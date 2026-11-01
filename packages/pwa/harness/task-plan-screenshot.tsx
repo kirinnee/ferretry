@@ -10,8 +10,8 @@
  * for a code the account can't make, beside the three lines a plan can't cover (not in Accounts, via Google, ssh) and
  * a code account with no history. "passkey" is the passkey sheet, over the card, with the daemon's own summary of
  * the selection. "machine" is a selection staged at the machine with `fy plan approve`. "approved" and "stopped" are
- * a plan the owner allowed, and one that has ended. "fallback" and "history" are the input card for a fill that did not
- * apply and one that did. "settings" is Settings › Secure copy › Task plans.
+ * a plan the owner allowed, and one that has ended. "fallback" is the input card for a fill that did not
+ * apply; "history" is the closed card of a fill that did, with the daemon's close note. "settings" is Settings › Secure copy › Task plans.
  *
  * Fake fixtures only: no real account, no daemon, no value. Every width asserts no sideways scroll and the touch floor
  * on every button of the phone.
@@ -41,6 +41,7 @@ import { createRoot } from 'react-dom/client';
 import { TaskPlanSchema } from '@ferretry/protocol';
 import { Markdown } from '../../src/components/markdown.tsx';
 import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
+import { AgendaSettled } from '../../src/features/agenda/agenda-settled.tsx';
 import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { TaskPlanCard } from '../../src/features/secure-copy/task-plan-card.tsx';
 import { TaskPlansCard } from '../../src/features/secure-copy/task-plans-surface.tsx';
@@ -120,12 +121,12 @@ const itemView = (extra: object, shown: never = item) => (
 
 const card = (
   <TaskPlanCard agentName="Hadi" canUsePasskey phase={{ kind: 'idle' }} plan={plan}
+    machineCodes={view === 'machine' ? [1] : undefined}
     machineSummary={view === 'machine' ? MACHINE_SUMMARY : undefined}
     onApprove={quiet} onConfirmMachine={quiet} onDenyMachine={quiet} onRevoke={quiet} />
 );
 
 const DID_NOT_APPLY = { by: 'plan', plan: PLAN_ID, line: 1, outcome: 'did-not-apply', reason: 'rate' } as const;
-const FILLED = { by: 'plan', plan: PLAN_ID, line: 1, outcome: 'filled' } as const;
 const inputOf = (preapproval: object) => fakeRequest({ preapproval } as never);
 const inputItem = (requestId: string) => ({ ...(item as object), kind: 'input', taskPlan: undefined, input: { requestId },
   title: 'Needs your password', subject: 'A password prompt in your terminal', why: 'A password prompt in your terminal' }) as never;
@@ -142,8 +143,14 @@ if (root === null) throw new Error('missing #root');
 const body = () => {
   if (view === 'settings')
     return <TaskPlansCard busy={false} error={null} onRevoke={quiet} plans={[approvedPlan(), mixedPlan()]} />;
-  if (view === 'fallback' || view === 'history') {
-    const input = inputOf(view === 'fallback' ? DID_NOT_APPLY : FILLED);
+  if (view === 'history') {
+    // The card the plan filled is closed by the daemon, with its own note: that is all the owner reads afterwards.
+    const closed = { ...(inputItem('in_filled') as object), resolvedAt: '2026-08-05T10:42:00.000Z', resolvedBy: 'daemon',
+      resolvedBySession: null, resolvedByName: null, disposition: 'done', resolutionNote: 'Filled under your task plan (line 2) on github.com.' } as never;
+    return itemView({ settled: <AgendaSettled busy={false} error={null} ferret="Hadi" item={closed} now={NOW} /> }, closed);
+  }
+  if (view === 'fallback') {
+    const input = inputOf(DID_NOT_APPLY);
     return itemView({ inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(input)} now={NOW} onDone={() => undefined} request={input} /> }, inputItem(input.id));
   }
   return itemView({ planForm: card });
@@ -242,11 +249,13 @@ try {
           const surface =
             state === 'settings'
               ? page.locator('[data-task-plans]')
-              : state === 'fallback' || state === 'history'
-                ? page.locator('[data-input-plan-miss], [data-input-plan-filled]')
-                : state === 'passkey'
-                  ? page.locator('[data-step-up-confirm]')
-                  : page.locator('[data-task-plan]');
+              : state === 'history'
+                ? page.locator('[data-agenda-settled]')
+                : state === 'fallback'
+                  ? page.locator('[data-input-plan-miss]')
+                  : state === 'passkey'
+                    ? page.locator('[data-step-up-confirm]')
+                    : page.locator('[data-task-plan]');
           if (state === 'passkey') {
             await page.locator('[data-task-plan]').first().waitFor({ state: 'visible' });
             await page.locator('[data-task-plan-tick="1"]').check();

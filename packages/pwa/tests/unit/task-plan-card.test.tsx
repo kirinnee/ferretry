@@ -252,6 +252,31 @@ describe('the ticking card, in more states', () => {
     }
   });
 
+  it('flags root only on a sudo, su or doas line that is offered, never on an unavailable ssh line', async () => {
+    const ssh = {
+      ...sudoLine(0),
+      state: 'unavailable' as const,
+      because: 'tool-not-covered' as const,
+      flags: [] as never[],
+    };
+    const first = ssh.candidates[0];
+    if (first === undefined) throw new Error('no candidate');
+    const unavailable = {
+      ...ssh,
+      candidates: [{ ...first, place: { ...first.place, tool: 'ssh', dest: 'deploy.example.com' } }],
+    };
+    const mounted = await mount(card(planOf({ lines: [unavailable, sudoLine(1)] })));
+    try {
+      const flagged = [...mounted.container.querySelectorAll('[data-task-plan-line]')].map(
+        each => each.querySelector('[data-task-plan-root]') !== null,
+      );
+      expect(flagged).toEqual([false, true]);
+      expect(mounted.container.textContent).not.toContain('into ssh');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('lists every secret-store overwrite and stopped-line case under what you will still be asked', async () => {
     const mounted = await mount(card());
     try {
@@ -348,7 +373,7 @@ describe('a selection staged at the machine', () => {
       'Line 2: sign in as deploy@atomi.cloud with its username, password and code, once',
       'Line 3: type the password of kirin; this gives the ferret root there, once',
     ];
-    const mounted = await mount(staged(plan, { machineSummary: summary }));
+    const mounted = await mount(staged(plan, { machineCodes: [1], machineSummary: summary }));
     try {
       expect(mounted.container.querySelector('[data-task-plan-state="machine-staged"]')).not.toBeNull();
       expect(q(mounted.container, '[data-task-plan-machine]', 'words').textContent).toContain('lines 2 and 3');
@@ -371,7 +396,7 @@ describe('a selection staged at the machine', () => {
     }
   });
 
-  it('warns about a code until the summary says there is none, and leaves a picker line’s root words general', async () => {
+  it('warns about a code until the daemon says there is none, and leaves a picker line’s root words general', async () => {
     const plan = withStage(planOf({ lines: [codesLine(0), pickerLine(1), passwordOnlyLine(2)] }), [0, 1, 2]);
     const waiting = await mount(staged(plan));
     try {
@@ -380,11 +405,25 @@ describe('a selection staged at the machine', () => {
     } finally {
       await waiting.unmount();
     }
-    const read = await mount(staged(plan, { machineSummary: ['Line 1: sign in, once'] }));
+    const read = await mount(staged(plan, { machineCodes: [], machineSummary: ['Line 1: sign in, once'] }));
     try {
       expect(read.container.querySelector('[data-task-plan-one-factor]')).toBeNull();
     } finally {
       await read.unmount();
+    }
+  });
+
+  it('still warns about the code when the summary is clipped before it says so (a long account)', async () => {
+    const plan = withStage(planOf({ lines: [codesLine(0)] }), [0]);
+    const clipped = `Line 1: sign in as ${'deploy-account-with-a-very-long-name@'.repeat(6)}`.slice(0, 239).concat('…');
+    expect(clipped).not.toMatch(/codes?/u);
+    const mounted = await mount(staged(plan, { machineCodes: [0], machineSummary: [clipped] }));
+    try {
+      expect(q(mounted.container, '[data-task-plan-one-factor]', 'code warning').textContent).toContain(
+        TOTP_TICK_WARNING,
+      );
+    } finally {
+      await mounted.unmount();
     }
   });
 

@@ -70,6 +70,8 @@ export interface TaskPlanCardProps {
   readonly phase: TaskPlanPhase;
   /** The daemon's own summary of a selection staged at the machine, one line each; `undefined` until it is read. */
   readonly machineSummary?: readonly string[];
+  /** The staged lines that also type the 6-digit code, as the daemon says them; `undefined` until it is read. */
+  readonly machineCodes?: readonly number[];
   /** Whether this device can confirm with a passkey. Without it a sign-in line can't be ticked. */
   readonly canUsePasskey: boolean;
   /** Sends the ticked lines. An empty selection declines the plan. */
@@ -109,8 +111,12 @@ const Flag = ({
 
 type SignInLine = Extract<TaskPlanLine, { readonly fields: unknown }>;
 
-/** Red "root on <host>" for a line that types a password into sudo, su or doas, and the words that say what that gives. */
+/**
+ * Red "root on <host>" for a line that types a password into sudo, su or doas, and the words that say what that gives.
+ * Only a line that is offered: an unavailable one (an ssh sign-in, say) types nothing, so it gives nothing.
+ */
 function RootFlag({ line, picked }: { readonly line: SignInLine; readonly picked: TaskPlanCandidate | undefined }) {
+  if (line.state === 'unavailable') return null;
   if (line.kind !== 'terminal-sign-in' && !line.flags.includes('root')) return null;
   const host = rootHost(picked, line);
   return (
@@ -430,14 +436,14 @@ function StillAsked() {
 function StagedLine({
   line,
   agentName,
-  summary,
+  codes,
 }: {
   readonly line: TaskPlanLine;
   readonly agentName: string;
-  readonly summary: readonly string[] | undefined;
+  readonly codes: readonly number[] | undefined;
 }) {
   const signIn = isSignIn(line) ? line : undefined;
-  // The daemon's summary names the account it will use; until then (or on a picker) the plan's own candidates stand.
+  // Until the stage is read (or on a picker) the plan's own candidates stand.
   const picked = signIn === undefined || signIn.candidates.length !== 1 ? undefined : signIn.candidates[0];
   return (
     <li
@@ -458,7 +464,7 @@ function StagedLine({
           {NO_HISTORY_WORDS}
         </Flag>
       ) : null}
-      {stagedCodeOn(summary, line) ? (
+      {stagedCodeOn(codes, line) ? (
         <span className="text-meta text-err" data-task-plan-one-factor="">
           Includes the 6-digit code. {TOTP_TICK_WARNING}
         </span>
@@ -475,6 +481,7 @@ function MachineStaged({
   agentName,
   phase,
   machineSummary,
+  machineCodes,
   canUsePasskey,
   onConfirmMachine,
   onDenyMachine,
@@ -499,7 +506,7 @@ function MachineStaged({
       )}
       <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Staged lines" data-task-plan-machine-lines="">
         {stagedLines(plan).map(line => (
-          <StagedLine agentName={agentName} key={line.line} line={line} summary={machineSummary} />
+          <StagedLine agentName={agentName} key={line.line} line={line} codes={machineCodes} />
         ))}
       </ul>
       <p className="m-0 text-meta text-muted" data-task-plan-expiry="">

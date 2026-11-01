@@ -211,14 +211,12 @@ export const stagedLines = (plan: TaskPlan): readonly TaskPlanLine[] =>
   plan.lines.filter(line => plan.machineStage?.lines.includes(line.line) === true);
 
 /**
- * Whether the daemon's summary of a staged selection says the 6-digit code is part of line N. Until the summary is
- * read the answer is "maybe", which a line that asks for a code treats as yes: it errs toward warning.
+ * Whether a staged selection types the 6-digit code on this line, from the daemon's own list of those lines (never
+ * from its clipped summary text). Until the stage is read the answer is "maybe", which a line that asks for a code
+ * treats as yes: it errs toward warning.
  */
-export const stagedCodeOn = (summary: readonly string[] | undefined, line: TaskPlanLine): boolean =>
-  isSignIn(line) &&
-  line.fields.includes('totp') &&
-  (summary === undefined ||
-    summary.some(entry => entry.startsWith(`Line ${String(line.line + 1)}:`) && /\bcodes?\b/u.test(entry)));
+export const stagedCodeOn = (codes: readonly number[] | undefined, line: TaskPlanLine): boolean =>
+  isSignIn(line) && line.fields.includes('totp') && (codes === undefined || codes.includes(line.line));
 
 /** The sentence a stopping or unavailable line says for its reason. */
 export const becauseWords = (reason: GrantMissReason | undefined): string | undefined =>

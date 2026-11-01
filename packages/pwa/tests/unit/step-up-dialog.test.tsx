@@ -9,8 +9,8 @@ import {
   FIRST_PASSKEY_TITLE,
   STEP_UP_BOUND_SCOPE_NOTE,
   STEP_UP_SCOPE_NOTE,
-  STEP_UP_SHARED_BOUND_NOTE,
   StepUpDialog,
+  sharedBoundNote,
   UNLOCK_COPY,
 } from '../../src/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -360,7 +360,7 @@ describe('the passkey prompt bound to a staged task plan', () => {
 });
 
 describe('the passkey prompt bound to a task plan, once another request joins it', () => {
-  it('stops saying it covers exactly the list, and says the plan must be allowed again', async () => {
+  it('stops saying it covers exactly the list, says what it does buy, and says the staged request must be confirmed again', async () => {
     const { gate } = harness();
     const mounted = await mount(<StepUpDialog gate={gate} machineName={id => `Name of ${id}`} />);
     try {
@@ -377,7 +377,10 @@ describe('the passkey prompt bound to a task plan, once another request joins it
       await interact(() => void gate.require(studio, 'add a paired device', 'explicit', 'add-device'));
       await interact(async () => await Promise.resolve());
       const scope = must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope').textContent;
-      expect(scope).toBe(STEP_UP_SHARED_BOUND_NOTE);
+      expect(scope).toBe(sharedBoundNote(STEP_UP_SCOPE_NOTE));
+      expect(scope).toContain('15 minutes');
+      expect(scope).toContain('confirm the staged request again');
+      expect(scope).not.toContain('Allow again');
       expect(scope).not.toContain('exactly');
       expect(mounted.container.querySelector('[data-step-up-summary]')).toBeNull();
     } finally {
@@ -394,6 +397,16 @@ describe('the passkey prompt bound to a task plan, once another request joins it
     void gate.require(studio, 'Line 2: sign in once', 'explicit', 'approve-task-plan', stage);
     expect(gate.snapshot()?.bound).toBe(true);
     void gate.require(studio, 'Line 5: paste once', 'explicit', 'approve-task-plan', `tps_${'e'.repeat(24)}` as never);
+    expect(gate.snapshot()?.bound).toBeUndefined();
+    expect(gate.snapshot()?.shared).toBe(true);
+  });
+
+  it('re-checks what the prompt covers on every request that joins, even with the same words and no new act', () => {
+    const { gate } = harness();
+    const words = 'Line 2: sign in once';
+    void gate.require(studio, words, 'explicit', 'approve-task-plan', `tps_${'d'.repeat(24)}` as never);
+    expect(gate.snapshot()?.bound).toBe(true);
+    void gate.require(studio, words, 'explicit', 'approve-task-plan', `tps_${'e'.repeat(24)}` as never);
     expect(gate.snapshot()?.bound).toBeUndefined();
     expect(gate.snapshot()?.shared).toBe(true);
   });

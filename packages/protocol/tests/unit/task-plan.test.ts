@@ -138,6 +138,7 @@ const STAGED = {
   stage: STAGE,
   plan: PLAN_ID,
   lines: [0, 2],
+  codes: [0],
   summary: ['Line 1: sign in as GitHub · kirinnee on github.com with its password, 1 use', 'Line 3: paste, 1 use'],
   expiresAt: AT,
 };

@@ -3,7 +3,7 @@
  * returns, the passkey the step-up asks for, and a stage dropped when that passkey is dismissed.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { TaskPlanHost } from '../../src/features/secure-copy/task-plan-host.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
@@ -32,6 +32,26 @@ interface Call {
   readonly method: string;
 }
 
+/**
+ * Holds every timer of 3 s or more instead of arming it, so a test can run the host's retry on demand ("advancing the
+ * clock") and see exactly which retries it scheduled.
+ */
+const realSetTimeout = globalThis.setTimeout;
+const held: { readonly ms: number; readonly run: () => void }[] = [];
+const holdLongTimers = (): void => {
+  globalThis.setTimeout = ((handler: () => void, ms?: number, ...rest: unknown[]) => {
+    if (typeof ms === 'number' && ms >= 3_000) {
+      held.push({ ms, run: handler });
+      return 0 as never;
+    }
+    return realSetTimeout(handler, ms, ...(rest as []));
+  }) as typeof setTimeout;
+};
+afterEach(() => {
+  globalThis.setTimeout = realSetTimeout;
+  held.length = 0;
+});
+
 /** A client that answers the plan routes from a table, and remembers every call. */
 function fakeClient(answers: Readonly<Record<string, unknown>>) {
   const calls: Call[] = [];
@@ -53,7 +73,7 @@ const PLAN_PATH = `/v1/sessions/${SESSION}/task-plans/${PLAN_ID}`;
 const SUMMARY = ['Line 2: sign in to vercel.com as deploy@atomi.cloud, once'];
 const staged = {
   outcome: 'staged',
-  staged: { stage: STAGE, plan: PLAN_ID, lines: [0], summary: SUMMARY, expiresAt: EXPIRES },
+  staged: { stage: STAGE, plan: PLAN_ID, lines: [0], codes: [], summary: SUMMARY, expiresAt: EXPIRES },
 };
 
 describe('the host', () => {
@@ -417,6 +437,7 @@ describe('the host, around the card', () => {
   });
 
   it('on a device that may not see accounts says so once, names nothing, stops asking and still offers the paste card', async () => {
+    holdLongTimers();
     const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
     const { client, calls } = fakeClient({
       'GET /v1/task-plans': forbidden,
@@ -438,6 +459,10 @@ describe('the host, around the card', () => {
       expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
       expect(calls.filter(call => call.path === '/v1/task-plans')).toHaveLength(1);
       expect(calls.some(call => call.path === '/v1/copy-plans')).toBe(true);
+      // Time passes past the 9 s retry: nothing was scheduled, so there is no further request.
+      expect(held).toEqual([]);
+      await interact(async () => await Promise.resolve());
+      expect(calls.filter(call => call.path === '/v1/task-plans')).toHaveLength(1);
     } finally {
       await mounted.unmount();
     }
@@ -465,6 +490,7 @@ describe('the host, around the card', () => {
   });
 
   it('retries a read that failed for another reason, quietly, and draws nothing meanwhile', async () => {
+    holdLongTimers();
     const { client, calls } = fakeClient({ 'GET /v1/task-plans': new Error('offline') });
     const mounted = await mount(
       <TaskPlanHost
@@ -479,6 +505,10 @@ describe('the host, around the card', () => {
       expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
       expect(mounted.container.querySelector('[data-task-plan-forbidden]')).toBeNull();
       expect(calls).toHaveLength(1);
+      // The retry is armed for 9 s; when that time comes the read is asked again.
+      expect(held.map(timer => timer.ms)).toEqual([9_000]);
+      await interact(async () => held.shift()?.run());
+      expect(calls.filter(call => call.path === '/v1/task-plans')).toHaveLength(2);
     } finally {
       await mounted.unmount();
     }

@@ -833,6 +833,8 @@ export const TaskPlanStagedSchema = z.strictObject({
   stage: TaskPlanStageIdSchema,
   plan: CopyPlanIdSchema,
   lines: z.array(TaskPlanLineNumberSchema).min(1).max(TASK_PLAN_MAX_LINES),
+  /** The staged lines (a subset of `lines`) that also type the 6-digit code: said here, so a clipped summary never hides it. */
+  codes: z.array(TaskPlanLineNumberSchema).max(TASK_PLAN_MAX_LINES),
   summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(TASK_PLAN_MAX_LINES),
   expiresAt: InstantSchema,
 });

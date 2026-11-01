@@ -69,9 +69,9 @@ export function TaskPlanHost({
 
   const [found, setFound] = useState<{ readonly client: TaskPlanClient; readonly plan: TaskPlan } | null>(null);
   const [phase, setPhase] = useState<TaskPlanPhase>({ kind: 'idle' });
-  const [staged, setStaged] = useState<{ readonly stage: string; readonly summary: readonly string[] } | undefined>(
-    undefined,
-  );
+  const [staged, setStaged] = useState<
+    { readonly stage: string; readonly summary: readonly string[]; readonly codes: readonly number[] } | undefined
+  >(undefined);
   const [forbidden, setForbidden] = useState(false);
   const [reads, setReads] = useState(0);
   const settled = useRef(false);
@@ -117,7 +117,7 @@ export function TaskPlanHost({
     let current = true;
     void readStage(foundClient, { id: foundPlanId, sessionId: foundSessionId }, stage).then(
       view => {
-        if (current) setStaged({ stage, summary: view.summary });
+        if (current) setStaged({ stage, summary: view.summary, codes: view.codes });
       },
       () => undefined,
     );
@@ -125,7 +125,7 @@ export function TaskPlanHost({
       current = false;
     };
   }, [foundClient, foundPlanId, foundSessionId, stage]);
-  const summary = staged !== undefined && staged.stage === stage ? staged.summary : undefined;
+  const stagedRead = staged !== undefined && staged.stage === stage ? staged : undefined;
 
   const finish = useCallback(
     (outcome: ApprovalOutcome): void => {
@@ -175,7 +175,8 @@ export function TaskPlanHost({
     <TaskPlanCard
       agentName={agentName ?? 'The ferret'}
       canUsePasskey={askPasskey !== undefined}
-      machineSummary={summary}
+      machineCodes={stagedRead?.codes}
+      machineSummary={stagedRead?.summary}
       onApprove={approval => void runApproval(ports, plan, approval).then(finish)}
       onConfirmMachine={() => {
         if (stage !== undefined) void runMachineConfirm(ports, plan, stage).then(finish);

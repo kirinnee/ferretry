@@ -64,7 +64,7 @@ const PLAN_PATH = `/v1/sessions/${SESSION}/task-plans/${PLAN_ID}`;
 const SUMMARY = ['Line 1: paste it, once'];
 const stagedAnswer = {
   outcome: 'staged',
-  staged: { stage: STAGE, plan: PLAN_ID, lines: [0], summary: SUMMARY, expiresAt: EXPIRES },
+  staged: { stage: STAGE, plan: PLAN_ID, lines: [0], codes: [], summary: SUMMARY, expiresAt: EXPIRES },
 };
 const line = (plan: ReturnType<typeof mixedPlan>, index: number) => {
   const found = plan.lines[index];
@@ -103,16 +103,16 @@ describe('the owner’s words', () => {
     expect(clockWords('2026-08-05T14:02:00.000ZX')).toBe('14:02');
   });
 
-  it('takes a staged selection’s lines from the plan, and says a code is in one only when the daemon’s words say so', () => {
+  it('takes a staged selection’s lines from the plan, and says a code is in one only when the daemon’s list says so', () => {
     const plan = { ...mixedPlan(), machineStage: { stage: STAGE, lines: [1, 3], askedAt: '2026-08-05T14:02:00.000Z' } };
     expect(stagedLines(plan).map(each => each.line)).toEqual([1, 3]);
     const withCodes = line(mixedPlan(), 1);
     expect(stagedCodeOn(undefined, withCodes)).toBe(true);
-    expect(stagedCodeOn(['Line 2: sign in as deploy with its username, password and code, once'], withCodes)).toBe(
-      true,
-    );
-    expect(stagedCodeOn(['Line 2: sign in as deploy with its username and password, once'], withCodes)).toBe(false);
-    expect(stagedCodeOn(['Line 1: sign in with its code, once'], withCodes)).toBe(false);
+    expect(stagedCodeOn([1], withCodes)).toBe(true);
+    expect(stagedCodeOn([1, 3], withCodes)).toBe(true);
+    expect(stagedCodeOn([], withCodes)).toBe(false);
+    expect(stagedCodeOn([0, 3], withCodes)).toBe(false);
+    expect(stagedCodeOn([1], line(mixedPlan(), 3))).toBe(false);
     expect(stagedCodeOn(undefined, line(mixedPlan(), 3))).toBe(false);
   });
 

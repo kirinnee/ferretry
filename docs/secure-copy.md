@@ -354,7 +354,8 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
 - **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
   the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
   made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
-  answers `waiting`, `approved`, `denied` or `expired`. The machine reads and drops only the stages it made; a
+  answers `waiting`, `approved`, `denied` or `expired`, and carries `codes`: the staged lines that also type the
+  6-digit code, so the app's red code warning never depends on the (clipped) summary text. The machine reads and drops only the stages it made; a
   paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
 - **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
   with none; a plan still waiting is declined whole. Its pastes and grants go at once. A plan also ends at its

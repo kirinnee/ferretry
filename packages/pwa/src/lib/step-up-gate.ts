@@ -143,13 +143,15 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        const covered = this.#boundness(waiting);
         if (actId === undefined) waiting.unnamed = true;
         else waiting.actIds.add(actId);
         if (subject !== undefined) waiting.subjects.add(subject);
-        if (!waiting.acts.includes(act)) {
-          waiting.acts.push(act);
-          this.#refreshActs(daemon.daemonId);
-        }
+        const named = !waiting.acts.includes(act);
+        if (named) waiting.acts.push(act);
+        // Every join re-checks what the prompt covers: the same words with a second stage is no longer one bound act.
+        const now = this.#boundness(waiting);
+        if (named || now.bound !== covered.bound || now.shared !== covered.shared) this.#refreshActs(daemon.daemonId);
         if (this.#prompt === null && this.#mayShow(waiting)) this.#show(waiting);
         return;
       }
