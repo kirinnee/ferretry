@@ -38,11 +38,15 @@ import type { Readable } from 'node:stream';
 // would be a second spelling, and the resulting 404 reads as "discovery is switched off".
 import { HOSTED_RELAY_PUBLIC_PATH } from '@ferretry/relay/adapters';
 import { parseReleaseHeaders, releaseHeadersFor } from '../../../packages/pwa/src/lib/release-headers.ts';
+import { parseReleaseRewrites, releasePathForRequest } from '../../../packages/pwa/src/lib/release-manifest.ts';
 import { assertNoLiveStatePath } from '../fixture.ts';
 
 export { HOSTED_RELAY_PUBLIC_PATH };
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
+
+/** `public/_redirects`, applied by this server because no Pages runtime is present to apply it. */
+const REDIRECTS_FILE = join(REPOSITORY_ROOT, 'packages', 'pwa', 'public', '_redirects');
 
 /**
  * The published site's own `connect-src`, served byte-for-byte from `packages/pwa/public/_headers`.
@@ -585,16 +589,6 @@ const UNSOLICITED_PATHS: readonly string[] = [
   '/apple-touch-icon-precomposed.png',
 ];
 
-/** `public/_redirects`, applied by this server because no Pages runtime is present to apply it. */
-const SPA_ROUTES: readonly (readonly [RegExp, string])[] = [
-  [/^\/app(\/.*)?$/u, 'app/index.html'],
-  [/^\/d\/.*$/u, 'app/index.html'],
-  [/^\/setup$/u, 'app/index.html'],
-  [/^\/pair(\/.*)?$/u, 'app/index.html'],
-  [/^\/join$/u, 'app/index.html'],
-  [/^\/shared$/u, 'app/index.html'],
-];
-
 async function contentSecurityPolicy(): Promise<string> {
   const headers = await readFile(HEADERS_FILE, 'utf8');
   const line = headers.split('\n').find(candidate => candidate.trim().startsWith('Content-Security-Policy:'));
@@ -621,19 +615,24 @@ export async function startPwaOrigin(distDir: string, teardown: HarnessTeardown)
   // Read once up front so a broken `_headers` fails the journey at its start, not mid-page.
   await contentSecurityPolicy();
   const requests: { path: string; status: number }[] = [];
+  const rewrites = parseReleaseRewrites(await readFile(REDIRECTS_FILE, 'utf8'));
+  const files: Record<string, string> = {};
+  for await (const name of new Bun.Glob('**/*').scan({ cwd: distDir, onlyFiles: true })) files[name] = name;
 
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: async request => {
       const path = new URL(request.url).pathname;
-      const route = SPA_ROUTES.find(([pattern]) => pattern.test(path));
-      const candidates = route === undefined ? [path.replace(/^\//u, '') || 'index.html'] : [route[1]];
-      for (const candidate of candidates) {
-        const file = Bun.file(join(distDir, candidate));
-        if (!(await file.exists())) continue;
+      // The same reader the service worker uses, so this server cannot drift from `public/_redirects`.
+      const candidate = releasePathForRequest(
+        { pathname: path, navigate: request.headers.get('sec-fetch-mode') === 'navigate' },
+        files,
+        rewrites,
+      );
+      if (candidate !== null) {
         requests.push({ path, status: 200 });
-        return new Response(file, {
+        return new Response(Bun.file(join(distDir, candidate)), {
           headers: {
             ...(await headersFor(path, candidate)),
             // No caching anywhere: two journeys in one suite must not share a bundle state, and a

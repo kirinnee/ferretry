@@ -282,11 +282,13 @@ describe('notificationWindow', () => {
     expect(notificationWindow([landing], ORIGIN)).toBe(landing);
   });
 
-  it.each(['/join', '/shared'])('counts %s as an app page, as public/_redirects serves it', path => {
+  it('counts /shared as an app page but never /join, so a tap cannot route a tab away mid-join', () => {
     const landing = { url: `${ORIGIN}/`, focused: true, visibilityState: 'visible' };
-    const page = { url: `${ORIGIN}${path}`, focused: false, visibilityState: 'hidden' };
+    const shared = { url: `${ORIGIN}/shared`, focused: false, visibilityState: 'hidden' };
+    const join = { url: `${ORIGIN}/join`, focused: false, visibilityState: 'hidden' };
 
-    expect(notificationWindow([landing, page], ORIGIN)).toBe(page);
+    expect(notificationWindow([landing, shared], ORIGIN)).toBe(shared);
+    expect(notificationWindow([landing, join], ORIGIN)).toBe(landing);
   });
 });
 
