@@ -1391,7 +1391,11 @@ import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/se
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
-import { restoreRestamped, settleUnrevivedRelaunch } from '../src/lib/session/resume/unrevived-relaunch.ts';
+import {
+  restoreRestamped,
+  settleRejectedRelaunch,
+  settleUnrevivedRelaunch,
+} from '../src/lib/session/resume/unrevived-relaunch.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -5742,6 +5746,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       });
     };
     const paneBefore = await parts.paneIdentity(id);
+    const rollBack = async (): Promise<void> => {
+      await parts.storage.updateConfig(id, current => restoreRestamped(recordBefore, jsonObject(current) ?? {}));
+    };
     const outcome = await parts.resume
       .resume({
         id,
@@ -5756,7 +5763,13 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             : `${request.note}\n\n${parts.preflight.handoff(report, reportPath, config.mode)}`,
       })
       .catch(async (error: unknown) => {
-        await settle(false, error instanceof Error ? error.message : String(error));
+        const rolledBack = await settleRejectedRelaunch({
+          from,
+          paneBefore,
+          paneNow: await parts.paneIdentity(id),
+          rollBack,
+        });
+        await settle(false, (error instanceof Error ? error.message : String(error)) + rolledBack);
         migrateRelaunchRefusal(error);
       });
     if (outcome.disposition !== 'revived') {
@@ -5766,9 +5779,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         to: account.agent,
         paneBefore,
         paneNow: await parts.paneIdentity(id),
-        rollBack: async () => {
-          await parts.storage.updateConfig(id, current => restoreRestamped(recordBefore, jsonObject(current) ?? {}));
-        },
+        rollBack,
       });
       await settle(false, detail);
       throw new SessionMigrateError('failed', detail);

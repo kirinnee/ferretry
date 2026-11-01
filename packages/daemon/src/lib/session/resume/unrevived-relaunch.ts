@@ -73,3 +73,20 @@ export async function settleUnrevivedRelaunch(input: {
     `this session and its record names ${input.from} again`
   );
 }
+
+/**
+ * A resume that was refused or threw (a pending question, a pane that could not be stopped) before it
+ * launched anything. The record is put back only while the registered pane is provably the one that
+ * served before the move; a changed or unreadable pane identity leaves it, as above. Answers the sentence
+ * to add to the failure, empty when the record was left.
+ */
+export async function settleRejectedRelaunch(input: {
+  readonly from: string;
+  readonly paneBefore: string | undefined;
+  readonly paneNow: string | undefined;
+  readonly rollBack: () => Promise<void>;
+}): Promise<string> {
+  if (input.paneBefore === undefined || input.paneBefore !== input.paneNow) return '';
+  await input.rollBack();
+  return `; the previous harness is still serving, so the record names ${input.from} again`;
+}

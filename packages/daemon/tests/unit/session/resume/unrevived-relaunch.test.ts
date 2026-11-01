@@ -3,6 +3,7 @@ import should from 'should';
 import {
   RESTAMPED_RECORD_KEYS,
   restoreRestamped,
+  settleRejectedRelaunch,
   settleUnrevivedRelaunch,
 } from '../../../../src/lib/session/resume/index.ts';
 
@@ -89,5 +90,38 @@ describe('restoring the fields a migration restamped', () => {
   it('should only ever touch the keys the migration restamps', () => {
     should(RESTAMPED_RECORD_KEYS).containEql('agent').and.not.containEql('sessionCapabilityHash');
     should(RESTAMPED_RECORD_KEYS).not.containEql('name');
+  });
+});
+
+describe('settling a migration whose resume was refused or threw', () => {
+  const run = async (paneBefore: string | undefined, paneNow: string | undefined) => {
+    let rolledBack = 0;
+    const note = await settleRejectedRelaunch({
+      from: 'claude-a',
+      paneBefore,
+      paneNow,
+      rollBack: async () => {
+        rolledBack += 1;
+      },
+    });
+    return { note, rolledBack };
+  };
+
+  it('should put the record back when the same pane is still registered', async () => {
+    const { note, rolledBack } = await run('%1:10:100', '%1:10:100');
+    should(rolledBack).equal(1);
+    should(note).equal('; the previous harness is still serving, so the record names claude-a again');
+  });
+
+  it('should leave the record when the pane changed or cannot be identified', async () => {
+    for (const [before, now] of [
+      ['%1:10:100', '%1:11:200'],
+      [undefined, undefined],
+      ['%1:10:100', undefined],
+    ] as const) {
+      const { note, rolledBack } = await run(before, now);
+      should(rolledBack).equal(0);
+      should(note).equal('');
+    }
   });
 });
