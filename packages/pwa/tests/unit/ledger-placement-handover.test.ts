@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { turnFileInstruction } from '@ferretry/protocol';
+import { transcriptEntriesFromLog } from '../../src/components/session-workspace-model.ts';
 import {
   handedOverDraft,
   isOwnSend,
@@ -233,6 +235,55 @@ describe('a delivered send the loaded transcript does not show yet', () => {
     expect(
       shape(placeLedgerRows([user('x', 'something', -60_000)], [delivered({ acceptedAt: 'nope' })], T0 + 2_000)),
     ).toEqual([{ id: 'x', kind: 'user', send: undefined }]);
+  });
+});
+
+describe('a send followed by a note the agent drained from its queue mid-turn', () => {
+  // The owner's report: the message drawn twice — once bare, once with its ticks after the Instructions
+  // row. The agent had it exactly once; the note it was sent while busy is written after the tool call it
+  // waited behind but stamped with the time it was queued, and that step back used to date the owner's
+  // row a day early, so the row could not be the send.
+  const sentAt = '2026-11-01T00:33:01.019Z';
+  const words =
+    "what's going on here? also im going out for halloween tonight. block it on the cal thanks. 6pm to 11pm";
+  const note = turnFileInstruction('/home/kirin/.ferretry/state/sessions/s1/turns/turn-169.md');
+  const log = [
+    '[00:23:36] assistant/message: The claim card is now closed.',
+    `[00:33:01] user/message: ${words}`,
+    '[00:33:06] assistant/tool-call: Bash({"command":"date"})',
+    '[00:33:06] tool/tool-result: Sat 2026-10-31 17:33 PDT',
+    `[00:33:01] user/message: ${note}`,
+  ].join('\n');
+  const owner = send({
+    sendId: 'a5a86528',
+    acceptedAt: sentAt,
+    message: words,
+    turn: 168,
+    fate: 'delivered',
+    fateAt: '2026-11-01T00:33:01.631Z',
+    evidence: { key: '323ec0d1', observedAt: '2026-11-01T00:33:01.181Z' },
+  });
+  const instructions = send({
+    sendId: 'instructions-1cf9802d9430b9',
+    acceptedAt: '2026-11-01T00:33:01.513Z',
+    message: 'Ferretry changed part of the instructions you were started with.',
+    path: 'turn-file',
+    turn: 169,
+    fate: 'delivered',
+    fateAt: '2026-11-01T00:33:07.120Z',
+    evidence: { key: 'ad297191', observedAt: '2026-11-01T00:33:06.779Z' },
+  });
+
+  test('draws the message once, on its own row, and the note on its hand-off row', () => {
+    for (const nowMs of [Date.parse('2026-11-01T00:33:13.000Z'), Date.parse('2026-11-01T00:40:00.000Z')]) {
+      const rows = placeLedgerRows(transcriptEntriesFromLog(log, nowMs), [owner, instructions], nowMs);
+      const users = rows.filter(row => row.kind === 'user' || row.kind === 'ledger');
+      expect(users.map(row => ({ kind: row.kind, send: row.send?.sendId ?? row.ledger?.sendId }))).toEqual([
+        { kind: 'user', send: 'a5a86528' },
+        { kind: 'user', send: 'instructions-1cf9802d9430b9' },
+      ]);
+      expect(rows.filter(row => row.text === words)).toHaveLength(1);
+    }
   });
 });
 

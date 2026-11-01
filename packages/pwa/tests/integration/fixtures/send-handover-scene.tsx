@@ -18,6 +18,9 @@
  *   ?pause=1      run no timeline; `window.__handover.goto(n)` steps it instead (for screenshots)
  *   ?stuck=open|typed  the send went out half a minute ago and is still on its way (or sits typed in
  *                 the agent's composer), so its controls are showing — for screenshots of them
+ *   ?note=1       while the agent works on it, a Ferretry Instructions note it was sent while busy lands
+ *                 after a tool call — written AFTER that call but stamped with the earlier time it was
+ *                 queued, the step back that once dated the reader's row a day early and drew it twice
  *   ?theme=<family>-<mode>
  *
  * `window.__handover` is the PROBE. After every DOM mutation and on every animation frame it counts,
@@ -49,6 +52,7 @@ const gap = Number(params.get('gap') ?? 400);
 const readDelay = Number(params.get('read') ?? 150);
 const paused = params.get('pause') === '1';
 const stuck = params.get('stuck');
+const note = params.get('note') === '1';
 
 const SESSION = 'mvhand0v-5e7d0b1e';
 const STATE = `/home/owner/.ferretry/state/sessions/${SESSION}`;
@@ -145,7 +149,41 @@ const PRIOR = [
   logLine(sentAt - 90_000, 'assistant', 'Two tests time out on CI. The retry flag should stabilise them.'),
 ].join('\n');
 const LANDED = `${PRIOR}\n${logLine(recordAt, 'user', landedRow())}`;
-const REPLIED = `${LANDED}\n${logLine(recordAt + 2_000, 'assistant', 'On it — re-running CI with the retry flag now.')}`;
+/** The note's hand-off: queued just after the send, drained only after the agent's first tool call. */
+const NOTE_TURN = 10;
+const NOTE_NAME = `turn-${String(NOTE_TURN).padStart(3, '0')}`;
+const NOTE_MESSAGE = [
+  'Ferretry changed part of the instructions you were started with. Follow these words in place of the matching part of your system prompt:',
+  '',
+  'Ferretry tools: you drive terminals and browser pages the person watches with the ferretry MCP tools.',
+].join('\n');
+const queuedAt = recordAt + 200;
+const toolAt = recordAt + 4_000;
+const WORKING = [
+  LANDED,
+  `[${clock(toolAt)}] assistant/tool-call: Bash({"command":"gh run rerun --failed","description":"Re-run the failed CI jobs"})`,
+  `[${clock(toolAt)}] tool/tool-result: ✓ Requested a rerun of the failed jobs`,
+  logLine(queuedAt, 'user', turnFileInstruction(`${STATE}/turns/${NOTE_NAME}.md`)),
+].join('\n');
+const REPLIED = `${note ? WORKING : LANDED}\n${logLine(note ? toolAt + 2_000 : recordAt + 2_000, 'assistant', 'On it — re-running CI with the retry flag now.')}`;
+const noteSend: LedgerSendRecord = {
+  sendId: 'instructions-1cf9802d',
+  acceptedAt: new Date(queuedAt - 100).toISOString(),
+  message: NOTE_MESSAGE,
+  attachmentIds: [],
+  path: 'turn-file',
+  turn: NOTE_TURN,
+  senderKind: 'human',
+  fate: 'delivered',
+  fateAt: new Date(toolAt + 300).toISOString(),
+  evidence: { key: 'proof-note', harness, observedAt: new Date(toolAt + 100).toISOString(), tier: 'turn-instruction' },
+  queue: {
+    state: 'read',
+    stateAt: new Date(toolAt + 500).toISOString(),
+    revision: 3,
+    by: { kind: 'ferretry', feature: 'Instructions', sections: ['Tools'] },
+  },
+};
 
 const delivered = (record: LedgerSendRecord): LedgerSendRecord => ({
   ...record,
@@ -177,9 +215,13 @@ const STAGES: readonly Stage[] = [
           : { name: 'landed', log: LANDED, sends: pending },
       ]),
   { name: 'delivered', log: LANDED, sends: confirmed },
-  { name: 'replied', log: REPLIED, sends: confirmed },
+  ...(note ? [{ name: 'working', log: WORKING, sends: [...confirmed, noteSend] }] : []),
+  { name: 'replied', log: REPLIED, sends: note ? [...confirmed, noteSend] : confirmed },
 ];
-const ARRIVALS: readonly number[] = order === 'together' ? [land, land + 200] : [land, land + gap, land + gap + 200];
+const ARRIVALS: readonly number[] = [
+  ...(order === 'together' ? [land, land + 200] : [land, land + gap, land + gap + 200]),
+  ...(note ? [land + gap + 400] : []),
+];
 
 interface Violation {
   readonly stage: string;
@@ -244,7 +286,7 @@ const source = {
     await new Promise(resolve => setTimeout(resolve, readDelay));
     return {
       name,
-      message: LONG,
+      message: name === NOTE_NAME ? NOTE_MESSAGE : LONG,
       attachments: path === 'turn-file' ? [{ filename: 'onboarding.png', mime: 'image/png' }] : [],
     };
   },

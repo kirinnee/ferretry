@@ -15,6 +15,11 @@
  * whole way through, and — except for a joined pair, which genuinely becomes a different message — the
  * SAME element, so the hand-over is in place.
  *
+ * A message the agent is sent while it works — Ferretry's Instructions note — lands after a tool call but is
+ * stamped with the earlier time it was queued (owner: "double text bubble of the same"). That step back once
+ * dated the reader's row a day early, so it could not be the send and the send drew a second bubble beside
+ * it; the `note` runs play that timeline too.
+ *
  * Set `FY_HANDOVER_SHOTS_DIR` to keep each stage at a phone and a desktop, light and dark.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -161,42 +166,47 @@ interface Run {
   readonly probe: Probe;
 }
 const runsOf = new Map<string, Promise<PromiseSettledResult<Run>[]>>();
+/** Every timeline: each path and harness, and a direct send with an Instructions note drained mid-turn. */
+const VARIANTS: readonly { readonly key: string; readonly query: string }[] = [
+  ...PATHS.flatMap(path =>
+    harnessesOf(path).map(harness => ({ key: `${path} · ${harness}`, query: `path=${path}&harness=${harness}` })),
+  ),
+  { key: 'direct · claude · queued note', query: 'path=direct&harness=claude&note=1' },
+];
 const startRuns = (): void => {
-  for (const path of PATHS)
-    for (const harness of harnessesOf(path))
-      runsOf.set(
-        `${path}/${harness}`,
-        Promise.allSettled(
-          ORDERS.flatMap(order =>
-            PACES.map(async (pace): Promise<Run> => {
-              const query = `path=${path}&harness=${harness}&order=${order}&land=${pace.land}&gap=${pace.gap}&read=${pace.read}`;
-              return { order, pace: pace.name, probe: await playInTurn(query) };
-            }),
-          ),
+  for (const variant of VARIANTS)
+    runsOf.set(
+      variant.key,
+      Promise.allSettled(
+        ORDERS.flatMap(order =>
+          PACES.map(async (pace): Promise<Run> => {
+            const query = `${variant.query}&order=${order}&land=${pace.land}&gap=${pace.gap}&read=${pace.read}`;
+            return { order, pace: pace.name, probe: await playInTurn(query) };
+          }),
         ),
-      );
+      ),
+    );
 };
 
 describe('a sent message hands over to its transcript row in place', () => {
   beforeAll(startRuns);
-  for (const path of PATHS)
-    for (const harness of harnessesOf(path))
-      it(`${path} · ${harness}: one bubble, one element, at every frame in every order and pace`, async () => {
-        for (const result of await (runsOf.get(`${path}/${harness}`) as Promise<PromiseSettledResult<Run>[]>)) {
-          if (result.status === 'rejected') throw result.reason;
-          const { order, pace, probe } = result.value;
-          // The run really went through every stage and was really watched while it did: a check ran in EVERY
-          // stage it reached. A frame count stood in for that once, and on a loaded runner, with twelve runs
-          // overlapping, it came out at exactly 10 and failed a random case, though every stage had been checked.
-          expect(probe.stages.at(-1)).toBe('replied');
-          expect({ order, pace, checked: [...probe.checkedStages].sort() }).toEqual({
-            order,
-            pace,
-            checked: [...new Set(probe.stages)].sort(),
-          });
-          expect({ order, pace, violations: probe.violations }).toEqual({ order, pace, violations: [] });
-        }
-      }, 120_000);
+  for (const variant of VARIANTS)
+    it(`${variant.key}: one bubble, one element, at every frame in every order and pace`, async () => {
+      for (const result of await (runsOf.get(variant.key) as Promise<PromiseSettledResult<Run>[]>)) {
+        if (result.status === 'rejected') throw result.reason;
+        const { order, pace, probe } = result.value;
+        // The run really went through every stage and was really watched while it did: a check ran in EVERY
+        // stage it reached. A frame count stood in for that once, and on a loaded runner, with twelve runs
+        // overlapping, it came out at exactly 10 and failed a random case, though every stage had been checked.
+        expect(probe.stages.at(-1)).toBe('replied');
+        expect({ order, pace, checked: [...probe.checkedStages].sort() }).toEqual({
+          order,
+          pace,
+          checked: [...new Set(probe.stages)].sort(),
+        });
+        expect({ order, pace, violations: probe.violations }).toEqual({ order, pace, violations: [] });
+      }
+    }, 120_000);
 });
 
 describe('the hand-over, captured', () => {
@@ -224,6 +234,27 @@ describe('the hand-over, captured', () => {
               await context.close();
             }
           }
+      // A note drained mid-turn, after a tool call: the reader's message is still the one bubble, with its ticks.
+      for (const phone of [false, true])
+        for (const mode of ['light', 'dark'] as const) {
+          const context = await newContext(phone, mode);
+          try {
+            const tab = await open(context, `path=direct&note=1&pause=1&read=0&theme=studio-${mode}`);
+            for (const [index, stage] of ['sent', 'landed', 'delivered', 'working', 'replied'].entries()) {
+              await tab.evaluate(
+                step => (window as unknown as { __handover: { goto: (n: number) => void } }).__handover.goto(step),
+                index,
+              );
+              await tab.waitForSelector(`[data-stage="${stage}"]`);
+              await tab.waitForTimeout(120);
+              await tab.screenshot({
+                path: join(shotsDir, `handover-note-${index}-${stage}-${phone ? 'phone' : 'desktop'}-${mode}.png`),
+              });
+            }
+          } finally {
+            await context.close();
+          }
+        }
       // A send still on its way after the settle time shows its way out, inside the same bubble.
       for (const stuck of ['open', 'typed'] as const)
         for (const phone of [false, true])

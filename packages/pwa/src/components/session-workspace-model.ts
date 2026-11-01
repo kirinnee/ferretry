@@ -163,6 +163,22 @@ const toolResult = (raw: string): ToolResultData => {
 const DAY_MS = 86_400_000;
 
 /**
+ * How far a record's clock may run AHEAD of the record after it and still be read as the same day.
+ *
+ * Records are not strictly in clock order. A message the agent was sent while it was busy is written
+ * where the harness drained it — after the tool calls it waited behind — but carries the time it was
+ * QUEUED, so the record before it can be a few seconds or minutes later. Read as midnight, that step
+ * dated the message the reader had just sent, and everything above it, a whole day early: the row could
+ * no longer be the send it was (`ledger-placement.ts` never lets an older row wear a newer send) and the
+ * message was drawn twice. A browser clock a little behind the daemon's is the same step against `now`.
+ *
+ * An hour covers any wait behind one tool call; a real midnight between neighbours is a step back of
+ * nearly a day, so only neighbours more than 23 hours apart are misread — next to the whole day the
+ * walk already loses for neighbours more than 24 hours apart.
+ */
+const OUT_OF_ORDER_MS = 60 * 60_000;
+
+/**
  * The instant of every record, oldest first; `undefined` for one with no clock.
  *
  * THE ONLY PLACE A UTC WALL CLOCK IS READ. The daemon prints each record's time as `HH:MM:SS` in UTC
@@ -171,9 +187,10 @@ const DAY_MS = 86_400_000;
  * text, which is why a phone in Tokyo no longer shows London's afternoon.
  *
  * The date is inferred by walking back from `now`: each record is the most recent instant its clock
- * names that is not after the record that follows it. That dates a long transcript correctly so long as
- * no two neighbouring records are a day apart. A record with no clock gets no instant rather than a
- * made-up one, because a wrong time is worse than none.
+ * names that is no more than {@link OUT_OF_ORDER_MS} after the record that follows it — a record a
+ * little later than its successor was written out of clock order, not before a midnight. That dates a
+ * long transcript correctly so long as no two neighbouring records are nearly a day apart. A record with
+ * no clock gets no instant rather than a made-up one, because a wrong time is worse than none.
  */
 const recordInstants = (records: readonly LogRecord[], now: number): readonly (number | undefined)[] => {
   const instants: (number | undefined)[] = [];
@@ -187,7 +204,9 @@ const recordInstants = (records: readonly LogRecord[], now: number): readonly (n
     const [hours, minutes, seconds] = clock.split(':').map(Number) as [number, number, number];
     const day = new Date(ceiling);
     const same = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hours, minutes, seconds);
-    ceiling = same > ceiling ? same - DAY_MS : same;
+    const latest = ceiling + OUT_OF_ORDER_MS;
+    // Its clock on the following record's day, or the day either side when that one is out of reach.
+    ceiling = same > latest ? same - DAY_MS : same + DAY_MS <= latest ? same + DAY_MS : same;
     instants[index] = ceiling;
   }
   return instants;
