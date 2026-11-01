@@ -713,8 +713,10 @@ shared pool their links lead into, goes through the same checked folders: every 
 every move (a hard link then an unlink for a file, a rename for a folder — `linkat`/`renameat` across two held
 folders on macOS), append, link and removal is made through a folder the guard opened and checked, with the state
 home's key files fenced. A folder the guard refuses — a home by identity, one that changed between two steps, one it
-cannot reach — refuses the migration with nothing moved, and only `ENOENT` reads as absent. Where descriptor reach
-cannot be loaded at all, the migration is refused rather than made by path.
+cannot reach — refuses the migration with nothing moved, and only `ENOENT` reads as absent (a name the guard could not
+reach that is there anyway is refused, not read as absent). Every folder is synced through its held descriptor too.
+Where descriptor reach cannot be loaded at all, the migration is **not made** rather than made by path: the apply goes
+on without it and its result names the pool as skipped, with the reason.
 
 ## Sub-ferrets and the Ferretry verbs
 

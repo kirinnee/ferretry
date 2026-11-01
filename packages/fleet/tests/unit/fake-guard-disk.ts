@@ -248,6 +248,7 @@ export class FakeGuardDisk implements GuardDisk {
       identity: this.identityOf(node),
       entryPath: leaf => (this.throughDescriptors === true ? `/@fd/${String(fd)}/${leaf}` : undefined),
       ...(this.throughDescriptors === 'calls' ? { at: this.calls(fd) } : {}),
+      sync: async () => undefined,
       chmod: async mode => {
         node.mode = mode;
         this.modes.push([`@fd:${String(fd)}`, mode]);

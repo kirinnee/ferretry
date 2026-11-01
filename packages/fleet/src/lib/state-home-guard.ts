@@ -75,6 +75,8 @@ export interface GuardDirectoryHandle {
   readonly at?: DescriptorCalls;
   /** Sets the folder's permission bits through THIS descriptor (`fchmod`), never by a path a link could redirect. */
   chmod(mode: number): Promise<void>;
+  /** Makes the folder's names durable through THIS descriptor (`fsync`). */
+  sync(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -776,6 +778,8 @@ export interface GuardedFolder {
   openFile(leaf: string, how: FileOpening, mode?: number): Promise<number>;
   /** Sets its permission bits through the descriptor (`fchmod`). */
   chmod(mode: number): Promise<void>;
+  /** Makes its new, renamed and removed names durable through the descriptor (`fsync`), never by its path. */
+  sync(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -844,6 +848,7 @@ function checkedFolder(handle: GuardDirectoryHandle, place: string, disk: Folder
     openFile: async (leaf, how, mode = 0o600) =>
       at ? await at.openFile(leafOf(leaf), how, mode) : await disk.openFile(await entry(leaf), how, mode),
     chmod: async mode => await handle.chmod(mode),
+    sync: async () => await handle.sync(),
     close: async () => await handle.close(),
   };
   handles.set(folder, handle);

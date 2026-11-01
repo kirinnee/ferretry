@@ -25,7 +25,7 @@ import {
   type SettingsObject,
   serializeSettings,
 } from '../lib/settings.ts';
-import type { SharedHistoryMigration } from '../lib/shared-history.ts';
+import { type SharedHistoryMigration, SharedHistoryUnavailableError } from '../lib/shared-history.ts';
 import { fencedBy } from '../lib/state-home-fence.ts';
 import type { FileIdentity, FolderDisk, GuardedFolder } from '../lib/state-home-guard.ts';
 import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
@@ -438,10 +438,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     // Committed. Cleanup from here is best-effort and never reclassifies a successful apply.
     const backupResidue = await journal.discard();
-    const residue = {
+    // A function, because a shared-history migration this host cannot make safely is skipped below and joins it.
+    const residue = () => ({
       ...(backupResidue.length === 0 ? {} : { backupResidue }),
-      ...(skipped.length === 0 ? {} : { skipped }),
-    };
+      ...(skipped.length === 0 ? {} : { skipped: [...skipped] }),
+    });
 
     const committed = (sharedHistory: FleetApplyPreview['sharedHistory']): FleetApplyCommittedState => ({
       accountCount: plan.manifest.accounts.length,
@@ -450,7 +451,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       manifest: plan.manifest,
       prunedWrappers,
       sharedHistory,
-      ...residue,
+      ...residue(),
     });
 
     const sharedHistory = [];
@@ -458,6 +459,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
       try {
         sharedHistory.push(await this.sharedHistoryMigration().materialize(request));
       } catch (error) {
+        // Not made, and said so: the rest of the apply stands (`SharedHistoryUnavailableError`).
+        if (error instanceof SharedHistoryUnavailableError) {
+          skipped.push({ path: path.join(request.poolRoot, request.kind), reason: error.message });
+          continue;
+        }
         throw new FleetApplyFailureError({
           kind: 'history-failed-after-commit',
           failedHarness: request.kind,
@@ -473,7 +479,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       manifestPath: plan.manifestPath,
       prunedWrappers,
       sharedHistory,
-      ...residue,
+      ...residue(),
     };
   }
 
@@ -693,7 +699,15 @@ export class FileFleetProvisioner implements FleetProvisioner {
     if ((plan.sharedHistoryRequests?.length ?? 0) === 0) return [];
     const migration = this.sharedHistoryMigration();
     const previews = [];
-    for (const request of plan.sharedHistoryRequests ?? []) previews.push(await migration.preview(request));
+    for (const request of plan.sharedHistoryRequests ?? []) {
+      try {
+        previews.push(await migration.preview(request));
+      } catch (error) {
+        // A migration this host cannot make safely is left out of the plan, not a reason to refuse the apply: the
+        // apply reports it as skipped.
+        if (!(error instanceof SharedHistoryUnavailableError)) throw error;
+      }
+    }
     return previews;
   }
 

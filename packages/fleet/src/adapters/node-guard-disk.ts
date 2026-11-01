@@ -222,6 +222,7 @@ export class NodeGuardDisk implements GuardDisk, FolderDisk {
       entryPath: leaf =>
         this.throughDescriptors ? `${this.descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined,
       chmod: async mode => await handle.chmod(mode),
+      sync: async () => await handle.sync(),
       close: async () => await handle.close(),
     };
   }

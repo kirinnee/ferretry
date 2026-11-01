@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fsyncSync, openSync, readSync, writeSync } from 'node:fs';
-import { type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
+import { closeSync, constants, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
+import { type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { HarnessKind } from '../lib/manifest.ts';
 import {
@@ -14,6 +14,7 @@ import {
   conversationLeaseDirectory,
   decideConversationLease,
   SharedHistoryAccessRefusedError,
+  SharedHistoryUnavailableError,
   type SharedHistoryFileSystem,
   type SharedHistoryNode,
   type SharedHistorySymbolicLinkNode,
@@ -136,14 +137,9 @@ async function makeDirectoryDurable(target: string): Promise<void> {
 /** Every folder the migration makes, as private to the account as the pool. */
 const FOLDER_MODE = 0o700;
 
-/** Make a folder's new, renamed or removed names durable: sync it, reached through its checked handle. */
+/** Make a folder's new, renamed or removed names durable: `fsync` through its held descriptor, never by path. */
 async function syncFolder(folder: GuardedFolder): Promise<void> {
-  const descriptor = openSync(await folder.self(), constants.O_RDONLY | constants.O_DIRECTORY);
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
+  await folder.sync();
 }
 
 /** Write every byte to a raw descriptor (at its offset, or at its end when opened to append). */
@@ -169,8 +165,9 @@ function writeAll(descriptor: number, bytes: Uint8Array): void {
  * folder is walked from the home down without following a link, anywhere else the real path is walked from `/` the
  * same way, a folder that is a home or one of its key files by identity is refused, and the step reaches its entry
  * THROUGH the held descriptor (Linux `/proc`, macOS descriptor calls). A swapped folder is refused, never followed, so
- * nothing in the home is moved, read into the pool, or removed. Where descriptor reach cannot be loaded at all, the
- * migration is refused rather than made by path. `deviceIdOf` and `canonicalDirectoryOf` stay path reads: they only
+ * nothing in the home is moved, read into the pool, or removed, and every folder is synced through its descriptor too.
+ * Where descriptor reach cannot be loaded at all, the migration is not made rather than made by path
+ * (`SharedHistoryUnavailableError`): a provisioner apply goes on without it and reports it as skipped. `deviceIdOf` and `canonicalDirectoryOf` stay path reads: they only
  * inform the plan, and every step it then takes is made as above.
  *
  * Every mutation is durable before it returns — the bytes, and the directory entry that names them,
@@ -217,16 +214,16 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
   async deviceIdOf(target: string): Promise<number> {
     await this.assertAllowedPath(target);
     const resolved = path.resolve(target);
-    try {
-      return (await lstat(resolved)).dev;
-    } catch (error) {
-      if (!endsResolution(error)) throw error;
-    }
+    // Through the same disk every step uses: the entry itself, else its nearest existing ancestor as resolved.
+    const own = await this.disk.identity(resolved);
+    if (own !== undefined) return Number(own.device);
     let current = path.dirname(resolved);
     for (;;) {
       const parent = path.dirname(current);
       try {
-        return (await stat(current)).dev;
+        const real = await this.disk.realpath(current);
+        const found = await this.disk.identity(real);
+        if (found !== undefined) return Number(found.device);
       } catch (error) {
         if (!endsResolution(error) || parent === current) throw error;
       }
@@ -436,6 +433,10 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
       // instead of being written through.
       const descriptor = await folder.openFile(leaf, 'append');
       try {
+        // A FIFO opens without blocking; anything that is not a regular file is refused here, before a byte moves.
+        if (!fstatSync(descriptor).isFile()) {
+          throw new Error(`shared-history append expected a file, found something else: ${target}`);
+        }
         const prefix = new TextEncoder().encode(expected);
         const seen = new Uint8Array(prefix.byteLength);
         const read = readSync(descriptor, seen, 0, seen.byteLength, 0);
@@ -581,14 +582,23 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
   private async reach(folders: DestinationFolders, directory: string): Promise<GuardedFolder | undefined> {
     const folder = await folders.existing(directory);
     if (folder === undefined) {
-      await lstat(directory).catch((error: unknown) => {
-        if (!isMissing(error)) throw error;
-      });
+      const there = await lstat(directory).then(
+        () => true,
+        (error: unknown) => {
+          if (!isMissing(error)) throw error;
+          return false;
+        },
+      );
+      // Something IS at the name the guard could not reach (a link that loops, or one made in between): not absent.
+      if (there)
+        throw new Error(
+          `refusing to read shared history at ${directory}: it is there, but not as a folder the guard can reach`,
+        );
       return undefined;
     }
     if (folder.anchored) return folder;
     await folder.close();
-    throw new Error(
+    throw new SharedHistoryUnavailableError(
       `refusing to migrate shared history in ${directory}: its folders cannot be reached through their descriptors here, so a step could be redirected into the state home${folders.unavailable === undefined ? '' : ` (${folders.unavailable})`}`,
     );
   }

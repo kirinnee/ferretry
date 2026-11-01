@@ -3,6 +3,7 @@ import {
   closeSync,
   constants,
   fchmodSync,
+  fsyncSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -192,6 +193,7 @@ export function descriptorHandle(
     entryPath: () => undefined,
     at,
     chmod: async mode => fchmodSync(fd, mode),
+    sync: async () => fsyncSync(fd),
     close: async () => closeSync(fd),
   };
   descriptors.set(handle, { fd, identity });

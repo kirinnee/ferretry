@@ -189,6 +189,7 @@ export class FakeAgentDisk implements AgentFilesystem {
     return {
       identity: this.identityOf(node),
       entryPath: leaf => (this.throughDescriptors ? `/@fd/${String(fd)}/${leaf}` : undefined),
+      sync: async () => undefined,
       chmod: async mode => {
         node.mode = mode;
       },

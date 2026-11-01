@@ -249,6 +249,7 @@ describe('DescriptorBracket — what it refuses', () => {
           identity: folder.identity,
           entryPath: () => undefined,
           chmod: async () => undefined,
+          sync: async () => undefined,
           close: async () => undefined,
         },
         'b',
