@@ -68,6 +68,24 @@ describe('shareLinkTarget', () => {
     should(reason).containEql('publicUrl');
   });
 
+  it('should judge a loopback public address as a loopback bind: refused alone, relayed beside a rendezvous', () => {
+    // Arrange
+    const advertisement: Advertisement = { kind: 'address', url: 'http://localhost:7077', origin: 'operator' };
+
+    // Act
+    const alone = unavailable(shareLinkTarget(advertisement, DAEMON_ID, APP_ORIGIN, undefined));
+    const relayed = shareLinkTarget(advertisement, DAEMON_ID, APP_ORIGIN, RELAY_URL);
+
+    // Assert
+    should(alone).containEql('not on a relay');
+    should(relayed).eql({
+      kind: 'ready',
+      appOrigin: APP_ORIGIN,
+      daemonUrl: 'http://localhost:7077',
+      daemonId: DAEMON_ID,
+    });
+  });
+
   it('should name the missing port when there is none to put in a link', () => {
     // Arrange
     const advertisement: Advertisement = { kind: 'none', refusal: 'no-port' };

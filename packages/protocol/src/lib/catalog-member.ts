@@ -412,7 +412,7 @@ export function parseShareFragment(fragment: string): ShareLinkSeed {
 
 /** Said beside a share link that only a rendezvous carries: who is on the path, and what they can and cannot see. */
 export const SHARE_LINK_RELAYED_NOTICE =
-  'A person opening this link reaches this machine through the relay it is connected to. The relay sees when they connect and how much is sent, never the code, their keys, their name or the catalogs.';
+  'A person opening this link reaches this machine through the relay it is connected to. The relay sees this machine’s fingerprint, the person’s IP address, when they connect and how much is sent, and can tell whether they joined; never the code, their keys, their name or the catalogs.';
 
 /**
  * WHAT THE OWNER IS TOLD BESIDE A SHARE LINK, composed once for the share sheet and `fy catalog share`, as

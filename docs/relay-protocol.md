@@ -2455,8 +2455,9 @@ transcript with a key it made and cannot export. **A publisher that answers only
 this way too**: its share gate is fed the same `discoverableRelayUrl` pairing's QR is drawn from, so it
 mints a link (loopback `url`, `fp`, no rendezvous named) exactly when another browser can discover the
 rendezvous it dials, and refuses only when neither an address nor such a rendezvous exists. For a loopback
-`url` the browser walks the rendezvous FIRST and the address last — for the join and for every later
-`member` session — since from another person's device that address names their own computer. It adds two records to the sequence-1 union, each a
+`url` the browser does not dial the address at all while it has a rendezvous to try — for the join and for
+every later `member` session — since from another person's device it names their own computer; only an app
+opened on loopback itself tries it, last. It adds two records to the sequence-1 union, each a
 separate mode with its own terminal states, and **neither reaches a single route a device session
 reaches**.
 

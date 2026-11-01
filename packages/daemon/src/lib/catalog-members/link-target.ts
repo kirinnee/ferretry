@@ -1,4 +1,4 @@
-import type { Advertisement } from '@ferretry/protocol';
+import { type Advertisement, isLoopbackLinkAddress } from '@ferretry/protocol';
 import type { ShareLinkTarget } from './ports.ts';
 
 /** The remedy for a machine nobody else can reach: the relay first (it opens no port), then an address. */
@@ -20,8 +20,9 @@ const REACH_REMEDY =
  * from, so a share link and a pairing QR can never disagree about one machine. A self-hosted rendezvous is
  * not discoverable by a stock browser, so it does not count: pairing's declared GAP, mirrored and not widened.
  *
- * A wildcard bind with no `publicUrl` has no address to put in a link at all, so it is refused even beside a
- * rendezvous, as pairing refuses it. Asked BEFORE a code is made, so a refused link spends nothing.
+ * A `publicUrl` that is itself loopback counts as a loopback bind. A wildcard bind with no `publicUrl` has no
+ * address to put in a link at all, so it is refused even beside a rendezvous, as pairing refuses it.
+ * Asked BEFORE a code is made, so a refused link spends nothing.
  */
 export function shareLinkTarget(
   advertisement: Advertisement | undefined,
@@ -31,8 +32,12 @@ export function shareLinkTarget(
 ): ShareLinkTarget {
   if (advertisement === undefined || daemonId === undefined)
     return { kind: 'unavailable', reason: 'This machine is still starting. Try again in a moment.' };
-  if (advertisement.kind === 'address') return { kind: 'ready', appOrigin, daemonUrl: advertisement.url, daemonId };
-  if (advertisement.kind === 'local-only') {
+  // An operator's `publicUrl` that is itself loopback reaches nobody else either: it is judged as a loopback bind,
+  // so a link is never made that only this machine could open, and a loopback link is always a relayed one (the
+  // promise `shareLinkNotice` makes beside it).
+  if (advertisement.kind === 'address' && !isLoopbackLinkAddress(advertisement.url))
+    return { kind: 'ready', appOrigin, daemonUrl: advertisement.url, daemonId };
+  if (advertisement.kind !== 'none') {
     if (discoveredRelayUrl !== undefined) return { kind: 'ready', appOrigin, daemonUrl: advertisement.url, daemonId };
     return {
       kind: 'unavailable',

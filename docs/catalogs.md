@@ -542,11 +542,15 @@ act alone (`share-catalog`), as minting a pairing code does.
   for itself (the hosted relay) — that loopback address, exactly as a pairing link from the same machine
   carries it ([pairing.md](pairing.md) "The link names no rendezvous; the device finds one itself"). The
   reader's browser goes to the rendezvous its build discovered and proves the publisher there against `fp`
-  before the code leaves it. Because a loopback address names the reader's own computer, the browser tries
-  the rendezvous **first** and that address last, for the join and for every later member session; any other
-  address is still tried first. The share sheet and `fy catalog share` say so beside such a link
-  (`shareLinkNotice` in `@ferretry/protocol`): the relay sees when the person connects and how much is sent,
-  never the code, their keys, their name or the catalogs. There is no anonymous route for any of this: the
+  before the code leaves it. Because a loopback address names the reader's own computer, a browser that has a
+  rendezvous to try **never dials that address** — for the join and for every later member session — unless the
+  app itself was opened on loopback (a local build), where it is tried last; with no rendezvous it is the only
+  candidate. Any other address is still tried first. A `publicUrl` that is itself loopback is judged as a
+  loopback bind, so a loopback link is always a relayed one. The share sheet and `fy catalog share` say so
+  beside such a link (`shareLinkNotice` in `@ferretry/protocol`): the relay sees this machine's fingerprint,
+  the person's IP address, when they connect and how much is sent, and can tell whether they joined; never
+  the code, their keys, their name or the catalogs. The relay is checked once, at boot, as pairing checks it:
+  a relay that drops this machine later still lets a link be minted (a declared GAP, at pairing's parity). There is no anonymous route for any of this: the
   join is the sealed `join` record and nothing else.
 
 **Joining.** The browser opens the link, makes its member key and box key, proves the publisher against

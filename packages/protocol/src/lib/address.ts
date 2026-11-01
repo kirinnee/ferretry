@@ -108,7 +108,7 @@ export function isLoopbackHost(host: string): boolean {
 
 /**
  * Whether a link's address names "this computer itself". From any other device it reaches nothing, so a
- * browser opening such a link goes to the rendezvous it discovered FIRST and dials the address last, instead
+ * browser opening such a link goes to the rendezvous it discovered and does not dial the address at all, instead
  * of stalling on (and possibly being asked permission for) its own loopback. Anything unreadable is not loopback.
  */
 export function isLoopbackLinkAddress(daemonUrl: string): boolean {

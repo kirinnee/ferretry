@@ -57,16 +57,28 @@ describe('the carriers a join walks', () => {
     should(joinCandidates(seedFor('sha256:legacy'), HOSTED)).eql([]);
   });
 
-  it('should try the rendezvous first and the loopback address last for a relay-only publisher', () => {
-    const candidates = joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED);
-    should(candidates).eql([
+  it('should not dial a loopback address beside a rendezvous from a hosted page: it names the reader’s computer', () => {
+    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED, false)).eql([
+      { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
+    ]);
+  });
+
+  it('should try a loopback address last when this app was itself opened on loopback', () => {
+    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED, true)).eql([
       { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
       { kind: 'direct', daemonUrl: LOOPBACK },
     ]);
   });
 
+  it('should read whether it was opened on loopback from the page when not told', () => {
+    const local = typeof location !== 'undefined' && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED)).eql(
+      joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED, local),
+    );
+  });
+
   it('should still offer a loopback address alone when this build discovered no rendezvous', () => {
-    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, undefined)).eql([
+    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, undefined, false)).eql([
       { kind: 'direct', daemonUrl: LOOPBACK },
     ]);
   });
@@ -102,16 +114,16 @@ describe('the carriers a member session may try', () => {
     should(memberCandidates({ ...subscription, daemonId: 'sha256:legacy' }, HOSTED)).eql([]);
   });
 
-  it('should try every relay before a loopback address, which names this reader’s own computer', () => {
-    const methods = memberCandidates(
-      { daemonId: FINGERPRINT, daemonUrl: LOOPBACK, carriers: [{ kind: 'relay', url: 'wss://relay.mine.test' }] },
-      HOSTED,
-    );
-    should(methods.map(one => (one.kind === 'relay' ? one.relayUrl : one.daemonUrl))).eql([
-      'wss://relay.mine.test',
-      HOSTED,
-      LOOPBACK,
-    ]);
+  it('should try only relays for a loopback publisher from a hosted page, and the address last from a local one', () => {
+    const subscription = {
+      daemonId: FINGERPRINT,
+      daemonUrl: LOOPBACK,
+      carriers: [{ kind: 'relay' as const, url: 'wss://relay.mine.test' }],
+    };
+    const shown = (methods: ReturnType<typeof memberCandidates>) =>
+      methods.map(one => (one.kind === 'relay' ? one.relayUrl : one.daemonUrl));
+    should(shown(memberCandidates(subscription, HOSTED, false))).eql(['wss://relay.mine.test', HOSTED]);
+    should(shown(memberCandidates(subscription, HOSTED, true))).eql(['wss://relay.mine.test', HOSTED, LOOPBACK]);
   });
 });
 
@@ -268,6 +280,7 @@ describe('walking the carriers to join', () => {
       heartbeat: noHeartbeat,
       directTimeoutMs: 30,
       relayTimeoutMs: 30,
+      servedFromLoopback: false,
     });
     should(result).match({ kind: 'joined', carrier: { kind: 'relay' } });
     should(routes.dialled).have.length(1);
