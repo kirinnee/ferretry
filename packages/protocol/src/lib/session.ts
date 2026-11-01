@@ -514,6 +514,12 @@ export const SessionConfigSchema = z.object({
   label: z.string().optional(),
   parent: z.string().optional(),
   /**
+   * A person revoked this session's credential (`fy session revoke-credential`, docs/agent-tools.md): no launch
+   * hands it one again — no Warden revive, peer resume, restart or migration — until a person resumes it. Absent
+   * on every session that was never cut off.
+   */
+  credentialRevoked: z.literal(true).optional(),
+  /**
    * The board this session works on (`board-design.md` §2.2): resolved once at start — inherited from the
    * parent, else the project its cwd is in, else `unfiled` — and kept. Absent for a session started before
    * boards existed.

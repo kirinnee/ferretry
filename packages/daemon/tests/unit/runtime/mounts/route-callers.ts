@@ -296,7 +296,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/learning/scan/estimate operator any',
   'POST /v1/learning/scan/cancel operator any',
   'GET /v1/learning/scan operator any',
-  'POST /v1/learning/scan operator any',
+  'POST /v1/learning/scan operator person',
   'POST /v1/agent/lessons none any',
   'POST /v1/recommend operator any',
   'POST /v1/stt/enhance operator any',

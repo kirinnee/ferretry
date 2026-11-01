@@ -25,7 +25,7 @@ function controller(status: SessionStatus = 'running') {
 }
 
 describe('fy session revoke-credential', () => {
-  it('should say a running ferret is cut off now, keeps running until its next launch, and how to keep it off', async () => {
+  it('should say what is cut off, that it sticks until a person resumes it, and what it does not reach', async () => {
     // Arrange
     const { asked, io, subject } = controller('thinking');
 
@@ -35,12 +35,13 @@ describe('fy session revoke-credential', () => {
     // Assert
     should(asked).deepEqual(['aniya']);
     should(io.out).deepEqual([
-      "revoked ms8-abcd1234's credential: its fy, MCP server and tools are refused from now on",
-      'it keeps running without them until its next launch, which gets a fresh credential; to keep it off: fy stop ms8-abcd1234',
+      "revoked ms8-abcd1234's credential: where its fy, MCP server and tools present their own (fys_…), they are refused from now on",
+      'no restart, revive or migration gives it a credential again until a person resumes it: fy resume ms8-abcd1234',
+      'it keeps running; a pane still on the admin token (an older fy, or one that read api-token) is not cut off by this — to stop it too: fy stop ms8-abcd1234',
     ]);
   });
 
-  it('should say a stopped session gets a fresh credential at its next launch', async () => {
+  it('should say only its status for a session with no pane', async () => {
     // Arrange
     const { io, subject } = controller('stopped');
 
@@ -48,7 +49,7 @@ describe('fy session revoke-credential', () => {
     await subject.execute('ms8-abcd1234');
 
     // Assert
-    should(io.out[1]).equal('it is stopped; its next launch gets a fresh credential');
+    should(io.out[2]).equal('it is stopped');
   });
 
   it('should print the answer as JSON on request, and nothing secret is in it', async () => {

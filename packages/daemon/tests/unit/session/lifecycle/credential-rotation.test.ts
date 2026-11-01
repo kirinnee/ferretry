@@ -167,3 +167,52 @@ describe('the prefixed session credential, across a rotation', () => {
     should(await identities.resolve(UNPREFIXED)).be.undefined();
   });
 });
+
+describe('SessionCredentialRotation cutting a session off', () => {
+  it('should refuse to cut off over a hash store that cannot mark a session, touching nothing', async () => {
+    // Arrange — a store that can only erase: a revoke on it would not stick, so it is refused outright.
+    const { order, environment, subject } = harness();
+    environment.documents.set(ID, { FY_SESSION_BOARD_CAPABILITY: 'pane-capability' });
+
+    // Act / Assert
+    await should(subject.cutOff(ID)).be.rejectedWith(/cannot mark a session cut off/u);
+    should(order).be.empty();
+    should(environment.documents.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: 'pane-capability' });
+  });
+
+  it('should mark it first, then drop the plaintext, and refuse every rotation until restored', async () => {
+    // Arrange
+    const order: string[] = [];
+    const environment = new MemoryEnvironment(order);
+    const marked = new Set<SessionId>();
+    const hashes: SessionCapabilityHashStore = {
+      record: async () => {
+        order.push('hash');
+      },
+      erase: async () => {
+        order.push('erase');
+      },
+      cutOff: async id => {
+        order.push('cut-off');
+        marked.add(id);
+      },
+      isCutOff: async id => marked.has(id),
+      restore: async id => {
+        marked.delete(id);
+      },
+    };
+    const subject = new SessionCredentialRotation({ credentials: { issue: () => FRESH }, environment, hashes });
+    environment.documents.set(ID, { FY_SESSION_BOARD_CAPABILITY: 'pane-capability', FY_SESSION_MODE: 'auto' });
+
+    // Act
+    await subject.cutOff(ID);
+    const refused = await subject.rotate(ID).catch((error: unknown) => error);
+    await subject.restore(ID);
+    const rotated = await subject.rotate(ID);
+
+    // Assert
+    should(order.slice(0, 2)).deepEqual(['cut-off', 'environment']);
+    should((refused as Error).name).equal('SessionCredentialRevokedError');
+    should(rotated).equal(FRESH.hash);
+  });
+});

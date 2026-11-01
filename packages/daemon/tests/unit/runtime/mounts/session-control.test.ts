@@ -430,6 +430,32 @@ describe("a start on a ferret's own credential", () => {
     should(control.starts).be.empty();
   });
 
+  it('should refuse a ferret giving its start the Warden’s own label, which would exempt it from every limit', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const own = await subject.dispatch(fromFerret(startRequest(startBody({ label: ' fleet-warden ' }))));
+    const header = await subject.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: 'req-h' },
+        body: startBody({ label: 'fleet-warden' }),
+      }),
+    );
+    const other = await subject.dispatch(
+      fromFerret(startRequest(startBody({ label: 'reviewer' }), { [FY_REQUEST_ID_HEADER]: 'req-o' })),
+    );
+
+    // Assert
+    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+    should([header.status, jsonBody(header).code]).deepEqual([403, 'owner_only']);
+    should(other.status).equal(201);
+    should(control.starts).have.length(1);
+  });
+
   it('should leave the owner free to start a top-level session or one for any parent', async () => {
     // Arrange
     const control = new FakeSessionControl();

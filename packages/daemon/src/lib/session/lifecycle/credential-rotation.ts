@@ -3,6 +3,7 @@ import {
   SESSION_BOARD_CAPABILITY_VARIABLE,
   type SessionCapabilityHashStore,
   type SessionCredentialIssuer,
+  SessionCredentialRevokedError,
   type SessionCredentialRotator,
   type SessionEnvironmentStore,
 } from './types.ts';
@@ -35,6 +36,10 @@ export class SessionCredentialRotation implements SessionCredentialRotator {
   constructor(private readonly ports: SessionCredentialRotationPorts) {}
 
   async rotate(id: SessionId): Promise<string> {
+    // A session a person cut off is handed no credential by ANY launch until a person resumes it: this is the one
+    // place every launch path passes through, so a Warden revive, a peer's resume, a restart and a migration all
+    // fail closed here rather than each needing its own check.
+    if ((await this.ports.hashes.isCutOff?.(id)) === true) throw new SessionCredentialRevokedError(id);
     const credential = this.ports.credentials.issue();
     const stored = await this.ports.environment.read(id);
     await this.ports.environment.write(id, { ...stored, [SESSION_BOARD_CAPABILITY_VARIABLE]: credential.capability });
@@ -44,5 +49,22 @@ export class SessionCredentialRotation implements SessionCredentialRotator {
 
   async revoke(id: SessionId): Promise<void> {
     await this.ports.hashes.erase(id);
+  }
+
+  /**
+   * The hash and the mark go first, in one write, so the value the pane holds names nobody even if anything
+   * below fails. Then the plaintext leaves the stored environment: nothing re-derives a hash from it, but a
+   * credential that names nobody has no reason to stay on disk either.
+   */
+  async cutOff(id: SessionId): Promise<void> {
+    const cutOff = this.ports.hashes.cutOff;
+    if (cutOff === undefined) throw new Error('this hash store cannot mark a session cut off');
+    await cutOff.call(this.ports.hashes, id);
+    const { [SESSION_BOARD_CAPABILITY_VARIABLE]: _revoked, ...kept } = await this.ports.environment.read(id);
+    await this.ports.environment.write(id, kept);
+  }
+
+  async restore(id: SessionId): Promise<void> {
+    await this.ports.hashes.restore?.(id);
   }
 }

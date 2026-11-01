@@ -393,7 +393,8 @@ release. It is also a **bearer class** of its own, `session`, beside the admin a
 - **A child never inherits it.** Every session, a sub-ferret included, is minted its own credential, and a
   pane is handed only its own (`FY_SESSION_TOKEN` is derived from the session's own stored value at each
   launch). The daemon drops `FY_SESSION_TOKEN`, `FY_SESSION_BOARD_CAPABILITY` and `FY_SESSION_ID` from its
-  own environment at boot, so a daemon started from inside a ferret's pane cannot pass that ferret's
+  own environment at boot, and unsets them from its tmux server's global environment (a server outlives the
+  daemon that started it), so a daemon started from inside a ferret's pane cannot pass that ferret's
   credential to the tmux server, its panes or its terminals.
 - **From this machine only.** A session-shaped bearer is looked up only when the request arrived on the
   privileged loopback carrier; from the tunnel, a LAN bind or any other remote carrier it is a stranger's,
@@ -438,11 +439,15 @@ its own).
   interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
   naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
   top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
-  what it starts ([pack-mode.md](pack-mode.md#limits)). The routes that can only make a parent-less session are
-  person routes for that reason: a fork (its target descends from nothing), adopting a conversation, a Warden
-  investigation, and `fy learning run --spawn` (launching miners; a ferret may still read the run's manifest).
-  **Honest limit:** the admin token with a session header (an older `fy`, a pane with no credential) still
-  starts with the body's parent, as before.
+  what it starts ([pack-mode.md](pack-mode.md#limits)). A ferret may not give its start the Warden's own label
+  (`fleet-warden`, `403 owner_only`): that label exempts a tree from the limits, the resource caps and
+  supervision, and only the daemon's Warden spawner sets it; even then the limits are skipped only for a session
+  that DESCENDS from a warden, never for a label a start gave itself. The routes that can only make a parent-less
+  session are a person's for that reason: a fork (its target descends from nothing), adopting a conversation, a
+  Warden investigation, a learning scan, `fy learning run --spawn` and a Warden run with `spawn` (a ferret may
+  still read the run's manifest and ask for a sweep that only looks). A ferret may hand over only its OWN session
+  (a handover starts a new top-level session in the source's place). **Honest limit:** the admin token with a
+  session header (an older `fy`, a pane with no credential) still starts with the body's parent, as before.
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
@@ -466,17 +471,25 @@ its own).
 
 `fy session revoke-credential <session>` (`POST /v1/sessions/:sessionId/revoke-credential`, a **person** route)
 revokes one session's credential at once. Its stored hash is erased on the session's own queue, so the value
-its pane holds names nobody from that moment: its `fy`, its MCP server and its agent tools are refused as an
-unknown credential (`401`; `fy` reports it and does not fall back to the admin token while the daemon offers
-`session.credential.1`). Nothing new is minted, so no replacement value lands anywhere a ferret could read it.
+its pane holds names nobody from that moment: where its `fy`, its MCP server and its agent tools present their
+own credential (`fys_…`), they are refused as an unknown one (`401`; `fy` reports it and does not fall back to
+the admin token while the daemon offers `session.credential.1`). Nothing new is minted, and the old plaintext
+leaves the session's stored environment.
 
-- **The pane keeps running.** This is the intended act: the ferret is cut off from Ferretry, not killed. It
-  loses `fy` and its tools until its **next launch** (a restart, a revive or a migration), which is handed a
-  fresh credential as every launch is. To keep it off, also `fy stop` it.
+- **The pane keeps running.** This is the intended act: the ferret is cut off from Ferretry, not killed.
+- **It sticks until a person resumes it.** The session is marked `credentialRevoked`, and every launch passes
+  through the one credential rotation, which refuses a marked session: no Warden auto-revive (even after the
+  ferret ends its own harness), no peer's `fy resume`, no `/v1/restarts`, no migration, no revive on a send hands
+  it a credential again. The Warden skips it, and a resume by anyone but a person is refused before anything is
+  touched. A **person's** resume (`fy resume <session>`, or Resume in the app) clears the mark, and that launch is
+  handed a fresh credential. A person's restart or migration of a marked session is refused too: resume it
+  first.
 - **Recorded** in the security log as `session.credential-revoked`, named by the session, never by a value.
-- **Honest limit:** a ferret that reads `~/.ferretry/api-token` (or runs `fy --as-owner`) is the owner at the
-  machine to this daemon, revoked or not — the same limit as every person route, closed only by walling the
-  state home off from ferrets.
+- **Honest limits:** it reaches only what presents the session's own credential. A pane still on the admin
+  token plus a session header — an older `fy` or MCP server from before RF-3, until the pane restarts — is not
+  cut off by this, and nor is a ferret that reads `~/.ferretry/api-token` (or runs `fy --as-owner`): to this
+  daemon that is the owner at the machine, the same limit as every person route, closed only by walling the
+  state home off from ferrets. To stop those too, `fy stop` it.
 
 **A ferret's `fy` and MCP server present it.** With a `fys_` value in `FY_SESSION_TOKEN` (or the older
 name) and no `FY_TOKEN`, they send `Authorization: Bearer fys_…` to a daemon that lists `session.credential.1`

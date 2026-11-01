@@ -194,6 +194,11 @@ export const FERRET_IDENTITY_VARIABLES = [
   SESSION_ID_VARIABLE,
 ] as const;
 
+/** Removes every ferret identity variable from `environment` in place: the daemon's own, at boot. */
+export function dropFerretIdentity(environment: Record<string, string | undefined>): void {
+  for (const name of FERRET_IDENTITY_VARIABLES) delete environment[name];
+}
+
 /** The session's own files a pane is handed by name; see `SessionPaths.media` and `SessionPaths.questionAsked`. */
 export interface SessionPaneFiles {
   readonly media: string;

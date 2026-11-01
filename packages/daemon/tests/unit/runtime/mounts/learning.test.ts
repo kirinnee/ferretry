@@ -504,6 +504,26 @@ describe('the learning review mount', () => {
       should([header.status, jsonBody(header).code]).deepEqual([403, 'owner_only']);
       should([manifest.status, owner.status]).deepEqual([200, 200]);
     });
+
+    it('should refuse a ferret starting a scan, whose miners are sessions with no parent, before the body is read', async () => {
+      // Arrange
+      const scan = (headers: Readonly<Record<string, string>>) =>
+        request({
+          method: 'POST',
+          path: '/v1/learning/scan',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: '{"scope":"not even read"}',
+        });
+      const on = dispatcher(new FakeLearningStore());
+
+      // Act
+      const own = await on.dispatch(fromFerret(scan(human)));
+      const header = await on.dispatch(scan(agentIn(FERRET_SESSION)));
+
+      // Assert
+      should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+      should([header.status, jsonBody(header).code]).deepEqual([403, 'owner_only']);
+    });
   });
 });
 

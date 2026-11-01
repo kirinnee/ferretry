@@ -278,8 +278,10 @@ alike — before anything is claimed or written. A warden's own spawns are the W
 **The lineage is the credential's.** A start on a ferret's own credential is ALWAYS that ferret's child —
 `fy start` (interactive too) and `fy new` alike: a parent left out is filled in, and one naming another session
 is `403 parent_mismatch`. So the limits are always charged to the ferret that asked, and a ferret cannot step
-out of them by starting a top-level session. The starts that could only make one — a fork, adopting a
-conversation, a Warden investigation, `fy learning run --spawn` — are a person's
+out of them by starting a top-level session, nor by giving its start the Warden's label (`403`; the limits are
+skipped only for a session that descends from a real warden). The starts that could only make one — a fork,
+adopting a conversation, a Warden investigation or a run with `spawn`, a learning scan, `fy learning run
+--spawn` — are a person's, and a ferret may hand over only its own session
 ([agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)). A sub-ferret never inherits its
 parent's credential: it is minted its own.
 

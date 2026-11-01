@@ -620,11 +620,13 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       noStore: true,
       handle: async () => await scanView(subsystem),
     },
+    // A PERSON'S ACT: a scan launches one miner session per batch, each with no parent, on the agent and model the
+    // body names. No ferret starts a session that is not its own child; it may still read the estimate.
     {
       method: 'POST',
       path: '/v1/learning/scan',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, LearningScanRequestSchema);

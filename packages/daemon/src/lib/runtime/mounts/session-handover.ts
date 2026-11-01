@@ -5,6 +5,7 @@ import {
   type SessionHandoverRequest,
   SessionHandoverRequestSchema,
 } from '@ferretry/protocol';
+import { agentSessionOf, isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, BodyTooLargeError, decodeParameter, headerValue } from '../../api/http.ts';
@@ -201,6 +202,10 @@ function requestId(request: ApiRequest): string {
  *  the reconciler keeps advancing it after this call returns. */
 async function begin(subsystem: SessionHandoverSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
+  // A handover starts a NEW top-level session in place of the source, so a ferret may hand over only ITSELF: never
+  // replace another ferret, or the owner's own session, with a session of its making.
+  if (isAgentCaller(context) && agentSessionOf(context) !== sessionId)
+    throw new ApiError(403, 'a ferret hands over only its own session; ask the owner', OWNER_ONLY_CODE);
   const target = await parseBody(context.request, SessionHandoverRequestSchema);
   const id = requestId(context.request);
   const receipt = await subsystem.begin(sessionId, target, id).catch(refuse);

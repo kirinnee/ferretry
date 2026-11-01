@@ -17,7 +17,7 @@ import {
 } from '../../../../src/lib/runtime/mounts/session-handover.ts';
 import { bodyReads, request } from '../../api/support.ts';
 import { receiptAt } from '../../handover/support.ts';
-import { agentIn, CREDENTIALS, human } from './support.ts';
+import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, human } from './support.ts';
 
 /**
  * The handover surface: what a caller may ask for, what each refusal answers, and what comes back.
@@ -395,20 +395,38 @@ describe('the session handover mount', () => {
     // Act
     const anonymousWrite = await subject.dispatch(beginRequest('s1', {}));
     const wardenWrite = await subject.dispatch(beginRequest('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
-    const peerWrite = await subject.dispatch(beginRequest('s1', agentIn('s9')));
+    const peerWrite = await subject.dispatch(beginRequest('s9', agentIn('s9')));
     const anonymousRead = await subject.dispatch(getRequest('s1', {}));
     const pairedRead = await subject.dispatch(getRequest('s1', agentIn('s9')));
 
     // Assert
     should(anonymousWrite.status).equal(401);
     should(wardenWrite.status).equal(403);
-    // An agent holds the admin token, so it reaches the subsystem exactly as the start and stop allow.
+    // An agent on the admin token with its own session header may hand over ITSELF.
     should(peerWrite.status).equal(202);
     // GET is authenticated: anonymous is refused, a paired device is not.
     should(anonymousRead.status).equal(401);
     should(pairedRead.status).equal(200);
     should(subsystem.begins).have.length(1);
     should(subsystem.reads).deepEqual(['s1']);
+  });
+
+  it('should let a ferret hand over only its own session, never another ferret’s or the owner’s', async () => {
+    // Arrange — a handover starts a new top-level session in place of the source.
+    const subsystem = new FakeSessionHandover();
+    const subject = dispatcher(subsystem);
+
+    // Act
+    const other = await subject.dispatch(fromFerret(beginRequest('s1')));
+    const otherByHeader = await subject.dispatch(beginRequest('s1', agentIn('s9')));
+    const own = await subject.dispatch(fromFerret(beginRequest(FERRET_SESSION)));
+    const owner = await subject.dispatch(beginRequest('s1'));
+
+    // Assert
+    should([other.status, JSON.parse(other.body).code]).deepEqual([403, 'owner_only']);
+    should([otherByHeader.status, JSON.parse(otherByHeader.body).code]).deepEqual([403, 'owner_only']);
+    should([own.status, owner.status]).deepEqual([202, 202]);
+    should(subsystem.begins.map(([id]) => id)).deepEqual([FERRET_SESSION, 's1']);
   });
 
   it('should answer each refusal the subsystem raises with its own status and code', async () => {

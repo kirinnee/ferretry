@@ -72,6 +72,33 @@ describe('cutting a ferret off', () => {
     should(subsystem.revoked).be.empty();
   });
 
+  it('should refuse a session id that does not decode to one, revoking nothing', async () => {
+    // Arrange
+    const subsystem = new FakeRevocation();
+
+    // Act — an encoded separator never reaches the subsystem.
+    const answer = await dispatcher(subsystem).dispatch(revoke('a%2Fb'));
+
+    // Assert
+    should([answer.status, jsonBody(answer).code]).deepEqual([400, 'invalid_session_id']);
+    should(subsystem.revoked).be.empty();
+  });
+
+  it('should leave any other failure to the dispatcher, never dressing it as a refusal', async () => {
+    // Arrange
+    const broken: SessionCredentialSubsystem = {
+      revoke: async () => {
+        throw new Error('the disk went away');
+      },
+    };
+
+    // Act
+    const answer = await dispatcher(broken).dispatch(revoke('ms8-abcd1234'));
+
+    // Assert
+    should(answer.status).equal(500);
+  });
+
   it('should answer 404 for a session that does not exist', async () => {
     // Act
     const answer = await dispatcher(new FakeRevocation()).dispatch(revoke('ms8-nobody000'));

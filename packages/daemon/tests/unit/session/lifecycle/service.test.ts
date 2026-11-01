@@ -32,7 +32,12 @@ import {
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from '../../../../src/lib/session/lifecycle/index.ts';
-import { FERRET_IDENTITY_VARIABLES, sessionPaneEnvironment } from '../../../../src/lib/session/lifecycle/policy.ts';
+import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
+import {
+  dropFerretIdentity,
+  FERRET_IDENTITY_VARIABLES,
+  sessionPaneEnvironment,
+} from '../../../../src/lib/session/lifecycle/policy.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const LAUNCHED: SessionLaunchInstructions = {
@@ -1479,6 +1484,23 @@ class RepositoryHashStore implements SessionCapabilityHashStore {
     const { sessionCapabilityHash: _revoked, ...config } = current.config;
     this.repository.documents.set(id, JSON.stringify({ ...current, config }));
   }
+
+  /** The `credentialRevoked` mark, kept beside the record as production keeps it in the same document. */
+  readonly cutOffs = new Set<string>();
+
+  async cutOff(id: SessionId): Promise<void> {
+    await this.erase(id);
+    this.order.push('cut-off');
+    this.cutOffs.add(id);
+  }
+
+  async isCutOff(id: SessionId): Promise<boolean> {
+    return this.cutOffs.has(id);
+  }
+
+  async restore(id: SessionId): Promise<void> {
+    this.cutOffs.delete(id);
+  }
 }
 
 describe('SessionLifecycleService credential per launch', () => {
@@ -1488,6 +1510,7 @@ describe('SessionLifecycleService credential per launch', () => {
     readonly environment: RecordingEnvironmentStore;
     readonly credentials: SequenceCredentialIssuer;
     readonly hashes: RepositoryHashStore;
+    readonly rotation: SessionCredentialRotation;
     /** The session id a presented capability authenticates as, through the real identity resolver. */
     readonly resolve: (capability: string) => Promise<string | undefined>;
   } {
@@ -1504,6 +1527,13 @@ describe('SessionLifecycleService credential per launch', () => {
         },
         erase: async id => {
           await hashes?.erase(id);
+        },
+        cutOff: async id => {
+          await hashes?.cutOff(id);
+        },
+        isCutOff: async id => (await hashes?.isCutOff(id)) === true,
+        restore: async id => {
+          await hashes?.restore(id);
         },
       },
     });
@@ -1527,6 +1557,7 @@ describe('SessionLifecycleService credential per launch', () => {
       environment,
       credentials,
       hashes,
+      rotation,
       resolve: async capability => (await identities.resolve(capability))?.sessionId,
     };
   }
@@ -1648,19 +1679,39 @@ describe('SessionLifecycleService credential per launch', () => {
     should(built.repository.current().state.status).equal('running');
     should(built.credentials.issues).equal(issued);
     should(built.serial.keys.at(-1)).equal(ID);
+    // Marked, so it sticks; and the plaintext that now names nobody is gone from the stored environment.
+    should(await built.hashes.isCutOff(parseSessionId(ID))).be.true();
+    should(built.environment.written.get(ID)).deepEqual({ FY_SESSION_MODE: 'auto' });
+    // The hash and the mark go BEFORE the record is read, so even a record this schema cannot read loses them.
+    should(built.order.indexOf('cut-off')).be.above(-1);
   });
 
-  it('should give the next launch after a revocation a fresh credential, and never the revoked one', async () => {
-    // Arrange
+  it('should hand a revoked ferret no credential on any relaunch — its own crash included — until a person restores it', async () => {
+    // Arrange — revoked while running, then it ends its own pane abnormally, as a ferret with a shell can.
     const built = rotating();
     await built.subject.create(input());
-    const failing = async () => {
-      throw new Error('the pane died');
+    const crashing = async () => {
+      throw new Error('the ferret killed its own harness');
     };
-    await should(built.subject.start(ID, failing)).be.rejectedWith('the pane died');
     await built.subject.revokeCredential(ID);
+    should(await built.resolve('created-capability')).be.undefined();
+    await built.rotation.restore(parseSessionId(ID));
+    await should(built.subject.start(ID, crashing)).be.rejectedWith('the ferret killed its own harness');
+    await built.subject.revokeCredential(ID);
+    const launches = built.launcher.launches();
+    const issued = built.credentials.issues;
 
-    // Act — a revive, as `fy resume` or a restart would.
+    // Act — the relaunch a Warden revive, a peer's resume, a restart or a migration would make.
+    const relaunch = await built.subject.start(ID).catch((error: unknown) => error);
+
+    // Assert — refused before anything is minted or launched.
+    should(relaunch).be.instanceOf(SessionCredentialRevokedError);
+    should(built.launcher.launches()).equal(launches);
+    should(built.credentials.issues).equal(issued);
+    should(await built.resolve('first-pane-capability')).be.undefined();
+
+    // Act — a person resumes it: the mark goes, and only now does a launch hand it a fresh credential.
+    await built.rotation.restore(parseSessionId(ID));
     await built.subject.start(ID);
 
     // Assert
@@ -1673,7 +1724,15 @@ describe('SessionLifecycleService credential per launch', () => {
     const built = rotating();
 
     // Act / Assert
-    await should(built.subject.revokeCredential(ID)).be.rejectedWith(/session not found/u);
+    await should(built.subject.revokeCredential(ID)).be.rejected();
+  });
+
+  it('should refuse a revocation on a daemon that issues no session credentials', async () => {
+    // Arrange — no rotation port at all.
+    const { subject } = harness();
+
+    // Act / Assert
+    await should(subject.revokeCredential(ID)).be.rejectedWith(/issues no session credentials/u);
   });
 
   it('should give a sub-ferret a credential of its own, never its parent’s', async () => {
@@ -1704,6 +1763,14 @@ describe('SessionLifecycleService credential per launch', () => {
       'FY_SESSION_ID',
       'FY_SESSION_TOKEN',
     ]);
+    const environment: Record<string, string | undefined> = {
+      FY_SESSION_TOKEN: 'fys_parent',
+      FY_SESSION_BOARD_CAPABILITY: 'fys_parent',
+      FY_SESSION_ID: 'ms8-parent01',
+      PATH: '/usr/bin',
+    };
+    dropFerretIdentity(environment);
+    should(environment).deepEqual({ PATH: '/usr/bin' });
   });
 
   it('should keep the credential of a pane that is still live when a start is retried', async () => {

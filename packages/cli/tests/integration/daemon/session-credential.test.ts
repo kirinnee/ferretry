@@ -468,6 +468,26 @@ describe('a connection decided once and looked at again', () => {
     should(await upgraded.connection.client()).equal('client-2');
   });
 
+  it('should decide again on the next call after a decision failed, rather than keep the failure', async () => {
+    // Arrange — the first decision throws (the daemon away, the listener check or the api-token read failing).
+    let decisions = 0;
+    const connection = new RevisitedConnection<string>(
+      async () => {
+        decisions += 1;
+        if (decisions === 1) throw new Error('daemon away');
+        return { client: 'bearer' };
+      },
+      async () => OFFERS,
+      () => 0,
+      1_000,
+    );
+
+    // Act / Assert
+    await should(connection.client()).be.rejectedWith('daemon away');
+    should(await connection.client()).equal('bearer');
+    should(decisions).equal(2);
+  });
+
   it('should keep its client when the daemon cannot be asked', async () => {
     const fixture = held({ baseUrl: 'http://127.0.0.1:1', pid: 1 });
     await fixture.connection.client();
