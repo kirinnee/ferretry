@@ -75,7 +75,7 @@ const CODEX_TOOL_ARGS = [
   '-c',
   'mcp_servers.ferretry.args=["mcp","serve"]',
   '-c',
-  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_TOKEN","FY_SESSION_BOARD_CAPABILITY"]',
   '-c',
   `developer_instructions=${tomlString(INSTRUCTION)}`,
 ];
@@ -534,6 +534,17 @@ describe('the Ferretry tools in the fixed layer', () => {
     should(claudeToolsConfig(FY)).match({ mcpServers: { ferretry: { env: { FY_TOKEN: '' } } } });
     should(FERRETRY_MCP_ENV_VARS).not.containEql('FY_TOKEN');
     should(codexToolsServer(FY).env_vars).not.containEql('FY_TOKEN');
+  });
+
+  it("should hand both tools servers the ferret's own credential under its documented name", () => {
+    // Codex passes only what is named, so the bearer `fy mcp serve` presents must be named; the older
+    // name stays for a server from before the rename. Claude passes the whole environment and blanks
+    // only FY_TOKEN, so the credential reaches it unnamed.
+    should(codexToolsServer(FY).env_vars).containEql('FY_SESSION_TOKEN');
+    should(codexToolsServer(FY).env_vars).containEql('FY_SESSION_BOARD_CAPABILITY');
+    should(claudeToolsConfig(FY)).deepEqual({
+      mcpServers: { ferretry: { type: 'stdio', command: FY, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
+    });
   });
 
   it('should APPEND to a profile’s own Claude instruction, in either spelling, and report nothing overridden', () => {

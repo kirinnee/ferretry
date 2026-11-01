@@ -194,9 +194,9 @@ describe('createFyClientConnector', () => {
     let tokenReads = 0;
     const connector = createFyClientConnector({
       version: '1.2.3',
-      resolveLocalToken: async () => {
+      resolveLocalCredential: async () => {
         tokenReads += 1;
-        return 'local-secret';
+        return { token: 'local-secret' };
       },
     });
 
