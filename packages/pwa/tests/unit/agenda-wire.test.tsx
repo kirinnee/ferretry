@@ -131,6 +131,40 @@ describe('whether a machine takes offerClose (agenda.offer-close.1)', () => {
   });
 });
 
+describe('whether a machine searches work by words (work.search.1)', () => {
+  const SEARCHES: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.130.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.workSearch]),
+  };
+
+  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
+    const wires = new AgendaWireDirectory();
+    expect(wires.workSearchOf(A)).toBeUndefined();
+    wires.note(A, { kind: 'failed' });
+    expect(wires.workSearchOf(A)).toBeUndefined();
+    wires.note(A, SEARCHES);
+    wires.note(B, NEW);
+    expect(wires.workSearchOf(A)).toBe(true);
+    expect(wires.workSearchOf(B)).toBe(false);
+    wires.clearDaemon(A);
+    expect(wires.workSearchOf(A)).toBeUndefined();
+  });
+
+  it('tells listeners when only that answer changes', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, NEW);
+    expect(heard).toBe(1);
+    wires.note(A, SEARCHES);
+    expect(heard).toBe(2);
+    wires.note(A, SEARCHES);
+    expect(heard).toBe(2);
+  });
+});
+
 describe('the session summary', () => {
   const summary = (first: string): SessionAgendaSummary => ({
     open: 1,

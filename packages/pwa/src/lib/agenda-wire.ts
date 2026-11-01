@@ -39,6 +39,8 @@ export class AgendaWireDirectory {
   readonly #snooze = new Map<DaemonId, boolean>();
   /** Whether each read machine takes an offer to close a card (`agenda.offer-close.1`); absent until its health answered. */
   readonly #offerClose = new Map<DaemonId, boolean>();
+  /** Whether each read machine answers `GET /v1/search` (`work.search.1`); absent until its health answered. */
+  readonly #workSearch = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -67,22 +69,35 @@ export class AgendaWireDirectory {
     return this.#offerClose.get(daemonId);
   }
 
+  /**
+   * Whether the machine searches cards and agenda items by words (`work.search.1`): `undefined` until its
+   * health answered, which keeps the finder and pickers as they were. Recorded from the health read the app
+   * already holds, so asking costs no request of its own.
+   */
+  workSearchOf(daemonId: DaemonId): boolean | undefined {
+    return this.#workSearch.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
     this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
     const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
     const changed = this.#offerClose.get(daemonId) !== offers;
     this.#offerClose.set(daemonId, offers);
+    const searches = machineOffers(read, DAEMON_FEATURES.workSearch);
+    const searchChanged = this.#workSearch.get(daemonId) !== searches;
+    this.#workSearch.set(daemonId, searches);
     const wire = agendaWireOf(read);
     const spelled = this.#wires.get(daemonId) !== wire;
     this.#wires.set(daemonId, wire);
-    if (changed || spelled) this.#notify();
+    if (changed || spelled || searchChanged) this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
     this.#snooze.delete(daemonId);
     const had = this.#offerClose.delete(daemonId);
-    if (this.#wires.delete(daemonId) || had) this.#notify();
+    const hadSearch = this.#workSearch.delete(daemonId);
+    if (this.#wires.delete(daemonId) || had || hadSearch) this.#notify();
   }
 
   #notify(): void {

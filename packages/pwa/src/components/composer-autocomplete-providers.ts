@@ -15,7 +15,7 @@
  * identities.
  */
 
-import type { AgendaItem, SessionView, TerminalListView } from '@ferretry/protocol';
+import type { AgendaItem, SessionView, TerminalListView, WorkHit, WorkKind } from '@ferretry/protocol';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
@@ -26,6 +26,12 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runt
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
+import {
+  isWorkSearchWords,
+  WORK_SEARCH_DEBOUNCE_MS,
+  type WorkSearchPort,
+  workProjectLabel,
+} from '../lib/work-search.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import {
@@ -131,6 +137,15 @@ export interface ComposerReferenceProviderOptions extends ComposerProviderScopeO
   readonly waitForTasks?: ComposerProviderWarmup;
   /** The menu's "Include agent tasks" switch, read live. Off: asks the human did not make stay out of the menu. */
   readonly getIncludeAgentTasks?: () => boolean;
+  /**
+   * The daemon's work search, read live; `undefined` on a machine that cannot search (or before its health is
+   * known), which keeps the menus exactly as they were. When it answers, a typed WORD query on the `@@@` and
+   * `@@@@` tiers also asks it, and its hits are merged under the local rows. The direct `!` and `&` sigils only
+   * open on an id prefix (the reference grammar's own token shape), so they never carry words and never ask.
+   */
+  readonly getWorkSearch?: () => WorkSearchPort | undefined;
+  /** Project id to name for the cards the search finds; a card whose project is unnamed shows no project. */
+  readonly getProjectNames?: () => ReadonlyMap<string, string> | undefined;
 }
 
 /** Injected so a test can drive the surfaces family without a live daemon; the
@@ -746,8 +761,112 @@ const agendaCandidates = (
       badge: item.source,
       replacement: reference,
       append: 'space',
-    } satisfies ComposerAutocompleteCandidate;
+    };
   });
+
+/** The most hits one picker merge asks the daemon for. */
+const WORK_PICKER_LIMIT = 20;
+
+const noWorkSearch = (): WorkSearchPort | undefined => undefined;
+
+const noProjectNames = (): ReadonlyMap<string, string> | undefined => undefined;
+
+const sleepUnlessAborted = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+
+/** A card the daemon found by its words: the same row a local card is, with its state as the trailing chip. */
+const taskHitCandidate = (
+  scope: DaemonSessionScope,
+  hit: Extract<WorkHit, { kind: 'task' }>,
+  projectNames: ReadonlyMap<string, string> | undefined,
+): ComposerAutocompleteCandidate => {
+  const reference = formatReference({ kind: 'task', id: hit.id });
+  return {
+    id: scopedId('task', scope, hit.id),
+    kind: 'task',
+    label: reference,
+    detail: [hit.title, workProjectLabel(hit.projectId, projectNames)].filter(part => part !== '').join(' · '),
+    group: 'Tasks',
+    badge: hit.standing,
+    rankPriority: -1,
+    prematched: true,
+    replacement: reference,
+    append: 'space',
+  };
+};
+
+/** An agenda item the daemon found by its words: the same row a local item is, with its standing as the chip. */
+const agendaHitCandidate = (
+  scope: DaemonSessionScope,
+  hit: Extract<WorkHit, { kind: 'agenda' }>,
+): ComposerAutocompleteCandidate => {
+  const reference = formatReference({ kind: 'attention', id: hit.id });
+  return {
+    id: scopedId('attention', scope, hit.id),
+    kind: 'attention',
+    label: reference,
+    detail: hit.title,
+    group: 'Agenda',
+    badge: hit.standing,
+    rankPriority: -1,
+    prematched: true,
+    replacement: reference,
+    append: 'space',
+  };
+};
+
+/**
+ * Local rows first, then what the daemon found by the typed WORDS.
+ *
+ * - Only for words: an empty query or the start of an id keeps today's instant local list, and so does a
+ *   machine that cannot search or a search that fails — the menu never gets worse for asking.
+ * - A card is open work only: the menu offers what is live, as the local list does.
+ * - An agenda item is this session's only: `!A3` is proved against THIS session's ledger, so another
+ *   session's `A3` would insert a reference nothing can prove.
+ * - A row the local list already has wins.
+ */
+const withWorkHits = async (
+  base: ComposerProviderResult,
+  context: { readonly query: string; readonly signal: AbortSignal },
+  kind: WorkKind,
+  scope: DaemonSessionScope,
+  port: WorkSearchPort | undefined,
+  projectNames: ReadonlyMap<string, string> | undefined,
+): Promise<ComposerProviderResult> => {
+  if (port === undefined || !isWorkSearchWords(context.query)) return base;
+  await sleepUnlessAborted(WORK_SEARCH_DEBOUNCE_MS, context.signal);
+  let hits: readonly WorkHit[];
+  try {
+    hits = (await port.search({ q: context.query, kind, open: true, limit: WORK_PICKER_LIMIT }, context.signal)).hits;
+  } catch (error) {
+    if (context.signal.aborted) throw abortReason(context.signal);
+    void error;
+    return base;
+  }
+  if (context.signal.aborted) throw abortReason(context.signal);
+  const known = new Set(base.candidates.map(candidate => candidate.id));
+  const found = hits.flatMap(hit => {
+    if (hit.kind !== kind) return [];
+    if (hit.kind === 'agenda') return hit.sessionId === scope.sessionId ? [agendaHitCandidate(scope, hit)] : [];
+    return [taskHitCandidate(scope, hit, projectNames)];
+  });
+  const fresh = found.filter(candidate => !known.has(candidate.id));
+  return fresh.length === 0 ? base : { ...base, candidates: [...base.candidates, ...fresh] };
+};
 
 const taskRecency = (task: ComposerReferenceTask): number => {
   const parsed = Date.parse(task.touchedAt);
@@ -801,7 +920,7 @@ const taskCandidates = (
         badge: task.lane,
         replacement: reference,
         append: 'space',
-      } satisfies ComposerAutocompleteCandidate;
+      };
     });
 };
 
@@ -927,6 +1046,8 @@ export function createReferencesProvider({
   getTasks = noTasks,
   waitForTasks,
   getIncludeAgentTasks = neverAgentTasks,
+  getWorkSearch = noWorkSearch,
+  getProjectNames = noProjectNames,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const files = createFilesProvider({ daemon, scope, fetcher });
@@ -966,6 +1087,8 @@ export function createReferencesProvider({
         getAgendaItems(scope),
         getTasks(scope),
         getIncludeAgentTasks(),
+        getWorkSearch(),
+        getProjectNames(),
         agentReferenceIdentityKey(scope.daemonId, sessions),
       ]);
     },
@@ -982,7 +1105,16 @@ export function createReferencesProvider({
     async candidates(context): Promise<ComposerProviderResult> {
       const tier = context.match.referenceTier ?? 0;
       if (tier === 1) return await files.candidates(context);
-      return await warmed(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
+      const local = await warmed(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
+      if (tier !== 3 && tier !== 4) return local;
+      return await withWorkHits(
+        local,
+        context,
+        tier === 3 ? 'agenda' : 'task',
+        scope,
+        getWorkSearch(),
+        getProjectNames(),
+      );
     },
   };
 }
