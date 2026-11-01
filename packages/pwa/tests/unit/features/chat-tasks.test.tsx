@@ -577,6 +577,20 @@ describe('ChatTasks — the Cards view', () => {
     expect(where(root)).toBe('2 of 3');
   });
 
+  it('lays the buttons out as the Inbox gate card does: Not good left, Done right, Skip quiet on its own row', async () => {
+    const { root } = await open();
+    const answers = must(root.querySelector('.fy-totest__answers'), 'the answer row');
+    expect([...answers.querySelectorAll('button')].map(button => button.textContent?.trim())).toEqual([
+      'Not good',
+      'Done',
+    ]);
+    expect(answers.querySelector('[data-to-test-not-good] svg.lucide-arrow-left')).not.toBeNull();
+    expect(answers.querySelector('[data-to-test-done] svg.lucide-arrow-right')).not.toBeNull();
+    const quiet = must(root.querySelector('.fy-totest__quiet'), 'the quiet row');
+    expect(quiet.querySelector('[data-to-test-skip]')).not.toBeNull();
+    expect(answers.contains(quiet)).toBe(false);
+  });
+
   it('marks a card to test Done with the button, through the Board’s own move', async () => {
     const { root, acts } = await open();
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-done]'), 'Done').click());

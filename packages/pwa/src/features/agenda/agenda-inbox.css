@@ -1030,6 +1030,15 @@
   flex: 1 1 auto;
   border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
+/* A gate card is as tall as its steps and no taller (never past the deck's room), so the plain buttons sit right under it. */
+.fy-inbox-open[data-inbox-gate] {
+  height: auto;
+  max-height: var(--deck-room, max(20rem, calc(100dvh - 22rem)));
+}
+.fy-inbox-open[data-inbox-gate] > .fy-item-view,
+.fy-inbox-open[data-inbox-gate] .fy-item-view__body {
+  flex: 0 1 auto;
+}
 /* A card to test in the quick-answer run: where it is in the run, then the same row as the list, scrolling on its own. */
 .fy-inbox-step {
   display: flex;
@@ -1354,8 +1363,17 @@
 }
 .fy-totest__actions {
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-totest__answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-sm);
+}
+.fy-totest__quiet {
+  display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: var(--gap-sm);
 }
 .fy-totest__actions .kt-btn {

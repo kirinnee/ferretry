@@ -16,7 +16,7 @@
  *   words as the ask.
  */
 
-import { Check, SkipForward, ThumbsDown, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, SkipForward, X } from 'lucide-react';
 import { type PointerEvent, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import { SWIPE_SLOP_PX, swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
@@ -351,43 +351,47 @@ function ToTestRow({
           </p>
         )}
         <div className="fy-totest__actions">
-          <button
-            aria-label={`Not good: ${title}`}
-            className="kt-btn"
-            data-to-test-not-good=""
-            data-variant="ghost"
-            disabled={busy}
-            onClick={() => notGood(row)}
-            type="button"
-          >
-            {state.pressed === 'not-good' ? <Spinner size={14} /> : <ThumbsDown aria-hidden="true" size={14} />}
-            Not good
-          </button>
-          <button
-            aria-label={`Done: ${title}`}
-            className="kt-btn"
-            data-to-test-done=""
-            data-variant="primary"
-            disabled={busy}
-            onClick={() => done(row)}
-            type="button"
-          >
-            {state.pressed === 'done' ? <Spinner size={14} /> : <Check aria-hidden="true" size={14} />}
-            Done
-          </button>
-          {skipButton ? (
+          <div className="fy-totest__answers">
             <button
-              aria-label={`Skip: ${title}`}
+              aria-label={`Not good: ${title}`}
               className="kt-btn"
-              data-to-test-skip=""
+              data-to-test-not-good=""
               data-variant="ghost"
               disabled={busy}
-              onClick={() => onSkip(row)}
+              onClick={() => notGood(row)}
               type="button"
             >
-              <SkipForward aria-hidden="true" size={14} />
-              Skip
+              {state.pressed === 'not-good' ? <Spinner size={14} /> : <ArrowLeft aria-hidden="true" size={14} />}
+              Not good
             </button>
+            <button
+              aria-label={`Done: ${title}`}
+              className="kt-btn"
+              data-to-test-done=""
+              data-variant="primary"
+              disabled={busy}
+              onClick={() => done(row)}
+              type="button"
+            >
+              {state.pressed === 'done' ? <Spinner size={14} /> : <ArrowRight aria-hidden="true" size={14} />}
+              Done
+            </button>
+          </div>
+          {skipButton ? (
+            <div className="fy-totest__quiet">
+              <button
+                aria-label={`Skip: ${title}`}
+                className="kt-btn"
+                data-to-test-skip=""
+                data-variant="ghost"
+                disabled={busy}
+                onClick={() => onSkip(row)}
+                type="button"
+              >
+                <SkipForward aria-hidden="true" size={14} />
+                Skip
+              </button>
+            </div>
           ) : null}
         </div>
       </div>

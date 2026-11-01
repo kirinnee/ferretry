@@ -346,7 +346,12 @@ function OpenItem({
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
   return (
-    <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
+    <div
+      className="fy-inbox-open"
+      data-inbox-gate={isGateItem(card.item) ? '' : undefined}
+      data-inbox-open={card.key}
+      key={card.key}
+    >
       {isGateItem(card.item) ? (
         <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
       ) : (
