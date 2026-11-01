@@ -33,7 +33,7 @@ export const switchProvenance = (state: BoardSwitch): string => {
   if (state.setBy === 'migration')
     return state.on
       ? 'Switched on when the board became opt-in, because you sent a card back (Not good) in the last 14 days.'
-      : 'Switched off when the board became opt-in: you had sent no card back in the last 14 days.';
+      : 'Switched off when the board became opt-in. Turn it on to track work here.';
   return 'Off by default.';
 };
 

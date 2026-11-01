@@ -89,7 +89,9 @@ describe('BoardSwitchView', () => {
     expect(switchProvenance(state(true, 'migration'))).toContain(
       'because you sent a card back (Not good) in the last 14 days',
     );
-    expect(switchProvenance(state(false, 'migration'))).toContain('you had sent no card back in the last 14 days');
+    expect(switchProvenance(state(false, 'migration'))).toBe(
+      'Switched off when the board became opt-in. Turn it on to track work here.',
+    );
     expect(switchProvenance(state(false, 'default'))).toBe('Off by default.');
   });
 });
