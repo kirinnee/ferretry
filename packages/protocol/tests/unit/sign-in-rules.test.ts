@@ -11,7 +11,11 @@ import {
   SIGN_IN_RULE_MAX,
   SIGN_IN_RULE_MAX_SECONDS,
   SIGN_IN_RULE_MIN_SECONDS,
+  SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_SUSPENSIONS,
+  SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
+  SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
   type SignInRuleBody,
   SignInRuleBodySchema,
   SignInRuleDraftSchema,
@@ -76,6 +80,16 @@ const body = (overrides: Partial<SignInRuleBody> = {}): SignInRuleBody => ({
   ...overrides,
 });
 
+/** A terminal rule for sudo on kirin-box: the password only, a day. */
+const sudoBody = (overrides: Partial<SignInRuleBody> = {}): SignInRuleBody =>
+  body({
+    surface: 'terminal',
+    fields: ['password'],
+    pins: { ...pins, username: 'kirin', placeKeys: ['sudo@kirin-box'] },
+    expiresAt: '2026-11-02T14:00:00.000Z',
+    ...overrides,
+  });
+
 /** The same rule, also typing a code from its pinned key. */
 const totpBody = (overrides: Partial<SignInRuleBody> = {}): SignInRuleBody =>
   body({ fields: ['username', 'password', 'totp'], pins: { ...pins, factor: FACTOR }, ...overrides });
@@ -125,6 +139,7 @@ const staged = {
   summary: ['Username and password and codes for GitHub · kirinnee on github.com'],
   fields: ['username', 'password', 'totp'],
   totp: true,
+  root: false,
   autoRecipe: false,
   scope: { kind: 'any' },
   expiresAt: EXPIRES,
@@ -142,6 +157,14 @@ const bodyChanges = (base: SignInRuleBody): Readonly<Record<string, SignInRuleBo
   id: { ...base, id: `sr_${'9'.repeat(24)}` },
   revision: { ...base, revision: 2 },
   signIn: { ...base, signIn: 'si_000000000000000b' },
+  // A surface never changes alone: a terminal body is the password only, at one sudo, su or doas key.
+  'surface: terminal': {
+    ...base,
+    surface: 'terminal',
+    fields: ['password'],
+    pins: { ...base.pins, placeKeys: ['sudo@kirin-box'], factor: undefined },
+    expiresAt: '2026-11-02T14:00:00.000Z',
+  },
   'fields: no username': { ...base, fields: ['password', 'totp'] },
   'fields: no code': { ...base, fields: ['username', 'password'], pins: { ...base.pins, factor: undefined } },
   'pins.accountKey': { ...base, pins: { ...base.pins, accountKey: `L${'B'.repeat(24)}` } },
@@ -176,11 +199,14 @@ const cases: SchemaCase[] = [
   { name: 'pins', schema: rules.SignInRulePinsSchema, value: pins },
   { name: 'body', schema: SignInRuleBodySchema, value: body() },
   { name: 'body with a code and a cap', schema: SignInRuleBodySchema, value: totpBody({ uses: 20 }) },
+  { name: 'surface', schema: rules.SignInRuleSurfaceSchema, value: 'terminal' },
+  { name: 'a terminal body: sudo, the password only', schema: SignInRuleBodySchema, value: sudoBody() },
   { name: 'proof', schema: rules.SignInRuleProofSchema, value: proof },
   { name: 'suspension', schema: rules.SignInRuleSuspensionSchema, value: 'scripted-origin' },
   { name: 'usage', schema: rules.SignInRuleUsageSchema, value: { count: 3, lastUsedAt: CREATED } },
   { name: 'narrowed', schema: rules.SignInRuleNarrowedSchema, value: { expiresAt: CREATED, uses: 2 } },
   { name: 'record', schema: SignInRuleRecordSchema, value: record() },
+  { name: 'a terminal record', schema: SignInRuleRecordSchema, value: record({ body: sudoBody() }) },
   {
     name: 'record suspended and narrowed',
     schema: SignInRuleRecordSchema,
@@ -210,6 +236,16 @@ const cases: SchemaCase[] = [
       approvedWith: { deviceId: DEVICE },
     },
   },
+  {
+    name: 'view of a terminal rule, flagged root',
+    schema: SignInRuleViewSchema,
+    value: {
+      ...view,
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      fields: ['password'],
+      flags: ['root'],
+    },
+  },
   { name: 'draft', schema: SignInRuleDraftSchema, value: { signIn: SIGN_IN, fields: ['username', 'password'] } },
   {
     name: 'draft with a code, a scope, a lifetime and a cap',
@@ -226,6 +262,17 @@ const cases: SchemaCase[] = [
     },
   },
   { name: 'staged', schema: SignInRuleStagedSchema, value: staged },
+  {
+    name: 'staged for sudo, flagged root',
+    schema: SignInRuleStagedSchema,
+    value: {
+      ...staged,
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      fields: ['password'],
+      totp: false,
+      root: true,
+    },
+  },
   {
     name: 'staged at the machine',
     schema: SignInRuleStagedSchema,
@@ -332,16 +379,32 @@ describe('standing sign-in rules: the wire', () => {
     ]);
   });
 
-  // Invariant 36 (R3c §14) and §18: lifetime bounds are signed, and a rule is for a page only.
-  it('should bound a rule between one hour and 90 days, and refuse any terminal rule', () => {
+  // Invariant 36 (R3c §14): lifetime bounds are signed, a page rule's and a terminal rule's (!A197).
+  it('should bound a page rule between one hour and 90 days, and a terminal rule to 7 days', () => {
     // Arrange
     const ending = (seconds: number): string => new Date(Date.parse(CREATED) + seconds * 1_000).toISOString();
 
     // Act / Assert
     should(SIGN_IN_RULE_MIN_SECONDS).equal(3_600);
     should(SIGN_IN_RULE_MAX_SECONDS).equal(90 * 86_400);
+    should(SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS).equal(86_400);
+    should(SIGN_IN_RULE_TERMINAL_MAX_SECONDS).equal(7 * 86_400);
+    should(rules.signInRuleLifetime('page')).deepEqual({
+      defaultSeconds: 30 * 86_400,
+      maxSeconds: 90 * 86_400,
+      maxDays: 90,
+    });
+    should(rules.signInRuleLifetime('terminal')).deepEqual({
+      defaultSeconds: 86_400,
+      maxSeconds: 7 * 86_400,
+      maxDays: 7,
+    });
     should(SignInRuleBodySchema.safeParse(body({ expiresAt: ending(SIGN_IN_RULE_MIN_SECONDS) })).success).be.true();
     should(SignInRuleBodySchema.safeParse(body({ expiresAt: ending(SIGN_IN_RULE_MAX_SECONDS) })).success).be.true();
+    should(SignInRuleBodySchema.safeParse(sudoBody({ expiresAt: ending(SIGN_IN_RULE_MIN_SECONDS) })).success).be.true();
+    should(
+      SignInRuleBodySchema.safeParse(sudoBody({ expiresAt: ending(SIGN_IN_RULE_TERMINAL_MAX_SECONDS) })).success,
+    ).be.true();
     assertRejects([
       {
         name: 'over 90 days',
@@ -354,16 +417,20 @@ describe('standing sign-in rules: the wire', () => {
         value: body({ expiresAt: ending(SIGN_IN_RULE_MIN_SECONDS - 1) }),
       },
       { name: 'ending before it begins', schema: SignInRuleBodySchema, value: body({ expiresAt: ending(-86_400) }) },
-      { name: 'a terminal surface', schema: SignInRuleBodySchema, value: { ...body(), surface: 'terminal' } },
       {
-        name: 'pinned to sudo on this machine',
+        name: 'a terminal rule over 7 days',
         schema: SignInRuleBodySchema,
-        value: body({ pins: { ...pins, placeKeys: ['sudo@kirin-box'] } }),
+        value: sudoBody({ expiresAt: ending(SIGN_IN_RULE_TERMINAL_MAX_SECONDS + 1) }),
       },
       {
-        name: 'a web host beside a terminal key',
+        name: 'a terminal rule for 30 days, as a page rule may',
         schema: SignInRuleBodySchema,
-        value: body({ pins: { ...pins, placeKeys: ['github.com', 'su@kirin-box'] } }),
+        value: sudoBody({ expiresAt: EXPIRES }),
+      },
+      {
+        name: 'a terminal rule under an hour',
+        schema: SignInRuleBodySchema,
+        value: sudoBody({ expiresAt: ending(SIGN_IN_RULE_MIN_SECONDS - 1) }),
       },
       {
         name: 'a draft lasting over 90 days',
@@ -378,7 +445,114 @@ describe('standing sign-in rules: the wire', () => {
     ]);
     // Nothing the canonical bytes would bind can carry a lifetime the schema refuses.
     should(canonicalSignInRule(body({ expiresAt: ending(SIGN_IN_RULE_MAX_SECONDS + 1) })).ok).be.false();
-    should(canonicalSignInRule({ ...body(), surface: 'terminal' } as never).ok).be.false();
+    should(canonicalSignInRule(sudoBody({ expiresAt: ending(SIGN_IN_RULE_TERMINAL_MAX_SECONDS + 1) })).ok).be.false();
+  });
+
+  // Invariant 24 (R3c §14, restored by !A197): terminal rules are sudo, su or doas only, the password only.
+  it('should take a terminal rule only for one sudo, su or doas key, typing the password alone', () => {
+    // Arrange
+    const at = (placeKeys: string[]): SignInRuleBody => sudoBody({ pins: { ...sudoBody().pins, placeKeys } });
+
+    // Act / Assert
+    for (const key of ['sudo@kirin-box', 'su@kirin-box', 'doas@kirin-box'])
+      should(SignInRuleBodySchema.safeParse(at([key])).success).be.true();
+    assertRejects([
+      { name: 'a terminal rule for ssh', schema: SignInRuleBodySchema, value: at(['ssh@prod.example.com']) },
+      { name: 'a terminal rule for npm', schema: SignInRuleBodySchema, value: at(['npm@kirin-box']) },
+      { name: 'a terminal rule for passwd', schema: SignInRuleBodySchema, value: at(['passwd@kirin-box']) },
+      { name: 'a terminal rule with no host', schema: SignInRuleBodySchema, value: at(['sudo']) },
+      { name: 'a terminal rule at a web host', schema: SignInRuleBodySchema, value: at(['github.com']) },
+      {
+        name: 'a terminal rule at two terminal keys',
+        schema: SignInRuleBodySchema,
+        value: at(['sudo@kirin-box', 'su@kirin-box']),
+      },
+      {
+        name: 'a terminal rule typing a username',
+        schema: SignInRuleBodySchema,
+        value: sudoBody({ fields: ['username', 'password'] }),
+      },
+      {
+        name: 'a terminal rule typing a code',
+        schema: SignInRuleBodySchema,
+        value: sudoBody({ fields: ['password', 'totp'], pins: { ...sudoBody().pins, factor: FACTOR } }),
+      },
+      {
+        name: 'a page rule pinned to sudo on this machine',
+        schema: SignInRuleBodySchema,
+        value: body({ pins: { ...pins, placeKeys: ['sudo@kirin-box'] } }),
+      },
+      {
+        name: 'a page rule with a web host beside a terminal key',
+        schema: SignInRuleBodySchema,
+        value: body({ pins: { ...pins, placeKeys: ['github.com', 'su@kirin-box'] } }),
+      },
+      {
+        name: 'a surface this build does not know',
+        schema: SignInRuleBodySchema,
+        value: { ...body(), surface: 'ssh' },
+      },
+    ]);
+    should(rules.signInRuleKeysFit('terminal', ['sudo@kirin-box'])).be.true();
+    should(rules.signInRuleKeysFit('terminal', [])).be.false();
+    should(rules.signInRuleKeysFit('page', ['sudo@kirin-box'])).be.false();
+  });
+
+  it('should sign the surface: a terminal rule’s bytes say so, and no page bytes ever read as a terminal rule', () => {
+    // Arrange
+    const sudo = canonicalOf(sudoBody());
+
+    // Act / Assert
+    should(JSON.parse(sudo)).have.property('surface', 'terminal');
+    should(JSON.parse(canonicalOf(body()))).have.property('surface', 'page');
+    // The page body with only its surface turned is no rule at all: nothing to bind.
+    should(canonicalSignInRule({ ...body(), surface: 'terminal' }).ok).be.false();
+    should(canonicalSignInRule({ ...sudoBody(), surface: 'page' }).ok).be.false();
+  });
+
+  it('should carry the root warning and the terminal honest limit, word for word', () => {
+    should(SIGN_IN_RULE_ROOT_WARNING).equal(
+      'This gives every ferret on this machine root whenever it asks, while the rule lasts.',
+    );
+    should(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT).equal(
+      'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.',
+    );
+  });
+
+  it('should flag a terminal rule root, and only a terminal rule, in the view and the stage (secrev-1268 N1)', () => {
+    // Arrange
+    const sudoPlace = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } as const;
+    const sudoStaged = { ...staged, place: sudoPlace, fields: ['password'], totp: false, root: true };
+    const sudoView = { ...view, place: sudoPlace, fields: ['password'], flags: ['root'] };
+
+    // Act / Assert — the structured flag decides the red line, whatever the summary says
+    should(SignInRuleStagedSchema.parse({ ...sudoStaged, summary: ['x'.repeat(240)] }).root).be.true();
+    assertRejects([
+      { name: 'a sudo stage not flagged root', schema: SignInRuleStagedSchema, value: { ...sudoStaged, root: false } },
+      { name: 'a page stage flagged root', schema: SignInRuleStagedSchema, value: { ...staged, root: true } },
+      {
+        name: 'a stage with no root flag at all',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, root: undefined },
+      },
+      {
+        name: 'a sudo stage typing a username',
+        schema: SignInRuleStagedSchema,
+        value: { ...sudoStaged, fields: ['username', 'password'] },
+      },
+      {
+        name: 'an ssh stage',
+        schema: SignInRuleStagedSchema,
+        value: { ...sudoStaged, place: { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'prod.example.com' } },
+      },
+      { name: 'a sudo view not flagged root', schema: SignInRuleViewSchema, value: { ...sudoView, flags: [] } },
+      { name: 'a page view flagged root', schema: SignInRuleViewSchema, value: { ...view, flags: ['root'] } },
+      {
+        name: 'a stage view for sudo not flagged root',
+        schema: rules.SignInRuleStageViewSchema,
+        value: { ...sudoStaged, root: false, state: 'waiting' },
+      },
+    ]);
   });
 });
 
@@ -447,8 +621,8 @@ describe('standing sign-in rules: the bytes the passkey is bound to', () => {
         .map(key => key.slice(5)),
     );
 
-    // Assert — `v` and `surface` are literals: they have nothing to change to
-    should(Object.keys(SignInRuleBodySchema.shape).filter(key => !top.has(key))).deepEqual(['v', 'surface']);
+    // Assert — `v` is a literal: it has nothing to change to
+    should(Object.keys(SignInRuleBodySchema.shape).filter(key => !top.has(key))).deepEqual(['v']);
     should(Object.keys(rules.SignInRulePinsSchema.shape).filter(key => !pinned.has(key))).deepEqual([]);
   });
 
@@ -841,7 +1015,7 @@ describe('standing sign-in rules: what the owner sees and sends', () => {
 
 describe('standing sign-in rules: review fixes (secrev-1271)', () => {
   // L3: which sign-in a staged rule is for is a field, never only words a clip can cut.
-  it('should name the staged rule’s account and page sign-in as fields', () => {
+  it('should name the staged rule’s account and sign-in as fields', () => {
     // Arrange
     const { account: _account, ...noAccount } = staged;
     const { place: _place, ...noPlace } = staged;
@@ -857,14 +1031,19 @@ describe('standing sign-in rules: review fixes (secrev-1271)', () => {
       { name: 'a staged rule with no account', schema: SignInRuleStagedSchema, value: noAccount },
       { name: 'a staged rule with no place', schema: SignInRuleStagedSchema, value: noPlace },
       {
-        name: 'a staged rule for a terminal',
+        name: 'a staged rule for a terminal, typing a username and a code',
         schema: SignInRuleStagedSchema,
-        value: { ...staged, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } },
+        value: { ...staged, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' }, root: true },
       },
       {
-        name: 'a stage view for a terminal',
+        name: 'a stage view for a terminal, typing a username and a code',
         schema: rules.SignInRuleStageViewSchema,
-        value: { ...staged, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' }, state: 'waiting' },
+        value: {
+          ...staged,
+          place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+          root: true,
+          state: 'waiting',
+        },
       },
       {
         name: 'an account with no label',

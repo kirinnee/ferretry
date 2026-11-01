@@ -147,11 +147,140 @@ describe('who may have a rule at all', () => {
     should(tappedIdentities(signIn())).eql(['0123456789abcdef']);
   });
 
-  it('should refuse a terminal sign-in, a provider one and one that types no password', () => {
-    should(ineligibleBecause(signIn({ place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } } as never))).equal(
-      'tool-not-covered',
-    );
+  it('should refuse a terminal sign-in for any program but sudo, su or doas, a provider one and one with no password', () => {
+    for (const place of [
+      { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'prod.example.com' },
+      { kind: 'terminal', tool: 'npm', host: 'kirin-box' },
+      { kind: 'terminal', tool: 'passwd', host: 'kirin-box' },
+    ])
+      should(
+        ineligibleBecause(
+          signIn({ place, observed: [{ ...tappedFact(`${place.tool}@kirin-box`), surface: 'terminal' }] } as never),
+        ),
+      ).equal('tool-not-covered');
+    // sudo with the owner's tapped history can have one: what was refused before !A197.
+    should(
+      ineligibleBecause(
+        signIn({
+          place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+          observed: [{ ...tappedFact('sudo@kirin-box'), surface: 'terminal', navigatedAway: undefined }],
+        } as never),
+      ),
+    ).be.undefined();
     should(ineligibleBecause(signIn({ method: { kind: 'google', via: 'GOOGLE' } } as never))).equal('via-provider');
     should(ineligibleBecause(signIn({ method: { kind: 'passkey' } } as never))).equal('not-password');
+  });
+});
+
+const sudoPrompt = (
+  over: Partial<Extract<InputTargetFacts, { readonly kind: 'terminal' }>> = {},
+): InputTargetFacts => ({
+  kind: 'terminal',
+  paneProof: { paneId: '%3', pid: 4242, sessionCreated: 1_700_000_000 },
+  foreground: { pid: 4300, pgid: 4300, comm: 'sudo', argv: 'sudo -v' },
+  echo: 'off',
+  cursorRow: 1,
+  promptLine: '[sudo] password for kirin:',
+  promptLineDigest: 'a'.repeat(64),
+  program: 'sudo',
+  canonical: true,
+  recognisedConsumer: true,
+  trustedProgram: true,
+  ...over,
+});
+
+/** A sudo sign-in's facts, folded from every terminal fill run through the observer, as the account store folds them. */
+function terminalHistory() {
+  let now = DELIVERED;
+  let kept: readonly LoginObserved[] = [];
+  const observer = new LoginObserver({
+    sink: {
+      observeSignIn: async (_id, observation) => {
+        kept = foldObservation(kept, observation, new Date(now).toISOString());
+      },
+    },
+    probe: { shows: async () => false, where: async () => undefined, prompt: async () => 'kirin@kirin-box:~$' },
+    now: () => now,
+    sleep: async ms => {
+      now += ms;
+    },
+  });
+  const fill = async (
+    by: LoginObserverBy | undefined,
+    options: { facts?: InputTargetFacts; steered?: boolean; submitted?: boolean } = {},
+  ) => {
+    now += 60_000;
+    const delivery: LoginDelivery = {
+      sessionId: 's1',
+      login: 'SUDO',
+      signIn: SIGN_IN,
+      domains: [],
+      target: { kind: 'terminal', key: 'dev' },
+      facts: options.facts ?? sudoPrompt(),
+      fields: [{ id: 'value', sensitivity: 'secret' } as never],
+      secrets: ['pw-UNIQUE'],
+      submitted: options.submitted ?? true,
+      matchKey: 'sudo@kirin-box',
+      surfaces: ['dev'],
+      since: now - 1_000,
+      deliveredAt: now,
+      ...(by === undefined ? {} : { by }),
+    };
+    if (options.steered === true) observer.acted('s1', 'terminal');
+    await observer.delivered(delivery);
+  };
+  const summary = (): SignInSummary =>
+    signIn({ place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' }, observed: [...kept] } as never);
+  return { fill, summary, kept: () => kept };
+}
+
+// R3c-T (!A197, r3c-plan §6): a terminal tap counts only into sudo, su or doas the KERNEL proved setuid root, echo off.
+describe('the tapped fact at a terminal (invariants 13, 24)', () => {
+  it('should qualify a sudo sign-in after two owner taps into a proved setuid sudo, with no "moved on" asked', async () => {
+    const h = terminalHistory();
+    await h.fill('device');
+    await h.fill('device', { submitted: false });
+    should(h.kept()[0]?.tapped).containDeep({ value: true, count: 2 });
+    should(h.kept()[0]?.navigatedAway).be.undefined();
+    should(ineligibleBecause(h.summary())).be.undefined();
+    should(tappedIdentities(h.summary())).eql([h.kept()[0]?.identity]);
+  });
+
+  it('should not qualify it on plan fills, rule fills and the admin token, however many', async () => {
+    const h = terminalHistory();
+    for (const by of ['plan', 'rule', 'host'] as const) for (let index = 0; index < 5; index += 1) await h.fill(by);
+    await h.fill('device');
+    await h.fill(undefined);
+    should(h.kept()[0]?.masked?.count).equal(17);
+    should(h.kept()[0]?.tapped).containDeep({ value: true, count: 1 });
+    should(ineligibleBecause(h.summary())).equal('no-history');
+  });
+
+  it('should count no tap into a sudo that is not setuid root, echoes, is no line, or is unproved, and start again', async () => {
+    for (const facts of [
+      sudoPrompt({ trustedProgram: undefined }),
+      sudoPrompt({ echo: 'on' }),
+      sudoPrompt({ canonical: false }),
+      sudoPrompt({ recognisedConsumer: false }),
+      // A shell that renamed itself sudo: the kernel proved nothing of it.
+      sudoPrompt({ program: undefined, trustedProgram: undefined, recognisedConsumer: false }),
+      // passwd started under a getpass name the kernel proves, but not one a rule may type into.
+      sudoPrompt({ program: 'passwd' }),
+    ]) {
+      const h = terminalHistory();
+      await h.fill('device');
+      await h.fill('device', { facts });
+      await h.fill('device');
+      should(h.kept()[0]?.tapped).containDeep({ value: true, count: 1 });
+      should(ineligibleBecause(h.summary())).equal('no-history');
+    }
+  });
+
+  it('should count no tap the ferret steered by acting on a terminal since the card was raised', async () => {
+    const h = terminalHistory();
+    await h.fill('device');
+    await h.fill('device', { steered: true });
+    should(h.kept()[0]?.tapped).containDeep({ value: true, count: 1 });
+    should(ineligibleBecause(h.summary())).equal('no-history');
   });
 });

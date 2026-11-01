@@ -934,3 +934,143 @@ describe('the prompt line, for a code Ferretry typed: did the same prompt come b
     should(await target(failing).promptLine('s1', 'dev', ['dev', 't-dev'])).be.undefined();
   });
 });
+
+// secrev-1301 M1: a standing rule's terminal fill proves the reader again between the value and Enter.
+describe('a standing rule’s terminal write: the value, the reader proved again, then Enter', () => {
+  /** sudo at its prompt in line mode, as every terminal rule fill has proved before it writes. */
+  const lineMode = (): World => ({ ...world(), canonical: true });
+  const sends = (w: World) => w.calls.filter(call => call[0] === 'if-shell');
+  const hex = (...bytes: number[]) => bytes.map(b => b.toString(16).padStart(2, '0'));
+  const keysOf = (text: string) => hex(...new TextEncoder().encode(text));
+  const killed = (w: World) => w.calls.filter(call => call[0] === 'send-keys' && call.at(-1) === '15');
+
+  it('should send the value without Enter, prove the same setuid sudo still leads, then send Enter alone', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    w.calls.length = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { reprove: true });
+
+    should(result).equal('typed');
+    should(w.typed).deepEqual([
+      ['send-keys', '-H', '-t', '%3', ...keysOf(SECRET)],
+      ['send-keys', '-H', '-t', '%3', ...hex(0x0d)],
+    ]);
+    // The look before the write, and the kernel asked again between the two writes.
+    should(w.ran).have.length(3);
+    should(killed(w)).have.length(0);
+  });
+
+  it('should send no Enter at all when the agent submits, after proving the reader again', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+
+    const result = await target(w).type('s1', dev, SECRET, false, expected, { reprove: true });
+
+    should(result).equal('typed');
+    should(w.typed).deepEqual([['send-keys', '-H', '-t', '%3', ...keysOf(SECRET)]]);
+  });
+
+  it('should answer reader_changed, erase the line and send no Enter when another reader leads after the value', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    // The real sudo was killed in the race and the ferret's own reader, calling itself sudo, leads the terminal now.
+    w.afterEnqueue = at => {
+      at.ps = ' 4242  4242  4400 bash -bash\n 4400  4400  4400 sudo sudo -v\n';
+      at.proved = {};
+    };
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { reprove: true });
+
+    should(result).equal('reader_changed');
+    should(w.typed).deepEqual([['send-keys', '-H', '-t', '%3', ...keysOf(SECRET)]]);
+    should(killed(w)).have.length(1);
+  });
+
+  it('should answer reader_changed when the same program is there but no longer setuid root, or echoes', async () => {
+    for (const change of [
+      (at: World) => {
+        at.proved = { 4300: { name: 'sudo', setuidRoot: false }, 4301: { name: 'sudo', setuidRoot: false } };
+      },
+      (at: World) => {
+        at.echo = 'on';
+      },
+    ]) {
+      const w = lineMode();
+      const expected = await observed(w);
+      w.afterEnqueue = change;
+
+      should(await target(w).type('s1', dev, SECRET, true, expected, { reprove: true })).equal('reader_changed');
+      should(w.typed).have.length(1);
+    }
+  });
+
+  it('should answer guard_refused and type nothing when tmux’s own guard refuses after a matching look', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    // The foreground command changes between the daemon's last look and tmux's write.
+    w.before = (call, at) => {
+      if (call[0] === 'if-shell') at.command = 'bash';
+    };
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { reprove: true });
+
+    should(result).equal('guard_refused');
+    should(w.typed).deepEqual([]);
+    should(sends(w)).have.length(1);
+  });
+
+  it('should answer reader_changed and erase the line when the guard refuses the Enter after the value went in', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    let writes = 0;
+    w.before = (call, at) => {
+      if (call[0] === 'if-shell' && ++writes === 2) at.cursor = 8;
+    };
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { reprove: true });
+
+    should(result).equal('reader_changed');
+    should(w.typed).deepEqual([['send-keys', '-H', '-t', '%3', ...keysOf(SECRET)]]);
+    should(killed(w)).have.length(1);
+  });
+
+  it('should answer uncertain and send no Enter when the value’s own write fails', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    w.write = failed;
+
+    should(await target(w).type('s1', dev, SECRET, true, expected, { reprove: true })).equal('uncertain');
+    should(sends(w)).have.length(1);
+  });
+
+  it('should answer reader_changed when the terminal can no longer be looked at after the value', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    w.afterEnqueue = at => {
+      at.located = false;
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected, { reprove: true })).equal('reader_changed');
+    should(w.typed).have.length(1);
+  });
+
+  it('should still answer target_changed, writing nothing, when the look before the write differs from the card', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    w.capture = ok('kirin@kirin-box:~$ \n');
+
+    should(await target(w).type('s1', dev, SECRET, true, expected, { reprove: true })).equal('target_changed');
+    should(sends(w)).have.length(0);
+  });
+
+  it('should keep a plain target_changed for a guard refusal outside a standing rule', async () => {
+    const w = lineMode();
+    const expected = await observed(w);
+    w.before = (call, at) => {
+      if (call[0] === 'if-shell') at.command = 'bash';
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+  });
+});

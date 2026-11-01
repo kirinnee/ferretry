@@ -119,3 +119,28 @@ describe('the composition root makes every connection', () => {
     );
   });
 });
+
+// secrev-1301 / lizzette (a): the terminal gate is the protocol's compile-time list, read nowhere else.
+describe('terminal standing rules are switched by the build alone', () => {
+  it('should read sign-in-rules-terminal.1 only through daemonFeatureList, for the rule service and the fills', async () => {
+    const fyd = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
+    const reads = fyd.split('\n').filter(line => line.includes('signInRulesTerminal'));
+    should(reads.map(line => line.trim())).eql([
+      'terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
+      'terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
+    ]);
+    // No daemon code (comments aside) holds the feature's name, which a config, env or file value could match.
+    const glob = new Bun.Glob('**/*.ts');
+    const code = (source: string): string => source.replaceAll(/\/\*[\s\S]*?\*\//gu, '').replaceAll(/\/\/.*$/gmu, '');
+    const holding: string[] = [];
+    for await (const file of glob.scan(new URL('../../../', import.meta.url).pathname))
+      if (!file.includes('tests/') && !file.includes('node_modules/'))
+        if (
+          code(await Bun.file(new URL(`../../../${file}`, import.meta.url)).text()).includes('sign-in-rules-terminal')
+        )
+          holding.push(file);
+    should(holding).eql([]);
+    const features = await Bun.file(new URL('../../../../protocol/src/lib/daemon-features.ts', import.meta.url)).text();
+    should(features).match(/const NOT_YET_REPORTED[^;]*DAEMON_FEATURES\.signInRulesTerminal[^;]*;/u);
+  });
+});

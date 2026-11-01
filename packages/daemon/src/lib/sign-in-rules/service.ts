@@ -5,7 +5,6 @@ import {
   type AuditActor,
   type AuditDetail,
   type Place,
-  SIGN_IN_RULE_DEFAULT_SECONDS,
   SIGN_IN_RULE_ERROR_CODES,
   SIGN_IN_RULE_INELIGIBLE_CODES,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
@@ -35,6 +34,7 @@ import {
   signInRuleBodyProblems,
   signInRuleClockProblems,
   signInRuleEffective,
+  signInRuleLifetime,
   signInRuleNarrowed,
   signInRuleSuspensionWords,
 } from '@ferretry/protocol';
@@ -42,13 +42,14 @@ import type { AuditSink } from '../audit/types.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { PasskeysChange } from '../step-up/passkeys-changed.ts';
 import { type RuleListing, ruleDrift, samePins, snapshotPins } from './drift.ts';
-import { ineligibleBecause } from './eligibility.ts';
+import { ineligibleBecause, ruleSurfaceOf } from './eligibility.ts';
 import { checkRuleProof, ruleChallenge, type SignInRuleProofPort } from './proof.ts';
 import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
 
 /**
  * STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): one owner-signed permission for Ferretry to fill
- * ONE page sign-in, for any ferret unless the owner narrowed its scope, until it expires (at most 90 days).
+ * ONE sign-in, for any ferret unless the owner narrowed its scope, until it expires: a page sign-in for at most 90 days,
+ * or sudo, su or doas in a terminal (the password only, root, red) for at most 7.
  *
  * ## ONLY THE OWNER, A FRESH PASSKEY EVERY TIME, BOUND TO THE BYTES
  *
@@ -116,6 +117,11 @@ export interface SignInRulePorts {
   readonly ids?: { ruleId?(): SignInRuleId; stageId?(): SignInRuleStageId; nonce?(): string };
   /** Said to the operator (stderr): a damaged file, a write that failed. Never a value or a name. */
   readonly warn: (message: string) => void;
+  /**
+   * Whether the daemon reports `sign-in-rules-terminal.1`: until it does, a sudo, su or doas sign-in can't have a rule
+   * (`tool_not_covered`, at the stage and in the eligibility). Absent: it can't.
+   */
+  readonly terminalRules?: () => boolean;
 }
 
 /** A refusal with a next step of its own: the route answers `status` and `code` in these words. */
@@ -381,7 +387,10 @@ export class SignInRuleService {
     const found = listing.signIns.find(each => each.id === signIn);
     if (found === undefined) throw new SignInRuleError(404, 'not_found', `there is no sign-in ${signIn}`);
     const rule = this.#records.find(record => record.body.signIn === signIn)?.body.id;
-    const because = ineligibleBecause(found) ?? ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
+    const because =
+      (ruleSurfaceOf(found) === 'terminal' && !this.#terminalRules() ? 'tool-not-covered' : undefined) ??
+      ineligibleBecause(found) ??
+      ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
     return because === undefined
       ? { signIn, eligible: true, ...(rule === undefined ? {} : { rule }) }
       : { signIn, eligible: false, because, ...(rule === undefined ? {} : { rule }) };
@@ -391,8 +400,10 @@ export class SignInRuleService {
 
   /**
    * STAGES A RULE from the owner's ticks: the daemon finds the sign-in, checks it can have a rule (a page password
-   * sign-in with the owner's tapped history), snapshots every pin itself, and holds the body for one challenge's life.
-   * One stage per sign-in: a newer one replaces a waiting one. Nothing is approved here.
+   * sign-in, or sudo, su or doas in a terminal, with the owner's tapped history), snapshots every pin itself, and holds
+   * the body for one challenge's life. The surface is the sign-in's own, never the caller's word: a terminal rule types
+   * the password only, lasts a day unless the owner says otherwise, and a week at most. One stage per sign-in: a newer
+   * one replaces a waiting one. Nothing is approved here.
    */
   async stage(caller: PasteRuleCaller, draft: SignInRuleDraft): Promise<SignInRuleStaged> {
     const owner = requireOwner(caller);
@@ -404,6 +415,18 @@ export class SignInRuleService {
     const ask = checked.data;
     const totp = ask.totp === true;
     const listing = await this.#listing();
+    const target = listing.signIns.find(each => each.id === ask.signIn);
+    const surface = target === undefined ? 'page' : ruleSurfaceOf(target);
+    // Terminal rules are their own feature (`sign-in-rules-terminal.1`): until it is reported, none can be made.
+    if (surface === 'terminal' && !this.#terminalRules())
+      throw new SignInRuleError(
+        409,
+        SIGN_IN_RULE_INELIGIBLE_CODES['tool-not-covered'],
+        SIGN_IN_RULE_INELIGIBLE_WORDS['tool-not-covered'],
+      );
+    // sudo, su and doas ask for the password alone: a username or a code ticked for one is refused before anything else.
+    if (surface === 'terminal' && (totp || ask.fields.length !== 1 || ask.fields[0] !== 'password'))
+      throw new SignInRuleError(400, 'bad_request', 'a terminal rule types the password only');
     const snap = snapshotPins(listing, ask.signIn, totp);
     if (!snap.ok) {
       if (snap.because === 'not-found')
@@ -448,12 +471,14 @@ export class SignInRuleService {
       id: existing?.body.id ?? this.#newRuleId(),
       revision: existing === undefined ? 1 : existing.body.revision + 1,
       signIn: ask.signIn,
-      surface: 'page',
+      surface,
       fields,
       pins: snap.pins,
       scope: ask.scope ?? { kind: 'any' },
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + (ask.lifetimeSeconds ?? SIGN_IN_RULE_DEFAULT_SECONDS) * 1_000).toISOString(),
+      expiresAt: new Date(
+        now + (ask.lifetimeSeconds ?? signInRuleLifetime(surface).defaultSeconds) * 1_000,
+      ).toISOString(),
       ...(ask.uses === undefined ? {} : { uses: ask.uses }),
     };
     const problem = [...signInRuleBodyProblems(unsigned), ...signInRuleClockProblems(unsigned, now)][0];
@@ -489,6 +514,11 @@ export class SignInRuleService {
       throw new SignInRuleError(400, 'bad_request', 'the rule could not be built for this device');
     this.#stages.set(stage.id, stage);
     return this.#staged(stage);
+  }
+
+  /** Whether terminal rules are on (`sign-in-rules-terminal.1` reported). Off unless the composition root says so. */
+  #terminalRules(): boolean {
+    return this.ports.terminalRules?.() === true;
   }
 
   /**
@@ -854,22 +884,28 @@ export class SignInRuleService {
       if (this.#health !== 'ok') return;
       await this.#suspendAll(
         this.#records
-          .filter(record => record.suspended === undefined && record.body.pins.placeKeys.includes(host))
+          .filter(
+            record =>
+              record.suspended === undefined &&
+              record.body.surface === 'page' &&
+              record.body.pins.placeKeys.includes(host),
+          )
           .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
       );
     });
   }
 
   /**
-   * A PAGE SCRIPT RAN WHERE ITS ORIGIN COULD NOT BE READ (R3c-4): it may have run on any login domain, so every rule is
-   * suspended (`scripted-origin`). Fails closed: denial of service at most, never a fill.
+   * A PAGE SCRIPT RAN WHERE ITS ORIGIN COULD NOT BE READ (R3c-4): it may have run on any login domain, so every PAGE
+   * rule is suspended (`scripted-origin`). Fails closed: denial of service at most, never a fill. A terminal rule is not
+   * a page's: no page script reaches the terminal it types into.
    */
   async scriptedEverywhere(): Promise<void> {
     await this.#serial(async () => {
       if (this.#health !== 'ok') return;
       await this.#suspendAll(
         this.#records
-          .filter(record => record.suspended === undefined)
+          .filter(record => record.suspended === undefined && record.body.surface === 'page')
           .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
       );
     });
@@ -1209,6 +1245,7 @@ export class SignInRuleService {
       ],
       fields: [...body.fields],
       totp: body.fields.includes('totp'),
+      root: body.surface === 'terminal',
       autoRecipe: stage.autoRecipe,
       scope: body.scope,
       expiresAt: body.expiresAt,
@@ -1224,11 +1261,10 @@ export class SignInRuleService {
     const signIn = listing?.signIns.find(each => each.id === record.body.signIn);
     const account = signIn === undefined ? undefined : listing?.accounts.find(each => each.id === signIn.account);
     const place: Place =
-      signIn?.place.kind === 'site'
-        ? signIn.place
-        : { kind: 'site', domains: [...record.body.pins.placeKeys], match: [] };
+      signIn !== undefined && ruleSurfaceOf(signIn) === record.body.surface ? signIn.place : pinnedPlace(record.body);
     const totp = effective.fields.includes('totp');
     const flags: SignInRuleFlag[] = [
+      ...(record.body.surface === 'terminal' ? (['root'] as const) : []),
       ...(totp ? (['one-factor'] as const) : []),
       ...(signIn?.autoApplyRecipe === true ? (['auto-recipe'] as const) : []),
     ];
@@ -1310,6 +1346,18 @@ export class SignInRuleService {
       })
       .catch(() => undefined);
   }
+}
+
+/**
+ * The place a rule was approved for, from its signed keys alone: what the list shows once its sign-in is gone or is no
+ * longer of the rule's surface. A terminal rule's one key is `tool@host` (sudo, su and doas name no destination).
+ */
+function pinnedPlace(body: SignInRuleBody): Place {
+  const [key = ''] = body.pins.placeKeys;
+  const at = key.indexOf('@');
+  return body.surface === 'terminal'
+    ? { kind: 'terminal', tool: key.slice(0, at), host: key.slice(at + 1) }
+    : { kind: 'site', domains: [...body.pins.placeKeys], match: [] };
 }
 
 /** A record's narrowing as one comparable string: the same three facts, in a fixed order. */

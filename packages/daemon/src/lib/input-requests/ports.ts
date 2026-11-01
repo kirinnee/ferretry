@@ -97,9 +97,12 @@ export type ObserveResult =
 /**
  * What came of the one write. `target_gone` and `target_changed` mean NOTHING was written. `uncertain` means the
  * write was attempted and did not complete cleanly: the value may be in the terminal, so the request ends and
- * is never retried.
+ * is never retried. Only a write asked to `reprove` (a standing rule's terminal fill) answers the last two:
+ * `guard_refused`, nothing written because tmux's own guard refused after a look that matched the card's facts; and
+ * `reader_changed`, the value went in but the reader the kernel proved no longer led the terminal before Enter, so it may
+ * be with another program (handled as `uncertain`).
  */
-export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain';
+export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain' | 'guard_refused' | 'reader_changed';
 
 /** A field as the target needs it to find where a value goes: its id and, on a page, the element the agent named. */
 export interface InputTargetField {
@@ -212,6 +215,13 @@ export interface TypeOptions {
    * typed (`target_changed`). A write that waited in the page's queue behind the ferret's acts is asked again there.
    */
   readonly proceed?: () => boolean;
+  /**
+   * A standing rule's terminal fill (secrev-1301 M1): the value goes in WITHOUT Enter, then the kernel proves again that
+   * the same setuid process still leads the foreground group, still the same program, echo off, line mode, and only
+   * then is Enter sent (a line-mode reader can't read the value before it). A reader that changed answers
+   * `reader_changed` (the line is erased); a guard that refuses answers `guard_refused`, never a plain `target_changed`.
+   */
+  readonly reprove?: boolean;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

@@ -12,7 +12,14 @@ import {
   SignInRuleSuggestionIdSchema,
   TwoFactorIdSchema,
 } from './account-ids.ts';
-import { AccountRefSchema, PlaceKeySchema, PlaceSchema, type TwoFactorKeySummary } from './accounts.ts';
+import {
+  AccountRefSchema,
+  type Place,
+  PlaceKeySchema,
+  PlaceSchema,
+  placeKeys,
+  type TwoFactorKeySummary,
+} from './accounts.ts';
 import { canonicalJson } from './canonical-json.ts';
 import { InstantSchema } from './common.ts';
 import { LOGIN_MATCH_MAX, LOGIN_USERNAME_MAX_LENGTH, oneLine } from './login-entries.ts';
@@ -41,7 +48,8 @@ export {
 
 /**
  * STANDING SIGN-IN RULES (docs/input-requests.md, "Standing rule fills"): one owner-signed permission for Ferretry to
- * fill ONE page sign-in, for any ferret (unless the owner narrowed its scope), until it expires — at most 90 days.
+ * fill ONE sign-in, for any ferret (unless the owner narrowed its scope), until it expires — at most 90 days for a page,
+ * at most 7 for sudo, su or doas in a terminal.
  *
  * ## THE BODY IS SIGNED; EVERYTHING ELSE MAY ONLY NARROW
  *
@@ -58,10 +66,12 @@ export {
  * domains, its recipe version, the field identities the owner's own taps have history with, and a fingerprint of the
  * account's 2FA keys. Any drift suspends the rule ({@link SIGN_IN_RULE_SUSPENSIONS}), and only a new passkey resumes it.
  *
- * ## PAGES ONLY
+ * ## A PAGE, OR SUDO, SU OR DOAS
  *
- * A standing rule is for a page sign-in only (`surface: 'page'`, web hosts only). A sudo, su or doas password stays
- * covered per task, by a task plan line (owner decision, R3c §18).
+ * A rule is for a page sign-in (`surface: 'page'`, web hosts only) or for a terminal one (`surface: 'terminal'`):
+ * exactly one `sudo@host`, `su@host` or `doas@host` key, the password only, red-flagged as root, 1 day by default and
+ * at most 7 (owner decision !A197). It fills only where the KERNEL proves that program is reading the terminal
+ * setuid root, never on a name a process gave itself; any other terminal program is never covered (`tool-not-covered`).
  *
  * ## THE FERRET LEARNS NOTHING ABOUT RULES
  *
@@ -79,6 +89,11 @@ export const SIGN_IN_RULE_MAX_DAYS = 90;
 const DAY_SECONDS = 86_400;
 export const SIGN_IN_RULE_DEFAULT_SECONDS = SIGN_IN_RULE_DEFAULT_DAYS * DAY_SECONDS;
 export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
+/** The same for a terminal rule (sudo, su, doas): root on demand, so a day by default and a week at most. */
+export const SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS = 1;
+export const SIGN_IN_RULE_TERMINAL_MAX_DAYS = 7;
+export const SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS = SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS * DAY_SECONDS;
+export const SIGN_IN_RULE_TERMINAL_MAX_SECONDS = SIGN_IN_RULE_TERMINAL_MAX_DAYS * DAY_SECONDS;
 /** The shortest a rule may last. */
 export const SIGN_IN_RULE_MIN_SECONDS = 3_600;
 /**
@@ -107,6 +122,55 @@ const DEVICE_LABEL_MAX_CHARS = 200;
 export const SIGN_IN_RULE_HONEST_LIMIT =
   "This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.";
 
+/** The red line on every terminal rule (sudo, su, doas), beside {@link SIGN_IN_RULE_HONEST_LIMIT}, verbatim. */
+export const SIGN_IN_RULE_ROOT_WARNING =
+  'This gives every ferret on this machine root whenever it asks, while the rule lasts.';
+
+/**
+ * What a terminal rule's program proof is worth, beside {@link SIGN_IN_RULE_ROOT_WARNING}, verbatim: the kernel proves a
+ * program root installed is reading the terminal setuid root, never by a name a process gave itself; but whoever starts
+ * it picks the name it starts under (secrev-1266a L4).
+ *
+ * THE RACE THAT REMAINS (secrev-1301 M1, said exactly): between the daemon's last kernel look and tmux's guarded write,
+ * the reader is checked only by facts a process of this account can reproduce (the pane, its foreground command's name,
+ * the cursor row). A program swapped in between the last kernel check and the typing can still read the password ONCE:
+ * holding Enter back does not stop a reader that takes bytes as they arrive. The rule is then suspended
+ * (`program-changed`: the kernel's check before Enter, or tmux's guard, saw the change), so it cannot be retried under
+ * that approval. Nothing more is claimed. Terminal rules fill only while the daemon reports
+ * `sign-in-rules-terminal.1` (daemon-features.ts).
+ */
+export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
+  'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';
+
+/** Whether a rule is for a page sign-in or a terminal one (sudo, su, doas). */
+export const SignInRuleSurfaceSchema = z.enum(['page', 'terminal']);
+export type SignInRuleSurface = z.infer<typeof SignInRuleSurfaceSchema>;
+
+/** How long a rule of each surface lasts when the owner names no time, and the most it may, in seconds. */
+export const signInRuleLifetime = (
+  surface: SignInRuleSurface,
+): { readonly defaultSeconds: number; readonly maxSeconds: number; readonly maxDays: number } =>
+  surface === 'terminal'
+    ? {
+        defaultSeconds: SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
+        maxSeconds: SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
+        maxDays: SIGN_IN_RULE_TERMINAL_MAX_DAYS,
+      }
+    : {
+        defaultSeconds: SIGN_IN_RULE_DEFAULT_SECONDS,
+        maxSeconds: SIGN_IN_RULE_MAX_SECONDS,
+        maxDays: SIGN_IN_RULE_MAX_DAYS,
+      };
+
+/**
+ * Whether match keys are ones a rule of this surface may fill at: a page rule only at web hosts (never a `tool@host`),
+ * a terminal rule at EXACTLY ONE `sudo@host`, `su@host` or `doas@host`. The one check behind the body and eligibility.
+ */
+export const signInRuleKeysFit = (surface: SignInRuleSurface, keys: readonly string[]): boolean =>
+  surface === 'terminal'
+    ? keys.length === 1 && taskPlanKeysFitLine('terminal-sign-in', keys)
+    : taskPlanKeysFitLine('sign-in', keys);
+
 // ── The signed body ──────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -133,7 +197,8 @@ const FactorFingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/u, 'a 2FA key f
  *
  * - `accountKey`: the immutable `L…` key; `account`, the handle at approval (a rename suspends); `username` (a change
  *   suspends).
- * - `placeKeys`: the sign-in's login domains (web hosts only).
+ * - `placeKeys`: the sign-in's login domains (web hosts only), or a terminal rule's one `sudo@host`, `su@host` or
+ *   `doas@host`.
  * - `recipeVersion`: the recipe the owner saw; absent when the sign-in has none.
  * - `identities`: the field identities the owner's own taps have history with. REQUIRED: a rule never pins a new form.
  * - `factors`: {@link factorFingerprint} of the account's 2FA keys; any change to the list suspends.
@@ -156,6 +221,7 @@ const unique = (values: readonly string[]): boolean => new Set(values).size === 
 
 /** The facts {@link signInRuleBodyProblems} reads: a body as parsed, before its own refinement. */
 interface SignInRuleBodyFacts {
+  readonly surface: SignInRuleSurface;
   readonly fields: readonly SignInField[];
   readonly pins: Pick<SignInRulePins, 'placeKeys' | 'identities' | 'factor'>;
   readonly createdAt: string;
@@ -169,20 +235,28 @@ interface SignInRuleBodyFacts {
 export const signInRuleBodyProblems = (body: SignInRuleBodyFacts): readonly string[] => {
   const lifetime = (Date.parse(body.expiresAt) - Date.parse(body.createdAt)) / 1_000;
   const totp = body.fields.includes('totp');
+  const terminal = body.surface === 'terminal';
+  const { maxSeconds, maxDays } = signInRuleLifetime(body.surface);
   return [
     ...(unique(body.fields) ? [] : ['a rule names each field once']),
     ...(totp === (body.pins.factor !== undefined) ? [] : ['a rule types a code exactly when it pins the 2FA key']),
     ...(totp && !body.fields.includes('password') ? ['a rule types a code only after its own password'] : []),
-    // Page-only (R3c §18): a `tool@host` key would put the password into a terminal.
-    ...(taskPlanKeysFitLine('sign-in', body.pins.placeKeys) ? [] : ['a rule is pinned to web hosts only']),
+    // A page rule's `tool@host` key would put the password into a terminal; a terminal rule is one sudo, su or doas.
+    ...(signInRuleKeysFit(body.surface, body.pins.placeKeys)
+      ? []
+      : [terminal ? 'a terminal rule is pinned to one sudo, su or doas' : 'a page rule is pinned to web hosts only']),
+    // sudo, su and doas ask for the password alone: no username to type, and no code a rule could add.
+    ...(terminal && (body.fields.length !== 1 || body.fields[0] !== 'password')
+      ? ['a terminal rule types the password only']
+      : []),
     ...(unique(body.pins.placeKeys) ? [] : ['a rule pins each login domain once']),
     ...(unique(body.pins.identities) ? [] : ['a rule pins each field identity once']),
     ...(Number.isFinite(lifetime) && lifetime >= SIGN_IN_RULE_MIN_SECONDS
       ? []
       : [`a rule lasts at least ${String(SIGN_IN_RULE_MIN_SECONDS / 3_600)} hour`]),
-    ...(Number.isFinite(lifetime) && lifetime <= SIGN_IN_RULE_MAX_SECONDS
+    ...(Number.isFinite(lifetime) && lifetime <= maxSeconds
       ? []
-      : [`a rule lasts at most ${String(SIGN_IN_RULE_MAX_DAYS)} days`]),
+      : [`a ${terminal ? 'terminal' : 'page'} rule lasts at most ${String(maxDays)} days`]),
   ];
 };
 
@@ -201,9 +275,10 @@ export const signInRuleClockProblems = (body: { readonly createdAt: string }, no
 
 /**
  * THE SIGNED PART of a rule. `revision` is 1 when created and one more on each resume, renew or widen (the id stays).
- * `surface` is `page`, always. `fields` are the ones Ferretry may type: `totp` only with `pins.factor`, and only beside
- * `password`. `expiresAt` is fixed when the rule is staged, between one hour and 90 days after `createdAt`. `uses` is
- * the optional cap. `approvedBy` is the paired device whose passkey proved it.
+ * `surface` is `page` (web hosts) or `terminal` (one sudo, su or doas key, the password only). `fields` are the ones
+ * Ferretry may type: `totp` only with `pins.factor`, and only beside `password`. `expiresAt` is fixed when the rule is
+ * staged, between one hour and 90 days after `createdAt` (7 days for a terminal rule). `uses` is the optional cap.
+ * `approvedBy` is the paired device whose passkey proved it.
  */
 export const SignInRuleBodySchema = z
   .strictObject({
@@ -211,7 +286,7 @@ export const SignInRuleBodySchema = z
     id: SignInRuleIdSchema,
     revision: SignInRuleRevisionSchema,
     signIn: SignInIdSchema,
-    surface: z.literal('page'),
+    surface: SignInRuleSurfaceSchema,
     fields: z.array(SignInFieldSchema).min(1).max(3),
     pins: SignInRulePinsSchema,
     scope: SignInRuleScopeSchema,
@@ -247,7 +322,7 @@ export type SignInRuleProof = z.infer<typeof SignInRuleProofSchema>;
 
 /**
  * WHY A RULE WAS SUSPENDED. Sticky: changing the pinned fact back does not resume it; only a new passkey does. The
- * first nine are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
+ * first ten are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
  * keeps a rule suspended in memory when its file could not be written.
  */
 export const SIGN_IN_RULE_SUSPENSIONS = [
@@ -260,6 +335,7 @@ export const SIGN_IN_RULE_SUSPENSIONS = [
   'sign-in-gone',
   'proof-invalid',
   'scripted-origin',
+  'program-changed',
   'passkey-removed',
   'store-write-failed',
 ] as const;
@@ -395,8 +471,11 @@ export function signInRuleEffective(record: SignInRuleRecord, now: number): Sign
 
 // ── The owner's view ─────────────────────────────────────────────────────────────────────────────────
 
-/** The daemon's flags on a rule, drawn red (`one-factor`: the code is ticked) or amber (`auto-recipe`). */
-export const SIGN_IN_RULE_FLAGS = ['one-factor', 'auto-recipe'] as const;
+/**
+ * The daemon's flags on a rule, drawn red (`root`: a terminal rule types sudo, su or doas's password; `one-factor`: the
+ * code is ticked) or amber (`auto-recipe`).
+ */
+export const SIGN_IN_RULE_FLAGS = ['root', 'one-factor', 'auto-recipe'] as const;
 export const SignInRuleFlagSchema = z.enum(SIGN_IN_RULE_FLAGS);
 export type SignInRuleFlag = z.infer<typeof SignInRuleFlagSchema>;
 
@@ -409,6 +488,27 @@ const codeTickProblems = (value: {
   ...(value.totp === value.fields.includes('totp') ? [] : ['totp says exactly whether the fields hold a code']),
   ...(value.totp && !value.fields.includes('password') ? ['a code is typed only after its own password'] : []),
 ];
+
+/**
+ * A rule's place as it may be shown: a site, or a terminal place whose key is one sudo, su or doas (`root` said for
+ * exactly those, so the red line reads the boolean, never the place's words), typing the password only.
+ */
+const placeProblems = (value: {
+  readonly place: Place;
+  readonly fields: readonly SignInField[];
+  readonly root: boolean;
+}): readonly string[] => {
+  const terminal = value.place.kind === 'terminal';
+  return [
+    ...(terminal && !signInRuleKeysFit('terminal', placeKeys(value.place))
+      ? ['a terminal rule is for sudo, su or doas only']
+      : []),
+    ...(value.root === terminal ? [] : ['a terminal rule is flagged root, and only a terminal rule']),
+    ...(terminal && (value.fields.length !== 1 || value.fields[0] !== 'password')
+      ? ['a terminal rule types the password only']
+      : []),
+  ];
+};
 
 /**
  * ONE RULE AS THE OWNER READS IT (`GET /v1/sign-in-rules`, gated like `GET /v1/accounts` because it names accounts).
@@ -448,7 +548,7 @@ export const SignInRuleViewSchema = z
   .superRefine((view, context) => {
     const problems = [
       ...codeTickProblems(view),
-      ...(view.place.kind === 'site' ? [] : ['a standing rule is for a page sign-in']),
+      ...placeProblems({ place: view.place, fields: view.fields, root: view.flags.includes('root') }),
       ...(unique(view.flags) ? [] : ['each flag is shown once']),
       ...(view.flags.includes('one-factor') === view.totp ? [] : ['a rule that types a code is flagged one-factor']),
       ...((view.status === 'suspended') === (view.suspended !== undefined)
@@ -500,20 +600,19 @@ export const SignInRuleDraftSchema = z
   });
 export type SignInRuleDraft = z.infer<typeof SignInRuleDraftSchema>;
 
-/** What a staged rule may not be: its code flags agree, and it is for a page sign-in. */
+/** What a staged rule may not be: its code flags agree, and `root` says exactly whether it is a terminal rule. */
 const stagedProblems = (staged: {
   readonly fields: readonly SignInField[];
   readonly totp: boolean;
-  readonly place: { readonly kind: string };
-}): readonly string[] => [
-  ...codeTickProblems(staged),
-  ...(staged.place.kind === 'site' ? [] : ['a standing rule is for a page sign-in']),
-];
+  readonly root: boolean;
+  readonly place: Place;
+}): readonly string[] => [...codeTickProblems(staged), ...placeProblems(staged)];
 
 /**
  * A RULE WAITING FOR ITS PASSKEY: the stage the `approve-sign-in-rule` proof is bound to, the rule it makes, and the
  * daemon's own words for it, which the passkey dialog shows. Every red and amber warning comes from the STRUCTURED
- * fields (`totp`: one factor; `autoRecipe`), never from the summary's words, which may be clipped (secrev-1268 N1);
+ * fields (`root`: sudo, su or doas; `totp`: one factor; `autoRecipe`), never from the summary's words, which may be
+ * clipped (secrev-1268 N1);
  * so does WHICH sign-in it is for (`account`, `place`: secrev-1271 L3), since a clip cuts the host first.
  * `machine` is set when it was staged at the machine (`fy rules add`) and waits in the app. Never a value.
  */
@@ -529,6 +628,8 @@ export const SignInRuleStagedSchema = z
     summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(SIGN_IN_RULE_SUMMARY_MAX_LINES),
     fields: z.array(SignInFieldSchema).min(1).max(3),
     totp: z.boolean(),
+    /** A terminal rule: Ferretry would type sudo, su or doas's password for any ferret it covers, which is root. Red. */
+    root: z.boolean(),
     autoRecipe: z.boolean(),
     scope: SignInRuleScopeSchema,
     /** When the RULE would end. */
@@ -695,7 +796,7 @@ export const SIGN_IN_RULE_ERROR_CODES = {
   viaProvider: 'via_provider',
   /** Not a password sign-in. */
   notPassword: 'not_password',
-  /** A terminal sign-in (sudo, su, doas, ssh…): a standing rule is for a page only; a task plan covers sudo per task. */
+  /** A terminal sign-in for another program than sudo, su or doas (ssh, npm…): no standing rule ever covers it. */
   toolNotCovered: 'tool_not_covered',
   /** The code was ticked, but the account has no 2FA key Ferretry makes codes for. */
   noCodeKey: 'no_code_key',
@@ -709,7 +810,8 @@ export const SIGN_IN_RULE_ERROR_CODES = {
 
 /**
  * Why a sign-in cannot have a standing rule yet: the owner has no tapped history with it, it is a provider sign-in or
- * not a password one, it is a terminal sign-in (pages only, R3c §18), or no paired device holds a passkey.
+ * not a password one, it is a terminal sign-in for a program other than sudo, su or doas, or no paired device holds a
+ * passkey.
  */
 export const SIGN_IN_RULE_INELIGIBLE = [
   'no-history',
@@ -735,7 +837,7 @@ export const SIGN_IN_RULE_INELIGIBLE_WORDS = {
   'no-history': 'Sign in yourself twice from the app first',
   'via-provider': "This sign-in goes through another account, so it can't be pre-approved",
   'not-password': 'Only a password sign-in can be pre-approved',
-  'tool-not-covered': 'A standing rule is for a page sign-in; a task plan covers sudo for one task',
+  'tool-not-covered': 'A standing rule covers a page sign-in, or sudo, su or doas in a terminal; not this program',
   'no-passkey': 'Add a passkey in Settings › Security first',
 } as const satisfies Record<SignInRuleIneligible, string>;
 

@@ -10819,6 +10819,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         audit: auditLog,
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
+        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
       });
       connectSignInRules(signInRules, {
         accounts: accountDirectory,
@@ -10839,6 +10840,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return key.success ? key.data : undefined;
         },
         advertised: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRules),
+        terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
         stampedProject: async sessionId => await stampedProjectOf(signInRuleSessions, sessionId),
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),

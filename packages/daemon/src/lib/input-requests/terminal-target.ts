@@ -37,6 +37,8 @@ const RAW_TEXT_LIMIT = 4096;
 /** A program name tmux may be asked to compare. Anything else cannot be pinned safely in a format string. */
 const PINNABLE_COMMAND = /^[A-Za-z0-9._:+@ -]+$/u;
 const GUARD_REFUSED = 'fy-input-guard-refused';
+/** VKILL in line mode: erases a line typed without Enter, so a reader that changed is not handed it on a later Enter. */
+const KILL_LINE = 0x15;
 
 const plain = (text: string, limit: number = RAW_TEXT_LIMIT): string => text.replaceAll(CONTROL, '').slice(0, limit);
 
@@ -362,8 +364,6 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;
     const bytes = new TextEncoder().encode(text);
-    const keys = submit ? new Uint8Array([...bytes, CARRIAGE_RETURN]) : bytes;
-    const [chunk = []] = hexInputChunks(keys, keys.byteLength);
     // A grant fill types only while its line is still held: asked after the last look, as the last thing before the write.
     if (options?.proceed?.() === false) return 'target_changed';
     const condition = [
@@ -372,20 +372,69 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       `#{==:#{cursor_y},${guard.cursorRow}}`,
       '#{==:#{pane_dead},0}',
     ].reduce((left, right) => `#{&&:${left},${right}}`);
-    try {
-      const written = await this.tmux.execute([
-        'if-shell',
-        '-F',
-        '-t',
-        paneId,
-        condition,
-        ['send-keys', '-H', '-t', paneId, ...chunk].join(' '),
-        `display-message -p ${GUARD_REFUSED}`,
-      ]);
-      if (written.code !== 0) return 'uncertain';
-      return written.stdout.includes(GUARD_REFUSED) ? 'target_changed' : 'typed';
-    } catch {
-      return 'uncertain';
+    const write = async (keys: Uint8Array): Promise<'typed' | 'refused' | 'uncertain'> => {
+      const [chunk = []] = hexInputChunks(keys, keys.byteLength);
+      try {
+        const written = await this.tmux.execute([
+          'if-shell',
+          '-F',
+          '-t',
+          paneId,
+          condition,
+          ['send-keys', '-H', '-t', paneId, ...chunk].join(' '),
+          `display-message -p ${GUARD_REFUSED}`,
+        ]);
+        if (written.code !== 0) return 'uncertain';
+        return written.stdout.includes(GUARD_REFUSED) ? 'refused' : 'typed';
+      } catch {
+        return 'uncertain';
+      }
+    };
+    if (options?.reprove !== true) {
+      const once = await write(submit ? new Uint8Array([...bytes, CARRIAGE_RETURN]) : bytes);
+      return once === 'refused' ? 'target_changed' : once;
     }
+    // A standing rule: the value without Enter, the reader proved again, then Enter (secrev-1301 M1).
+    const typed = await write(bytes);
+    if (typed === 'refused') return 'guard_refused';
+    if (typed === 'uncertain') return 'uncertain';
+    if (!(await this.sameReader(sessionId, target.key, fresh.facts))) {
+      await this.tmux.execute(['send-keys', '-H', '-t', paneId, KILL_LINE.toString(16)]).catch(() => undefined);
+      return 'reader_changed';
+    }
+    if (!submit) return 'typed';
+    const entered = await write(new Uint8Array([CARRIAGE_RETURN]));
+    if (entered === 'refused') {
+      await this.tmux.execute(['send-keys', '-H', '-t', paneId, KILL_LINE.toString(16)]).catch(() => undefined);
+      return 'reader_changed';
+    }
+    return entered;
+  }
+
+  /**
+   * Whether the reader the kernel proved before the write still holds the terminal after the value went in without
+   * Enter: the same foreground process and group, still the one setuid-root program, echo off, line mode, in the same
+   * pane. A line-mode reader can't have read the value yet, so the real sudo is always still there; anything else
+   * means the reader changed in the race between the last look and the write. A look that fails counts as changed.
+   */
+  private async sameReader(
+    sessionId: string,
+    key: string,
+    before: Extract<InputTargetFacts, { readonly kind: 'terminal' }>,
+  ): Promise<boolean> {
+    const again = await this.look(sessionId, key).catch(() => undefined);
+    if (again?.ok !== true || again.facts.kind !== 'terminal') return false;
+    const after = again.facts;
+    return (
+      after.paneProof.paneId === before.paneProof.paneId &&
+      after.paneProof.pid === before.paneProof.pid &&
+      after.foreground.pid === before.foreground.pid &&
+      after.foreground.pgid === before.foreground.pgid &&
+      after.program !== undefined &&
+      after.program === before.program &&
+      after.trustedProgram === true &&
+      after.echo === 'off' &&
+      after.canonical === true
+    );
   }
 }
