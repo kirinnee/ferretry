@@ -2,13 +2,14 @@
  * One ferret's chat header and Info side pane, drawn by the real `SessionTopBar`, `InfoPanel`
  * and `BoardSideTab` over a fake daemon (`board-chat-screenshot.ts` bundles this).
  *
- * `?state=card|none` picks a session with or without a focus card, `?view=kanban|list` the Tasks view, `?cards=few`
+ * `?state=card|none` picks a session with or without a focus card, `?view=cards|kanban|list` the Tasks view (Kanban when
+ * not given), `?totest=1` adds two cards waiting for a try (the moves the page is asked for are kept in `window.__moves`), `?cards=few`
  * the six-card fixture (the default is 70 cards), `?agents=1` turns "Show agent tasks" on, `?expanded=1` opens the
  * Tasks tab over the whole chat area (the desktop Info panel steps out of the way). `?origin=0` serves cards
  * the way an older daemon does, with no `origin`.
  */
 
-import type { BoardTaskView, SessionView } from '@ferretry/protocol';
+import { type BoardTaskView, boardOk, type SessionView } from '@ferretry/protocol';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
@@ -135,6 +136,30 @@ const OPEN = [
   card('F99', { title: 'Someone else’s card', laneId: 'implement', owner: 'mvzzzzzz-00000000', lastTouchedAt: ago(5) }),
 ];
 
+const SHIPPED = { version: '5.4.0', tag: 'v5.4.0', at: ago(60) };
+const TO_TEST =
+  params.get('totest') === '1'
+    ? [
+        card('F30', {
+          title: 'Pair a second phone',
+          laneId: 'tested',
+          owner: LEAD,
+          shippedIn: SHIPPED,
+          howToTest:
+            '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+          lastTouchedAt: ago(55),
+        }),
+        card('F31', {
+          title: 'Faster board loading',
+          laneId: 'tested',
+          owner: LEAD,
+          shippedIn: { ...SHIPPED, version: '5.3.2', tag: 'v5.3.2', at: ago(60 * 26) },
+          howToTest: '1. Open the Board on a phone.\n2. It should draw in under a second.',
+          lastTouchedAt: ago(60 * 25),
+        }),
+      ]
+    : [];
+
 const TITLES = [
   'Retry a failed move',
   'Drawer opens wrong card',
@@ -183,7 +208,7 @@ const originOf = (task: BoardTaskView, index: number): BoardTaskView => {
     task,
   );
 };
-const CARDS = (FEW ? OPEN : [...OPEN, ...MANY]).map(originOf);
+const CARDS = [...(FEW ? OPEN : [...OPEN, ...MANY]), ...TO_TEST].map(originOf);
 
 const store = new DaemonBoardStore(
   fakePort({
@@ -197,6 +222,12 @@ const store = new DaemonBoardStore(
   }),
   fakeEnvironment(),
 );
+
+(window as unknown as { __moves: unknown[] }).__moves = [];
+store.act = async (_daemon, id, request) => {
+  (window as unknown as { __moves: unknown[] }).__moves.push({ id, to: (request as { to?: string }).to });
+  return boardOk(card(id));
+};
 
 const agendaStore = new DaemonAgendaStore();
 const agenda = {
@@ -214,7 +245,8 @@ const agenda = {
   },
   respond: async () => undefined,
 };
-boardSideView.set(params.get('view') === 'list' ? 'list' : 'kanban');
+const requested = params.get('view');
+boardSideView.set(requested === 'list' || requested === 'cards' ? requested : 'kanban');
 
 function Harness() {
   const [expanded, setExpanded] = useState(params.get('expanded') === '1');

@@ -493,3 +493,169 @@ describe('ChatTasks — Show agent tasks and Expand', () => {
     expect(root.querySelector('[data-task="F18"]')?.getAttribute('draggable')).toBe('false');
   });
 });
+
+const ASK = { sessionId: 's1', id: 'A1' };
+const waiting = card('F40', {
+  owner: SELF,
+  laneId: 'implement',
+  title: 'Needs a call',
+  activity: 'waiting',
+  waitingOnOwner: [ASK],
+  openAsks: [ASK],
+});
+
+const where = (root: HTMLElement) => root.querySelector('.fy-item-view__where')?.textContent;
+const shownTitle = (root: HTMLElement) =>
+  root.querySelector('[data-board-cards] .fy-board-card__title, [data-board-cards] [data-to-test-title]')?.textContent;
+const step = (root: HTMLElement, label: 'Previous card' | 'Next card') =>
+  must(root.querySelector<HTMLButtonElement>(`[data-board-cards] button[aria-label="${label}"]`), label);
+
+describe('ChatTasks — the Cards view', () => {
+  beforeEach(() => boardSideView.set('cards'));
+
+  it('is the view this panel opens on, with Kanban and List still there as tabs', async () => {
+    const { root } = await open({ extraCards: [waiting] });
+    expect(root.querySelector('[data-board-cards]')).not.toBeNull();
+    expect(root.querySelector('[data-board-side-kanban]')).toBeNull();
+    expect(
+      [...root.querySelectorAll<HTMLButtonElement>('.fy-board-side__view')].map(tab => [
+        tab.dataset['view'],
+        tab.getAttribute('aria-pressed'),
+      ]),
+    ).toEqual([
+      ['cards', 'true'],
+      ['kanban', 'false'],
+      ['list', 'false'],
+    ]);
+  });
+
+  it('shows one card at a time, the card to test first and then the one waiting on the owner', async () => {
+    const { root } = await open({ extraCards: [waiting] });
+    expect(where(root)).toBe('1 of 6');
+    expect(shownTitle(root)).toBe('Try the board');
+    expect(root.querySelectorAll('[data-board-cards] [data-task], [data-board-cards] [data-to-test]')).toHaveLength(1);
+    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To test');
+    await interact(() => step(root, 'Next card').click());
+    expect(where(root)).toBe('2 of 6');
+    expect(shownTitle(root)).toBe('Needs a call');
+    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('Waiting on you');
+    await interact(() => step(root, 'Next card').click());
+    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('Other');
+  });
+
+  it('stops at both ends of the stack', async () => {
+    const { root } = await open({ extraCards: [waiting] });
+    expect(step(root, 'Previous card').disabled).toBe(true);
+    for (let at = 1; at < 6; at += 1) await interact(() => step(root, 'Next card').click());
+    expect(where(root)).toBe('6 of 6');
+    expect(step(root, 'Next card').disabled).toBe(true);
+    await interact(() => step(root, 'Previous card').click());
+    expect(where(root)).toBe('5 of 6');
+  });
+
+  it('marks a card to test Done with the button, through the Board’s own move', async () => {
+    const { root, acts } = await open();
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-done]'), 'Done').click());
+    await interact(() => flush());
+    expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
+  });
+
+  it('sends a card to test back with the owner’s words, through the Board’s reason box', async () => {
+    const { root, acts } = await open();
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click());
+    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
+    expect(acts).toEqual([]);
+    const form = dialog.closest('form') ?? dialog;
+    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'It crashes');
+    await submit(form as HTMLElement);
+    await interact(() => flush());
+    expect(acts).toHaveLength(1);
+    expect(acts[0]?.id).toBe('F22');
+    expect(JSON.stringify(acts[0]?.request)).toContain('It crashes');
+  });
+
+  it('draws How to test on the card to test', async () => {
+    const { root } = await open({
+      extraCards: [card('F50', { owner: SELF, laneId: 'tested', title: 'Steps', howToTest: '1. Press it' })],
+    });
+    await interact(() => step(root, 'Next card').click());
+    expect(shownTitle(root)).toBe('Steps');
+    expect(root.querySelector('[data-to-test-how]')?.textContent).toContain('Press it');
+  });
+
+  it('draws a card that is not to test as the ordinary card, with no swipe row', async () => {
+    const { root } = await open({ extraCards: [waiting] });
+    await interact(() => step(root, 'Next card').click());
+    expect(root.querySelector('[data-board-cards] [data-to-test]')).toBeNull();
+    expect(root.querySelector('[data-board-cards] [data-task="F40"]')).not.toBeNull();
+  });
+
+  it('opens the card’s drawer from the title of a card to test', async () => {
+    const { root } = await open();
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title').click());
+    expect(document.body.querySelector('.fy-board-detail__scrim')).not.toBeNull();
+  });
+
+  it('switches to Kanban and back, and remembers the pick on this device', async () => {
+    const { root } = await open();
+    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="kanban"]'), 'Kanban').click());
+    expect(boardSideView.snapshot()).toBe('kanban');
+    expect(root.querySelector('[data-board-cards]')).toBeNull();
+    expect(root.querySelector('[data-board-side-kanban]')).not.toBeNull();
+    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="cards"]'), 'Cards').click());
+    expect(root.querySelector('[data-board-cards]')).not.toBeNull();
+  });
+
+  it('says so when the ferret has no cards', async () => {
+    const chat = await chatOf();
+    const { root } = await open({ chat: { ...chat, cards: { ...chat.cards, total: 0, hiddenAgents: 0 } } });
+    expect(root.querySelector('[data-board-cards]')).toBeNull();
+    expect(root.querySelector('[data-board-side-empty]')).not.toBeNull();
+  });
+});
+
+const pointer = (type: string, x: number, init: PointerEventInit = {}): PointerEvent =>
+  new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: 300,
+    pointerId: 9,
+    pointerType: 'touch',
+    ...init,
+  });
+
+const swipe = async (root: HTMLElement, dx: number): Promise<void> => {
+  const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__meta'), 'a place to grab');
+  await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx / 2)));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx)));
+  await interact(() => grip.dispatchEvent(pointer('pointerup', 100 + dx)));
+};
+
+describe('ChatTasks — swiping a card to test, at once', () => {
+  beforeEach(() => boardSideView.set('cards'));
+
+  it('a right swipe is Done, with no tap on a button first', async () => {
+    const { root, acts } = await open();
+    await swipe(root, 300);
+    await interact(() => flush());
+    expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
+  });
+
+  it('a left swipe opens the Board’s reason box and moves nothing yet', async () => {
+    const { root, acts } = await open();
+    await swipe(root, -300);
+    await interact(() => flush());
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(acts).toEqual([]);
+  });
+
+  it('a short swipe does nothing', async () => {
+    const { root, acts } = await open();
+    await swipe(root, 40);
+    await interact(() => flush());
+    expect(acts).toEqual([]);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
