@@ -15,6 +15,7 @@ import {
   SKILL_ID,
   ScriptedPrompt,
   mcpItem,
+  sharedItem,
   skillItem,
 } from './fixtures';
 
@@ -308,5 +309,91 @@ describe('fy catalog export', () => {
       'no item in Team tools "ghost"',
     );
     should(gateway.calls.some(call => call.call === 'export')).equal(false);
+  });
+});
+
+describe('fy catalog default', () => {
+  it('should make the catalog the default by id, asking nothing', async () => {
+    const { controller, gateway, out, prompt } = build();
+    await controller.makeDefault('Team tools', {});
+    should(gateway.calls.at(-1)).eql({ call: 'update', catalogId: CATALOG_ID, request: { role: 'default' } });
+    should(prompt.asked).have.length(0);
+    should(out.text).containEql('is now the default catalog');
+  });
+
+  it('should print the payload with --json', async () => {
+    const { controller, out } = build();
+    await controller.makeDefault('Team tools', { json: true });
+    should(JSON.parse(out.text).id).equal(CATALOG_ID);
+  });
+});
+
+describe('fy catalog ls (default)', () => {
+  it('should mark the default catalog', async () => {
+    const gateway = new FakeGateway({ catalogs: [catalog({ role: 'default' })], preview: preview() });
+    const { controller, out } = build({ gateway });
+    await controller.list({});
+    should(out.text).containEql(`(${CATALOG_ID}) · default · revision`);
+  });
+});
+
+describe('fy catalog add --item', () => {
+  const other = catalog({ items: [] });
+  const shared = (gateway: FakeGateway) => gateway.calls.filter(call => call.call === 'listItems');
+
+  it('should show the frozen review, ask, then list the item at the version shown', async () => {
+    const gateway = new FakeGateway({ catalogs: [other], preview: preview({ version: 2 }), shared: [sharedItem()] });
+    const { controller, out, prompt } = build({ gateway, answers: ['y'] });
+    await controller.add('Team tools', { item: 'pdf-tools' });
+    should(shared(gateway)).have.length(1);
+    should(gateway.calls.slice(-2)).eql([
+      { call: 'preview', catalogId: CATALOG_ID, request: { itemId: SKILL_ID } },
+      { call: 'add', catalogId: CATALOG_ID, request: { itemId: SKILL_ID, version: 2 } },
+    ]);
+    should(out.lines[0]).containEql('line two');
+    should(prompt.asked[0]).containEql('Add skill pdf-tools to Team tools exactly as shown above? [y/N]');
+    should(out.lines[1]).startWith('Added pdf-tools version 1');
+  });
+
+  it('should add nothing when the answer is no', async () => {
+    const gateway = new FakeGateway({ catalogs: [other], preview: preview(), shared: [sharedItem()] });
+    const { controller } = build({ gateway, answers: [''] });
+    await should(controller.add('Team tools', { item: SKILL_ID })).rejectedWith(/^cancelled/);
+    should(writes(gateway).filter(call => call.call !== 'listItems')).have.length(0);
+  });
+
+  it('should print one payload with --json', async () => {
+    const gateway = new FakeGateway({ catalogs: [other], preview: preview(), shared: [sharedItem()] });
+    const { controller, out } = build({ gateway });
+    await controller.add('Team tools', { item: 'pdf-tools', yes: true, json: true });
+    should(JSON.parse(out.text).itemId).equal(SKILL_ID);
+  });
+
+  it('should refuse an item the catalog already lists, before previewing', async () => {
+    const gateway = new FakeGateway();
+    const { controller } = build({ gateway });
+    await should(controller.add('Team tools', { item: 'pdf-tools', yes: true })).rejectedWith(
+      /already lists pdf-tools/,
+    );
+    should(gateway.calls.some(call => call.call === 'preview')).equal(false);
+  });
+
+  it('should list again an item the catalog withdrew', async () => {
+    const gateway = new FakeGateway({
+      catalogs: [catalog({ items: [skillItem({ withdrawnAt: '2026-10-31T10:00:00.000Z' })] })],
+      preview: preview(),
+      shared: [sharedItem()],
+    });
+    const { controller } = build({ gateway });
+    await controller.add('Team tools', { item: 'pdf-tools', yes: true });
+    should(gateway.calls.at(-1)).match({ call: 'add', request: { itemId: SKILL_ID } });
+  });
+
+  it('should refuse a name the machine does not keep, and mixing with a source', async () => {
+    const gateway = new FakeGateway();
+    const { controller } = build({ gateway });
+    await should(controller.add('Team tools', { item: 'nope', yes: true })).rejectedWith(/no shared item "nope"/);
+    await should(controller.add('Team tools', { item: 'x', skill: 'y' })).rejectedWith(/--item alone/);
+    await should(controller.add('Team tools', { item: 'x', mcp: 'y' })).rejectedWith(/--item alone/);
   });
 });

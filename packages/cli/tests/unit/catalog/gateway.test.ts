@@ -62,6 +62,15 @@ describe('protocol catalog gateway', () => {
     should(actual.catalogs).have.length(1);
   });
 
+  it('should read every shared item with a plain GET', async () => {
+    const calls: Call[] = [];
+    const actual = await new ProtocolCatalogGateway(
+      fakeClient({ publisher: catalogList().publisher, items: [] }, calls),
+    ).listItems();
+    should(calls[0]).match({ path: '/v1/catalog-items', init: undefined });
+    should(actual.items).eql([]);
+  });
+
   it('should ask for the source check only when told to', async () => {
     const calls: Call[] = [];
     await new ProtocolCatalogGateway(fakeClient(catalogList(), calls)).list({ sourceState: true });

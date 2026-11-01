@@ -8,6 +8,8 @@ import {
   type OwnedCatalog,
   type OwnedCatalogItem,
   type OwnedCatalogList,
+  type OwnedSharedItem,
+  type OwnedSharedItemList,
   type PublishCatalogVersionRequest,
   type PublishedCatalogItem,
   type SharedCatalogFile,
@@ -69,6 +71,29 @@ export function catalog(overrides: Partial<OwnedCatalog> = {}): OwnedCatalog {
     issuedAt: AT,
     createdAt: AT,
     items: [skillItem(), mcpItem()],
+    ...overrides,
+  };
+}
+
+export function sharedItem(overrides: Partial<OwnedSharedItem> = {}): OwnedSharedItem {
+  return {
+    itemId: SKILL_ID,
+    kind: 'skill',
+    name: 'pdf-tools',
+    summary: 'Split, merge and OCR PDFs',
+    source: { kind: 'skill', path: '/home/u/.claude/skills/pdf-tools/SKILL.md' },
+    current: 1,
+    createdAt: AT,
+    catalogs: [{ catalogId: CATALOG_ID, state: 'live' }],
+    versions: [
+      {
+        version: 1,
+        size: 120,
+        publishedAt: AT,
+        summary: 'Split, merge and OCR PDFs',
+        usedBy: { catalogIds: [CATALOG_ID] },
+      },
+    ],
     ...overrides,
   };
 }
@@ -209,6 +234,7 @@ export class MemoryFiles implements ICatalogFileWriter {
 
 export type GatewayCall =
   | { call: 'list'; sourceState: boolean }
+  | { call: 'listItems' }
   | { call: 'create'; request: CreateCatalogRequest }
   | { call: 'update'; catalogId: string; request: UpdateCatalogRequest }
   | { call: 'remove'; catalogId: string }
@@ -225,7 +251,11 @@ export class FakeGateway implements ICatalogGateway {
   signedDigest: string | undefined;
 
   constructor(
-    private readonly state: { catalogs: readonly OwnedCatalog[]; preview: CatalogItemPreview } = {
+    private readonly state: {
+      catalogs: readonly OwnedCatalog[];
+      preview: CatalogItemPreview;
+      shared?: readonly OwnedSharedItem[];
+    } = {
       catalogs: [catalog()],
       preview: preview(),
     },
@@ -234,6 +264,10 @@ export class FakeGateway implements ICatalogGateway {
   list(options: { readonly sourceState: boolean } = { sourceState: false }): Promise<OwnedCatalogList> {
     this.calls.push({ call: 'list', sourceState: options.sourceState });
     return Promise.resolve(catalogList(this.state.catalogs));
+  }
+  listItems(): Promise<OwnedSharedItemList> {
+    this.calls.push({ call: 'listItems' });
+    return Promise.resolve({ publisher: PUBLISHER, items: this.state.shared ?? [sharedItem()] });
   }
   create(request: CreateCatalogRequest): Promise<OwnedCatalog> {
     this.calls.push({ call: 'create', request });

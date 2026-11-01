@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import { verifySharedCatalogFile } from '@ferretry/relay';
+import type { OwnedCatalogList } from '@ferretry/protocol';
 import should from 'should';
 import { CatalogsDocumentSchema } from '../../../src/lib/shared-catalogs/document.ts';
 import {
@@ -142,6 +143,17 @@ describe('migrateCatalogs', () => {
   });
 });
 
+/** The keys 3c-2 added, each optional, taken off so the answer can be held to what the version 1 daemon said. */
+function withoutAddedKeys(list: OwnedCatalogList): unknown {
+  return {
+    ...list,
+    catalogs: list.catalogs.map(({ role: _role, ...catalog }) => ({
+      ...catalog,
+      items: catalog.items.map(({ current: _current, ...item }) => item),
+    })),
+  };
+}
+
 describe('the upgrade, inside the service', () => {
   it('should keep every export byte for byte what the version 1 daemon made, and every item', async () => {
     const { r, legacy } = await upgraded();
@@ -171,7 +183,7 @@ describe('the upgrade, inside the service', () => {
   it('should answer a list as the version 1 daemon did: same digests and sizes per catalog', async () => {
     const { r, legacy } = await upgraded();
     const listed = await r.service.list();
-    should(JSON.stringify(listed)).equal(JSON.stringify(GOLDEN.list));
+    should(JSON.stringify(withoutAddedKeys(listed))).equal(JSON.stringify(GOLDEN.list));
     const skill = legacy.document.catalogs[0]?.items[0];
     const item = listed.catalogs[0]?.items[0];
     should(item?.versions).deepEqual(
@@ -285,7 +297,7 @@ describe('the upgrade, inside the service', () => {
   it('should leave an unchanged source unchanged, and publish nothing for it, after the upgrade', async () => {
     const { r } = await upgraded();
     const listed = await r.service.list({ sourceState: true });
-    should(JSON.stringify(listed)).equal(JSON.stringify(GOLDEN.listWithState));
+    should(JSON.stringify(withoutAddedKeys(listed))).equal(JSON.stringify(GOLDEN.listWithState));
     const states = listed.catalogs.flatMap(catalog => catalog.items.map(item => [item.itemId, item.sourceState]));
     should(states).deepEqual([
       [LEGACY_SKILL, 'unchanged'],

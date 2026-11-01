@@ -34,6 +34,15 @@ import {
 
 export const SHARED_CATALOGS_PATH = '/v1/catalogs';
 
+/** `GET /v1/catalog-items`: the shared items this machine keeps, whichever catalogs list them. */
+export const CATALOG_ITEMS_PATH = '/v1/catalog-items';
+
+/** Most catalogs one machine keeps. Making one past it is refused `catalogs_full`. */
+export const CATALOGS_MAX_PER_PUBLISHER = 256;
+
+/** Most shared items one machine keeps. A new item past it is refused `items_full`. */
+export const SHARED_ITEMS_MAX = 4_096;
+
 /** The sentence a request for a public catalog is refused with. */
 export const CATALOG_PUBLIC_UNAVAILABLE =
   'A public catalog is not available yet. Catalogs are shared with the people you add as members, and until members exist, as a file.';
@@ -92,10 +101,12 @@ export const OwnedCatalogItemSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   kind: CatalogItemKindSchema,
   name: CatalogItemNameSchema,
-  /** The latest version's summary. */
+  /** The current version's summary. */
   summary: CatalogSummarySchema,
   harness: CatalogHarnessSchema.optional(),
   source: CatalogSourceReferenceSchema,
+  /** The version every catalog that lists this item live puts in its manifest. Absent from an older daemon: the latest. */
+  current: z.number().int().min(1).optional(),
   /** Only when it was asked for (`?sourceState=1`): finding it re-reads the source, so a plain list does not. */
   sourceState: CatalogSourceStateSchema.optional(),
   /** Why a source is `unavailable`, in words. */
@@ -106,6 +117,10 @@ export const OwnedCatalogItemSchema = z.strictObject({
   versions: z.array(CatalogItemVersionSchema).min(1).readonly(),
 });
 export type OwnedCatalogItem = z.infer<typeof OwnedCatalogItemSchema>;
+
+/** A catalog is the default (where one tap adds) or one of the others. Kept by id, never by name. */
+export const CatalogRoleSchema = z.enum(['default', 'collection']);
+export type CatalogRole = z.infer<typeof CatalogRoleSchema>;
 
 export const OwnedCatalogSchema = z.strictObject({
   id: SharedCatalogIdSchema,
@@ -119,6 +134,8 @@ export const OwnedCatalogSchema = z.strictObject({
   /** When the current revision was made. An export signs this instant, so exporting twice is the same bytes. */
   issuedAt: InstantSchema,
   createdAt: InstantSchema,
+  /** Absent from an older daemon: every catalog was then a collection. */
+  role: CatalogRoleSchema.optional(),
   items: z.array(OwnedCatalogItemSchema).readonly(),
 });
 export type OwnedCatalog = z.infer<typeof OwnedCatalogSchema>;
@@ -126,9 +143,65 @@ export type OwnedCatalog = z.infer<typeof OwnedCatalogSchema>;
 /** `GET /v1/catalogs`: every catalog on this machine. */
 export const OwnedCatalogListSchema = z.strictObject({
   publisher: DaemonIdSchema,
+  /** The catalog one tap adds to. Absent when there is none yet, and from an older daemon. */
+  defaultCatalogId: SharedCatalogIdSchema.optional(),
   catalogs: z.array(OwnedCatalogSchema).readonly(),
 });
 export type OwnedCatalogList = z.infer<typeof OwnedCatalogListSchema>;
+
+// ── The shared items ─────────────────────────────────────────────────────────────────────────────
+
+/** One version of a shared item, and where it is in use. */
+export const OwnedSharedItemVersionSchema = z.strictObject({
+  version: z.number().int().min(1),
+  /** Bytes of the frozen copy, which is the same whichever catalog lists it. */
+  size: z.number().int().min(1),
+  publishedAt: InstantSchema,
+  summary: CatalogSummarySchema,
+  /** Skills only: how many files it holds. */
+  fileCount: z.number().int().min(0).optional(),
+  /** Every catalog lists the current version, so this is the live catalogs for it and empty for any other. */
+  usedBy: z.strictObject({ catalogIds: z.array(SharedCatalogIdSchema).readonly() }),
+});
+export type OwnedSharedItemVersion = z.infer<typeof OwnedSharedItemVersionSchema>;
+
+/** Whether a catalog lists the item now, or did once and took it out. */
+export const OwnedSharedItemCatalogSchema = z.strictObject({
+  catalogId: SharedCatalogIdSchema,
+  state: z.enum(['live', 'withdrawn']),
+  withdrawnAt: InstantSchema.optional(),
+});
+export type OwnedSharedItemCatalog = z.infer<typeof OwnedSharedItemCatalogSchema>;
+
+/** An item of the table: kept once, listed by any number of catalogs. */
+export const OwnedSharedItemSchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  kind: CatalogItemKindSchema,
+  name: CatalogItemNameSchema,
+  /** The current version's summary. */
+  summary: CatalogSummarySchema,
+  harness: CatalogHarnessSchema.optional(),
+  /** Where the current version was read from. */
+  source: CatalogSourceReferenceSchema,
+  /** The version every catalog that lists this item live puts in its manifest. */
+  current: z.number().int().min(1),
+  createdAt: InstantSchema,
+  /** Only when it was asked for (`?sourceState=1`), and against the current version. */
+  sourceState: CatalogSourceStateSchema.optional(),
+  sourceNote: z.string().max(1_024).optional(),
+  catalogs: z.array(OwnedSharedItemCatalogSchema).readonly(),
+  /** Oldest first. */
+  versions: z.array(OwnedSharedItemVersionSchema).min(1).readonly(),
+});
+export type OwnedSharedItem = z.infer<typeof OwnedSharedItemSchema>;
+
+/** `GET /v1/catalog-items`. */
+export const OwnedSharedItemListSchema = z.strictObject({
+  publisher: DaemonIdSchema,
+  defaultCatalogId: SharedCatalogIdSchema.optional(),
+  items: z.array(OwnedSharedItemSchema).readonly(),
+});
+export type OwnedSharedItemList = z.infer<typeof OwnedSharedItemListSchema>;
 
 // ── Catalogs ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -140,21 +213,27 @@ export const CreateCatalogRequestSchema = z.strictObject({
 });
 export type CreateCatalogRequest = z.infer<typeof CreateCatalogRequestSchema>;
 
-/** `PATCH /v1/catalogs/:id`: rename it, describe it, or change the name this machine signs it under. */
+/**
+ * `PATCH /v1/catalogs/:id`: rename it, describe it, change the name this machine signs it under, or make it the
+ * default. `role` can only be `default`: the default moves by promoting another catalog, so there is never
+ * none by accident. Making a catalog the default changes nothing a manifest says, so the revision stays.
+ */
 export const UpdateCatalogRequestSchema = z
   .strictObject({
     name: CatalogLabelSchema.optional(),
     description: CatalogDescriptionSchema.optional(),
     publisherName: CatalogLabelSchema.optional(),
     visibility: CatalogVisibilitySchema.optional(),
+    role: z.literal('default').optional(),
   })
   .refine(
     request =>
       request.name !== undefined ||
       request.description !== undefined ||
       request.publisherName !== undefined ||
-      request.visibility !== undefined,
-    'name a change: a name, a description, a publisher name or a visibility',
+      request.visibility !== undefined ||
+      request.role !== undefined,
+    'name a change: a name, a description, a publisher name, a visibility or a role',
   );
 export type UpdateCatalogRequest = z.infer<typeof UpdateCatalogRequestSchema>;
 
@@ -199,12 +278,18 @@ export const CatalogItemPreviewSchema = z.strictObject({
 });
 export type CatalogItemPreview = z.infer<typeof CatalogItemPreviewSchema>;
 
-/** `POST /v1/catalogs/:id/items`: the first version, only if the source still hashes to `digest`. */
-export const AddCatalogItemRequestSchema = z.strictObject({
-  source: CatalogItemSourceSchema,
-  digest: CatalogDigestSchema,
-  summary: CatalogSummarySchema.optional(),
-});
+/**
+ * `POST /v1/catalogs/:id/items`: a new item, only if the source still hashes to `digest`; or an item this machine
+ * already keeps, listed here too. `version` is the one the person reviewed and must still be the current one.
+ */
+export const AddCatalogItemRequestSchema = z.union([
+  z.strictObject({
+    source: CatalogItemSourceSchema,
+    digest: CatalogDigestSchema,
+    summary: CatalogSummarySchema.optional(),
+  }),
+  z.strictObject({ itemId: SharedCatalogItemIdSchema, version: z.number().int().min(1) }),
+]);
 export type AddCatalogItemRequest = z.infer<typeof AddCatalogItemRequestSchema>;
 
 /** `POST /v1/catalogs/:id/items/:itemId/versions`: the next version, only if the source still hashes to `digest`. */

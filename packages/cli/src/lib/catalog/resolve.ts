@@ -1,4 +1,4 @@
-import type { OwnedCatalog, OwnedCatalogItem } from '@ferretry/protocol';
+import type { OwnedCatalog, OwnedCatalogItem, OwnedSharedItem } from '@ferretry/protocol';
 
 const lower = (value: string): string => value.toLowerCase();
 
@@ -32,6 +32,11 @@ export function pick<T extends { readonly name: string }>(
 
 export function resolveCatalog(catalogs: readonly OwnedCatalog[], wanted: string): OwnedCatalog {
   return pick(catalogs, catalog => catalog.id, wanted, 'catalog');
+}
+
+/** An item this machine keeps, by id or name. */
+export function resolveSharedItem(items: readonly OwnedSharedItem[], wanted: string): OwnedSharedItem {
+  return pick(items, item => item.itemId, wanted, 'shared item');
 }
 
 /** A live item by id or name; a withdrawn item only by its id, so a name never reaches back to one. */

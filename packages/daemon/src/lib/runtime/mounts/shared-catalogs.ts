@@ -38,6 +38,7 @@ export interface SharedCatalogSubsystem {
   readonly catalogs: Pick<
     SharedCatalogService,
     | 'list'
+    | 'listItems'
     | 'create'
     | 'update'
     | 'remove'
@@ -59,6 +60,10 @@ const STATUS: Readonly<Record<CatalogRefusalCode, number>> = {
   item_withdrawn: 409,
   name_taken: 409,
   catalog_full: 409,
+  catalogs_full: 409,
+  items_full: 409,
+  item_listed: 409,
+  current_changed: 409,
   public_unavailable: 400,
   source_unknown: 404,
   source_ambiguous: 409,
@@ -114,6 +119,16 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       noStore: true,
       handle: async context =>
         await answer(() => catalogs.list({ sourceState: queryValue(context.request, 'sourceState') === '1' })),
+    },
+    {
+      method: 'GET',
+      path: '/v1/catalog-items',
+      minimum: 'operator',
+      caller: 'any',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context =>
+        await answer(() => catalogs.listItems({ sourceState: queryValue(context.request, 'sourceState') === '1' })),
     },
     {
       method: 'POST',

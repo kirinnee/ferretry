@@ -83,6 +83,15 @@ export function registerCatalogCommands(program: Command, controller: CatalogCon
     });
 
   catalog
+    .command('default')
+    .description('make this the default catalog, where one tap adds')
+    .argument('<catalog>', 'the catalog id or name')
+    .option('--json', JSON_HELP)
+    .action(async (name: string, _flags: unknown, command: Command) => {
+      await controller.makeDefault(name, merged(command));
+    });
+
+  catalog
     .command('rm')
     .alias('remove')
     .description('delete a catalog and every version in it')
@@ -95,8 +104,11 @@ export function registerCatalogCommands(program: Command, controller: CatalogCon
 
   catalog
     .command('add')
-    .description('freeze a skill or an MCP setup into a catalog, after showing you all of it')
+    .description(
+      'freeze a skill or an MCP setup into a catalog, or list an item you already keep, after showing you all of it',
+    )
     .argument('<catalog>', 'the catalog id or name')
+    .option('--item <item>', 'an item this machine already keeps (id or name), listed here too at its current version')
     .option('--skill <source>', 'a SKILL.md path from the skills inventory, or a skill name')
     .option('--mcp <source>', 'an MCP inventory server id, or a server name')
     .option('--summary <text>', "your own words for what it does, instead of the skill's description")

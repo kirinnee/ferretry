@@ -3,16 +3,18 @@ import type { CatalogItemSource, OwnedCatalog } from '@ferretry/protocol';
 import type { ICatalogFileWriter, ICatalogGateway, ICatalogOutput, ICatalogPrompt } from './ports.ts';
 import {
   renderCatalogCreated,
+  renderCatalogDefault,
   renderCatalogDeleted,
   renderCatalogList,
   renderCatalogUpdated,
   renderExported,
+  renderListed,
   renderPreview,
   renderPublished,
   renderSigning,
   renderWithdrawn,
 } from './render.ts';
-import { catalogFileSlug, resolveCatalog, resolveItem } from './resolve.ts';
+import { catalogFileSlug, resolveCatalog, resolveItem, resolveSharedItem } from './resolve.ts';
 
 export interface CatalogCommandOptions {
   readonly json?: boolean;
@@ -30,6 +32,8 @@ export interface CatalogCreateOptions extends CatalogCommandOptions {
 export interface CatalogAddOptions extends CatalogConfirmedOptions {
   readonly skill?: string;
   readonly mcp?: string;
+  /** An item this machine already keeps (id or name), listed here too. */
+  readonly item?: string;
   readonly summary?: string;
 }
 
@@ -85,6 +89,13 @@ export class CatalogController {
     this.#report(updated, options, () => renderCatalogUpdated(updated));
   }
 
+  /** Makes a catalog the default, where one tap adds. Nothing a manifest says changes. */
+  async makeDefault(catalog: string, options: CatalogCommandOptions): Promise<void> {
+    const found = await this.#catalog(catalog);
+    const updated = await this.gateway.update(found.id, { role: 'default' });
+    this.#report(updated, options, () => renderCatalogDefault(updated));
+  }
+
   async remove(catalog: string, options: CatalogConfirmedOptions): Promise<void> {
     const found = await this.#catalog(catalog);
     await this.#confirm(
@@ -97,6 +108,7 @@ export class CatalogController {
 
   /** Previews the source, shows it in full, and freezes it as version 1 only if the person says yes. */
   async add(catalog: string, options: CatalogAddOptions): Promise<void> {
+    if (options.item !== undefined) return await this.#addExisting(catalog, options.item, options);
     const source = requestedSource(options);
     const found = await this.#catalog(catalog);
     const summary = options.summary === undefined ? {} : { summary: options.summary };
@@ -105,6 +117,21 @@ export class CatalogController {
     await this.#confirm(`Add ${preview.kind} ${preview.name} to ${found.name} exactly as shown above?`, options);
     const published = await this.gateway.add(found.id, { source, digest: preview.digest, ...summary });
     this.#report(published, options, () => renderPublished(published));
+  }
+
+  /** Shows the frozen current version of an item this machine already keeps, and lists it here if the person says yes. */
+  async #addExisting(catalog: string, item: string, options: CatalogAddOptions): Promise<void> {
+    if (options.skill !== undefined || options.mcp !== undefined)
+      throw new Error('pass --item alone, or --skill / --mcp for something new');
+    const found = await this.#catalog(catalog);
+    const target = resolveSharedItem((await this.gateway.listItems()).items, item);
+    if (found.items.some(listed => listed.itemId === target.itemId && listed.withdrawnAt === undefined))
+      throw new Error(`${found.name} already lists ${target.name}`);
+    const preview = await this.gateway.preview(found.id, { itemId: target.itemId });
+    this.#showPreview(preview, options);
+    await this.#confirm(`Add ${preview.kind} ${preview.name} to ${found.name} exactly as shown above?`, options);
+    const published = await this.gateway.add(found.id, { itemId: target.itemId, version: preview.version });
+    this.#report(published, options, () => renderListed(published, found.name));
   }
 
   /** Previews the next version of an item from the source it remembers, and publishes it if the person says yes. */
