@@ -1030,6 +1030,30 @@
   flex: 1 1 auto;
   border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
+/* A card to test in the quick-answer run: where it is in the run, then the same row as the list, scrolling on its own. */
+.fy-inbox-step {
+  display: flex;
+  box-sizing: border-box;
+  height: var(--deck-room, max(20rem, calc(100dvh - 22rem)));
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  overflow-y: auto;
+}
+.fy-inbox-step__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+}
+.fy-inbox-step__rank {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-inbox-step__pager {
+  display: flex;
+  align-items: center;
+}
 /* A peek is only an edge (see the deck above): its view is drawn, but nothing of it shows. */
 .fy-attn-deck__peek .fy-inbox-open {
   height: 100%;
@@ -1115,6 +1139,7 @@
   padding-left: 0;
 }
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__cardbar,
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-step,
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-deck-foot {
   padding-right: 16px;
   padding-left: 16px;
