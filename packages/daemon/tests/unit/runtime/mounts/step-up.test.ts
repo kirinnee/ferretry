@@ -387,6 +387,35 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'approve-task-plan')).be.false();
   });
 
+  it('should mint no approve-sign-in-rule challenge while this daemon stages no standing rules', async () => {
+    // Arrange — a device with a passkey, and a 2FA stage and a plan stage that must not stand in for a rule's
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });
+    const dispatcher = await world.surface;
+    const ask = async (body: unknown) =>
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
+      );
+    const ruleStage = `srs_${'d'.repeat(24)}`;
+
+    // Act
+    const options = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: ruleStage });
+    const borrowed = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: STAGE });
+    const unbound = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule' });
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — refused before any challenge: nothing to answer, nothing claimable for any subject
+    should(options.status).equal(404);
+    should(jsonBody(options)).containEql({ code: 'stage_not_found' });
+    should([borrowed.status, unbound.status]).deepEqual([400, 400]);
+    should(stepped.status).not.equal(200);
+    should(world.service.claimFresh(browser, 'approve-sign-in-rule', ruleStage)).be.false();
+    should(world.service.claimFresh(browser, 'approve-sign-in-rule', BOUND)).be.false();
+    // @ts-expect-error — an act every caller must prove names what its proof is bound to
+    should(world.service.claimFresh(browser, 'approve-sign-in-rule')).be.false();
+  });
+
   it('should bind an approve-task-plan proof to the one staged selection it named, and to nothing else', async () => {
     // Arrange — a selection waiting for its passkey, bound to PLAN_BOUND, beside a 2FA stage bound to BOUND
     const planStage = `tps_${'c'.repeat(24)}`;

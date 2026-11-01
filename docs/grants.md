@@ -388,11 +388,15 @@ right after an unlock. **A fresh proof is stamped with the act it was proved for
 it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
 for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
 at admission, so one passkey buys one install. At the machine, nothing is asked — **except saving a 2FA seed**
-(act `add-2fa-key`) **and approving a task plan's sign-in lines** (act `approve-task-plan`): those two are asked of
-EVERY caller, the admin token on loopback included, and each proof is bound to the one staged thing it commits
-(`subject`: the staged save `st_…`, or the staged selection `tps_…`, never the other's), opens no step-up window,
-and is never the fresh proof another act takes ([secrets.md](secrets.md#2fa-keys),
-[secure-copy.md](secure-copy.md#task-plans)). A task plan's routes are `caller: 'person'`: staging, committing and
+(act `add-2fa-key`), **approving a task plan's sign-in lines** (act `approve-task-plan`) **and approving a standing
+sign-in rule** (act `approve-sign-in-rule`): those three are asked of EVERY caller, the admin token on loopback
+included, and each proof is bound to the one staged thing it commits (`subject`: the staged save `st_…`, the staged
+selection `tps_…` or the staged rule `srs_…`, never another's), opens no step-up window, and is never the fresh proof
+another act takes ([secrets.md](secrets.md#2fa-keys), [secure-copy.md](secure-copy.md#task-plans)). A standing rule's
+proof is also a **stored proof** (`STEP_UP_ACTS_STORED_PROOF`): its challenge is derived from the rule's signed bytes
+and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Until the rule
+service lands, its options answer `404 stage_not_found` and mint no challenge
+([input-requests.md](input-requests.md#coming-and-off-by-default-standing-sign-in-rules)). A task plan's routes are `caller: 'person'`: staging, committing and
 confirming a selection demand `terminal.configure` (plus `browser.use` for a page sign-in or a paste into a page, and
 `secrets.configure` for a paste into the store), while reading plans, dropping a stage and revoking only narrow and
 demand `terminal.use`; revoking never asks for a passkey. Every one that answers a plan or a stage's summary also

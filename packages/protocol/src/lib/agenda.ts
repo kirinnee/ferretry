@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { AccountIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
+import {
+  AccountIdSchema,
+  SignInRuleIdSchema,
+  SignInRuleSuggestionIdSchema,
+  TwoFactorStageIdSchema,
+} from './account-ids.ts';
 import { TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
@@ -832,6 +837,22 @@ export const AgendaTwoFactorSeedRefSchema = z.strictObject({
 export type AgendaTwoFactorSeedRef = z.infer<typeof AgendaTwoFactorSeedRefSchema>;
 
 /**
+ * A FERRET'S SUGGESTION of a standing sign-in rule (sign-in-rules.ts, `account.propose` with `preapprove`): the card's
+ * only action opens the owner's create sheet with NOTHING ticked. It names the suggestion, never an account, and the
+ * generic agenda answer creates nothing. Only the daemon raises one.
+ */
+export const AgendaSignInRuleSuggestionRefSchema = z.strictObject({ suggestion: SignInRuleSuggestionIdSchema });
+export type AgendaSignInRuleSuggestionRef = z.infer<typeof AgendaSignInRuleSuggestionRefSchema>;
+
+/**
+ * A standing sign-in rule a fill in this session SUSPENDED (sign-in-rules.ts): an `info` card that sends the owner to
+ * Settings › Secure copy. It names the rule, never an account (the agenda text holds no names), and an agenda answer
+ * resumes nothing: only a new passkey does. Only the daemon raises one.
+ */
+export const AgendaSignInRuleSuspendedRefSchema = z.strictObject({ rule: SignInRuleIdSchema });
+export type AgendaSignInRuleSuspendedRef = z.infer<typeof AgendaSignInRuleSuspendedRefSchema>;
+
+/**
  * What an `input` card may not be, and must be: it carries its request, and no ask, answers, steps or
  * confirmation of its own (the form answers it), and it is never a notice. Anything but an `input` card
  * carries no request.
@@ -931,6 +952,10 @@ const AgendaItemBaseShape = {
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
+  /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
+  signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
+  /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
+  signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -969,6 +994,13 @@ export const AgendaItemSchema = z
         code: 'custom',
         message: 'only an info card presents a phone approval',
         path: ['phoneApproval'],
+      });
+    }
+    if (value.signInRuleSuspended !== undefined && value.kind !== 'info') {
+      context.addIssue({
+        code: 'custom',
+        message: 'only an info card says a standing rule was suspended',
+        path: ['signInRuleSuspended'],
       });
     }
     for (const problem of agendaFormProblems(value)) {

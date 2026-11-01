@@ -136,12 +136,29 @@ export const DAEMON_FEATURES = {
    * REPORTED SINCE THE APP SHOWS THE PLAN CARD: an app that cannot show it keeps the copy-plan card.
    */
   taskPlan: 'task-plan.1',
+  /**
+   * Standing sign-in rules (sign-in-rules.ts, docs/input-requests.md): the owner's passkey-signed permission, kept on
+   * disk, for Ferretry to fill one page sign-in for any ferret until it expires. The input request and its outcome
+   * carry a `sign-in-rule` actor and a `preapproval` note by rule, which an older app's strict parse refuses, so the
+   * daemon fills under a rule only while it reports this name.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the rule service and the app's sheet ship first.
+   */
+  signInRules: 'sign-in-rules.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
 
+/**
+ * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
+ * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
+ */
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.signInRules]);
+
 /** The names a daemon of this build reports, in a stable order. */
-export const daemonFeatureList = (): readonly DaemonFeature[] => Object.values(DAEMON_FEATURES).sort();
+export const daemonFeatureList = (): readonly DaemonFeature[] =>
+  Object.values(DAEMON_FEATURES)
+    .filter(feature => !NOT_YET_REPORTED.has(feature))
+    .sort();
 
 /**
  * Whether a daemon's health report offers a feature. A report with no list at all — a daemon from

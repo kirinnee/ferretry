@@ -1127,6 +1127,26 @@ describe('account.propose', () => {
     expect(viaTool({ tool: 'account.propose', signIn: SI(1), login: 'GITHUB', ...recipe }).success).toBe(false);
     expect(viaTool({ tool: 'account.propose', ...recipe }).success).toBe(false);
   });
+
+  it('should suggest a standing rule with preapprove, the recipe then optional, and never neither', () => {
+    const why = { why: 'I sign in here every day' };
+    const viaTool = (call: unknown) => AgentToolCallSchema.safeParse(call);
+    expect(viaTool({ tool: 'account.propose', signIn: SI(1), preapprove: true, ...why }).success).toBe(true);
+    expect(
+      viaTool({ tool: 'account.propose', signIn: SI(1), preapprove: true, recipe: 'Open the page.', ...why }).success,
+    ).toBe(true);
+    expect(
+      viaTool({ tool: 'account.propose', signIn: SI(1), preapprove: false, recipe: 'Open the page.', ...why }).success,
+    ).toBe(true);
+    // Neither a recipe nor a rule: nothing to suggest.
+    expect(viaTool({ tool: 'account.propose', signIn: SI(1), ...why }).success).toBe(false);
+    expect(viaTool({ tool: 'account.propose', signIn: SI(1), preapprove: false, ...why }).success).toBe(false);
+    // A suggestion names no field, scope, expiry or pin: the owner's sheet starts with nothing ticked.
+    for (const extra of [{ fields: ['password'] }, { scope: { kind: 'any' } }, { uses: 5 }, { totp: true }])
+      expect(viaTool({ tool: 'account.propose', signIn: SI(1), preapprove: true, ...why, ...extra }).success).toBe(
+        false,
+      );
+  });
 });
 
 describe('facts are written only by the daemon (invariant 14)', () => {

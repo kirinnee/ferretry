@@ -13,7 +13,9 @@ import {
   GRANT_MISS_REASONS,
   GRANT_STOPPING_REASONS,
   grantMissLine,
+  grantMissLineFor,
   grantMissWords,
+  ruleMissWords,
   TASK_PLAN_MISS_AGENT_NOTE,
   TASK_PLAN_UNAVAILABLE_REASONS,
   type TaskPlan,
@@ -740,6 +742,66 @@ describe('why a line did not apply', () => {
   it('should name the propose-time and the stopping reasons from the one list', () => {
     for (const reason of [...TASK_PLAN_UNAVAILABLE_REASONS, ...GRANT_STOPPING_REASONS])
       should(GRANT_MISS_REASONS).containEql(reason);
+  });
+
+  it('should name the standing rule misses, and stop on the ones that change what the owner approved', () => {
+    for (const reason of [
+      'suspended',
+      'out-of-scope',
+      'account-changed',
+      'factor-changed',
+      'proof-invalid',
+      'no-history',
+      'code-without-sign-in',
+      'scripted-origin',
+    ] as const)
+      should(GRANT_MISS_REASONS).containEql(reason);
+    should(GRANT_STOPPING_REASONS).containDeep([
+      'account-changed',
+      'factor-changed',
+      'proof-invalid',
+      'scripted-origin',
+    ]);
+    // Scope and history are not drift: a ferret outside the scope, or a form with no taps yet, suspends nothing.
+    should(GRANT_STOPPING_REASONS).not.containEql('out-of-scope');
+    should(GRANT_STOPPING_REASONS).not.containEql('no-history');
+  });
+
+  it("should say a plan line's miss by its line, and a rule's by the rule, suspended where it stops", () => {
+    // Act / Assert — the plan's words are unchanged
+    should(grantMissLineFor({ by: 'plan', line: 1, outcome: 'did-not-apply', reason: 'form-changed' })).equal(
+      grantMissLine(1, 'form-changed'),
+    );
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'form-changed' })).equal(
+      "Your standing rule for this sign-in didn't apply: the sign-in form changed since you approved it. The rule is suspended until you approve it again.",
+    );
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'scripted-origin' })).equal(
+      "Your standing rule for this sign-in didn't apply: a ferret ran a page script on this site. The rule is suspended until you approve it again.",
+    );
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'suspended' })).equal(
+      "Your standing rule for this sign-in didn't apply: it was suspended earlier. The rule is suspended until you approve it again.",
+    );
+    // A miss that is not drift says why, and nothing about a suspension.
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'rate' })).equal(
+      "Your standing rule for this sign-in didn't apply: too many sign-ins were filled in the last hour.",
+    );
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'out-of-scope' })).equal(
+      "Your standing rule for this sign-in didn't apply: it doesn't cover this ferret's session or project.",
+    );
+    // Per source: a rule expires, it is not a plan that ended.
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'expired' })).equal(
+      "Your standing rule for this sign-in didn't apply: the rule had expired.",
+    );
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'sign-in-gone' })).equal(
+      "Your standing rule for this sign-in didn't apply: the sign-in was removed or moved to another account. The rule is suspended.",
+    );
+    // Nothing to say: a fill, a note with no reason, or not-here.
+    should(grantMissLineFor({ by: 'rule', outcome: 'filled' })).be.undefined();
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply' })).be.undefined();
+    should(grantMissLineFor({ by: 'rule', outcome: 'did-not-apply', reason: 'not-here' })).be.undefined();
+    should(grantMissLineFor({ by: 'plan', line: 0, outcome: 'did-not-apply', reason: 'not-here' })).be.undefined();
+    for (const reason of GRANT_MISS_REASONS)
+      if (reason !== 'not-here') should(ruleMissWords(reason)).be.a.String().and.not.be.empty();
   });
 });
 

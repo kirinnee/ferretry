@@ -73,4 +73,37 @@ describe('the 2FA key route shapes', () => {
       AgendaItemSchema.safeParse({ ...item, twoFactorSeed: { stage: 'st_x', account: 'GITHUB' } }).success,
     ).be.false();
   });
+
+  it('should keep the standing-rule suggestion and suspension cards on an item by id, never by an account', () => {
+    const item = {
+      id: 'A8',
+      source: 'question',
+      sourceRef: null,
+      subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+      why: 'Open it to choose what, if anything, to approve.',
+      howToResolve: 'Open the sheet in the Ferretry app.',
+      waitingSince: '2026-10-31T12:00:00Z',
+      kind: 'info',
+      raisedBy: 'daemon',
+      raisedBySession: null,
+      raisedByName: null,
+    };
+    const suggestion = { suggestion: `srg_${'a'.repeat(16)}` };
+    const suspended = { rule: `sr_${'b'.repeat(24)}` };
+
+    should(AgendaItemSchema.safeParse({ ...item, signInRuleSuggestion: suggestion }).data?.signInRuleSuggestion).eql(
+      suggestion,
+    );
+    should(AgendaItemSchema.safeParse({ ...item, signInRuleSuspended: suspended }).data?.signInRuleSuspended).eql(
+      suspended,
+    );
+    for (const bad of [
+      { signInRuleSuggestion: { suggestion: 'srg_x' } },
+      { signInRuleSuggestion: { ...suggestion, account: 'GITHUB' } },
+      { signInRuleSuspended: { rule: `srs_${'b'.repeat(24)}` } },
+      { signInRuleSuspended: { ...suspended, account: 'GITHUB' } },
+      { signInRuleSuspended: suspended, kind: 'permission' },
+    ])
+      should(AgendaItemSchema.safeParse({ ...item, ...bad }).success).be.false();
+  });
 });

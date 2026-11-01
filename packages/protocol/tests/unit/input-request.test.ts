@@ -5,6 +5,7 @@ import { AgendaItemSchema } from '../../src/lib/agenda.ts';
 import { AgentToolCallSchema } from '../../src/lib/agent-tools.ts';
 import { AUDIT_EVENTS } from '../../src/lib/audit.ts';
 import {
+  INPUT_ACTOR_OBSERVER_BY,
   INPUT_AUDIT_EVENTS,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_JOURNAL_EVENT_TYPES,
@@ -13,6 +14,8 @@ import {
   INPUT_PAD_BUCKET_BYTES,
   INPUT_SINGLE_FIELD_ID,
   INPUT_VALUE_MAX_BYTES,
+  type InputActor,
+  InputActorSchema,
   InputAgentViewSchema,
   InputAuditDetailSchema,
   InputCancelBodySchema,
@@ -26,6 +29,10 @@ import {
   InputTargetFactsSchema,
   inputRaiseFields,
   inputValueProblem,
+  LOGIN_OBSERVER_BYS,
+  type LoginObserverBy,
+  observerByOf,
+  ownerTapped,
   padInputValue,
   savedRolesOf,
   strongestSensitivity,
@@ -413,6 +420,103 @@ describe('a card a task plan filled, or tried to', () => {
 
   it('should never tell the ferret about a preapproval', () => {
     should(Object.keys(InputAgentViewSchema.shape)).not.containEql('preapproval');
+  });
+});
+
+describe('a card a standing sign-in rule filled, or tried to', () => {
+  const RULE = `sr_${'1'.repeat(24)}`;
+  const outcome = { at: AT, by: { kind: 'sign-in-rule', rule: RULE, revision: 2 }, submitted: true, source: 'saved' };
+
+  it('should name the rule and its revision a fill was made under as its actor, apart from a paste rule', () => {
+    should(InputOutcomeSchema.safeParse(outcome).success).be.true();
+    should(InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'sign-in-rule', rule: RULE } }).success).be.false();
+    should(
+      InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'sign-in-rule', rule: RULE, revision: 0 } }).success,
+    ).be.false();
+    // A paste rule's 32-hex id is not a sign-in rule's, and the reverse.
+    should(
+      InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'sign-in-rule', rule: ID, revision: 1 } }).success,
+    ).be.false();
+    should(InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'rule', ruleId: RULE } }).success).be.false();
+    should(InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'standing', rule: RULE } }).success).be.false();
+  });
+
+  // Invariant 14 (R3c §14): the actor → observer mapping is exhaustive, and a rule fill never reads as the owner's tap.
+  it('should map every actor to who the login observer says filled it, with no default', () => {
+    // Act
+    const by = [
+      observerByOf({ kind: 'host' }),
+      observerByOf({ kind: 'device', deviceId: 'phone' }),
+      observerByOf({ kind: 'rule', ruleId: ID }),
+      observerByOf({ kind: 'plan', planId: ID, line: 0 }),
+      observerByOf({ kind: 'sign-in-rule', rule: RULE, revision: 1 }),
+    ];
+
+    // Assert
+    should(by).deepEqual(['host', 'device', 'rule', 'plan', 'rule']);
+    should(Object.keys(INPUT_ACTOR_OBSERVER_BY).sort()).deepEqual(
+      InputActorSchema.options.map(option => option.shape.kind.value).sort(),
+    );
+    should(LOGIN_OBSERVER_BYS.filter(ownerTapped)).deepEqual(['device']);
+  });
+
+  it('should refuse to compile a mapping that leaves an actor kind out (type test)', () => {
+    // Arrange — the mapping is keyed by every actor kind: a new kind that is not mapped is a compile error
+    type ObserverMap = { readonly [Kind in InputActor['kind']]: LoginObserverBy };
+    type WithANewKind = { readonly [Kind in InputActor['kind'] | 'new-kind']: LoginObserverBy };
+
+    // Act / Assert
+    const mapped: ObserverMap = INPUT_ACTOR_OBSERVER_BY;
+    // @ts-expect-error — an actor kind added without a mapping fails here, instead of falling through to an owner's tap
+    const unmapped: WithANewKind = INPUT_ACTOR_OBSERVER_BY;
+    // @ts-expect-error — and a mapping missing the sign-in rule does not satisfy the actor kinds
+    const missing: ObserverMap = { host: 'host', device: 'device', rule: 'rule', plan: 'plan' };
+    should(mapped['sign-in-rule']).equal('rule');
+    should(unmapped).equal(INPUT_ACTOR_OBSERVER_BY);
+    should(missing.host).equal('host');
+  });
+
+  it('should carry the owner a rule that did not apply by its rule and revision, and refuse a source it does not know', () => {
+    const missed = { by: 'rule', rule: RULE, revision: 2, outcome: 'did-not-apply', reason: 'scripted-origin' };
+
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: missed }).success).be.true();
+    should(
+      InputRequestSchema.safeParse({
+        ...REQUEST,
+        preapproval: { by: 'rule', rule: RULE, revision: 2, outcome: 'filled' },
+      }).success,
+    ).be.true();
+    should(
+      InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, outcome: 'filled' } }).success,
+    ).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, line: 1 } }).success).be.false();
+    should(
+      InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, revision: undefined } }).success,
+    ).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, by: 'standing' } }).success).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, by: undefined } }).success).be.false();
+  });
+
+  it('should audit a rule fill by rule and revision beside the sign-in, never a value', () => {
+    const filled = {
+      targetKind: 'browser',
+      sensitivity: 'secret',
+      by: 'rule',
+      signInRule: RULE,
+      revision: 2,
+      signIn: 'si_0123456789abcdef',
+      entry: 'GITHUB_KIRINNEE',
+      factor: 'tf_0123456789ab',
+      submitted: true,
+    };
+
+    should(InputAuditDetailSchema.safeParse(filled).success).be.true();
+    should(InputAuditDetailSchema.safeParse({ ...filled, by: undefined }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, revision: undefined }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, signInRule: undefined }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, by: 'plan' }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, signInRule: ID }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, password: 'hunter2' }).success).be.false();
   });
 });
 

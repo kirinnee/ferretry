@@ -25,6 +25,7 @@ import {
   UnlockGrantedSchema,
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
+  SIGN_IN_RULE_ERROR_CODES,
   STEP_UP_ACTS,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
@@ -187,6 +188,14 @@ export function stepUpRoutes(
             StepUpOptionsSchema.parse(value),
           );
         }
+        // Approving a standing sign-in rule binds a DERIVED challenge to its staged body and keeps the assertion (R3c-2).
+        // Until this daemon stages rules, there is nothing to bind to: no challenge is minted for the act, from anyone.
+        if (body.act === STEP_UP_ACTS.approveSignInRule)
+          return errorResponse(
+            404,
+            'that standing sign-in rule is not waiting for a passkey: stage it again',
+            SIGN_IN_RULE_ERROR_CODES.stageNotFound,
+          );
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

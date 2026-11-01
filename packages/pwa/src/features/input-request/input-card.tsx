@@ -24,7 +24,7 @@
 
 import {
   type AccountList,
-  grantMissLine,
+  grantMissLineFor,
   INPUT_LOCK_WORDS,
   type InputRequest,
   type InputSavedOffer,
@@ -145,11 +145,9 @@ export function InputCard({
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
-  // Why the task plan did not fill this card: the owner's view only, one fixed sentence, and none for `not-here`.
-  const planMissLine =
-    request.preapproval?.outcome === 'did-not-apply' && request.preapproval.reason !== undefined
-      ? grantMissLine(request.preapproval.line, request.preapproval.reason)
-      : undefined;
+  // Why the task plan (or a standing rule) did not fill this card: the owner's view only, one fixed sentence by source,
+  // and none for `not-here`.
+  const planMissLine = request.preapproval === undefined ? undefined : grantMissLineFor(request.preapproval);
   const planFilledLine =
     request.preapproval?.by === 'plan' && request.preapproval.outcome === 'filled'
       ? `Filled under your task plan (line ${String(request.preapproval.line + 1)}).`

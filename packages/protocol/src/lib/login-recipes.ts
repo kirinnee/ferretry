@@ -120,6 +120,13 @@ export const LoginObservedSchema = z.strictObject({
   noEchoAfterSubmit: LoginObservedFlagSchema.optional(),
   navigatedAway: LoginObservedFlagSchema.optional(),
   secondFactor: LoginObservedSecondFactorSchema.optional(),
+  /**
+   * Whether the fill was the OWNER's own tap from a paired device that went through: on a page, a device tap that
+   * moved on unsteered (`false`: one that did not, which starts the count again); on a terminal, a device tap typed
+   * hidden into a proved sudo, su or doas. Plan fills, rule fills and the admin token's deliveries never write it, so
+   * only this fact counts toward a standing rule's history (sign-in-rules.ts).
+   */
+  tapped: LoginObservedFlagSchema.optional(),
 });
 export type LoginObserved = z.infer<typeof LoginObservedSchema>;
 
@@ -132,6 +139,8 @@ export interface LoginObservation {
   readonly noEchoAfterSubmit?: boolean;
   readonly navigatedAway?: boolean;
   readonly secondFactor?: LoginSecondFactor;
+  /** The owner's own device tap went through (written for `by: 'device'` only). */
+  readonly tapped?: boolean;
 }
 
 function folded<T extends boolean | LoginSecondFactor>(
@@ -166,12 +175,14 @@ export function foldObservation(
   const echo = folded(base?.noEchoAfterSubmit, seen.noEchoAfterSubmit, observedAt);
   const navigated = folded(base?.navigatedAway, seen.navigatedAway, observedAt);
   const factor = folded(base?.secondFactor, seen.secondFactor, observedAt);
+  const tapped = folded(base?.tapped, seen.tapped, observedAt);
   const entry: LoginObserved = {
     ...next,
     ...(masked === undefined ? {} : { masked }),
     ...(echo === undefined ? {} : { noEchoAfterSubmit: echo }),
     ...(navigated === undefined ? {} : { navigatedAway: navigated }),
     ...(factor === undefined ? {} : { secondFactor: factor }),
+    ...(tapped === undefined ? {} : { tapped }),
   };
   return [...kept.filter(other => other.at !== seen.at), entry].slice(-LOGIN_OBSERVED_MAX);
 }

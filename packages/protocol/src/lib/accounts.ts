@@ -1448,12 +1448,22 @@ export const AccountProposeCallSchema = z
     signIn: SignInIdSchema.optional(),
     /** Older clients: the account's handle. Resolves to its only sign-in. */
     login: AccountIdSchema.optional(),
-    recipe: LoginRecipeSchema,
+    /** The recipe to suggest. Optional only when the call suggests a standing rule instead (`preapprove`). */
+    recipe: LoginRecipeSchema.optional(),
+    /**
+     * Also suggest a STANDING RULE for this sign-in (sign-in-rules.ts): the daemon raises a card whose only action
+     * opens the owner's create sheet with nothing ticked. It creates, stages and widens nothing by itself.
+     */
+    preapprove: z.boolean().optional(),
     why: LoginRecipeProposeRequestSchema.shape.why,
   })
   .refine(call => (call.signIn === undefined) !== (call.login === undefined), {
     message: 'name the sign-in (signIn), as account_hint lists it',
     path: ['signIn'],
+  })
+  .refine(call => call.recipe !== undefined || call.preapprove === true, {
+    message: 'suggest a recipe, a standing rule (preapprove: true), or both',
+    path: ['recipe'],
   });
 export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
 
