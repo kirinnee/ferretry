@@ -1199,6 +1199,7 @@ import {
   SkillsInventoryService,
   type SocketRoute,
   SpeedupsService,
+  STAGED_FILE_TTL_MS,
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   type StackSamplerPort,
   StagedApiSurface,
@@ -12305,19 +12306,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           signInChoice,
           recipes: loginRecipes,
           loginActs: loginObserver,
-          files: new AgentFiles({
-            fs: new NodeAgentFilesystem(),
-            folderOf: async sessionId => await sessionFolder(storage, sessionId),
-            readAttachment: async (sessionId, attachmentId) => {
-              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
-              return { filename: attachment.filename, bytes };
-            },
-            uploadDirectory: join(paths.temporary, 'browser-upload'),
-            // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
-            stateHomes: [paths.home, paths.state, paths.config],
-            token: () => crypto.randomUUID().replaceAll('-', ''),
-            now: () => Date.now(),
-          }),
+          files: (() => {
+            const agentFiles = new AgentFiles({
+              fs: new NodeAgentFilesystem(),
+              folderOf: async sessionId => await sessionFolder(storage, sessionId),
+              readAttachment: async (sessionId, attachmentId) => {
+                const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+                return { filename: attachment.filename, bytes };
+              },
+              uploadDirectory: join(paths.temporary, 'browser-upload'),
+              // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
+              stateHomes: [paths.home, paths.state, paths.config],
+              token: () => crypto.randomUUID().replaceAll('-', ''),
+              now: () => Date.now(),
+            });
+            // Upload copies outlive their call by the staging time; swept at boot and on a timer, not only by the next upload.
+            const sweep = asActivity(activities, 'browser-upload sweep', async () => await agentFiles.sweep());
+            setInterval(sweep, STAGED_FILE_TTL_MS).unref();
+            setTimeout(sweep, 30_000).unref();
+            return agentFiles;
+          })(),
           redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({

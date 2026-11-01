@@ -12,6 +12,7 @@ export {
 } from './file-shared-history.ts';
 export * from './host-harness-scan.ts';
 export * from './mutation-journal.ts';
+export * from './node-guard-disk.ts';
 export * from './credential-classifier.ts';
 export * from './credential-reads.ts';
 export * from './wrapper-source.ts';

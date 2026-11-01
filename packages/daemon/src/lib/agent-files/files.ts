@@ -1,11 +1,19 @@
 import { basename, dirname, join, resolve } from 'node:path';
-import { type FileIdentity, openedFileProblem, resolveStateHomes, stateHomeHolding } from '@ferretry/fleet';
+import {
+  createOutsideStateHomes,
+  type FileIdentity,
+  type GuardDisk,
+  type Guarded,
+  openOutsideStateHomes,
+  resolveStateHomes,
+  type StateHomes,
+  stateHomeByName,
+} from '@ferretry/fleet';
 import type { AgentUploadFile } from '@ferretry/protocol';
 import {
   AGENT_FILE_LIMITS,
   AgentFileError,
   DEFAULT_SAVE_FOLDER,
-  isWithin,
   lexicalTarget,
   realTarget,
   relativeWords,
@@ -14,54 +22,17 @@ import {
   uploadSizeProblem,
 } from './policy.ts';
 
-/**
- * The state-home rule in the file tools' words (`state-home-guard.ts` in `@ferretry/fleet`, kept out of `policy.ts`
- * because the browser worker imports that under node type stripping): the daemon's own directories
- * are out of reach even when a session's folder contains them. `homes` holds each as configured AND as its real
- * path, and `path` is checked as named and again once resolved, so neither a symlink nor a symlinked home gets past.
- */
-export function stateHomeRefusal(
-  homes: readonly string[],
-  path: string,
-  verb: 'read' | 'write',
-): AgentFileError | undefined {
-  const home = stateHomeHolding(homes, path);
-  if (home === undefined) return undefined;
-  return new AgentFileError(
-    'forbidden',
-    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so the file tools never ${verb} there`,
-    'state-home',
-  );
-}
-
 /** Which file an entry is (the shared state-home guard's {@link FileIdentity}). */
 export type AgentFileIdentity = FileIdentity;
 
-/** A file opened to read: its identity as the open descriptor sees it, and a copy out of that descriptor. */
-export interface AgentOpenFile {
-  readonly identity: AgentFileIdentity;
-  /** Copies what the descriptor reads into a NEW private file (never into a link); refuses to grow past `maxBytes`. */
-  copyTo(to: string, maxBytes: number): Promise<number>;
-  close(): Promise<void>;
-}
-
-/** What the file tools ask of the disk. Structural, so a unit test supplies a fake and the daemon a Node one. */
-export interface AgentFilesystem {
-  realpath(path: string): Promise<string>;
-  /** The entry itself (a symlink is reported as `link`, never followed), or `undefined` when nothing is there. */
-  lstat(
-    path: string,
-  ): Promise<{ readonly kind: 'file' | 'directory' | 'link' | 'other'; readonly size: number } | undefined>;
-  /** The entry itself, never followed, with its device and inode; `undefined` when nothing is there. */
-  identity(path: string): Promise<AgentFileIdentity | undefined>;
-  /** Opens `path` to read without following a link at its last step and without blocking on a pipe. */
-  openRead(path: string): Promise<AgentOpenFile>;
-  /** The names in a folder; none when there is no such folder. */
-  list(path: string): Promise<readonly string[]>;
+/**
+ * What the file tools ask of the disk: the state-home guard's disk (`@ferretry/fleet`), plus making folders,
+ * placing the daemon's own copies and removing them. Structural, so a unit test supplies a fake.
+ */
+export interface AgentFilesystem extends GuardDisk {
   mkdirp(path: string, mode: number): Promise<void>;
   writeNew(path: string, bytes: Uint8Array, mode: number): Promise<void>;
-  /** Copies into a NEW file (never into a link, never executable); refuses to grow past `maxBytes`. */
-  copyNew(from: string, to: string, maxBytes: number): Promise<number>;
+  /** Removes a DAEMON-OWNED entry (its own copies); never used on a path an agent named. */
   remove(path: string, options?: { readonly recursive?: boolean }): Promise<void>;
 }
 
@@ -115,6 +86,7 @@ export interface SavedFile {
 }
 
 const DIRECTORY_MODE = 0o755;
+const SAVED_FILE_MODE = 0o644;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 /** A placed copy's directory: when it was placed, then a token. */
@@ -123,18 +95,59 @@ const PLACED_NAME = /^(\d+)-/u;
 interface Root {
   readonly folder: string;
   readonly real: string;
-  /** The daemon's own directories, each as configured and as resolved. */
-  readonly homes: readonly string[];
+  readonly homes: StateHomes;
+}
+
+/** The state-home refusal, in the file tools' words. */
+function stateHomeError(home: string, verb: 'read' | 'write'): AgentFileError {
+  return new AgentFileError(
+    'forbidden',
+    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so the file tools never ${verb} there`,
+    'state-home',
+  );
+}
+
+/** A guard's refusal, in the file tools' words. */
+function refusalOf(
+  refusal: Extract<Guarded<unknown>, { readonly ok: false }>,
+  shown: string,
+  verb: 'read' | 'write',
+): AgentFileError {
+  switch (refusal.rule) {
+    case 'state-home':
+      return stateHomeError(refusal.home ?? 'the state home', verb);
+    case 'outside':
+      return new AgentFileError('forbidden', 'that path leads outside this session’s folder, so it is refused');
+    case 'not-found':
+      return new AgentFileError('not_found', verb === 'read' ? `no file at ${shown}` : 'that place cannot be resolved');
+    case 'not-a-file':
+      return new AgentFileError('bad_request', `${shown} is not a file`);
+    case 'hard-link':
+      return new AgentFileError(
+        'forbidden',
+        `${shown} is a hard link (the file has more than one name), and another of its names could be inside the daemon's state home, so it is refused: ${verb === 'read' ? 'copy it and upload the copy' : 'remove it or save elsewhere'}`,
+        'hard-link',
+      );
+    case 'taken':
+      return new AgentFileError('conflict', `${shown} already exists — pass overwrite to replace it`);
+    default:
+      return new AgentFileError(
+        'forbidden',
+        `${shown} changed while it was being checked, so it is refused`,
+        'changed',
+      );
+  }
 }
 
 /**
  * What the file tools may reach: the session's own folder and nothing else — and never the daemon's own
- * state home, even when the folder holds it.
+ * state home, even when the folder holds it. Every read and write goes through the shared state-home guard
+ * (`state-home-guard.ts` in `@ferretry/fleet`), which judges a path by name, by real path and by identity and
+ * proves the file it opened is the one it checked.
  *
- * Reading (an upload) takes a path or an attachment id; writing (a download or a PDF) takes a place under
- * the folder. Both resolve REAL paths — a symlink in the folder that leads out of it is refused, not
- * followed. A file an agent names is OPENED, checked to be the file that was resolved, and copied into the
- * daemon's own directory; the browser is handed the copy, so a path swapped after the check reaches nothing.
+ * Reading (an upload) takes a path or an attachment id, and the browser is handed the DAEMON'S copy of it, so a
+ * path swapped after the check reaches nothing. Writing (a download or a PDF) goes through a descriptor opened
+ * in a checked folder, and nothing is ever removed by a path an agent could have swapped.
  */
 export class AgentFiles {
   constructor(private readonly ports: AgentFilesPorts) {}
@@ -148,9 +161,9 @@ export class AgentFiles {
     } catch {
       throw new AgentFileError('unavailable', 'this session’s working folder is not available');
     }
-    let homes: readonly string[];
+    let homes: StateHomes;
     try {
-      homes = await resolveStateHomes(this.ports.stateHomes, this.ports.fs);
+      homes = await resolveStateHomes({ homes: this.ports.stateHomes }, this.ports.fs);
     } catch {
       // Unresolved, a symlinked home could not be recognised by its real path: refuse rather than guess.
       throw new AgentFileError('unavailable', 'this daemon’s state home cannot be resolved, so no file is reached');
@@ -158,17 +171,17 @@ export class AgentFiles {
     return { folder: resolve(folder), real, homes };
   }
 
-  /** The folder rule and the state-home rule, on a real path. */
+  /** The folder rule and the state-home rule (by name), on a real path. */
   private confined(root: Root, realPath: string, verb: 'read' | 'write'): string {
     realTarget(root.real, realPath);
-    const refusal = stateHomeRefusal(root.homes, realPath, verb);
-    if (refusal !== undefined) throw refusal;
+    const verdict = stateHomeByName(root.homes, realPath);
+    if (verdict.inside) throw stateHomeError(verdict.home, verb);
     return realPath;
   }
 
   async prepareUpload(sessionId: string, sources: readonly AgentUploadFile[]): Promise<PreparedUpload> {
     const root = await this.root(sessionId);
-    await this.prune();
+    await this.sweep();
     const files: PreparedUploadFile[] = [];
     const placed: string[] = [];
     const release = async (): Promise<void> => {
@@ -194,9 +207,10 @@ export class AgentFiles {
 
   /**
    * Removes the copies placed for earlier uploads once {@link STAGED_FILE_TTL_MS} has passed. A copy outlives
-   * its call because a page may read the file it was given later — when its form is submitted.
+   * its call because a page may read the file it was given later — when its form is submitted. Run before
+   * every upload, and by the daemon at boot and on a timer, so a copy never outlives its time by much.
    */
-  private async prune(): Promise<void> {
+  async sweep(): Promise<void> {
     const cutoff = this.ports.now() - STAGED_FILE_TTL_MS;
     const names = await this.ports.fs.list(this.ports.uploadDirectory).catch(() => []);
     for (const name of names) {
@@ -217,43 +231,21 @@ export class AgentFiles {
   private async existing(root: Root, requested: string, placed: string[]): Promise<PreparedUploadFile> {
     const candidate = lexicalTarget(root.folder, requested);
     const shown = relativeWords(root.folder, candidate);
-    const named = stateHomeRefusal(root.homes, candidate, 'read');
-    if (named !== undefined) throw named;
-    let real: string;
+    const opened = await openOutsideStateHomes(candidate, root.homes, this.ports.fs, { inside: root.real });
+    if (!opened.ok) throw refusalOf(opened, shown, 'read');
+    const file = opened.value;
     try {
-      real = await this.ports.fs.realpath(candidate);
-    } catch {
-      throw new AgentFileError('not_found', `no file at ${shown}`);
-    }
-    this.confined(root, real, 'read');
-    let file: AgentOpenFile;
-    try {
-      file = await this.ports.fs.openRead(real);
-    } catch {
-      throw new AgentFileError('not_found', `${shown} cannot be opened to read`);
-    }
-    try {
-      // What was opened must be a regular file still at the checked place, with no other name: a hard link's
-      // other name may be anywhere on the disk, the state home included, and nothing on the file says where.
-      const problem = await openedFileProblem(real, file.identity, this.ports.fs);
-      if (problem === 'not-a-file') throw new AgentFileError('bad_request', `${shown} is not a file`);
-      if (problem === 'changed')
-        throw new AgentFileError(
-          'forbidden',
-          `${shown} changed while it was being checked, so it is refused`,
-          'changed',
-        );
-      if (problem === 'hard-link')
-        throw new AgentFileError(
-          'forbidden',
-          `${shown} is a hard link (the file has ${String(file.identity.links)} names), and another of its names could be inside the daemon's state home, so it is refused: copy it and upload the copy`,
-          'hard-link',
-        );
+      this.confined(root, file.path, 'read');
       if (file.identity.size > AGENT_FILE_LIMITS.fileBytes)
         throw new AgentFileError('bad_request', `${shown} is over the upload size limit`);
-      const name = sanitizeFileName(real, 'file');
+      const name = sanitizeFileName(file.path, 'file');
       const copy = join(await this.place(placed), name);
-      const size = await file.copyTo(copy, AGENT_FILE_LIMITS.fileBytes);
+      const size = await file.copyTo(copy, AGENT_FILE_LIMITS.fileBytes, PRIVATE_FILE_MODE).catch(() => {
+        throw new AgentFileError(
+          'bad_request',
+          `${shown} could not be read whole: it grew past the upload size limit, or the read failed`,
+        );
+      });
       return { path: copy, name, size };
     } finally {
       await file.close();
@@ -277,7 +269,8 @@ export class AgentFiles {
 
   /**
    * Saves a staged file into the session's folder: `saveAs` (relative) or `downloads/<name>`. Never replaces
-   * an existing file unless `overwrite`, never follows a link out of the folder, never makes the file executable.
+   * an existing file unless `overwrite`, never writes through a link or into the state home, never makes the
+   * file executable, and never removes a file by path.
    */
   async save(
     sessionId: string,
@@ -292,40 +285,52 @@ export class AgentFiles {
     if (staged.size > options.maxBytes)
       throw new AgentFileError('bad_request', 'that file is over the save size limit');
     const requested = options.saveAs ?? `${DEFAULT_SAVE_FOLDER}/${sanitizeFileName(staged.name, 'download')}`;
-    const destination = await this.destination(root, requested, options.overwrite === true);
+    const overwrite = options.overwrite === true;
+    const destination = await this.destination(root, requested, overwrite);
+    const shown = relativeWords(root.folder, lexicalTarget(root.folder, requested));
     await this.ports.fs.mkdirp(dirname(destination), DIRECTORY_MODE);
-    // The folder just made is checked again: a link planted between the check and the mkdir would show here.
-    this.confined(root, await this.ports.fs.realpath(dirname(destination)), 'write');
-    if (options.overwrite === true) await this.ports.fs.remove(destination).catch(() => undefined);
+    // The folder is opened and checked, and the file reached THROUGH it and proven before a byte is written.
+    const opened = await createOutsideStateHomes(destination, root.homes, this.ports.fs, {
+      inside: root.real,
+      overwrite,
+      mode: SAVED_FILE_MODE,
+    });
+    if (!opened.ok) throw refusalOf(opened, shown, 'write');
+    const file = opened.value;
     let size: number;
     try {
-      size = await this.ports.fs.copyNew(staged.path, destination, options.maxBytes);
+      // `.git` and the daemon's scratch entries, where the folder REALLY is now.
+      this.confined(root, file.path, 'write');
+      size = await file.copyFrom(staged.path, options.maxBytes);
     } catch (error) {
-      await this.ports.fs.remove(destination).catch(() => undefined);
+      await file.discard().catch(() => undefined);
+      await file.close();
       if (error instanceof AgentFileError) throw error;
-      throw new AgentFileError('conflict', 'that place cannot be written');
+      throw new AgentFileError(
+        'bad_request',
+        'that file could not be saved whole: it grew past the save size limit, or the write failed',
+      );
     }
-    const shown = isWithin(root.real, destination)
-      ? relativeWords(root.real, destination)
-      : relativeWords(root.folder, destination);
-    return { saved: shown, name: sanitizeFileName(destination, 'file'), size };
+    await file.close();
+    // The guard kept it under the folder's real path, so that is where it is named from.
+    return { saved: relativeWords(root.real, file.path), name: sanitizeFileName(file.path, 'file'), size };
   }
 
   private async destination(root: Root, requested: string, overwrite: boolean): Promise<string> {
     const lexical = lexicalTarget(root.folder, requested);
     if (lexical === root.folder) throw new AgentFileError('bad_request', 'name a file, not the folder itself');
-    const named = stateHomeRefusal(root.homes, lexical, 'write');
-    if (named !== undefined) throw named;
+    const named = stateHomeByName(root.homes, lexical);
+    if (named.inside) throw stateHomeError(named.home, 'write');
     // The nearest ancestor that exists decides where the path REALLY goes; what is below it is new.
     let ancestor = lexical;
     const missing: string[] = [];
     for (;;) {
-      const entry = await this.ports.fs.lstat(ancestor);
+      const entry = await this.ports.fs.identity(ancestor);
       if (entry !== undefined) break;
       missing.unshift(ancestor.slice(dirname(ancestor).length + 1));
       ancestor = dirname(ancestor);
     }
-    const entry = await this.ports.fs.lstat(ancestor);
+    const entry = await this.ports.fs.identity(ancestor);
     if (missing.length === 0) {
       if (entry?.kind === 'directory')
         throw new AgentFileError('conflict', `${relativeWords(root.folder, lexical)} is a folder`);
@@ -335,8 +340,7 @@ export class AgentFiles {
           'conflict',
           `${relativeWords(root.folder, lexical)} already exists — pass overwrite to replace it`,
         );
-      this.confined(root, join(await this.ports.fs.realpath(dirname(lexical)), basename(lexical)), 'write');
-      return lexical;
+      return this.confined(root, join(await this.ports.fs.realpath(dirname(lexical)), basename(lexical)), 'write');
     }
     const realAncestor = await this.ports.fs.realpath(ancestor).catch(() => {
       throw new AgentFileError('forbidden', 'that place cannot be resolved');

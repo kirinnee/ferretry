@@ -348,80 +348,34 @@ describe('AgentFiles.save — where a download or a PDF may land', () => {
   });
 });
 
-describe('NodeAgentFilesystem.lstat', () => {
-  it('should report a missing entry as nothing, but let any other failure through', async () => {
-    const disk = new NodeAgentFilesystem();
-
-    should(await disk.lstat(join(folder, 'nope'))).be.undefined();
-    await disk.lstat(join(folder, 'x'.repeat(300))).then(
-      () => should.fail(undefined, undefined, 'a name that long should not be looked up'),
-      (error: unknown) => should(error).be.instanceOf(Error),
-    );
-  });
-});
-
-describe('NodeAgentFilesystem — what the upload guard reads', () => {
-  it('should list a folder, list nothing where there is none, and let any other failure through', async () => {
-    const disk = new NodeAgentFilesystem();
-    await writeFile(join(folder, 'a.txt'), 'a');
-
-    should(await disk.list(folder)).containEql('a.txt');
-    should(await disk.list(join(folder, 'nope'))).deepEqual([]);
-    await disk.list(join(folder, 'x'.repeat(300))).then(
-      () => should.fail(undefined, undefined, 'a name that long should not be listed'),
-      (error: unknown) => should(error).be.instanceOf(Error),
-    );
-  });
-
-  it('should tell a file by its device and inode, and refuse to open a link at the last step', async () => {
+describe('AgentFiles.save — never into the daemon’s state home, on a real disk', () => {
+  it('should write INTO an existing file when asked, never removing it or writing through a hard link', async () => {
     // Arrange
-    const disk = new NodeAgentFilesystem();
-    await writeFile(join(folder, 'a.txt'), 'abc');
-    await link(join(folder, 'a.txt'), join(folder, 'b.txt'));
-    await symlink(join(folder, 'a.txt'), join(folder, 'c.txt'));
+    const source = await staged('fresh bytes');
+    await writeFile(join(folder, 'out.txt'), 'old');
+    const before = (await stat(join(folder, 'out.txt'))).ino;
+    await link(join(home, 'api-token'), join(folder, 'token-too'));
 
     // Act
-    const opened = await disk.openRead(join(folder, 'a.txt'));
-    const named = await disk.identity(join(folder, 'b.txt'));
-    const linked = await disk.identity(join(folder, 'c.txt'));
-    const followed = await disk.openRead(join(folder, 'c.txt')).then(
-      () => 'opened',
-      () => 'refused',
-    );
-    await opened.close();
+    const saved = await files.save('s1', source, { ...SAVE, saveAs: 'out.txt', overwrite: true });
+    const linked = await refusal(files.save('s1', source, { ...SAVE, saveAs: 'token-too', overwrite: true }));
 
     // Assert
-    should(opened.identity).match({ kind: 'file', links: 2, size: 3 });
-    should(named?.inode).equal(opened.identity.inode);
-    should(named?.device).equal(opened.identity.device);
-    should(linked?.kind).equal('link');
-    should(followed).equal('refused');
+    should(saved.size).equal(11);
+    should((await stat(join(folder, 'out.txt'))).ino).equal(before);
+    should(await readFile(join(folder, 'out.txt'), 'utf8')).equal('fresh bytes');
+    should(linked.rule).equal('hard-link');
+    should(await readFile(join(home, 'api-token'), 'utf8')).equal('fy_admin_token');
   });
 
-  it('should copy from the open file into a new private one, never over an existing file, and stop at the cap', async () => {
-    // Arrange
-    const disk = new NodeAgentFilesystem();
-    await writeFile(join(folder, 'big.bin'), new Uint8Array(200_000));
-    await writeFile(join(folder, 'taken.bin'), 'x');
-    const opened = await disk.openRead(join(folder, 'big.bin'));
+  it('should refuse the state home named directly and through a symlinked folder, writing nothing there', async () => {
+    const source = await staged('planted');
+    await symlink(join(home, 'state'), join(folder, 'state-link'));
 
-    // Act
-    const copied = await opened.copyTo(join(folder, 'copy.bin'), 1_000_000);
-    const over = await opened.copyTo(join(folder, 'small.bin'), 100_000).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    const taken = await opened.copyTo(join(folder, 'taken.bin'), 1_000_000).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    await opened.close();
+    const direct = await refusal(files.save('s1', source, { ...SAVE, saveAs: '.fy/state/passkeys.json' }));
+    const linked = await refusal(files.save('s1', source, { ...SAVE, saveAs: 'state-link/passkeys.json' }));
 
-    // Assert
-    should(copied).equal(200_000);
-    should((await stat(join(folder, 'copy.bin'))).mode & 0o777).equal(0o600);
-    should(over).be.instanceOf(AgentFileError);
-    should(taken).be.instanceOf(Error);
-    should(await readFile(join(folder, 'taken.bin'), 'utf8')).equal('x');
+    should([direct.rule, linked.rule]).deepEqual(['state-home', 'state-home']);
+    should(await readdir(join(home, 'state'))).deepEqual(['secrets.key']);
   });
 });
