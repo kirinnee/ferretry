@@ -10,8 +10,10 @@
 
 import type { McpInventory } from '@ferretry/protocol';
 import { Plus } from 'lucide-react';
+import { useState } from 'react';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
 import { AddCatalogEntry, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
+import { McpServerDetails } from '../mcp/mcp-server-details.tsx';
 import { MCP_SCOPE_LABEL, MCP_SCOPE_TITLE, MCP_TRANSPORT_LABEL, sortedMcpServers } from '../mcp/mcp-model.ts';
 import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
 import {
@@ -72,6 +74,13 @@ export function ContextMcpPanel({
   );
 
   const rows = useCatalogRows(catalogs);
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  const toggleDetails = (id: string): void =>
+    setShown(previous => {
+      const next = new Set(previous);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   if (load.kind === 'failed')
     return (
@@ -144,6 +153,8 @@ export function ContextMcpPanel({
                     tone: server.scope === 'project' || server.scope === 'local' ? 'accent' : 'muted',
                   }}
                   description={MCP_TRANSPORT_LABEL[server.transport]}
+                  onOpen={() => toggleDetails(server.id)}
+                  openLabel={shown.has(server.id) ? 'Hide details' : 'Show details'}
                   dimmed={server.shadowedBy !== undefined}
                 >
                   <div className="px-xs">
@@ -155,6 +166,7 @@ export function ContextMcpPanel({
                       compact
                     />
                   </div>
+                  {shown.has(server.id) ? <McpServerDetails server={server} /> : null}
                 </CatalogItemRow>
               )}
             </li>
