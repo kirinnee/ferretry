@@ -52,6 +52,10 @@ export function inputRequestService(
     readonly scriptedOrigins?: () => ScriptedOriginsView;
     /** The agenda the cards are raised on; absent: a board that takes every card and says nothing. */
     readonly agenda?: InputAgendaPort;
+    /** Whether the page target arms a pagehide clear it is asked to try (`armClear: 'try'`); absent: it never can. */
+    readonly arms?: boolean;
+    /** Called each time the journal is written (a request or a hold), before it answers. */
+    readonly journalled?: (event: unknown) => void;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -79,7 +83,8 @@ export function inputRequestService(
             probe: async (_session, _target, _facts, fieldIds) =>
               await (options.probe as NonNullable<typeof options.probe>)(fieldIds),
           }),
-      type: async (_session, _target, values) => {
+      type: async (_session, _target, values, _submit, _expected, typeOptions) => {
+        if (typeOptions?.armClear === 'try') typeOptions.armed?.(options.arms === true);
         writes.push(...values.map(value => value.text));
         return 'typed';
       },
@@ -91,9 +96,12 @@ export function inputRequestService(
     },
     notifier: { tell: async () => undefined },
     journal: {
-      publish: async (_session, event) => void events.push(event),
+      publish: async (_session, event) => {
+        events.push(event);
+        options.journalled?.(event);
+      },
       history: async () => [],
-      quarantine: async () => undefined,
+      quarantine: async (_session, event) => void options.journalled?.(event),
       quarantines: async () => [],
     },
     audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },

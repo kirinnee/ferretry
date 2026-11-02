@@ -64,16 +64,16 @@ export const INPUT_SHORT_LOCK_SECONDS = 10;
  * - `not-proven`: nothing could be checked (no observer, an unreadable login store). Also an older daemon's one word
  *   for every long page lock.
  * - `terminal-shows`: a terminal that is not a local sudo, su, doas or passwd prompt with typing hidden.
- * - `scripted`: a ferret ran a page script on this page or on this site (any ferret, machine-wide), or one whose site
- *   could not be read; or one is running now.
- * - `steered`: this ferret acted on this page, or on a page that shares its cookies and storage at its site, after the
+ * - `scripted`: a ferret ran a page script on this page or on this site (its registrable domain; any ferret,
+ *   machine-wide), or one whose site could not be read; or one is running now.
+ * - `steered`: this ferret acted on this page, or on a page that shares its cookies and storage on its site, after the
  *   card was raised.
  * - `not-password-field`: a secret field is not a visible, uncovered password box in the page's own origin on a secure
  *   page, or a human check shows.
  * - `first-time`: no saved sign-in here has facts for this field, and no probe ran.
  * - `did-not-move-on`: a sign-in's facts for this field say it showed the value, or did not move on.
- * - `not-submitted`: the facts prove the field after a submit, Ferretry is not pressing Enter, and no owner's own tap
- *   on this field has moved the page on yet.
+ * - `until-moved-on`: the facts prove the field after a submit, but Ferretry is not pressing Enter, so the value sits
+ *   on the page: it stays hidden while the page shows that document, at most the full window (docs/input-requests.md).
  * - `probe-shown`: the throwaway value showed in the page's text.
  * - `probe-stopped`: the probe could not finish cleanly (a request, a socket, a navigation, a field that did not empty).
  */
@@ -89,7 +89,7 @@ export const INPUT_LOCK_REASONS = [
   'not-password-field',
   'first-time',
   'did-not-move-on',
-  'not-submitted',
+  'until-moved-on',
   'probe-shown',
   'probe-stopped',
 ] as const;
@@ -115,7 +115,7 @@ export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
   'not-password-field': 'This is not a plain password box on a secure page.',
   'first-time': "First time on this page: Ferretry hasn't seen it hide a password yet.",
   'did-not-move-on': "Last time here, the page didn't move on or it showed the value.",
-  'not-submitted': "Ferretry won't press Enter, and your own sign-in here hasn't moved the page on yet.",
+  'until-moved-on': "It ends sooner once the page moves on, because the value hasn't been submitted yet.",
   'probe-shown': "A test value Ferretry typed showed in the page's text.",
   'probe-stopped': "Ferretry's quick test of this page didn't finish cleanly.",
 };

@@ -103,6 +103,20 @@ export class PageInputTarget implements InputTargetPort {
         if (pageId !== expected.pageId) return 'target_changed';
         // A grant fill that waited in this queue goes ahead only if its line is still held now.
         if (options?.proceed?.() === false) return 'target_changed';
+        if (options?.armClear === 'try') {
+          // An owner's value Ferretry does not submit: armed when the browser can, so a page that moves on and comes
+          // back (the back/forward cache) shows the field empty. One that can't keeps its full hold instead.
+          const passwords = values
+            .map(value => value.field)
+            .filter(
+              field => expected.fields.find(each => each.fieldId === field)?.field.type?.toLowerCase() === 'password',
+            );
+          const armed =
+            passwords.length > 0 &&
+            port.inputArm !== undefined &&
+            (await port.inputArm(pageId, expected, passwords).catch(() => 'refused' as const)) === 'armed';
+          options.armed?.(armed);
+        }
         if (options?.armClear === true) {
           // A grant fill arms its pagehide clear first, in this same turn of the page's queue. A browser that can't (or a
           // worker from before the call, which refuses it) types nothing: the clear is part of the fill.

@@ -4,7 +4,7 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,steered,logins, and the account-choice cards
+ * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,steered,unsubmitted,logins, and the account-choice cards
  * `choice-<ferret|project|folder|site|only|pick>-<terminal|browser>` and `always-<terminal|browser>`) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
@@ -16,7 +16,7 @@
  * its tick are on screen. "unverified" is a secret
  * card whose reader the kernel did not prove (a shell that calls itself sudo): amber, "unverified", the full lock. "steered"
  * is the Google password card after the ferret used that same page: the full lock and the sentence that says why
- * (lock.ts, per page). Every width asserts no sideways scroll and the touch floor on every button of the phone.
+ * (lock.ts, per page); "unsubmitted" is that card when Ferretry won't press Enter: held until the page moves on. Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -228,14 +228,16 @@ const choiceBrowser = fakeRequest({
 });
 // The Google password card once the ferret used that very page after asking: the full lock, and why (lock.ts).
 const steered = { ...google, lock: { seconds: 120, reason: 'steered' } };
+// The same card when Ferretry will not press Enter on a page whose facts prove it after a submit: held until it moves on.
+const unsubmitted = { ...google, submit: 'agent', lock: { seconds: 120, reason: 'until-moved-on' } };
 const choiceRequest = choiceKind === 'browser' ? choiceBrowser : choiceTerminal;
-const request = ACCOUNT_CHOICE !== null ? choiceRequest : ({ first, next, google, chain, codeterm, signin, unverified, steered }[view] ?? first);
+const request = ACCOUNT_CHOICE !== null ? choiceRequest : ({ first, next, google, chain, codeterm, signin, unverified, steered, unsubmitted }[view] ?? first);
 const subject =
   ACCOUNT_CHOICE !== null
     ? choiceKind === 'browser'
       ? 'Sign in to ClickUp'
       : 'Type it into sudo'
-    : view === 'google' || view === 'chain' || view === 'steered'
+    : view === 'google' || view === 'chain' || view === 'steered' || view === 'unsubmitted'
     ? 'Sign in to Google'
     : view === 'signin'
       ? 'Sign in to Vercel'
@@ -253,7 +255,7 @@ const item = {
   sourceRef: request.id,
   sourceSeq: 1,
   kind: 'input',
-  title: view === 'google' || view === 'steered' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
+  title: view === 'google' || view === 'steered' || view === 'unsubmitted' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
   subject,
   why: subject,
   context: 'The rebuild you asked for in &F131',
@@ -346,6 +348,7 @@ const STATES = (
     'signin',
     'unverified',
     'steered',
+    'unsubmitted',
     'logins',
     ...CHOICE_STATES,
   ] as readonly string[]
@@ -405,7 +408,7 @@ try {
             await page.locator('[data-input-value]').fill('correct-horse-battery');
             await page.locator('[data-input-save-tick]').check();
           }
-          if (state === 'google' || state === 'steered')
+          if (state === 'google' || state === 'steered' || state === 'unsubmitted')
             await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
           // A made-up code, typed so the shot shows it is visible as it is typed.
           if (state === 'chain' || state === 'codeterm') await page.locator('[data-input-value]').fill('481516');

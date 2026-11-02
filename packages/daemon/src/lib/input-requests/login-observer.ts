@@ -171,17 +171,31 @@ export type PageSteerReason = 'scripted' | 'acted';
 interface PageMarks {
   /** Acts told but not placed yet: each counts as an act, or a script, on every page. */
   readonly open: Map<symbol, { readonly at: number; readonly script: boolean }>;
-  /** The last act per page and host (`page\0host`, `page\0*` for any host, `*` for any page). */
+  /** The last act per page and site (`page\0site`, `page\0*` for any, `*` for any page), sites by {@link siteOf}. */
   readonly acts: Map<string, number>;
   /** What each page an act touched is, for whether it shares a card page's storage. */
   readonly pages: Map<string, Pick<ActedPage, 'incognito' | 'openerId'>>;
-  /** Pages and hosts a script ran on, ever, and whether one ran somewhere that could not be told. */
+  /** Pages and sites ({@link siteOf}) a script ran on, ever, and whether one ran somewhere that could not be told. */
   readonly scriptedPages: Set<string>;
-  readonly scriptedHosts: Set<string>;
+  readonly scriptedSites: Set<string>;
   scriptedAnywhere: boolean;
 }
 
 const ANY = '*';
+
+/**
+ * THE SITE A HOST BELONGS TO, as a page card's lock groups acts and scripts (secrev-1333 L2): tabs on sibling subdomains
+ * of one registrable domain share cookies, so `mail.example.com` and `accounts.example.com` are one site. Without a
+ * public-suffix list it is the host's last two labels, port dropped: never narrower than the registrable domain, and
+ * sometimes wider (every `*.co.uk` page is one "site"), which only ever counts more acts. An IP address, `localhost`
+ * or a one-label host is its own site.
+ */
+export function siteOf(host: string): string {
+  const bare = host.toLowerCase().replace(/:[0-9]+$/u, '');
+  if (bare.startsWith('[') || /^[0-9.]+$/u.test(bare)) return bare;
+  const labels = bare.split('.').filter(label => label !== '');
+  return labels.length <= 2 ? labels.join('.') : labels.slice(-2).join('.');
+}
 
 /**
  * Whether two pages may share cookies and storage: the same page; two of the shared agent profile; or either unknown,
@@ -313,7 +327,7 @@ export class LoginObserver {
       acts: new Map(),
       pages: new Map(),
       scriptedPages: new Set(),
-      scriptedHosts: new Set(),
+      scriptedSites: new Set(),
       scriptedAnywhere: false,
     };
     this.marks.set(sessionId, made);
@@ -334,34 +348,37 @@ export class LoginObserver {
       ...(page.incognito === true ? { incognito: true } : {}),
       ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
     });
-    const hosts = page.hosts === undefined || page.hosts.length === 0 ? undefined : page.hosts;
-    for (const host of hosts ?? [ANY]) later(`${page.id}\u0000${host}`);
+    // Filed by SITE: a tab on a sibling subdomain shares the card's cookies.
+    const sites =
+      page.hosts === undefined || page.hosts.length === 0 ? undefined : [...new Set(page.hosts.map(siteOf))];
+    for (const site of sites ?? [ANY]) later(`${page.id}\u0000${site}`);
     if (!script) return;
     marks.scriptedPages.add(page.id);
-    if (hosts === undefined) marks.scriptedAnywhere = true;
-    else for (const host of hosts) marks.scriptedHosts.add(host);
+    if (sites === undefined) marks.scriptedAnywhere = true;
+    else for (const site of sites) marks.scriptedSites.add(site);
   }
 
   /**
    * WHETHER THE FERRET COULD HAVE STEERED WHAT THIS ONE PAGE SHOWS, for a page card's lock (lock.ts): judged per page,
    * never per session, so an act on another tab or a terminal does not lengthen this card's lock.
    *
-   * - `scripted`: at any time, this session ran a page script on this page, on any page while it was at this page's
-   *   host, or where the page or host could not be told; or a script of this session is running now. (Another ferret's
-   *   script on this host is the machine-wide taint, asked by the input service.)
+   * - `scripted`: at any time, this session ran a page script on this page, on any page while it was on this page's
+   *   site ({@link siteOf}), or where the page or host could not be told; or a script of this session is running now.
+   *   (Another ferret's script on this site is the machine-wide taint, asked by the input service.)
    * - `acted`: at or after `since`, this session acted on this page, on an unknown page, or on another page that may
-   *   share its cookies and storage while it was at this page's host (or an unknown one), or such an act is running
+   *   share its cookies and storage while it was on this page's site (or an unknown one), or such an act is running
    *   now. An unreadable `since` counts as acted; `since` = +∞ asks about scripts only.
    */
   pageSteer(sessionId: string, page: SteerablePage, since: number): PageSteerReason | undefined {
     const marks = this.marks.get(sessionId);
     if (marks === undefined) return Number.isNaN(since) ? 'acted' : undefined;
+    const site = page.host === undefined ? undefined : siteOf(page.host);
     const open = [...marks.open.values()];
     if (open.some(act => act.script)) return 'scripted';
     if (
       marks.scriptedAnywhere ||
       marks.scriptedPages.has(page.id) ||
-      (page.host === undefined ? marks.scriptedHosts.size > 0 : marks.scriptedHosts.has(page.host))
+      (site === undefined ? marks.scriptedSites.size > 0 : marks.scriptedSites.has(site))
     )
       return 'scripted';
     if (Number.isNaN(since)) return 'acted';
@@ -372,10 +389,10 @@ export class LoginObserver {
       if (key === ANY) return 'acted';
       const split = key.indexOf('\u0000');
       const id = key.slice(0, split);
-      const host = key.slice(split + 1);
+      const filed = key.slice(split + 1);
       if (id === page.id) return 'acted';
-      const hostMatches = host === ANY || page.host === undefined || host === page.host;
-      if (hostMatches && mayShare(card, marks.pages.get(id))) return 'acted';
+      const siteMatches = filed === ANY || site === undefined || filed === site;
+      if (siteMatches && mayShare(card, marks.pages.get(id))) return 'acted';
     }
     return undefined;
   }

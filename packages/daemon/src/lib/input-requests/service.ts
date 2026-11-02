@@ -81,7 +81,7 @@ import {
   spellsPassword,
   steeredLock,
 } from './lock.ts';
-import { type LoginDelivery, type LoginObserver, placeOf } from './login-observer.ts';
+import { type LoginDelivery, type LoginObserver, placeOf, siteOf } from './login-observer.ts';
 import type {
   InputAgendaPort,
   InputAgentNotifier,
@@ -304,6 +304,12 @@ const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
 
 export class InputRequestService {
   private readonly held = new Map<string, Held>();
+  /**
+   * The page holds that follow their document (`until-moved-on`, secrev-1333 M1), by hold id: pictures of the page come
+   * back once it shows another document, and stop again if it shows the value's document again. A hold the registry
+   * has let go of is simply never asked about again.
+   */
+  private readonly followed = new Set<string>();
   /**
    * What a card being raised is about, by request id, while `agenda.raise` runs: the card's push is made INSIDE that
    * raise (the deadline push, buzz.ts), before the request is held, so `pushSubjectOf` must already know it.
@@ -1553,10 +1559,13 @@ export class InputRequestService {
   pageHeld(
     sessionId: string,
     names: readonly (string | undefined)[],
-  ): { readonly until: number; readonly documents: readonly string[] } | undefined {
+  ): { readonly until: number; readonly documents: readonly string[]; readonly documentsOnly?: true } | undefined {
     const marked = names.filter((name): name is string => name !== undefined).map(pageName);
     const until = this.deps.quarantine.until(sessionId, marked);
     if (until === undefined) return undefined;
+    // Every hold on the page follows its document (`until-moved-on`): pictures, like text, wait only while the page
+    // shows a document a value went into. Any other hold keeps pictures out for its whole window.
+    const documentsOnly = this.deps.quarantine.until(sessionId, marked, this.followed) === undefined;
     const documents = [...this.held.values()]
       .filter(
         held =>
@@ -1566,7 +1575,7 @@ export class InputRequestService {
           held.names.some(name => marked.includes(pageName(name))),
       )
       .map(held => held.navigation as string);
-    return { until, documents };
+    return documentsOnly && documents.length > 0 ? { until, documents, documentsOnly: true } : { until, documents };
   }
 
   /** The document a session's page shows now, so a held page can be read again once it has moved on. */
@@ -1827,14 +1836,15 @@ export class InputRequestService {
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
       if (heldFromView(fields) && request.target.kind !== 'secret') {
-        // At the write, an act of the ferret on THIS page (or a tab sharing its storage at its site) since the card was
-        // raised voids a page's proof as well; an act on another tab or a terminal does not (login-observer.ts).
-        const steered = this.steerOf(request.sessionId, seen.facts, Date.parse(request.raisedAt));
+        // At the write, an act of the ferret on THIS page (or a tab sharing its storage on its site) since the card was
+        // raised voids a page's proof as well; an act on another tab or a terminal does not (login-observer.ts). Asked
+        // AFTER the store is read, so an act that began during the read counts (secrev-1333 L1).
+        const facts = await this.lockFacts(seen.facts);
         const now = lockFor(seen.facts, fields, {
-          ...(await this.lockFacts(seen.facts)),
+          ...facts,
           probed: held.probed === true,
           submitted,
-          ...(steered === undefined ? {} : { steered }),
+          ...this.steeredSince(request.sessionId, seen.facts, Date.parse(request.raisedAt)),
         });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);
         held.request = { ...held.request, lock };
@@ -1863,6 +1873,21 @@ export class InputRequestService {
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
           this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
+      // Asked once more with the page held, before the write (secrev-1333 L1): an act on it that began since the
+      // lock was decided (while the attempt was journalled, say) gets the full lock. The full hold is taken before the
+      // short one is let go, so the page is never unheld.
+      const lock = held.request.lock;
+      const late =
+        hold === undefined || lock === undefined
+          ? undefined
+          : this.steerOf(request.sessionId, seen.facts, Date.parse(request.raisedAt));
+      if (late !== undefined && lock !== undefined && lock.reason !== steeredLock(late).reason) {
+        const full = longerLock(lock, steeredLock(late));
+        held.request = { ...held.request, lock: full };
+        const short = hold;
+        hold = await this.holdFor(request, held.names, full.seconds * 1000);
+        await this.letGo(short);
+      }
       // A grant fill types only while its line is still held: a revoke, an expiry or a stop since the last look ends it
       // here, with nothing awaited between this check and the write.
       if (grant !== undefined && !grant.held()) {
@@ -1871,8 +1896,22 @@ export class InputRequestService {
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         throw new GrantMissed('expired');
       }
+      // A value Ferretry does not submit on a page whose facts prove it after a submit is held while the page shows
+      // that document (`until-moved-on`, secrev-1333 M1), once the browser armed its pagehide clear: a page that moves
+      // on and comes back from the back/forward cache then shows the field empty. Unarmed, it keeps the plain window.
+      const follows =
+        clear === undefined && seen.facts.kind === 'browser' && held.request.lock?.reason === 'until-moved-on';
+      const arming = { armed: false };
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
+          ...(follows
+            ? {
+                armClear: 'try' as const,
+                armed: (ok: boolean) => {
+                  arming.armed = ok;
+                },
+              }
+            : {}),
           // A code left visible on the strength of a proven code program is typed only while one still holds it.
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
           ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
@@ -1959,8 +1998,10 @@ export class InputRequestService {
           outcome === 'guard_refused' ? 'target_changed' : outcome,
         );
       }
+      const typedUnder = hold;
       await this.settle(hold);
       hold = undefined;
+      if (follows && arming.armed && typedUnder !== undefined) this.followed.add(typedUnder.id);
       if (clear !== undefined)
         grant?.typed(
           clear,
@@ -2123,10 +2164,10 @@ export class InputRequestService {
   /**
    * WHY THE FERRET COULD HAVE STEERED THIS PAGE, for its lock (docs/input-requests.md, "How long the lock lasts"):
    *
-   * - a page script ANY caller ran on this page's host, on a host that couldn't be read, or one running anywhere now
-   *   (the machine-wide taint the standing rules keep);
-   * - this session's own acts and scripts on this very page (login-observer.ts `pageSteer`): a script on it or at its
-   *   host ever, an act on it, or on a tab that shares its cookies and storage at its host, at or after `since`.
+   * - a page script ANY caller ran on this page's site (`siteOf`: sibling subdomains share cookies), on a host that
+   *   couldn't be read, or one running anywhere now (the machine-wide taint the standing rules keep);
+   * - this session's own acts and scripts on this very page (login-observer.ts `pageSteer`): a script on it or on its
+   *   site ever, an act on it, or on a tab that shares its cookies and storage on its site, at or after `since`.
    *
    * Never an act on another tab, another site's tab in the same profile, an incognito tab, or a terminal. `unknown`
    * with no observer wired. Nothing is asked of a terminal: its lock never reads the ferret's acts.
@@ -2134,12 +2175,13 @@ export class InputRequestService {
   private steerOf(sessionId: string, facts: InputTargetFacts, since: number): PageSteer | undefined {
     if (facts.kind !== 'browser') return undefined;
     const host = placeOf(facts, undefined);
+    const site = host === undefined ? undefined : siteOf(host);
     const machine = this.deps.grants?.scriptedOrigins();
     if (
       machine !== undefined &&
       (machine.running === true ||
         machine.everywhere !== undefined ||
-        (host === undefined ? machine.hosts.size > 0 : machine.hosts.has(host)))
+        (site === undefined ? machine.hosts.size > 0 : [...machine.hosts.keys()].some(each => siteOf(each) === site)))
     )
       return 'scripted';
     const observer = this.deps.observer;

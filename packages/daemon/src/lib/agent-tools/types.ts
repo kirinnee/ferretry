@@ -113,7 +113,14 @@ export interface AgentInputPort {
   pageHeld?(
     sessionId: string,
     names: readonly (string | undefined)[],
-  ): { readonly until: number; readonly documents: readonly string[] } | undefined;
+  ):
+    | {
+        readonly until: number;
+        readonly documents: readonly string[];
+        /** Every hold on the page follows its document: pictures, like text, wait only while it shows one of them. */
+        readonly documentsOnly?: true;
+      }
+    | undefined;
   /** The document a session's page shows now, or nothing when it cannot be told. */
   pageDocument?(sessionId: string, key: string): Promise<string | undefined>;
 }

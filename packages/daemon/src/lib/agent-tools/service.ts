@@ -185,7 +185,11 @@ export interface AgentToolPorts {
    * lock reads only acts on its own page (login-observer.ts `pageSteer`); until then the act counts on every page.
    */
   readonly loginActs?: {
-    acted(sessionId: string, kind: SurfaceKind, script: boolean): { placed(page: ActedPage | undefined): void } | void;
+    acted(
+      sessionId: string,
+      kind: SurfaceKind,
+      script: boolean,
+    ): { placed(page: ActedPage | undefined): void } | undefined;
   };
   /**
    * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
@@ -1339,7 +1343,9 @@ export class AgentToolService {
    * A page the daemon just typed a secret into is not READ while it is held: masking can only hide a value it
    * recognises, so the page's text, its log and any picture of it wait for the window to end. A picture always
    * waits (no mask can be drawn on pixels). Text may be read again as soon as the page has left the document the
-   * value went into, because every read is masked for the redaction window anyway.
+   * value went into, because every read is masked for the redaction window anyway. A hold that follows its document
+   * (`documentsOnly`: a value Ferretry did not submit, input service `until-moved-on`) lets pictures back the same way;
+   * a page that cannot say which document it shows is held.
    */
   private async assertPageReadable(
     caller: AgentToolCaller,
@@ -1354,7 +1360,7 @@ export class AgentToolService {
     const input = this.ports.input;
     const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;
-    if (PAGE_TEXT.has(tool) && held.documents.length > 0) {
+    if ((PAGE_TEXT.has(tool) || held.documentsOnly === true) && held.documents.length > 0) {
       const now = await (
         document ?? (async () => await input.pageDocument?.(caller.sessionId, surface.name ?? surface.id))
       )();
