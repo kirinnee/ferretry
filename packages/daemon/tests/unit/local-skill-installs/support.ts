@@ -4,6 +4,7 @@ import {
   type ProjectSkillFiles,
   type RuntimeSkillAssets,
   type SkillFolderChange,
+  type SkillFilesReading,
   type SkillFolderReading,
 } from '../../../src/lib/catalog-installs/ports.ts';
 import type { FreshStepUpContext } from '../../../src/lib/fleet/catalog-service.ts';
@@ -58,6 +59,10 @@ class FakeProjectSkills implements ProjectSkillFiles {
     return this.folders.read(`${root}/${folder}`);
   }
 
+  async read(): Promise<SkillFilesReading> {
+    return { files: new Map(), tooLarge: [] };
+  }
+
   apply(root: string, folder: string, change: SkillFolderChange): Promise<void> {
     return this.folders.change(`${root}/${folder}`, change);
   }
@@ -68,6 +73,10 @@ class FakeRuntimeSkills implements RuntimeSkillAssets {
   constructor(readonly folders: FakeFolders) {}
   inspect(name: string): Promise<SkillFolderReading> {
     return this.folders.read(`runtime/${name}`);
+  }
+
+  async read(): Promise<SkillFilesReading> {
+    return { files: new Map(), tooLarge: [] };
   }
 
   async remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void> {
