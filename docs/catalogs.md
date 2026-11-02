@@ -353,6 +353,9 @@ The reads are open to a ferret (they show only what the owner already keeps); th
 `changes` and the version reads are the same bytes whoever asks. A version read reads the kept copy, and
 refuses a copy that no longer matches its digest.
 
+The feature flag is `catalogs.versions.1`: a daemon reports it when it answers the item routes above, so the app
+dials them only where the machine says it can.
+
 ### One item in many catalogs, and the default (catalogs 3c-2)
 
 An item is kept once and can be listed in any number of catalogs. `POST /items` with `{itemId, version}` lists an item

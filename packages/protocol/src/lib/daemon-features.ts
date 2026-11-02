@@ -164,6 +164,12 @@ export const DAEMON_FEATURES = {
    */
   catalogQuickAdd: 'catalogs.quick-add.1',
   /**
+   * Item-level versions (docs/catalogs.md § What changed): `GET /v1/catalog-items/:itemId`, `…/versions/:version`,
+   * `…/changes`, and the preview and publish of an update at the item. A daemon without this name answers 404, so the
+   * app shows a version view and an item publish only where the machine reports it.
+   */
+  catalogVersions: 'catalogs.versions.1',
+  /**
    * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
    * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
    * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.

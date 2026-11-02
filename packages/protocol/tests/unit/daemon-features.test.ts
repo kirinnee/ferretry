@@ -63,6 +63,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('catalogs.quick-add.1');
   });
 
+  it('should report item-level versions, so the app dials the item routes only where the machine answers them', () => {
+    should(DAEMON_FEATURES.catalogVersions).equal('catalogs.versions.1');
+    should(daemonFeatureList()).containEql('catalogs.versions.1');
+  });
+
   it('should report task plans now that the app draws the plan card', () => {
     // A plan fill closes an input card with a `plan` actor an older app's strict parse refuses: only a daemon that reports this fills one.
     should(DAEMON_FEATURES.taskPlan).equal('task-plan.1');
