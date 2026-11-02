@@ -59,11 +59,11 @@ describe('where an install goes unless the person picks another place', () => {
     expect(plan).toEqual({
       draft: { scope: 'project', projectRoot: '/work/app', harness: 'codex' },
       scope: 'project',
-      sentence: 'This project (every session in this folder)',
+      sentence: 'this project (every session in this folder)',
       projectRoot: '/work/app',
     });
     expect(scopeLine(plan)).toBe(
-      'Installs into This project (every session in this folder). You can pick another place when you install.',
+      'Installs into this project (every session in this folder). You can pick another place when you install.',
     );
   });
 
@@ -71,7 +71,7 @@ describe('where an install goes unless the person picks another place', () => {
     const plan = installPlan({ cwd: '/tmp/scratch', harness: 'claude', runtime: 'claude-work' }, projects, runtimes);
     expect(plan.draft).toEqual({ scope: 'runtime', runtime: 'rt-work', profile: 'default' });
     expect(plan.sentence).toBe(accountSentence('claude-work'));
-    expect(plan.sentence).toBe('This account (every session on claude-work)');
+    expect(plan.sentence).toBe('this account (every session on claude-work)');
     expect(plan.runtimeId).toBe('rt-work');
   });
 
@@ -167,7 +167,7 @@ describe('where it landed', () => {
       `Installed pdf-tools in ${PROJECT_SENTENCE}. ${CLAUDE_LIVE}`,
     );
     expect(landedSentence(inRuntime('rt-work'), accountPlan, SKILLS, 'claude')).toBe(
-      `Installed pdf-tools in This account (every session on claude-work). ${CLAUDE_LIVE}`,
+      `Installed pdf-tools in this account (every session on claude-work). ${CLAUDE_LIVE}`,
     );
   });
 

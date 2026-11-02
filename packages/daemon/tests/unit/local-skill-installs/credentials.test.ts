@@ -74,6 +74,32 @@ describe('the credential test that refuses a copy', () => {
     should(firstCredentialLine(`API_KEY=abcdef01234\n56789abcdef`)).equal(1);
   });
 
+  it('should name the exact line, whatever the line breaks and whichever pass finds it', () => {
+    const KEY = `API_KEY=${LONG}`;
+    should(firstCredentialLine(KEY)).equal(1);
+    should(firstCredentialLine(`#!/bin/sh\n${KEY}\necho filled\n`)).equal(2);
+    should(firstCredentialLine(`a\nb\nc\n${KEY}\nd`)).equal(4);
+    should(firstCredentialLine(`a\r\nb\r\n${KEY}\r\nd\r\n`)).equal(3);
+    should(firstCredentialLine(`a\r\n\r\nb\r\n${KEY}`)).equal(4);
+    should(firstCredentialLine(`#!/bin/sh\nAPI_\u202EKEY=${LONG}\necho filled\n`)).equal(2);
+    should(firstCredentialLine(`one\ntwo\nAPI_KEY=abcdef01234\n56789abcdef\nfive`)).equal(3);
+    should(firstCredentialLine(`one\r\n\r\ntwo\r\nAPI_KEY=abcdef01234\r\n\r\n56789abcdef\r\nsix`)).equal(4);
+    should(firstCredentialLine(`one\ntwo\nAPI_\nKEY=${LONG}\nfive`)).equal(4);
+  });
+
+  it('should name the line a credential that survives only in the joined text starts on', () => {
+    should(firstCredentialLine('sk-1234567890\n1234567890\n! API_KEY=abcdef01234\n56789abcdef')).equal(3);
+    should(firstCredentialLine('fill \n"API_KEY=abcdef01234\n56789abcdef')).equal(2);
+    should(firstCredentialLine('word \ntoken\n:abcdef01234\n56789abcdef')).equal(2);
+    should(firstCredentialLine('sk-1234567890\n1234567890\n! one\nAPI_KEY=abcdef01234\n56789abcdef')).equal(4);
+    should(firstCredentialLine('one \n\nghp_0123456789\nabcdefghijklmnopqrstuvwxyz')).equal(3);
+    should(firstCredentialLine('one\ntwo ghp_0123456789\nabcdefghijklmnopqrstuvwxyz')).equal(2);
+    should(firstCredentialLine('one\ncurl -u me:\npassword1 now')).equal(2);
+    should(firstCredentialLine('one\nhttps://h/?a=b&api_key=abcdef01234\n56789abcdef')).equal(2);
+    should(firstCredentialLine('pad\n\nhttps://h/?x=1&\napi_key=abcdef0123456789abcdef')).equal(4);
+    should(firstCredentialLine('pad\nhttps://h/?x=1&pre\napi_key=abcdef0123456789abcdef')).equal(3);
+  });
+
   it('should leave alone what is short, referenced, a place, or not a secret by name', () => {
     should(firstCredentialLine('API_KEY=short')).be.undefined();
     should(firstCredentialLine('API_KEY=$OTHER_VARIABLE_NAME_HERE')).be.undefined();
@@ -179,6 +205,7 @@ describe('the credential test on a hostile file', () => {
     ['token prefixes that never reach the length', repeated('ghp_1 ')],
     ['lines', repeated('a\n')],
     ['joined lines', repeated('api_\nkey\n')],
+    ['joined lines ending in a credential', `${repeated('a \n')}api_\nkey=${LONG}`],
   ];
 
   for (const [name, text] of hostile) {

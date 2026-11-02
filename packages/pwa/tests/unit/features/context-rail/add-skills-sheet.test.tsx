@@ -130,7 +130,7 @@ describe('the subscriptions list', () => {
     expect(rows()[0]?.textContent).toContain("Studio · Kirin's catalog");
     expect(rows()[0]?.textContent).toContain('v1');
     expect(q('[data-add-skills-install]')?.textContent).toContain('Install');
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This project (every session in this folder)');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this project (every session in this folder)');
     await view.unmount();
   });
 
@@ -250,6 +250,7 @@ describe('the subscriptions list', () => {
     const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
     const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const { view } = await open(host);
+    expect(q('[data-add-skills-search]')?.getAttribute('placeholder')).toBe('Search skills');
     await typeInto(q('[data-add-skills-search]'), 'nothing like it');
     expect(rows()).toHaveLength(0);
     expect(q('[data-add-skills-none]')?.textContent).toBe(NO_SKILLS_FOUND);
@@ -318,7 +319,7 @@ describe('Install from the sheet', () => {
     await settle();
     expect(q('[data-catalog-sheet="add-skills"]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
-      `Installed pdf-tools in This project (every session in this folder). ${CLAUDE_LIVE}`,
+      `Installed pdf-tools in this project (every session in this folder). ${CLAUDE_LIVE}`,
     );
     expect(events).toEqual(['installed']);
     expect(q('[data-add-skills-installed]')).not.toBeNull();
@@ -396,7 +397,7 @@ describe('Install from the sheet', () => {
       { cwd: '/tmp/elsewhere' },
     );
     const { view } = await open(host);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This account (every session on claude-work)');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this account (every session on claude-work)');
     await click(q('[data-add-skills-install]'));
     await settle();
     await click(q('[data-shared-install-button]'));
@@ -474,7 +475,7 @@ describe('the app store as the default source', () => {
     await settle();
     await settle();
     expect(rows()).toHaveLength(1);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This project');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this project');
     await view.unmount();
   });
 
@@ -498,7 +499,7 @@ describe('the app store as the default source', () => {
     await settle();
     await settle();
     expect(rows()).toHaveLength(1);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This account');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this account');
     await view.unmount();
   });
 });

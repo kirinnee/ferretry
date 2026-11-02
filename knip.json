@@ -51,6 +51,7 @@
         "harness/catalogs-versions-screenshot.tsx",
         "harness/shared-screenshot.tsx",
         "harness/add-skills-screenshot.tsx",
+        "harness/machine-skills-screenshot.tsx",
         "harness/sharing-screenshot.tsx",
         "harness/screenshot.ts",
         "harness/cred-cards-screenshot.tsx",
