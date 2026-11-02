@@ -223,6 +223,7 @@ async function machine(options: { codexHome?: boolean } = {}): Promise<Machine> 
   };
   handle.deps = fileFleetSetupDeps({
     catalog,
+    daemonId: () => 'daemon-source',
     credentials,
     tools: { plans: () => [], install: async () => [] },
     secrets: {
@@ -263,6 +264,7 @@ describe('the setup service collaborators over a temporary machine', () => {
     await writeFile(path.join(codexHome, 'AGENTS.md'), '# elsewhere too\n');
     const deps = fileFleetSetupDeps({
       catalog,
+      daemonId: () => 'daemon-source',
       claudeConfigDir: claudeHome,
       codexHome,
       credentials,

@@ -11981,6 +11981,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ...(process.env.CLAUDE_CONFIG_DIR === undefined ? {} : { claudeConfigDir: process.env.CLAUDE_CONFIG_DIR }),
           ...(process.env.CODEX_HOME === undefined ? {} : { codexHome: process.env.CODEX_HOME }),
           credentials: harnessCredentials,
+          daemonId: () => attachmentDaemonId,
           tools: new ToolInstallService({
             platform: process.platform,
             executables,

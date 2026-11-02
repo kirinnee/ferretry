@@ -36,6 +36,7 @@
  * request; nothing is launched to find anything out, and no provider is called.
  */
 import {
+  assignOriginKeys,
   type AccountModel,
   buildCloneBundle,
   type ClonePlan,
@@ -43,6 +44,7 @@ import {
   cloneSources,
   describeClone,
   EMPTY_RUNTIME_IDS,
+  EXPORT_KEYS_FILE,
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
@@ -61,11 +63,13 @@ import {
   mergeImport,
   mergeImportRecord,
   parseCloneBundle,
+  parseExportKeys,
   parseSettings,
   planClone,
   planImport,
   type SettingsObject,
   skillFrontmatterKeys,
+  serializeExportKeys,
   skillSourceReference,
 } from '@ferretry/fleet';
 import type {
@@ -161,6 +165,18 @@ export interface FleetSetupServiceDeps {
   skillItems(): Promise<readonly string[]>;
   /** A content digest (sha256). */
   digest(text: string): string;
+  /**
+   * This daemon's own id, as it reports itself to a machine that copies from it. Absent while pairing
+   * identity is not open yet, and then there is nothing to say a copy came from.
+   */
+  daemonId(): string | undefined;
+  /** Cryptographically random bytes: an origin key is 16 of them. */
+  randomBytes(length: number): Uint8Array;
+  /** `setup/export-keys.json`: the origin keys this machine gave what it exported (state, never configuration). */
+  readonly exportKeys: {
+    read(path: string): Promise<string | undefined>;
+    write(path: string, text: string): Promise<void>;
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────
@@ -374,7 +390,14 @@ export class FleetSetupService {
       for (const skipped of folder.skipped)
         notCopied.push({ path: `${directory}/${skipped.path}`, reason: skipped.reason });
     }
-    return buildCloneBundle({
+    const daemon = this.deps.daemonId();
+    if (daemon === undefined) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} is still starting, so it cannot be copied from yet. Try again in a moment.`,
+      );
+    }
+    const bundle = buildCloneBundle({
       model: reading.model,
       machine: catalog.machineName(),
       exportedAt: new Date(catalog.now()).toISOString(),
@@ -382,6 +405,30 @@ export class FleetSetupService {
       files,
       notCopied,
     });
+    const path = `${catalog.layout.fleetDirectory}/${EXPORT_KEYS_FILE}`;
+    const { keys, stored } = assignOriginKeys({
+      bundle,
+      previous: parseExportKeys(await this.#storedKeys(path)),
+      runtimeIds: Object.fromEntries(
+        Object.entries(((await catalog.ids()) ?? EMPTY_RUNTIME_IDS).runtimes).map(([name, entry]) => [name, entry.id]),
+      ),
+      randomBytes: length => this.deps.randomBytes(length),
+    });
+    // Bookkeeping: an export that cannot remember its keys still answers with the ones it minted.
+    try {
+      await this.deps.exportKeys.write(path, serializeExportKeys(stored));
+    } catch {
+      // The next export re-derives what it can; a renamed item then looks new rather than copying wrongly.
+    }
+    return { ...bundle, version: 2, daemon, keys };
+  }
+
+  async #storedKeys(path: string): Promise<string | undefined> {
+    try {
+      return await this.deps.exportKeys.read(path);
+    } catch {
+      return undefined;
+    }
   }
 
   async #emails(): Promise<Record<string, string | undefined>> {

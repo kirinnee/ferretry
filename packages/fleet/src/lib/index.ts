@@ -10,6 +10,7 @@ export * from './account/disabled.ts';
 export * from './account/disabled-runtime.ts';
 export * from './account/document.ts';
 export * from './account/environment.ts';
+export * from './account/export-keys.ts';
 export * from './account/fixed-layer.ts';
 export * from './account/halves.ts';
 export * from './account/ids.ts';

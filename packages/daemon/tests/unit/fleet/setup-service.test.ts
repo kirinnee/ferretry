@@ -12,6 +12,9 @@ import {
   buildCloneBundle,
   builtInModelCatalogs,
   builtInPresets,
+  EXPORT_KEYS_FILE,
+  originKeyOfId,
+  parseExportKeys,
   FleetApplyFailureError,
   type FleetApplyPlan,
   type FleetDocumentWrite,
@@ -25,6 +28,7 @@ import {
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
+  ORIGIN_KEY_PATTERN,
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
@@ -60,6 +64,7 @@ const LAYOUT: FleetLayout = {
 };
 
 const RECORD_PATH = `/state/fleet/${IMPORT_RECORD_FILE}`;
+const KEYS_PATH = `/state/fleet/${EXPORT_KEYS_FILE}`;
 const SECRET_VALUE = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
 /** A host with Claude Code signed in, instructions, settings holding one secret, and one skill. */
@@ -149,6 +154,11 @@ interface World {
     documentError: unknown;
     scanError: unknown;
     locate: Partial<Record<'claude' | 'codex', string>>;
+    daemon: string | undefined;
+    /** `setup/export-keys.json` as the machine holds it. */
+    keysText: string | undefined;
+    keysWriteError: unknown;
+    keysWrites: number;
   };
 }
 
@@ -194,7 +204,12 @@ function world(
     documentError: undefined,
     scanError: undefined,
     locate: { claude: '/usr/bin/claude' },
+    daemon: 'daemon-source',
+    keysText: undefined,
+    keysWriteError: undefined,
+    keysWrites: 0,
   };
+  let drawn = 0;
   const deps: FleetSetupServiceDeps = {
     catalog: {
       document: async () => {
@@ -244,6 +259,20 @@ function world(
     readFolder: async path => state.folders[path] ?? { files: [], skipped: [] },
     skillItems: async () => await state.skillItems(),
     digest: text => `sha:${Bun.hash(text).toString(16)}`,
+    daemonId: () => state.daemon,
+    randomBytes: length => {
+      drawn += 1;
+      return Uint8Array.from({ length }, (_, index) => (drawn * 37 + index * 11) % 256);
+    },
+    exportKeys: {
+      read: async path => (path === KEYS_PATH ? state.keysText : undefined),
+      write: async (path, text) => {
+        if (state.keysWriteError !== undefined) throw state.keysWriteError;
+        should(path).equal(KEYS_PATH);
+        state.keysText = text;
+        state.keysWrites += 1;
+      },
+    },
     ...options.overrides,
   };
   return {
@@ -528,6 +557,184 @@ describe('exportBundle', () => {
       reason: 'the setup is too large to copy in one go',
     });
     should(bundle.credentials).deepEqual([{ id: 'claude-you', harness: 'claude', label: 'work' }]);
+  });
+});
+
+/** SET_UP_MODEL with its `main` instructions renamed, its document moved with it and its profile following. */
+const renamedMain = (to: string): AccountModel => {
+  const base = SET_UP_MODEL();
+  const { main: _main, ...others } = base.components.instructions;
+  return parseAccountModel({
+    ...base,
+    components: {
+      ...base.components,
+      instructions: { ...others, [to]: { file: `components/instructions/${to}.md` } },
+    },
+    profiles: { default: { layers: [`instructions/${to}`, 'skills/mine', 'modelSets/claude'] } },
+  });
+};
+
+const MAIN_DOCUMENT = '/state/fleet/assets/components/instructions/main.md';
+
+describe('exportBundle origin keys', () => {
+  const exported = async (
+    w: World,
+  ): Promise<Extract<Awaited<ReturnType<FleetSetupService['exportBundle']>>, { version: 2 }>> => {
+    const bundle = FleetCloneBundleSchema.parse(await w.service.exportBundle());
+    if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
+    return bundle;
+  };
+
+  it('should answer version 2 with the daemon id and a key for every exported item, and remember them', async () => {
+    // Arrange
+    const w = world({
+      catalog: {
+        ids: async () => ({
+          version: 1,
+          runtimes: { 'claude-default': { id: '12345678-1234-4234-8234-123456789abc', formerNames: [] } },
+        }),
+      },
+    });
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+
+    // Act
+    const bundle = await exported(w);
+
+    // Assert
+    should(bundle.daemon).equal('daemon-source');
+    should(Object.keys(bundle.keys).toSorted()).deepEqual([
+      'instructions/far',
+      'instructions/lost',
+      'instructions/main',
+      'login/claude-you',
+      'modelSets/claude',
+      'profile/default',
+      'runtime/claude-default',
+      'skills/mine',
+    ]);
+    for (const key of Object.values(bundle.keys)) should(key).match(ORIGIN_KEY_PATTERN);
+    should(new Set(Object.values(bundle.keys)).size).equal(8);
+    should(bundle.keys['runtime/claude-default']).equal(originKeyOfId('12345678-1234-4234-8234-123456789abc'));
+    const stored = parseExportKeys(w.state.keysText);
+    should(Object.keys(stored.items).toSorted()).deepEqual(
+      Object.keys(bundle.keys)
+        .filter(reference => !reference.startsWith('runtime/'))
+        .toSorted(),
+    );
+    should(stored.items['instructions/main']?.key).equal(bundle.keys['instructions/main']);
+  });
+
+  it('should give the same keys on the next export', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+    const first = await exported(w);
+    const second = await exported(w);
+    const { 'runtime/claude-default': _runtime, ...firstKeys } = first.keys;
+    const { 'runtime/claude-default': _again, ...secondKeys } = second.keys;
+    should(secondKeys).deepEqual(firstKeys);
+    should(w.state.keysWrites).equal(2);
+  });
+
+  it('should keep a key through a pure rename and give an edited rename a new one', async () => {
+    // Arrange
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+    const before = await exported(w);
+
+    // Act: renamed, document unchanged
+    w.state.reading = configReading(renamedMain('primary'), 'r');
+    w.state.assets['/state/fleet/assets/components/instructions/primary.md'] = 'Main.\n';
+    const renamed = await exported(w);
+
+    // Assert
+    should(renamed.keys['instructions/primary']).equal(before.keys['instructions/main']);
+    should(renamed.keys['profile/default']).equal(before.keys['profile/default']);
+    should(Object.keys(parseExportKeys(w.state.keysText).items)).not.containEql('instructions/main');
+
+    // Act: renamed again AND edited
+    w.state.reading = configReading(renamedMain('final'), 'r');
+    w.state.assets['/state/fleet/assets/components/instructions/final.md'] = 'Main, edited.\n';
+    const edited = await exported(w);
+
+    // Assert
+    should(edited.keys['instructions/final']).not.equal(before.keys['instructions/main']);
+    should(edited.keys['profile/default']).equal(before.keys['profile/default']);
+  });
+
+  it('should mint again when export-keys.json cannot be read, and write a file that can', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+    for (const broken of [
+      'not json',
+      '{"version":2,"items":{}}',
+      '{"version":1,"items":{"instructions/main":{"key":"short","digest":"x"}}}',
+    ]) {
+      w.state.keysText = broken;
+      const bundle = await exported(w);
+      should(bundle.keys['instructions/main']).match(ORIGIN_KEY_PATTERN);
+      should(parseExportKeys(w.state.keysText).items['instructions/main']?.key).equal(bundle.keys['instructions/main']);
+    }
+  });
+
+  it('should still answer with the keys it minted when the file cannot be written', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.keysWriteError = new Error('read-only file system');
+    const bundle = await exported(w);
+    should(bundle.keys['instructions/main']).match(ORIGIN_KEY_PATTERN);
+    should(w.state.keysText).be.undefined();
+  });
+
+  it('should refuse an export while the daemon has no id to report', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.daemon = undefined;
+    await setupRefusal(w.service.exportBundle(), 'fleet_setup_refused');
+  });
+
+  it('should carry no secret value and no token field in the bundle, the keys or the file (§14.4)', async () => {
+    // Arrange: a login that names a secret, and a secret the store holds.
+    const w = world();
+    const base = SET_UP_MODEL();
+    w.state.reading = configReading(
+      parseAccountModel({
+        ...base,
+        components: {
+          ...base.components,
+          mcp: { github: { command: 'github-mcp', env: { GITHUB_TOKEN: '${secret:GITHUB_TOKEN}' } } },
+        },
+      }),
+      'r',
+    );
+    w.secrets.set('GITHUB_TOKEN', SECRET_VALUE);
+
+    // Act
+    const bundle = await exported(w);
+    const wire = JSON.stringify(bundle);
+
+    // Assert
+    should(wire).not.containEql(SECRET_VALUE);
+    should(w.state.keysText ?? '').not.containEql(SECRET_VALUE);
+    should(wire).containEql('${secret:GITHUB_TOKEN}');
+    should(Object.keys(bundle).toSorted()).deepEqual([
+      'components',
+      'credentials',
+      'daemon',
+      'exportedAt',
+      'files',
+      'format',
+      'keys',
+      'machine',
+      'notCopied',
+      'profiles',
+      'runtimes',
+      'version',
+    ]);
+    for (const credential of bundle.credentials) should(Object.keys(credential)).not.containEql('token');
   });
 });
 
