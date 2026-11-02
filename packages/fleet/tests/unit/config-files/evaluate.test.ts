@@ -186,7 +186,7 @@ describe('evaluateConfigFiles: last good wins', () => {
 
   it('should keep the previous version for a file that holds a raw secret', () => {
     // Arrange
-    const key = ['sk', 'ant', 'api03'].join('-') + '-' + 'Q'.repeat(24);
+    const key = `${['sk', 'ant', 'api03'].join('-')}-${'Q'.repeat(24)}`;
     const good = 'harness: claude\nstore: environment\nenv:\n  A: b\n';
     const accepted = acceptedOf([file('logins/work.yaml', good)]);
 
@@ -908,7 +908,7 @@ describe('evaluateConfigFiles: account-defaults.yaml is held for the owner', () 
     should(actual.pending.map(entry => entry.path)).deepEqual(['account-defaults.yaml']);
   });
 
-  it('should put a removal into effect at once: taking a default away needs nobody’s confirmation (!A243)', () => {
+  it('should hold a removal too: taking a default away is the owner’s call as well', () => {
     // Arrange
     const accepted = acceptedOf([file('account-defaults.yaml', FIRST)]);
 
@@ -916,37 +916,10 @@ describe('evaluateConfigFiles: account-defaults.yaml is held for the owner', () 
     const actual = evaluate([file('account-defaults.yaml', '{}\n')], accepted);
 
     // Assert
-    should(actual.pending).deepEqual([]);
-    should(actual.effective.accountDefaults).deepEqual({});
-  });
-
-  it('should put the deletion of the whole file into effect at once, the same removal', () => {
-    // Arrange
-    const accepted = acceptedOf([file('account-defaults.yaml', FIRST)]);
-
-    // Act
-    const actual = evaluate([], accepted);
-
-    // Assert
-    should(actual.pending).deepEqual([]);
-    should(actual.effective.accountDefaults).deepEqual({});
-  });
-
-  it('should still hold a write that removes one line and changes another, and keep both in effect meanwhile', () => {
-    // Arrange
-    const both = 'sites:\n  app.clickup.com: CLICKUP_A\n  github.com: GITHUB\n';
-    const accepted = acceptedOf([file('account-defaults.yaml', both)]);
-
-    // Act
-    const actual = evaluate([file('account-defaults.yaml', 'sites:\n  github.com: GITHUB_B\n')], accepted);
-
-    // Assert
     should(actual.pending[0]?.changes).deepEqual([
-      'changes which account a card offers first for github.com in every session on this machine',
+      'changes which account a card offers first for app.clickup.com in every session on this machine',
     ]);
-    should(actual.effective.accountDefaults).deepEqual({
-      sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' },
-    });
+    should(actual.effective.accountDefaults).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
   });
 
   it('should put the file in effect once it is the accepted version', () => {

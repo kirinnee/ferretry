@@ -474,13 +474,18 @@ describe('a ferret’s write to account-defaults.yaml', () => {
 
 describe('a raw write to account-defaults.yaml that takes defaults away (!A243)', () => {
   const BOTH = 'sites:\n  app.clickup.com: CLICKUP_A\n  github.com: GITHUB\n';
-
-  it('should need no approval when it only removes a line, whoever may not loosen', async () => {
+  const GITHUB_ONLY = 'sites:\n  github.com: GITHUB\n';
+  const seeded = async () => {
     const w = await world();
     await withAccounts(w);
     await w.config.writeOwn(PATH, BOTH);
+    return w;
+  };
 
-    const answer = await w.config.write(PATH, 'sites:\n  github.com: GITHUB\n', undefined, false);
+  it('should need no approval when the owner only removes a line', async () => {
+    const w = await seeded();
+
+    const answer = await w.config.write(PATH, GITHUB_ONLY, undefined, false, 'owner');
 
     should(answer.outcome).equal('applied');
     should(answer.loosened).be.false();
@@ -488,43 +493,71 @@ describe('a raw write to account-defaults.yaml that takes defaults away (!A243)'
     should((await w.config.load()).evaluation.pending).deepEqual([]);
   });
 
-  it('should need no approval when it empties the file', async () => {
-    const w = await world();
-    await withAccounts(w);
-    await w.config.writeOwn(PATH, BOTH);
+  it('should need no approval when the owner empties the file', async () => {
+    const w = await seeded();
 
-    const answer = await w.config.write(PATH, '{}\n', undefined, false);
+    const answer = await w.config.write(PATH, '{}\n', undefined, false, 'owner');
 
     should(answer.outcome).equal('applied');
     should(await inEffect(w)).deepEqual({});
   });
 
-  it('should still ask when it removes one line and changes another, and change neither until it is confirmed', async () => {
-    const w = await world();
-    await withAccounts(w);
-    await w.config.writeOwn(PATH, BOTH);
+  it('should still ask when the owner removes one line and changes another, and change neither until confirmed', async () => {
+    const w = await seeded();
 
-    const answer = await w.config.write(PATH, 'sites:\n  github.com: GITHUB_OTHER\n', undefined, false);
+    const answer = await w.config.write(PATH, 'sites:\n  github.com: GITHUB_OTHER\n', undefined, false, 'owner');
 
     should(answer.outcome).equal('pending');
     should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
     should((await w.config.load()).evaluation.pending[0]?.changes).deepEqual([
       'changes which account a card offers first for github.com in every session on this machine',
+      'changes which account a card offers first for app.clickup.com in every session on this machine',
     ]);
   });
 
-  it('should still ask when it adds a line, and still ask when it changes one', async () => {
+  it('should still ask when the owner adds a line, and still ask when the owner changes one', async () => {
     const w = await world();
     await withAccounts(w);
-    await w.config.writeOwn(PATH, 'sites:\n  github.com: GITHUB\n');
+    await w.config.writeOwn(PATH, GITHUB_ONLY);
 
-    const added = await w.config.write(PATH, BOTH, undefined, false);
+    const added = await w.config.write(PATH, BOTH, undefined, false, 'owner');
     should(added.outcome).equal('pending');
     should(await w.config.discard(PATH, added.pending?.etag ?? '')).be.true();
 
-    const changed = await w.config.write(PATH, 'sites:\n  github.com: GITHUB_OTHER\n', undefined, false);
+    const changed = await w.config.write(PATH, 'sites:\n  github.com: GITHUB_OTHER\n', undefined, false, 'owner');
     should(changed.outcome).equal('pending');
     should(await inEffect(w)).deepEqual({ sites: { 'github.com': 'GITHUB' } });
+  });
+
+  it('should HOLD a ferret’s removal (!A162): config_write only ever suggests, so the earlier lines stay in effect', async () => {
+    const w = await seeded();
+
+    const answer = await w.config.write(PATH, GITHUB_ONLY, undefined, false, 'agent');
+
+    should(answer.outcome).equal('pending');
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+    should((await w.config.load()).evaluation.pending[0]?.changes).deepEqual([
+      'changes which account a card offers first for app.clickup.com in every session on this machine',
+    ]);
+  });
+
+  it('should HOLD a write that names no caller: the door that does not say it is the owner is not one', async () => {
+    const w = await seeded();
+
+    const answer = await w.config.write(PATH, '{}\n', undefined, false);
+
+    should(answer.outcome).equal('pending');
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+
+  it('should hold an edit the daemon cannot attribute (a file changed on the disk), removal or not', async () => {
+    const w = await seeded();
+    w.directory.texts.set(PATH, GITHUB_ONLY);
+
+    const pending = (await w.config.load()).evaluation.pending;
+
+    should(pending.map(p => p.path)).deepEqual([PATH]);
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
   });
 });
 
@@ -578,7 +611,7 @@ describe('the defaults follow the owner’s account acts', () => {
     should((await w.config.load()).evaluation.pending.map(p => p.path)).deepEqual([PATH]);
   });
 
-  it('should not let a reused handle inherit when the file is deleted', async () => {
+  it('should not let a reused handle inherit when the file’s deletion is held', async () => {
     const w = await world();
     await seed(w, lineOfA);
     w.directory.texts.delete(PATH);

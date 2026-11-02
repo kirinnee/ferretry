@@ -195,6 +195,7 @@ async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Prom
       request.text,
       headerValue(context.request, CONFIG_IF_MATCH_HEADER),
       mayLoosen,
+      'owner',
     );
     if (written.loosened && context.governance?.governed === true) context.spendFreshStepUp?.();
     return jsonResponse({
@@ -303,7 +304,7 @@ async function agentTool(subsystem: ConfigFilesSubsystem, call: AgentConfigToolC
     };
   }
   try {
-    const written = await service.write(call.path, call.text, call.etag, false);
+    const written = await service.write(call.path, call.text, call.etag, false, 'agent');
     return {
       summary:
         written.outcome === 'applied'

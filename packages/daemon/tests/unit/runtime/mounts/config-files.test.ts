@@ -916,3 +916,55 @@ describe('the configuration files mount', () => {
     });
   });
 });
+
+describe('account-defaults.yaml: only the owner’s own removal needs no approval (!A243, !A162)', () => {
+  const BOTH = 'sites:\n  app.clickup.com: CLICKUP_A\n  github.com: GITHUB\n';
+  const GITHUB_ONLY = 'sites:\n  github.com: GITHUB\n';
+  const inEffect = async (subject: World) => (await subject.service.load()).evaluation.effective.accountDefaults;
+  const seeded = async (): Promise<World> => {
+    const subject = world();
+    subject.off.delete('settings');
+    await subject.service.writeOwn('account-defaults.yaml', BOTH);
+    return subject;
+  };
+
+  it('should put the owner’s removal-only PUT into effect at once, even from a governed device with no fresh passkey', async () => {
+    const subject = await seeded();
+
+    const answer = await call(subject, DEVICE, put('account-defaults.yaml', GITHUB_ONLY));
+
+    should(answer.body).containEql({ outcome: 'applied' });
+    should(await inEffect(subject)).deepEqual({ sites: { 'github.com': 'GITHUB' } });
+  });
+
+  it('should hold the owner’s PUT that removes one line and changes another', async () => {
+    const subject = await seeded();
+
+    const answer = await call(subject, DEVICE, put('account-defaults.yaml', 'sites:\n  github.com: GITHUB_OTHER\n'));
+
+    should(answer.body).containDeep({ outcome: 'pending' });
+    should(await inEffect(subject)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+
+  it('should HOLD a ferret’s config_write that only removes a line, the earlier lines staying in effect', async () => {
+    const subject = await seeded();
+
+    const answer = await call(
+      subject,
+      undefined,
+      tool({ tool: 'config.write', path: 'account-defaults.yaml', text: GITHUB_ONLY }),
+    );
+
+    should(answer.status).equal(200);
+    should(String(answer.body.summary)).match(/waits for the owner to confirm it/u);
+    should(await inEffect(subject)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+
+  it('should HOLD a ferret’s config_write that empties the file', async () => {
+    const subject = await seeded();
+
+    await call(subject, undefined, tool({ tool: 'config.write', path: 'account-defaults.yaml', text: '{}\n' }));
+
+    should(await inEffect(subject)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+});

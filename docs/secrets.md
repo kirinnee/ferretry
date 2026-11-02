@@ -403,8 +403,8 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 2FA keys have routes of their own: see [2FA keys](#2fa-keys).
 
 **The default account per place** is `config/account-defaults.yaml`, not a part of the account store: its lines hold
-**handles only**, never a value, and every change that ADDS or CHANGES a line is held for the owner when anyone else makes it, while a write that only
-REMOVES lines needs no approval (owner decision !A243; [Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
+**handles only**, never a value, and every change to it is held for the owner when anyone else makes it, a ferret's removal included; the OWNER's own write
+that only REMOVES lines needs no passkey (owner decision !A243; [Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
 is the owner's own write of one line (`account: null` clears it): a ferret is refused before its body is read, a
 paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once (it is refused with `409 no_sign_in_here` for an account with no sign-in on that key). The card and `account_hint` read the file ([which account is first](input-requests.md#which-account-is-first-and-why)). The
 account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
