@@ -26,7 +26,13 @@
  * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
-import type { CloneRunnable, FleetCloneBundle, FleetCredentialView, SpeedupsView } from '@ferretry/protocol';
+import type {
+  CloneLoginTarget,
+  CloneRunnable,
+  FleetCloneBundle,
+  FleetCredentialView,
+  SpeedupsView,
+} from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
@@ -87,12 +93,12 @@ import {
   type CloneNeed,
   type CloneOutcomeItem,
   cloneLogins,
+  cloneLoginTargets,
   cloneNeeds,
   controlsChange,
   keysToCopy,
   needsAfterCopy,
-  type ReusedLogin,
-  reusedSignIns,
+  signInLink,
   type SourceSettingsFile,
   sourceItemSummary,
 } from './clone-settings-model.ts';
@@ -119,8 +125,10 @@ interface CloneResult {
   readonly summary: string | null;
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
-  /** The source sign-ins whose login this machine already had: reused as they are, with no slot. */
-  readonly reused: ReadonlyMap<string, ReusedLogin>;
+  /** What each source sign-in became here: a login this machine already had, or the slot the copy made. */
+  readonly logins: ReadonlyMap<string, CloneLoginTarget>;
+  /** This machine's logins after the copy, for their sign-in state. */
+  readonly after: readonly FleetCredentialView[];
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
   /** The source as the person names it, for the Done sentences. */
   readonly sourceName: string;
@@ -328,6 +336,8 @@ export function CloneMachine(props: CloneMachineProps) {
       let summary: string | null = null;
       const outcomes: { item: CloneOutcomeItem; outcome: CloneItemOutcome }[] = [];
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
+      // This machine's logins BEFORE the copy: the sign-ins it already has, which the copy matches against.
+      const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
       if (copiesFleet) {
         const applied = await changes.apply({
           kind: 'clone.import' as const,
@@ -375,8 +385,8 @@ export function CloneMachine(props: CloneMachineProps) {
         summary,
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
-        reused:
-          credentials?.kind === 'done' ? reusedSignIns(bundle.credentials, credentials.value.credentials) : new Map(),
+        logins: before?.kind === 'done' ? cloneLoginTargets(bundle.credentials, before.value.credentials) : new Map(),
+        after: credentials?.kind === 'done' ? credentials.value.credentials : [],
         outcomes,
         sourceName,
       });
@@ -843,9 +853,6 @@ function DoneStep({
 }) {
   if (result === null) return null;
   const busiest = result.slots[0];
-  const signInTarget = (need: CloneNeed): string | undefined =>
-    result.slots.find(slot => slot.id === need.credentialId)?.id ??
-    (need.credentialId === undefined ? undefined : result.reused.get(need.credentialId)?.id);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-clone-step="done">
       <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
@@ -853,16 +860,12 @@ function DoneStep({
       </SetupNote>
       <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
       <CloneNeedsList
-        needs={needsAfterCopy(
-          needs,
-          result.slots.map(slot => slot.id),
-          result.reused,
-        )}
+        needs={needsAfterCopy(needs, result.logins, result.after)}
         machineName={machineName}
         onAdd={onAdd}
         copy={copy}
         signIn={need => {
-          const target = signInTarget(need);
+          const target = signInLink(need, result.logins, result.after);
           return target === undefined ? null : (
             <a
               href={machineItemHash(machineName, 'sign-ins', target)}

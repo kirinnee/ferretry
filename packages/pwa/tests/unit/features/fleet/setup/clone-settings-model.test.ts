@@ -7,6 +7,7 @@ import {
   type CloneItemId,
   type CloneNeed,
   cloneLogins,
+  cloneLoginTargets,
   cloneNeeds,
   controlsChange,
   keysToCopy,
@@ -15,7 +16,7 @@ import {
   needsSentence,
   outcomeSentence,
   providersNeededBy,
-  reusedSignIns,
+  signInLink,
   type SourceSettingsFile,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
@@ -530,101 +531,85 @@ describe('outcomeSentence', () => {
   });
 });
 
-describe('needsAfterCopy', () => {
+describe('the Done screen sign-in needs', () => {
   const signIn = (id: string): CloneNeed => ({
     key: `sign-in:${id}`,
     kind: 'sign-in',
-    name: `Claude Code login (${id})`,
+    name: `Codex login (${id})`,
     credentialId: id,
-    why: 'me@work.example',
+    why: 'Work',
     held: false,
   });
   const secret: CloneNeed = { key: 'secret:KEY', kind: 'secret', name: 'KEY', why: 'login glm', held: false };
-
-  it('drops a sign-in for a signed-in reused login that has no slot, and keeps one with a slot', () => {
-    const reused = signIn('claude-you');
-    const slotted = signIn('codex-you');
-    const signedIn = new Map([['claude-you', { id: 'claude-mine', signedIn: true }]]);
-    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'], signedIn)).toEqual([slotted, secret]);
-  });
-
-  it('keeps the sign-in of a reused login that still needs one', () => {
-    const pending = signIn('codex-you');
-    const reused = new Map([['codex-you', { id: 'codex-mine', signedIn: false }]]);
-    expect(needsAfterCopy([pending, secret], [], reused)).toEqual([pending, secret]);
-  });
-
-  it('keeps a slotless sign-in that was not reused, and every secret', () => {
-    const ghost = signIn('ghost');
-    expect(needsAfterCopy([ghost, secret], [], new Map())).toEqual([ghost, secret]);
-  });
-});
-
-describe('reusedSignIns', () => {
-  const here = (
+  const login = (
+    id: string,
     harness: string,
-    fields: { id?: string; email?: string; label?: string; store?: string; status?: string } = {},
-  ): MatchableLogin => ({
-    id: fields.id ?? `${harness}-here`,
-    harness,
-    store: fields.store ?? 'ferretry',
-    status: { word: fields.status ?? 'ready' },
-    ...(fields.email === undefined ? {} : { email: fields.email }),
-    ...(fields.label === undefined ? {} : { label: fields.label }),
-  });
-  const bundleOf = (...credentials: FleetCloneBundle['credentials']): FleetCloneBundle['credentials'] => credentials;
+    status: string,
+    fields: { email?: string; label?: string; store?: string } = {},
+  ): MatchableLogin => ({ id, harness: harness as MatchableLogin['harness'], status: { word: status }, ...fields });
+  const sources = (...credentials: FleetCloneBundle['credentials']): FleetCloneBundle['credentials'] => credentials;
 
-  it('matches the same CLI and email ignoring case, never another CLI or an API-key login', () => {
-    const credentials = bundleOf(
-      { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
-      { id: 'codex-you', harness: 'codex', email: 'me@work.example' },
-      { id: 'env', harness: 'claude', store: 'environment', env: {}, email: 'env@work.example' },
+  it('drops the need of a matched login that is signed in, and keeps the need of a new slot', () => {
+    const before = [login('claude-mine', 'claude', 'ready', { email: 'me@work.example' })];
+    const targets = cloneLoginTargets(
+      sources(
+        { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
+        { id: 'codex-you', harness: 'codex', label: 'Work' },
+      ),
+      before,
     );
-    const logins = [
-      here('claude', { email: 'me@work.example' }),
-      here('claude', { email: 'env@work.example', store: 'environment' }),
+    const after = [...before, login('codex-you', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const needs = [signIn('claude-you'), signIn('codex-you'), secret];
+    expect(needsAfterCopy(needs, targets, after)).toEqual([signIn('codex-you'), secret]);
+    expect(signInLink(signIn('codex-you'), targets, after)).toBe('codex-you');
+  });
+
+  it('counts only ready and refresh_due as signed in', () => {
+    const credentials = sources({ id: 'codex-you', harness: 'codex', label: 'Work' });
+    const need = signIn('codex-you');
+    for (const [status, shown] of [
+      ['ready', false],
+      ['refresh_due', false],
+      ['checking', true],
+      ['needs_sign_in', true],
+      ['expired', true],
+    ] as const) {
+      const here = [login('codex-mine', 'codex', status, { label: 'Work' })];
+      const targets = cloneLoginTargets(credentials, here);
+      expect(needsAfterCopy([need], targets, here)).toEqual(shown ? [need] : []);
+    }
+  });
+
+  it('keeps the need of a matched login that is not signed in, pointing at that login', () => {
+    const here = [login('codex-mine', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const targets = cloneLoginTargets(sources({ id: 'codex-you', harness: 'codex', label: 'Work' }), here);
+    const need = signIn('codex-you');
+    expect(needsAfterCopy([need], targets, here)).toEqual([need]);
+    expect(signInLink(need, targets, here)).toBe('codex-mine');
+  });
+
+  it('points an ambiguous sign-in at the slot the copy made, never at one of the logins that fit', () => {
+    const before = [
+      login('codex-you', 'codex', 'needs_sign_in', { label: 'Work' }),
+      login('codex-other', 'codex', 'needs_sign_in', { label: 'Work' }),
     ];
-    expect([...reusedSignIns(credentials, logins).keys()]).toEqual(['claude-you']);
+    const targets = cloneLoginTargets(sources({ id: 'codex-you', harness: 'codex', label: 'Work' }), before);
+    expect(targets.get('codex-you')).toEqual({
+      kind: 'new',
+      id: 'codex-you-2',
+      candidates: ['codex-other', 'codex-you'],
+    });
+    const after = [...before, login('codex-you-2', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const need = signIn('codex-you');
+    expect(needsAfterCopy([need], targets, after)).toEqual([need]);
+    expect(signInLink(need, targets, after)).toBe('codex-you-2');
   });
 
-  it('falls back to the label only when neither side has an email, and never lets an email meet none', () => {
-    const credentials = bundleOf(
-      { id: 'by-label', harness: 'codex', label: 'Work' },
-      { id: 'has-email', harness: 'claude', email: 'me@work.example' },
-    );
-    const logins = [here('codex', { label: 'Work' }), here('claude', { label: 'Work' })];
-    expect([...reusedSignIns(credentials, logins).keys()]).toEqual(['by-label']);
-  });
-
-  it('names the matched login and whether it is signed in, preferring a signed-in match', () => {
-    const credentials = bundleOf(
-      { id: 'codex-you', harness: 'codex', label: 'Work' },
-      { id: 'claude-you', harness: 'claude', email: 'me@work.example' },
-    );
-    const logins = [
-      here('codex', { id: 'codex-mine', label: 'Work', status: 'needs_sign_in' }),
-      here('claude', { id: 'claude-empty', email: 'me@work.example', status: 'needs_sign_in' }),
-      here('claude', { id: 'claude-ready', email: 'me@work.example' }),
-    ];
-    expect(reusedSignIns(credentials, logins)).toEqual(
-      new Map([
-        ['codex-you', { id: 'codex-mine', signedIn: false }],
-        ['claude-you', { id: 'claude-ready', signedIn: true }],
-      ]),
-    );
-  });
-
-  it('keeps the need of a label-matched login that is not signed in (codex-you / codex-mine, both Work)', () => {
-    const credentials = bundleOf({ id: 'codex-you', harness: 'codex', label: 'Work' });
-    const logins = [here('codex', { id: 'codex-mine', label: 'Work', status: 'needs_sign_in' })];
-    const need: CloneNeed = {
-      key: 'sign-in:codex-you',
-      kind: 'sign-in',
-      name: 'Codex login (codex-you)',
-      credentialId: 'codex-you',
-      why: 'Work',
-      held: false,
-    };
-    expect(needsAfterCopy([need], [], reusedSignIns(credentials, logins))).toEqual([need]);
+  it('keeps a need the copy did not settle, linked only to a login of its own id', () => {
+    const ghost = signIn('ghost');
+    const after = [login('codex-here', 'codex', 'ready', { label: 'Work' })];
+    expect(needsAfterCopy([ghost, secret], new Map(), after)).toEqual([ghost, secret]);
+    expect(signInLink(ghost, new Map(), after)).toBeUndefined();
+    expect(signInLink(signIn('codex-here'), new Map(), after)).toBe('codex-here');
   });
 });

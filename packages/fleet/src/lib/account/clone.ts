@@ -9,7 +9,7 @@
  *   then the bundle itself. Each login the copied runtimes use travels as a descriptor (harness, label,
  *   email) and nothing else (L2), and no history travels at all (L3).
  * - {@link planClone} — the TARGET: the next configuration and the documents to write. A sign-in this
- *   machine already has (same harness, same account email, else same label — {@link matchSignIn}) is
+ *   machine already has (same harness, same account email, else same label — {@link matchCloneSignIn}) is
  *   **reused as it is**: the copied runtimes point at it and nothing about it is written. Any other
  *   login becomes an **empty slot** that needs sign-in and keeps its label, and the runtimes keep
  *   pointing at their slot (C8). **Add alongside** keeps what is there and gives a clashing name `-2`;
@@ -36,12 +36,14 @@ import {
   type CloneRunnable,
   cloneBundleProblem,
   cloneFileOwned,
+  type CloneLoginTarget,
   cloneRunnables,
   FLEET_CLONE_BUNDLE_FORMAT,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
   type FleetCloneCredential,
   type FleetCloneFile,
+  planCloneLogins,
   secretReferencesIn,
   suggestCloneDefault,
 } from '@ferretry/protocol';
@@ -458,43 +460,6 @@ function referencedFiles(model: AccountModel): Set<string> {
   return files;
 }
 
-/** Which of the target's own sign-ins could be the one a descriptor carries. */
-export type SignInMatch =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'one'; readonly id: string }
-  | { readonly kind: 'many'; readonly ids: readonly string[] };
-
-const normalEmail = (email: string | undefined): string | undefined => email?.trim().toLowerCase();
-
-/**
- * The login this machine already has for a source sign-in (L2), never by token, secret name or file. Only a
- * sign-in of the SAME harness counts, and an API-key (environment) login never does: it is config and copies.
- * A pair matches by account email, case-insensitive; when neither side has an email, by label, exactly. A
- * login with an email never matches one without. Two or more fits are `many`: no silent pick.
- *
- * THE SEAM FOR THE RECORD: a link from the "last copied" record (source login → target login id, while that
- * login still exists) belongs BEFORE the email step, as the first thing this answers.
- */
-export function matchSignIn(
-  descriptor: Pick<FleetCloneCredential, 'harness' | 'label' | 'email'>,
-  targets: Readonly<Record<string, Credential>>,
-  emails: Readonly<Record<string, string | undefined>>,
-): SignInMatch {
-  const email = normalEmail(descriptor.email);
-  const ids = Object.entries(targets)
-    .filter(([id, credential]) => {
-      if (credential.store === 'environment' || credential.harness !== descriptor.harness) return false;
-      const own = normalEmail(emails[id]);
-      if (email !== undefined || own !== undefined) return email !== undefined && email === own;
-      return descriptor.label !== undefined && credential.label === descriptor.label;
-    })
-    .map(([id]) => id)
-    .toSorted();
-  const [first] = ids;
-  if (first === undefined) return { kind: 'none' };
-  return ids.length === 1 ? { kind: 'one', id: first } : { kind: 'many', ids };
-}
-
 /**
  * Plan copying a bundle onto this machine. Throws {@link CloneRefusal} when the bundle is damaged or
  * the copy would make a configuration this machine cannot read.
@@ -535,24 +500,31 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   const credentials: Record<string, Credential> = { ...base.credentials };
   const signIns = new Map<string, Omit<CloneLoginOutcome, 'runtimes'>>();
   const targetEmails = options.targetEmails ?? {};
+  const settled = planCloneLogins(
+    bundle.credentials,
+    Object.entries(base.credentials).map(([id, credential]) => ({
+      id,
+      harness: credential.harness,
+      store: credential.store,
+      email: targetEmails[id],
+      label: credential.label,
+    })),
+  );
   for (const credential of bundle.credentials) {
-    const match =
-      credential.store === 'environment'
-        ? ({ kind: 'none' } as const)
-        : matchSignIn(credential, base.credentials, targetEmails);
-    if (match.kind === 'one') {
-      const own = base.credentials[match.id] as Credential;
-      credentialIds.set(credential.id, match.id);
+    const here = settled.get(credential.id) as CloneLoginTarget;
+    if (here.kind === 'matched') {
+      const own = base.credentials[here.id] as Credential;
+      credentialIds.set(credential.id, here.id);
       signIns.set(credential.id, {
         sourceId: credential.id,
         outcome: 'matched',
         harness: credential.harness,
-        target: match.id,
-        name: targetEmails[match.id] ?? own.label ?? match.id,
+        target: here.id,
+        name: targetEmails[here.id] ?? own.label ?? here.id,
       });
       continue;
     }
-    const id = freeName(credential.id, candidate => credentials[candidate] !== undefined);
+    const id = here.id;
     if (id !== credential.id) renamed.push({ what: 'login', from: credential.id, to: id });
     credentialIds.set(credential.id, id);
     const label = credential.label ?? credential.email;
@@ -569,11 +541,11 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     if (credential.store !== 'environment') {
       signIns.set(credential.id, {
         sourceId: credential.id,
-        outcome: match.kind === 'many' ? 'ask' : 'slot',
+        outcome: here.candidates === undefined ? 'slot' : 'ask',
         harness: credential.harness,
         target: id,
         name: credential.email ?? credential.label ?? credential.id,
-        ...(match.kind === 'many' ? { candidates: match.ids } : {}),
+        ...(here.candidates === undefined ? {} : { candidates: here.candidates }),
       });
     }
   }

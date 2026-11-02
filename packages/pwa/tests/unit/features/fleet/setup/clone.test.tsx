@@ -814,10 +814,21 @@ const outcomes = (screen: Screen) =>
     element => `${element.getAttribute('data-clone-outcome')}:${element.getAttribute('data-outcome')}`,
   );
 
+/** What the credentials route answers before the copy ran and after it: the copy's apply is what flips it. */
+const copying = (before: ReturnType<typeof credentials>, after: ReturnType<typeof credentials>): Answers => {
+  let copied = false;
+  return {
+    [APPLY_PATH]: () => {
+      copied = true;
+      return EXECUTED;
+    },
+    '/v1/fleet/credentials': () => (copied ? after : before),
+  };
+};
+
 const fullTarget = (extra: Answers = {}): Answers => ({
   '/v1/fleet/proposals': STAGED,
-  [APPLY_PATH]: EXECUTED,
-  '/v1/fleet/credentials': SLOTS,
+  ...copying(credentials([]), SLOTS),
   '/v1/speedups': SPEEDUPS,
   '/v1/secrets': secretsRoute().answer,
   ...hereFiles(),
@@ -1519,6 +1530,67 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
       expect(screen.q('[data-clone-need="sign-in:codex-you"] [data-clone-need-sign-in="codex-mine"]')).not.toBeNull();
       expect(screen.q('[data-clone-need-sign-in="codex-you"]')).toBeNull();
       expect(screen.q('[data-setup-section="slots"]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('keeps the sign-in of a reused login that is still checking: it is not signed in yet', async () => {
+    const { createClient } = daemons({
+      work: sourceFiles({
+        '/v1/fleet/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
+      }),
+      target: fullTarget({
+        '/v1/fleet/credentials': credentials([
+          credentialView('codex-mine', {
+            harness: 'codex',
+            email: undefined,
+            label: 'Work',
+            status: { ...credentialView('x').status, word: 'checking', label: 'Checking' },
+          }),
+        ]),
+      }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(screen.q('[data-clone-need="sign-in:codex-you"] [data-clone-need-sign-in="codex-mine"]')).not.toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('points an ambiguous sign-in at the new slot, not at either login that fit', async () => {
+    const work = { harness: 'codex' as const, email: undefined, label: 'Work' };
+    const { createClient } = daemons({
+      work: sourceFiles({
+        '/v1/fleet/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
+      }),
+      target: fullTarget(
+        copying(
+          credentials([credentialView('codex-you', work), credentialView('codex-other', work)]),
+          credentials([
+            credentialView('codex-you', work),
+            credentialView('codex-other', work),
+            credentialView('codex-you-2', { ...work, clonedFrom: 'work-linux', usedBy: ['codex-default'] }),
+          ]),
+        ),
+      ),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      const need = must(screen.q('[data-clone-need="sign-in:codex-you"]'), 'sign-in need');
+      expect(need.querySelector('[data-clone-need-sign-in]')?.getAttribute('data-clone-need-sign-in')).toBe(
+        'codex-you-2',
+      );
+      expect(need.querySelector('a')?.getAttribute('href')).toContain('codex-you-2');
     } finally {
       await screen.view.unmount();
     }
