@@ -748,6 +748,7 @@ export class SessionSendService {
    * for exactly this send rather than a terminal error naming a tmux session.
    */
   private async unconfirmed(id: SessionId, record: SendRecord): Promise<SendUnconfirmed> {
+    await this.reserveTurn(id, record);
     await this.ports.ledger.settle(id, record.sendId, {
       fate: 'unaccounted',
       fateAt: this.ports.clock.now(),
@@ -921,6 +922,10 @@ export class SessionSendService {
     const pane = observed ?? (await this.ports.terminal.observe(id));
     if (!this.finishable(pane) || pane.draft === undefined || !showsOwnText(pane.draft, text))
       return { outcome: 'refused', record };
+    // The same uniqueness every caller gets: when another unsettled send could equally be what the box holds
+    // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
+    if (strandedSend(pane.draft, await this.ports.ledger.list(id))?.sendId !== record.sendId)
+      return { outcome: 'refused', record };
     const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
     return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
@@ -1030,7 +1035,14 @@ export class SessionSendService {
         : {}),
     });
     const turn = record.turn;
-    if (turn !== undefined && (record.path === 'turn-file' || record.path === 'direct') && target.turn < turn)
+    // A turn an unconfirmed typing RESERVED (`reserveTurn`) has its number already and has not started yet.
+    const reserved =
+      target.turn === turn && record.fate === 'unaccounted' && record.unaccountedReason === 'landing_unconfirmed';
+    if (
+      turn !== undefined &&
+      (record.path === 'turn-file' || record.path === 'direct') &&
+      (target.turn < turn || reserved)
+    )
       await this.turnStarted(target.id, {
         sendId: record.sendId,
         message: record.message,
@@ -1083,7 +1095,7 @@ export class SessionSendService {
         sendId: request.sendId,
         path: 'revive',
         message: payload,
-        turn: target.turn + 1,
+        turn: await this.revivedTurn(target),
       });
     });
     if (!accepted.created) return this.settledAs(accepted.record, false);
@@ -1105,6 +1117,38 @@ export class SessionSendService {
       ...this.attribution(sender),
     });
     return { kind: 'settled', path: 'revive', applied: true, record, held: true };
+  }
+
+  /**
+   * B144 — A TYPED POINTER'S TURN IS TAKEN, started or not. A typing whose landing no frame proved never
+   * reached the turn bookkeeping, so the session stayed on the previous turn while the pointer — which the
+   * pane may draw and somebody may submit at any time — named the next turn's file. Every later turn file
+   * (a send, a revive, the resume domain's own) was numbered from the session's turn, and the next one
+   * overwrote it. So the number is reserved on the session itself, its reason left alone; the turn starts
+   * when an Enter is seen to take it (`entered`).
+   */
+  private async reserveTurn(id: SessionId, record: SendRecord): Promise<void> {
+    const turn = record.turn;
+    if (turn === undefined || (record.path !== 'turn-file' && record.path !== 'direct')) return;
+    const target = await this.ports.repository.read(id);
+    if (target === undefined || target.turn >= turn) return;
+    await this.ports.repository.transition(id, { event: 'control.turn_reserved', turn, keepReason: true });
+  }
+
+  /**
+   * The turn a revive's message is carried as. The resume domain numbers its turn file from the session's
+   * turn, so a turn a send still names that the session has not reserved (one recorded before reservations
+   * existed) is reserved first: the relaunch's file and this record then agree, and neither overwrites it.
+   */
+  private async revivedTurn(target: SendTarget): Promise<number> {
+    const turn = nextTurnNumber(target, await this.ports.ledger.list(target.id));
+    if (turn > target.turn + 1)
+      await this.ports.repository.transition(target.id, {
+        event: 'control.turn_reserved',
+        turn: turn - 1,
+        keepReason: true,
+      });
+    return turn;
   }
 
   /**

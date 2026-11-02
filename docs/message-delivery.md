@@ -464,8 +464,25 @@ since B144, a message typed AS ITSELF (`direct`, `native-inline`) of at least `O
 characters: the fill typed it into a composer it proved empty, so text that is exactly it is the send's.
 A shorter message could be a word a person typed and is never pressed. Re-wrapped and `…`-clipped text
 matches as for a pointer, and a message that travelled as a paste matches the composer only when one
-collapsed placeholder (`[Pasted text #40 +3 lines]`) is ALL it shows — and only when no other unsettled
-send would match it too.
+collapsed placeholder is ALL it shows and its own count agrees with the message (`lonePasteOf`,
+`lib/tmux/composer.ts`): Claude's `+N lines` (the message's line breaks, or its lines) or Codex's `N chars`.
+A person who cleared our paste and pasted their own draft shows a placeholder too, so one with a count that
+disagrees, or no count at all, is never ours. Every automated Enter — the tracker's, the queue's, a new
+send's, the Warden's — also requires that no OTHER unsettled send of the session would match the box
+(`strandedSend`): two pastes whose placeholders read alike are neither provably ours.
+
+**The key itself is guarded by a fresh, exact read** (`submitComposer`, `holdsExactly`). The service's
+decision and the key are a few awaits apart, and a person may type in between, so the terminal captures the
+pane again right before Enter and presses only when the composer is the payload and nothing else (its lone
+paste placeholder, for a paste), at a pane that is not mid-turn or behind a prompt. Containment — the payload
+anywhere in the composer — still rules out a retype; it never licenses a key. The person's own **Press Enter**
+(`POST …/sends/:id/enter`) and **Send it** (`/composer`) are held to the same exactness.
+
+**One Enter budget, durably.** The tracker writes the ledger under its own lock and the send service under
+another (the tracker calls the service, so they cannot share one); a tracker write from a stale read used to
+append after the service counted an Enter and put the count back — seven Enters past a limit of five. The file
+ledger now runs every read-modify-append for a session as one transaction (`FileSendLedger.transaction`), a
+leaf lock with nothing else awaited under it.
 
 ## B144: a ferret idle behind its own unsent message
 
@@ -491,26 +508,43 @@ four fixes:
    `STRANDED_ENTER_LIMIT` (5), counted before each key.
 3. **The next send reused the turn number.** An unconfirmed pointer never started its turn, so the next send
    claimed the same number and overwrote the very turn file the pointer named — what the agent read when the
-   pointer was finally submitted. A turn file now takes the next number past the session's turn AND past every
-   turn a non-withdrawn send of the session still names (`nextTurnNumber`).
+   pointer was finally submitted. Now an unconfirmed typing RESERVES its turn on the session record
+   (`control.turn_reserved`, reason untouched), so every turn file after it — a send's, a revive's, the resume
+   domain's own — is numbered past it; an Enter that later takes the pointer starts that reserved turn. A send
+   also numbers past every turn a non-withdrawn send still names (`nextTurnNumber`), and a revive reserves that
+   number first, so its record and the relaunch's file agree.
 4. **`fy send` claimed a queue the message was not in.** A queued answer whose ledger has no record yet is in
-   FERRETRY's queue, untyped. The send answer now carries the queue's `waitReason` and `waitBehind`
+   FERRETRY's queue, untyped — and so is one whose ledger row is `withdrawn` (a hand-over refused before any
+   key), which used to answer "delivered". The send answer now carries the queue's `waitReason` and `waitBehind`
    (`SendResult`), and `fy send` says "NOT delivered yet: it is waiting in Ferretry's queue … because …" — and,
    behind an unconfirmed send of ours, that a re-submit was attempted and the Warden flags it. `fy send --wait`
    treats the ledger's 404 for such a message as still waiting, never as "no such send", and ends a long wait
    saying it was never typed, without failing — a script that resent on failure would make a copy.
 
+**The tracker keeps "it is in the box" true to the screen.** `typedNotSent` is set when the tracker sees a
+send's own text in the composer and dropped when it does not: on every look for an open send, and — since
+B144 — for an `unaccounted` one too, which is set on first sight (a late-drawn pointer) and watched for as long
+as a repair is (`repairLimitMs`), past the hold ceiling, every `busyExtensionMs` once its Enters are spent. A
+message typed into a three-hour turn whose Enter was swallowed is still there when that same turn ends, and
+only a look can see it.
+
 **The Warden's backstop — `input_stuck`** (`lib/warden/input-stuck.ts`). A send is stuck when it was typed by the
-daemon (not held, not untyped, not a revive), is `accepted`, `queued` or `unaccounted`, and either the tracker
-last saw its text in the composer (`typedNotSent`) or its landing was never seen (`landing_unconfirmed`) — and
-the ferret's last turn ended no later than the ledger last spoke of the send. An autonomous ferret at
+daemon (not held, not untyped, not a revive), is `accepted`, `queued` or `unaccounted`, and the tracker says its
+text is in the composer (`typedNotSent`) — the flag decides, not the turn clock. An autonomous ferret at
 `your-turn` for `STUCK_INPUT_MS` (3 min) with such a send typed that long, within a day, is flagged. Once per
 episode the Warden presses Enter through the send path (`resubmitStuck`, one press past the daemon's own
-budget; `absent` when an idle pane shows an empty box). If that does not submit it, the ferret's health is set
-`stalled` (journal `control.input_stuck`) and it is named on the `warden:input-stuck` machine item
+budget). If the text is there and that does not submit it, the ferret's health is set `stalled` (journal
+`control.input_stuck`) and it is named on the `warden:input-stuck` machine item
 ([agenda.md](agenda.md#the-machine-agenda)); when it is no longer flagged it leaves the item and the mark is
-taken off (`control.input_unstuck`). Nothing is pressed or noticed while the Warden is off; the flag is still
-shown. The flag never reaches Jev, an investigation or the spawn fingerprint.
+taken off (`control.input_unstuck`). An EMPTY box at the press (`absent`) proves only that nothing is held
+now — the message may have been read — so it is neither marked nor noticed, and nobody is told to send it
+again. Nothing is pressed or noticed while the Warden is off; the flag is still shown. The flag never reaches
+Jev, an investigation or the spawn fingerprint.
+
+**On the wire it has its own field.** The Warden status and run views carry `input_stuck` flags in an optional
+`stuckInput` list (`WardenStuckInputFlagSchema`), never in `anomalies`: an app or CLI built before the kind
+existed parses `anomalies` against a closed list, and one unknown kind there rejected the whole status. A
+newer reader shows both (`wardenFlags`). For the same reason the kind is never put on a blessing.
 
 ## What a message row can say
 
@@ -607,6 +641,10 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
 - **A message held in Claude's own queue while the ferret is idle is not pushed.** Claude submits what it
   queued at the turn boundary; a queue still drawn at an idle prompt is not driven with `ctrl+x ctrl+s`, which is
   unmeasured here. Its send stays `queued` and the transcript decides.
+- **A paste placeholder is matched by its count, not its identity.** The placeholder's counter (`#40`) is not
+  recorded when a paste lands, so a person who clears our paste and pastes a draft with exactly the same line
+  (or character) count is indistinguishable from it. Every other check — a lone placeholder, one unsettled
+  send that matches, an idle pane, a fresh exact read before the key — still holds.
 - **An interactive session is not flagged `input_stuck`.** It is the owner's own terminal; the send path's
   nudges and the queue's clearing still apply to it.
 

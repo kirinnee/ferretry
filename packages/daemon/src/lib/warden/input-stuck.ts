@@ -15,18 +15,22 @@
  * ═══ WHAT IT IS ═══
  *
  * Facts only, from the session's state and its own send ledger. A send is STUCK when it was typed by the
- * daemon (not held for a revive, not still untyped), is not settled for good, and either the tracker last
- * saw its text sitting in the composer (`typedNotSent`) or its typing was never seen to land
- * (`landing_unconfirmed`) — and the ferret has not taken a turn since that was last known: its turn ended
- * no later than the send's last word in the ledger. Then, once the ferret has sat at its prompt and the
- * send has been typed for at least {@link STUCK_INPUT_MS}, it is flagged.
+ * daemon (not held for a revive, not still untyped), is not settled for good, and the send tracker says its
+ * text is sitting in the composer now (`typedNotSent`). The tracker keeps that flag true to the screen —
+ * set when it sees the text, dropped when it does not — for an open send on every look, and for an
+ * unconfirmed one for as long as a repair is watched; so the flag, not the turn clock, decides. (A turn
+ * clock cannot: a message typed into a three-hour turn whose Enter was swallowed is still there when that
+ * same turn ends.) Then, once the ferret has sat at its prompt and the send has been typed for at least
+ * {@link STUCK_INPUT_MS}, it is flagged.
  *
  * ═══ WHAT IS DONE ═══
  *
  * Once per EPISODE (one stuck send): the Warden presses Enter on it, through the send path's verified
  * re-submit, which presses only when the box holds exactly that send's text at an idle, undialogued pane.
- * If that did not submit it, the ferret is marked `stalled` — never `healthy` — and named on ONE machine
- * notice listing every ferret in that state, which clears itself when the ferret moves again.
+ * If the text is there and that did not submit it, the ferret is marked `stalled` — never `healthy` — and
+ * named on ONE machine notice listing every ferret in that state, which clears itself when the ferret moves
+ * again. An EMPTY box proves only that nothing is held now — the message may well have been read — so it
+ * is neither marked nor noticed, and nobody is told to send it again.
  *
  * Pure: the fleet, the ledgers and the memory arrive through the arguments.
  */
@@ -83,30 +87,19 @@ export function stuckInputCandidates(
 /** When a send was typed: its current attempt, else its acceptance. */
 const typedAtMs = (send: StuckInputSend): number => Date.parse(send.attemptAt ?? send.acceptedAt);
 
-/**
- * The newest send of this ferret that is stuck in its box, or `undefined`. See the module comment for the
- * rule; `turnEndedAt` is when the ferret's last turn ended (`turnStateAt` at `your-turn`).
- */
+/** The newest send of this ferret that is stuck in its box, or `undefined`. See the module comment for the rule. */
 export function stuckSendOf(
   sends: readonly StuckInputSend[],
-  turnEndedAt: string | undefined,
   nowMs: number,
   stuckMs: number = STUCK_INPUT_MS,
 ): StuckInputSend | undefined {
-  const ended = latestInstantMs(turnEndedAt);
-  if (ended === undefined) return undefined;
   let newest: StuckInputSend | undefined;
   for (const send of sends) {
     if (send.held === true || send.untyped === true || REVIVE_PATHS.has(send.path) || !UNSETTLED.has(send.fate))
       continue;
-    const unsent = send.typedNotSent === true || send.unaccountedReason === 'landing_unconfirmed';
-    if (!unsent) continue;
+    if (send.typedNotSent !== true) continue;
     const typed = typedAtMs(send);
     if (!Number.isFinite(typed) || nowMs - typed < stuckMs || nowMs - typed > STUCK_INPUT_HORIZON_MS) continue;
-    // A turn that ended after the ledger last spoke of this send was a turn the ferret took since: whatever
-    // the flag still says, the text is not known to be sitting there any more.
-    const lastWord = latestInstantMs(send.attemptAt, send.fateAt, send.deadlineAt) ?? typed;
-    if (ended > lastWord) continue;
     if (newest === undefined || typed > typedAtMs(newest)) newest = send;
   }
   return newest;
@@ -128,20 +121,18 @@ export function detectStuckInput(
   for (const view of candidates) {
     const sends = ledgers.get(view.config.id);
     if (sends === undefined) continue;
-    const stuck = stuckSendOf(sends, view.state.turnStateAt, nowMs, stuckMs);
+    const stuck = stuckSendOf(sends, nowMs, stuckMs);
     if (stuck === undefined) continue;
     const anchor = latestInstantMs(view.state.turnStateAt, stuck.attemptAt ?? stuck.acceptedAt) ?? nowMs;
     const idleMinutes = Math.floor((nowMs - anchor) / 60_000);
     const from = stuck.fromName === undefined ? 'a message' : `a message from ${stuck.fromName}`;
-    const how =
-      stuck.typedNotSent === true ? 'sits typed in its input box, not sent' : 'was typed and never seen to land';
     anomalies.push({
       kind: 'input_stuck',
       sessionId: view.config.id,
       ...(view.config.teammate === undefined ? {} : { teammate: view.config.teammate }),
       ...(view.config.label === undefined ? {} : { label: view.config.label }),
       status: view.state.status,
-      detail: `idle at its prompt for ${idleMinutes}m while ${from} (send ${stuck.sendId}) ${how} — everything sent after it waits behind it`,
+      detail: `idle at its prompt for ${idleMinutes}m while ${from} (send ${stuck.sendId}) sits typed in its input box, not sent — everything sent after it waits behind it`,
       since: isoFromMs(anchor),
       idleMinutes,
       subject: stuckInputEpisode(view.config.id, stuck.sendId),
@@ -171,7 +162,12 @@ export type StuckInputMemory = Readonly<Record<string, StuckInputTold>>;
 /** The next step for one flagged ferret. */
 export type StuckInputStep =
   | { readonly kind: 'press'; readonly sessionId: string; readonly sendId: string }
-  | { readonly kind: 'notice'; readonly sessionId: string; readonly sendId: string; readonly press?: StuckInputPress };
+  | {
+      readonly kind: 'notice';
+      readonly sessionId: string;
+      readonly sendId: string;
+      readonly press?: Exclude<StuckInputPress, 'absent'>;
+    };
 
 /**
  * What to do this sweep: press once for a new episode; name a ferret on the notice once its press did not
@@ -193,7 +189,8 @@ export function planStuckInput(input: {
       steps.push({ kind: 'press', sessionId, sendId });
       continue;
     }
-    if (told.noticedAt === undefined)
+    // An empty box at the press proved nothing is held now: never noticed on that.
+    if (told.noticedAt === undefined && told.press !== 'absent')
       steps.push({ kind: 'notice', sessionId, sendId, ...(told.press === undefined ? {} : { press: told.press }) });
   }
   return { steps, recovered };
@@ -203,16 +200,14 @@ export function planStuckInput(input: {
 export function stuckInputNoticeLine(
   anomaly: Pick<WardenAnomaly, 'sessionId' | 'teammate' | 'since'>,
   sendId: string,
-  press: StuckInputPress | undefined,
+  press: Exclude<StuckInputPress, 'absent'> | undefined,
 ): string {
   const who = anomaly.teammate === undefined ? anomaly.sessionId : `${anomaly.teammate} (${anomaly.sessionId})`;
   const outcome =
-    press === 'absent'
-      ? 'its box is empty, so the message never arrived — send it again'
-      : press === 'holding'
-        ? 'Enter was pressed and did not take'
-        : press === 'refused'
-          ? 'Enter could not be pressed (busy, a dialog, or no presses left)'
-          : 'Enter was pressed and it is still idle';
+    press === 'holding'
+      ? 'Enter was pressed and did not take'
+      : press === 'refused'
+        ? 'Enter could not be pressed (busy, a dialog, other text beside it, or no presses left)'
+        : 'Enter was pressed and it is still idle';
   return `${who}: send ${sendId} stuck since ${anomaly.since ?? 'unknown'} — ${outcome}`;
 }

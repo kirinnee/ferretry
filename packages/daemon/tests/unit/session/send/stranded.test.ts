@@ -149,7 +149,7 @@ describe('B144: a message of ours typed as itself', () => {
     should(showsOwnText(wrapped(ENVELOPE.replaceAll('\n', ' '), 30), ENVELOPE)).be.true();
     should(showsOwnText(`${ENVELOPE.slice(0, 40)}…`, ENVELOPE)).be.true();
     should(showsOwnText('[Pasted text #40 +3 lines]', ENVELOPE)).be.true();
-    should(showsOwnText('[Pasted Content 1204 chars]', ENVELOPE)).be.true();
+    should(showsOwnText(`[Pasted Content ${ENVELOPE.length} chars]`, ENVELOPE)).be.true();
     should(showsOwnText(OURS, OURS)).be.true();
   });
 
@@ -158,6 +158,11 @@ describe('B144: a message of ours typed as itself', () => {
     should(showsOwnText(`${ENVELOPE} and also this`, ENVELOPE)).be.false();
     should(showsOwnText('see [Pasted text #40 +3 lines]', ENVELOPE)).be.false();
     should(showsOwnText('[Pasted text #2 +1 lines]', 'please rerun the suite')).be.false();
+    // A placeholder whose count disagrees is somebody else's paste — the one a person made after ours was cleared.
+    should(showsOwnText('[Pasted text #999 +30 lines]', ENVELOPE)).be.false();
+    should(showsOwnText('[Pasted Content 1204 chars]', ENVELOPE)).be.false();
+    should(showsOwnText('[Image #1]', ENVELOPE)).be.false();
+    should(showsOwnText('[Pasted text #3]', ENVELOPE)).be.false();
     should(showsOwnText(`${ENVELOPE.slice(0, 8)}…`, ENVELOPE)).be.false();
     should(showsOwnText('', ENVELOPE)).be.false();
   });

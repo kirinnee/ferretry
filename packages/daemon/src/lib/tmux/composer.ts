@@ -109,3 +109,30 @@ export function composerHolds(frame: string, text: string, evidence: LandingEvid
   const seen = composerEvidence(frame, text);
   return evidence === 'placeholder' ? seen.placeholders > 0 : seen.chars > 0;
 }
+
+/** One collapsed-paste placeholder and nothing else around it. */
+const LONE_PASTE_PLACEHOLDER = /^\[(?:Pasted text|Pasted Content)[^\]\n]*\]$/iu;
+
+/**
+ * Whether a composer showing ONLY a collapsed-paste placeholder can be this payload's paste (B144).
+ *
+ * A placeholder hides the text, so "a placeholder is there" proves nothing about whose paste it is: a person
+ * who cleared our paste and pasted their own draft shows one too. The placeholder's own count is the only
+ * thing it says about what it holds, so it must agree with the payload: Claude's `+N lines` (the payload's
+ * line breaks, or its lines — the two readings of the counter, both accepted) or Codex's `N chars`. A
+ * placeholder with no count, an image or audio placeholder, or one beside any other text is never claimed.
+ */
+export function lonePasteOf(composer: string, text: string): boolean {
+  const shown = composer.trim();
+  if (!LONE_PASTE_PLACEHOLDER.test(shown)) return false;
+  const lines = /\+(\d+)\s+lines?\b/iu.exec(shown);
+  if (lines !== null) {
+    const breaks = text.split('\n').length - 1;
+    const counted = Number(lines[1]);
+    return counted === breaks || counted === breaks + 1;
+  }
+  const chars = /(\d+)\s+chars?\b/iu.exec(shown);
+  if (chars === null) return false;
+  const counted = Number(chars[1]);
+  return counted === text.length || counted === [...text].length;
+}

@@ -31,12 +31,16 @@ const ferret = (
   hasLiveMonitor: true,
 });
 
-/** annabeth's turn pointer: typed into a stalled pane at 15:00:32, never seen to land, never submitted. */
+/**
+ * annabeth's turn pointer: typed into a stalled pane at 15:00:32, never seen to land, then drawn late — and
+ * the send tracker, looking at the composer, says it is sitting there (`typedNotSent`).
+ */
 const pointer = (over: Partial<StuckInputSend> = {}): StuckInputSend => ({
   sendId: 'send-63',
   path: 'turn-file',
   fate: 'unaccounted',
   unaccountedReason: 'landing_unconfirmed',
+  typedNotSent: true,
   acceptedAt: iso(NOW - 10 * MINUTE),
   attemptAt: iso(NOW - 10 * MINUTE),
   fateAt: iso(NOW - 10 * MINUTE + 25_000),
@@ -72,21 +76,33 @@ describe('which ferrets are looked at', () => {
 });
 
 describe('when a send is stuck in the box', () => {
-  it('should find an unconfirmed pointer the ferret never took a turn on', () => {
-    should(stuckSendOf([pointer()], iso(NOW - 21 * MINUTE), NOW)?.sendId).equal('send-63');
+  it('should find an unconfirmed pointer the tracker sees sitting in the box', () => {
+    should(stuckSendOf([pointer()], NOW)?.sendId).equal('send-63');
   });
 
   it('should find a message whose Enter was swallowed mid-turn, the turn having ended after it was typed', () => {
-    should(stuckSendOf([swallowed()], iso(NOW - 29 * MINUTE), NOW)?.sendId).equal('send-lead');
+    should(stuckSendOf([swallowed()], NOW)?.sendId).equal('send-lead');
   });
 
-  it('should not call a send stuck once the ferret took a turn after the ledger last spoke of it', () => {
-    should(stuckSendOf([pointer()], iso(NOW - 5 * MINUTE), NOW)).be.undefined();
-    should(stuckSendOf([swallowed({ deadlineAt: iso(NOW - 20 * MINUTE) })], iso(NOW - 5 * MINUTE), NOW)).be.undefined();
+  it('should still find one whose own long turn ended after the hold ceiling settled it (review finding)', () => {
+    // Typed into a three-hour turn, settled unconfirmed at the two-hour ceiling, still in the box when that
+    // same turn ends: the turn clock says "a turn ended since", the screen says it is still there.
+    const timedOut = swallowed({
+      fate: 'unaccounted',
+      unaccountedReason: 'timeout',
+      acceptedAt: iso(NOW - 3 * 60 * MINUTE),
+      attemptAt: iso(NOW - 3 * 60 * MINUTE),
+      fateAt: iso(NOW - 60 * MINUTE),
+    });
+    should(stuckSendOf([timedOut], NOW)?.sendId).equal('send-lead');
+  });
+
+  it('should not call a send stuck the tracker does not see in the box, whatever its fate says', () => {
+    should(stuckSendOf([pointer({ typedNotSent: undefined })], NOW)).be.undefined();
+    should(stuckSendOf([swallowed({ typedNotSent: false })], NOW)).be.undefined();
   });
 
   it('should leave alone a send too young, too old, settled, never typed, held, carried by a revive, or proven', () => {
-    const turnEnded = iso(NOW - 2 * STUCK_INPUT_HORIZON_MS);
     const young = iso(NOW - STUCK_INPUT_MS + 1_000);
     const cases: StuckInputSend[] = [
       pointer({ attemptAt: young, acceptedAt: young, fateAt: young }),
@@ -99,15 +115,14 @@ describe('when a send is stuck in the box', () => {
       pointer({ untyped: true }),
       pointer({ held: true }),
       pointer({ path: 'revive' }),
-      pointer({ unaccountedReason: 'transcript_unreadable' }),
       swallowed({ typedNotSent: false }),
     ];
-    for (const send of cases) should(stuckSendOf([send], turnEnded, NOW)).be.undefined();
+    for (const send of cases) should(stuckSendOf([send], NOW)).be.undefined();
   });
 
   it('should name the newest stuck send when there are several', () => {
     const older = pointer({ sendId: 'older', attemptAt: iso(NOW - 15 * MINUTE), acceptedAt: iso(NOW - 15 * MINUTE) });
-    should(stuckSendOf([older, pointer()], iso(NOW - 21 * MINUTE), NOW)?.sendId).equal('send-63');
+    should(stuckSendOf([older, pointer()], NOW)?.sendId).equal('send-63');
   });
 });
 
@@ -124,7 +139,7 @@ describe('the flag', () => {
       subject: 'input:annabeth:send-63',
       sendId: 'send-63',
     });
-    should(flag?.detail).match(/a message from tamika \(send send-63\) was typed and never seen to land/);
+    should(flag?.detail).match(/a message from tamika \(send send-63\) sits typed in its input box, not sent/);
   });
 
   it('should flag nothing for a ferret whose ledger could not be read', () => {
@@ -134,6 +149,12 @@ describe('the flag', () => {
 
 describe('what the Warden does about it', () => {
   const stuck = [{ sessionId: 'annabeth', sendId: 'send-63' }];
+
+  it('should never notice a ferret whose press found its box empty (review finding)', () => {
+    should(
+      planStuckInput({ stuck, memory: { annabeth: { sendId: 'send-63', press: 'absent' } }, enabled: true }).steps,
+    ).be.empty();
+  });
 
   it('should press once for a new episode, then notice only if the press did not end it', () => {
     should(planStuckInput({ stuck, memory: {}, enabled: true }).steps).eql([
@@ -168,7 +189,6 @@ describe('what the Warden does about it', () => {
     should(stuckInputNoticeLine(flag, 'send-63', 'holding')).match(
       /^annabeth \(annabeth\): send send-63 stuck since .* Enter was pressed and did not take$/,
     );
-    should(stuckInputNoticeLine(flag, 'send-63', 'absent')).match(/never arrived — send it again/);
     should(stuckInputNoticeLine(flag, 'send-63', 'refused')).match(/could not be pressed/);
     should(stuckInputNoticeLine(flag, 'send-63', 'submitted')).match(/Enter was pressed and it is still idle$/);
     should(stuckInputNoticeLine({ sessionId: 'annabeth' }, 'send-63', undefined)).match(

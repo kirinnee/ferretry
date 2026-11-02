@@ -28,7 +28,7 @@ import type {
   WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
-import { displaySystemCallsign } from '@ferretry/protocol';
+import { displaySystemCallsign, wardenFlags } from '@ferretry/protocol';
 import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import {
   wardenAccountLabel,
@@ -321,7 +321,7 @@ export const watchingRows = (
   const rows = new Map<string, WardenRow>();
   const blessings = new Map(status.blessings.map(blessing => [blessing.sessionId, blessing]));
   const grouped = new Map<string, WardenAnomaly[]>();
-  for (const anomaly of status.anomalies)
+  for (const anomaly of wardenFlags(status))
     grouped.set(anomaly.sessionId, [...(grouped.get(anomaly.sessionId) ?? []), anomaly]);
   for (const [sessionId, group] of grouped) {
     const [first] = group as [WardenAnomaly, ...WardenAnomaly[]];

@@ -1094,8 +1094,10 @@ describe('a composer that already holds unsent text', () => {
         data: { sendId: 'send-1', reason: 'landing_unconfirmed', attempt: 1 },
       });
     }
-    // No turn is claimed for a prompt that never proved it landed.
-    should(idle.repository.transitions).be.empty();
+    // No turn is STARTED for a prompt that never proved it landed — but its number is reserved (B144), so no
+    // later turn file overwrites the one the typed pointer names.
+    should(idle.repository.transitions).eql([{ event: 'control.turn_reserved', turn: 4, keepReason: true }]);
+    should(busy.repository.transitions).be.empty();
   });
 
   it('settles a forced retry that was typed but never shown as unconfirmed again, under the same id', async () => {
@@ -1804,6 +1806,44 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     for (const record of records) built.ledger.records.set(record.sendId, record);
     return built;
   }
+
+  it('reserves the turn a revive carries past one an unconfirmed pointer names, so the relaunch agrees (review)', async () => {
+    const built = idle([pane({ alive: false })], unconfirmed());
+    built.repository.transitions.length = 0;
+
+    await built.service.send(request()).catch(() => undefined);
+
+    should(built.ledger.records.get('send-1')).match({ path: 'revive', turn: 6 });
+    should(built.repository.transitions).match([{ event: 'control.turn_reserved', turn: 5, keepReason: true }]);
+  });
+
+  it('starts the turn an unconfirmed typing reserved, once an Enter takes its pointer', async () => {
+    const built = idle([pane({ draft: POINTER })], unconfirmed());
+    await built.repository.transition(ID, { event: 'control.turn_reserved', turn: 5, keepReason: true });
+
+    await built.service.finishOwnDraft(ID);
+
+    should(built.repository.transitions.at(-1)).match({ event: 'turn.started', turn: 5 });
+  });
+
+  it('presses nothing when another unsettled send could equally be what the box holds (review)', async () => {
+    const paste = (sendId: string, message: string) =>
+      unconfirmed({ sendId, path: 'native-inline', message, matchText: message, turn: undefined });
+    const built = idle(
+      [pane({ draft: '[Pasted text #3 +2 lines]' })],
+      paste('a', 'first message\nlong enough to claim'),
+      paste('b', 'second message\nlong enough to claim'),
+    );
+
+    should(await built.service.resubmit(ID, 'a')).match({ sendId: 'a' });
+    should(await built.service.resubmitStuck(ID, 'a')).equal('refused');
+    should(built.terminal.calls).not.containEql('submitComposer');
+  });
+
+  it("answers absent to the Warden when an idle pane's box is empty", async () => {
+    const built = idle([pane({})], unconfirmed());
+    should(await built.service.resubmitStuck(ID, 'send-0')).equal('absent');
+  });
 
   it('never gives a new turn file the number an unconfirmed pointer still names', async () => {
     // annabeth's turn 63: the unconfirmed pointer never started its turn, and the next send overwrote its file.

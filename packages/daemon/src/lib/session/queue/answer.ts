@@ -22,7 +22,9 @@ export function answerOf(
   readonly waitReason?: QueueWaitReason;
   readonly waitBehind?: string;
 } {
-  if (record === undefined) {
+  // A WITHDRAWN row is a hand-over the pane refused before any key: the message went back to the queue, so
+  // the queue says where it is — never the path the refused attempt would have taken ("delivered").
+  if (record === undefined || record.fate === 'withdrawn') {
     const reason = waiting?.state === 'queued' ? waiting.waitReason : undefined;
     return {
       disposition: 'queued',
@@ -32,5 +34,5 @@ export function answerOf(
     };
   }
   const disposition = record.held === true ? 'queued-for-revive' : dispositionOf(record.path, record.fate === 'queued');
-  return { disposition, fate: record.fate === 'withdrawn' ? 'accepted' : record.fate };
+  return { disposition, fate: record.fate };
 }

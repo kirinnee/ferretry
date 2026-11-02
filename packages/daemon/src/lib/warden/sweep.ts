@@ -79,6 +79,7 @@ import type {
   WardenTriageStatus,
   WardenAgendaView as WireAgendaView,
   WardenAnomaly as WireWardenAnomaly,
+  WardenStuckInputFlag as WireWardenStuckInputFlag,
 } from '@ferretry/protocol';
 import {
   displaySystemCallsign,
@@ -703,6 +704,23 @@ const failureMessage = (error: unknown): string => (error instanceof Error ? err
  * is the whole conversion — one place, so nothing downstream is tempted to widen
  * the domain type to match a serialization detail.
  */
+/**
+ * A view's flags on the wire: `input_stuck` in its own optional field, never in `anomalies`, which an older app
+ * parses against a closed list of kinds (`WardenStuckInputFlagSchema`).
+ */
+function wireFlags(anomalies: readonly WardenAnomaly[]): {
+  readonly anomalies: WireWardenAnomaly[];
+  readonly stuckInput?: WireWardenStuckInputFlag[];
+} {
+  const stuck = anomalies.filter(anomaly => anomaly.kind === 'input_stuck');
+  return {
+    anomalies: anomalies.filter(anomaly => anomaly.kind !== 'input_stuck').map(wireAnomaly),
+    ...(stuck.length === 0
+      ? {}
+      : { stuckInput: stuck.map(anomaly => ({ ...wireAnomaly(anomaly), kind: 'input_stuck' as const })) }),
+  };
+}
+
 function wireAnomaly(anomaly: WardenAnomaly): WireWardenAnomaly {
   const { affectedSessionIds, ledger, ...rest } = anomaly;
   return {
@@ -801,7 +819,7 @@ export class WardenSweepService {
       config: stored.config,
       ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
       ...(nextSweepAt === undefined ? {} : { nextSweepAt }),
-      anomalies: (state.lastAnomalies ?? []).map(wireAnomaly),
+      ...wireFlags(state.lastAnomalies ?? []),
       fingerprint: state.lastFingerprint ?? '',
       ...(liveWarden === undefined ? {} : { liveWarden }),
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
@@ -996,7 +1014,8 @@ export class WardenSweepService {
         ...(state.lastAnomalies ?? [])
           .filter(anomaly => anomaly.sessionId === sessionId && anomaly.status === status)
           .map(anomaly => anomaly.kind)
-          .filter(kind => kind !== 'owner_request'),
+          // A stuck message is not a judgement a person clears; and an older app rejects the kind (`wireFlags`).
+          .filter(kind => kind !== 'owner_request' && kind !== 'input_stuck'),
         ...(current?.status === status ? current.kinds : []),
       ]),
     ];
@@ -1191,7 +1210,7 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      anomalies: [...anomalies, ...orphaned, ...overdue.anomalies, ...stuckFlags].map(wireAnomaly),
+      ...wireFlags([...anomalies, ...orphaned, ...overdue.anomalies, ...stuckFlags]),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -2610,7 +2629,11 @@ export class WardenSweepService {
       this.ports.journal.record('fleet.warden_input_recovered', { sessionId });
     }
     const byId = new Map(input.stuck.map(anomaly => [anomaly.sessionId, anomaly]));
-    const notice = async (sessionId: string, sendId: string, press: StuckInputPress | undefined): Promise<void> => {
+    const notice = async (
+      sessionId: string,
+      sendId: string,
+      press: Exclude<StuckInputPress, 'absent'> | undefined,
+    ): Promise<void> => {
       const anomaly = byId.get(sessionId);
       if (anomaly === undefined) return;
       const line = stuckInputNoticeLine(anomaly, sendId, press);
@@ -2646,8 +2669,10 @@ export class WardenSweepService {
         sendId: step.sendId,
         outcome: press,
       });
-      // Submitted: the ferret takes its turn, and the next sweep finds it moving. Anything else is escalated now.
-      if (press !== 'submitted') await notice(step.sessionId, step.sendId, press);
+      // Submitted: the ferret takes its turn, and the next sweep finds it moving. An empty box proves only that
+      // nothing is held now — the message may have been read — so it is neither marked nor noticed. Anything
+      // else is escalated now.
+      if (press !== 'submitted' && press !== 'absent') await notice(step.sessionId, step.sendId, press);
     }
     const { stuckInput: _previous, ...rest } = input.state;
     return Object.keys(memory).length === 0 ? rest : { ...rest, stuckInput: memory };

@@ -228,6 +228,30 @@ describe('the storage send repository', () => {
     await opened.storage.close();
   });
 
+  it("should reserve a turn number and leave the session's reason as it was (B144)", async () => {
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, {
+      id: 'session-1',
+      status: 'interrupted',
+      turn: 62,
+      reason: 'interrupted by client',
+    });
+
+    await new StorageSendRepository(opened.storage, clock).transition(ID, {
+      event: 'control.turn_reserved',
+      turn: 63,
+      keepReason: true,
+    });
+
+    should((await opened.storage.readState(ID)) as Record<string, unknown>).match({
+      turn: 63,
+      status: 'interrupted',
+      reason: 'interrupted by client',
+    });
+    await opened.storage.close();
+  });
+
   it('should journal an event with no state change of its own', async () => {
     // Arrange
     const { opened } = await openStorage();
@@ -291,6 +315,43 @@ describe('the file send ledger', () => {
     // The FIRST record wins: the second call is a retry of the same logical send, not a new one.
     should(second.record.message).equal('ship it');
     await stat(join(home, 'channel', 'sends.jsonl'));
+  });
+
+  it('should keep every concurrent settlement of one send, a stale read never rolling another back (B144)', async () => {
+    // The tracker and the send service write the same record under different locks. An Enter counted by one
+    // must survive a flag the other wrote from a read taken before the count: seven Enters slipped past a
+    // limit of five when it did not.
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+
+    await Promise.all([
+      subject.settle(ID, 'send-1', { typedNotSent: true }),
+      subject.settle(ID, 'send-1', { submitNudges: 1 }),
+      subject.settle(ID, 'send-1', { deadlineAt: NOW }),
+    ]);
+
+    should(await new FileSendLedger(() => home, clock).list(ID)).match([
+      { sendId: 'send-1', typedNotSent: true, submitNudges: 1, deadlineAt: NOW },
+    ]);
+  });
+
+  it('should go on writing after a write that failed', async () => {
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    const failing = subject.settle(ID, 'send-1', { submitNudges: 1 });
+    const broken = subject as unknown as { append: () => Promise<void> };
+    const original = broken.append;
+    broken.append = async () => {
+      throw new Error('disk full');
+    };
+    await failing.catch(() => undefined);
+    const refused = await subject.settle(ID, 'send-1', { submitNudges: 2 }).catch(() => 'refused');
+    broken.append = original;
+
+    should(refused).equal('refused');
+    should(await subject.settle(ID, 'send-1', { submitNudges: 3 })).match({ submitNudges: 3 });
   });
 
   it('should revise transport facts on a live record without creating a second send', async () => {
@@ -1019,6 +1080,18 @@ describe('the tmux send terminal, as the tracker reads it', () => {
     should(await subject([], 'held', stuck).submitComposer(ID, 'hi')).equal('holding');
     should(await subject([], 'held', absent).submitComposer(ID, 'hi')).equal('absent');
     should([sent.keys, stuck.keys, absent.keys]).deepEqual([['Enter'], ['Enter'], []]);
+  });
+
+  it('should press nothing when the payload has a person’s words beside it, or the pane is mid-turn (B144)', async () => {
+    // Containment rules out a retype; it is never a licence to press: Enter would submit the person's words.
+    const joined = new FrameTmux([typed('please rerun the suite and also delete my draft')]);
+    const busy = new FrameTmux([
+      [`• Working (12s • esc to interrupt)\n› please rerun the suite\n\n  gpt-5 default`, '24|1'],
+    ]);
+
+    should(await subject([], 'held', joined).submitComposer(ID, 'please rerun the suite')).equal('absent');
+    should(await subject([], 'held', busy).submitComposer(ID, 'please rerun the suite')).equal('absent');
+    should([joined.keys, busy.keys]).deepEqual([[], []]);
   });
 });
 

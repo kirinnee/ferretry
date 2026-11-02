@@ -31,6 +31,7 @@ const pointer: StuckInputSend = {
   path: 'turn-file',
   fate: 'unaccounted',
   unaccountedReason: 'landing_unconfirmed',
+  typedNotSent: true,
   acceptedAt: iso(NOW - 10 * MINUTE),
   attemptAt: iso(NOW - 10 * MINUTE),
   fateAt: iso(NOW - 10 * MINUTE + 25_000),
@@ -89,8 +90,13 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     now = NOW + 5 * MINUTE;
     await subject.service.run({ force: false });
 
-    should(first.anomalies.map(anomaly => [anomaly.kind, anomaly.sessionId])).eql([['input_stuck', 'annabeth']]);
-    should(first.anomalies[0]).not.have.property('sendId');
+    // In its own field, never in `anomalies`, which an older app parses against a closed list of kinds.
+    should(first.anomalies).be.empty();
+    should(first.stuckInput?.map(anomaly => [anomaly.kind, anomaly.sessionId])).eql([['input_stuck', 'annabeth']]);
+    should(first.stuckInput?.[0]).not.have.property('sendId');
+    const status = await subject.service.status();
+    should(status.anomalies).be.empty();
+    should(status.stuckInput?.map(anomaly => anomaly.sessionId)).eql(['annabeth']);
     should(stuckInput.pressed).eql(['annabeth:send-63']);
     should(stuckInput.stalled).eql(['annabeth']);
     should(stuckInput.notices.get('annabeth')?.line).match(/send send-63 .* Enter was pressed and did not take/);
@@ -186,13 +192,27 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     should(stuckInput.cleared).be.empty();
   });
 
+  it('should neither mark nor notice a ferret whose box the press found empty — nothing says resend (review finding)', async () => {
+    const stuckInput = new FakeStuckInput();
+    stuckInput.press = 'absent';
+    const subject = harness({ config: enabled(), fleet: [idle()], stuckInput });
+
+    await subject.service.run({ force: false });
+    const again = harness({ config: enabled(), fleet: [idle()], stuckInput, state: subject.state() });
+    await again.service.run({ force: false });
+
+    should(stuckInput.pressed).eql(['annabeth:send-63']);
+    should(stuckInput.stalled).be.empty();
+    should(stuckInput.notices.size).equal(0);
+  });
+
   it('should still flag a stuck ferret with the Warden off, pressing and noticing nothing', async () => {
     const stuckInput = new FakeStuckInput();
     const subject = harness({ config: enabled({ enabled: false }), fleet: [idle()], stuckInput });
 
     const run = await subject.service.run({ force: false });
 
-    should(run.anomalies.map(anomaly => anomaly.kind)).eql(['input_stuck']);
+    should(run.stuckInput?.map(anomaly => anomaly.kind)).eql(['input_stuck']);
     should(stuckInput.pressed).be.empty();
     should(stuckInput.notices.size).equal(0);
   });

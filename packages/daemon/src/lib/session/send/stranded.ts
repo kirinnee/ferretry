@@ -1,5 +1,5 @@
 import { parseHandoffPointer } from '@ferretry/protocol';
-import { composerTransport, PASTE_PLACEHOLDER_PATTERN } from '../../tmux/composer.ts';
+import { composerTransport, lonePasteOf } from '../../tmux/composer.ts';
 import type { SendPath, SendRecord } from './types.ts';
 
 /**
@@ -85,7 +85,8 @@ export function sameComposerText(left: string, right: string): boolean {
  * WHAT MAKES IT OURS is still the ledger: the fill typed it into a composer it had proven EMPTY, so text that
  * is exactly it, still there, is the send's own. A message this short could be a word a person typed, so it
  * is never claimed below {@link OWN_TEXT_MIN} characters; and a paste drawn as a placeholder is claimed only
- * when the placeholder is ALL the composer shows.
+ * when the placeholder is ALL the composer shows AND its own count agrees with the message (`lonePasteOf`):
+ * a person who cleared our paste and pasted their own draft shows a placeholder too.
  */
 
 /** The transports that type the message itself rather than a pointer at it. */
@@ -93,9 +94,6 @@ const INLINE_PATHS: ReadonlySet<SendPath> = new Set<SendPath>(['direct', 'native
 
 /** Below this many characters (whitespace ignored) a message could be a person's own words, so it is never claimed. */
 export const OWN_TEXT_MIN = 12;
-
-/** One collapsed-paste placeholder and nothing else: `[Pasted text #40 +3 lines]`, `[Pasted Content 1204 chars]`. */
-const LONE_PASTE = new RegExp(`^${PASTE_PLACEHOLDER_PATTERN}$`, 'iu');
 
 /**
  * The text a send typed that may still be sitting in the composer: its pointer, or — for a message typed as
@@ -114,7 +112,7 @@ export function strandableText(record: SendRecord): string | undefined {
 /**
  * Whether `draft` is exactly what this send typed, as a TUI may draw it: the pointer re-wrapped or clipped
  * after its path; the message re-wrapped, or clipped with `…` past {@link OWN_TEXT_MIN} characters; or, for a
- * message that travelled as a paste, one collapsed placeholder alone.
+ * message that travelled as a paste, one collapsed placeholder alone whose count agrees with it.
  */
 export function showsOwnText(draft: string, text: string): boolean {
   if (parseHandoffPointer(text) !== null) return showsOwnPointer(draft, text);
@@ -122,7 +120,7 @@ export function showsOwnText(draft: string, text: string): boolean {
   const wanted = squeezed(text);
   if (wanted.length < OWN_TEXT_MIN || shown === '') return false;
   if (shown === wanted) return true;
-  if (composerTransport(text) === 'paste' && LONE_PASTE.test(draft.trim())) return true;
+  if (composerTransport(text) === 'paste' && lonePasteOf(draft, text)) return true;
   if (!shown.endsWith('…')) return false;
   const visible = shown.slice(0, -1);
   return visible.length >= OWN_TEXT_MIN && wanted.startsWith(visible);

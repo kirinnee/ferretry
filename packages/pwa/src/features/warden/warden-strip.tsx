@@ -15,7 +15,7 @@
  * NO ALL-CLEAR WITHOUT A SWEEP. A daemon that has not swept yet has no evidence, and says so.
  */
 
-import type { WardenStatusView } from '@ferretry/protocol';
+import { type WardenStatusView, wardenFlags } from '@ferretry/protocol';
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
@@ -46,7 +46,7 @@ function Dot() {
 export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   if (status === null) return null;
 
-  const digest = wardenAnomalyDigest(status.anomalies);
+  const digest = wardenAnomalyDigest(wardenFlags(status));
   const reporting = status.lastSweepAt !== undefined;
   const needs = wardenNeedsYouCount(status);
   const healthy = reporting && needs === 0;

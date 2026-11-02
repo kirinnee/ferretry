@@ -196,6 +196,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (record.held === true) return false;
     if (isOpenSend(record)) return true;
     const age = now - Date.parse(record.acceptedAt);
+    // Text of ours SEEN sitting in the composer stays watched past the hold ceiling (B144): a turn longer
+    // than it ends with the text still there, and only a look can press its Enter or see it go.
+    if (record.fate === 'unaccounted' && record.typedNotSent === true && strandableText(record) !== undefined)
+      return age < this.settings.repairLimitMs;
     if (isRepairableSend(record)) return age < this.settings.repairLimitMs;
     return (record.fate === 'unaccounted' || record.fate === 'timed_out') && age < this.settings.holdLimitMs;
   }
@@ -384,16 +388,34 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    * left, or the send older than `strandedWatchMs` — the Warden watches the long tail (`input-stuck.ts`).
    */
   private async unconfirmedInComposer(id: SessionId, record: SendRecord, now: number): Promise<number | undefined> {
-    if (record.fate !== 'unaccounted' || record.held === true) return undefined;
-    const due = this.nudgeDue(record);
-    if (due === undefined || now - this.typedSince(record) > this.settings.strandedWatchMs) return undefined;
+    if (record.fate !== 'unaccounted' || record.held === true || strandableText(record) === undefined) return undefined;
+    const seen = record.typedNotSent === true;
+    // Seen in the composer, it is watched as long as a repair is; never seen, only while its keys could still
+    // be arriving.
+    const window = seen ? this.settings.repairLimitMs : this.settings.strandedWatchMs;
+    if (now - this.typedSince(record) > window) return undefined;
     const hold = await this.paneHold(id, record);
-    if (hold !== 'composer') return now + this.settings.busyExtensionMs;
-    if (now < due) return Math.max(due, now + this.settings.firstCheckMs);
-    const after = (await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined)) ?? record;
-    // Entered: it is an open send again, and `resubmit` asked for the look that follows it.
-    if (isOpenSend(after)) return undefined;
-    return this.pressLookAt(after, now);
+    if (hold === 'unreadable') return now + this.settings.busyExtensionMs;
+    if (hold !== 'composer') {
+      // Gone from the composer: the flag the app and the Warden read is dropped, so neither calls it stuck.
+      if (seen) await this.ports.ledger.settle(id, record.sendId, { typedNotSent: undefined });
+      return seen ? undefined : now + this.settings.busyExtensionMs;
+    }
+    // There: said so on the record, so the Warden reads a fresh fact rather than a guess from the turn clock.
+    let current = record;
+    if (!seen) {
+      current = (await this.ports.ledger.settle(id, record.sendId, { typedNotSent: true })) ?? record;
+      await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
+    }
+    const due = this.nudgeDue(current);
+    if (due !== undefined && now >= due) {
+      const after = (await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined)) ?? current;
+      // Entered: it is an open send again, and `resubmit` asked for the look that follows it.
+      if (isOpenSend(after)) return undefined;
+      current = after;
+    }
+    // No Enter left: still looked at, slowly, so the flag stays true to the screen until it goes.
+    return this.pressLookAt(current, now) ?? now + this.settings.busyExtensionMs;
   }
 
   /**
