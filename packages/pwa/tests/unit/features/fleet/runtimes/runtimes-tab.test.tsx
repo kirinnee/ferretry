@@ -83,7 +83,7 @@ const pageWith = async (overrides: Partial<FleetRuntimeView> & { name: string },
 describe('Runtimes tab list', () => {
   it('lists every runtime with its login, profile and default model, and marks the agent one', async () => {
     const view = await open();
-    expect(text(view.container, '[data-runtimes-tab] > div p')).toBe('5 runtimes on studio-mac');
+    expect(text(view.container, '[data-runtimes-count]')).toBe('5 runtimes on studio-mac');
     expect(view.container.querySelectorAll('[data-runtime-row]')).toHaveLength(5);
     expect(text(view.container, '[data-runtime-row="claude-default"]')).toContain(
       'you@example.com (personal) · Default profile · Sonnet 5.5',
@@ -111,7 +111,7 @@ describe('Runtimes tab list', () => {
       credential: { id: 'gone', store: 'ferretry', status: 'ready' },
     });
     const view = await open({ routes: reads([orphan]) });
-    expect(text(view.container, '[data-runtimes-tab] > div p')).toBe('1 runtime on studio-mac');
+    expect(text(view.container, '[data-runtimes-count]')).toBe('1 runtime on studio-mac');
     expect(text(view.container, '[data-runtime-row="orphan"]')).toContain('Unknown login · Default profile');
     await view.unmount();
   });
