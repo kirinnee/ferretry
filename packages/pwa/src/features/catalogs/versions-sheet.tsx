@@ -104,7 +104,7 @@ export function VersionsSheet({
   const [compare, setCompare] = useState<Compare | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<OwnerRefusal | null>(null);
+  const [failure, setFailure] = useState<{ readonly version: number; readonly refusal: OwnerRefusal } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const compareToken = useRef(0);
 
@@ -170,7 +170,10 @@ export function VersionsSheet({
         setAsk(null);
         setNote(READ_AGAIN_SENTENCE);
         await load();
-      } else setFailure(refusal);
+      } else {
+        setAsk(null);
+        setFailure({ version: chosen.version, refusal });
+      }
     } finally {
       setBusy(false);
     }
@@ -203,11 +206,9 @@ export function VersionsSheet({
               {note}
             </p>
           )}
-          {failure === null ? null : failure.sharingOff ? (
+          {failure?.refusal.sharingOff === true ? (
             <SharingOffPanel connection={connection} createClient={createClient} />
-          ) : (
-            <FailureLine sentence={failure.sentence} />
-          )}
+          ) : null}
           <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Versions" data-versions-list="">
             {versionLines(read.item, now).map(line => {
               const actions = versionActions(line, canWrite);
@@ -283,6 +284,9 @@ export function VersionsSheet({
                       </Button>
                     ) : null}
                   </div>
+                  {failure?.version === line.version && !failure.refusal.sharingOff ? (
+                    <FailureLine sentence={failure.refusal.sentence} />
+                  ) : null}
                   {asked === null ? null : (
                     <div
                       className="flex min-w-0 flex-col items-start gap-xs rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-warn"

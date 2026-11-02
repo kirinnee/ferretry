@@ -33,6 +33,53 @@ describe('ChangesView', () => {
     await view.unmount();
   });
 
+  it('renders a long line whole: it wraps, and nothing on it clips, truncates or scrolls', async () => {
+    const long = `acme --stdio --remote https://evil.example.test/${'a'.repeat(300)}${ZWSP}`;
+    const view = await mount(
+      <ChangesView
+        changes={catalogChanges({
+          entries: [
+            {
+              label: 'Starts',
+              change: 'changed',
+              document: false,
+              before: 'acme',
+              after: long,
+              flag: 'command',
+            },
+            {
+              label: 'Skill file a.md',
+              change: 'changed',
+              document: true,
+              hunks: [
+                { beforeStart: 1, beforeLines: 1, afterStart: 1, afterLines: 1, lines: [{ kind: 'add', text: long }] },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+    const lines = all('[data-change-line="add"]');
+    expect(lines.length).toBe(2);
+    for (const line of lines) {
+      expect(line.textContent).toContain('a'.repeat(300));
+      expect(line.textContent).toContain('U+200B');
+    }
+    const clipping =
+      /(^|\s)(truncate|overflow-hidden|overflow-x-hidden|overflow-auto|overflow-x-auto|overflow-scroll|text-ellipsis|whitespace-nowrap|whitespace-pre|w-max|max-h-\S+)(\s|$)/u;
+    for (const node of all(
+      '[data-change-entry], [data-change-entry] pre, [data-change-line], [data-change-line-text]',
+    )) {
+      if (node.matches('[data-change-entry]')) continue;
+      expect(clipping.test(node.getAttribute('class') ?? '')).toBe(false);
+    }
+    for (const node of all('[data-change-line-text], pre')) {
+      expect(node.className).toContain('whitespace-pre-wrap');
+      expect(node.className).toContain('[overflow-wrap:anywhere]');
+    }
+    await view.unmount();
+  });
+
   it('uses a plain heading by default and shows the warnings the version no longer has', async () => {
     const view = await mount(
       <ChangesView

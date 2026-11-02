@@ -30,11 +30,13 @@ const LINE_CLASS: Readonly<Record<Kind, string>> = {
 
 function DiffLine({ kind, text }: { readonly kind: Kind; readonly text: string }) {
   return (
-    <span className={cn('block whitespace-pre-wrap break-words px-3', LINE_CLASS[kind])} data-change-line={kind}>
-      <span aria-hidden="true" className="select-none pr-2">
+    <span className={cn('flex min-w-0 px-3', LINE_CLASS[kind])} data-change-line={kind}>
+      <span aria-hidden="true" className="shrink-0 select-none pr-2">
         {LINE_SIGN[kind]}
       </span>
-      <MarkedText text={text} />
+      <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]" data-change-line-text="">
+        <MarkedText text={text} />
+      </span>
     </span>
   );
 }
@@ -105,12 +107,10 @@ function Entry({ entry }: { readonly entry: CatalogChange }) {
           </span>
         )}
       </figcaption>
-      {/* The only box here allowed to be wider than the screen: a long line scrolls inside it. */}
-      <div className="max-h-[320px] overflow-auto">
-        <pre className="mono m-0 w-max min-w-full max-w-none py-1 text-meta leading-base">
-          <EntryBody entry={entry} />
-        </pre>
-      </div>
+      {/* A review never hides the end of a line: every line wraps, so every character and marker shows. */}
+      <pre className="mono m-0 min-w-0 max-w-full whitespace-pre-wrap py-1 text-meta leading-base [overflow-wrap:anywhere]">
+        <EntryBody entry={entry} />
+      </pre>
     </figure>
   );
 }

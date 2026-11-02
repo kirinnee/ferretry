@@ -269,7 +269,7 @@ describe('make current, retire, bring back', () => {
     await view.unmount();
   });
 
-  it('names the catalogs that joined later when the version is from before they joined', async () => {
+  it('says in plain words which catalog was added later, beside that version, and closes the confirm', async () => {
     const sentence =
       'Version 1 of pdf-tools is not one Friends may serve: a catalog serves an item from the version it was added at, and never the versions that already existed then.';
     const { view } = await open({
@@ -280,8 +280,12 @@ describe('make current, retire, bring back', () => {
     });
     await tap('[data-version-make-current="1"]');
     await tap('[data-version-confirm-yes]');
-    expect(q('[data-catalog-failure]')?.textContent).toContain('Friends may serve');
-    expect(q('[data-version-confirm]')).not.toBeNull();
+    const beside = lineOf(1)?.querySelector('[data-catalog-failure]');
+    expect(beside?.textContent).toContain(
+      "Friends was added after version 1, so it can't offer version 1. Keep the current version, or make a newer one current.",
+    );
+    expect(document.querySelectorAll('[data-catalog-failure]').length).toBe(1);
+    expect(q('[data-version-confirm]')).toBeNull();
     await view.unmount();
   });
 

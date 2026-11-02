@@ -151,10 +151,22 @@ describe('ownerRefusal for versions', () => {
       'Make another version current first.',
     );
   });
-  it('uses the daemon’s own sentence, which names the catalogs, for a version from before they joined', () => {
-    const sentence = 'Version 1 of pdf-tools is not one Friends may serve.';
-    should(ownerRefusal(new FyHttpError(sentence, 409, 'version_before_join')).sentence).equal(sentence);
-    should(ownerRefusal(new FyHttpError('  ', 409, 'version_before_join')).sentence.length).be.above(10);
+  it('says in plain words which catalogs were added after the version, and what to do', () => {
+    const tail = ': a catalog serves an item from the version it was added at.';
+    const say = (names: string): string =>
+      ownerRefusal(
+        new FyHttpError(`Version 2 of pdf-tools is not one ${names} may serve${tail}`, 409, 'version_before_join'),
+      ).sentence;
+    should(say('Friends')).equal(
+      "Friends was added after version 2, so it can't offer version 2. Keep the current version, or make a newer one current.",
+    );
+    should(say('Friends, Reading list')).equal(
+      "Friends and Reading list were added after version 2, so they can't offer version 2. Keep the current version, or make a newer one current.",
+    );
+    should(say('A, B, C')).startWith('A, B and C were added after version 2');
+    should(ownerRefusal(new FyHttpError('  ', 409, 'version_before_join')).sentence).equal(
+      "A catalog that was added later can't offer that version. Keep the current version, or make a newer one current.",
+    );
   });
   it('asks to look again when the current version moved on', () => {
     should(ownerRefusal(new FyHttpError('x', 409, 'current_changed')).previewAgain).be.true();

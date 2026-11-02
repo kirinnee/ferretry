@@ -575,6 +575,8 @@ and Sharing › My catalogs), never to a member.
   a file a tool runs on its own) and `newWarnings` come first. `tooLarge` and `truncated` are said in words; hidden
   characters stay marked (`⟨U+200B⟩`) and a carriage return at a line end is shown as `⟨U+000D⟩`. Every string goes
   through the same marked-text renderer as the full review, so raw hidden text is never drawn.
+  Lines **wrap** (pre-wrap, break anywhere, the `-`/`+` gutter stays): a review never hides the end of a line, so
+  nothing is cut off, ellipsised or scrolled away, on a phone included.
 - **Publish update** (Add to catalog's "Publish update" and the row's "Source changed — Publish update") shows
   `changes` against the CURRENT version under the preview, before the button. When the daemon answers
   `sameAsVersion`, the sheet says "That is version N. Make version N current instead." with a button that does it
@@ -583,8 +585,10 @@ and Sharing › My catalogs), never to a member.
   version number anyway." and still lets the owner publish.
 - **Make current** sends `{version, from}` with the current version the sheet read, after a one-line confirm ("Every
   catalog that lists it will offer version N from now on. Copies people already have stay as they are."). Refusals
-  are one sentence each: `version_before_join` shows the daemon's own sentence, which names the catalogs that
-  joined later; `current_changed` reads the item again and says it moved on; `version_current` says "Make another
+  are one sentence each, shown **beside the version that was refused** (the confirm closes): `version_before_join`
+  says it in plain words and names every catalog that joined later ("Friends was added after version 2, so it can't
+  offer version 2. Keep the current version, or make a newer one current."; the names are read out of the daemon's
+  message, since the wire carries them nowhere else); `current_changed` reads the item again and says it moved on; `version_current` says "Make another
   version current first." (also what a retire of the current one says).
 - **Retire…** and **Bring back…** (`PATCH .../versions/:version {retired}`) each confirm in one sentence. Only the
   buttons the daemon would accept are drawn: the current version offers neither, a retired one only Bring back, an

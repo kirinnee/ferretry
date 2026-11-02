@@ -93,9 +93,26 @@ const OWNER_REFUSALS: Readonly<Record<string, string>> = {
   version_unknown: 'That version is not there any more. The list is out of date; look again.',
 };
 
-/** The daemon names the catalogs that joined later; this stands in only if a message ever comes without them. */
-const BEFORE_JOIN_FALLBACK =
-  'A catalog that joined later cannot be offered that version. Pick a newer one, or publish a new version.';
+/** The daemon's own sentence names the version and the catalogs: `Version 2 of x is not one A, B may serve: …`. */
+const BEFORE_JOIN_DAEMON = /^Version (\d+) of .+? is not one (.+) may serve:/su;
+
+const KEEP_OR_NEWER = 'Keep the current version, or make a newer one current.';
+
+/**
+ * Plain words for a version a catalog that was added later may not offer. The names come out of the daemon's
+ * sentence (the wire carries nothing else); a sentence that does not read that way says the same without them.
+ */
+function beforeJoinSentence(message: string): string {
+  const found = BEFORE_JOIN_DAEMON.exec(message);
+  const version = found?.[1];
+  const named = found?.[2];
+  if (version === undefined || named === undefined)
+    return `A catalog that was added later can't offer that version. ${KEEP_OR_NEWER}`;
+  const names = named.split(', ');
+  const one = names.length === 1;
+  const list = one ? named : `${names.slice(0, -1).join(', ')} and ${names.at(-1) as string}`;
+  return `${list} ${one ? 'was' : 'were'} added after version ${version}, so ${one ? 'it' : 'they'} can't offer version ${version}. ${KEEP_OR_NEWER}`;
+}
 
 export function ownerRefusal(error: unknown): OwnerRefusal {
   if (grantRefusalNotice(error) !== null && !(error instanceof FyHttpError && error.code === 'grant_step_up_required'))
@@ -103,9 +120,7 @@ export function ownerRefusal(error: unknown): OwnerRefusal {
   const code = error instanceof FyHttpError ? error.code : undefined;
   const known =
     code === 'version_before_join' && error instanceof FyHttpError
-      ? error.message.trim() === ''
-        ? BEFORE_JOIN_FALLBACK
-        : error.message
+      ? beforeJoinSentence(error.message)
       : code === undefined
         ? undefined
         : OWNER_REFUSALS[code];
