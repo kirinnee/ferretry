@@ -3,6 +3,7 @@ import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/feature
 import type { ToTestHost } from '../../../src/features/agenda/to-test-rows.tsx';
 import { splitSnoozed, toTestCards, withProjectName, withTaskName } from '../../../src/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
+import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, flush, laptop, PROJECT } from '../board-support.ts';
 import { fakeActions, fill, refusal, submit } from './board-detail-support.tsx';
@@ -201,7 +202,7 @@ describe('Inbox — cards waiting for a try', () => {
 
   it('finds a card by the name of its project', async () => {
     const { root } = await open();
-    const find = must(root.querySelector<HTMLInputElement>('[data-agenda-find]'), 'the Find box');
+    const find = await openFind(root);
     await fill(find, 'ferretry');
     expect(root.querySelectorAll('[data-to-test]')).toHaveLength(2);
     await fill(find, 'no such project');
@@ -297,6 +298,12 @@ describe('Inbox — snoozing a card waiting for a try', () => {
     const { root } = await open({ snoozed: true });
     expect(root.querySelector('[data-agenda-section="to-test"]')?.querySelectorAll('[data-to-test]')).toHaveLength(2);
     expect(root.querySelector('[data-to-test="F25"]') ?? null).toBeNull();
+    await interact(() =>
+      must(
+        root.querySelector<HTMLButtonElement>('[data-agenda-filter] [aria-haspopup="menu"]'),
+        'the Show menu',
+      ).click(),
+    );
     expect(
       must(root.querySelector('[data-agenda-filter-option="snoozed"]'), 'the Snoozed filter').textContent,
     ).toContain('(1)');
@@ -304,9 +311,7 @@ describe('Inbox — snoozing a card waiting for a try', () => {
 
   it('lists it under Snoozed with when it wakes, and Unsnooze wakes it now', async () => {
     const { root, actions } = await open({ snoozed: true });
-    await interact(() =>
-      must(root.querySelector<HTMLElement>('[data-agenda-filter-option="snoozed"]'), 'Snoozed').click(),
-    );
+    await chooseFromMenu(root, 'filter', 'snoozed');
     const row = must(root.querySelector<HTMLElement>('[data-to-test-snoozed]'), 'the snoozed card');
     expect(row.querySelector('[data-to-test-snoozed-title]')?.textContent).toBe('Parked try');
     expect(row.querySelector('[data-to-test-wakes]')?.textContent).toMatch(/^Snoozed until /u);
@@ -318,9 +323,7 @@ describe('Inbox — snoozing a card waiting for a try', () => {
 
   it('says nothing matches, not that nothing is snoozed, when a filter hides the snoozed card', async () => {
     const { root } = await open({ snoozed: true, page: { from: 'warden' } });
-    await interact(() =>
-      must(root.querySelector<HTMLElement>('[data-agenda-filter-option="snoozed"]'), 'Snoozed').click(),
-    );
+    await chooseFromMenu(root, 'filter', 'snoozed');
     expect(root.querySelector('[data-agenda-parked-empty]') ?? null).toBeNull();
   });
 });

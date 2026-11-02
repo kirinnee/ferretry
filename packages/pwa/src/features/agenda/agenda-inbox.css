@@ -39,7 +39,8 @@
 /* ---- The page ------------------------------------------------------------------------------------- */
 /* THE PAGE IS ITS OWN SCROLLER, and the scroller ends where the phone's tab bar begins (the bar is the
    next flex row under the page area), so no card can be drawn under the bar. The column is centred with
-   padding rather than a max-width so the scrollbar stays at the window's edge. The bottom padding is the
+   padding rather than a max-width so the scrollbar stays at the window's edge, and EVERY block of the page (toolbar, banners,
+   lists) sits in that one column, so they share one left edge. The bottom padding is the
    undo toast's clearance, not the bar's height: the toast floats above the bar and must not hide the
    last card, and the home-indicator inset is the bar's to pay (index.css, THE BOTTOM INSET). */
 .fy-attn-inbox {
@@ -53,14 +54,14 @@
   width: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--gap-md) max(16px, calc((100% - 52rem) / 2)) 96px;
+  padding: var(--gap-md) max(16px, calc((100% - 56rem) / 2)) 96px;
 }
 /* A flex column squeezes its children to fit unless they refuse; the page scrolls instead. */
 .fy-attn-inbox > * {
   flex-shrink: 0;
 }
-/* ONE COMPACT ROW: title and count, the quiet "Updating" mark, then the tools pushed to the end. A phone
-   wraps the tools onto a second line rather than squeezing them. */
+/* ONE COMPACT ROW on every width: title and count, the quiet "Updating" mark, the status menu, then the tools
+   (who, machine, Find) and, on a wide screen, "Answer quickly" at the end. A phone keeps its own wrapping rules. */
 .fy-attn-inbox__head {
   display: flex;
   min-height: 32px;
@@ -97,41 +98,11 @@
 .fy-attn-inbox__tools {
   display: flex;
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--gap-xs) var(--gap-sm);
-}
-/* OPEN / RESOLVED: a small segmented control, the pressed one filled. Resolved history is reachable here
-   and in a chat's header menu — nowhere else. */
-.fy-attn-inbox__filter {
-  display: inline-flex;
-  flex-shrink: 0;
-  margin-left: auto;
-  gap: 2px;
-  padding: 2px;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-}
-.fy-attn-inbox__filter-button {
-  min-height: 28px;
-  padding: 0 var(--gap-md);
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-attn-inbox__filter-button:hover {
-  color: var(--fg);
-}
-.fy-attn-inbox__filter-button[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--accent);
 }
 .fy-attn-inbox__machine,
 .fy-attn-inbox__find {
@@ -205,16 +176,6 @@
   .fy-attn-inbox__find-input,
   .fy-attn-inbox__machine {
     font-size: var(--text-input, 16px);
-  }
-  .fy-attn-inbox__filter {
-    max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .fy-attn-inbox__filter-button {
-    min-height: 44px;
-    padding: 0 var(--gap-sm);
-    white-space: nowrap;
   }
   .fy-attn-inbox__machine {
     min-height: 44px;
@@ -441,10 +402,8 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  max-width: 48rem;
   flex-direction: column;
   gap: var(--gap-lg, 24px);
-  margin-inline: auto;
 }
 .fy-inbox-calm {
   margin: 0;
@@ -1703,4 +1662,114 @@
 }
 .fy-filter-menu__trigger {
   max-width: 8.5rem;
+}
+
+/* ---- A wide screen's Inbox: compact toolbar, one tight rhythm ---------------------------------------- */
+/* The phone's menus, sized for a pointer: 32px controls, and "Answer quickly" the one primary button at the end of
+   the row. A ferret's line sits right over its cards, and a section's gaps are the same everywhere. */
+@media (min-width: 768px) {
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__trigger,
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__find {
+    min-height: 32px;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__find {
+    min-width: 32px;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__item {
+    min-height: 36px;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__finding {
+    flex: 0 1 16rem;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-quick--toolbar {
+    min-height: 32px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-section {
+    gap: var(--gap-sm);
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-section__groups {
+    gap: var(--gap-md);
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-section__toggle {
+    min-height: 32px;
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-group {
+    gap: var(--gap-sm);
+  }
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-inbox-group__head {
+    min-height: 0;
+    padding: 0;
+  }
+}
+
+/* A phone's toolbar: every control is one 44px pill or circle with one border, the row fills the column from the
+   cards' left edge to their right edge, and Find's icon takes the far end. Tight padding keeps all four on one
+   line at 320px. */
+@media (max-width: 767.98px) {
+  .fy-attn-inbox .fy-filter-menu {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .fy-attn-inbox .fy-filter-menu__trigger,
+  .fy-attn-inbox .fy-filter-menu__find {
+    box-sizing: border-box;
+    height: 44px;
+  }
+  .fy-attn-inbox .fy-filter-menu__trigger {
+    min-width: 0;
+    max-width: 100%;
+    padding: 0 var(--gap-sm) 0 var(--gap-md);
+  }
+  .fy-attn-inbox .fy-filter-menu__find {
+    flex: none;
+    width: 44px;
+    margin-left: auto;
+  }
+  .fy-attn-inbox .fy-inbox-quick {
+    box-sizing: border-box;
+    height: 44px;
+  }
+}
+/* Find's open box is the same height as the pills beside it, border included. */
+.fy-attn-inbox__find {
+  box-sizing: border-box;
+  height: 32px;
+}
+@media (max-width: 767.98px) {
+  .fy-attn-inbox__find {
+    height: 44px;
+  }
+}
+/* The status pill never gives way; the narrowest phones drop the who and machine icons so "All" is never clipped. */
+@media (max-width: 767.98px) {
+  .fy-attn-inbox__head > .fy-filter-menu {
+    flex: none;
+  }
+}
+@media (max-width: 359.98px) {
+  .fy-attn-inbox__tools .fy-filter-menu__trigger > svg:not(:last-child) {
+    display: none;
+  }
+}
+/* A wide screen's labels have room to say "All machines" whole, in any theme's type. */
+@media (min-width: 768px) {
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-filter-menu__trigger {
+    max-width: 14rem;
+  }
+}
+/* Find open on a phone: the pills keep their line and the box takes the next one, edge to edge. */
+@media (max-width: 767.98px) {
+  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools {
+    display: contents;
+  }
+}
+/* The box is the one bordered thing; the field inside it draws no ring of its own. */
+.fy-attn-inbox__find .fy-attn-inbox__find-input,
+.fy-attn-inbox__find .fy-attn-inbox__find-input:focus,
+.fy-attn-inbox__find .fy-attn-inbox__find-input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
 }

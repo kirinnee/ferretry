@@ -21,6 +21,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
+import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -171,7 +172,7 @@ describe('AgendaInboxPage states', () => {
     expect(mounted.container.querySelector('[data-agenda-empty]')?.textContent).toContain('Nothing needs you');
     expect(mounted.container.querySelector('h1')?.textContent).toBe('Inbox');
     expect(mounted.container.textContent).not.toContain('Attention');
-    expect(mounted.container.querySelector('[aria-label="Find in Inbox"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-find-open]')).not.toBeNull();
     await mounted.unmount();
   });
 
@@ -212,6 +213,30 @@ describe('AgendaInboxPage states', () => {
     expect(phone.container.querySelector('[data-agenda-kind] [aria-haspopup="menu"]')?.textContent).toBe('All');
     expect(phone.container.querySelector('[aria-label="Find in Inbox"]')).toBeNull();
     expect(phone.container.querySelector('[data-agenda-find-open]')).not.toBeNull();
+    await phone.unmount();
+  });
+
+  it('ends the wide toolbar with a compact primary Answer quickly, and keeps theme out of it', async () => {
+    const wide = await mount(page(fakeInbox(), [threeWay]));
+    const quick = must(wide.container.querySelector<HTMLElement>('[data-agenda-quick]'), 'Answer quickly');
+    expect(quick.parentElement?.tagName).toBe('HEADER');
+    expect(quick.getAttribute('data-variant')).toBe('primary');
+    expect(quick.className).toContain('fy-inbox-quick--toolbar');
+    expect(quick.textContent).toContain('Answer quickly');
+    expect(wide.container.querySelector('.fy-inbox-body [data-agenda-quick]')).toBeNull();
+    expect(wide.container.querySelector('[data-page-theme-switch]')).toBeNull();
+    await chooseFromMenu(wide.container, 'filter', 'resolved');
+    expect(wide.container.querySelector('[data-agenda-quick]')).toBeNull();
+    await wide.unmount();
+  });
+
+  it("keeps the phone's Answer quickly as the first line of its list, with no theme switch in the row", async () => {
+    const phone = await mount(page(fakeInbox(), [threeWay], { phone: true }));
+    const quick = must(phone.container.querySelector<HTMLElement>('[data-agenda-quick]'), 'Answer quickly');
+    expect(quick.closest('.fy-inbox-body')).not.toBeNull();
+    expect(quick.hasAttribute('data-variant')).toBe(false);
+    expect(quick.className).not.toContain('fy-inbox-quick--toolbar');
+    expect(phone.container.querySelector('[data-page-theme-switch]')).toBeNull();
     await phone.unmount();
   });
 
@@ -374,7 +399,7 @@ describe('AgendaInboxPage rows', () => {
 
   it('clears the Find box with Escape, and leaves an empty box alone', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay]));
-    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-agenda-find]'), 'Find');
+    const find = await openFind(mounted.container);
     const pressEscape = () =>
       interact(() => {
         find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -448,7 +473,7 @@ describe('AgendaInboxPage rows', () => {
     expect(selected()).not.toBe(first);
     await press('k');
     expect(selected()).toBe(first);
-    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-agenda-find]'), 'Find');
+    const find = await openFind(mounted.container);
     await interact(() => find.focus());
     await interact(() => {
       find.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }));
@@ -460,13 +485,9 @@ describe('AgendaInboxPage rows', () => {
   it('narrows to one machine and to what Find matches, and offers the way back when nothing does', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay]));
     expect(mounted.container.querySelector('[data-agenda-machine]')).not.toBeNull();
-    const machine = must(mounted.container.querySelector<HTMLSelectElement>('[data-agenda-machine]'), 'machines');
-    await interact(() => {
-      machine.value = 'laptop';
-      machine.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await chooseFromMenu(mounted.container, 'machine', 'laptop');
     expect(rows(mounted)).toHaveLength(1);
-    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-agenda-find]'), 'Find');
+    const find = await openFind(mounted.container);
     await interact(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'nothing like this');
       find.dispatchEvent(new Event('input', { bubbles: true }));
@@ -927,8 +948,9 @@ describe('AgendaInboxPage Resolved filter', () => {
     );
     return { mounted, navigated, loads: () => loads };
   };
-  const option = (root: ParentNode, which: 'open' | 'resolved') =>
-    must(root.querySelector<HTMLButtonElement>(`[data-agenda-filter-option="${which}"]`), which);
+  const choose = (root: ParentNode, which: 'open' | 'resolved') => chooseFromMenu(root, 'filter', which);
+  const shown = (root: ParentNode) =>
+    must(root.querySelector('[data-agenda-filter] [aria-haspopup="menu"]'), 'the Show menu').textContent;
 
   it('starts on Open, and choosing Resolved reads the history and swaps the list', async () => {
     const { mounted, loads } = mountFilter({
@@ -936,18 +958,18 @@ describe('AgendaInboxPage Resolved filter', () => {
     });
     const view = await mounted;
     const root = view.container;
-    expect(option(root, 'open').getAttribute('aria-pressed')).toBe('true');
+    expect(shown(root)).toBe('Open');
     expect(root.querySelector('[data-agenda-resolved-pane]')).toBeNull();
-    await interact(() => option(root, 'resolved').click());
+    await choose(root, 'resolved');
     expect(loads()).toBe(1);
-    expect(option(root, 'resolved').getAttribute('aria-pressed')).toBe('true');
+    expect(shown(root)).toBe('Resolved');
     expect(root.querySelector('[data-agenda-resolved-pane]')).not.toBeNull();
     expect([...root.querySelectorAll('[data-agenda-record]')].map(r => r.getAttribute('data-agenda-record'))).toEqual([
       'A1',
       'A2',
     ]);
     expect(root.querySelector('[data-agenda-record-origin]')?.textContent).toContain('Workshop');
-    await interact(() => option(root, 'open').click());
+    await choose(root, 'open');
     expect(root.querySelector('[data-agenda-resolved-pane]')).toBeNull();
     await view.unmount();
   });
@@ -955,7 +977,7 @@ describe('AgendaInboxPage Resolved filter', () => {
   it('a record links to its conversation', async () => {
     const { mounted, navigated } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
     const view = await mounted;
-    await interact(() => option(view.container, 'resolved').click());
+    await choose(view.container, 'resolved');
     await interact(() =>
       must(view.container.querySelector<HTMLElement>('.fy-attn-panel__record-link'), 'link').click(),
     );
@@ -968,9 +990,9 @@ describe('AgendaInboxPage Resolved filter', () => {
     const { mounted } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
     const view = await mounted;
     const root = view.container;
-    await interact(() => option(root, 'resolved').click());
+    await choose(root, 'resolved');
     expect(root.querySelectorAll('[data-agenda-record]')).toHaveLength(1);
-    const find = must(root.querySelector<HTMLInputElement>('[data-agenda-find]'), 'Find');
+    const find = await openFind(root);
     await interact(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'zzz-no-such-thing');
       find.dispatchEvent(new Event('input', { bubbles: true }));
@@ -985,12 +1007,12 @@ describe('AgendaInboxPage Resolved filter', () => {
 
   it('says it is reading, then says nothing is resolved', async () => {
     const reading = await mountFilter({ resolvedReading: true }).mounted;
-    await interact(() => option(reading.container, 'resolved').click());
+    await choose(reading.container, 'resolved');
     expect(reading.container.textContent).toContain('Reading resolved items');
     await reading.unmount();
 
     const none = await mountFilter().mounted;
-    await interact(() => option(none.container, 'resolved').click());
+    await choose(none.container, 'resolved');
     expect(none.container.querySelector('[data-agenda-resolved-empty]')?.textContent).toContain('Nothing resolved');
     await none.unmount();
   });

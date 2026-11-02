@@ -24,9 +24,13 @@
  *   centred at a readable width, takes ← → ↓ (answer, answer, Skip) and j/k (move) from anywhere that is not a field or
  *   a menu, Esc closes it, a mouse drag swipes, and finishing says "All done". In the list, j/k (or ↑/↓) walk the rows
  *   and Enter opens one.
- * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
- *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
- *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
+ * - ONE TOOLBAR ROW, on a phone and a wide screen alike, in ONE centred column that every block aligns to: the
+ *   "Inbox n" title, Show ▾ (Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the
+ *   open list and the badge until it wakes, is unsnoozed, or the ferret re-opens it), who ▾ (All / Interactive / Agents),
+ *   machine ▾ (once there is more than one machine), Find behind a search icon that expands, and — from
+ *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it. On a
+ *   wide screen "Answer quickly n" is a compact primary button at the row's right end; on a phone it sits in the body.
+ *   The theme switch is not on this row at all: Settings has it, and a phone's top bar carries its own.
  *
  * The page renders off the shell's `AgendaInbox` alone, so it render-tests with a fake one; reading what was said
  * about an open item (its History) is the host's (`readConversation`).
@@ -108,7 +112,6 @@ import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
-import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { BoardSendBack } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
@@ -122,7 +125,7 @@ import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
-import { FilterMenu, FindBox, FindToggle } from './inbox-filter-menu.tsx';
+import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -660,65 +663,9 @@ const FILTER_WORDS: Readonly<Record<InboxFilter, string>> = {
 const filterWords = (entry: InboxFilter, counts: Readonly<Record<ParkedReason, number>>): string =>
   entry === 'snoozed' || entry === 'replied' ? `${FILTER_WORDS[entry]} (${counts[entry]})` : FILTER_WORDS[entry];
 
-/** Open / Snoozed / Replied / Resolved: toggle buttons, the chosen one pressed. */
-function InboxFilterBar({
-  filter,
-  counts,
-  onChange,
-}: {
-  readonly filter: InboxFilter;
-  readonly counts: Readonly<Record<ParkedReason, number>>;
-  readonly onChange: (next: InboxFilter) => void;
-}) {
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
-    <div aria-label="Show" className="fy-attn-inbox__filter" data-agenda-filter="" role="group">
-      {FILTER_CHOICES.map(entry => (
-        <button
-          aria-pressed={filter === entry}
-          className="fy-attn-inbox__filter-button"
-          data-agenda-filter-option={entry}
-          key={entry}
-          onClick={() => onChange(entry)}
-          type="button"
-        >
-          {filterWords(entry, counts)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 const KIND_WORDS: Readonly<Record<ModeFilter, string>> = { all: 'All', interactive: 'Interactive', auto: 'Agents' };
 const KIND_CHOICES = (Object.keys(KIND_WORDS) as ModeFilter[]).map(value => ({ value, label: KIND_WORDS[value] }));
 const FILTER_CHOICES = ['open', 'snoozed', 'replied', 'resolved'] as const;
-
-/** All / Interactive / Agents: which kind of ferret raised the items — the sessions bar's own split. */
-function KindFilterBar({
-  kind,
-  onChange,
-}: {
-  readonly kind: ModeFilter;
-  readonly onChange: (next: ModeFilter) => void;
-}) {
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, not a form fieldset
-    <div aria-label="Ferrets" className="fy-attn-inbox__filter" data-agenda-kind="" role="group">
-      {(['all', 'interactive', 'auto'] as const).map(entry => (
-        <button
-          aria-pressed={kind === entry}
-          className="fy-attn-inbox__filter-button"
-          data-agenda-kind-option={entry}
-          key={entry}
-          onClick={() => onChange(entry)}
-          type="button"
-        >
-          {KIND_WORDS[entry]}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** The bulk dismiss under the Agents filter; nothing under any other, or where the host gave it no way to reach machines. */
 function AgentsBulk({
@@ -1520,6 +1467,23 @@ export function AgendaInboxPage({
     },
   };
 
+  const quick =
+    runOrder.length === 0 ? null : (
+      <button
+        className={phone ? 'kt-btn fy-inbox-quick' : 'kt-btn fy-inbox-quick fy-inbox-quick--toolbar'}
+        data-agenda-quick=""
+        {...(phone ? {} : { 'data-variant': 'primary' })}
+        onClick={startDeck}
+        type="button"
+      >
+        <Zap aria-hidden="true" size={15} />
+        Answer quickly
+        <span className="fy-inbox-quick__count">{runOrder.length}</span>
+      </button>
+    );
+
+  // ONE TOOLBAR ROW on every width: title and count, the status menu, who, machine and Find; on a wide screen
+  // "Answer quickly" ends the row (the phone's is the first line of its list), and theme is not on this row (Settings has it; a phone's top bar carries its own).
   const header = (
     <header className="fy-attn-inbox__head">
       {/* A phone's top bar already says "Inbox" with the count beside it: the page draws no second title there. */}
@@ -1535,67 +1499,42 @@ export function AgendaInboxPage({
           <span className="fy-attn-inbox__updating-text">Updating</span>
         </span>
       ) : null}
-      {phone ? (
-        <FilterMenu
-          choiceHook="data-agenda-filter-option"
-          choices={FILTER_CHOICES.map(entry => ({ value: entry, label: filterWords(entry, parkedCounts) }))}
-          hook="data-agenda-filter"
-          name="Show"
-          onChange={choose}
-          value={filter}
-        />
-      ) : (
-        <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
-      )}
+      <FilterMenu
+        choiceHook="data-agenda-filter-option"
+        choices={FILTER_CHOICES.map(entry => ({ value: entry, label: filterWords(entry, parkedCounts) }))}
+        hook="data-agenda-filter"
+        name="Show"
+        onChange={choose}
+        value={filter}
+      />
       <div className="fy-attn-inbox__tools">
         {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
-        {phone ? (
-          <FilterMenu
-            choiceHook="data-agenda-kind-option"
-            choices={KIND_CHOICES}
-            hook="data-agenda-kind"
-            icon={<Users aria-hidden="true" size={14} />}
-            name="Ferrets"
-            onChange={setKind}
-            value={kind}
-          />
-        ) : (
-          <KindFilterBar kind={kind} onChange={setKind} />
-        )}
+        <FilterMenu
+          choiceHook="data-agenda-kind-option"
+          choices={KIND_CHOICES}
+          hook="data-agenda-kind"
+          icon={<Users aria-hidden="true" size={14} />}
+          name="Ferrets"
+          onChange={setKind}
+          value={kind}
+        />
         {machines.length > 1 ? (
-          phone ? (
-            <FilterMenu
-              choiceHook="data-agenda-machine-option"
-              choices={[
-                { value: '', label: 'All' },
-                ...machines.map(entry => ({ value: entry.daemonId as string, label: entry.name })),
-              ]}
-              hook="data-agenda-machine"
-              icon={<Laptop aria-hidden="true" size={14} />}
-              name="Machine"
-              onChange={next => setMachine(next === '' ? null : (next as DaemonId))}
-              value={machineFilter ?? ''}
-            />
-          ) : (
-            <select
-              aria-label="Machine"
-              className="fy-attn-inbox__machine"
-              data-agenda-machine=""
-              onChange={event => setMachine(event.target.value === '' ? null : (event.target.value as DaemonId))}
-              value={machineFilter ?? ''}
-            >
-              <option value="">All machines</option>
-              {machines.map(entry => (
-                <option key={entry.daemonId} value={entry.daemonId}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
-          )
+          <FilterMenu
+            choiceHook="data-agenda-machine-option"
+            choices={[
+              { value: '', label: phone ? 'All' : 'All machines' },
+              ...machines.map(entry => ({ value: entry.daemonId as string, label: entry.name })),
+            ]}
+            hook="data-agenda-machine"
+            icon={<Laptop aria-hidden="true" size={14} />}
+            name="Machine"
+            onChange={next => setMachine(next === '' ? null : (next as DaemonId))}
+            value={machineFilter ?? ''}
+          />
         ) : null}
-        {phone ? <FindToggle onChange={setQuery} query={query} /> : <FindBox onChange={setQuery} query={query} />}
-        <PageThemeSwitch />
+        <FindToggle onChange={setQuery} query={query} />
       </div>
+      {phone || filter !== 'open' ? null : quick}
     </header>
   );
 
@@ -1612,13 +1551,7 @@ export function AgendaInboxPage({
       <NothingMatches onClear={clearFilters} />
     ) : (
       <div className="fy-inbox-body" data-agenda-lists="">
-        {runOrder.length > 0 ? (
-          <button className="kt-btn fy-inbox-quick" data-agenda-quick="" onClick={startDeck} type="button">
-            <Zap aria-hidden="true" size={15} />
-            Answer quickly
-            <span className="fy-inbox-quick__count">{runOrder.length}</span>
-          </button>
-        ) : null}
+        {phone ? quick : null}
         {nothingForYou && !filtered ? (
           <p className="fy-inbox-calm" data-agenda-empty="">
             Nothing needs you right now.

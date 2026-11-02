@@ -11,6 +11,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
+import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import { typeInto } from '../../support/learning-dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -61,19 +62,28 @@ const mountPage = async (
       {...extra}
     />,
   );
+  const menu = () =>
+    must(
+      view.container.querySelector<HTMLButtonElement>('[data-agenda-filter] [aria-haspopup="menu"]'),
+      'the Show menu',
+    );
+  const openMenu = () => interact(() => menu().click());
   const option = (which: string) =>
     must(view.container.querySelector<HTMLButtonElement>(`[data-agenda-filter-option="${which}"]`), which);
-  const choose = (which: string) => interact(() => option(which).click());
+  const choose = (which: string) => chooseFromMenu(view.container, 'filter', which);
   const rowIds = (): string[] =>
     [...view.container.querySelectorAll('[data-agenda-parked]')].map(
       row => row.textContent?.match(/!(A\d+)/u)?.[1] ?? '',
     );
-  return { view, fake, option, choose, rowIds, loads, navigated };
+  return { view, fake, menu, openMenu, option, choose, rowIds, loads, navigated };
 };
 
 describe('AgendaInboxPage Snoozed and Replied filters', () => {
   it('says how many are snoozed and how many replied, and keeps them off the open list', async () => {
-    const { view, option } = await mountPage({ parked: [snoozed('A2', LATER), snoozed('A3', SOONER), replied('A4')] });
+    const { view, option, openMenu } = await mountPage({
+      parked: [snoozed('A2', LATER), snoozed('A3', SOONER), replied('A4')],
+    });
+    await openMenu();
     expect(option('snoozed').textContent).toBe('Snoozed (2)');
     expect(option('replied').textContent).toBe('Replied (1)');
     expect(option('open').textContent).toBe('Open');
@@ -84,12 +94,12 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
   });
 
   it('shows Snoozed, reading the boards, the one that wakes soonest first, each with where it stands', async () => {
-    const { view, option, choose, rowIds, loads } = await mountPage({
+    const { view, menu, choose, rowIds, loads } = await mountPage({
       parked: [snoozed('A2', LATER), snoozed('A3', SOONER), replied('A4')],
     });
     await choose('snoozed');
     expect(loads.count).toBe(1);
-    expect(option('snoozed').getAttribute('aria-pressed')).toBe('true');
+    expect(menu().textContent).toBe('Snoozed (2)');
     expect(view.container.querySelector('[data-agenda-parked-pane="snoozed"]')).not.toBeNull();
     expect(rowIds()).toEqual(['A3', 'A2']);
     const status = view.container.querySelector('[data-agenda-parked-status]')?.textContent ?? '';
@@ -200,10 +210,7 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
   it('says nothing matches when Find hides every row, and Show everything brings them back', async () => {
     const { view, choose, rowIds } = await mountPage({ parked: [snoozed('A2', LATER)] });
     await choose('snoozed');
-    await typeInto(
-      must(view.container.querySelector<HTMLInputElement>('[data-agenda-find]'), 'Find'),
-      'zzz-no-such-thing',
-    );
+    await typeInto(await openFind(view.container), 'zzz-no-such-thing');
     expect(rowIds()).toEqual([]);
     expect(view.container.querySelector('[data-agenda-parked-empty]')).toBeNull();
     await interact(() =>

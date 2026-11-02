@@ -22,7 +22,7 @@ describe('the Inbox is its own scroller, so the phone tab bar under it covers no
   });
 
   it('centres its column with padding, so the scrollbar stays at the window edge', () => {
-    expect(page).toContain('padding: var(--gap-md) max(16px, calc((100% - 52rem) / 2)) 96px;');
+    expect(page).toContain('padding: var(--gap-md) max(16px, calc((100% - 56rem) / 2)) 96px;');
     expect(page).not.toContain('max-width');
   });
 

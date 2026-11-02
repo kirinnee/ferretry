@@ -5,6 +5,7 @@ import type { ClearPort } from '../../../src/lib/agenda-clear-agents.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import type { DaemonHealthRead } from '../../../src/lib/daemon-health.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
+import { chooseFromMenu } from '../../support/inbox-menus.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import { healthOf } from '../../support/health.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -75,8 +76,7 @@ const mountPage = async (withPort: boolean, health: Record<string, DaemonHealthR
       )}
     />,
   );
-  const kind = (which: string) =>
-    must(view.container.querySelector<HTMLButtonElement>(`[data-agenda-kind-option="${which}"]`), which);
+  const kind = (which: string) => chooseFromMenu(view.container, 'kind', which);
   const button = () => view.container.querySelector<HTMLButtonElement>('[data-agenda-clear-agents-button]');
   const dialog = () => view.container.querySelector('[data-clear-dialog]');
   const rows = (): string[] =>
@@ -87,11 +87,11 @@ const mountPage = async (withPort: boolean, health: Record<string, DaemonHealthR
 describe('Inbox kind filter', () => {
   it('shows every ferret by default, then only interactive ones, then only agents', async () => {
     const { view, kind, rows } = await mountPage(true, {});
-    expect(kind('all').getAttribute('aria-pressed')).toBe('true');
+    expect(view.container.querySelector('[data-agenda-kind] [aria-haspopup="menu"]')?.textContent).toBe('All');
     expect(rows().sort()).toEqual(['A1', 'A2', 'A3']);
-    await interact(() => kind('interactive').click());
+    await kind('interactive');
     expect(rows()).toEqual(['A2']);
-    await interact(() => kind('auto').click());
+    await kind('auto');
     expect(rows().sort()).toEqual(['A1', 'A3']);
     await view.unmount();
   });
@@ -101,16 +101,16 @@ describe('Clear all from agent ferrets (gate)', () => {
   it('offers the button only under Agents', async () => {
     const { view, kind, button } = await mountPage(true, {});
     expect(button()).toBeNull();
-    await interact(() => kind('interactive').click());
+    await kind('interactive');
     expect(button()).toBeNull();
-    await interact(() => kind('auto').click());
+    await kind('auto');
     expect(must(button(), 'button').textContent).toBe('Clear all from agent ferrets');
     await view.unmount();
   });
 
   it('offers nothing when the host gave it no way to reach machines', async () => {
     const { view, kind, button } = await mountPage(false, {});
-    await interact(() => kind('auto').click());
+    await kind('auto');
     expect(button()).toBeNull();
     await view.unmount();
   });
@@ -120,7 +120,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
   it('counts across machines, names the one that needs an update, then clears the others', async () => {
     const calls: string[] = [];
     const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS, laptop: OLD }, calls);
-    await interact(() => kind('auto').click());
+    await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     expect(dialog()?.textContent).toContain('Dismiss 2 agenda items from agent ferrets?');
@@ -144,7 +144,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
   it('clears every machine that offers the feature', async () => {
     const calls: string[] = [];
     const { view, kind, button } = await mountPage(true, { workshop: OFFERS, laptop: OFFERS }, calls);
-    await interact(() => kind('auto').click());
+    await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     expect(view.container.querySelector('[data-clear-dialog]')?.textContent).toContain('Dismiss 4 agenda items');
@@ -165,7 +165,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
   it('can be cancelled without sending a clear', async () => {
     const calls: string[] = [];
     const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS }, calls);
-    await interact(() => kind('auto').click());
+    await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-clear-close]'), 'cancel').click());
@@ -176,7 +176,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
 
   it('closes on Escape once it has counted', async () => {
     const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS }, []);
-    await interact(() => kind('auto').click());
+    await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     await interact(() => {
@@ -188,7 +188,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
 
   it('has nothing to confirm when no machine can clear', async () => {
     const { view, kind, button } = await mountPage(true, { workshop: OLD, laptop: { kind: 'failed' } });
-    await interact(() => kind('auto').click());
+    await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     const text = view.container.querySelector('[data-clear-dialog]')?.textContent ?? '';
