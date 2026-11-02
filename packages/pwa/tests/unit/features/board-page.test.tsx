@@ -3,6 +3,7 @@ import { boardErr, boardOk } from '@ferretry/protocol';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { sendBack, sendBackBox, sendBackField, sendBackSubmit, plainSendBackEditor } from './send-back-support.ts';
 import {
   boardAnswer,
   COUNTS,
@@ -20,6 +21,8 @@ import {
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -263,12 +266,7 @@ describe('BoardPage — views', () => {
     expect(button.textContent).toBe('Reopen');
     await interact(() => button.click());
     expect(acts).toEqual([]);
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
-    await typeInto(
-      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
-      'it broke again',
-    );
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await sendBack(sendBackBox(root), 'it broke again');
     expect(acts).toEqual([
       { daemonId: 'daemon/laptop', id: 'F8', request: { action: 'move', to: 'implement', reason: 'it broke again' } },
     ]);
@@ -502,15 +500,10 @@ describe('BoardPage — moving cards', () => {
     const li = await openMenu(root, 'F3');
     await pickLane(li, 'Implement');
     expect(acts).toEqual([]);
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
+    const dialog = sendBackBox(root);
     expect(dialog.textContent).toContain('Move Review the thing back to Implement');
-    const submit = must(dialog.querySelector<HTMLButtonElement>('button[type="submit"]'), 'submit');
-    expect(submit.disabled).toBe(true);
-    await typeInto(
-      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
-      'CI is red again',
-    );
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(sendBackSubmit(dialog).disabled).toBe(true);
+    await sendBack(dialog, 'CI is red again');
     expect(acts).toEqual([
       { daemonId: 'daemon/laptop', id: 'F3', request: { action: 'move', to: 'implement', reason: 'CI is red again' } },
     ]);
@@ -532,9 +525,7 @@ describe('BoardPage — moving cards', () => {
       act: async () => boardErr({ status: 409, message: 'That lane is gated.', boardCode: 'owner-gate' as const }),
     });
     await pickLane(await openMenu(root, 'F3'), 'Todo');
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
-    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'because');
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await sendBack(sendBackBox(root), 'because');
     expect(acts).toHaveLength(1);
     expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('That lane is gated.');
     await interact(() =>
@@ -875,9 +866,7 @@ describe('BoardPage — an answer in flight', () => {
     expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe(
       'Reopen Old closed thing: back to Implement',
     );
-    expect(root.querySelector('[aria-label="Reason"]')?.getAttribute('placeholder')).toBe(
-      'Why is it going back? The ferret reads this.',
-    );
+    expect(sendBackField(root).getAttribute('placeholder')).toBe('Why is it going back? The ferret reads this.');
   });
 });
 
@@ -895,7 +884,7 @@ describe('BoardPage — Not good with pictures', () => {
     },
   });
   const pickFile = async (root: HTMLElement): Promise<void> => {
-    const picker = must(root.querySelector<HTMLInputElement>('[data-send-back-picker]'), 'the picker');
+    const picker = must(root.querySelector<HTMLInputElement>('input[type="file"]:not([capture])'), 'the picker');
     Object.defineProperty(picker, 'files', {
       configurable: true,
       value: [new File(['png'], 'flicker.png', { type: 'image/png' })],
@@ -919,12 +908,7 @@ describe('BoardPage — Not good with pictures', () => {
     await pickFile(root);
     const ferret = card('F4').owner;
     expect(uploads).toEqual([`${laptop.daemonId}:${ferret}:flicker.png`]);
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
-    await typeInto(
-      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
-      'still flickers',
-    );
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await sendBack(sendBackBox(root), 'still flickers');
     expect(acts).toEqual([
       {
         daemonId: laptop.daemonId,
@@ -938,7 +922,7 @@ describe('BoardPage — Not good with pictures', () => {
       },
     ]);
     expect(root.querySelector('[data-task="F4"] [data-verdict="not-good"]')?.hasAttribute('data-pending')).toBe(true);
-    expect(root.querySelector('.fy-board-sendback__send')?.getAttribute('aria-label')).toBe('Sending…');
+    expect(root.querySelector('button[data-composer-send]')?.getAttribute('aria-label')).toBe('Sending…');
     release();
     await interact(() => flush());
     expect(root.querySelector('[role="dialog"]')).toBeNull();
@@ -950,22 +934,18 @@ describe('BoardPage — Not good with pictures', () => {
       act: async () => boardErr({ status: 409, message: 'not in its session', boardCode: 'owner-gate' as const }),
     });
     await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
-    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'no');
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await sendBack(sendBackBox(root), 'no');
     expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('not in its session');
-    expect(root.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]')?.value).toBe('no');
+    expect(sendBackField(root).value).toBe('no');
   });
 
   it('sends the words alone to a machine too old for pictures', async () => {
     const { root, acts } = await open({ props: withFiles(false) });
     await click(root, '[data-task="F4"] [data-verdict="not-good"]');
     await interact(() => flush());
-    expect(root.querySelector('[data-send-back-picker]')).toBeNull();
+    expect(root.querySelector('[data-composer-attach]')).toBeNull();
     expect(root.querySelector('[data-send-back-note="update"]')).not.toBeNull();
-    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
-    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'broken');
-    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await sendBack(sendBackBox(root), 'broken');
     expect(acts[0]?.request).toEqual({ action: 'move', to: 'implement', reason: 'broken' });
   });
 });

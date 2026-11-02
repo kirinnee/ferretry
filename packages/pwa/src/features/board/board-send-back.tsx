@@ -1,33 +1,29 @@
 /**
- * SENDING A CARD BACK, WITH WORDS AND PICTURES: the composer behind "Not good", "Reopen" and every other move back
- * the owner makes on the Board (`board-design.md` §2.9). The words are the reason the ferret reads; the files go
- * with them, as a chat's would.
+ * SENDING A CARD BACK, WITH WORDS AND PICTURES: the box behind "Not good", "Reopen" and every other move back
+ * the owner makes — on the Board, in a to-test row and in the Inbox deck (`board-design.md` §2.9). The words are
+ * the reason the ferret reads; the files go with them, as a chat's would.
  *
- * The files are the chat composer's own: `useComposerAttachments` uploads each the moment it is added (paste a
- * screenshot, or Attach), with the same type and size checks, and `PendingAttachmentStrip` draws them. They go
+ * THE BOX IS THE CHAT'S OWN COMPOSER, detached from any chat (`Composer`'s `detached` mode): the same editing
+ * surface, voice, Enter and Shift+Enter, paste and drop, and none of what belongs to a conversation — its words
+ * are the host's move and are kept nowhere, so a Not good typed here is never the ferret's chat draft and never
+ * queued as a message. Every place a send-back is asked for draws this one component, so its width is one rule.
+ *
+ * The files are the composer's own: each is uploaded the moment it is added, with the same type and size checks,
  * to the card's ferret's session, because that is where the daemon looks for them; the move then names them.
  *
  * THE APP SHIPS BEFORE THE DAEMON. Attach is offered only once the machine has said it takes files with a move
- * back (`board.reopen.attachments.1`). A machine that has not answered yet shows Attach waiting; one that said no
- * gets the words alone, and a line saying an update brings the pictures.
+ * back (`board.reopen.attachments.1`). A machine that has not answered yet, or has no way to upload, draws the
+ * words alone; one that said no also says an update brings the pictures.
  */
 
 import { type AttachmentView, MAX_BOARD_REASON_LENGTH, MAX_BOARD_REOPEN_ATTACHMENTS } from '@ferretry/protocol';
-import { Paperclip, Send } from 'lucide-react';
-import {
-  type ClipboardEvent,
-  type FormEvent,
-  type KeyboardEvent,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { type ComposerAttachmentUploader, useComposerAttachments } from '../../components/composer-attachments.ts';
-import { PendingAttachmentStrip } from '../../components/session-chat-parts.tsx';
-import { Spinner } from '../../components/spinner.tsx';
+import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Composer, type ComposerProps } from '../../components/composer.tsx';
+import type { ComposerAttachmentUploader } from '../../components/composer-attachments.ts';
+import { useComposerPreferences } from '../../hooks/use-composer-preferences.ts';
+import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { DaemonDraftStore } from '../../lib/drafts.ts';
 import { UPDATE_MACHINE_WHERE } from '../../lib/machine-update-words.ts';
 
 /** What the Board needs from a machine to send files with a move back. */
@@ -96,13 +92,23 @@ export function useSendBackFiles(
   }, [asks, upload, daemon, sessionId, offered]);
 }
 
+interface SendBackTarget {
+  /** The card's machine. */
+  readonly daemon: DaemonConnection;
+  /** The card's ferret; the box's files are uploaded to its session, and its draft is kept under it. */
+  readonly sessionId: string;
+}
+
 export interface BoardSendBackProps {
   /** What is being sent back, e.g. `Not good: send Pairing QR back to Implement`. */
   readonly heading: string;
+  readonly target: SendBackTarget;
+  /** Something outside the box is working on this card: the box waits. */
   readonly busy: boolean;
-  /** The last refusal, or `null`. */
+  /** A refusal the host already holds, shown above the box. */
   readonly error: string | null;
-  readonly onSubmit: (sendBack: SendBack) => void;
+  /** Resolves to the refusal, or `null` when it went; a refusal keeps the words and files in the box. */
+  readonly onSubmit: (sendBack: SendBack) => Promise<string | null> | string | null | undefined;
   readonly onCancel: () => void;
   /** Files for this card's ferret; `null` draws the words alone. */
   readonly files: SendBackFiles | null;
@@ -110,11 +116,17 @@ export interface BoardSendBackProps {
   readonly submitLabel?: string;
   /** The words may be left empty: the answer goes without them (a "Not yet"). */
   readonly wordsOptional?: boolean;
-  readonly busyLabel?: string;
 }
+
+/**
+ * The box a refusal's words are written in. Its draft is the box's own: it is kept nowhere (a store that
+ * writes nothing), so what is typed for one card is never another's, and never the chat's.
+ */
+const NEVER_KEPT = new DaemonDraftStore({ getItem: () => null, setItem: () => undefined });
 
 export function BoardSendBack({
   heading,
+  target,
   busy,
   error,
   onSubmit,
@@ -122,160 +134,83 @@ export function BoardSendBack({
   files,
   placeholder = 'What is not good? The ferret reads this.',
   submitLabel = 'Send back',
-  busyLabel = 'Sending…',
   wordsOptional = false,
 }: BoardSendBackProps) {
-  const [reason, setReason] = useState('');
-  const input = useRef<HTMLTextAreaElement>(null);
-  const picker = useRef<HTMLInputElement>(null);
   const headingId = useId();
-  const errorId = useId();
+  const preferences = useComposerPreferences(target.daemon.daemonId);
+  const phone = useLayoutMode() === 'drawer';
   const attachable = files !== null && files.offered === true;
-  const attachments = useComposerAttachments(attachable ? files.upload : undefined, files?.sessionId ?? '');
-  useEffect(() => input.current?.focus(), []);
-
-  const trimmed = reason.trim();
-  const full = attachments.entries.length >= MAX_BOARD_REOPEN_ATTACHMENTS;
-  const hold = attachments.uploading
-    ? 'Wait for the files to finish uploading.'
-    : attachments.failed.length > 0
-      ? 'Remove or retry the file that did not upload.'
-      : null;
-  const canSend = (trimmed !== '' || wordsOptional) && !busy && hold === null;
-
-  const add = (picked: readonly File[]): void => {
-    if (!attachable || picked.length === 0) return;
-    attachments.add(picked.slice(0, Math.max(0, MAX_BOARD_REOPEN_ATTACHMENTS - attachments.entries.length)));
-  };
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
-    if (canSend) onSubmit({ reason: trimmed, attachmentIds: attachments.readyIds });
-  };
+  const submitNow = useRef(onSubmit);
+  submitNow.current = onSubmit;
+  // The composer's send is the host's move, not a chat message: nothing reaches a session from here.
+  const api = useMemo(
+    () =>
+      ({
+        send: async (_session: string, input: { readonly message: string; readonly attachmentIds?: string[] }) => {
+          if (input.message.length > MAX_BOARD_REASON_LENGTH)
+            throw new Error(`That is too long: keep it under ${String(MAX_BOARD_REASON_LENGTH)} characters.`);
+          const refused = await submitNow.current({ reason: input.message, attachmentIds: input.attachmentIds ?? [] });
+          if (typeof refused === 'string') throw new Error(refused);
+          return {};
+        },
+      }) as unknown as ComposerProps['api'],
+    [],
+  );
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      onCancel();
-      return;
-    }
-    // Enter alone sends, as the box it replaced did; Shift+Enter is a new line.
-    if (event.key === 'Enter' && !event.shiftKey && event.target === input.current) {
-      event.preventDefault();
-      if (canSend) onSubmit({ reason: trimmed, attachmentIds: attachments.readyIds });
-    }
-  };
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    const pasted = Array.from(event.clipboardData?.files ?? []);
-    if (!attachable || pasted.length === 0) return;
-    event.preventDefault();
-    add(pasted);
+    // Esc anywhere in the box but the field (the Cancel button, the picker) goes back too.
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.stopPropagation();
+    onCancel();
   };
 
   return (
-    <form
+    <div
       aria-busy={busy}
       aria-labelledby={headingId}
       aria-modal="true"
       className="fy-board-reason fy-board-sendback"
       data-board-send-back=""
       onKeyDown={onKeyDown}
-      onSubmit={submit}
       role="dialog"
     >
-      <p className="fy-board-reason__heading" id={headingId}>
-        {heading}
-      </p>
-      <textarea
-        aria-describedby={error === null ? undefined : errorId}
-        aria-invalid={error !== null}
-        aria-label="Reason"
-        className="fy-board-reason__input fy-board-sendback__input"
-        disabled={busy}
-        maxLength={MAX_BOARD_REASON_LENGTH}
-        onChange={event => setReason(event.target.value)}
-        onPaste={onPaste}
-        placeholder={placeholder}
-        ref={input}
-        required={!wordsOptional}
-        rows={3}
-        value={reason}
-      />
-      {attachments.entries.length === 0 ? null : (
-        <PendingAttachmentStrip
-          entries={attachments.entries}
-          onRemove={attachments.remove}
-          onRetry={attachments.retry}
-        />
+      <div className="fy-board-sendback__head">
+        <p className="fy-board-reason__heading" id={headingId}>
+          {heading}
+        </p>
+        <button
+          className="kt-btn kt-btn--sm fy-board-sendback__cancel"
+          data-variant="ghost"
+          disabled={busy}
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+      {error === null ? null : (
+        <p className="fy-board-reason__error" role="alert">
+          {error}
+        </p>
       )}
       {files !== null && files.offered === false ? (
         <p className="fy-board-sendback__note" data-send-back-note="update">
           {SEND_BACK_FILES_NEED_UPDATE}
         </p>
       ) : null}
-      {error === null ? null : (
-        <p className="fy-board-reason__error" id={errorId} role="alert">
-          {error}
-        </p>
-      )}
-      <div className="fy-board-reason__actions fy-board-sendback__actions">
-        {files === null || files.offered === false ? null : (
-          <>
-            <button
-              className="kt-btn fy-board-sendback__attach"
-              data-variant="ghost"
-              disabled={!attachable || busy || full}
-              onClick={() => picker.current?.click()}
-              title={
-                files.offered === null
-                  ? 'Asking the machine whether it takes files…'
-                  : full
-                    ? `Up to ${MAX_BOARD_REOPEN_ATTACHMENTS} files`
-                    : 'Attach images or files'
-              }
-              type="button"
-            >
-              <Paperclip aria-hidden="true" size={14} />
-              Attach
-            </button>
-            <input
-              aria-hidden="true"
-              className="hidden"
-              data-send-back-picker=""
-              multiple
-              onChange={event => {
-                add(Array.from(event.currentTarget.files ?? []));
-                // Cleared so choosing the same file again is still a change.
-                event.currentTarget.value = '';
-              }}
-              ref={picker}
-              tabIndex={-1}
-              type="file"
-            />
-          </>
-        )}
-        {hold === null || attachments.entries.length === 0 ? null : (
-          <span className="fy-board-sendback__hold" role="status">
-            {hold}
-          </span>
-        )}
-        <span className="fy-board-sendback__spacer" />
-        <button className="kt-btn" data-variant="ghost" disabled={busy} onClick={onCancel} type="button">
-          Cancel
-        </button>
-        <button
-          aria-label={busy ? busyLabel : submitLabel}
-          className="kt-btn fy-board-sendback__send"
-          data-variant="primary"
-          disabled={!canSend}
-          type="submit"
-        >
-          {busy ? <Spinner className="fy-board-answer-spinner" size={14} /> : <Send aria-hidden="true" size={14} />}
-          {/* Both words take the same room, so the button does not change width while it sends. */}
-          <span className="fy-board-sendback__send-label" data-busy={busy ? '' : undefined}>
-            <span aria-hidden={busy}>{submitLabel}</span>
-            <span aria-hidden={!busy}>{busyLabel}</span>
-          </span>
-        </button>
-      </div>
-    </form>
+      <Composer
+        allowEmptySend={wordsOptional}
+        api={api}
+        autoFocus
+        compact={phone}
+        daemon={target.daemon}
+        detached={{ sendLabel: submitLabel, attachable, maxAttachments: MAX_BOARD_REOPEN_ATTACHMENTS }}
+        disabled={busy}
+        draftStore={NEVER_KEPT}
+        placeholder={placeholder}
+        sessionId={target.sessionId}
+        {...preferences}
+        {...(attachable ? { uploadAttachment: files.upload } : {})}
+      />
+    </div>
   );
 }

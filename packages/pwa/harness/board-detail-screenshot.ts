@@ -146,9 +146,12 @@ try {
         const detail = page.locator('.fy-board-detail');
         await detail.locator('[data-verdict="not-good"]').click();
         const composer = page.locator('[data-board-send-back]');
-        await composer.locator('.fy-board-sendback__attach:not([disabled])').waitFor({ state: 'visible' });
-        await composer.locator('[aria-label="Reason"]').fill('Pairing worked, but the QR is cut off on a small phone.');
-        await composer.locator('[data-send-back-picker]').setInputFiles([
+        await composer.locator('button[data-composer-attach]:not([disabled])').waitFor({ state: 'visible' });
+        await composer
+          .locator('textarea, [contenteditable="true"]')
+          .first()
+          .fill('Pairing worked, but the QR is cut off on a small phone.');
+        await composer.locator('input[type="file"]:not([accept])').setInputFiles([
           { name: 'qr-cut-off.png', mimeType: 'image/png', buffer: PIXEL },
           { name: 'settings.png', mimeType: 'image/png', buffer: PIXEL },
         ]);

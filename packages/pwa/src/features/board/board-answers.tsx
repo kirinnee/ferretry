@@ -94,7 +94,6 @@ export function useBoardAnswers({
   portal = false,
 }: BoardAnswersInput): BoardAnswers {
   const [pending, setPending] = useState<PendingMove | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   // Per card: the answer in flight, and the last refusal. Several cards can be settling at once.
   const [settling, setSettling] = useState<ReadonlyMap<string, BoardAnswer>>(() => new Map());
   const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -135,14 +134,17 @@ export function useBoardAnswers({
         return;
       }
       if (plan.kind === 'ask-reason') {
+        if (connectionOf(card.daemonId) === undefined) {
+          onNotice('That machine is not connected here, so the card cannot be sent back from this page.');
+          return;
+        }
         const toName = group.laneSet?.lanes.find(lane => lane.id === plan.to)?.name ?? plan.to;
-        setProblem(null);
         setPending({ card, group, to: plan.to, toName, answer });
         return;
       }
       if (plan.kind === 'send') void send(card, group, plan.to, answer);
     },
-    [send, settling, onNotice],
+    [send, settling, onNotice, connectionOf],
   );
 
   // The composer's files go to the card's ferret: its assignee, else its owner ferret (where the daemon looks).
@@ -152,14 +154,13 @@ export function useBoardAnswers({
     pending === null ? null : (pending.card.task.assignee ?? pending.card.task.owner),
   );
 
-  const submit = async ({ reason, attachmentIds }: SendBack): Promise<void> => {
-    if (pending === null) return;
-    setProblem(null);
+  const submit = async ({ reason, attachmentIds }: SendBack): Promise<string | null> => {
+    if (pending === null) return null;
     const attachments =
       attachmentIds.length === 0 || files === null ? undefined : { from: files.sessionId, ids: [...attachmentIds] };
     const refused = await send(pending.card, pending.group, pending.to, pending.answer, reason, attachments);
     if (refused === null) setPending(null);
-    else setProblem(refused);
+    return refused;
   };
 
   const answerFor = useCallback(
@@ -171,19 +172,22 @@ export function useBoardAnswers({
     [settling, refusals],
   );
 
+  const daemon = pending === null ? undefined : connectionOf(pending.card.daemonId);
   const drawn =
-    pending === null ? null : (
+    pending === null || daemon === undefined ? null : (
       <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
         <BoardSendBack
           busy={settling.has(pending.card.key)}
-          error={problem}
+          error={null}
           files={files}
           key={pending.card.key}
-          onCancel={() => {
-            setPending(null);
-            setProblem(null);
+          onCancel={() => setPending(null)}
+          onSubmit={submit}
+          target={{
+            daemon,
+            sessionId:
+              files?.sessionId ?? pending.card.task.assignee ?? pending.card.task.owner ?? pending.card.task.id,
           }}
-          onSubmit={sendBack => void submit(sendBack)}
           {...sendBackWords(pending)}
         />
       </div>

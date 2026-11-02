@@ -706,7 +706,11 @@ who is not on this host ([grants.md](grants.md)).
 The owner's two answers about a card, on every surface that shows one (Kanban, Table, card detail):
 
 - **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
-- **Not good** opens a small composer: the words, plus any images or files. It is the owner's move back, so it
+- **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
+  same mic, Enter to send and Shift+Enter for a new line. What is typed is kept nowhere — never the ferret's chat draft,
+  never queued as a message — and the box is as wide as the column it sits in (under the Inbox deck's card it takes the
+  card's own inset; one rule in `board.css` and `agenda-inbox.css`, one component for the Board, a to-test row, the
+  Answer-quickly run and the Inbox deck). It is the owner's move back, so it
   is a reopen: the card goes back to the rework lane, the words are added to its clarifications, and the
   ferret is sent them through its queue as the owner. The `reopened` history event names the files, so the
   card reads "reopened Released → Implement … with 2 images".

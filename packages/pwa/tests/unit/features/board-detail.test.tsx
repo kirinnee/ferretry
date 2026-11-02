@@ -6,6 +6,7 @@ import { daemonBoardPath, daemonSessionPath } from '../../../src/lib/pages/route
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 import { card, deferred, flush, laptop } from '../board-support.ts';
+import { sendBack, sendBackField, sendBackSubmit, plainSendBackEditor, writeSendBack } from './send-back-support.ts';
 import {
   buttonNamed,
   click,
@@ -22,6 +23,8 @@ import {
   submit,
   text,
 } from './board-detail-support.tsx';
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -53,6 +56,10 @@ const moreItem = async (root: HTMLElement, name: string): Promise<void> => {
 const reasonBox = (root: HTMLElement): HTMLElement => must(root.querySelector('[role="dialog"]'), 'the reason box');
 const reasonSubmit = async (root: HTMLElement, reason: string): Promise<void> => {
   const box = reasonBox(root);
+  if (box.hasAttribute('data-board-send-back')) {
+    await sendBack(box, reason);
+    return;
+  }
   await fill(must(box.querySelector<HTMLInputElement>('[aria-label="Reason"]'), 'the reason input'), reason);
   await submit(box);
   await interact(() => flush());
@@ -327,7 +334,7 @@ describe('BoardDetail — moving', () => {
     await pickLane(root, 'Plan/Design');
     expect(actions.calls).toEqual([]);
     expect(text(reasonBox(root), '.fy-board-reason__heading')).toBe('Move Build it back to Plan/Design');
-    expect(buttonNamed(reasonBox(root), 'Move back').disabled).toBe(true);
+    expect(sendBackSubmit(reasonBox(root)).disabled).toBe(true);
     await reasonSubmit(root, 'wrong plan');
     expect(actions.calls).toEqual(['moveTask:["plan","wrong plan"]']);
     expect(root.querySelector('[role="dialog"]')).toBeNull();
@@ -339,7 +346,7 @@ describe('BoardDetail — moving', () => {
     await pickLane(root, 'Todo');
     await reasonSubmit(root, 'start over');
     expect(text(reasonBox(root), '[role="alert"]')).toBe('the plan lane is owner only');
-    expect(reasonBox(root).querySelector('[aria-label="Reason"]')?.getAttribute('aria-invalid')).toBe('true');
+    expect(sendBackField(reasonBox(root)).value).toBe('start over');
   });
 
   it('shows the refusal of a forward move beside the comment box, where the owner is looking', async () => {
@@ -363,9 +370,7 @@ describe('BoardDetail — moving', () => {
     await clickNamed(reasonBox(root), 'Cancel');
     expect(root.querySelector('[role="dialog"]')).toBeNull();
     await pickLane(root, 'Todo');
-    await interact(() =>
-      pressKey(must(reasonBox(root).querySelector('[aria-label="Reason"]'), 'the reason input'), 'Escape'),
-    );
+    await interact(() => pressKey(sendBackField(reasonBox(root)), 'Escape'));
     expect(root.querySelector('[role="dialog"]')).toBeNull();
     expect(closed.count).toBe(0);
     expect(actions.calls).toEqual([]);
@@ -376,9 +381,9 @@ describe('BoardDetail — moving', () => {
     const actions = fakeActions({ moveTask: () => pending.promise });
     const { root } = await open({ task: card('F1', IMPLEMENT), actions });
     await pickLane(root, 'Todo');
-    await fill(must(reasonBox(root).querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'the input'), 'why');
-    await submit(reasonBox(root));
-    expect(buttonNamed(reasonBox(root), 'Moving…').disabled).toBe(true);
+    await writeSendBack(reasonBox(root), 'why');
+    await interact(() => sendBackSubmit(reasonBox(root)).click());
+    expect(sendBackSubmit(reasonBox(root)).getAttribute('aria-label')).toBe('Sending…');
     pending.resolve(refusal('too late'));
     await interact(() => flush());
     expect(text(reasonBox(root), '[role="alert"]')).toBe('too late');
@@ -447,9 +452,7 @@ describe('BoardDetail — the verdict', () => {
     const { root, actions } = await open({ task: card('F1', tested) });
     await click(root, '[data-verdict="not-good"]');
     expect(text(reasonBox(root), '.fy-board-reason__heading')).toBe('Not good: send Try it back to Implement');
-    expect(reasonBox(root).querySelector('[aria-label="Reason"]')?.getAttribute('placeholder')).toBe(
-      'What is not good? The ferret reads this.',
-    );
+    expect(sendBackField(reasonBox(root)).getAttribute('placeholder')).toBe('What is not good? The ferret reads this.');
     await reasonSubmit(root, 'it crashes on phones');
     expect(actions.calls).toEqual(['moveTask:["implement","it crashes on phones"]']);
   });
@@ -870,7 +873,7 @@ describe('BoardDetail — an answer in flight', () => {
     });
     await click(root, '[data-verdict="not-good"]');
     await interact(() => flush());
-    const picker = must(root.querySelector<HTMLInputElement>('[data-send-back-picker]'), 'the picker');
+    const picker = must(root.querySelector<HTMLInputElement>('input[type="file"]:not([capture])'), 'the picker');
     Object.defineProperty(picker, 'files', {
       configurable: true,
       value: [new File(['png'], 'a.png', { type: 'image/png' })],
@@ -888,7 +891,7 @@ describe('BoardDetail — an answer in flight', () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT), sendBackFiles: true });
     await pickLane(root, 'Plan/Design');
     await interact(() => flush());
-    expect(root.querySelector('[data-send-back-picker]')).not.toBeNull();
+    expect(root.querySelector('[data-composer-attach]')).not.toBeNull();
     await reasonSubmit(root, 'wrong plan');
     expect(actions.calls).toEqual(['moveTask:["plan","wrong plan"]']);
   });

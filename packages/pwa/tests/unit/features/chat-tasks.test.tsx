@@ -19,11 +19,13 @@ import {
   laptop,
   originCard,
 } from '../board-support.ts';
-import { fill, submit } from './board-detail-support.tsx';
+import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const SELF = 's1';
 const KID = 'c1';
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 beforeEach(() => boardSideView.set('kanban'));
@@ -248,12 +250,7 @@ describe('ChatTasks — the reason box', () => {
     return opened;
   };
   const box = () => must(document.body.querySelector<HTMLElement>('form[role="dialog"], [role="dialog"]'), 'box');
-  const typeReason = async (reason: string): Promise<void> => {
-    const form = box().closest('form') ?? box();
-    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, reason);
-    await submit(form as HTMLElement);
-    await interact(() => flush());
-  };
+  const typeReason = (reason: string): Promise<void> => sendBack(box(), reason);
 
   it('sends the card back with the reason and closes the box', async () => {
     const { acts } = await askReason();
@@ -603,12 +600,8 @@ describe('ChatTasks — the Cards view', () => {
   it('sends a card to test back with the owner’s words, through the Board’s reason box', async () => {
     const { root, acts } = await open();
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click());
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
     expect(acts).toEqual([]);
-    const form = dialog.closest('form') ?? dialog;
-    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'It crashes');
-    await submit(form as HTMLElement);
-    await interact(() => flush());
+    await sendBack(sendBackBox(document.body), 'It crashes');
     expect(acts).toHaveLength(1);
     expect(acts[0]?.id).toBe('F22');
     expect(JSON.stringify(acts[0]?.request)).toContain('It crashes');
@@ -646,12 +639,9 @@ describe('ChatTasks — the Cards view', () => {
     const { root, acts } = await open({ extraCards: [waiting] });
     await interact(() => step(root, 'Next card').click());
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Send back').click());
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
+    const dialog = sendBackBox(document.body);
     expect(dialog.textContent).toContain('Send Board system back to Todo');
-    const form = dialog.closest('form') ?? dialog;
-    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'Split it');
-    await submit(form as HTMLElement);
-    await interact(() => flush());
+    await sendBack(dialog, 'Split it');
     expect(acts).toHaveLength(1);
     expect(JSON.stringify(acts[0]?.request)).toContain('Split it');
   });

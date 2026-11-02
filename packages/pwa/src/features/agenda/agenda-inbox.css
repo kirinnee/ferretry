@@ -1146,28 +1146,27 @@ a.fy-inbox-row:focus-visible {
   padding-left: 0;
 }
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__cardbar,
-.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-step,
-.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-deck-foot {
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-step {
   padding-right: 16px;
   padding-left: 16px;
 }
 /* The open card keeps a margin from the panel's edges, on a phone and on a wide screen alike: its border and corners
    are drawn, and it never touches the edge, the composer or the bar above it. The margin is on the deck, so the
    cards peeking out behind it keep the same edges. */
+.fy-attn-inbox__deck--open {
+  --fy-deck-card-inset: var(--gap-md);
+  --fy-deck-foot-inset: var(--gap-md);
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open {
+  --fy-deck-card-inset: 8px;
+  --fy-deck-foot-inset: 16px;
+}
 .fy-attn-inbox__deck--open > .fy-attn-deck {
-  margin: var(--gap-sm) var(--gap-md) 0;
+  margin: var(--gap-sm) var(--fy-deck-card-inset) 0;
 }
 .fy-attn-inbox__deck--open > .fy-inbox-deck-foot {
-  margin-right: var(--gap-md);
-  margin-left: var(--gap-md);
-}
-.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open > .fy-inbox-deck-foot {
-  margin-right: 0;
-  margin-left: 0;
-}
-.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open > .fy-attn-deck {
-  margin-right: 8px;
-  margin-left: 8px;
+  padding-right: var(--fy-deck-foot-inset);
+  padding-left: var(--fy-deck-foot-inset);
 }
 /* On a wide screen the run is a centred column of one readable measure: the bar above it, the card, its keys and the
    end of the run all sit in it, never full-bleed. */
@@ -1526,9 +1525,12 @@ a.fy-inbox-row:focus-visible {
   gap: var(--gap-xs) var(--gap-sm);
   padding: var(--gap-xs) 0 var(--gap-sm);
 }
-/* The "Not good" words take the answer row's place and width. */
+/* The "Not good" box is exactly as wide as the card above it: the foot keeps the composer's gutter, and this takes the
+   difference back, so the box and the card share ONE inset (`--fy-deck-card-inset`) on a phone and a wide screen alike. */
 .fy-inbox-gate-why {
   min-width: 0;
+  margin-right: calc(var(--fy-deck-card-inset) - var(--fy-deck-foot-inset));
+  margin-left: calc(var(--fy-deck-card-inset) - var(--fy-deck-foot-inset));
 }
 /* A gate item's one meta line: quiet, the lane's verb a touch stronger. */
 .fy-meta-line--gate {
