@@ -1561,10 +1561,10 @@ describe('AppShell', () => {
     });
     await settle();
     expect(window.location.pathname).toBe('/shared');
-    expect(picker.view.container.querySelector('h1')?.textContent).toBe('Shared with me');
+    expect(picker.view.container.querySelector('h1')?.textContent).toBe('Subscriptions');
     expect(picker.view.container.querySelector('[data-publisher-label]')?.textContent).toBe('Studio');
     expect(must(picker.view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe(
-      'Shared with me',
+      'Subscriptions',
     );
     await interact(() => {
       must(picker.view.container.querySelector<HTMLButtonElement>('[data-shared-home]'), 'back').click();

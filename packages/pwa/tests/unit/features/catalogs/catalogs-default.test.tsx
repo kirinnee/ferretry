@@ -31,13 +31,7 @@ async function open(options: { features: string[]; list?: Record<string, unknown
         return ownedCatalog({ id: SECOND, name: 'Other', role: 'default' });
       }),
   });
-  const view = await mount(
-    <CatalogsSurface
-      connection={connection}
-      createClient={fake.factory}
-      installHost={{ createClient: fake.factory, projects: [] }}
-    />,
-  );
+  const view = await mount(<CatalogsSurface connection={connection} createClient={fake.factory} />);
   await settle();
   return { fake, view };
 }

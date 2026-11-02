@@ -1,5 +1,5 @@
 /**
- * "Add a catalog from a link": the PRIMARY way to get a catalog someone shared.
+ * "Subscribe with a link": the PRIMARY way to follow a catalog someone shared.
  *
  * A paste field and one button. A share link goes to the same /join page the phone's camera opens, so
  * there is one path into joining. Any other link is named in a sentence; nothing is sent from here and the
@@ -14,8 +14,9 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { FailureLine } from './catalog-parts.tsx';
 
-const ADD_FROM_LINK_TITLE = 'Add a catalog from a link';
-const ADD_FROM_LINK_HELP = 'Paste the link someone sent you.';
+const ADD_FROM_LINK_TITLE = 'Subscribe with a link';
+const ADD_FROM_LINK_HELP =
+  'Paste the invite link someone sent you. Subscribing installs nothing: you pick what to install.';
 
 interface AddCatalogFromLinkProps {
   /** Opens the join page at `to` (path and fragment). Defaults to the router, or the address bar where there is none. */
@@ -68,7 +69,7 @@ export function AddCatalogFromLink({ navigate }: AddCatalogFromLinkProps) {
         />
         <Button type="submit" variant="primary" data-catalog-link-add="">
           <Link2 size={16} aria-hidden="true" />
-          Add
+          Subscribe
         </Button>
       </div>
       {problem === null ? null : <FailureLine sentence={problem} />}

@@ -485,7 +485,7 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
   if (route.kind === 'connection-picker') return [{ label: 'Daemons' }];
   if (route.kind === 'setup') return [{ label: 'Set up' }];
   if (route.kind === 'join') return [{ label: 'Join' }];
-  if (route.kind === 'shared') return [{ label: 'Shared with me' }];
+  if (route.kind === 'shared') return [{ label: 'Subscriptions' }];
   const home = daemonHomePath(route.daemonId);
   switch (route.kind) {
     case 'home':

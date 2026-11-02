@@ -1,22 +1,19 @@
 /**
- * SHARING — the one place to share skills and MCP servers, see what is shared with you, and say who
- * can read your catalogs.
+ * SHARING — a marketplace in three views (&B131): what this browser subscribes to and can install, the catalogs this
+ * machine publishes, and who subscribes to them.
  *
- * Four views of one thing, as the ordinary level-three underlined tabs: My catalogs, Shared with me,
- * People and Skills. The tab is part of the address (`/d/:daemon/sharing/:tab`), so a view is linkable
- * and Back steps through the views the reader opened.
+ * The tabs are the ordinary level-three underlined tabs: Subscriptions, My catalogs and People. The tab is part of the
+ * address (`/d/:daemon/sharing/:tab`), so a view is linkable and Back steps through the views the reader opened.
  *
- * The page is ONE machine's: the connection arrives from the app's existing machine selection, so there
- * is no second switcher here. Each view is the screen that already existed — this page only gives them
- * a home. Skills is the machine's own inventory in the session surface's rows, unchanged.
+ * The page is ONE machine's: the connection arrives from the app's existing machine selection, so there is no second
+ * switcher here. Publishing a skill starts in My catalogs (+ Publish skills) or from a side-panel row's ⋯; there is no
+ * Skills tab any more, because a list of skills to publish lives where you publish.
  */
 
-import { useMemo } from 'react';
 import type { InstallMachine } from '../shared/shared-item-sheet.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonSharingPath, SHARING_TABS, type SharingTab } from '../../lib/pages/routes.ts';
-import { useDaemonClient, useDaemonFetch } from '../../lib/store.tsx';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { UnderlineTabs } from '../../shell/underline-tabs.tsx';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { CatalogMembersPanel } from '../catalogs/catalog-members.tsx';
@@ -26,24 +23,18 @@ import { AddCatalogEntry } from '../catalogs/catalog-row-tools.tsx';
 import { CatalogsSurface, useCatalogs } from '../catalogs/catalogs-surface.tsx';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { SharedWithMe } from '../shared/shared-with-me.tsx';
+import type { MachineSkillEntriesLoader } from '../skills/machine-skills-api.ts';
 import type { SharedController } from '../shared/shared-controller.ts';
-import { MACHINE_SKILLS_SESSION, machineSkillsLoader } from '../skills/machine-skills-api.ts';
-import type { SkillsCatalogLoader } from '../skills/skills-api.ts';
-import { SkillsSurface } from '../skills/skills-surface.tsx';
 
-export const DEFAULT_SHARING_TAB: SharingTab = 'catalogs';
+export const DEFAULT_SHARING_TAB: SharingTab = 'shared';
 
 const TAB_LABELS: Readonly<Record<SharingTab, string>> = {
+  shared: 'Subscriptions',
   catalogs: 'My catalogs',
-  shared: 'Shared with me',
   people: 'People',
-  skills: 'Skills',
 };
 
 const TABS = SHARING_TABS.map(id => ({ id, label: TAB_LABELS[id] }));
-
-/** A skill is used from a chat; this page has none, so the row's button says where to go. */
-export const SKILLS_USE_NOTE = 'Skills are used from a session: open one and type the name there.';
 
 const GUTTER_CLASS = 'px-4 sm:px-5';
 const COLUMN_CLASS = 'w-full max-w-[680px]';
@@ -63,7 +54,8 @@ export interface SharingPageProps {
   /** Seams for tests and the harness; the app uses the daemon-bound client and the daemon's own routes. */
   readonly createClient?: CatalogClientFactory;
   readonly installHost?: InstallHost;
-  readonly loadSkills?: SkillsCatalogLoader;
+  /** Reads the skills on this machine for My catalogs' Publish skills picker. */
+  readonly loadMachineSkills?: MachineSkillEntriesLoader;
 }
 
 export function SharingPage({
@@ -74,7 +66,7 @@ export function SharingPage({
   machines,
   createClient,
   installHost,
-  loadSkills,
+  loadMachineSkills,
 }: SharingPageProps) {
   const current = tab ?? DEFAULT_SHARING_TAB;
   return (
@@ -91,57 +83,30 @@ export function SharingPage({
         />
         <PageThemeSwitch />
       </div>
-      {current === 'skills' ? (
-        <div className="flex min-h-0 flex-1 flex-col" data-sharing-body="">
-          <MachineSkills connection={connection} loadSkills={loadSkills} createClient={createClient} />
-        </div>
-      ) : (
-        <div className={`min-h-0 flex-1 overflow-y-auto scroll-thin py-3 ${GUTTER_CLASS}`} data-sharing-body="">
-          <div className={COLUMN_CLASS}>
-            {current === 'catalogs' ? (
-              <CatalogsSurface
-                connection={connection}
-                {...(createClient === undefined ? {} : { createClient })}
+      <div className={`min-h-0 flex-1 overflow-y-auto scroll-thin py-3 ${GUTTER_CLASS}`} data-sharing-body="">
+        <div className={COLUMN_CLASS}>
+          {current === 'catalogs' ? (
+            <CatalogsSurface
+              connection={connection}
+              {...(createClient === undefined ? {} : { createClient })}
+              {...(loadMachineSkills === undefined ? {} : { loadMachineSkills })}
+            />
+          ) : current === 'shared' ? (
+            <div className="flex min-w-0 flex-col gap-md">
+              <AddCatalogEntry host={{ connection, ...(createClient === undefined ? {} : { createClient }) }} />
+              <SharedWithMe
+                embedded
+                members={members}
+                machines={machines}
                 {...(installHost === undefined ? {} : { installHost })}
               />
-            ) : current === 'shared' ? (
-              <div className="flex min-w-0 flex-col gap-md">
-                <AddCatalogEntry host={{ connection, ...(createClient === undefined ? {} : { createClient }) }} />
-                <SharedWithMe
-                  embedded
-                  members={members}
-                  machines={machines}
-                  {...(installHost === undefined ? {} : { installHost })}
-                />
-              </div>
-            ) : (
-              <People connection={connection} createClient={createClient} />
-            )}
-          </div>
+            </div>
+          ) : (
+            <People connection={connection} createClient={createClient} />
+          )}
         </div>
-      )}
+      </div>
     </div>
-  );
-}
-
-function MachineSkills({
-  connection,
-  loadSkills,
-  createClient,
-}: {
-  readonly connection: DaemonConnection;
-  readonly loadSkills: SkillsCatalogLoader | undefined;
-  readonly createClient: CatalogClientFactory | undefined;
-}) {
-  const fetcher = useDaemonFetch();
-  const load = useMemo(() => loadSkills ?? machineSkillsLoader(connection, fetcher), [connection, fetcher, loadSkills]);
-  return (
-    <SkillsSurface
-      scope={daemonSessionScope(connection, MACHINE_SKILLS_SESSION)}
-      loadCatalog={load}
-      onInsert={() => SKILLS_USE_NOTE}
-      catalogs={{ connection, ...(createClient === undefined ? {} : { createClient }) }}
-    />
   );
 }
 

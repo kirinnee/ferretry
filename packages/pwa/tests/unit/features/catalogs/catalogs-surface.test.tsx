@@ -13,7 +13,6 @@ import {
   sharedItem,
 } from '../../../support/catalog-views.ts';
 import { healthOf } from '../../../support/health.ts';
-import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -74,7 +73,6 @@ async function open(handlers: Parameters<typeof fakeClient>[0], extra: Record<st
       connection={connection}
       createClient={fake.factory}
       saveFile={(name, text) => saved.push({ name, text })}
-      installHost={{ createClient: fake.factory, projects: [] }}
       {...extra}
     />,
   );
@@ -110,7 +108,7 @@ describe('CatalogsSurface list', () => {
     });
     expect(q('[data-sharing-off]')).not.toBeNull();
     expect(q('[data-catalog-more]')).toBeNull();
-    expect(q('[data-catalog-link-input]')).not.toBeNull();
+    expect(q('[data-catalog-link-input]')).toBeNull();
     await view.unmount();
   });
 
@@ -129,10 +127,10 @@ describe('CatalogsSurface list', () => {
     await view.unmount();
   });
 
-  it('opens the install sheet', async () => {
+  it('has no subscribe field and no install from a file: they belong to Subscriptions', async () => {
     const { view } = await open({ 'GET /v1/catalogs': () => ({ catalogs: [] }) });
-    await chooseInstallFromFile();
-    expect(q('[data-catalog-sheet]')).not.toBeNull();
+    expect(q('[data-catalog-link-input]')).toBeNull();
+    expect(q('[data-catalog-more]')).toBeNull();
     await view.unmount();
   });
 });
@@ -142,6 +140,28 @@ describe('CatalogsSurface detail', () => {
     'GET /v1/catalogs': () => ({ catalogs: [rich()] }),
     [`GET ${DETAIL}`]: () => ({ catalogs: [rich()] }),
     ...change,
+  });
+
+  it('opens + Publish skills on this catalog with the machine’s skills, and closes it', async () => {
+    const { view } = await open(both(), {
+      loadMachineSkills: async () => [
+        {
+          name: 'lint-fix',
+          description: 'Fix the lint',
+          harness: 'claude',
+          scope: 'user',
+          path: '/home/k/.claude/skills/lint-fix/SKILL.md',
+          runtimes: ['claude-work'],
+        },
+      ],
+    });
+    await tap('[data-catalog-open]');
+    await tap('[data-catalog-publish-skills]');
+    expect(q('[data-catalog-sheet="publish-skills"]')?.textContent).toContain('Publish skills in Team skills');
+    expect(q('[data-publish-pick="lint-fix"]')).not.toBeNull();
+    await tap('button[aria-label="Close Publish skills"]');
+    expect(q('[data-catalog-sheet="publish-skills"]')).toBeNull();
+    await view.unmount();
   });
 
   it('shows items with versions and states, and goes back', async () => {

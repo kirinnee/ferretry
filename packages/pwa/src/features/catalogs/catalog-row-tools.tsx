@@ -95,7 +95,7 @@ export function useCatalogRows(host: CatalogRowsHost | undefined): CatalogRowsRe
 }
 
 /**
- * The paste field and the file install, as one block: the top of Sharing › Shared with me.
+ * The paste field and the file install, as one block: the top of Sharing › Subscriptions.
  */
 export function AddCatalogEntry({ host }: { readonly host: CatalogRowsHost }) {
   const [open, setOpen] = useState(false);

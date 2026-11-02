@@ -1,5 +1,6 @@
 /**
- * /shared: the publishers this browser belongs to, and what each one shares.
+ * Subscriptions (/shared, and Sharing › Subscriptions): the publishers this browser subscribes to, and a store page
+ * of what each one shares — every item with its version, and Install or Installed (&B131 A3).
  *
  * Only a verified, signed manifest is ever listed. A catalog that did not verify shows its problem and
  * nothing else. The person's own label for a publisher comes first; the publisher's own name never
@@ -15,11 +16,14 @@ import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { AccessRefused } from './access-refused.tsx';
 import type { Attempt, SharedCatalogView, SharedController } from './shared-controller.ts';
 import {
+  INSTALL,
+  INSTALLED,
   LEAVE,
   LEAVE_NOTE,
   LEFT_SENTENCE,
   NOTHING_SHARED,
   ONLINE_ONLY,
+  PINNED_NOTE,
   publisherLine,
   SHARED_WITH_ME,
   UNLOCK_BUTTON,
@@ -383,6 +387,9 @@ function CardBody({
     case 'ok':
       return (
         <div className="flex min-w-0 flex-col gap-sm">
+          <p className="m-0 text-meta text-muted" data-shared-pinned="">
+            {PINNED_NOTE}
+          </p>
           {state.blocks.map(block =>
             block.kind === 'problem' ? (
               <section
@@ -408,8 +415,9 @@ function CardBody({
                 <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label={`Items in ${block.name}`}>
                   {block.items.map(item => (
                     <li key={item.entry.itemId} className="min-w-0">
-                      <ItemButton
+                      <StoreItemRow
                         sub={sub}
+                        installed={installed.has(item.entry.itemId)}
                         view={block.view}
                         entry={item.entry}
                         title={item.title}
@@ -456,8 +464,19 @@ function WithdrawnNote({
   );
 }
 
-function ItemButton({
+/**
+ * ONE ITEM ON A STORE PAGE (&B131 A3): its name and version (the title says both), one line of what it is, and what you can do with it.
+ *
+ * Subscribing installs nothing: the right side is **Install** (or nothing, with no machine paired to install on) until
+ * this browser's machines hold it, and then **Installed**. Opening the name or Install shows the item's full review
+ * and the install hand-off, as before.
+ *
+ * B4 SLOT (braelynn): the installed version, "Update available" and Update / Stay / Skip / Move to version replace
+ * the status on the right of THIS row, and nowhere else. Nothing updates by itself (owner-approved).
+ */
+function StoreItemRow({
   sub,
+  installed,
   view,
   entry,
   title,
@@ -468,6 +487,8 @@ function ItemButton({
   onRefused,
 }: {
   readonly sub: MemberSubscription;
+  /** Whether one of this browser's machines already holds this item. */
+  readonly installed: boolean;
   readonly view: SharedCatalogView;
   readonly entry: SharedCatalogManifestEntry;
   readonly title: string;
@@ -491,16 +512,38 @@ function ItemButton({
   };
   return (
     <>
-      <button
-        type="button"
-        className="kt-panel flex min-h-[44px] w-full min-w-0 flex-col items-start gap-0.5 px-control-x py-2 text-left focus-visible:outline-focus focus-visible:outline-offset-focus"
-        disabled={opening}
-        onClick={() => void open()}
-        data-shared-item={entry.itemId}
+      <div
+        className="kt-panel flex min-h-[44px] w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5 px-control-x py-1"
+        data-shared-item-row={entry.itemId}
       >
-        <span className="break-words text-cell font-semibold text-fg">{title}</span>
-        <span className="break-words text-meta text-muted">{opening ? OPENING_ITEM : summary}</span>
-      </button>
+        <button
+          type="button"
+          className="flex min-h-[44px] min-w-[8rem] flex-1 flex-col items-start justify-center gap-0.5 rounded-control text-left focus-visible:outline-focus focus-visible:outline-offset-focus"
+          disabled={opening}
+          onClick={() => void open()}
+          data-shared-item={entry.itemId}
+        >
+          <span className="break-words text-cell font-semibold text-fg">{title}</span>
+          <span className="break-words text-meta text-muted">{opening ? OPENING_ITEM : summary}</span>
+        </button>
+        {installed ? (
+          <span className="fy-info-chip shrink-0" data-tone="accent" data-shared-item-installed="">
+            {INSTALLED}
+          </span>
+        ) : machines.length === 0 ? null : (
+          <Button
+            type="button"
+            size="sm"
+            className="min-h-[44px] shrink-0"
+            disabled={opening}
+            onClick={() => void open()}
+            aria-label={` `}
+            data-shared-item-install=""
+          >
+            {INSTALL}
+          </Button>
+        )}
+      </div>
       {failure === null ? null : <FailureLine sentence={failure} />}
       {shown === null ? null : (
         <SharedItemSheet

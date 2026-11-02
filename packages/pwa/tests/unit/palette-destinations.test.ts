@@ -54,7 +54,7 @@ describe('destinationPaletteEntries', () => {
       'destination-projects',
       'destination-sharing',
       'destination-sharing-shared',
-      'destination-sharing-skills',
+      'destination-sharing-publish',
       'destination-analytics',
       'destination-warden',
       'destination-learning',
@@ -69,11 +69,11 @@ describe('destinationPaletteEntries', () => {
 
     expect(hrefOf('destination-sharing')).toBe('/d/alpha/sharing');
     expect(hrefOf('destination-sharing-shared')).toBe('/d/alpha/sharing/shared');
-    expect(hrefOf('destination-sharing-skills')).toBe('/d/alpha/sharing/skills');
-    expect(entries.find(entry => entry.id === 'destination-sharing-shared')?.label).toBe('Shared with me');
-    expect(entries.find(entry => entry.id === 'destination-sharing-skills')?.label).toBe('Share a skill…');
+    expect(hrefOf('destination-sharing-publish')).toBe('/d/alpha/sharing/catalogs');
+    expect(entries.find(entry => entry.id === 'destination-sharing-shared')?.label).toBe('Subscriptions');
+    expect(entries.find(entry => entry.id === 'destination-sharing-publish')?.label).toBe('Publish skills…');
     expect(destinationPaletteEntries('share a skill', APP_BAR_DESTINATIONS, alpha).map(entry => entry.id)).toContain(
-      'destination-sharing-skills',
+      'destination-sharing-publish',
     );
   });
 
