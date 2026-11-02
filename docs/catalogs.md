@@ -1522,7 +1522,7 @@ the store client and the store locator, and `lib/runtime/mounts/catalog-links.ts
 
 | Route                                 | Caller | What it does                                                                          |
 | ------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
-| `GET /v1/catalog-links/store`         | any    | whether a store is set up and reachable (no address)                                  |
+| `GET /v1/catalog-links/store`         | any    | whether a store is set up and reachable, and its origin (not a secret)                |
 | `POST /v1/catalog-links/preview`      | person | what a link would hold and whether it fits; no passkey; nothing is signed or uploaded |
 | `GET /v1/catalog-links[?itemId=]`     | any    | the owner's links, newest first; no URL, key, bundle id or store address              |
 | `POST /v1/catalog-links`              | person | mint; a fresh `share-link` passkey for a governed caller; `201 {link, url}`           |
@@ -1549,8 +1549,25 @@ store has confirmed the delete.
 
 **The key.** A public link's key is sealed in `link-keys.json` (AES-256-GCM, AAD `catalog-link:<linkId>`) under the
 vault's own key: the seventh holder in [secrets.md](secrets.md). A one-time link's key is never written; the URL is
-shown once. `links.json` holds ids, kinds, states and times and no URL, key, token or bundle id; `wire-secrets.test.ts`
-walks every owner schema for such a field.
+shown once. `links.json` holds ids, kinds, states and times, the store's origin, the daemon id that uploaded the link
+and the **bundle id**, and no URL, key or fetch token. The bundle id has to be there (the store names a link by it) and
+it is not a secret: it opens nothing without the key. No owner answer and no audit line carries it, and
+`wire-secrets.test.ts` walks every owner schema for such a field. If the vault key (`secrets.key`) is lost, Copy
+answers `500 links_store_damaged`; the link keeps working for anyone who holds the URL.
+
+**Turning a link off under another identity.** A store answers `404 link_unknown` to a delete from anyone but the
+uploader, exactly as it does for a bundle it never had. So `link_unknown` counts as "already gone" only while the
+daemon id that uploaded the link (`publisher` in `links.json`) is still this machine's. If the identity has changed
+(pairing state was reset, or `state/catalogs/` was restored onto a fresh machine), Turn off keeps the link and its key,
+answers `503 signing_unavailable` with "made under this machine's previous identity, so it cannot be turned off from
+here. It stops working by ‹end›", and retries only slowly. The link is marked `expired` once its own end has passed.
+
+**Hostile or broken stores.** The address the daemon signs for must be `https:` (an `http:` address only for this
+computer itself), whether it comes from `catalogs.linkStore.url` or from the relay directory origin; a stored link's
+`storeOrigin` is held to the same rule. A store's answer is read through a 64 KiB cap and the 20 s deadline: more than
+that, or too slow, is `unreachable`. A store that fails a status call is not asked again for a minute, so a reader that
+polls the list cannot hold up Mint or Turn off. A mint whose upload answer never came says "the link may have been
+made", not "no link was made": the pending record stays and reconciliation settles it.
 
 **Audit.** `catalog.link.minted` (link id, item id, version, kind, expiry, install cap), `catalog.link.copied` and
 `catalog.link.ended` ([audit.md](audit.md)). Never the URL, the key, the token or the bundle id.

@@ -12439,7 +12439,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const mounted: Omit<
         MountedSubsystems,
-        'sessionMcp' | 'catalogInstalls' | 'localSkillInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers' | 'catalogLinks'
+        | 'sessionMcp'
+        | 'catalogInstalls'
+        | 'localSkillInstalls'
+        | 'mcpInventory'
+        | 'sharedCatalogs'
+        | 'catalogMembers'
+        | 'catalogLinks'
       > = {
         pack: {
           service: packService,
