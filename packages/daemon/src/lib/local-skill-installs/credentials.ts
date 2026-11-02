@@ -1,17 +1,38 @@
 /**
  * The narrow test that refuses a copy (docs/catalogs.md § Copying a skill from this machine). A skill file may
  * quote a password the person typed once: copied into another account or project it would become a credential
- * somewhere it was never meant to be, and the review must never draw it. Four shapes are certain enough to
+ * somewhere it was never meant to be, and the review must never draw it. These shapes are certain enough to
  * refuse on — an address with a password in it (`scheme://user:pass@host`), a long value assigned to a name that
  * announces a secret (`API_KEY=…`, `api_key = "…"`, `token: …`, `"token": "…"`), an `Authorization: Bearer …`
- * header, and `curl -u user:pass`. Anything vaguer only WARNS (`mayHoldSecret`).
+ * header, `curl -u user:pass`, a long credential in an address's query (`?token=…`, `&api_key=…`), a PEM private
+ * key block, and a well-known token (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`: the prefixes See changes owns). Anything
+ * vaguer only WARNS (`mayHoldSecret`).
  *
  * The text is read the way "See changes" reads it (catalog-installs/conservative-changes.ts): invisible
  * characters out, look-alike forms folded (NFKC), the secret NAMES that file owns, and a second pass over the
  * lines joined so a name or a value a line break split is still found. It reports the LINE, never the value.
- * Pure and linear: plain scans, no backtracking pattern.
+ * Pure and linear: plain scans (the text is cut into words once, the first `curl` is found once), and no pattern
+ * that can backtrack: a run of quote marks is trimmed by a loop, not by `["']+/**
+ * The narrow test that refuses a copy (docs/catalogs.md § Copying a skill from this machine). A skill file may
+ * quote a password the person typed once: copied into another account or project it would become a credential
+ * somewhere it was never meant to be, and the review must never draw it. These shapes are certain enough to
+ * refuse on — an address with a password in it (`scheme://user:pass@host`), a long value assigned to a name that
+ * announces a secret (`API_KEY=…`, `api_key = "…"`, `token: …`, `"token": "…"`), an `Authorization: Bearer …`
+ * header, `curl -u user:pass`, a long credential in an address's query (`?token=…`, `&api_key=…`), a PEM private
+ * key block, and a well-known token (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`: the prefixes See changes owns). Anything
+ * vaguer only WARNS (`mayHoldSecret`).
+ *
+ * The text is read the way "See changes" reads it (catalog-installs/conservative-changes.ts): invisible
+ * characters out, look-alike forms folded (NFKC), the secret NAMES that file owns, and a second pass over the
+ * lines joined so a name or a value a line break split is still found. It reports the LINE, never the value.
+, which is quadratic on `"""…x`.
  */
-import { foldedForScan, joinedLines, namesSecret } from '../catalog-installs/conservative-changes.ts';
+import {
+  foldedForScan,
+  isKnownTokenShape,
+  joinedLines,
+  namesSecret,
+} from '../catalog-installs/conservative-changes.ts';
 
 const ASSIGNED_NAME = /^-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,127}$/u;
 const MIN_VALUE_LENGTH = 16;
@@ -19,17 +40,30 @@ const ADDRESS_STOPS = new Set(['/', '?', '#', '"', "'", '<', '>', '`']);
 const SCHEMES = new Set(['bearer', 'basic', 'token', 'digest']);
 const LINE_END = /\r\n|[\r\n]/u;
 const WORD = /\S+/gu;
-const VALUE_ENDS = /^["'`]+|["'`,;})\]]+$/gu;
-const NAME_ENDS = /^["'`{[(]+|["'`]+$/gu;
+const VALUE_START = new Set(['"', "'", '`']);
+const VALUE_END = new Set(['"', "'", '`', ',', ';', '}', ')', ']']);
+const NAME_START = new Set(['"', "'", '`', '{', '[', '(']);
+const NAME_END = new Set(['"', "'", '`']);
+const TOKEN_SPLIT = /[=:"'`,;(){}[\]<>@/&?]/u;
+const PEM_HEADER = /-----BEGIN (?:[A-Z0-9]{1,16} ){0,4}PRIVATE KEY-----/iu;
 
 /** A value that points at a secret rather than holding one: `$VAR`, `${VAR}`, `<your key>`, `%VAR%`, `[…]`. */
 const isReference = (value: string): boolean => /^[$<{[%]/u.test(value);
 
 const isSpace = (character: string): boolean => character.trim() === '';
 
-const bare = (word: string): string => word.replace(VALUE_ENDS, '');
+/** `word` without the characters of `starts` at its front and `ends` at its back: two loops, one pass. */
+function trimmed(word: string, starts: ReadonlySet<string>, ends: ReadonlySet<string>): string {
+  let from = 0;
+  let to = word.length;
+  while (from < to && starts.has(word.charAt(from))) from += 1;
+  while (to > from && ends.has(word.charAt(to - 1))) to -= 1;
+  return word.slice(from, to);
+}
 
-const nameOf = (word: string): string => word.replace(NAME_ENDS, '');
+const bare = (word: string): string => trimmed(word, VALUE_START, VALUE_END);
+
+const nameOf = (word: string): string => trimmed(word, NAME_START, NAME_END);
 
 /** Where in `text` an address with a password in it starts, or -1. */
 function addressWithPassword(text: string): number {
@@ -87,23 +121,48 @@ function assignsSecret(words: readonly string[], index: number): boolean {
 }
 
 /** `curl -u user:pass`, `curl --user user:pass`: a flag that carries a password, after a word that says `curl`. */
-function curlUser(words: readonly string[], index: number): boolean {
+function curlUser(words: readonly string[], index: number, curlAt: number): boolean {
   const flag = bare(words[index] ?? '');
   if (flag !== '-u' && flag !== '--user') return false;
-  if (!words.slice(0, index).some(word => bare(word).toLowerCase().endsWith('curl'))) return false;
+  if (curlAt === -1 || curlAt >= index) return false;
   const login = bare(words[index + 1] ?? '');
   const password = login.slice(login.indexOf(':') + 1);
   return login.includes(':') && password !== '' && !isReference(password);
+}
+
+/** A credential in an address's query: `https://host/path?token=…`, `…&access_token=…`, `…?api_key=…`. */
+function queryCredential(word: string): boolean {
+  const query = word.indexOf('?');
+  if (query === -1) return false;
+  return word
+    .slice(query + 1)
+    .split('&')
+    .some(parameter => {
+      const equals = parameter.indexOf('=');
+      return (
+        equals > 0 && announcesSecret(parameter.slice(0, equals)) && isLongValue(bare(parameter.slice(equals + 1)))
+      );
+    });
+}
+
+/** A well-known token standing in the word, alone or after `=`, `:`, a quote or a slash. */
+const holdsToken = (word: string): boolean => word.split(TOKEN_SPLIT).some(isKnownTokenShape);
+
+function earliest(offsets: readonly number[]): number {
+  const found = offsets.filter(at => at !== -1);
+  return found.length === 0 ? -1 : Math.min(...found);
 }
 
 /** Where in `text` the first credential starts, or -1. */
 function credentialOffset(text: string): number {
   const found = [...text.matchAll(WORD)];
   const words = found.map(match => match[0]);
-  const hit = words.findIndex((_, index) => assignsSecret(words, index) || curlUser(words, index));
-  const word = found[hit]?.index ?? -1;
-  const address = addressWithPassword(text);
-  return word === -1 || (address !== -1 && address < word) ? address : word;
+  const curlAt = words.findIndex(word => bare(word).toLowerCase().endsWith('curl'));
+  const hit = words.findIndex(
+    (word, index) =>
+      assignsSecret(words, index) || curlUser(words, index, curlAt) || queryCredential(word) || holdsToken(word),
+  );
+  return earliest([found[hit]?.index ?? -1, addressWithPassword(text), text.search(PEM_HEADER)]);
 }
 
 /** The 1-based line that holds offset `at` of the lines joined with `glue` characters between them. */

@@ -6,6 +6,7 @@ import {
   HIDDEN_WARNING,
   MAX_SCANNED,
   foldedForScan,
+  isKnownTokenShape,
   joinedLines,
   mayHoldSecret,
   namesSecret,
@@ -168,5 +169,20 @@ describe('the helpers the copy refusal shares', () => {
     should(foldedForScan('Ａ​Ｂ')).equal('AB');
     should(namesSecret('X-Auth')).equal(true);
     should(namesSecret('colour')).equal(false);
+  });
+
+  it('should know a well-known token by its prefix, length and a digit', () => {
+    should(isKnownTokenShape(`ghp_${'0'.repeat(36)}`)).equal(true);
+    should(isKnownTokenShape(`GHP_${'0'.repeat(36)}`)).equal(true);
+    should(isKnownTokenShape(`sk-ant-api03-${'1'.repeat(20)}`)).equal(true);
+    should(isKnownTokenShape(`xoxb-${'2'.repeat(20)}`)).equal(true);
+    should(isKnownTokenShape(`AKIA${'3'.repeat(16)}`)).equal(true);
+    should(isKnownTokenShape(`akia${'3'.repeat(16)}`)).equal(false);
+    should(isKnownTokenShape(`eyJ${'4'.repeat(30)}`)).equal(true);
+    should(isKnownTokenShape('ghp_short1')).equal(false);
+    should(isKnownTokenShape('sk-learn-is-a-python-library')).equal(false);
+    should(isKnownTokenShape(`ghp_${'0'.repeat(30)}!`)).equal(false);
+    should(isKnownTokenShape(`-----BEGIN${'0'.repeat(30)}`)).equal(false);
+    should(isKnownTokenShape(`plain${'0'.repeat(30)}`)).equal(false);
   });
 });

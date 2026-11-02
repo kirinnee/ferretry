@@ -907,7 +907,7 @@ another account's home (`~/.claude/skills`, a runtime's skills folder) or a regi
   it, then copy the skill."): an address with a password in it (`scheme://user:pass@host`), a name that looks
   like a secret given a value of 16 or more characters (`API_KEY=…`, `api_key = "…"`, YAML or JSON `token: …` /
   `"token": "…"`; `$VAR`, `${VAR}` and `<…>` references are not values, and after `:` neither is a path or an
-  address), an `Authorization: Bearer <16+ characters>` header, and `curl -u user:pass`. The text is read as "See
+  address), an `Authorization: Bearer <16+ characters>` header, `curl -u user:pass`, a credential in an address's query (`?token=…`, `&access_token=…`, `?api_key=…` with 16 or more characters), a PEM private key block (`-----BEGIN … PRIVATE KEY-----`), and a well-known token on its own (`ghp_…`, `github_pat_…`, `sk-…`, `xoxb-…`, `glpat-…`, `AKIA…`: the prefix list "See changes" owns, 20 or more characters with a digit in them, so `sk-learn-is-a-library` is prose). The scan is **linear** (a test feeds it 256 KiB of hostile text and holds it to well under a second). The text is read as "See
   changes" reads it (invisible characters out, look-alike letters folded, and a name or value a line break split
   put back together), by the same helpers (`catalog-installs/conservative-changes.ts`), so the two cannot drift. A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
   warning per file: "<file> mentions keys, tokens or passwords. Check it holds no secret value before you copy

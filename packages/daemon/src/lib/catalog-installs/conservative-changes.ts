@@ -150,6 +150,24 @@ export const foldedForScan = (text: string): string => withoutInvisible(text).no
 /** Whether a NAME announces a secret, wherever in it the word stands (`api_key`, `apikey`, `X-Auth`, `passphrase`). */
 export const namesSecret = (name: string): boolean => hasAny(name.toLowerCase(), SECRET_WORDS);
 
+/** A well-known token is at least this long, prefix included (`ghp_` plus 36, `AKIA` plus 16, `sk-` plus 20 or more). */
+const MIN_TOKEN_LENGTH = 20;
+const TOKEN_TAIL = /^[A-Za-z0-9_-]+$/u;
+
+/**
+ * Whether `word` is, whole, a well-known token: one of the prefixes above, at least {@link MIN_TOKEN_LENGTH}
+ * characters of letters, digits, `_` and `-`, and a digit in it (a hyphenated word that merely starts `sk-` is
+ * prose). `-----BEGIN` is a key block, not a token, and is not here. Linear.
+ */
+export function isKnownTokenShape(word: string): boolean {
+  if (word.length < MIN_TOKEN_LENGTH || !TOKEN_TAIL.test(word) || !/\d/u.test(word)) return false;
+  const lower = word.toLowerCase();
+  return (
+    LOWER_PREFIXES.some(prefix => !prefix.startsWith('-') && lower.startsWith(prefix)) ||
+    EXACT_PREFIXES.some(prefix => word.startsWith(prefix))
+  );
+}
+
 /** Names, token prefixes and expansions: the things a line break or an invisible character can split. */
 function trips(text: string): boolean {
   const lower = text.toLowerCase();
