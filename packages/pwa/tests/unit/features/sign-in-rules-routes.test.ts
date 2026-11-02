@@ -212,9 +212,9 @@ describe('the owner’s words', () => {
   it('says where a rule applies', () => {
     expect(scopeWords({ kind: 'any' })).toBe('Any ferret on this machine');
     expect(scopeWords({ kind: 'project', project: '7f1c1a1e-6d0c-4f6e-9a8e-0d3f1f7d2a11' })).toBe(
-      'Ferrets in one project',
+      'Ferrets in board project 7f1c1a1e-6d0c-4f6e-9a8e-0d3f1f7d2a11',
     );
-    expect(scopeWords({ kind: 'session', session: 'ses_abcdefghijklmnop' })).toBe('One session (ijklmnop)');
+    expect(scopeWords({ kind: 'session', session: 'ses_abcdefghijklmnop' })).toBe('Session ses_abcdefghijklmnop');
   });
 
   it('says the status, with the reason for a suspension and the wait for an unverified rule', () => {

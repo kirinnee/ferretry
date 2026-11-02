@@ -993,7 +993,8 @@ export const SignInRuleNarrowSchema = z
 export type SignInRuleNarrow = z.infer<typeof SignInRuleNarrowSchema>;
 
 export type SignInRuleNarrowing =
-  { readonly ok: true; readonly narrowed: SignInRuleNarrowed } | { readonly ok: false; readonly reason: string };
+  | { readonly ok: true; readonly narrowed: SignInRuleNarrowed }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * The overlay after a narrowing, or why it isn't one: every part must be STRICTLY narrower than what is in force now
@@ -1030,7 +1031,8 @@ export function signInRuleNarrowed(
 // ── The bytes the passkey is bound to ────────────────────────────────────────────────────────────────
 
 export type SignInRuleCanonical =
-  { readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string };
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * THE BYTES A RULE'S PASSKEY IS BOUND TO: RFC 8785 JSON ({@link canonicalJson}) of the whole parsed body, with its

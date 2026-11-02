@@ -1319,7 +1319,8 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
  * prompt and the answer is `undefined`.
  */
 export function useAddKeyStepUp():
-  ((daemon: DaemonConnection, stage: TwoFactorStageId, words: string) => Promise<boolean>) | undefined {
+  | ((daemon: DaemonConnection, stage: TwoFactorStageId, words: string) => Promise<boolean>)
+  | undefined {
   const store = useContext(StoreContext);
   return useMemo(
     () =>
@@ -1338,7 +1339,8 @@ export function useAddKeyStepUp():
  * there is no prompt and the answer is `undefined`.
  */
 export function useApproveTaskPlanStepUp():
-  ((daemon: DaemonConnection, stage: TaskPlanStageId, words: StepUpWords) => Promise<boolean>) | undefined {
+  | ((daemon: DaemonConnection, stage: TaskPlanStageId, words: StepUpWords) => Promise<boolean>)
+  | undefined {
   const store = useContext(StoreContext);
   return useMemo(
     () =>
@@ -1358,7 +1360,8 @@ export function useApproveTaskPlanStepUp():
  * wrote reaches them. Outside a provider there is no prompt.
  */
 export function useApproveSignInRuleStepUp():
-  ((daemon: DaemonConnection, stage: SignInRuleStageId, words: StepUpWords) => Promise<boolean>) | undefined {
+  | ((daemon: DaemonConnection, stage: SignInRuleStageId, words: StepUpWords) => Promise<boolean>)
+  | undefined {
   const store = useContext(StoreContext);
   return useMemo(
     () =>
