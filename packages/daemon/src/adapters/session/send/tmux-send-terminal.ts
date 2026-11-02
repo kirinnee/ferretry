@@ -15,7 +15,9 @@ import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerInput,
   composerTransport,
+  type DeliveryFrame,
   frameCursor,
+  lonePasteOf,
   occupiedComposer,
   type PaneHold,
   paneBlockingDialog,
@@ -36,6 +38,25 @@ import {
 } from '../../tmux/composer-fill.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
+
+/**
+ * Whether a frame's composer holds this payload and nothing else, at a pane where Enter submits it: not
+ * mid-turn and not behind a dialog or permission prompt. A paste is its lone placeholder with a count that
+ * agrees with the payload (`lonePasteOf`).
+ */
+function holdsExactly(frame: DeliveryFrame, text: string): boolean {
+  if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible)) return false;
+  if (
+    paneBlockingPrompt(frame.visible) !== undefined ||
+    paneBlockingPermission(frame.visible) !== undefined ||
+    paneBlockingDialog(frame.visible) !== undefined
+  )
+    return false;
+  const composer = readComposer(frame.visible, frameCursor(frame));
+  if (composer === undefined || composer.placeholder === true) return false;
+  const input = composerInput(composer);
+  return showsPayload(input, text) || (composerTransport(text) === 'paste' && lonePasteOf(input, text));
+}
 
 /** True while what the composer holds is the start of the payload: what erasing from its end leaves. */
 function erasing(shown: string, text: string): boolean {
@@ -165,10 +186,17 @@ export class TmuxSendTerminal implements SendTerminal {
     return 'stuck';
   }
 
-  /** One Enter, for a composer holding exactly the payload, then watched until it leaves or does not. */
+  /**
+   * One Enter, for a composer holding exactly the payload, then watched until it leaves or does not.
+   *
+   * EXACTLY, on a frame captured right before the key (B144): the payload anywhere in the composer is how a
+   * retype is ruled out, but it is not a licence to press — a person who typed after our text, or pasted
+   * beside our chip, would have their words submitted with it. So the key goes only when the composer is the
+   * payload and nothing else, at a pane that is not mid-turn or behind a prompt; otherwise `absent`.
+   */
   async submitComposer(id: SessionId, text: string): Promise<ComposerSubmitOutcome> {
     const session = await this.session(id);
-    if ((await this.hold(id, text)) !== 'composer') return 'absent';
+    if (!holdsExactly(await captureFrame(this.tmux, session), text)) return 'absent';
     await this.tmux.sendKey(session, 'Enter');
     for (let poll = 0; poll < this.keys.submitPolls; poll += 1) {
       await this.sleep(this.keys.pollMs);

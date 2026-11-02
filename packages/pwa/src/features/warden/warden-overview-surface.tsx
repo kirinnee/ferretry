@@ -16,6 +16,7 @@ import {
   type SessionView,
   type WardenLeaveDuration,
   WardenAgendaViewSchema,
+  wardenFlags,
 } from '@ferretry/protocol';
 import { useCallback, useState } from 'react';
 
@@ -100,7 +101,7 @@ function WardenOverviewBody({
     setNotice(null);
     try {
       const run = await (await createClient(connection)).wardenRun(false);
-      const flagged = run.anomalies.length;
+      const flagged = wardenFlags(run).length;
       setNotice({
         tone: 'ok',
         text: run.message ?? `Swept: ${flagged === 0 ? 'nothing flagged' : `${flagged} flagged`}.`,

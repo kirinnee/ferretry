@@ -22,6 +22,7 @@ import {
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
   type WardenExchangeReader,
+  type WardenStuckInputPort,
   type WardenFleetSession,
   type WardenReviveService,
   type WardenRuntimeState,
@@ -187,6 +188,8 @@ export function harness(
     readonly board?: WardenBoardPort;
     /** The send ledgers, when a test is about who answered whom. */
     readonly exchanges?: WardenExchangeReader;
+    /** A ferret stuck on an unsent message of ours, when a test is about one. */
+    readonly stuckInput?: WardenStuckInputPort;
     /** Force every card notice to one outcome. */
     readonly noticeWrite?: WardenAgendaWrite;
     /** Make the machine agenda refuse to take a card off its orphan list. */
@@ -389,6 +392,7 @@ export function harness(
     ...(options.autoMigrate === undefined ? {} : { autoMigrate: options.autoMigrate }),
     ...(options.board === undefined ? {} : { board: options.board }),
     ...(options.exchanges === undefined ? {} : { exchanges: options.exchanges }),
+    ...(options.stuckInput === undefined ? {} : { stuckInput: options.stuckInput }),
     jevChecks: {
       append: async check => {
         if (options.jevChecksFail === 'append') throw new Error('disk full');

@@ -60,6 +60,16 @@ export interface SendTrackerSettings {
    * take, because until then the daemon is still finishing its own job.
    */
   readonly submitNudgesMs: readonly number[];
+  /**
+   * How soon a nudge that fell due and was NOT pressed — the pane mid-turn, or behind a dialog — is tried
+   * again. Longer than a first check, because a turn can run for many minutes and every look reads the pane.
+   */
+  readonly deferredNudgeMs: number;
+  /**
+   * How long after its typing an UNCONFIRMED send's composer is still looked at for its own text to press
+   * Enter on (B144): a stalled pane draws keys late, but not this late. Past it the Warden watches.
+   */
+  readonly strandedWatchMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -79,6 +89,8 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   matchSlackMs: 5_000,
   typedStableMs: 4_000,
   submitNudgesMs: [4_000, 12_000, 30_000],
+  deferredNudgeMs: 5_000,
+  strandedWatchMs: 10 * 60_000,
 };
 
 /** Fates still being looked for. */

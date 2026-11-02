@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { SendRecord, SendResult } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { AnswerQuestionController } from '../../../src/lib/session/answer-controller.ts';
 import { InterruptSessionController, ResumeSessionController } from '../../../src/lib/session/lifecycle-controllers.ts';
@@ -522,6 +523,96 @@ describe('SendMessageController --wait', () => {
     should(oldIo.io.err.join('\n')).match(/cannot be waited on/);
     should(describeFate(row('accepted'))).equal('accepted — not yet proven anywhere');
     should(describeDisposition('sent')).match(/not yet proven queued/);
+  });
+});
+
+describe('SendMessageController — a message still in Ferretry’s queue (B144)', () => {
+  const waiting = (extra: Partial<SendResult> = {}): SendResult => ({
+    ...sendResult('queued'),
+    sendId: 'req-1',
+    fate: 'accepted',
+    waitReason: 'draft',
+    ...extra,
+  });
+  const noSend = () => new FyHttpError('session ses-1 has no send req-1', 404, 'not_found');
+
+  it('should say it is NOT delivered and waits behind an unconfirmed send, never "in the agent’s own queue"', async () => {
+    const api = new RecordingApi({ send: waiting({ waitBehind: 'send-0' }) });
+    const { io, presenter } = capturedPresenter();
+
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'hi',
+    });
+
+    const said = io.err.join('\n');
+    should(said).match(/NOT delivered yet/);
+    should(said).match(/behind an unconfirmed earlier send \(send-0\)/);
+    should(said).match(/attempted a re-submit/);
+    should(said).not.match(/auto-submits at the turn boundary/);
+  });
+
+  it('should keep waiting while the ledger has no row for it yet, then report what it proves', async () => {
+    const api = new RecordingApi({
+      send: waiting(),
+      sendStatusFailures: [noSend(), noSend()],
+      sendStatus: [
+        {
+          v: 1,
+          sendId: 'req-1',
+          acceptedAt: '2026-08-01T12:00:00.000Z',
+          acceptedTurn: 1,
+          path: 'direct',
+          message: 'hi',
+          attachmentIds: [],
+          fate: 'delivered',
+        },
+      ],
+    });
+    const { io, presenter } = capturedPresenter();
+    const clock = new SteppedClock();
+
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, clock).execute('ses-1', {
+      message: 'hi',
+      wait: true,
+    });
+
+    should(api.methods().filter(method => method === 'sendStatus')).have.length(3);
+    should(io.err.join('\n')).match(/delivered — the agent’s transcript shows the message/);
+    should(io.err.join('\n')).not.match(/has no send/);
+  });
+
+  it('should end a long wait saying it was never typed, without failing — a script must not resend it', async () => {
+    const api = new RecordingApi({ send: waiting(), sendStatusFailures: Array.from({ length: 200 }, noSend) });
+    const { io, presenter } = capturedPresenter();
+
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, new SteppedClock()).execute('ses-1', {
+      message: 'hi',
+      wait: true,
+    });
+
+    should(io.err.join('\n')).match(/still not typed into the agent after 5m: it is waiting in Ferretry's queue/);
+  });
+
+  it('should still fail a wait whose send the daemon never had, once it was typed', async () => {
+    const api = new RecordingApi({
+      send: { ...sendResult('sent'), sendId: 'req-1', fate: 'accepted' },
+      sendStatusFailures: [noSend()],
+    });
+
+    const failure = await new SendMessageController(
+      api,
+      new FakeFiles(),
+      capturedPresenter().presenter,
+      HERE,
+      WAIT_CLOCK,
+    )
+      .execute('ses-1', { message: 'hi', wait: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    should(failure).be.instanceOf(FyHttpError);
   });
 });
 

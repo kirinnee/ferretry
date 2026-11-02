@@ -53,7 +53,7 @@
  * Every function here is pure; the cursor comes from tmux beside the capture.
  */
 
-import { PASTE_PLACEHOLDER_PATTERN } from './composer.ts';
+import { composerTransport, lonePasteOf, PASTE_PLACEHOLDER_PATTERN } from './composer.ts';
 import type { ComposerInk } from './composer-ink.ts';
 
 /**
@@ -411,6 +411,20 @@ export function composerContains(composer: string, text: string): boolean {
   if (showsPayload(composer, text)) return true;
   const wanted = squeezed(text);
   return wanted.length >= CLIPPED_MATCH_MIN && squeezed(composer).includes(wanted);
+}
+
+/**
+ * Whether a frame's composer, READABLY, holds text beside or instead of the payload the fill just typed — so
+ * an Enter now would submit somebody else's words with it (B144). The payload itself, re-wrapped or clipped,
+ * or for a paste its lone placeholder with a count that agrees with it (`lonePasteOf`), is ours; anything
+ * else — a person who typed beside it, or replaced our paste with their own — is not. A composer that cannot
+ * be read, an empty one, or a placeholder says nothing here: those keep the delivery's own proof.
+ */
+export function composerHoldsOtherText(visible: string, cursor: ComposerCursor, text: string): boolean {
+  const input = composerInput(readComposer(visible, cursor));
+  if (input === '') return false;
+  if (showsPayload(input, text)) return false;
+  return !(composerTransport(text) === 'paste' && lonePasteOf(input, text));
 }
 
 /** Where a frame shows a payload being held, if anywhere. */

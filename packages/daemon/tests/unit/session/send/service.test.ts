@@ -36,6 +36,8 @@ import {
   SendUnavailable,
   SendUnconfirmed,
   SessionSendService,
+  STRANDED_ENTER_LIMIT,
+  nextTurnNumber,
 } from '../../../../src/lib/session/send/index.ts';
 
 /**
@@ -1092,8 +1094,10 @@ describe('a composer that already holds unsent text', () => {
         data: { sendId: 'send-1', reason: 'landing_unconfirmed', attempt: 1 },
       });
     }
-    // No turn is claimed for a prompt that never proved it landed.
-    should(idle.repository.transitions).be.empty();
+    // No turn is STARTED for a prompt that never proved it landed — but its number is reserved (B144), so no
+    // later turn file overwrites the one the typed pointer names.
+    should(idle.repository.transitions).eql([{ event: 'control.turn_reserved', turn: 4, keepReason: true }]);
+    should(busy.repository.transitions).be.empty();
   });
 
   it('settles a forced retry that was typed but never shown as unconfirmed again, under the same id', async () => {
@@ -1771,5 +1775,178 @@ describe('the refusals a queue asks before it accepts a message', () => {
 
     should(refused).be.instanceof(SendUnavailable);
     should(asking.terminal.typed).be.empty();
+  });
+});
+
+describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
+  const POINTER = turnFileInstruction('/state/turns/turn-005.md');
+  const ENVELOPE =
+    '[message from ferret lizzette (session mvgt2oz9-04e28935) — not from the owner]\nTo reply: fy send lizzette "<reply>"\n\nre-verify: CHANGES, one small fix.';
+
+  function unconfirmed(overrides: Partial<SendRecord> = {}): SendRecord {
+    return {
+      sendId: 'send-0',
+      acceptedAt: '2026-08-01T11:59:00.000Z',
+      acceptedTurn: 4,
+      path: 'turn-file',
+      message: 'the long message',
+      matchText: POINTER,
+      turn: 5,
+      fate: 'unaccounted',
+      unaccountedReason: 'landing_unconfirmed',
+      attempt: 1,
+      attemptAt: '2026-08-01T11:59:00.000Z',
+      senderKind: 'agent',
+      ...overrides,
+    };
+  }
+
+  function idle(frames: SendPaneObservation[], ...records: SendRecord[]): Parts {
+    const built = parts(target({ status: 'running', turn: 4 }), frames);
+    for (const record of records) built.ledger.records.set(record.sendId, record);
+    return built;
+  }
+
+  it('reserves the turn a revive carries past one an unconfirmed pointer names, so the relaunch agrees (review)', async () => {
+    const built = idle([pane({ alive: false })], unconfirmed());
+    built.repository.transitions.length = 0;
+
+    await built.service.send(request()).catch(() => undefined);
+
+    should(built.ledger.records.get('send-1')).match({ path: 'revive', turn: 6 });
+    should(built.repository.transitions).match([{ event: 'control.turn_reserved', turn: 5, keepReason: true }]);
+  });
+
+  it('reserves nothing again for a replayed revive request, answering from its first record (review)', async () => {
+    const built = idle([pane({ alive: false })], unconfirmed());
+    await built.service.send(request()).catch(() => undefined);
+    const reservations = built.repository.transitions.filter(change => change.event === 'control.turn_reserved');
+
+    await built.service.send(request()).catch(() => undefined);
+
+    should(built.repository.transitions.filter(change => change.event === 'control.turn_reserved')).eql(reservations);
+    should(built.ledger.records.get('send-1')).match({ turn: 6 });
+  });
+
+  it('starts the turn an unconfirmed typing reserved, once an Enter takes its pointer', async () => {
+    const built = idle([pane({ draft: POINTER })], unconfirmed());
+    await built.repository.transition(ID, { event: 'control.turn_reserved', turn: 5, keepReason: true });
+
+    await built.service.finishOwnDraft(ID);
+
+    should(built.repository.transitions.at(-1)).match({ event: 'turn.started', turn: 5 });
+  });
+
+  it('presses nothing when another unsettled send could equally be what the box holds (review)', async () => {
+    const paste = (sendId: string, message: string) =>
+      unconfirmed({ sendId, path: 'native-inline', message, matchText: message, turn: undefined });
+    const built = idle(
+      [pane({ draft: '[Pasted text #3 +2 lines]' })],
+      paste('a', 'first message\nlong enough to claim'),
+      paste('b', 'second message\nlong enough to claim'),
+    );
+
+    should(await built.service.resubmit(ID, 'a')).match({ sendId: 'a' });
+    should(await built.service.resubmitStuck(ID, 'a')).equal('refused');
+    should(built.terminal.calls).not.containEql('submitComposer');
+  });
+
+  it("answers absent to the Warden when an idle pane's box is empty", async () => {
+    const built = idle([pane({})], unconfirmed());
+    should(await built.service.resubmitStuck(ID, 'send-0')).equal('absent');
+  });
+
+  it('never gives a new turn file the number an unconfirmed pointer still names', async () => {
+    // annabeth's turn 63: the unconfirmed pointer never started its turn, and the next send overwrote its file.
+    const built = idle([pane({ promptReady: true })], unconfirmed());
+
+    await built.service.send(request());
+
+    should(built.ledger.records.get('send-1')).match({ turn: 6 });
+    should(built.repository.transitions).match([{ event: 'turn.started', turn: 6 }]);
+  });
+
+  it('numbers past the session and every claimed turn, ignoring a withdrawn send that typed nothing', () => {
+    should(nextTurnNumber({ turn: 4 }, [])).equal(5);
+    should(nextTurnNumber({ turn: 4 }, [unconfirmed({ turn: 7 })])).equal(8);
+    should(nextTurnNumber({ turn: 4 }, [unconfirmed({ turn: 7, fate: 'withdrawn' })])).equal(5);
+    should(nextTurnNumber({ turn: 9 }, [unconfirmed({ turn: 7 })])).equal(10);
+  });
+
+  it('lets the queue finish an unconfirmed pointer of ours, re-opening it and starting its turn', async () => {
+    const built = idle([pane({ draft: POINTER })], unconfirmed());
+
+    should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+
+    should(built.terminal.calls).eql(['observe', 'submitComposer']);
+    should(built.ledger.records.get('send-0')).match({ fate: 'accepted', submitNudges: 1, attemptAt: NOW });
+    should(built.repository.journal_.at(0)).match({
+      event: 'control.send_resubmitted',
+      data: { by: 'queue', reason: 'pointer typed but not submitted' },
+    });
+    should(built.repository.transitions).match([{ event: 'turn.started', turn: 5 }]);
+    should(built.tracked).eql([ID]);
+  });
+
+  it('finishes a long message typed as itself, drawn as a lone paste placeholder', async () => {
+    const built = idle(
+      [pane({ draft: '[Pasted text #40 +3 lines]' })],
+      unconfirmed({ path: 'native-inline', message: ENVELOPE, matchText: ENVELOPE, turn: undefined, fate: 'accepted' }),
+    );
+
+    should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+    should(built.repository.journal_.at(0)).match({ data: { reason: 'typed but not submitted' } });
+  });
+
+  it("says a person's draft is theirs, and presses nothing", async () => {
+    const built = idle([pane({ draft: 'half a question' })], unconfirmed());
+
+    should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+    should(built.terminal.calls).not.containEql('submitComposer');
+    should(built.tracked).be.empty();
+  });
+
+  it('names the send that will not leave, and stops pressing at the limit', async () => {
+    const holding = idle([pane({ draft: POINTER })], unconfirmed());
+    holding.terminal.submitOutcome = 'holding';
+    const spent = idle([pane({ draft: POINTER })], unconfirmed({ submitNudges: STRANDED_ENTER_LIMIT }));
+
+    should(await holding.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: true });
+    should(await spent.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+    should(spent.terminal.calls).not.containEql('submitComposer');
+  });
+
+  it('presses nothing while the agent works or a dialog is up — its own queue takes it at the turn end', async () => {
+    for (const frame of [
+      pane({ draft: POINTER, activeWork: true }),
+      pane({ draft: POINTER, blockingPrompt: 'Do you trust this folder?' }),
+    ]) {
+      const built = idle([frame], unconfirmed());
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    }
+  });
+
+  it("gives the Warden one press past the daemon's own limit, and no more", async () => {
+    const once = idle([pane({ draft: POINTER })], unconfirmed({ submitNudges: STRANDED_ENTER_LIMIT }));
+    const twice = idle([pane({ draft: POINTER })], unconfirmed({ submitNudges: STRANDED_ENTER_LIMIT + 1 }));
+
+    should(await once.service.resubmitStuck(ID, 'send-0')).equal('submitted');
+    should(once.repository.journal_.at(0)).match({ data: { by: 'warden' } });
+    should(await twice.service.resubmitStuck(ID, 'send-0')).equal('refused');
+    should(await once.service.resubmitStuck(ID, 'send-9')).equal('refused');
+  });
+
+  it('finishes a stranded message typed as itself before a new send, as it does a pointer', async () => {
+    const built = idle(
+      [pane({ draft: ENVELOPE }), pane({ promptReady: true })],
+      unconfirmed({ path: 'direct', message: ENVELOPE, matchText: ENVELOPE, turn: 5 }),
+    );
+
+    await built.service.send(request());
+
+    should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    should(built.terminal.typed).eql(['ship it']);
+    should(built.repository.transitions.map(change => change.turn)).eql([5, 6]);
   });
 });

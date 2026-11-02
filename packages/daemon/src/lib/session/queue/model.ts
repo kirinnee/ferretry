@@ -48,6 +48,8 @@ export const QueueEventSchema = z.discriminatedUnion('kind', [
     at: InstantSchema,
     id: QueuedMessageIdSchema,
     reason: QueueWaitReasonSchema.optional(),
+    /** The send of this session's own whose unsubmitted text holds the box (B144); only beside `draft`. */
+    behind: z.string().min(1).optional(),
   }),
 ]);
 export type QueueEvent = z.infer<typeof QueueEventSchema>;
@@ -85,7 +87,7 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
         : message;
     case 'moved': {
       if (!canMove(message.state, event.state)) return message;
-      const { waitReason: _reason, failure: _failure, ...rest } = message;
+      const { waitReason: _reason, waitBehind: _behind, failure: _failure, ...rest } = message;
       return {
         ...rest,
         state: event.state,
@@ -97,8 +99,9 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
     }
     case 'waiting': {
       if (message.state !== 'queued') return message;
-      const { waitReason: _reason, ...rest } = message;
-      return event.reason === undefined ? rest : { ...rest, waitReason: event.reason };
+      const { waitReason: _reason, waitBehind: _behind, ...rest } = message;
+      if (event.reason === undefined) return rest;
+      return { ...rest, waitReason: event.reason, ...(event.behind === undefined ? {} : { waitBehind: event.behind }) };
     }
   }
 }

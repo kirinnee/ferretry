@@ -140,6 +140,11 @@ const wardenCases: SchemaCase[] = [
   { name: 'liveness ledger', schema: warden.LivenessLedgerSchema, value: { lastTranscriptAt: INSTANT } },
   { name: 'anomaly', schema: warden.WardenAnomalySchema, value: anomaly },
   {
+    name: 'stuck-input flag',
+    schema: warden.WardenStuckInputFlagSchema,
+    value: { ...anomaly, kind: 'input_stuck' },
+  },
+  {
     name: 'failover account view',
     schema: warden.WardenFailoverAccountViewSchema,
     value: { agent: 'agent', eligible: true },
@@ -661,5 +666,15 @@ describe('the autoMigrate patch', () => {
     should(warden.WardenAutoMigrateConfigSchema.parse(legacy).minHeadroomPercent).equal(
       warden.DEFAULT_WARDEN_MIN_HEADROOM_PERCENT,
     );
+  });
+});
+
+describe('the flags a Warden view carries (B144)', () => {
+  it('should list the anomalies, then the ferrets stuck on an unsent message, from their own field', () => {
+    const flag = { kind: 'owner_request' as const, sessionId: 's-1', status: 'running' as const, detail: 'asked' };
+    const stuck = { kind: 'input_stuck' as const, sessionId: 's-2', status: 'running' as const, detail: 'stuck' };
+
+    should(warden.wardenFlags({ anomalies: [flag] })).deepEqual([flag]);
+    should(warden.wardenFlags({ anomalies: [flag], stuckInput: [stuck] })).deepEqual([flag, stuck]);
   });
 });

@@ -128,6 +128,7 @@ import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agen
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
+import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
 import { OrphanList } from '../src/lib/warden/orphan-list.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
@@ -1364,6 +1365,7 @@ import {
   type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenExchangeReader,
+  type WardenStuckInputPort,
   type WardenFleetSession,
   type WardenJournal,
   WardenLivenessMonitor,
@@ -3639,7 +3641,10 @@ function createSessionSendSubsystem(
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
-        const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
+        const answer = answerOf(
+          (await ledger.list(id)).find(record => record.sendId === enqueued.message.id),
+          (await queue.list(id)).find(message => message.id === enqueued.message.id),
+        );
         if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
@@ -3647,6 +3652,8 @@ function createSessionSendSubsystem(
           disposition: answer.disposition,
           sendId: enqueued.message.id,
           fate: answer.fate,
+          ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
+          ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
         };
       }
       const outcome = await service
@@ -4483,6 +4490,8 @@ interface WardenParts {
     /** Bound once the auto-migrate service exists: the login it would move a ferret to now. */
     readonly candidate: { read?: (sessionId: string) => Promise<string | undefined> };
     readonly orphans: OrphanList;
+    /** Every ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), as one machine item. */
+    readonly stuckInput: StuckInputList;
     readonly folded: Promise<void>;
   };
   readonly usage: UsageFeedPort;
@@ -4511,6 +4520,8 @@ interface WardenParts {
   readonly sends: Pick<SessionSendService, 'send'>;
   /** The send ledgers, read-only: who last messaged whom (`warden/report-overdue.ts`). */
   readonly exchanges: WardenExchangeReader;
+  /** A ferret stuck on an unsent message of ours (`warden/input-stuck.ts`), less the machine notice. */
+  readonly stuckInput: Omit<WardenStuckInputPort, 'add' | 'remove'>;
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly migrate: SessionMigrateSubsystem & AgentJobControl;
   /** Analytics, for pricing a finished warden from its own transcript. */
@@ -4698,6 +4709,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       orphans: parts.machine.orphans,
       board: parts.board,
       exchanges: parts.exchanges,
+      stuckInput: {
+        ...parts.stuckInput,
+        add: async notice => await parts.machine.stuckInput.add(notice),
+        remove: async sessionId => await parts.machine.stuckInput.remove(sessionId),
+      },
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -10913,6 +10929,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new FileMachineMembers(stateFiles, join(paths.state, 'warden-orphans.json')),
           machineAgenda,
         ),
+        stuckInput: new StuckInputList(
+          new FileMachineMembers(stateFiles, join(paths.state, 'warden-input-stuck.json')),
+          machineAgenda,
+        ),
       };
       // The old notices are folded in first and quietly; only then does the minute timer or the Warden's sweep touch
       // the lists, so nothing writes a list while the folding is still reading it.
@@ -13314,6 +13334,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             }),
           sends: producerSends('Warden'),
           exchanges: { sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)) },
+          // B144: the send path's own verified Enter, and the health a stuck ferret is marked with.
+          stuckInput: {
+            sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
+            resubmit: async (sessionId, sendId) => await sends.resubmitStuck(parseSessionId(sessionId), sendId),
+            markStalled: async (sessionId, reason) => {
+              await sendRepository.transition(parseSessionId(sessionId), {
+                event: 'control.input_stuck',
+                health: 'stalled',
+                reason,
+              });
+            },
+            clearStalled: async sessionId => {
+              const id = parseSessionId(sessionId);
+              const view = await sessions.get(id).catch(() => undefined);
+              if (view?.state.health !== 'stalled') return;
+              await sendRepository.transition(id, { event: 'control.input_unstuck', health: 'healthy' });
+            },
+          },
           resume,
           revive: {
             events: {

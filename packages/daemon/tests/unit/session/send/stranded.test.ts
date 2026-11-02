@@ -6,7 +6,10 @@ import {
   sameComposerText,
   showsOwnPointer,
   strandablePointer,
+  strandableText,
   strandedPointerSend,
+  strandedSend,
+  showsOwnText,
 } from '../../../../src/lib/session/send/index.ts';
 
 /**
@@ -114,5 +117,61 @@ describe('comparing two readings of the composer', () => {
   it('ignores how the TUI wrapped either, and nothing else', () => {
     should(sameComposerText('fix the\n  login bug', 'fix the login bug')).be.true();
     should(sameComposerText('fix the login bug', 'fix the login bugs')).be.false();
+  });
+});
+
+describe('B144: a message of ours typed as itself', () => {
+  const ENVELOPE =
+    '[message from ferret lizzette (session mvgt2oz9-04e28935) — not from the owner]\nTo reply: fy send lizzette "<reply>"\n\nre-verify: CHANGES, one small fix.';
+  const inline = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'native-inline', message: ENVELOPE, matchText: ENVELOPE, turn: undefined, ...overrides });
+
+  it('claims a long message typed as itself, but never one short enough to be a word a person typed', () => {
+    should(strandableText(inline())).equal(ENVELOPE);
+    should(strandableText(record({ path: 'direct', message: 'ship it', matchText: 'ship it' }))).be.undefined();
+    should(strandableText(record({ path: 'direct', message: 'please rerun it', matchText: 'please rerun it' }))).equal(
+      'please rerun it',
+    );
+    should(strandableText(record())).equal(OURS);
+  });
+
+  it('claims nothing settled, held, never typed, or carried by a revive', () => {
+    for (const fate of ['delivered', 'cancelled', 'timed_out', 'withdrawn'] as const)
+      should(strandableText(inline({ fate }))).be.undefined();
+    should(strandableText(inline({ held: true }))).be.undefined();
+    should(strandableText(inline({ untyped: true }))).be.undefined();
+    should(strandableText(record({ untyped: true }))).be.undefined();
+    should(strandableText(inline({ path: 'revive' }))).be.undefined();
+  });
+
+  it('sees it re-wrapped, clipped, or as the lone paste placeholder Claude collapses it to', () => {
+    should(showsOwnText(ENVELOPE, ENVELOPE)).be.true();
+    should(showsOwnText(wrapped(ENVELOPE.replaceAll('\n', ' '), 30), ENVELOPE)).be.true();
+    should(showsOwnText(`${ENVELOPE.slice(0, 40)}…`, ENVELOPE)).be.true();
+    should(showsOwnText('[Pasted text #40 +3 lines]', ENVELOPE)).be.true();
+    should(showsOwnText(`[Pasted Content ${ENVELOPE.length} chars]`, ENVELOPE)).be.true();
+    should(showsOwnText(OURS, OURS)).be.true();
+  });
+
+  it("never takes a person's words, a placeholder beside text, or a placeholder for a literal message", () => {
+    should(showsOwnText('half a question', ENVELOPE)).be.false();
+    should(showsOwnText(`${ENVELOPE} and also this`, ENVELOPE)).be.false();
+    should(showsOwnText('see [Pasted text #40 +3 lines]', ENVELOPE)).be.false();
+    should(showsOwnText('[Pasted text #2 +1 lines]', 'please rerun the suite')).be.false();
+    // A placeholder whose count disagrees is somebody else's paste — the one a person made after ours was cleared.
+    should(showsOwnText('[Pasted text #999 +30 lines]', ENVELOPE)).be.false();
+    should(showsOwnText('[Pasted Content 1204 chars]', ENVELOPE)).be.false();
+    should(showsOwnText('[Image #1]', ENVELOPE)).be.false();
+    should(showsOwnText('[Pasted text #3]', ENVELOPE)).be.false();
+    should(showsOwnText(`${ENVELOPE.slice(0, 8)}…`, ENVELOPE)).be.false();
+    should(showsOwnText('', ENVELOPE)).be.false();
+  });
+
+  it('finds the one send in the box, and refuses when two would both match it', () => {
+    const records = [record({ sendId: 'pointer' }), inline({ sendId: 'paste' })];
+    should(strandedSend('[Pasted text #40 +3 lines]', records)?.sendId).equal('paste');
+    should(strandedSend(OURS, records)?.sendId).equal('pointer');
+    should(strandedSend('[Pasted text #41 +3 lines]', [...records, inline({ sendId: 'paste-2' })])).be.undefined();
+    should(strandedSend('a person’s words', records)).be.undefined();
   });
 });
