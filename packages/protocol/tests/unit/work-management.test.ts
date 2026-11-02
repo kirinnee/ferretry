@@ -1181,6 +1181,19 @@ describe('attention schemas', () => {
       should(agenda.ResolvedAgendaItemSchema.safeParse(withAsk(ask)).success).be.false();
   });
 
+  it('should keep an answer receipt on a resolved item only as a SHA-256 digest', () => {
+    // Arrange
+    const digest = 'a'.repeat(64);
+
+    // Act / Assert
+    should(agenda.ResolvedAgendaItemSchema.parse({ ...resolvedAgenda, answerReceipt: digest }).answerReceipt).equal(
+      digest,
+    );
+    should(agenda.ResolvedAgendaItemSchema.safeParse(resolvedAgenda).success).be.true();
+    for (const answerReceipt of ['still flickers', 'A'.repeat(64), 'a'.repeat(63)])
+      should(agenda.ResolvedAgendaItemSchema.safeParse({ ...resolvedAgenda, answerReceipt }).success).be.false();
+  });
+
   it('should reject ambiguous attention and resolution state', () => {
     // Arrange
     const multipleChoice = { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] };
