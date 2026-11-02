@@ -268,6 +268,36 @@ describe('next time: a saved login', () => {
       expect(body.signIn).toBeUndefined();
     });
 
+    it('puts an account with no sign-in anywhere behind the second step, as "not linked to a site"', async () => {
+      const bare = offer({ id: 'SCRATCH', label: 'Scratch login', matched: false, elsewhere: [] });
+      const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, bare] })));
+
+      expect(q('[data-input-others] > [data-input-offer="SCRATCH"]')).toBeNull();
+      expect(q('[data-input-elsewhere] [data-input-offer="SCRATCH"] [data-input-signs-in-at]')?.textContent).toBe(
+        'not linked to a site',
+      );
+    });
+
+    it('offers no one-tap and no "Only account here" when two accounts sign in here (Pick one)', async () => {
+      const first = primaryOffer({ id: 'GOOGLE_A', label: 'Google a' });
+      const second = offer({ id: 'GOOGLE_B', label: 'Google b', matched: true, signIn: 'si_0123456789abcdee' });
+      const { q, view } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [first, second, okta] })));
+
+      expect(q('[data-input-pick-one]')).not.toBeNull();
+      expect(q('[data-variant="primary"][data-input-offer]')).toBeNull();
+      expect(view.container.textContent).not.toContain('Use saved');
+      expect(q('[data-input-why]')).toBeNull();
+      expect(view.container.textContent).not.toContain('Only account here');
+      expect(q('[data-input-pick-one-line]')?.textContent).toBe('Pick one: 2 accounts sign in here');
+    });
+
+    it('keeps the one-tap and "Only account here" when only other sites’ accounts are listed besides it', async () => {
+      const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, okta] })));
+
+      expect(q('[data-input-offer-matched]')).not.toBeNull();
+      expect(q('[data-input-why]')?.textContent).toBe('Only account here');
+    });
+
     it('draws no second step when no offer signs in elsewhere', async () => {
       const other = offer({ id: 'GITHUB_KIRINNEE', label: 'GitHub (kirinnee)', matched: false });
       const { q } = await show(withSaved(saved({ offers: [matched, other] })));

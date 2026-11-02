@@ -1,8 +1,10 @@
 /**
  * Screenshots of a sign-in card's "Choose another account" when some saved accounts belong to OTHER sites (&B137 PR B):
  * the first step lists only accounts that sign in at THIS site; accounts saved for another site are behind a second step
- * ("Use an account from another site…") and each says where it signs in. Never a one-tap. Views: the card as it opens,
- * the first step open, both steps open, and a card whose only saved account is another site's. At a 390px phone and a
+ * ("Use an account from another site…") and each says where it signs in ("not linked to a site" when it signs in
+ * nowhere). Never a one-tap. Views: the card as it opens (one account here: the one-tap and "Only account here"), the
+ * first step open, both steps open, two accounts here ("Pick one", no one-tap, both steps open), and a card whose only
+ * saved accounts are other sites'. At a 390px phone and a
  * 1440px desktop, in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/other-site-accounts-screenshot.tsx [out-dir] [views]   # writes other-site-<view>-<viewport>-<scheme>.png
@@ -40,9 +42,11 @@ const view = new URLSearchParams(location.search).get('view') ?? 'closed';
 const SIGN_IN = 'si_0123456789abcdef';
 const SIGN_IN_B = 'si_0123456789abcdee';
 const onlyOther = view === 'only-other';
+const pickOne = view === 'pick-one';
 const accounts = AccountListSchema.parse({ v: 1, health: 'ready', accounts: [], signIns: [] });
-const google = offer({ id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com', matched: true, signIn: SIGN_IN, primary: true, why: 'only' });
-const googleB = offer({ id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech', matched: true, signIn: SIGN_IN_B });
+const google = offer({ id: 'GOOGLE_KIRINNEE97', label: 'Google kirinnee97', username: 'kirinnee97@gmail.com', matched: true, signIn: SIGN_IN, ...(pickOne ? {} : { primary: true as const, why: 'only' as const }) });
+const googleB = offer({ id: 'GOOGLE_ERNEST', label: 'Google ernest', username: 'ernest@atomi.tech', matched: true, signIn: SIGN_IN_B });
+const scratch = offer({ id: 'SCRATCH_LOGIN', label: 'Scratch login', matched: false, elsewhere: [] });
 const okta = offer({ id: 'LIFTOFF_OKTA_COM', label: 'Liftoff Okta', username: 'kirin@liftoff.example', matched: false, elsewhere: ['liftoff.okta.com'] });
 const github = offer({ id: 'GITHUB_KIRINNEE', label: 'GitHub (kirinnee)', matched: false, elsewhere: ['github.com', 'api.github.com'] });
 const request = requestOf('secret', {
@@ -61,8 +65,8 @@ const request = requestOf('secret', {
   },
   saved: saved({
     match: 'accounts.google.com',
-    suggest: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
-    offers: onlyOther ? [okta, github] : [google, googleB, okta, github],
+    suggest: { id: 'GOOGLE_KIRINNEE97', label: 'Google kirinnee97' },
+    offers: onlyOther ? [okta, github, scratch] : pickOne ? [google, googleB, okta, github, scratch] : [google, okta, github, scratch],
   }),
 });
 const machine = fakeClient(() => ({}));
@@ -100,7 +104,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const VIEWS = ['closed', 'first-step', 'second-step', 'only-other'].filter(
+const VIEWS = ['closed', 'first-step', 'second-step', 'pick-one', 'only-other'].filter(
   each => wanted === undefined || wanted.includes(each),
 );
 

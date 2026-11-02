@@ -174,7 +174,7 @@ describe('what a card offers', () => {
     should(savedFor('private', 'sudo@box', EMPTY)).deepEqual({ match: 'sudo@box', offers: [] });
     should(savedFor('plain', undefined, listing([account('U', { username: 'kirin' })], []))).deepEqual({
       saves: 'username',
-      offers: [{ id: 'U', label: 'u', username: 'kirin', fills: 'username', matched: false }],
+      offers: [{ id: 'U', label: 'u', username: 'kirin', fills: 'username', matched: false, elsewhere: [] }],
     });
   });
 
@@ -606,11 +606,11 @@ describe('an account saved for ANOTHER site is only a second step, never the def
     should(saved).not.have.property('differentFrom');
   });
 
-  it('should list the accounts that sign in nowhere without a place, after the ones here and before those elsewhere', () => {
+  it('should put an account that signs in nowhere behind the second step too, as "not linked", never in the first', () => {
     const saved = savedFor('secret', 'accounts.google.com', list);
     should(saved.offers.map(offer => [offer.id, offer.elsewhere])).deepEqual([
       ['ACCOUNTS_GOOGLE_COM', undefined],
-      ['BARE', undefined],
+      ['BARE', []],
       ['LIFTOFF_OKTA_COM', ['liftoff.okta.com']],
     ]);
   });

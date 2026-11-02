@@ -390,11 +390,11 @@ export const InputSavedOfferSchema = z
     hinted: z.boolean().optional(),
     /**
      * Where this account signs in, when that is somewhere else (place keys, names only: `liftoff.okta.com`,
-     * `sudo@kirin-box`). Only on an offer picked by hand (`matched: false`): the card puts it behind a second step
-     * that says where it signs in, and it is never the one-tap choice. Absent: it signs in nowhere (offered with the
-     * rest by hand), or an older daemon, whose card keeps it in the one list.
+     * `sudo@kirin-box`); EMPTY when it signs in nowhere ("not linked to a site"). Only on an offer picked by hand
+     * (`matched: false`): the card puts it behind a second step and it is never the one-tap choice. Absent: an account
+     * for this very site that no sign-in matched, or an older daemon, whose card keeps it in the one list.
      */
-    elsewhere: z.array(LoginMatchSchema).min(1).max(LOGIN_MATCH_MAX).readonly().optional(),
+    elsewhere: z.array(LoginMatchSchema).max(LOGIN_MATCH_MAX).readonly().optional(),
     signIn: SignInIdSchema.optional(),
     primary: z.literal(true).optional(),
     why: SignInChoiceReasonSchema.optional(),

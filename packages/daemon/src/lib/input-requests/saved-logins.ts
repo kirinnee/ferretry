@@ -179,18 +179,19 @@ function handPickable(
 
 /**
  * Where an account signs in when that is NOT this target: the place keys of its sign-ins (names only), so the card can
- * say "signs in at liftoff.okta.com" and keep it behind a second step. Empty when it signs in nowhere, or when any of its
- * sign-ins names this key (a site it is only "for": it is not another site's account).
+ * say "signs in at liftoff.okta.com" and keep it behind a second step. Empty when it signs in nowhere ("not linked to a
+ * site", also a second step); `undefined` when any of its sign-ins names this key (a site it is only "for": it is this
+ * site's account, offered in the first step).
  */
 function signsInElsewhere(
   account: AccountId,
   matchKey: string | undefined,
   listing: SavedListing,
-): readonly PlaceKey[] {
+): readonly PlaceKey[] | undefined {
   const hosts = listing.signIns
     .filter(signIn => signIn.account === account)
     .flatMap(signIn => placeHosts(signIn.place));
-  if (matchKey !== undefined && hosts.includes(matchKey)) return [];
+  if (matchKey !== undefined && hosts.includes(matchKey)) return undefined;
   return [...new Set(hosts)].slice(0, LOGIN_MATCH_MAX);
 }
 
@@ -273,7 +274,7 @@ function offered(
         ...base(account),
         matched: false,
         ...(hinted === account.id ? { hinted: true } : {}),
-        ...(elsewhere.length === 0 ? {} : { elsewhere }),
+        ...(elsewhere === undefined ? {} : { elsewhere }),
       };
     })
     .sort(

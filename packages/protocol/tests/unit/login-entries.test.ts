@@ -135,7 +135,8 @@ describe('what an input card offers', () => {
     expect(card([{ ...primary, why: 'site' }])).toBe(false);
     expect(card([{ ...primary, why: 'ferret', project: undefined }])).toBe(true);
     expect(card([{ ...older, matched: false, elsewhere: ['liftoff.okta.com'] }])).toBe(true);
-    expect(card([{ ...older, matched: false, elsewhere: [] }])).toBe(false);
+    expect(card([{ ...older, matched: false, elsewhere: [] }])).toBe(true);
+    expect(card([{ ...older, elsewhere: [] }])).toBe(false);
     expect(card([{ ...older, elsewhere: ['liftoff.okta.com'] }])).toBe(false);
   });
 
