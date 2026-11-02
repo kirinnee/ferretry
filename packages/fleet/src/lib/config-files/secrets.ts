@@ -75,15 +75,25 @@ export function shannonEntropy(value: string): number {
 
 /**
  * `clonedFromKey` holds an origin key: 16 random bytes that name an item across two machines. It ends in
- * "key" and reads as random, but it opens nothing — it is an identifier, not a credential.
+ * "key" and reads as random, but it opens nothing — it is an identifier, not a credential. It is only
+ * ever the item's own top-level field, so only a value found there is exempt ({@link LooksLikeOptions}).
  */
 const ORIGIN_KEY_FIELD = 'clonedFromKey';
 
+export interface LooksLikeOptions {
+  /** `key` is a field of the item itself, not of anything nested inside it (an `env` map, say). */
+  readonly topLevel?: boolean;
+}
+
 /** Whether `value`, found under `key`, looks like a raw secret. */
-export function looksLikeRawSecret(key: string | number | undefined, value: string): boolean {
+export function looksLikeRawSecret(
+  key: string | number | undefined,
+  value: string,
+  options: LooksLikeOptions = {},
+): boolean {
   if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
   if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
-  if (key === ORIGIN_KEY_FIELD && ORIGIN_KEY_PATTERN.test(value)) return false;
+  if (options.topLevel === true && key === ORIGIN_KEY_FIELD && ORIGIN_KEY_PATTERN.test(value)) return false;
   const trimmed = value.trim();
   if (REFERENCE.test(trimmed) || trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
   // A path or a URL under a "…key" name (a key file, a JWKS endpoint) is where a secret is, not one.
@@ -101,6 +111,7 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
         looksLikeRawSecret(
           path.findLast(part => typeof part === 'string'),
           value,
+          { topLevel: path.length === 1 },
         )
       )
         findings.push({ path });
