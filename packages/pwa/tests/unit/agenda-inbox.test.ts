@@ -205,7 +205,7 @@ describe('conversation links', () => {
   });
 
   test('a machine item opens in the Inbox, not a conversation', () => {
-    expect(agendaConversationPath(STUDIO, '@machine', 'A3')).not.toContain('/session/');
+    expect(agendaConversationPath(STUDIO, 'machine-agenda', 'A3')).not.toContain('/session/');
   });
 
   test('reads a well-formed item id and refuses anything else', () => {

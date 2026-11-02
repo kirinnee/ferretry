@@ -1,4 +1,4 @@
-import { DoctorReportSchema, HealthViewSchema, type QueuedMessage } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema, isMachineAgendaId, type QueuedMessage } from '@ferretry/protocol';
 import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
@@ -143,7 +143,6 @@ import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.t
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
-import { isMachineAgendaId } from './lib/machine-agenda.ts';
 import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';

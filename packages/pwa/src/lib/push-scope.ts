@@ -23,11 +23,11 @@
  * Pure: the page and the worker both call these, and neither reads a global here.
  */
 
-import type { PushNotificationPayload } from '@ferretry/protocol';
+import { isMachineAgendaId, type PushNotificationPayload } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { notificationBrand } from './notify.ts';
 import { agendaTargetFromSearch, inboxTargetPath } from './agenda-inbox.ts';
-import { daemonHomePath, daemonSessionPath, parseRoute } from './pages/routes.ts';
+import { daemonAgendaPath, daemonHomePath, daemonSessionPath, parseRoute } from './pages/routes.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -163,6 +163,7 @@ export const notificationTapUrl = (allowed: string, origin: string): string => {
 const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
   if (machine === null) return '/app/';
   if (sessionId === undefined || sessionId.trim() === '') return machinePath(machine);
+  if (isMachineAgendaId(sessionId)) return daemonAgendaPath(machine.daemonId as DaemonId);
   return daemonSessionPath(machine.daemonId as DaemonId, sessionId);
 };
 

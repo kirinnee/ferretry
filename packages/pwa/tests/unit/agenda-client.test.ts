@@ -88,13 +88,13 @@ describe('attention transport', () => {
     should(JSON.parse(String(calls[2]?.init.body))).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
-  it('dials the machine agenda for the @machine scope', async () => {
+  it('dials the machine agenda for the machine-agenda scope', async () => {
     const calls: Array<{ url: string; method?: string }> = [];
     const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       calls.push({ url: String(input), method: init?.method });
-      return response(snapshot('@machine'));
+      return response(snapshot('machine-agenda'));
     };
-    const machine = daemonSessionScope(daemonA, '@machine');
+    const machine = daemonSessionScope(daemonA, 'machine-agenda');
 
     await fetchAgendaSnapshot(daemonA, machine, fetcher);
     await applyAgendaAction(daemonA, machine, { action: 'dismiss', id: 'A1' }, fetcher);

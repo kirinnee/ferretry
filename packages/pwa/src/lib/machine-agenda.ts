@@ -8,16 +8,17 @@
  * where its board and its answers go — is decided by {@link isMachineAgendaId}.
  */
 
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary, SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type AgendaSnapshot,
+  MACHINE_AGENDA_ID,
+  type SessionAgendaSummary,
+  type SessionView,
+} from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
-
-/** The reserved id of a machine's own agenda; the daemon's `MACHINE_AGENDA_ID`. */
-export const MACHINE_AGENDA_ID = '@machine';
 
 /** The name the Inbox groups the machine agenda under. */
 export const MACHINE_GROUP_NAME = 'Machine';
-
-export const isMachineAgendaId = (sessionId: string): boolean => sessionId === MACHINE_AGENDA_ID;
 
 const instant = (value: string): number => {
   const at = Date.parse(value);

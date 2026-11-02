@@ -517,6 +517,33 @@
   font-size: var(--text-base, var(--text-sm));
   font-weight: var(--weight-strong);
 }
+.fy-inbox-machine-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: var(--gap-sm) 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-inbox-machine-notes p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fy-inbox-machine-notes__title {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fy-inbox-group__icon {
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: var(--gap-xs);
+  color: var(--fg);
+}
 .fy-inbox-group__task,
 .fy-inbox-group__card,
 .fy-inbox-group__machine {

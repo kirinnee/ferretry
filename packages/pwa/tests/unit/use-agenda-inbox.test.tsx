@@ -321,7 +321,7 @@ describe('useAgendaInboxModel', () => {
 
   test('reads each machine’s own agenda and lists it first, counted, from its own board', async () => {
     const boards = new Map([
-      ['studio/@machine', board('@machine', [{ ...item('A7', 3), notice: true } as AgendaItem])],
+      ['studio/machine-agenda', board('machine-agenda', [{ ...item('A7', 3), notice: true } as AgendaItem])],
       ['studio/a', board('a', [item('A1', 1)])],
     ]);
     const { client, calls } = fakeClient(boards);
@@ -336,9 +336,9 @@ describe('useAgendaInboxModel', () => {
     );
     await settle();
     const read = inbox as unknown as AgendaInbox;
-    const polled = calls.filter(call => call.method === 'revalidate' && call.sessionId === '@machine');
+    const polled = calls.filter(call => call.method === 'revalidate' && call.sessionId === 'machine-agenda');
     expect([...new Set(polled.map(call => call.daemonId))].sort()).toEqual(['laptop', 'studio']);
-    expect(read.unread.map(entry => entry.view.config.id)).toEqual(['@machine', 'a']);
+    expect(read.unread.map(entry => entry.view.config.id)).toEqual(['machine-agenda', 'a']);
     expect(read.total).toBe(2);
   });
 
@@ -362,7 +362,7 @@ describe('useAgendaInboxModel', () => {
 
     const reads = () =>
       calls
-        .filter(call => call.method === 'revalidate' && call.sessionId !== '@machine')
+        .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
         .map(c => `${c.daemonId}/${c.sessionId}`);
     expect(reads()).toEqual(['studio/a', 'laptop/b']);
     const read = inbox as unknown as AgendaInbox;
@@ -410,7 +410,9 @@ describe('useAgendaInboxModel', () => {
 
     const read = inbox as unknown as AgendaInbox;
     expect(
-      calls.filter(call => call.method === 'revalidate' && call.sessionId !== '@machine').map(call => call.sessionId),
+      calls
+        .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
+        .map(call => call.sessionId),
     ).toEqual(['a']);
     expect(read.total).toBe(0);
     expect(read.cards).toEqual([]);
@@ -664,7 +666,7 @@ describe('useAgendaInboxModel', () => {
     await settle();
     const up = inbox as unknown as AgendaInbox;
     const reads = calls
-      .filter(call => call.method === 'revalidate' && call.sessionId !== '@machine')
+      .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
       .map(call => `${call.daemonId}/${call.sessionId}`);
     // Newest first, as the inbox lists them; the two that failed are read again.
     expect(reads).toEqual(['laptop/c', 'laptop/b', 'studio/a', 'laptop/c', 'laptop/b']);
@@ -748,7 +750,7 @@ describe('the Resolved filter reads', () => {
     await settle();
     expect(
       calls
-        .filter(call => call.method === 'revalidate' && call.sessionId !== '@machine')
+        .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
         .map(call => call.sessionId)
         .sort(),
     ).toEqual(['a', 'b']);
@@ -782,7 +784,7 @@ describe('the Resolved filter reads', () => {
     await settle();
     expect(
       calls
-        .filter(call => call.method === 'revalidate' && call.sessionId !== '@machine')
+        .filter(call => call.method === 'revalidate' && call.sessionId !== 'machine-agenda')
         .map(call => call.daemonId)
         .sort(),
     ).toEqual(['studio']);

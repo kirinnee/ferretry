@@ -24,6 +24,7 @@ import {
   agendaDeepLinkFromFragment,
   agendaInDiscussion,
   agendaTurn,
+  isMachineAgendaId,
   LEGACY_ATTENTION_LINK_PARAMETER,
   type ResolvedAgendaItem,
   type SessionAgendaSummary,
@@ -33,7 +34,6 @@ import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } fr
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from './daemon-connection.ts';
-import { isMachineAgendaId } from './machine-agenda.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
 import { rootViews } from './session-root.ts';

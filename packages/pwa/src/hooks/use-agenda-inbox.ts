@@ -13,7 +13,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import { MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -51,7 +51,7 @@ import {
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
-import { MACHINE_AGENDA_ID, withMachineAgendas } from '../lib/machine-agenda.ts';
+import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { toTestBesideGates } from '../lib/gate-items.ts';

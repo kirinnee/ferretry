@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
+import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -45,6 +45,7 @@ import {
   ChevronRight,
   CloudOff,
   Laptop,
+  Server,
   SkipForward,
   Undo2,
   Users,
@@ -108,7 +109,6 @@ import {
   isGateItem,
 } from '../../lib/gate-items.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
-import { isMachineAgendaId } from '../../lib/machine-agenda.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
@@ -401,6 +401,7 @@ function OpenItem({
         ) : (
           <InboxWhoLine card={card} onNavigate={onNavigate} />
         )}
+        {isMachineAgendaId(card.view.config.id) ? <MachineNotes item={card.item} /> : null}
         <AgendaItemView
           busy={false}
           closeLabel="Back to the Inbox"
@@ -427,6 +428,25 @@ function OpenItem({
         />
       </div>
     </DaemonTaskReferences>
+  );
+}
+
+/**
+ * What a machine notice says that the item view has no place for: why it was raised and what to do about it (the
+ * command that fixes it). The ferrets it lists, each with its reason, are the item's context, drawn by the view.
+ */
+function MachineNotes({ item }: { readonly item: InboxCard['item'] }) {
+  return (
+    <div className="fy-inbox-machine-notes" data-inbox-machine-notes="">
+      <section>
+        <h3 className="fy-inbox-machine-notes__title">Why</h3>
+        <p data-inbox-machine-why="">{item.why}</p>
+      </section>
+      <section>
+        <h3 className="fy-inbox-machine-notes__title">What to do</h3>
+        <p data-inbox-machine-fix="">{item.howToResolve}</p>
+      </section>
+    </div>
   );
 }
 
@@ -1116,6 +1136,9 @@ function NoticeRow({ card, env }: { readonly card: InboxCard; readonly env: RowE
 function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: RowEnv }) {
   const head = (
     <>
+      {group.machine ? (
+        <Server aria-hidden="true" className="fy-inbox-group__icon" data-agenda-group-icon="" size={16} />
+      ) : null}
       <span className="fy-inbox-group__ferret">{group.ferret}</span>
       {group.task === null ? null : (
         <>

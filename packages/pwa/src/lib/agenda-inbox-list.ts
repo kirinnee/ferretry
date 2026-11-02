@@ -16,7 +16,14 @@
  * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
  */
 
-import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, type SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  agendaTitle,
+  agendaWakeAt,
+  formatTaskRef,
+  isMachineAgendaId,
+  type SessionView,
+} from '@ferretry/protocol';
 import { matchesMode, sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
@@ -24,7 +31,6 @@ import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import { visibleWhy } from './agenda-inbox.ts';
 import type { ModeFilter } from './controls.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import { isMachineAgendaId } from './machine-agenda.ts';
 
 /** One ferret's open items on one machine, under one header. */
 export interface FerretGroup {
@@ -53,7 +59,11 @@ export interface FerretGroup {
 
 const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringify([daemonId, sessionId]);
 
-const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true;
+/**
+ * A plain notification line (Clear, or tap to open its chat). The machine's own notices are never lines: they have no
+ * chat, so each is a full row that opens its detail — which ferrets, why, and the command that fixes it.
+ */
+const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true && !isMachineAgendaId(card.view.config.id);
 
 /** The card a conversation works on, as it is written: `&F12`. */
 const cardOf = (view: SessionView): string | null =>

@@ -3,10 +3,11 @@
  *
  *  - The Machine group is the FIRST group, above the ferret's, with the machine's own notices ("3 ferrets could not be
  *    moved", "claude-liftoff hit its hard limit") and no callsign.
- *  - Its header is not a link: the machine agenda has no chat.
+ *  - Its header carries an icon and is not a link: the machine agenda has no chat.
+ *  - Its rows read at the same contrast as the ferret's, and a tap opens the detail: why, the listed ferrets and the fix.
  *  - Nothing scrolls sideways.
  *
- * Set `FY_INBOX_MACHINE_SHOTS_DIR` to keep `<viewport>-machine.png`.
+ * Set `FY_INBOX_MACHINE_SHOTS_DIR` to keep `<viewport>-<theme>-machine.png` and `…-machine-open.png`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -72,43 +73,77 @@ const VIEWPORTS = [
   { name: 'desktop-1440', width: 1_440, height: 900, phone: false },
 ] as const;
 
+const THEMES = ['studio-light', 'studio-dark'] as const;
+
 describe('the Inbox’s Machine group', () => {
   for (const viewport of VIEWPORTS)
-    it(`comes first, names no ferret and links nowhere (${viewport.name})`, async () => {
-      const context = await browser.newContext({
-        viewport: { width: viewport.width, height: viewport.height },
-        deviceScaleFactor: viewport.phone ? 2 : 1,
-        hasTouch: viewport.phone,
-        isMobile: viewport.phone,
-      });
-      const origin = server?.url.origin ?? '';
-      await context.route('**/*', async route =>
-        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
-      );
-      const tab = await context.newPage();
-      try {
-        await tab.goto(`${origin}/?theme=studio-light`);
-        await tab.waitForSelector('[data-agenda-group]', { timeout: 4_000 });
-        const groups = await tab.evaluate(() =>
-          [...document.querySelectorAll('[data-agenda-group]')].map(group => ({
-            text: group.textContent ?? '',
-            link: group.querySelector('[data-agenda-group-link]') !== null,
-            machine: group.querySelector('[data-agenda-group-machine]') !== null,
-          })),
+    for (const theme of THEMES)
+      it(`comes first with an icon, reads at full contrast and opens its detail (${viewport.name}, ${theme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
         );
-        expect(groups.length).toBe(2);
-        expect(groups[0]?.machine).toBe(true);
-        expect(groups[0]?.link).toBe(false);
-        expect(groups[0]?.text).toContain('3 ferrets could not be moved');
-        expect(groups[0]?.text).toContain('claude-liftoff hit its hard limit');
-        expect(groups[1]?.link).toBe(true);
-        const overflow = await tab.evaluate(
-          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        );
-        expect(overflow).toBeLessThanOrEqual(0);
-        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-machine.png`) });
-      } finally {
-        await context.close();
-      }
-    }, 60_000);
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=${theme}`);
+          await tab.waitForSelector('[data-agenda-group]', { timeout: 4_000 });
+          await tab.evaluate(async () => await document.fonts.ready);
+          const groups = await tab.evaluate(() =>
+            [...document.querySelectorAll('[data-agenda-group]')].map(group => ({
+              text: group.textContent ?? '',
+              link: group.querySelector('[data-agenda-group-link]') !== null,
+              machine: group.querySelector('[data-agenda-group-machine]') !== null,
+              icon: group.querySelector('[data-agenda-group-icon]') !== null,
+              titleColors: [...group.querySelectorAll('[data-agenda-row-title]')].map(
+                title => getComputedStyle(title).color,
+              ),
+              notices: group.querySelectorAll('[data-agenda-notice]').length,
+            })),
+          );
+          expect(groups.length).toBe(2);
+          expect(groups[0]?.machine).toBe(true);
+          expect(groups[0]?.icon).toBe(true);
+          expect(groups[0]?.link).toBe(false);
+          expect(groups[0]?.notices).toBe(0);
+          expect(groups[0]?.text).toContain('3 ferrets could not be moved');
+          expect(groups[0]?.text).toContain('claude-liftoff hit its hard limit');
+          expect(groups[1]?.link).toBe(true);
+          // The same text colour as the ferret's own row, not a muted grey.
+          expect(new Set([...(groups[0]?.titleColors ?? []), ...(groups[1]?.titleColors ?? [])]).size).toBe(1);
+          const overflow = await tab.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow).toBeLessThanOrEqual(0);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-machine.png`) });
+
+          await tab.goto(`${origin}/?theme=${theme}&open=1`);
+          await tab.waitForSelector('[data-inbox-open] [data-inbox-machine-fix] >> visible=true', { timeout: 4_000 });
+          await tab.evaluate(async () => await document.fonts.ready);
+          await tab.waitForTimeout(900);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-machine-open.png`) });
+          const detail = await tab.evaluate(
+            () =>
+              [...document.querySelectorAll('[data-inbox-open]')]
+                .map(open => open.textContent ?? '')
+                .find(text => text.includes('durian')) ?? '',
+          );
+          expect(detail).toContain('durian: Not moved: no other login could take it.');
+          expect(detail).toContain('fy migrate <id> -a <runtime>');
+          const chat = await tab.evaluate(() =>
+            [...document.querySelectorAll('[data-inbox-open]')]
+              .filter(open => (open.textContent ?? '').includes('durian'))
+              .some(open => open.querySelector('[data-inbox-open-chat]') !== null),
+          );
+          expect(chat).toBe(false);
+        } finally {
+          await context.close();
+        }
+      }, 60_000);
 });

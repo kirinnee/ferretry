@@ -4,7 +4,7 @@ import { agendaConversationPath, type InboxCard } from '../../../src/lib/agenda-
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import { machineSessionView } from '../../../src/lib/machine-agenda.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
@@ -15,7 +15,7 @@ const moved = agendaItem('M1', {
   waitingSince: '2026-08-01T10:00:00.000Z',
 } as never);
 const machineView = machineSessionView({
-  sessionId: '@machine',
+  sessionId: 'machine-agenda',
   items: [moved],
   resolved: [],
   updatedAt: '2026-08-01T11:00:00.000Z',
@@ -81,8 +81,46 @@ describe('the Machine group in the Inbox', () => {
     expect(heads.map(head => head.textContent).join('|')).toMatch(/Studio.*\|.*Laptop|Laptop.*\|.*Studio/);
   });
 
+  test('draws the group with an icon, and its notices as full rows rather than grey lines', async () => {
+    // Arrange
+    const view0 = must(machineView, 'the machine view');
+
+    // Act
+    await open([inboxCard(moved, view0)]);
+
+    // Assert
+    expect(view?.container.querySelector('[data-agenda-group-machine] [data-agenda-group-icon]')).not.toBeNull();
+    expect(view?.container.querySelector('[data-agenda-notice]')).toBeNull();
+    expect(view?.container.querySelector('.fy-inbox-row')).not.toBeNull();
+  });
+
+  test('opens the item’s detail when its row is tapped: the ferrets with their reasons and the command', async () => {
+    // Arrange
+    const detailed = agendaItem('M3', {
+      notice: true,
+      subject: '2 ferrets could not be moved',
+      why: 'The Warden moves a ferret whose login hit a limit.',
+      context: 'durian: Not moved: no login could take it.\nkai: Not moved: cap.',
+      howToResolve: 'Move one yourself with: fy migrate <id> -a <runtime>',
+      sourceRef: 'warden:auto-move-failed',
+      waitingSince: '2026-08-01T10:00:00.000Z',
+    } as never);
+    const card = inboxCard(detailed, must(machineView, 'the machine view'));
+    await open([card]);
+
+    // Act
+    const row = must(view?.container.querySelector<HTMLElement>('[data-agenda-row]'), 'the row');
+    await interact(() => row.click());
+
+    // Assert
+    const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
+    expect(text).toContain('durian: Not moved: no login could take it.');
+    expect(text).toContain('fy migrate <id> -a <runtime>');
+    expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
+  });
+
   test('links its item to the Inbox, not to a conversation', () => {
-    expect(agendaConversationPath(daemonId('studio'), '@machine', 'M1')).not.toContain('/session/');
+    expect(agendaConversationPath(daemonId('studio'), 'machine-agenda', 'M1')).not.toContain('/session/');
     expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toContain('/session/sess-1');
   });
 });

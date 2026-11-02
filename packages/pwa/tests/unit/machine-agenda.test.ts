@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionView } from '@ferretry/protocol';
-import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  type AgendaItem,
+  type AgendaSnapshot,
   isMachineAgendaId,
   MACHINE_AGENDA_ID,
-  MACHINE_GROUP_NAME,
-  machineSessionView,
-  withMachineAgendas,
-} from '../../src/lib/machine-agenda.ts';
+  type SessionView,
+} from '@ferretry/protocol';
+import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
+import { MACHINE_GROUP_NAME, machineSessionView, withMachineAgendas } from '../../src/lib/machine-agenda.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 import { sessionView } from '../support/sessions.ts';
 
@@ -22,8 +22,8 @@ const parked = (id: string, minutes: number): AgendaItem =>
 
 describe('the machine agenda id', () => {
   it('is reserved, and only it is the machine agenda', () => {
-    expect(MACHINE_AGENDA_ID).toBe('@machine');
-    expect(isMachineAgendaId('@machine')).toBe(true);
+    expect(MACHINE_AGENDA_ID).toBe('machine-agenda');
+    expect(isMachineAgendaId('machine-agenda')).toBe(true);
     expect(isMachineAgendaId('ses-1')).toBe(false);
   });
 });
@@ -35,7 +35,7 @@ describe('machineSessionView', () => {
 
   it('summarises the open items: count, oldest, its ask and the latest wait', () => {
     const view = machineSessionView(board([item('M2', 10), item('M1', 5), item('M3', 20)])) as SessionView;
-    expect(view.config.id).toBe('@machine');
+    expect(view.config.id).toBe('machine-agenda');
     expect(view.config.name).toBe(MACHINE_GROUP_NAME);
     expect(view.state.agenda).toEqual({ open: 3, first: 'M1', ask: 'Subject M1', latestAt: at(20) });
     expect(view.state.attention).toEqual(view.state.agenda);
@@ -68,12 +68,12 @@ describe('withMachineAgendas', () => {
 
   it('lists the machine agenda first among the machine’s conversations', () => {
     const [out] = withMachineAgendas([machine(STUDIO, [real])], () => board([item('M1', 1)]));
-    expect(out?.sessions?.map(view => view.config.id)).toEqual(['@machine', 'ses-1']);
+    expect(out?.sessions?.map(view => view.config.id)).toEqual(['machine-agenda', 'ses-1']);
   });
 
   it('lists it on a machine whose conversations are not read yet', () => {
     const [out] = withMachineAgendas([machine(STUDIO, null)], () => board([item('M1', 1)]));
-    expect(out?.sessions?.map(view => view.config.id)).toEqual(['@machine']);
+    expect(out?.sessions?.map(view => view.config.id)).toEqual(['machine-agenda']);
   });
 
   it('asks each machine for its own board, and leaves one without a board (or an empty one) alone', () => {
@@ -83,7 +83,7 @@ describe('withMachineAgendas', () => {
       asked.push(`${daemon}/${session}`);
       return daemon === STUDIO ? undefined : board([]);
     });
-    expect(asked).toEqual(['studio/@machine', 'laptop/@machine']);
+    expect(asked).toEqual(['studio/machine-agenda', 'laptop/machine-agenda']);
     expect(out[0]).toBe(machines[0] as never);
     expect(out[1]).toBe(machines[1] as never);
   });

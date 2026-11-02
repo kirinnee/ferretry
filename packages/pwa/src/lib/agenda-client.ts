@@ -6,8 +6,8 @@ import {
   type AgendaSnapshot,
   AgendaSnapshotSchema,
   FY_REQUEST_ID_HEADER,
+  isMachineAgendaId,
 } from '@ferretry/protocol';
-import { isMachineAgendaId } from './machine-agenda.ts';
 import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
