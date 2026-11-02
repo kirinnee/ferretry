@@ -1106,6 +1106,11 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               </label>
             </fieldset>
           ) : null}
+          {save.enabled && save.mode === 'new' && update === undefined ? (
+            <p className="m-0 text-cell text-fg" data-input-save-new-only="">
+              Saves as a new account
+            </p>
+          ) : null}
           {save.enabled && save.mode !== 'update' ? (
             <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
               Name

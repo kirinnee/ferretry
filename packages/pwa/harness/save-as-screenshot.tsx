@@ -159,7 +159,10 @@ try {
           await page.locator('[data-harness-surface]').waitFor({ state: 'visible' });
           if (state !== 'one-tap') {
             if (state === 'update') await page.locator('[data-input-type-instead]').first().click();
-            await page.locator('[data-input-value]').fill(state === 'too-short' ? 'abc' : PASSWORD);
+            // `different` is the card exactly as it opens: the password box is empty (the app never holds a saved value).
+            // Every other state has the owner typing a made-up password first.
+            if (state !== 'different')
+              await page.locator('[data-input-value]').fill(state === 'too-short' ? 'abc' : PASSWORD);
             if (state !== 'different') await page.locator('[data-input-save-tick]').check();
             if (state === 'save-more') await page.locator('[data-input-save-more] summary').click();
             if (state === 'update') await page.locator('[data-input-save-update]').check();

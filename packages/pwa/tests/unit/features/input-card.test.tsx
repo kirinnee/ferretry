@@ -1085,8 +1085,10 @@ describe('a second person on one site', () => {
     expect(card.view.container.textContent).not.toContain('Use saved');
     expect(card.q('[data-input-different-account]')?.textContent).toContain('The page is signing in ernest@atomi.tech');
     expect(card.q('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a password for ernest@atomi.tech');
-    // The owner types: the field is open from the start.
-    expect(card.q('[data-input-value]')).not.toBeNull();
+    // The owner types: the field is open from the start, and EMPTY — nothing of kirinnee97's is in it, and Send has
+    // nothing to send until the owner types.
+    expect(card.q<HTMLInputElement>('[data-input-value]')?.value).toBe('');
+    expect(card.q<HTMLButtonElement>('[data-input-send]')?.disabled).toBe(true);
 
     const placeOnly = await open(false);
     expect(placeOnly.q('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a password');
@@ -1098,8 +1100,10 @@ describe('a second person on one site', () => {
     await click(card.q('[data-input-save-tick]'));
 
     expect(card.q<HTMLInputElement>('[data-input-save-username]')?.value).toBe('ernest@atomi.tech');
-    // kirinnee97's account is not offered for Update at all: the daemon sent no `update` for another person.
+    // kirinnee97's account is not offered for Update at all: the daemon sent no `update` for another person, and the
+    // card says in one plain line which it is.
     expect(card.q('[data-input-save-update]')).toBeNull();
+    expect(card.q('[data-input-save-new-only]')?.textContent).toBe('Saves as a new account');
     expect(card.q<HTMLInputElement>('[data-input-save-label]')?.value).toBe('Google · ernest@atomi.tech');
     expect(card.q('[data-input-save-more] summary')?.textContent).toBe('More');
     const words = card.q('[data-input-save]')?.textContent ?? '';
@@ -1138,8 +1142,10 @@ describe('a second person on one site', () => {
     await click(card.q('[data-input-type-instead]'));
     await typeInto(card.q('[data-input-value]'), SECRET);
     await click(card.q('[data-input-save-tick]'));
-    // Typed instead of the one-tap: it starts on a new account, and the owner picks Update by hand.
+    // Typed instead of the one-tap: it starts on a new account, and the owner picks Update by hand. With a choice
+    // drawn, the one-line "Saves as a new account" is not.
     expect(card.q<HTMLInputElement>('[data-input-save-new]')?.checked).toBe(true);
+    expect(card.q('[data-input-save-new-only]')).toBeNull();
     await click(card.q('[data-input-save-update]'));
 
     expect(card.q('[data-input-save-updates]')?.textContent).toBe(

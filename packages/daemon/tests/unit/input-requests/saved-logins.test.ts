@@ -1074,8 +1074,12 @@ describe('a second person on one site', () => {
     });
     // kirinnee97's account is not even offered for Update: the page is signing in someone else.
     should(request.saved?.update).be.undefined();
-    // Nothing is typed by a typed username: only the owner's Send does.
+    // Nothing is typed by a typed username: only the owner's Send does. The card the owner reads holds no value at
+    // all, so its password box opens empty: kirinnee97's password is in no request, route or sink.
     should(h.writes).deepEqual([]);
+    should(h.fills).deepEqual([]);
+    should(JSON.stringify(request)).not.containEql(KIRIN_PASSWORD);
+    should(await h.everything()).not.containEql(KIRIN_PASSWORD);
     // The agenda card (title, ask, prompt) is what ferrets and other devices read: the place only, no account, no person.
     const agenda = h.sinks.filter(line => line.includes('"requestId"') && line.includes('"ask"')).join('\n');
     should(agenda).not.equal('');
