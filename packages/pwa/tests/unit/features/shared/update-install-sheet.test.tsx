@@ -1,12 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { Attempt, UpdateSource } from '../../../../src/features/shared/shared-controller.ts';
-import {
-  EDITED_NOTE,
-  NO_COMPARISON,
-  PREVIEW_UNRELATED,
-  UPDATE_BUTTON,
-} from '../../../../src/features/shared/store-row-model.ts';
+import { NO_COMPARISON, PREVIEW_UNRELATED, UPDATE_BUTTON } from '../../../../src/features/shared/store-row-model.ts';
 import {
   UpdateInstallSheet,
   type UpdateInstallSheetProps,
@@ -211,12 +206,24 @@ describe('asking this machine', () => {
 
 describe('keep or replace local edits', () => {
   const edited = () => {
-    throw new FyHttpError('SKILL.md was edited', 409, 'catalog_install_edited');
+    throw new FyHttpError(
+      'Edited on this machine since it was installed: SKILL.md. Nothing was replaced. Look at what changes, then replace your edits or keep them.',
+      409,
+      'catalog_install_edited',
+    );
   };
 
   it('offers Keep my edits and Replace my edits, and Keep changes nothing', async () => {
     const rig = await open({ [PREVIEW]: edited });
-    expect(q('[data-update-edited]')?.textContent).toContain(EDITED_NOTE);
+    const banner = q('[data-update-edited-banner]');
+    expect(banner?.textContent).toBe('Not updated. You edited SKILL.md.');
+    expect(banner?.className).toContain('bg-warn-bg');
+    expect(banner?.className).not.toContain('err');
+    expect(q('[data-catalog-failure]')).toBeNull();
+    expect(q('[data-update-edited]')?.textContent).toContain(
+      'Keep my edits leaves this install as it is. Replace my edits puts v2 over them.',
+    );
+    expect(q('[data-update-edited]')?.textContent).not.toContain('This install was edited');
     await click(q('[data-update-keep]'));
     expect(rig.closed).toEqual(['closed']);
     expect(rig.calls).toHaveLength(1);

@@ -29,15 +29,41 @@ export const VERSIONS_LOADING = 'Reading the versions…';
 export const NO_OTHER_VERSIONS = 'The publisher offers no other version of this.';
 export const PREVIEW_UNRELATED =
   'This machine reads this version as something other than the one the publisher listed, so it was not used. Nothing was changed.';
-export const EDITED_NOTE =
-  'You changed files of this install on this machine. Keep your edits and nothing changes, or replace them with the new version.';
+export const MORE = 'More';
+
+/** The choice under the banner. The banner says what happened; this says only what each button does. */
+export const editedChoice = (version: number): string =>
+  `Keep my edits leaves this install as it is. Replace my edits puts v${String(version)} over them.`;
+
+const EDITED_FILES = /(?:installed|reviewed): (.+?)\. Nothing was replaced/u;
+
+/** The banner for an install edited on the machine: nothing failed, so it says what was left alone and why, once. */
+export function editedBanner(sentence: string): string {
+  const files = EDITED_FILES.exec(sentence)?.[1];
+  return `Not updated. You edited ${files ?? 'files of this install on this machine'}.`;
+}
 
 export const stayLabel = (version: number): string => `Stay on v${String(version)}`;
-export const installedText = (version: number): string => `Installed v${String(version)}`;
+export const installedText = (version: number): string => `v${String(version)} installed`;
+const availableText = (version: number): string => `v${String(version)} available`;
+export const offeredText = (version: number): string => `v${String(version)}`;
+
+/** One quiet line under each choice in the menu: what it does, and how it differs from the one beside it. */
+export function actHint(act: MenuAct, installedVersion: number, listedVersion: number): string {
+  switch (act) {
+    case 'stay':
+      return `Keep v${String(installedVersion)} and stop asking about newer versions. Ask again clears it.`;
+    case 'skip':
+      return `Hide v${String(listedVersion)} only. A newer version asks again.`;
+    case 'move':
+      return 'Pick any version the publisher still offers, newer or older.';
+  }
+}
 
 // ── The status ───────────────────────────────────────────────────────────────────────────────────
 
 export type RowAct = 'changes' | 'update' | 'stay' | 'skip' | 'move' | 'again';
+export type MenuAct = Extract<RowAct, 'stay' | 'skip' | 'move'>;
 
 type RowKind =
   /** The machine holds the version the publisher lists. */
@@ -53,26 +79,34 @@ type RowKind =
 
 export interface RowStatus {
   readonly kind: RowKind;
-  /** `Installed v2`, `Installed v2 · Update available`. */
+  /** `v2 installed`, `v1 installed · v2 available`: the versions live here and nowhere else on the row. */
   readonly text: string;
-  /** The acts open to the person, in the order they are drawn. */
-  readonly acts: readonly RowAct[];
+  /** The acts drawn as buttons beside the status, in order. */
+  readonly buttons: readonly RowAct[];
+  /** The acts kept in the More menu, in order. */
+  readonly menu: readonly MenuAct[];
 }
 
 /** The status of an installed item against the version the verified manifest lists as current. */
 export function rowStatus(installed: InstalledItem, listedVersion: number): RowStatus {
   const { version, install } = installed;
   const base = installedText(version);
-  if (listedVersion < version) return { kind: 'ahead', text: base, acts: ['move'] };
-  if (listedVersion === version) return { kind: 'current', text: base, acts: [] };
+  if (listedVersion < version) return { kind: 'ahead', text: base, buttons: [], menu: ['move'] };
+  if (listedVersion === version) return { kind: 'current', text: base, buttons: [], menu: [] };
   if (install.hold === true)
-    return { kind: 'held', text: `${base} · Staying on v${String(version)}`, acts: ['again', 'move'] };
+    return { kind: 'held', text: `${base} · Staying on v${String(version)}`, buttons: ['again'], menu: ['move'] };
   if (install.skippedVersion === listedVersion)
-    return { kind: 'skipped', text: `${base} · Skipped v${String(listedVersion)}`, acts: ['again', 'changes', 'move'] };
+    return {
+      kind: 'skipped',
+      text: `${base} · Skipped v${String(listedVersion)}`,
+      buttons: ['again', 'changes'],
+      menu: ['move'],
+    };
   return {
     kind: 'update',
-    text: `${base} · Update available`,
-    acts: ['changes', 'update', 'stay', 'skip', 'move'],
+    text: `${base} · ${availableText(listedVersion)}`,
+    buttons: ['update', 'changes'],
+    menu: ['stay', 'skip', 'move'],
   };
 }
 

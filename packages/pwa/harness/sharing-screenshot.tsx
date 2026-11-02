@@ -1,6 +1,6 @@
 /**
  * The Sharing page as a marketplace (docs/catalogs.md, &B131 A3): Subscriptions with a store page (one item Installed,
- * the rest with Install; an install with a newer version offers See changes, Update, Stay, Skip and Move to version, and
+ * the rest with Install; an install with a newer version offers Update and See changes, and Stay, Skip and Move to version under More, and
  * a local edit offers keep or replace), My catalogs, a catalog with + Publish skills and its picker, and People; and the places that
  * lead to it: the phone's More sheet, the desktop top bar, the sidebar footer and the narrow rail. On a phone and a
  * desktop, light and dark.
@@ -101,7 +101,7 @@ const client = {
       if (method === 'PATCH') return installedAtV1(upd).install;
       const body = JSON.parse(init.body);
       if (path.endsWith('/preview')) {
-        if (edited && body.replaceEdited !== true) throw new FyHttpError('SKILL.md was edited', 409, 'catalog_install_edited');
+        if (edited && body.replaceEdited !== true) throw new FyHttpError('Edited on this machine since it was installed: SKILL.md. Nothing was replaced. Look at what changes, then replace your edits or keep them.', 409, 'catalog_install_edited');
         return machinePreview(upd, body.item.itemVersion, { changes: catalogChanges(), ...(body.replaceEdited === true ? { edited: { paths: ['SKILL.md'] } } : {}) });
       }
     }
@@ -346,7 +346,10 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await shot(page, 'store-update-passkey', theme, vp, '[role="dialog"]');
 
   await open(page, theme, 'update');
-  await page.locator('[data-shared-item-act="move"]').click();
+  await page.locator('[data-shared-item-more]').click();
+  await page.locator('[role="menu"]').waitFor({ state: 'visible' });
+  await shot(page, 'store-more-menu', theme, vp);
+  await page.locator('[data-menu-key="move"]').click();
   await page.locator('[data-move-version]').first().waitFor({ state: 'visible' });
   await shot(page, 'store-move-to-version', theme, vp, '[role="dialog"]');
 

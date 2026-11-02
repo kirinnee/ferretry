@@ -1,14 +1,17 @@
 /**
  * The right side of a store row once a paired machine holds the item (&B131 B4): the installed version, whether the
- * publisher offers a newer one, and See changes / Update / Stay / Skip / Move to version. Nothing here runs on its own:
- * Stay and Skip write a choice about future versions and touch no file, and every move to a version goes through the
- * update sheet and its passkey.
+ * publisher offers a newer one, Update and See changes, and one More menu (Stay, Skip, Move to version). Nothing
+ * here runs on its own: Stay and Skip write a choice about future versions and touch no file, and every move to a
+ * version goes through the update sheet and its passkey.
  */
 
 import { revealHidden, type SharedCatalogManifestEntry, type SignedCatalogItemVersions } from '@ferretry/protocol';
-import { useEffect, useState } from 'react';
+import { CircleCheck, MoreHorizontal } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useInputModality } from '../../hooks/use-input-modality.ts';
 import type { MemberSubscription } from '../../lib/member-keys.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { ContextMenu, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { installRefusal } from '../catalogs/catalog-install-model.ts';
 import { setCatalogInstallPrefs } from '../catalogs/catalog-installs-api.ts';
@@ -19,8 +22,10 @@ import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
 import type { SharedCatalogView, SharedController } from './shared-controller.ts';
 import type { InstalledItem } from './shared-installs.ts';
 import {
+  actHint,
   actLabel,
   askAgainPrefs,
+  MORE,
   MOVE,
   type MoveLine,
   moveLines,
@@ -69,6 +74,9 @@ export function InstalledControls({
   const [moving, setMoving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const { touchAffected } = useInputModality();
   const { install, machine } = installed;
 
   const choose = async (prefs: Parameters<typeof setCatalogInstallPrefs>[3]): Promise<void> => {
@@ -116,13 +124,13 @@ export function InstalledControls({
     <>
       <div className="flex min-w-0 max-w-full flex-wrap items-center gap-xs" data-shared-item-status={status.kind}>
         <span
-          className="fy-info-chip shrink-0"
+          className="fy-info-chip max-w-full"
           data-tone={status.kind === 'update' ? 'warn' : 'accent'}
           data-shared-item-installed=""
         >
           {status.text}
         </span>
-        {status.acts.map(act => (
+        {status.buttons.map(act => (
           <Button
             key={act}
             type="button"
@@ -136,6 +144,42 @@ export function InstalledControls({
             {actLabel(act, installed.version)}
           </Button>
         ))}
+        {status.menu.length === 0 ? null : (
+          <>
+            <Button
+              ref={moreRef}
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-[44px] shrink-0"
+              disabled={busy}
+              aria-haspopup="menu"
+              aria-expanded={anchor !== null}
+              aria-label={MORE}
+              onClick={() => {
+                const rect = moreRef.current?.getBoundingClientRect();
+                setAnchor({ x: rect?.left ?? 0, y: (rect?.bottom ?? 0) + 4 });
+              }}
+              data-shared-item-more=""
+            >
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </Button>
+            <ContextMenu
+              open={anchor !== null}
+              anchor={anchor ?? { x: 0, y: 0 }}
+              ariaLabel={`${MORE} for ${revealHidden(installed.name)}`}
+              triggerRef={moreRef}
+              touch={touchAffected}
+              onClose={() => setAnchor(null)}
+              items={status.menu.map(act => ({
+                key: act,
+                label: actLabel(act, installed.version),
+                hint: actHint(act, installed.version, entry.version),
+                onSelect: () => run(act),
+              }))}
+            />
+          </>
+        )}
       </div>
       {failure === null ? null : <FailureLine sentence={failure} />}
       {moving ? (
@@ -243,13 +287,24 @@ function MoveSheet({
             <li key={line.version} className="min-w-0">
               <button
                 type="button"
-                className="kt-panel flex min-h-[44px] w-full min-w-0 flex-col items-start justify-center gap-0.5 px-control-x py-1 text-left focus-visible:outline-focus focus-visible:outline-offset-focus disabled:opacity-60"
+                className="kt-panel flex min-h-[44px] w-full min-w-0 flex-col items-start justify-center gap-0.5 px-control-x py-1 text-left focus-visible:outline-focus focus-visible:outline-offset-focus disabled:cursor-default disabled:opacity-100"
                 disabled={line.direction === 'installed'}
+                {...(line.direction === 'installed' ? { 'aria-current': true } : {})}
                 onClick={() => onPick(line, listed.signed)}
                 data-move-version={line.version}
                 data-move-direction={line.direction}
               >
-                <span className="break-words text-cell font-semibold text-fg">{line.text}</span>
+                <span className="flex min-w-0 items-start gap-1.5 break-words text-cell font-semibold text-fg">
+                  {line.direction === 'installed' ? (
+                    <CircleCheck
+                      size={16}
+                      aria-hidden="true"
+                      className="mt-0.5 shrink-0 text-ok"
+                      data-move-installed-mark=""
+                    />
+                  ) : null}
+                  <span>{line.text}</span>
+                </span>
                 <span className="break-words text-meta text-muted">
                   <MarkedText text={line.summary} />
                 </span>

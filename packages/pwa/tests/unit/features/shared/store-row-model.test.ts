@@ -1,11 +1,15 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import type { UpdateSource } from '../../../../src/features/shared/shared-controller.ts';
 import {
+  actHint,
   actLabel,
   askAgainPrefs,
   busyLabel,
   confirmLabel,
+  editedBanner,
+  editedChoice,
   installedText,
+  offeredText,
   MOVE_BUTTON,
   moveLines,
   moveSubtitle,
@@ -41,37 +45,40 @@ const sourceAt = (version: 1 | 2, withList: boolean): UpdateSource => {
 describe('rowStatus', () => {
   const held = (change: Record<string, unknown>) => installedAtV1(fx, change);
 
-  it('says only "Installed v1" and offers nothing when the machine holds the listed version', () => {
-    expect(rowStatus(held({}), 1)).toEqual({ kind: 'current', text: 'Installed v1', acts: [] });
+  it('says only "v1 installed" and offers nothing when the machine holds the listed version', () => {
+    expect(rowStatus(held({}), 1)).toEqual({ kind: 'current', text: 'v1 installed', buttons: [], menu: [] });
   });
 
-  it('offers every act when the publisher lists a newer version and nothing was chosen', () => {
+  it('puts Update and See changes beside the status and the rest in the menu when a newer version is listed', () => {
     expect(rowStatus(held({}), 2)).toEqual({
       kind: 'update',
-      text: 'Installed v1 · Update available',
-      acts: ['changes', 'update', 'stay', 'skip', 'move'],
+      text: 'v1 installed · v2 available',
+      buttons: ['update', 'changes'],
+      menu: ['stay', 'skip', 'move'],
     });
   });
 
   it('says it is staying when the person chose to stay, and offers to ask again', () => {
     expect(rowStatus(held({ hold: true }), 2)).toEqual({
       kind: 'held',
-      text: 'Installed v1 · Staying on v1',
-      acts: ['again', 'move'],
+      text: 'v1 installed · Staying on v1',
+      buttons: ['again'],
+      menu: ['move'],
     });
   });
 
   it('says it was skipped only for the version that was skipped', () => {
     expect(rowStatus(held({ skippedVersion: 2 }), 2)).toEqual({
       kind: 'skipped',
-      text: 'Installed v1 · Skipped v2',
-      acts: ['again', 'changes', 'move'],
+      text: 'v1 installed · Skipped v2',
+      buttons: ['again', 'changes'],
+      menu: ['move'],
     });
     expect(rowStatus(held({ skippedVersion: 2 }), 3).kind).toBe('update');
   });
 
   it('offers only a move when the machine is ahead of the listed version', () => {
-    expect(rowStatus(held({}), 0)).toEqual({ kind: 'ahead', text: 'Installed v1', acts: ['move'] });
+    expect(rowStatus(held({}), 0)).toEqual({ kind: 'ahead', text: 'v1 installed', buttons: [], menu: ['move'] });
   });
 });
 
@@ -89,7 +96,29 @@ describe('words', () => {
       'Ask again',
     ]);
     expect(stayLabel(4)).toBe('Stay on v4');
-    expect(installedText(4)).toBe('Installed v4');
+    expect(installedText(4)).toBe('v4 installed');
+    expect(offeredText(4)).toBe('v4');
+  });
+
+  it('says what Stay and Skip each do, and that they are not the same', () => {
+    expect(actHint('stay', 1, 2)).toBe('Keep v1 and stop asking about newer versions. Ask again clears it.');
+    expect(actHint('skip', 1, 2)).toBe('Hide v2 only. A newer version asks again.');
+    expect(actHint('move', 1, 2)).toBe('Pick any version the publisher still offers, newer or older.');
+  });
+
+  it('says an edited install once: the banner names what was left alone, the choice names what each button does', () => {
+    expect(
+      editedBanner(
+        'This install was edited here, so it was not updated. Edited on this machine since it was installed: SKILL.md, notes/a.md. Nothing was replaced. Look at what changes, then replace your edits or keep them.',
+      ),
+    ).toBe('Not updated. You edited SKILL.md, notes/a.md.');
+    expect(
+      editedBanner('Edited on this machine after the changes were reviewed: SKILL.md. Nothing was replaced.'),
+    ).toBe('Not updated. You edited SKILL.md.');
+    expect(editedBanner('This install was edited here, so it was not updated.')).toBe(
+      'Not updated. You edited files of this install on this machine.',
+    );
+    expect(editedChoice(2)).toBe('Keep my edits leaves this install as it is. Replace my edits puts v2 over them.');
   });
 
   it('clears the stay choice, else the skip', () => {

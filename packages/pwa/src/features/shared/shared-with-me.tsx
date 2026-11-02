@@ -57,6 +57,7 @@ import {
   useInstalledFromPublisher,
 } from './shared-installs.ts';
 import { InstalledControls } from './store-row-actions.tsx';
+import { offeredText } from './store-row-model.ts';
 import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import { type InstallMachine, type OpenedSharedItem, SharedItemSheet } from './shared-item-sheet.tsx';
 
@@ -544,18 +545,25 @@ function StoreItemRow({
             onRefused={onRefused}
             onChanged={onChanged}
           />
-        ) : machines.length === 0 ? null : (
-          <Button
-            type="button"
-            size="sm"
-            className="min-h-[44px] shrink-0"
-            disabled={opening}
-            onClick={() => void open()}
-            aria-label={` `}
-            data-shared-item-install=""
-          >
-            {INSTALL}
-          </Button>
+        ) : (
+          <>
+            <span className="shrink-0 text-meta text-muted" data-shared-item-version="">
+              {offeredText(entry.version)}
+            </span>
+            {machines.length === 0 ? null : (
+              <Button
+                type="button"
+                size="sm"
+                className="min-h-[44px] shrink-0"
+                disabled={opening}
+                onClick={() => void open()}
+                aria-label={` `}
+                data-shared-item-install=""
+              >
+                {INSTALL}
+              </Button>
+            )}
+          </>
         )}
       </div>
       {failure === null ? null : <FailureLine sentence={failure} />}

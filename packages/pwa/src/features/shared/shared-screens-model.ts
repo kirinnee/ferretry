@@ -105,7 +105,7 @@ export interface ItemLine {
 export function itemLine(entry: SharedCatalogManifestEntry): ItemLine {
   return {
     entry,
-    title: `${revealHidden(entry.name)} · ${kindLabel(entry.kind)} · version ${entry.version}`,
+    title: `${revealHidden(entry.name)} · ${kindLabel(entry.kind)}`,
     summary: revealHidden(entry.summary),
   };
 }

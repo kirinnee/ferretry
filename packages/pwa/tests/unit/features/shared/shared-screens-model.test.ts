@@ -87,7 +87,8 @@ describe('an item line', () => {
 
   it('shows the name, kind and version, with the summary apart, and writes hidden characters out', () => {
     const line = itemLine(entry({ name: `pdf${RLO}tools`, summary: `a${ZWSP}b` }));
-    expect(line.title).toContain('Skill · version 3');
+    expect(line.title).toMatch(/ · Skill$/u);
+    expect(line.title).not.toContain('version');
     expect(line.title).not.toContain(RLO);
     expect(line.summary).not.toContain(ZWSP);
   });

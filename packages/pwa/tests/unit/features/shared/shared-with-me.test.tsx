@@ -123,7 +123,9 @@ describe('two publishers', () => {
     expect(text()).not.toContain('loft-box');
     expect(calls.filter(call => call === 'browse')).toHaveLength(2);
     const item = cards[0]?.querySelector('[data-shared-item]');
-    expect(item?.textContent).toContain('pdf-tools · Skill · version 1');
+    expect(item?.textContent).toContain('pdf-tools · Skill');
+    expect(item?.textContent).not.toContain('version');
+    expect(cards[0]?.querySelector('[data-shared-item-version]')?.textContent).toBe('v1');
     expect(item?.textContent).toContain('Split, merge and OCR PDFs');
     expect(cards[0]?.querySelector('[data-shared-catalog]')?.textContent).toContain("Kirin's catalog");
     await view.unmount();
@@ -540,7 +542,7 @@ describe('the store page', () => {
   it('says nothing installs or updates by itself, and shows each item’s version', async () => {
     const { view } = await open({ list: async () => [studio], browse: browseOk });
     expect(q('[data-shared-pinned]')?.textContent).toBe(PINNED_NOTE);
-    expect(q(`[data-shared-item-row="${firstItem()}"] [data-shared-item]`)?.textContent).toMatch(/version \d+/u);
+    expect(q(`[data-shared-item-row="${firstItem()}"] [data-shared-item-version]`)?.textContent).toMatch(/^v\d+$/u);
     await view.unmount();
   });
 
@@ -587,7 +589,8 @@ describe('the store page', () => {
     );
     await settle();
     const row = q(`[data-shared-item-row="${firstItem()}"]`);
-    expect(row?.querySelector('[data-shared-item-installed]')?.textContent).toBe('Installed v1');
+    expect(row?.querySelector('[data-shared-item-installed]')?.textContent).toBe('v1 installed');
+    expect(row?.querySelector('[data-shared-item-version]')).toBeNull();
     expect(row?.querySelector('[data-shared-item-install]')).toBeNull();
     await view.unmount();
   });

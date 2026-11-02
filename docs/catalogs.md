@@ -1137,19 +1137,24 @@ refusal. A browser that already has a key opens a member session and redeems the
 
 **Subscriptions (online only): a store page per publisher.** One line under each publisher says that nothing installs
 or updates by itself: "Install what you want; each install stays on its version until you update it." Every item is a
-**store row**: its name and version (`v3`), one line of what it is, and on the right **Install** (when this browser has
-a paired machine to install on; it opens the item's review and install hand-off). Once a paired machine's install
-records hold the item, the right side says what that machine holds, read from the install record's version (the
-title already carries the listed version, so there is no second version chip):
+**store row**: its name and kind (`pdf-tools · Skill`), one line of what it is, and on the right **Install** (when this
+browser has a paired machine to install on; it opens the item's review and install hand-off) beside the version the
+publisher lists (`v3`). Once a paired machine's install records hold the item, the right side is a status chip that
+carries the versions, so the title never does and no version is said twice, then the acts. One row on a desktop, at
+most two on a phone, every target at least 44 px, no sideways scroll:
 
-- **Installed v2**: the machine holds the version the manifest lists. Nothing else is offered.
-- **Installed v2 · Update available**: the manifest lists a newer version. **See changes** (the diff this machine
-  computes, shown before anything is written), **Update**, **Stay on v2** (stop asking for this version),
-  **Skip this version** and **Move to version…** (any version the publisher still offers, newer or older).
-- **Installed v2 · Staying on v2** / **Skipped v3**: the person said no to the listed version. **Ask again** clears the
-  choice. See changes and Move stay open. Stay and Skip are `PATCH /v1/catalog-installs/{scope}/:installId`
-  (`hold` / `skippedVersion`) and touch no file, so they take no passkey.
-- **Installed v3** when the publisher has since taken the newer version back: only **Move to version…** is offered.
+- **v2 installed**: the machine holds the version the manifest lists. Nothing else is offered.
+- **v1 installed · v2 available**: the manifest lists a newer version. **Update** and **See changes** (the diff this
+  machine computes, shown before anything is written) sit beside the chip; one **More** (⋯) menu holds **Stay on v1**,
+  **Skip this version** and **Move to version…** (any version the publisher still offers, newer or older), each with a
+  line saying what it does. **Stay** is `hold`: keep v1 and stop asking about every newer version until **Ask
+  again**. **Skip** is `skippedVersion`: hide only the version now listed, so a newer one asks again. They are not
+  the same, and both are kept.
+- **v1 installed · Staying on v1** / **Skipped v2**: the person said no to the listed version. **Ask again** clears the
+  choice. See changes (after a skip) and Move (in More) stay open. Stay and Skip are
+  `PATCH /v1/catalog-installs/{scope}/:installId` (`hold` / `skippedVersion`) and touch no file, so they take no passkey.
+- **v3 installed** when the publisher has since taken the newer version back: only **Move to version…** is offered, in
+  More. In the Move list the installed version carries a check and "Installed" at full contrast.
 
 Update and Move open a sheet that fetches the version from the publisher, verifies it in the browser, and sends it to
 the machine that holds the install through the installer's own `/preview` and apply routes (no route is added for
@@ -1157,7 +1162,7 @@ this): the machine answers what changes and the app shows it; the one button tha
 passkey** or **Move · confirm with passkey**) asks for a fresh passkey exactly where the installer requires one. A
 version other than the listed one travels with the publisher's signed version list, and an older one is sent with
 `allowOlder`. If the install was edited on the machine, the preview answers `catalog_install_edited` and the sheet
-offers **Keep my edits** (nothing changes) or **Replace my edits** (the same preview again with `replaceEdited`). If the
+shows one neutral notice ("Not updated. You edited SKILL.md.", not an error: nothing failed) and offers **Keep my edits** (nothing changes) or **Replace my edits** (the same preview again with `replaceEdited`). If the
 machine reads the version as something other than the one the publisher listed, the sheet refuses it in one sentence.
 Nothing here ever runs on its own. **Unsubscribe** (was Leave) stops showing the publisher; what you installed stays and
 keeps working. Each publisher shows the person's own label and the first 20 characters of its

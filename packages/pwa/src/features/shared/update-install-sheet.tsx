@@ -14,7 +14,7 @@ import {
   type SharedCatalogManifestEntry,
   type SignedCatalogItemVersions,
 } from '@ferretry/protocol';
-import { CircleCheck } from 'lucide-react';
+import { CircleAlert, CircleCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../shell/primitives.tsx';
 import {
@@ -43,7 +43,8 @@ import {
   busyLabel,
   confirmLabel,
   DONE_UPDATING,
-  EDITED_NOTE,
+  editedBanner,
+  editedChoice,
   KEEP_MY_EDITS,
   moveSubtitle,
   NO_COMPARISON,
@@ -103,24 +104,29 @@ function UpdateLanded({ landed, onDone }: { readonly landed: CatalogInstalled; r
 }
 
 function EditedChoice({
-  paths,
+  banner,
+  version,
   busy,
   onKeep,
   onReplace,
 }: {
-  readonly paths: readonly string[];
+  readonly banner: string;
+  readonly version: number;
   readonly busy: boolean;
   readonly onKeep: () => void;
   readonly onReplace: () => void;
 }) {
   return (
     <section className="flex min-w-0 flex-col items-start gap-xs" data-update-edited="">
-      <p className="m-0 break-words text-cell text-fg">{EDITED_NOTE}</p>
-      {paths.length === 0 ? null : (
-        <p className="m-0 break-all font-mono text-meta text-muted" data-update-edited-paths="">
-          {paths.join(', ')}
-        </p>
-      )}
+      <p
+        className="m-0 flex w-full items-start gap-2 break-words rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-cell text-fg"
+        role="status"
+        data-update-edited-banner=""
+      >
+        <CircleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-warn" />
+        <span>{banner}</span>
+      </p>
+      <p className="m-0 break-words text-cell text-muted">{editedChoice(version)}</p>
       <div className="flex flex-wrap gap-xs">
         <Button type="button" className="min-h-[44px]" disabled={busy} onClick={onKeep} data-update-keep="">
           {KEEP_MY_EDITS}
@@ -259,15 +265,18 @@ export function UpdateInstallSheet({
       ) : null}
       {failure === null ? null : (
         <div className="flex min-w-0 flex-col items-start gap-xs">
-          <FailureLine
-            sentence={failure.sentence}
-            {...(failure.previewAgain && source !== null
-              ? { again: true, onAgain: () => void ask(source, replacing) }
-              : {})}
-          />
+          {failure.editedOffered && source !== null ? null : (
+            <FailureLine
+              sentence={failure.sentence}
+              {...(failure.previewAgain && source !== null
+                ? { again: true, onAgain: () => void ask(source, replacing) }
+                : {})}
+            />
+          )}
           {failure.editedOffered && source !== null ? (
             <EditedChoice
-              paths={paths}
+              banner={editedBanner(failure.sentence)}
+              version={version}
               busy={busy}
               onKeep={onClose}
               onReplace={() => {

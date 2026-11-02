@@ -78,8 +78,14 @@ async function open(
   return { ...fake, view, changed, refused, asked };
 }
 
+const MENU_ACTS = new Set(['stay', 'skip', 'move']);
+
+/** A button beside the status, or an item of the More menu (opened first). */
 const tap = async (act: string) => {
-  await click(q(`[data-shared-item-act="${act}"]`));
+  if (MENU_ACTS.has(act)) {
+    await click(q('[data-shared-item-more]'));
+    await click(q(`[data-menu-key="${act}"]`));
+  } else await click(q(`[data-shared-item-act="${act}"]`));
   await settle();
   await settle();
 };
@@ -87,24 +93,51 @@ const tap = async (act: string) => {
 describe('what the row says', () => {
   it('says only Installed for a current install, and offers nothing', async () => {
     const { view } = await open({}, { entry: { ...fx.entry, version: 1 } });
-    expect(q('[data-shared-item-installed]')?.textContent).toBe('Installed v1');
+    expect(q('[data-shared-item-installed]')?.textContent).toBe('v1 installed');
     expect(q('[data-shared-item-status]')?.getAttribute('data-shared-item-status')).toBe('current');
     expect(acts()).toEqual([]);
+    expect(q('[data-shared-item-more]')).toBeNull();
     await view.unmount();
   });
 
-  it('says Update available with every act as a plain verb, each at least 44 px high', async () => {
+  it('says both versions in the chip, with Update and See changes and one More beside it, each at least 44 px high', async () => {
     const { view } = await open({});
-    expect(q('[data-shared-item-installed]')?.textContent).toBe('Installed v1 · Update available');
-    expect(acts()).toEqual(['changes', 'update', 'stay', 'skip', 'move']);
-    expect(all('[data-shared-item-act]').map(button => button.textContent)).toEqual([
-      'See changes',
-      'Update',
-      'Stay on v1',
-      'Skip this version',
-      'Move to version…',
+    expect(q('[data-shared-item-installed]')?.textContent).toBe('v1 installed · v2 available');
+    expect(acts()).toEqual(['update', 'changes']);
+    expect(all('[data-shared-item-act]').map(button => button.textContent)).toEqual(['Update', 'See changes']);
+    const more = q('[data-shared-item-more]');
+    expect(more?.getAttribute('aria-label')).toBe('More');
+    expect(more?.getAttribute('aria-haspopup')).toBe('menu');
+    expect(
+      [...all('[data-shared-item-act]'), more].every(button => button?.className.includes('min-h-[44px]') === true),
+    ).toBe(true);
+    await view.unmount();
+  });
+
+  it('keeps Stay, Skip and Move in the More menu, each saying what it does', async () => {
+    const { view } = await open({});
+    expect(q('[role="menu"]')).toBeNull();
+    await click(q('[data-shared-item-more]'));
+    expect(q('[data-shared-item-more]')?.getAttribute('aria-expanded')).toBe('true');
+    expect(q('[role="menu"]')?.getAttribute('aria-label')).toBe('More for pdf-tools');
+    expect(all('[role="menuitem"]').map(item => item.getAttribute('data-menu-key'))).toEqual(['stay', 'skip', 'move']);
+    expect(all('[role="menuitem"]').map(item => item.textContent)).toEqual([
+      'Stay on v1Keep v1 and stop asking about newer versions. Ask again clears it.',
+      'Skip this versionHide v2 only. A newer version asks again.',
+      'Move to version…Pick any version the publisher still offers, newer or older.',
     ]);
-    expect(all('[data-shared-item-act]').every(button => button.className.includes('min-h-[44px]'))).toBe(true);
+    q('[aria-label="Close menu"]')?.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await settle();
+    expect(q('[role="menu"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('offers only a move, in the menu, when the publisher took the newer version back', async () => {
+    const { view } = await open({}, { entry: { ...fx.entry, version: 0 } });
+    expect(q('[data-shared-item-installed]')?.textContent).toBe('v1 installed');
+    expect(acts()).toEqual([]);
+    await click(q('[data-shared-item-more]'));
+    expect(all('[role="menuitem"]').map(item => item.getAttribute('data-menu-key'))).toEqual(['move']);
     await view.unmount();
   });
 });
@@ -129,13 +162,13 @@ describe('stay, skip and ask again', () => {
 
   it('asks again by clearing the stay choice, or the skip', async () => {
     const stayed = await open({ [PATCH]: () => installRecord() }, { change: { hold: true } });
-    expect(q('[data-shared-item-installed]')?.textContent).toBe('Installed v1 · Staying on v1');
+    expect(q('[data-shared-item-installed]')?.textContent).toBe('v1 installed · Staying on v1');
     await tap('again');
     expect(stayed.calls[0]?.body).toEqual({ hold: false });
     await stayed.view.unmount();
     document.body.replaceChildren();
     const skipped = await open({ [PATCH]: () => installRecord() }, { change: { skippedVersion: 2 } });
-    expect(q('[data-shared-item-installed]')?.textContent).toBe('Installed v1 · Skipped v2');
+    expect(q('[data-shared-item-installed]')?.textContent).toBe('v1 installed · Skipped v2');
     await tap('again');
     expect(skipped.calls[0]?.body).toEqual({ skippedVersion: null });
     await skipped.view.unmount();
@@ -198,6 +231,12 @@ describe('move to version', () => {
     expect(lines[0]?.textContent).toContain('v2 · Newer · Current · 2026-10-31');
     expect((lines[1] as HTMLButtonElement).disabled).toBe(true);
     expect(lines.every(line => line.className.includes('min-h-[44px]'))).toBe(true);
+    const installed = lines[1] as HTMLElement;
+    expect(installed.querySelector('[data-move-installed-mark]')).not.toBeNull();
+    expect(installed.textContent).toContain('Installed');
+    expect(installed.getAttribute('aria-current')).toBe('true');
+    expect(installed.className).toContain('disabled:opacity-100');
+    expect(lines[0]?.querySelector('[data-move-installed-mark]')).toBeNull();
     await view.unmount();
   });
 
