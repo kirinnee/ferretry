@@ -793,13 +793,16 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   **A value typed in by hand is never in `changes`.** The preview is open to a ferret and the installed copy is
   read from this machine's own bytes, so BOTH sides of the comparison, the installed copy and the offered item,
   go through the fleet's own rules first (`looksSecret`, `redactText`): (a) an environment value that is not a
-  whole `${secret:…}` placeholder and that `looksSecret(name, value)` flags (a name such as `PASSWORD` or
-  `TOKEN`, or a known token prefix; any length from 8) is shown as `‹hidden›`; (b) a skill file has each line
-  that holds such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command,
-  arguments and address have the same lines cut, and an address's user name and password and its secret-looking
-  query values; (d) a file whose lines **joined** still hold a secret (one split over lines), or that holds a
-  private key block, is hidden whole. A value cut on both sides that is not the same on both reads
-  `‹hidden, different›` on the offered side, so a change is never shown as no change. The rest of the answer
+  whole `${secret:…}` placeholder (or an indirect `$VAR`) is shown as `‹hidden›` at **any length** when its NAME
+  announces a secret (`PASSWORD`, `TOKEN`, …), or when `looksSecret(name, value)` flags it (a known token prefix);
+  any other value has its user info and secret-looking query values cut; (b) a skill file has each line that holds
+  such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command, arguments and
+  address have the same lines cut, and an address's user name and password and its secret-looking query values;
+  an argument that follows a flag naming a secret (`--password x`), or is that flag's `=` value, is cut too;
+  (d) a file whose lines **joined across each line break** still hold a secret (one split over lines, indented or
+  not), or that holds a private key block, is hidden whole. Wherever a value is cut and the raw texts of the two
+  sides differ while what is shown is the same, the offered side reads `‹hidden, different›` (in a file, an
+  environment value, the command, an argument or the address), so a change is never shown as no change. The rest of the answer
   (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
   is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are

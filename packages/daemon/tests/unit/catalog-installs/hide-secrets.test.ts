@@ -63,6 +63,98 @@ describe('hideSecrets: servers', () => {
   });
 });
 
+describe('hideSecrets: names, flags and addresses', () => {
+  const setupOf = (item: unknown) =>
+    (item as { mcp: { args: string[]; env: Record<string, string>; command: string } }).mcp;
+
+  it('should hide a value at any length when its name announces a secret, and keep references', () => {
+    const [one] = hideSecrets(
+      command({
+        env: { DB_PASSWORD: 'hunter2', A_TOKEN: '$TOKEN', B_TOKEN: '${secret:B}', MODE: 'dev', EMPTY_TOKEN: '' },
+      }),
+      command({}),
+    );
+    should(setupOf(one).env).eql({
+      DB_PASSWORD: HIDDEN,
+      A_TOKEN: '$TOKEN',
+      B_TOKEN: '${secret:B}',
+      MODE: 'dev',
+      EMPTY_TOKEN: '',
+    });
+  });
+
+  it('should cut the password after a flag that names one, and the value of such a flag written with =', () => {
+    const [one] = hideSecrets(
+      command({
+        args: [
+          '--password',
+          'hunter2xyz',
+          '--api-key=short1',
+          '--token',
+          '$TOKEN',
+          '--mode',
+          'fast',
+          '--password',
+          '--x',
+        ],
+      }),
+      command({}),
+    );
+    should(setupOf(one).args).eql([
+      '--password',
+      HIDDEN,
+      '--api-key=' + HIDDEN,
+      '--token',
+      '$TOKEN',
+      '--mode',
+      'fast',
+      '--password',
+      '--x',
+    ]);
+  });
+
+  it('should cut user info and a query secret out of an environment value', () => {
+    const [one] = hideSecrets(command({ env: { DB_URL: 'postgres://app:pa55word99@db/app' } }), command({}));
+    should(setupOf(one).env.DB_URL).equal(`postgres://${HIDDEN}@db/app`);
+  });
+
+  it('should say a hidden change differs in the command, an argument and an address', () => {
+    const [, offered] = hideSecrets(
+      command({ command: 'run API_KEY=sk-aaaaaaaaaaaaaaaa', args: ['--token=ghp_aaaaaaaaaaaaaaaa'] }),
+      command({ command: 'run API_KEY=sk-bbbbbbbbbbbbbbbb', args: ['--token=ghp_bbbbbbbbbbbbbbbb'] }),
+    );
+    should(setupOf(offered).command).equal(`run API_KEY=${HIDDEN_DIFFERENT}`);
+    should(setupOf(offered).args).eql(['--token=' + HIDDEN_DIFFERENT]);
+    const [, url] = hideSecrets(
+      mcp({ transport: 'url', url: 'https://a.example.com/x?api_key=aaaaaaaaaaaa' }),
+      mcp({ transport: 'url', url: 'https://a.example.com/x?api_key=bbbbbbbbbbbb' }),
+    );
+    should((url as { mcp: { url: string } }).mcp.url).equal(`https://a.example.com/x?api_key=${HIDDEN_DIFFERENT}`);
+  });
+
+  it('should say a hidden change differs in a file whose lines are cut', () => {
+    const [, same] = hideSecrets(
+      skill(['a.md', 'API_TOKEN=exampleexample1\n']),
+      skill(['a.md', 'API_TOKEN=exampleexample1\n']),
+    );
+    should((same as { skill: { files: { content: string }[] } }).skill.files[0]?.content).equal(
+      `API_TOKEN=${HIDDEN}\n`,
+    );
+    const [, other] = hideSecrets(
+      skill(['a.md', 'API_TOKEN=myrealtoken99x\n']),
+      skill(['a.md', 'API_TOKEN=exampleexample1\n']),
+    );
+    should((other as { skill: { files: { content: string }[] } }).skill.files[0]?.content).equal(
+      `API_TOKEN=${HIDDEN_DIFFERENT}\n`,
+    );
+  });
+
+  it('should hide a file too long to check for a split secret', () => {
+    const [one] = hideSecrets(skill(['a.md', 'x\n'.repeat(20_001)]), skill());
+    should((one as { skill: { files: { content: string }[] } }).skill.files[0]?.content).equal(HIDDEN);
+  });
+});
+
 describe('hideSecrets: skills', () => {
   it('should leave a file with nothing secret as it is', () => {
     const [before, after] = hideSecrets(skill(['SKILL.md', '# one\n']), skill(['SKILL.md', '# two\n']));
