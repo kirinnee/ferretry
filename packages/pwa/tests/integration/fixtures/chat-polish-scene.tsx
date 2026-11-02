@@ -41,7 +41,7 @@ const daemon = daemonConnection({ daemonId: 'daemon-chat', baseUrl: 'https://cha
 const NOW = Date.now();
 const MINUTE = 60_000;
 
-/** The fleet this scene can prove, so a peer's foot carries its quiet "Open conversation" link too. */
+/** The fleet this scene can prove, so a peer's foot carries its quiet "Open chat" link too. */
 const FLEET = [
   { config: { id: 'mvtorre1-a41c8b02', teammate: 'torrey' }, state: { status: 'running' } },
   { config: { id: 'mvlizze2-b93d70f1', teammate: 'lizzette' }, state: { status: 'running' } },
@@ -262,7 +262,7 @@ function Scene() {
   return (
     <div className="scene-chat">
       {/* The surface a session page assembles: enough of one to prove the peers by their sessions,
-          so the foot shows its quiet "Open conversation" link beside "Show more" and the ticks. */}
+          so the foot shows its quiet "Open chat" link beside "Show more" and the ticks. */}
       <ReferenceSurfaceProvider
         surface={{
           agentReferenceResolver: createAgentReferenceResolver(daemon.daemonId, FLEET),

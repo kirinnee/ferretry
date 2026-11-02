@@ -119,7 +119,7 @@ describe('chat polish', () => {
       expect(more).not.toBeNull();
       expect(link).not.toBeNull();
       expect(time).not.toBeNull();
-      // Show more, Open conversation and the time share one line — none takes a row of its own.
+      // Show more, Open chat and the time share one line — none takes a row of its own.
       expect(Math.abs(centre(more) - centre(time))).toBeLessThanOrEqual(2);
       expect(Math.abs(centre(link) - centre(time))).toBeLessThanOrEqual(2);
       expect(time?.x ?? 0).toBeGreaterThan((link?.x ?? 0) + (link?.width ?? 0));
@@ -129,6 +129,26 @@ describe('chat polish', () => {
       const shortTime = await short.locator('time').boundingBox();
       expect(await short.locator('[data-peer-more]').count()).toBe(0);
       expect(Math.abs(centre(quiet) - centre(shortTime))).toBeLessThanOrEqual(2);
+      // On the narrowest phone the row may wrap, but a control's own words are never cut: neither the
+      // button nor the link carries an ellipsis.
+      const narrow = await browser.newContext({
+        viewport: { width: 320, height: 640 },
+        colorScheme: 'light',
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+      });
+      try {
+        const tab = await open(narrow, 'theme=studio-light', '.fy-transcript-content');
+        const controls = tab.locator(
+          '.fy-message-peer[data-peer="torrey"] [data-peer-more], .fy-message-peer[data-peer="torrey"] .fy-peer-open',
+        );
+        expect(await controls.count()).toBe(2);
+        for (const control of await controls.all())
+          expect(await control.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      } finally {
+        await narrow.close();
+      }
     } finally {
       await context.close();
     }

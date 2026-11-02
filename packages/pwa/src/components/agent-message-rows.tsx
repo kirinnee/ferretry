@@ -80,9 +80,10 @@ export function PeerName({
 
 /**
  * "Open conversation with tomi" — a real link, so a modifier-click still opens a new tab. The row says
- * only "Open conversation ›": the sender's name is already the header of the card this foots, and the
- * shorter words are what let the control share the foot's one line. The name is still spoken — the
- * link's accessible name keeps it, screen-reader-only.
+ * only "Open chat ›" — the words the Inbox already uses for the same move, and short enough that the
+ * label is never cut to fit the foot's one line (a control's words are never truncated). The sender's
+ * name is already the header of the card this foots, and the name is still spoken — the link's
+ * accessible name keeps it, screen-reader-only.
  */
 function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; readonly surface: ReferenceSurface }) {
   const navigate = surface.onNavigate;
@@ -95,7 +96,7 @@ function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; r
   };
   return (
     <a className="fy-peer-open" href={to} onClick={open}>
-      Open conversation
+      Open chat
       <span aria-hidden="true"> ›</span>
       <span className="sr-only"> with {displayCallsign(agent.name)}</span>
     </a>

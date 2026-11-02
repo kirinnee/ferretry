@@ -118,8 +118,9 @@ describe('a message from another ferret', () => {
       </ReferenceSurfaceProvider>,
     );
     const open = view.root.findByProps({ className: 'fy-peer-open' });
-    // The foot's row says only "Open conversation ›"; the name it opens stays in the spoken name.
-    expect(open.children[0]).toBe('Open conversation');
+    // The foot's row says only "Open chat ›" — never cut, even on the narrowest phone; the name it
+    // opens stays in the spoken name.
+    expect(open.children[0]).toBe('Open chat');
     const [chevron, spoken] = open.children.filter(child => typeof child !== 'string');
     expect(chevron?.props['aria-hidden']).toBe('true');
     expect(spoken?.props.className).toBe('sr-only');
