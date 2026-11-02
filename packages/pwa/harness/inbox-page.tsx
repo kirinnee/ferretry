@@ -267,7 +267,7 @@ const GATE = item('G61', 3, 'daemon', {
   raisedBy: 'daemon',
   raisedBySession: null,
   raisedByName: null,
-  ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
+  ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
   gate: {
     cardId: 'F61',
     laneId: 'tested',
@@ -288,14 +288,14 @@ const GATE_PLAN = item('G62', 3, 'daemon', {
   subject: 'OK to build: pairing a second phone',
   why: 'The plan for pairing a second phone is ready.',
   body: '1. Add a second pairing code route.\n2. Show every paired phone in Devices.\n3. Let the owner revoke one phone.',
-  ask: { kind: 'multiple-choice', options: [{ label: 'Approve' }, { label: 'Change the plan' }] },
+  ask: { kind: 'multiple-choice', options: [{ label: 'Change the plan' }, { label: 'Approve' }] },
   gate: {
     ...GATE.gate,
     cardId: 'F62',
     laneId: 'plan',
     laneName: 'Plan',
     options: [
-      { id: 'o0', label: 'Approve', outcome: 'advance' },
+      { id: 'o0', label: 'Approve', outcome: 'next' },
       { id: 'o1', label: 'Change the plan', outcome: 'reopen-with-agenda' },
     ],
   },
