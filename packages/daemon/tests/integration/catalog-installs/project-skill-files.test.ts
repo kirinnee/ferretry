@@ -117,6 +117,23 @@ describe('FileProjectSkillFiles.read', () => {
     should(reading.tooLarge).deepEqual(['blob.bin', 'big.txt']);
   });
 
+  it('should read a file of exactly the largest size, and mark one byte more as too large to show', async () => {
+    // Arrange
+    const root = await project();
+    await mkdir(join(root, FOLDER), { recursive: true });
+    const cap = 256 * 1024;
+    await writeFile(join(root, FOLDER, 'exact.txt'), 'z'.repeat(cap), 'utf8');
+    await writeFile(join(root, FOLDER, 'over.txt'), 'z'.repeat(cap + 1), 'utf8');
+
+    // Act
+    const reading = await new FileProjectSkillFiles().read(root, FOLDER, ['exact.txt', 'over.txt']);
+
+    // Assert
+    should([...reading.files.keys()]).deepEqual(['exact.txt']);
+    should(reading.files.get('exact.txt')?.length).equal(cap);
+    should(reading.tooLarge).deepEqual(['over.txt']);
+  });
+
   it('should mark a file past the total a skill may hold as too large to show', async () => {
     // Arrange
     const root = await project();

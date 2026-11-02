@@ -106,7 +106,9 @@ class MemoryStore implements CatalogInstallStore {
 class MemoryPrefs implements CatalogInstallPrefsStore {
   state: CatalogInstallPrefsState = EMPTY_CATALOG_INSTALL_PREFS;
   failWrite: Error | undefined;
+  failRead: Error | undefined;
   async read(): Promise<CatalogInstallPrefsState> {
+    if (this.failRead !== undefined) throw this.failRead;
     return structuredClone(this.state);
   }
 
@@ -121,7 +123,12 @@ class FakeMcpFiles implements McpProjectFiles {
   version = 0;
   failRead: Error | undefined;
   racing = false;
+  reads = 0;
+  /** Runs at the start of each read, with how many there have been: a file that moves between two reads. */
+  onRead: ((reads: number) => void) | undefined;
   async read(): Promise<McpProjectFileReading> {
+    this.reads += 1;
+    this.onRead?.(this.reads);
     if (this.failRead !== undefined) throw this.failRead;
     return { text: this.text, etag: this.text === null ? null : `e${this.version}` };
   }

@@ -129,8 +129,15 @@ async function readIfPresent(
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw notPlain(path);
-    if (info.size > CATALOG_SKILL_FILE_MAX_BYTES) return { size: info.size };
-    return { size: info.size, bytes: new Uint8Array(await handle.readFile()) };
+    // Never trust the size from `stat`: the file may grow before it is read. Read one byte past the cap and count them.
+    const buffer = new Uint8Array(CATALOG_SKILL_FILE_MAX_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    return length > CATALOG_SKILL_FILE_MAX_BYTES ? { size: length } : { size: length, bytes: buffer.slice(0, length) };
   } finally {
     await handle.close();
   }

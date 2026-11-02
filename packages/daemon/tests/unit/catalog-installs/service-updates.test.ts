@@ -782,3 +782,143 @@ describe('stay and skip', () => {
     should(preview.replaces?.version).equal(1);
   });
 });
+
+describe('an edit undone after the review', () => {
+  it('should apply a skill whose edited file was put back, and not refuse it for the hash it once had', async () => {
+    const r = rig();
+    await install(r, skillV(1));
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'mine');
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, skillV(2), projectTarget(), { replaceEdited: true }),
+    );
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', '# v1\n');
+    const installed = await applyPreview(r, preview);
+    should(installed.install.provenance.version).equal(2);
+    should(r.folders.folders.get(FOLDER)?.get('SKILL.md')).equal('# v2\n');
+  });
+
+  it('should apply a runtime server whose stored component was put back', async () => {
+    const r = rig();
+    await install(r, mcpItem(alice.daemonId), runtimeTarget());
+    const original = r.fleet.components.get('mcp')?.[0];
+    const current = r.fleet.components.get('mcp')?.[0];
+    r.fleet.components.set('mcp', [
+      { ...current, name: 'acme-mcp', detail: { ...(current?.detail as object), edited: 1 } },
+    ]);
+    const preview = await r.service.preview(
+      'runtime',
+      await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), runtimeTarget(), { replaceEdited: true }),
+    );
+    r.fleet.components.set('mcp', original === undefined ? [] : [original]);
+    const installed = await r.service.apply(
+      'runtime',
+      { previewId: preview.previewId, secretBindings: { ACME_TOKEN: null } },
+      GOVERNANCE,
+      STEP_UP,
+    );
+    should(installed.install.provenance.version).equal(2);
+  });
+
+  it('should apply a project server whose entry was put back', async () => {
+    const r = rig();
+    await install(r, mcpItem(alice.daemonId), projectTarget());
+    const original = r.mcp.text;
+    const written = JSON.parse(original ?? '{}') as { mcpServers: Record<string, Record<string, unknown>> };
+    written.mcpServers['acme-mcp'] = { ...written.mcpServers['acme-mcp'], args: ['--mine'] };
+    r.mcp.text = JSON.stringify(written);
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), projectTarget(), { replaceEdited: true }),
+    );
+    r.mcp.text = original;
+    const installed = await r.service.apply(
+      'project',
+      { previewId: preview.previewId, secretBindings: { ACME_TOKEN: null } },
+      GOVERNANCE,
+      STEP_UP,
+    );
+    should(installed.install.provenance.version).equal(2);
+  });
+});
+
+describe('a project server file that moves while the install is applied', () => {
+  it('should refuse when the entry changed between the check and the write', async () => {
+    const r = rig();
+    await install(r, mcpItem(alice.daemonId), projectTarget());
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), projectTarget()),
+    );
+    const before = r.mcp.reads;
+    r.mcp.onRead = reads => {
+      if (reads !== before + 2) return;
+      const written = JSON.parse(r.mcp.text ?? '{}') as { mcpServers: Record<string, Record<string, unknown>> };
+      written.mcpServers['acme-mcp'] = { ...written.mcpServers['acme-mcp'], args: ['--sneaked'] };
+      r.mcp.text = JSON.stringify(written);
+      r.mcp.version += 1;
+    };
+    const error = await refusal(
+      r.service.apply(
+        'project',
+        { previewId: preview.previewId, secretBindings: { ACME_TOKEN: null } },
+        GOVERNANCE,
+        STEP_UP,
+      ),
+    );
+    should(error.code).equal('catalog_install_conflict');
+    should(r.mcp.text).match(/--sneaked/u);
+  });
+
+  it('should refuse when a server of that name appeared between the check and the write', async () => {
+    const r = rig();
+    const preview = await r.service.preview('project', await request(alice, mcpItem(alice.daemonId), projectTarget()));
+    const before = r.mcp.reads;
+    r.mcp.onRead = reads => {
+      if (reads !== before + 2) return;
+      r.mcp.text = JSON.stringify({ mcpServers: { 'acme-mcp': { command: 'theirs' } } });
+      r.mcp.version += 1;
+    };
+    const error = await refusal(
+      r.service.apply(
+        'project',
+        { previewId: preview.previewId, secretBindings: { ACME_TOKEN: null } },
+        GOVERNANCE,
+        STEP_UP,
+      ),
+    );
+    should(error.code).equal('catalog_install_conflict');
+    should(r.mcp.text).match(/theirs/u);
+  });
+});
+
+describe('a damaged preferences file', () => {
+  it('should still list every install, say so, and refuse a new choice', async () => {
+    const r = rig();
+    const { installed } = await install(r, skillV(1));
+    r.prefs.failRead = new CatalogInstallStateError(
+      'catalog-install-prefs.json is not JSON, so no preference was changed',
+    );
+    const listed = await r.service.list();
+    should(listed.installs).have.length(1);
+    should(listed.installs[0]?.hold).be.undefined();
+    should(listed.note).match(/catalog-install-prefs\.json/u);
+    should(listed.note).match(/stay or skip/u);
+    await r.service
+      .setPrefs('project', installed.install.installId, { hold: true })
+      .should.be.rejectedWith(CatalogInstallStateError);
+  });
+
+  it('should list no note when the file is fine', async () => {
+    const r = rig();
+    await install(r, skillV(1));
+    should((await r.service.list()).note).be.undefined();
+  });
+
+  it('should not hide a read failure that is not a damaged file', async () => {
+    const r = rig();
+    await install(r, skillV(1));
+    r.prefs.failRead = new Error('disk gone');
+    await r.service.list().should.be.rejectedWith('disk gone');
+  });
+});

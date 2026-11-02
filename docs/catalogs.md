@@ -749,21 +749,41 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   not text is shown as too large. An MCP server is read from the project `.mcp.json` entry or the stored
   component, with the values the install filled in mapped back to their placeholders. If the installed copy
   cannot be rebuilt, `changes` is left out and the preview still stands.
+  **A value typed in by hand is never in `changes`.** The preview is open to a ferret and the installed copy is
+  read from this machine's own bytes, so BOTH sides of the comparison, the installed copy and the offered item,
+  go through the fleet's own rules first (`looksSecret`, `redactText`): (a) an environment value that is not a
+  whole `${secret:…}` placeholder and that `looksSecret(name, value)` flags (a name such as `PASSWORD` or
+  `TOKEN`, or a known token prefix; any length from 8) is shown as `‹hidden›`; (b) a skill file has each line
+  that holds such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command,
+  arguments and address have the same lines cut, and an address's user name and password and its secret-looking
+  query values; (d) a file whose lines **joined** still hold a secret (one split over lines), or that holds a
+  private key block, is hidden whole. A value cut on both sides that is not the same on both reads
+  `‹hidden, different›` on the offered side, so a change is never shown as no change. The rest of the answer
+  (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
+  is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are
   files it wrote whose hash changed (a stored component, or the server's `.mcp.json` entry), the preview is
   refused with **`catalog_install_edited`** (409), naming the paths. Nothing is changed. **Keep** is
   doing nothing. **Replace** is the same preview with `replaceEdited: true`: it lists `edited` with an
-  `edited-locally` warning and **saves the hashes it saw**. The apply passes them as `expected` to the
-  write, so a file edited again after the review is refused `catalog_install_edited` again. A file the
+  `edited-locally` warning and **saves the hashes it saw**. The apply re-reads the place and compares it with those
+  hashes (`sameEdits`), so a file edited again after the review is refused `catalog_install_edited` again; an
+  edit **undone** after the review is no edit, and the write is guarded by what is on disk at the apply, not by the
+  hash once reviewed. A project server's `.mcp.json` entry is checked again at the write, against the entry the
+  check saw, so a file that moves between the two is `catalog_install_conflict`. A file the
   install has no hash for, or anything another install holds, is never overwritten or deleted: that stays
   `catalog_install_conflict`, and it wins over `edited`.
 - **Stay or skip.** `PATCH …/:installId` with `{hold?: boolean, skippedVersion?: int | null}` records the
   person's choice about future versions and answers the install (with `hold` / `skippedVersion` when set).
   `hold: false` and `skippedVersion: null` clear. It touches no file and asks for no passkey, but it is the
   person's act, so a ferret is refused. The choice lives in `<FY_HOME>/state/catalog-install-prefs.json`
-  (`schemaVersion` 1, `0600`, written by temp file and rename; a damaged file is an error, never
-  "no choices"), apart from `catalog-installs.json`, which stays at version 1. A choice is dropped when its
+  (`schemaVersion` 1, `0600`, written by temp file and rename; a damaged file refuses every NEW choice, never
+  "no choices", but it does not hide the installs: the list shows all of them without any choice and a `note` that
+  says the file is damaged), apart from `catalog-installs.json`, which stays at version 1. A choice is dropped when its
   install is removed or replaced. Neither choice ever updates, or stops, anything on its own.
+- **Declared gap: the revision a machine has seen rises only on an apply.** A machine that never installed from
+  revision r+1 accepts a cached (manifest r, version list r) pair, exactly as the current-version path does:
+  `catalog_revision_older` is judged against what this machine has installed from, not against what it has
+  merely been shown.
 - **Feature flag.** `GET /v1/health` lists `catalog-installs.updates.1` once the daemon does all of this, so
   an app can tell a daemon that answers `changes` from one that does not.
 

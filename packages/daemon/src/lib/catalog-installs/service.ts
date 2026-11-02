@@ -64,6 +64,7 @@ import {
   renderMcpProjectFile,
 } from '../session-mcp/project-file.ts';
 import { type EditedHashes, editedView, editedWords, hasEdits, NO_EDITS, sameEdits } from './edited.ts';
+import { hideSecrets } from './hide-secrets.ts';
 import {
   mcpAsInstalled,
   setupOfProjectEntry,
@@ -71,7 +72,13 @@ import {
   withPlaceholders,
   withUnreadableFiles,
 } from './on-disk-item.ts';
-import { type CatalogInstallPrefsStore, mergedPref, withPref } from './prefs.ts';
+import {
+  type CatalogInstallPrefsState,
+  type CatalogInstallPrefsStore,
+  EMPTY_CATALOG_INSTALL_PREFS,
+  mergedPref,
+  withPref,
+} from './prefs.ts';
 import { CatalogPreviews, type HeldPreview } from './previews.ts';
 import {
   CatalogInstallRefusalError,
@@ -86,6 +93,7 @@ import {
   type CatalogInstallRecord,
   type CatalogInstallState,
   type CatalogInstallStore,
+  CatalogInstallStateError,
 } from './store.ts';
 
 export interface CatalogInstallServiceDeps {
@@ -168,6 +176,8 @@ interface DestinationState {
   readonly replaces: CatalogInstallRecord | undefined;
   readonly reading: SkillFolderReading | undefined;
   readonly edited: EditedHashes;
+  /** A project server: the hash of its `.mcp.json` entry as checked (`null` when there was none). */
+  readonly entrySeen?: string | null;
 }
 
 /** The item as it is on disk now, for the diff, and the files that could not be read into it. */
@@ -207,8 +217,24 @@ export class CatalogInstallService {
   /** `GET /v1/catalog-installs`. */
   async list(): Promise<CatalogInstallList> {
     const state = await this.deps.store.read();
-    const prefs = await this.deps.prefs.read();
-    return { installs: state.installs.map(record => this.#view(record, prefs.installs[record.installId])) };
+    const { prefs, damaged } = await this.#readPrefsForList();
+    return {
+      installs: state.installs.map(record => this.#view(record, prefs.installs[record.installId])),
+      ...(damaged === undefined ? {} : { note: damaged }),
+    };
+  }
+
+  /** The hold/skip choices for a list. A damaged file hides no install: the list has none of them, and says so. */
+  async #readPrefsForList(): Promise<{ prefs: CatalogInstallPrefsState; damaged?: string }> {
+    try {
+      return { prefs: await this.deps.prefs.read() };
+    } catch (error) {
+      if (!(error instanceof CatalogInstallStateError)) throw error;
+      return {
+        prefs: EMPTY_CATALOG_INSTALL_PREFS,
+        damaged: `${error.message}. Every install is listed, but none of its stay or skip choices is shown, and a new choice cannot be saved until the file is fixed.`,
+      };
+    }
   }
 
   /** `PATCH /v1/catalog-installs/<scope>/:installId`: stay on this version, or skip one. Writes no file but the choice. */
@@ -382,7 +408,7 @@ export class CatalogInstallService {
       const state = await this.deps.store.read();
       const judged = this.#judge(state, held.provenance, held.revision, held.target, held.allowOlder);
       const resolved = await this.#resolveTarget(held.item, held.target);
-      const { replaces, reading, edited } = await this.#destinationState(
+      const { replaces, reading, edited, entrySeen } = await this.#destinationState(
         held.item,
         held.target,
         resolved,
@@ -396,7 +422,7 @@ export class CatalogInstallService {
         );
       const written =
         held.target.scope === 'project'
-          ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading)
+          ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading, entrySeen)
           : await this.#writeRuntime(held, held.target, request.secretBindings, replaces, reading, governance);
       const installedAt = new Date(this.deps.now()).toISOString();
       const record: CatalogInstallRecord = {
@@ -507,7 +533,8 @@ export class CatalogInstallService {
     try {
       const installed = await this.#installedItem(replaces, item, resolved, reading);
       if (installed === undefined) return undefined;
-      const changes = catalogItemChanges(installed.item, item, newDiffBudget());
+      const [before, after] = hideSecrets(installed.item, item);
+      const changes = catalogItemChanges(before, after, newDiffBudget());
       return item.kind === 'skill' && installed.unreadable.length > 0
         ? withUnreadableFiles(changes, installed.unreadable, item)
         : changes;
@@ -730,8 +757,13 @@ export class CatalogInstallService {
     const root = resolved.root as string;
     if (target.scope === 'project') {
       if (item.kind === 'mcp') {
-        const entry = await this.#checkProjectMcp(root, item.name, replaces);
-        return { replaces, reading: undefined, edited: entry === undefined ? NO_EDITS : { files: new Map(), entry } };
+        const { seen, entry } = await this.#checkProjectMcp(root, item.name, replaces);
+        return {
+          replaces,
+          reading: undefined,
+          edited: entry === undefined ? NO_EDITS : { files: new Map(), entry },
+          entrySeen: seen,
+        };
       }
       const folder = resolved.destination.folder as string;
       const reading = await this.#inspectProjectSkill(root, folder);
@@ -740,16 +772,16 @@ export class CatalogInstallService {
     return await this.#checkRuntime(item, replaces);
   }
 
-  /** Answers the entry's hash when it is the one of ours that was edited here since, else nothing. */
+  /** The entry's hash as read, and again as `entry` when it is the one of ours that was edited here since. */
   async #checkProjectMcp(
     root: string,
     name: string,
     replaces: CatalogInstallRecord | undefined,
-  ): Promise<string | undefined> {
+  ): Promise<{ seen: string | null; entry?: string }> {
     const { document } = await this.#readProjectMcp(root);
     const servers = document.mcpServers as Record<string, unknown> | undefined;
     const present = servers !== undefined && Object.hasOwn(servers, name);
-    if (!present) return undefined;
+    if (!present) return { seen: null };
     const recorded = replaces?.files[0]?.sha256;
     if (recorded === undefined)
       refuse(
@@ -757,7 +789,7 @@ export class CatalogInstallService {
         `${PROJECT_MCP_FILE} already has a server called ${name} that no install of ours put there.`,
       );
     const now = await this.#hash(JSON.stringify(servers[name]));
-    return now === recorded ? undefined : now;
+    return now === recorded ? { seen: now } : { seen: now, entry: now };
   }
 
   /** The runtime side of step 8. Answers the skill folder as it was READ, so the write is guarded by that very reading. */
@@ -857,18 +889,18 @@ export class CatalogInstallService {
     bindings: CatalogSecretBindings,
     replaces: CatalogInstallRecord | undefined,
     verified: SkillFolderReading | undefined,
+    entrySeen: string | null | undefined,
   ): Promise<Written> {
     const { item } = held;
     const root = resolved.root as string;
-    if (item.kind === 'mcp') return await this.#writeProjectMcp(item, root, bindings);
+    if (item.kind === 'mcp') return await this.#writeProjectMcp(item, root, bindings, entrySeen ?? null);
     if (item.kind !== 'skill') return refuse('catalog_not_installable', `${item.name} cannot be installed.`);
     const folder = resolved.destination.folder as string;
     const reading = verified as SkillFolderReading;
     const next = new Set(item.skill.files.map(file => file.path));
     const stale = this.#staleFiles(replaces, `${folder}/`, next, reading);
     const expected = new Map<string, string | null>();
-    for (const path of [...next, ...stale])
-      expected.set(path, held.edited?.files.get(path) ?? reading.files.get(path) ?? null);
+    for (const path of [...next, ...stale]) expected.set(path, reading.files.get(path) ?? null);
     try {
       await this.deps.skillFiles.apply(root, folder, {
         write: item.skill.files,
@@ -903,6 +935,7 @@ export class CatalogInstallService {
     item: Extract<SharedCatalogItem, { kind: 'mcp' }>,
     root: string,
     bindings: CatalogSecretBindings,
+    verifiedEntry: string | null,
   ): Promise<Written> {
     const notes: string[] = [];
     const server = this.#server(item, value => {
@@ -923,6 +956,13 @@ export class CatalogInstallService {
     const { path, reading, document } = await this.#readProjectMcp(root);
     const entry = projectEntry(server);
     const servers = (document.mcpServers ?? {}) as Record<string, unknown>;
+    // The entry checked at step 8 must still be the one in the file just read (the etag only guards after this read).
+    const now = Object.hasOwn(servers, item.name) ? await this.#hash(JSON.stringify(servers[item.name])) : null;
+    if (now !== verifiedEntry)
+      refuse(
+        'catalog_install_conflict',
+        `${PROJECT_MCP_FILE} changed while the install was being applied, so nothing was written. Preview it again.`,
+      );
     const text = renderMcpProjectFile({ ...document, mcpServers: { ...servers, [item.name]: entry } });
     try {
       await this.deps.mcpFiles.replace(path, text, reading.etag);
