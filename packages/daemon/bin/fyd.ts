@@ -65,6 +65,7 @@ import {
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
+  type BoardTaskStartResponse,
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
   daemonFeatureList,
@@ -620,6 +621,7 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
+import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
@@ -641,11 +643,17 @@ import {
   stageGateLanes,
   SessionCards,
   type SessionLivenessSource,
+  CardStartRefused,
+  ownerDelegation,
+  startOnCard,
   walkLadder,
 } from '../src/lib/board/index.ts';
 import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
+
+/** How many owner-start keys the daemon remembers (see `cardStartResults`). */
+const CARD_START_KEYS_KEPT = 256;
 
 /** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
 const WORK_SEARCH_WARM_DELAY_MS = 5_000;
@@ -4481,7 +4489,7 @@ interface WardenParts {
    */
   readonly attention: AgendaService;
   /**
-   * The machine items the Warden keeps: ferrets it could not move, cards with nobody on them. `folded` settles when
+   * The machine items the Warden keeps: ferrets it could not move, cards with nobody working on them. `folded` settles when
    * the boot folding of the old per-ferret notices has finished: the sweep waits for it, so a sweep and the folding
    * never write the same list at once.
    */
@@ -10225,6 +10233,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ledger is published when the Warden builds its monitor, further down, and reads nothing until then.
       const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
       const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
+      // One owner's start at a time per card (board/start-on-card.ts): the check and the start are one step.
+      const cardStarts = new KeyedSerialExecutor();
+      // What each click's start came to, by the key the click carried, apart from whether its ferret is still alive: a
+      // retry after a lost response gets the same answer even once that ferret has finished. Bounded, oldest first.
+      const cardStartResults = new Map<string, BoardTaskStartResponse>();
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
@@ -10915,7 +10928,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new FileMachineMembers(stateFiles, join(paths.state, 'machine-agenda-members.json')),
         clock,
       );
-      // The Warden's two list items: ferrets it could not move, and cards with nobody on them. Each is kept in a
+      // The Warden's two list items: ferrets it could not move, and cards with nobody working on them. Each is kept in a
       // small file so a restart still names them; a stopped or moved ferret leaves the first by itself.
       const candidateBox: { read?: (sessionId: string) => Promise<string | undefined> } = {};
       const wardenLists = {
@@ -13089,6 +13102,64 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           create: async (request, caller) => await boardWorld.board.create(request, caller),
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           skip: async (request, caller) => await boardWorld.board.skip(request, caller),
+          // The owner's start puts a NEW ferret on the card, in the card's own project's folder, on the machine's
+          // default runtime (board/start-on-card.ts). One at a time per card, so a retry finds the first start.
+          start: async (id, caller, key) =>
+            await startOnCard(
+              {
+                task: async taskId => await boardWorld.board.task(taskId),
+                folderOf: async card => {
+                  const project = (await catalogs.projects()).find(row => row.id === card.projectId);
+                  return project?.path ?? undefined;
+                },
+                live: async () => {
+                  const roster = await boardSessions.roster();
+                  return new Map(
+                    [...roster.sessions.values()]
+                      .filter(session => !isTerminalStatus(session.status))
+                      .map(session => [session.id, session.focusTask?.id ?? null] as const),
+                  );
+                },
+                stuck: async () => {
+                  const roster = await boardSessions.roster();
+                  return new Map(
+                    [...roster.sessions.values()]
+                      .filter(session => session.status === 'kill_failed')
+                      .map(session => [session.id, session.focusTask?.id ?? null] as const),
+                  );
+                },
+                exclusive: async (taskId, work) => await cardStarts.run(taskId, work),
+                start: async ({ card, folder, name, prompt }) => {
+                  const request = StartSessionRequestSchema.parse({ mode: 'auto', prompt, cwd: folder, name });
+                  try {
+                    const started = await sessionControl.start(
+                      request,
+                      crypto.randomUUID(),
+                      JSON.stringify(request),
+                      ownerDelegation(card),
+                      DAEMON_START,
+                    );
+                    return { sessionId: started.config.id, status: started.state.status, reason: started.state.reason };
+                  } catch (error) {
+                    if (error instanceof SessionControlError) throw new CardStartRefused(error.message);
+                    throw error;
+                  }
+                },
+                stop: async (sessionId, reason) => {
+                  await sessionControl.stop(sessionId, reason);
+                },
+                recall: key => cardStartResults.get(key),
+                remember: (key, result) => {
+                  cardStartResults.set(key, result);
+                  if (cardStartResults.size > CARD_START_KEYS_KEPT)
+                    cardStartResults.delete(cardStartResults.keys().next().value as string);
+                },
+                bin: CLIENT_NAME,
+              },
+              id,
+              caller,
+              key,
+            ),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,

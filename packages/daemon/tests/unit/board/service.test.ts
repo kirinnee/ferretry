@@ -1175,6 +1175,19 @@ describe('handing a card to a sub-ferret', () => {
     should(ports.store.writes).be.empty();
   });
 
+  it('should refuse a card moved into a closed lane after the lead chose it', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', laneId: 'closed' })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+
+    // Assert
+    should(error.code).equal('invalid');
+    should(error.message).equal('&F1 is closed; reopen it before you hand it to a sub-ferret');
+    should(ports.store.writes).be.empty();
+  });
+
   it('should still hand the card over, with a warning, when the sub-ferret cannot be focused', async () => {
     // Arrange
     const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
@@ -1185,6 +1198,35 @@ describe('handing a card to a sub-ferret', () => {
     // Assert
     should(handed).match({ id: 'F1', assignee: 'child' });
     should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
+  });
+});
+
+describe('the owner starting a ferret on a card', () => {
+  it('should assign the card to the new ferret as the owner and focus it', async () => {
+    // Arrange
+    const { service } = serviceWith([card({ id: 'F1', owner: 'lead' })]);
+
+    // Act
+    const assigned = await service.assignForOwner('F1', 'child');
+
+    // Assert
+    should(assigned).match({ id: 'F1', assignee: 'child' });
+  });
+
+  it('should refuse a dropped card and a card in a closed lane, and change nothing', async () => {
+    // Arrange
+    const dropped = serviceWith([card({ id: 'F1', dropped: { at: NOW, reason: 'x' } })]);
+    const closed = serviceWith([card({ id: 'F1', laneId: 'closed' })]);
+
+    // Act
+    const droppedError = await refusal(dropped.service.assignForOwner('F1', 'child'));
+    const closedError = await refusal(closed.service.assignForOwner('F1', 'child'));
+
+    // Assert
+    should(droppedError.message).equal('&F1 is dropped; reopen it before you start a ferret on it');
+    should(closedError.message).equal('&F1 is closed; reopen it before you start a ferret on it');
+    should(dropped.ports.store.writes).be.empty();
+    should(closed.ports.store.writes).be.empty();
   });
 });
 

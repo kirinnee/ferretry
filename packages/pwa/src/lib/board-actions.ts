@@ -25,6 +25,7 @@ import {
   type BoardTaskActionRequestInput,
   type BoardTaskCreateRequestInput,
   type BoardTaskId,
+  type BoardTaskStartResponse,
   type BoardTaskView,
   boardErr,
   boardOk,
@@ -52,6 +53,8 @@ interface BoardMutationError {
 type LaneMutation = BoardResult<LaneSet, LaneWriteError>;
 
 type BoardMutation = BoardResult<BoardTaskView, BoardMutationError>;
+
+type BoardStart = BoardResult<BoardTaskStartResponse, BoardMutationError>;
 
 /** A card, named by its machine and id, with what a move needs to be checked: its lane and its lane set. */
 interface BoardCardTarget {
@@ -99,6 +102,8 @@ export interface BoardActions {
   note(target: BoardCardTarget, text: string): Promise<BoardMutation>;
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
+  /** Starts a new ferret on the card (or names the live one that holds it); `key` makes a retry of one click safe. */
+  start(target: BoardCardTarget, key?: string): Promise<BoardStart>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
   /** Puts a card aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the card. */
   snoozeTask(target: BoardCardTarget, until: string | null): Promise<BoardMutation>;
@@ -130,7 +135,7 @@ export interface BoardActions {
 }
 
 export interface BoardActionsDeps {
-  readonly store: Pick<DaemonBoardStore, 'act' | 'create' | 'changeLanes'>;
+  readonly store: Pick<DaemonBoardStore, 'act' | 'create' | 'changeLanes' | 'start'>;
   readonly agenda: Pick<DaemonAgendaClient, 'respond'>;
   /** The current pairing of a machine, or `undefined` once it is unpaired. */
   readonly connection: (daemonId: DaemonId) => DaemonConnection | undefined;
@@ -213,6 +218,11 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     note: (target, text) => send(target, { action: 'note', text }),
     link: (target, link) => send(target, { action: 'link', ...link }),
     drop: (target, reason) => send(target, { action: 'drop', reason }),
+    start: async (target, key) => {
+      const machine = deps.connection(target.daemonId);
+      if (machine === undefined) return boardErr(unpaired(target.daemonId));
+      return await deps.store.start(machine, target.id, key);
+    },
     editField: (target, edit) => send(target, { action: 'edit', ...edit }),
     snoozeTask: (target, until) => send(target, { action: 'snooze', until }),
     reparent: (target, parent, reason) =>

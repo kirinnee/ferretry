@@ -29,6 +29,7 @@ import {
   AGENDA_PUSH_TITLE_LENGTH,
   type BoardTaskId,
   type BoardTaskView,
+  clipAtWord,
   formatTaskRef,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
@@ -199,6 +200,28 @@ const clamp = (value: string, maximum: number): string =>
 const remedies = (view: BoardTaskView, assignee: string, cli: string): string =>
   `Resume its ferret (\`${cli} resume ${assignee}\`), hand the card to another ferret (\`${cli} task assign ${view.id} <ferret>\`), or drop it (\`${cli} task drop ${view.id} --reason "<why>"\`).`;
 
+/** What became of a ferret, for a reader who is not an engineer: it finished, failed, or is gone. */
+const endedWords = (sessionId: string, fleet: ReadonlyMap<string, WardenSessionView>): string => {
+  const session = fleet.get(sessionId);
+  if (session === undefined) return 'is no longer on this machine';
+  return session.state.status === 'failed' ? 'has failed' : 'has finished';
+};
+
+const CARD_LINE_TAIL = (lane: string): string =>
+  ` is waiting in ${lane}, but no ferret is assigned, so nothing will happen to it.`;
+
+/**
+ * The one line that names an orphaned card: its reference, title and lane, and what that means. It is what the
+ * notice's subject and the machine list's row say, so it has to fit a push body: a long title gives way, never
+ * the ending.
+ */
+export function orphanCardLine(view: BoardTaskView, board: WardenBoardRead): string {
+  const ref = formatTaskRef(view);
+  const tail = CARD_LINE_TAIL(laneName(board, view));
+  const room = Math.max(24, AGENDA_PUSH_BODY_LENGTH - ref.length - 1 - tail.length);
+  return flatten(`${ref} ${clipAtWord(flatten(view.title), room)}${tail}`);
+}
+
 /** The queued message to the card's owner ferret. */
 export function orphanOwnerMessage(
   view: BoardTaskView,
@@ -208,11 +231,15 @@ export function orphanOwnerMessage(
 ): string {
   const assignee = effectiveAssignee(view);
   return (
-    `Your card ${formatTaskRef(view)} “${view.title}” has nobody on it. It is in ${laneName(board, view)}, ` +
-    `but its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive. ` +
+    `Your card ${formatTaskRef(view)} "${flatten(view.title)}" has no ferret working on it. It is waiting in ${laneName(board, view)}, ` +
+    `but its ferret ${ferretRef(assignee, fleet)} ${endedWords(assignee, fleet)}, so nothing will happen to it. ` +
     `You own the card, so pick it up: ${remedies(view, assignee, cli)}`
   );
 }
+
+/** The notice's title: one card, or how many. */
+export const orphanTitle = (count: number): string =>
+  count === 1 ? 'A card has nobody working on it' : `${String(count)} cards have nobody working on them`;
 
 /** The notice to the owner, when no ferret that owns the card is alive to be told. */
 export function orphanNotice(
@@ -228,32 +255,26 @@ export function orphanNotice(
   const where = input.machine === undefined ? '' : ` on ${input.machine}`;
   const owner =
     view.owner === assignee
-      ? 'Its ferret owns it too, so no other ferret answers for it.'
-      : `Its owner ferret ${ferretRef(view.owner, fleet)} is ${endedAs(view.owner, fleet)} as well.`;
+      ? 'It is the only ferret that answers for the card.'
+      : `The ferret that owns the card, ${ferretRef(view.owner, fleet)}, ${endedWords(view.owner, fleet)} too.`;
   return {
     sourceRef: orphanNoticeSourceRef(view.id),
     task: { id: view.id },
-    title: clamp(`${ref} has nobody on it`, AGENDA_PUSH_TITLE_LENGTH),
-    subject: clamp(
-      flatten(`${ref} “${view.title}” is in ${lane}, and no ferret is working it.`),
-      AGENDA_PUSH_BODY_LENGTH,
-    ),
+    title: clamp(orphanTitle(1), AGENDA_PUSH_TITLE_LENGTH),
+    subject: clamp(orphanCardLine(view, board), AGENDA_PUSH_BODY_LENGTH),
     why: clamp(
       flatten(
-        `Its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive. ${owner}`,
+        `The last ferret on it, ${ferretRef(assignee, fleet)}, ${endedWords(assignee, fleet)}. ${owner} A card only moves when a ferret works on it, so this one will sit in ${lane} until you act.`,
       ),
       MAX_AGENDA_DETAIL_LENGTH,
     ),
     premise: clamp(
-      `- Card: ${ref} “${flatten(view.title)}”${where}, in ${lane}.\n- Left by: ${ferretRef(assignee, fleet)} (session ${assignee}).`,
+      `- Card: ${ref} ${flatten(view.title)}${where}, waiting in ${lane}.\n- Last ferret on it: ${ferretRef(assignee, fleet)}.`,
       MAX_AGENDA_REASON_LENGTH,
     ),
-    context: clamp(
-      '- The Warden saw it on the board: a card in an active or review lane with no live ferret on it or under it.',
-      MAX_AGENDA_DETAIL_LENGTH,
-    ),
+    context: clamp(`- ${lane} is a lane where a ferret should be working the card. None is.`, MAX_AGENDA_DETAIL_LENGTH),
     howToResolve: clamp(
-      `Open ${ref}. ${remedies(view, assignee, input.clientName)}\nThis notice clears itself once a ferret is on the card again.`,
+      `Open ${ref} to see where it stands. Then start a ferret on it to carry on, or close the card if it is no longer needed.\nThis notice clears itself once a ferret is on the card again.`,
       MAX_AGENDA_DETAIL_LENGTH,
     ),
     waitingSince: since,

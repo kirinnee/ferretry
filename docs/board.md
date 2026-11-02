@@ -977,6 +977,50 @@ and `openAsks` (every open item), and a card with open blocking items is `waitin
 in the agenda's schema, so an item raised with no focus card simply belongs to no card; the board import creates a
 card for the open items it finds that name none ([board-import.md](board-import.md)).
 
+## Start a ferret on a card
+
+The owner can start work on a card that has nobody working on it, from the Warden's notice or from the card
+(`POST /v1/board/tasks/:taskId/start`; [agenda.md](agenda.md#the-machine-agenda) draws the buttons).
+
+- **It starts a NEW ferret on the card**, never the old assignee: that one may be gone, may have been started for
+  another repository, or may carry a focus the card has left. The client sends only the card id; the daemon decides
+  the rest, through the same start `fy new --card` makes (`SessionCards.open` over an existing card):
+  - **the card** is the new ferret's focus task and its anchor, and is assigned to it (the start moves the card into
+    its working lane);
+  - **the folder** is the card's own project's folder, read from the card as it is now, so a card refiled to another
+    project starts there; a card under no project folder is refused in plain words;
+  - **the runtime** is the machine's default;
+  - **the brief** is built from the card: its ask, summary, why it exists, context, how to test it, links and last
+    events (`startOnCardBrief`, over `focusCardBrief`).
+- **A closed or dropped card is refused** — "This card was closed; reopen it first." — checked inside the same
+  per-card step that starts the ferret, and again after the launch. The recheck reads the WHOLE card, not only the
+  assignee: `cards.open` assigns the new ferret before it launches, and a close in between drops the card but keeps
+  that assignee, so the recheck also stops the new ferret when the card is dropped or sits in a closed lane. A move
+  into a closed lane is refused by `assignTo` as well ("reopen it before you …").
+- **A launch that failed is refused in words.** The session service returns a failed view, not an error, once the
+  session record exists; the start reads that view and answers `invalid` with "No ferret was started on &X:
+  <reason>", never `started: true`. A failed view is not proof nothing runs (the lifecycle can fail AFTER delivering
+  the first turn), so the start stops that session's pane first; if the pane will not stop, the refusal says so and
+  asks the owner to check it before starting another. A retry therefore never runs two panes: a session the
+  lifecycle recorded as `kill_failed` is terminal to the roster, but the start (and only the start) counts it as
+  still holding its card (its assignee, or the card as its focus) and refuses with "A ferret on &X could not be
+  stopped; stop it first."
+- **A card a live ferret holds is not started again.** Its assignee, its owner (unless the card is unclaimed in the
+  backlog), or any live ferret whose focus it is, counts. The answer is `200` with that ferret and `started: false`,
+  and the notice swaps its button for **Open its chat**; its line reads "&B1 … — a ferret has picked it up."
+  That answer is remembered per key like any other, so a lost reply followed by the holder finishing still gets
+  the same answer on retry, and no new ferret.
+- **One action key per click.** The PWA sends a key with each Start click as `x-fy-request-id`, and sends the SAME
+  key on a retry of a click that got no answer. The daemon remembers the result per card and key (a bounded
+  in-memory map, separate from liveness) and returns it: a retry after a lost response gets the first start's answer
+  even when that ferret has already finished, and starts no second ferret. A new click carries a new key, so it may
+  start new work. A request without the header is its own click.
+- **Alone per card.** The check and the start run one at a time per card, so a second client racing a start gets
+  the first start's ferret back (`started: false`) instead of a second ferret.
+- **The person's act only.** A ferret, even a lead, is refused (`forbidden`); the route spine also needs the
+  `fleet` capability at operator minimum for a caller who is not on this host. Closing the card is the other way
+  out (`drop`, with a reason, as `fy task drop --reason` does).
+
 ## The turn-end check
 
 When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check.ts`) — **only on a board that is
@@ -1067,21 +1111,22 @@ Retired spellings print what replaced them and exit non-zero: `fy task list` is 
 The routes behind them, all needing the `fleet` capability at operator minimum for a caller off this host
 ([grants.md](grants.md)):
 
-| Route                                           | Does                                                                        |
-| ----------------------------------------------- | --------------------------------------------------------------------------- |
-| `GET /v1/board`                                 | the board view                                                              |
-| `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against       |
-| `POST /v1/board/tasks`                          | create a card                                                               |
-| `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                       |
-| `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                      |
-| `POST /v1/board/skip`                           | record `fy task skip`                                                       |
-| `POST /v1/board/import`                         | run the import                                                              |
-| `GET /v1/board/projects`                        | list projects                                                               |
-| `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set                                            |
-| `GET, PUT /v1/board/projects/:projectId/switch` | read whether the project uses the board; set it (the owner only)            |
-| `GET /v1/search`                                | find cards and agenda items by any words ([work-search.md](work-search.md)) |
-| `POST /v1/search/related`                       | the related check before filing                                             |
-| `POST /v1/tidy/plan`                            | the calling ferret's tidy plan: what to drop, close and keep (read-only)    |
+| Route                                           | Does                                                                          |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `GET /v1/board`                                 | the board view                                                                |
+| `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against         |
+| `POST /v1/board/tasks`                          | create a card                                                                 |
+| `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                         |
+| `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                        |
+| `POST /v1/board/tasks/:taskId/start`            | the owner's start of a NEW ferret on the card (or the live one that holds it) |
+| `POST /v1/board/skip`                           | record `fy task skip`                                                         |
+| `POST /v1/board/import`                         | run the import                                                                |
+| `GET /v1/board/projects`                        | list projects                                                                 |
+| `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set                                              |
+| `GET, PUT /v1/board/projects/:projectId/switch` | read whether the project uses the board; set it (the owner only)              |
+| `GET /v1/search`                                | find cards and agenda items by any words ([work-search.md](work-search.md))   |
+| `POST /v1/search/related`                       | the related check before filing                                               |
+| `POST /v1/tidy/plan`                            | the calling ferret's tidy plan: what to drop, close and keep (read-only)      |
 
 A write that fails answers with one of these codes: `invalid`, `not-found`, `forbidden`, `reason-required`,
 `owner-gate`, `blocked-by`, `cycle`, `unknown-lane`, `no-lane-set`, `version-conflict`.

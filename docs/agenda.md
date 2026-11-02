@@ -298,7 +298,7 @@ reference it. `ping: true` asks for the phone to buzz and is only valid on a not
 
 ## The machine agenda
 
-Some notices belong to no ferret's thread: the Warden could not move a ferret, a card has nobody on it, a login
+Some notices belong to no ferret's thread: the Warden could not move a ferret, a card has nobody working on it, a login
 hit its budget. They are held on **one daemon-owned board** — the machine agenda — instead of on whichever
 ferret's agenda they concern, and the Inbox shows them as their own **Machine** group (a stand-in conversation named
 "Machine", with a small machine icon), counted, searchable and notified like any other item. The ledger's id,
@@ -320,8 +320,27 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   - `warden:auto-move-failed` — "N ferrets could not be moved", listing each (up to 12, then "…and N more."). A
     ferret that stops, is gone, or moved to another login drops off; the item resolves when the list is empty. A
     stopped ferret is never added.
-  - `warden:orphans` — one item naming the cards that have nobody on them. A card leaves it when someone takes it.
-    The nudge to a live owner ferret is unchanged.
+  - `warden:orphans` — one item naming the cards that have nobody working on them, titled "A card has nobody working on it"
+    (or "N cards have nobody working on them"), one plain line per card: "&B1 Fix simcha Loge 502 is waiting in
+    Review/CI, but no ferret is assigned, so nothing will happen to it." A card leaves it when someone takes it. The
+    nudge to a live owner ferret is unchanged. It is information, so **Got it** dismisses the whole item, and it
+    carries `cards` (below): each card gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
+    holds the three; a screen reader hears "Open card &B1", "Start a ferret on &B1", "Close card &B1").
+    - **`cards`** is a structured field on an `info` item (1 to 12 rows, each `{ task: { id }, line }`, strict; refused
+      on any other kind). The daemon sets it only for a machine that reports `agenda.cards.1`; an older app drops the
+      unknown field and reads the same lines from the context instead, so nothing is lost. An app that draws `cards`
+      hides the context, because it would say every line twice, and a lone card's line is not repeated under its own title.
+    - **Open** goes to the card. **Close** asks first (with a reason the owner may edit) and then drops the card with
+      the board's own `POST /v1/board/tasks/:taskId` `{action:'drop', reason}`. The button is shown to the person and
+      confirms first; the drop underneath keeps the board's existing rules (`caller: any`, the planner ACL), which are
+      unchanged, so a card's owner ferret or an ancestor may still drop it as before. **Start a ferret** is
+      `POST /v1/board/tasks/:taskId/start` ([board.md](board.md#start-a-ferret-on-a-card)): it starts a NEW ferret on
+      the card, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
+      (kept across a retry when no answer came back), so a lost response cannot start a second ferret.
+    - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
+      (`started: false`); the row swaps **Start a ferret** for **Open its chat**, and its line reads "… — a ferret has
+      picked it up." in place of "no ferret is assigned".
+    - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.
   - `warden:input-stuck` — one item naming every ferret idle with a message of Ferretry's own typed in its box and
     never submitted, after the Warden's Enter did not submit it (the `input_stuck` flag,
     [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message)). A ferret leaves it

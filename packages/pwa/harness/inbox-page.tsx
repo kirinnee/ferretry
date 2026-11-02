@@ -16,6 +16,11 @@
  *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
  *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
  *   ?view=input           an INPUT item open (a short typed value: the Type in chip)
+ *   ?view=orphan-one      the Warden's "A card has nobody working on it" notice open, one card (Open / Start / Close)
+ *   ?view=orphan-three    the same notice for three cards, each line with its own three buttons
+ *   ?view=orphan-list     `/inbox?from=warden` with that notice (one card) in the list
+ *   &held=1              (with orphan-*) the board answers Start with "a live ferret already holds it": a click swaps
+ *                         the button for "Open its chat"
  *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *   ?view=open            doubles as the reply run (`inbox-reply-screenshot.ts`): Send moves on to the next card with
@@ -32,9 +37,11 @@ import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-compose
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
+import { IDLE_STORE } from '../src/hooks/use-chat-card.ts';
 import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { RepliedAgenda, withRepliedCards, withRepliedParked } from '../src/lib/agenda-replied.ts';
+import type { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -331,6 +338,35 @@ const INPUT = item('A44', 5, 'ottilie', {
   ask: { kind: 'open-question' },
   premise: '- Alerts go to one inbox\n- It is only used for the relay alerts',
 } as Partial<AgendaItem>);
+/** The Warden's orphan notice (`warden:orphans`), as the daemon raises it: one item, a line and three buttons per card. */
+const orphanNotice = (lines: readonly string[]): AgendaItem =>
+  item('A60', 35, 'Warden', {
+    title: lines.length === 1 ? 'A card has nobody working on it' : `${lines.length} cards have nobody working on them`,
+    subject:
+      lines.length === 1
+        ? (lines[0] ?? '')
+        : 'These cards are waiting, but no ferret is assigned to any of them, so nothing will happen to them.',
+    why: 'A card only moves when a ferret works on it. These were handed to ferrets that have since finished, so they will sit where they are until you act.',
+    premise:
+      lines.length === 1
+        ? 'Ferretry saw this card on the board with no ferret working on it.'
+        : 'Ferretry saw these cards on the board with no ferret working on any of them.',
+    context: lines.map(line => `- ${line}`).join('\n'),
+    howToResolve:
+      'For each card: open it to see where it stands, start a ferret on it to carry on, or close it if it is no longer needed. A card leaves this list once a ferret is on it again. Tap Got it to dismiss the notice.',
+    raisedBy: 'daemon',
+    sourceRef: 'warden:orphans',
+    notice: true,
+    kind: 'info',
+    cards: lines.map((line, index) => ({ task: { id: ['B1', 'F61', 'F58'][index] ?? 'F1' }, line })),
+  } as Partial<AgendaItem>);
+const ORPHAN_LINES = [
+  '&B1 Fix simcha Loge 502 is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
+  '&F61 Pairing a second phone is waiting in Implement, but no ferret is assigned, so nothing will happen to it.',
+  '&F58 Faster board loading is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
+];
+const ORPHAN_ONE = card(orphanNotice(ORPHAN_LINES.slice(0, 1)), CARE, 'studio');
+const ORPHAN_THREE = card(orphanNotice(ORPHAN_LINES), CARE, 'studio');
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
@@ -344,6 +380,9 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-longtitle': card(LONG_TITLE, LEDGER, 'studio'),
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
+  'orphan-one': ORPHAN_ONE,
+  'orphan-three': ORPHAN_THREE,
+  'orphan-list': ORPHAN_ONE,
 };
 
 /** `?only=A5,A2` keeps just those open items: a short run that can be finished from the keyboard. */
@@ -397,7 +436,7 @@ const MACHINE: DaemonConnection = daemonConnection({
 });
 /** What the conversation holds about the open item (a daemon-raised gate item is mentioned by nobody: none). */
 const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
-  open.item.gate !== undefined
+  open.item.gate !== undefined || open.item.cards !== undefined
     ? []
     : [
         {
@@ -636,6 +675,9 @@ function Inbox({
 }
 
 const view = new URLSearchParams(location.search).get('view') ?? 'sections';
+if (new URLSearchParams(location.search).get('held') === '1')
+  (IDLE_STORE as { start: DaemonBoardStore['start'] }).start = async (_machine, id) =>
+    boardOk({ task: id, sessionId: 'worker', started: false });
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 // `voice=1`: an app store is provided, so the composers draw their mic as they do with Settings › Voice on.
@@ -668,7 +710,7 @@ const store = voice
   : null;
 const page = (
   <Inbox
-    from={view === 'warden' ? 'warden' : null}
+    from={view === 'warden' || view === 'orphan-list' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
     openAt={
@@ -678,7 +720,9 @@ const page = (
           ? TO_TEST[0]?.key
           : view === 'gate-list'
             ? undefined
-            : OPENED[view]?.key
+            : view === 'orphan-list'
+              ? undefined
+              : OPENED[view]?.key
     }
     extra={OPENED[view]}
   />

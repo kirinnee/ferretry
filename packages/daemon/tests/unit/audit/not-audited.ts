@@ -97,6 +97,7 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     "the owner's own unsent words, typed at keystroke rate; it widens nobody's access, and logging it would copy the draft into a log",
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/tasks/:taskId': 'a work card on a project board; its own append-only history records who did what',
+  'POST /v1/board/tasks/:taskId/start': "resumes the card's own ferret; its session journal records it",
   'POST /v1/board/skip':
     'a ferret recording on its own session why its work has no card; the session config keeps the reason and when',
   'POST /v1/board/import':

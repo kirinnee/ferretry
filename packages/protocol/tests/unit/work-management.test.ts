@@ -338,6 +338,14 @@ const agendaCases: SchemaCase[] = [
   },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   {
+    name: 'card a notice is about',
+    schema: agenda.AgendaCardRowSchema,
+    value: {
+      task: { id: 'F1' },
+      line: '&F1 Fix it is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
+    },
+  },
+  {
     name: 'session attention summary',
     schema: agenda.SessionAgendaSummarySchema,
     value: { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' },

@@ -2420,6 +2420,7 @@ export function boardSubsystem(overrides: Partial<BoardSubsystem> = {}): BoardSu
     create: missing,
     act: missing,
     skip: missing,
+    start: missing,
     ...overrides,
   };
 }

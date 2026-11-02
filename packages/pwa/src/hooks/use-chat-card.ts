@@ -25,6 +25,7 @@ const IDLE_PORT: BoardPort = {
   create: refuse,
   version: refuse,
   act: refuse,
+  start: refuse,
 };
 export const IDLE_STORE = new DaemonBoardStore(IDLE_PORT);
 const NO_MACHINES: readonly BoardMachine[] = [];

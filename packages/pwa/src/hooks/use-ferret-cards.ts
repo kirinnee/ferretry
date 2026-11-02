@@ -24,6 +24,7 @@ const IDLE_STORE = new DaemonBoardStore({
   create: refuse,
   version: refuse,
   act: refuse,
+  start: refuse,
 } satisfies BoardPort);
 const NO_MACHINES: readonly BoardMachine[] = [];
 const NO_CARDS: readonly SessionCard[] = [];

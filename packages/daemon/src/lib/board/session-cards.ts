@@ -63,7 +63,15 @@ interface BoardProjectNames {
 export interface SessionCardsPorts {
   readonly board: Pick<
     BoardService,
-    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger' | 'mayAdoptUnder'
+    | 'reserve'
+    | 'spawn'
+    | 'signalDone'
+    | 'snapshot'
+    | 'requireHandOver'
+    | 'handOver'
+    | 'assignForOwner'
+    | 'trigger'
+    | 'mayAdoptUnder'
   >;
   readonly lanes: LaneSetSource;
   /** The board a session about to start in a folder will work on, for a `fy new --cwd` (`SessionProjects`). */
@@ -100,6 +108,8 @@ export interface Delegation {
   readonly parentFrom?: ParentFrom;
   /** The board's name as the owner reads it; `undefined` when the child may run on another board. */
   readonly project?: string;
+  /** The OWNER started the ferret on this existing card (`ownerDelegation`): no lead hands it down, the owner assigns it. */
+  readonly byOwner?: true;
 }
 
 /** What delegating a card came to: the delegation, or why the start must not go on. */
@@ -153,6 +163,19 @@ export const cardTitle = (name: string | undefined, brief: string): string =>
 
 /** A brief as a card's ask: verbatim, cut only at the field's limit. */
 export const askOf = (text: string, source: string): TaskMessage => ({ text: clip(text, MAX_ASK_LENGTH), source });
+
+/**
+ * The delegation of a start the owner made on an existing card ("Start a ferret on it"): it is assigned to the new
+ * ferret as the owner's act, and the card keeps its owner and its parent.
+ */
+export const ownerDelegation = (card: Pick<BoardTask, 'id' | 'owner' | 'parent'>): Delegation => ({
+  lead: card.owner,
+  brief: '',
+  id: card.id,
+  existing: true,
+  parent: card.parent,
+  byOwner: true,
+});
 
 /** The line a sub-ferret's brief gains (`subFerretFooter`): its card and where it is. */
 export const cardFooterLine = (
@@ -381,9 +404,12 @@ export class SessionCards {
     return cards.find(card => card.id === parent.id)?.projectId === projectId;
   }
 
-  /** The lead's existing card, assigned to the session just started; it keeps its owner and its parent. */
+  /** The existing card, assigned to the session just started (by the lead, or by the owner); it keeps its owner and its parent. */
   private async handOver(delegation: Delegation, sessionId: string): Promise<OpenedCard> {
-    const card = await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
+    const card =
+      delegation.byOwner === true
+        ? await this.ports.board.assignForOwner(delegation.id, sessionId)
+        : await this.ports.board.handOver(delegation.id, delegation.lead, sessionId);
     return {
       card: await this.workStarted(card, sessionId),
       project: await this.ports.projects.nameOf(card.projectId),

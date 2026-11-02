@@ -75,6 +75,8 @@ export interface AgendaItemCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
+  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  readonly cardsForm?: ReactNode;
   /**
    * A review's Request changes: the host sends the composer's words as the change asked for, or puts the owner in
    * the composer when it is empty. Absent: the card says to type the changes there instead.
@@ -285,6 +287,7 @@ export function AgendaItemCard({
   parkedNote,
   inputForm,
   planForm,
+  cardsForm,
   onRequestChanges,
   answerDock,
   formKey,
@@ -306,7 +309,8 @@ export function AgendaItemCard({
   const seen = new Set<number>();
   const mark = (text: string): string => markTerms(text, terms, seen);
   const premise = read.premise?.trim() ? mark(read.premise) : null;
-  const context = read.context?.trim() ? mark(read.context) : null;
+  // A notice with cards lists them as rows with buttons, so its context (the same lines, for an older app) says nothing more.
+  const context = cardsForm === undefined && read.context?.trim() ? mark(read.context) : null;
 
   const answerable = latest && settled === undefined;
   const formFields = item.fields ?? [];
@@ -460,8 +464,10 @@ export function AgendaItemCard({
             : shape === 'form'
               ? { lead: FORM_ELSEWHERE }
               : {})}
+          {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
         >
           {askLine === '' ||
+          cardsForm !== undefined ||
           (gated && body !== null) ||
           shape === 'answers' ||
           shape === 'input' ||
@@ -471,6 +477,7 @@ export function AgendaItemCard({
             </div>
           )}
           {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
+          {cardsForm}
           {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
           {choosing && showList ? (
             <OptionsList

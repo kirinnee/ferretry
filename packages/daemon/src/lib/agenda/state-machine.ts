@@ -9,6 +9,7 @@ import {
   type AgendaCopyPlanRef,
   type AgendaTaskPlanRef,
   type AgendaSignInRuleSuggestionRef,
+  type AgendaCardRow,
   type AgendaPhoneApprovalRef,
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
@@ -152,6 +153,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
   readonly phoneApproval?: AgendaPhoneApprovalRef;
+  /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
+  readonly cards?: readonly AgendaCardRow[];
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
   /** The card gate the item asks about (`AgendaGate`); only the daemon raises one, under its `gate:` reference. */
@@ -934,6 +937,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.signInRuleSuggestion === undefined ? {} : { signInRuleSuggestion: request.signInRuleSuggestion }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
+      ...(request.cards === undefined ? {} : { cards: request.cards }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
       ...(request.gate === undefined ? {} : { gate: request.gate }),
       ...(request.discussion === true
@@ -1001,6 +1005,8 @@ function refreshStable(
     neededBy: request.neededBy,
     notice: request.notice,
     ping: request.ping,
+    // The cards a notice lists are restated whole: a list that shrank or grew replaces the old one.
+    cards: request.cards,
     links: request.links,
     steps: request.steps,
     body: request.body,
@@ -1293,6 +1299,7 @@ function sameRequest(item: AgendaItem, request: RaiseAgendaRequest): boolean {
     JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
     item.notice === request.notice &&
     item.ping === request.ping &&
+    JSON.stringify(item.cards ?? null) === JSON.stringify(request.cards ?? null) &&
     JSON.stringify(item.gate ?? null) === JSON.stringify(request.gate ?? null) &&
     JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
     JSON.stringify(agendaBriefOf(item)) === JSON.stringify(agendaBriefOf(request))

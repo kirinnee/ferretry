@@ -16,12 +16,14 @@ import {
   BoardTaskCreateRequestSchema,
   type BoardTaskId,
   type BoardTaskResponse,
+  type BoardTaskStartResponse,
+  FY_REQUEST_ID_HEADER,
   parseTaskRef,
 } from '@ferretry/protocol';
 import { type ApiActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, headerValue, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { type BoardCaller, BoardError, BoardUnavailableError } from '../../board/index.ts';
@@ -43,6 +45,8 @@ export interface BoardSubsystem {
   create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
+  /** The owner's start of a NEW ferret on a card, or the live ferret that already holds it. */
+  start(id: BoardTaskId, caller: BoardCaller, key?: string): Promise<BoardTaskStartResponse>;
 }
 
 /** The HTTP status each refusal answers with. */
@@ -245,6 +249,22 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
         const id = pathTaskId(context);
         const request = await parseBody(context.request, BoardTaskActionRequestSchema);
         return await answer(async () => await board.act(id, request, caller));
+      },
+    },
+    {
+      // A person's act only: a ferret hands a card down (`fy task assign`, `fy new --card`), it does not start one here.
+      method: 'POST',
+      path: '/v1/board/tasks/:taskId/start',
+      minimum: 'operator',
+      caller: 'person',
+      capability: fleet,
+      noStore: true,
+      handle: async context => {
+        const caller = boardCaller(context.actor);
+        const id = pathTaskId(context);
+        // The click's own key is the request id the app reuses on a retry: a retry gets the first start's answer.
+        const key = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim();
+        return await answer(async () => await board.start(id, caller, key === '' ? undefined : key));
       },
     },
   ];

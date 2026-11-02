@@ -27,6 +27,8 @@ import {
   type BoardTaskId,
   type BoardTaskResponse,
   BoardTaskResponseSchema,
+  type BoardTaskStartResponse,
+  BoardTaskStartResponseSchema,
   boardErr,
   boardOk,
   FY_REQUEST_ID_HEADER,
@@ -87,6 +89,12 @@ export interface BoardPort {
     id: BoardTaskId,
     request: BoardTaskActionRequestInput,
   ): Promise<BoardResult<BoardTaskResponse, BoardWriteError>>;
+  /** Starts a NEW ferret on the card, as the owner (`POST /v1/board/tasks/:id/start`). */
+  start(
+    daemon: DaemonConnection,
+    id: BoardTaskId,
+    key?: string,
+  ): Promise<BoardResult<BoardTaskStartResponse, BoardWriteError>>;
   /** Opens a card the owner writes, on the machine that will hold it. */
   create(
     daemon: DaemonConnection,
@@ -234,6 +242,39 @@ export const postBoardAction = async (
     : boardErr(writeError(response.status, 'the daemon answered with a card this app cannot read', undefined));
 };
 
+/**
+ * `POST /v1/board/tasks/:id/start`: the new ferret the daemon started on the card (or the live one that already held
+ * it: `started: false`), or its refusal as a value. An older daemon has no such route and answers `404`.
+ * `key` is the action key of ONE Start click: the daemon answers a repeat of it with the first answer, so a retry after a
+ * lost response cannot start a second ferret. Without one, every call is its own click.
+ */
+export const postBoardStart = async (
+  daemon: DaemonConnection,
+  id: BoardTaskId,
+  fetcher: DaemonFetch = browserFetch,
+  key: string = crypto.randomUUID(),
+): Promise<BoardResult<BoardTaskStartResponse, BoardWriteError>> => {
+  let response: Response;
+  try {
+    response = await send(
+      daemon,
+      `/v1/board/tasks/${encodeURIComponent(id)}/start`,
+      { method: 'POST', headers: { [FY_REQUEST_ID_HEADER]: key } },
+      fetcher,
+    );
+  } catch (reason) {
+    return boardErr(writeError(0, reason instanceof Error ? reason.message : String(reason), undefined));
+  }
+  if (!response.ok) {
+    const refused = await failure(response);
+    return boardErr(writeError(refused.status, refused.message, refused.code));
+  }
+  const answer = BoardTaskStartResponseSchema.safeParse(await response.json().catch(() => null));
+  return answer.success
+    ? boardOk(answer.data)
+    : boardErr(writeError(response.status, 'the daemon answered with a start this app cannot read', undefined));
+};
+
 /** `POST /v1/board/tasks`: the card as the daemon now holds it, or the refusal as a value. */
 export const postBoardCreate = async (
   daemon: DaemonConnection,
@@ -312,6 +353,7 @@ export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort 
   projects: daemon => fetchBoardProjects(daemon, fetcher),
   version: daemon => fetchDaemonVersion(daemon, fetcher),
   act: (daemon, id, request) => postBoardAction(daemon, id, request, fetcher),
+  start: (daemon, id, key) => postBoardStart(daemon, id, fetcher, key),
   create: (daemon, request) => postBoardCreate(daemon, request, fetcher),
   lanes: (daemon, projectId, request) => postLaneSetAction(daemon, projectId, request, fetcher),
 });
