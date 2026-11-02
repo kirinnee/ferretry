@@ -214,6 +214,12 @@ async function publisher() {
       signedManifest: async () => {
         throw new Error('this suite reads no manifest');
       },
+      versionsRevision: async () => {
+        throw new Error('this suite reads no version list');
+      },
+      signedVersions: async () => {
+        throw new Error('this suite reads no version list');
+      },
       frozenItem: async () => {
         throw new Error('this suite reads no item');
       },

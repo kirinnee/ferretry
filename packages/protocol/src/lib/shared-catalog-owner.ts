@@ -44,9 +44,6 @@ export const CATALOGS_MAX_PER_PUBLISHER = 256;
 /** Most shared items one machine keeps. A new item past it is refused `items_full`. */
 export const SHARED_ITEMS_MAX = 4_096;
 
-/** Most versions one item keeps. A version past it is refused `items_full`. */
-export const CATALOG_ITEM_MAX_VERSIONS = 1_000;
-
 /** The sentence a request for a public catalog is refused with. */
 export const CATALOG_PUBLIC_UNAVAILABLE =
   'A public catalog is not available yet. Catalogs are shared with the people you add as members, and until members exist, as a file.';
@@ -277,6 +274,11 @@ export const CatalogItemPreviewSchema = z.strictObject({
   version: z.number().int().min(1),
   /** The version it would follow, when the frozen copy is the same as that one (nothing to publish). */
   sameAsVersion: z.number().int().min(1).optional(),
+  /**
+   * The newest RETIRED version the frozen copy is the same as, when no version it could be published against is.
+   * Publishing is still allowed — it makes a new number — so this is a warning for the person, not a refusal.
+   */
+  sameAsRetiredVersion: z.number().int().min(1).optional(),
   digest: CatalogDigestSchema,
   /** Bytes of the frozen item. */
   size: z.number().int().min(1),
@@ -478,3 +480,26 @@ export const PublishedSharedItemSchema = z.strictObject({
   item: OwnedSharedItemSchema,
 });
 export type PublishedSharedItem = z.infer<typeof PublishedSharedItemSchema>;
+
+/** `PUT /v1/catalog-items/:itemId/current`: make a kept version the one every live catalog serves, only if `from` is still current. */
+export const MakeCurrentRequestSchema = z.strictObject({
+  version: z.number().int().min(1),
+  from: z.number().int().min(1),
+});
+export type MakeCurrentRequest = z.infer<typeof MakeCurrentRequestSchema>;
+
+/** `PATCH /v1/catalog-items/:itemId/versions/:version`: retire a version (it stops being offered) or bring it back. */
+export const RetireVersionRequestSchema = z.strictObject({ retired: z.boolean() });
+export type RetireVersionRequest = z.infer<typeof RetireVersionRequestSchema>;
+
+/** The answer to retiring or unretiring: the version's new state and every live catalog the change raised. */
+export const RetiredVersionSchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  version: z.number().int().min(1),
+  /** When it was retired; unset when it is in use again. */
+  retiredAt: InstantSchema.optional(),
+  /** False when the version was already in the state asked for: nothing was written and no revision rose. */
+  changed: z.boolean(),
+  catalogs: z.array(z.strictObject({ catalogId: SharedCatalogIdSchema, revision: z.number().int().min(1) })).readonly(),
+});
+export type RetiredVersion = z.infer<typeof RetiredVersionSchema>;

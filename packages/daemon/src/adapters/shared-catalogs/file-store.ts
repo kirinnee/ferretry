@@ -1,6 +1,11 @@
 import { join } from 'node:path';
 import type { FileSystemPort, FoundationPaths } from '../../lib/index.ts';
-import { CatalogsDocumentSchema, type CatalogsDocument, documentProblem } from '../../lib/shared-catalogs/document.ts';
+import {
+  CatalogsDocumentSchema,
+  CatalogsDocumentV2Schema,
+  type CatalogsDocument,
+  documentProblem,
+} from '../../lib/shared-catalogs/document.ts';
 import { CatalogsDocumentV1Schema } from '../../lib/shared-catalogs/document-v1.ts';
 import type { CatalogBlobStore, CatalogDocumentStore, RawCatalogs } from '../../lib/shared-catalogs/ports.ts';
 import { CatalogRefusal } from '../../lib/shared-catalogs/refusal.ts';
@@ -14,8 +19,8 @@ const DIGEST = /^sha256:([0-9a-f]{64})$/u;
  * `state/catalogs/catalogs.json`, read whole, parsed with the schema its `schemaVersion` names, written whole
  * through a temporary file and a rename. DAMAGED IS NOT EMPTY: a file that will not parse is a refusal that
  * names it, because an empty list shown over a damaged document would have the person publish again on top of
- * it. Only a machine that has never published answers the empty document. A version 1 file is handed on with
- * its exact text, so the backup the upgrade writes is those bytes.
+ * it. Only a machine that has never published answers the empty document. A version 1 or 2 file is handed on
+ * with its exact text, so the backup the upgrade writes is those bytes.
  */
 export class FileCatalogDocumentStore implements CatalogDocumentStore {
   private readonly file: string;
@@ -45,9 +50,14 @@ export class FileCatalogDocumentStore implements CatalogDocumentStore {
       if (!parsed.success) throw this.damaged(documentProblem(parsed) as string);
       return { version: 1, doc: parsed.data, text };
     }
+    if (version === 2) {
+      const parsed = CatalogsDocumentV2Schema.safeParse(decoded);
+      if (!parsed.success) throw this.damaged(documentProblem(parsed) as string);
+      return { version: 2, doc: parsed.data, text };
+    }
     const parsed = CatalogsDocumentSchema.safeParse(decoded);
     if (!parsed.success) throw this.damaged(documentProblem(parsed) as string);
-    return { version: 2, doc: parsed.data };
+    return { version: 3, doc: parsed.data };
   }
 
   async write(document: CatalogsDocument): Promise<void> {
@@ -56,6 +66,10 @@ export class FileCatalogDocumentStore implements CatalogDocumentStore {
 
   async writeBackupV1(text: string): Promise<void> {
     await this.writeFile(this.paths.catalogsBackupV1, text);
+  }
+
+  async writeBackupV2(text: string): Promise<void> {
+    await this.writeFile(this.paths.catalogsBackupV2, text);
   }
 
   private async writeFile(file: string, text: string): Promise<void> {

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AddCatalogItemRequestSchema,
+  MakeCurrentRequestSchema,
   OwnedSharedItemListSchema,
   PreviewSharedItemVersionRequestSchema,
   PublishedSharedItemSchema,
@@ -10,6 +11,8 @@ import {
   QuickAddRequestSchema,
   QuickAddUndoneSchema,
   QuickAddUndoRequestSchema,
+  RetireVersionRequestSchema,
+  RetiredVersionSchema,
   SharedItemPreviewSchema,
   UpdateCatalogRequestSchema,
 } from '../../src/lib/index.ts';
@@ -142,5 +145,36 @@ describe('publishing at the item', () => {
         .success,
     ).equal(true);
     should(SharedItemPreviewSchema.shape.changes.safeParse({ entries: [] }).success).equal(false);
+  });
+});
+
+describe('making a version current and retiring one', () => {
+  it('should take a version and the one it was chosen from, and nothing else', () => {
+    should(MakeCurrentRequestSchema.safeParse({ version: 1, from: 2 }).success).equal(true);
+    should(MakeCurrentRequestSchema.safeParse({ version: 0, from: 2 }).success).equal(false);
+    should(MakeCurrentRequestSchema.safeParse({ version: 1 }).success).equal(false);
+    should(MakeCurrentRequestSchema.safeParse({ version: 1, from: 2, extra: 1 }).success).equal(false);
+  });
+
+  it('should take retired as a boolean, and nothing else', () => {
+    should(RetireVersionRequestSchema.safeParse({ retired: true }).success).equal(true);
+    should(RetireVersionRequestSchema.safeParse({ retired: 'yes' }).success).equal(false);
+    should(RetireVersionRequestSchema.safeParse({ retired: false, extra: 1 }).success).equal(false);
+  });
+
+  it('should answer with the version’s state and every catalog raised, with no stamp once it is back in use', () => {
+    const answer = {
+      itemId: ITEM,
+      version: 2,
+      changed: true,
+      catalogs: [{ catalogId: `cat_${'A'.repeat(22)}`, revision: 3 }],
+    };
+    should(RetiredVersionSchema.safeParse({ ...answer, changed: undefined }).success).equal(false);
+    should(RetiredVersionSchema.safeParse(answer).success).equal(true);
+    should(RetiredVersionSchema.safeParse({ ...answer, retiredAt: '2026-01-01T00:00:00.000Z' }).success).equal(true);
+    should(
+      RetiredVersionSchema.safeParse({ ...answer, catalogs: [{ ...answer.catalogs[0], revision: 0 }] }).success,
+    ).equal(false);
+    should(RetiredVersionSchema.safeParse({ ...answer, extra: 1 }).success).equal(false);
   });
 });

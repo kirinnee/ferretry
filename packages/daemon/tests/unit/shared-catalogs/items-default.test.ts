@@ -277,7 +277,7 @@ describe('the caps and the document rules', () => {
     const catalogs = Array.from({ length: CATALOGS_MAX_PER_PUBLISHER }, (_, index) =>
       emptyCatalog(`cat_${String(index).padStart(22, '0')}`, `c${index}`),
     );
-    const full: CatalogsDocument = { schemaVersion: 2, items: [], catalogs };
+    const full: CatalogsDocument = { schemaVersion: 3, items: [], catalogs };
     should(
       refusalOf(() =>
         withCatalog(full, {
@@ -290,14 +290,14 @@ describe('the caps and the document rules', () => {
       ),
     ).equal('catalogs_full');
     const items = Array.from({ length: SHARED_ITEMS_MAX }, (_, index) => filler(index));
-    const stocked: CatalogsDocument = { schemaVersion: 2, items, catalogs: [emptyCatalog('cat_one', 'one')] };
+    const stocked: CatalogsDocument = { schemaVersion: 3, items, catalogs: [emptyCatalog('cat_one', 'one')] };
     should(
       refusalOf(() => withNewItem(stocked, 'cat_one', filler(SHARED_ITEMS_MAX), '2026-01-02T00:00:00.000Z')),
     ).equal('items_full');
   });
 
   it('should keep the default when listing, and say the same default changes nothing', () => {
-    const document: CatalogsDocument = { schemaVersion: 2, items: [], catalogs: [emptyCatalog('cat_one', 'one')] };
+    const document: CatalogsDocument = { schemaVersion: 3, items: [], catalogs: [emptyCatalog('cat_one', 'one')] };
     const made = withDefault(document, 'cat_one');
     should(made.defaultCatalogId).equal('cat_one');
     should(withDefault(made, 'cat_one')).equal(made);
@@ -308,7 +308,7 @@ describe('the caps and the document rules', () => {
     const catalog = emptyCatalog('cat_one', 'one');
     const item = { ...filler(1), current: 1 };
     const document: CatalogsDocument = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       items: [item],
       catalogs: [
         catalog,
@@ -467,7 +467,7 @@ describe('a listing with a binding missing', () => {
       current: 1,
       versions: [{ version: 1, bindings: {} }],
     } as unknown as StoredSharedItem;
-    const document = { schemaVersion: 2, items: [item], catalogs: [catalog] } as unknown as CatalogsDocument;
+    const document = { schemaVersion: 3, items: [item], catalogs: [catalog] } as unknown as CatalogsDocument;
     should(refusalOf(() => withListedItem(document, 'cat_one', 'itm_one', 1, {}, '2026-01-02T00:00:00.000Z'))).equal(
       'store_damaged',
     );

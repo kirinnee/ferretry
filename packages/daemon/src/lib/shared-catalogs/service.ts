@@ -47,23 +47,34 @@ import {
   type QuickAddAnswer,
   type QuickAddRequest,
   type QuickAddUndone,
+  type RetiredVersion,
   SHARED_CATALOG_FILE_FORMAT,
   SHARED_CATALOG_FILE_MAX_BYTES,
   SHARED_CATALOG_MANIFEST_FORMAT,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
   type SharedCatalogItem,
+  type SharedCatalogItemVersions,
   SharedCatalogItemSchema,
+  SHARED_CATALOG_VERSIONS_FORMAT,
   type SharedCatalogManifestEntry,
   type SharedItemPreview,
   type SharedItemVersionDetail,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
   type UpdateCatalogRequest,
   type WithdrawnCatalogItem,
 } from '@ferretry/protocol';
-import { type DaemonIdentity, type RelayCrypto, signCatalogManifest, verifySharedCatalogFile } from '@ferretry/relay';
+import {
+  type DaemonIdentity,
+  type RelayCrypto,
+  signCatalogItemVersions,
+  signCatalogManifest,
+  verifySharedCatalogFile,
+} from '@ferretry/relay';
 import {
   bindingOf,
+  canBeMadeCurrent,
   type CatalogBinding,
   type CatalogEntry,
   type CatalogsDocument,
@@ -77,18 +88,24 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  mayServe,
+  offeredVersions,
+  revisionsOf,
   roleOf,
   type StoredCatalog,
   type StoredSharedItem,
   type StoredVersion,
   withCatalog,
   withCatalogPatch,
+  withCurrentVersion,
   withDefault,
   withListedItem,
   withNewItem,
+  upgradeCatalogsV2,
   withoutCatalog,
   withoutEntry,
   withPublishedVersion,
+  withRetired,
   withWithdrawn,
 } from './document.ts';
 import {
@@ -261,7 +278,7 @@ export class SharedCatalogService {
       'itemId' in request
         ? await this.#prepare({ ...this.#listed(document, catalog, request.itemId) })
         : await this.#prepare({ source: request.source, summary: request.summary });
-    return { catalogId: catalog.id, ...(await this.#preview(identity, prepared)) };
+    return { catalogId: catalog.id, ...(await this.#preview(identity, document, prepared)) };
   }
 
   /** One shared item, as the list shows it. */
@@ -306,8 +323,9 @@ export class SharedCatalogService {
   /** The next version of an item, read from the source it remembers, with what would change from the current one. */
   async previewItemVersion(itemId: string): Promise<SharedItemPreview> {
     const identity = await this.#identity();
-    const item = findItem(await this.#document(), itemId);
-    return await this.#preview(identity, await this.#prepare({ item }));
+    const document = await this.#document();
+    const item = findItem(document, itemId);
+    return await this.#preview(identity, document, await this.#prepare({ item }));
   }
 
   #versionOfItem(item: StoredSharedItem, version: number): StoredVersion {
@@ -321,7 +339,7 @@ export class SharedCatalogService {
    * What the next version of an item (or a new item) would be: the candidate frozen from the source as it reads
    * now, its digest, and — against the CURRENT version, the one every catalog serves — what changed.
    */
-  async #preview(identity: DaemonIdentity, prepared: Prepared): Promise<SharedItemPreview> {
+  async #preview(identity: DaemonIdentity, document: CatalogsDocument, prepared: Prepared): Promise<SharedItemPreview> {
     const item = freezeItem(
       this.#input(identity, NORMALISED_CATALOG_ID, prepared, NORMALISED_ITEM_ID, prepared.version),
     );
@@ -332,8 +350,14 @@ export class SharedCatalogService {
       existing === undefined
         ? undefined
         : [currentVersion(existing), ...existing.versions.toReversed()].find(
-            version => version.contentDigest === print.contentDigest,
+            version => version.contentDigest === print.contentDigest && canBeMadeCurrent(document, existing, version),
           );
+    const retired =
+      existing === undefined || same !== undefined
+        ? undefined
+        : existing.versions
+            .toReversed()
+            .find(version => version.retiredAt !== undefined && version.contentDigest === print.contentDigest);
     return {
       ...(existing === undefined ? {} : { itemId: existing.itemId }),
       kind: prepared.body.kind,
@@ -343,6 +367,7 @@ export class SharedCatalogService {
       location: prepared.location,
       version: prepared.version,
       ...(same === undefined ? {} : { sameAsVersion: same.version }),
+      ...(retired === undefined ? {} : { sameAsRetiredVersion: retired.version }),
       digest: print.contentDigest,
       size: print.size,
       ...readItem(item),
@@ -727,9 +752,58 @@ export class SharedCatalogService {
   }
 
   /**
+   * Makes a kept version the one every live catalog serves, each rising a revision in the one write. Only if `from` is
+   * still the current version, the version is not retired, and no live catalog joined after it (see `withCurrentVersion`).
+   */
+  makeCurrent(
+    itemId: string,
+    request: { readonly version: number; readonly from: number },
+  ): Promise<PublishedSharedItem> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      const next = withCurrentVersion(document, itemId, request.version, request.from, instant(this.deps.now()));
+      await this.#commit(next);
+      const stored = itemOf(next, itemId);
+      const current = currentVersion(stored);
+      return {
+        itemId,
+        itemVersion: current.version,
+        current: stored.current,
+        catalogs: next.catalogs.flatMap(catalog =>
+          liveEntries(catalog).some(entry => entry.itemId === itemId)
+            ? [{ catalogId: catalog.id, revision: catalog.revision, digest: bindingOf(current, catalog.id).digest }]
+            : [],
+        ),
+        item: await this.#sharedItem(next, identity, stored, true),
+      };
+    });
+  }
+
+  /**
+   * Retires a version, or brings it back. Every live catalog rises a revision (the version list it signs changes);
+   * asking for the state it is already in writes nothing.
+   */
+  setRetired(itemId: string, version: number, retired: boolean): Promise<RetiredVersion> {
+    return this.#serially(async () => {
+      const document = await this.#writable();
+      const next = withRetired(document, itemId, version, retired, instant(this.deps.now()));
+      if (next !== document) await this.#commit(next);
+      const stored = itemOf(next, itemId).versions.find(candidate => candidate.version === version) as StoredVersion;
+      return {
+        itemId,
+        version,
+        ...(stored.retiredAt === undefined ? {} : { retiredAt: stored.retiredAt }),
+        changed: next !== document,
+        catalogs: revisionsOf(next, itemId),
+      };
+    });
+  }
+
+  /**
    * Re-reads the source, refuses unless it still hashes to the digest the person previewed, and writes the next
    * version: refused when it is the same as the current one (`nothing_to_publish`) or as an older one
-   * (`same_as_version`). The document comes back with every live catalog bumped.
+   * (`same_as_version`) that make-current would accept. The document comes back with every live catalog bumped.
    */
   async #publish(
     identity: DaemonIdentity,
@@ -754,7 +828,11 @@ export class SharedCatalogService {
         'nothing_to_publish',
         `${item.name} has not changed since version ${current.version}, so there is nothing new to publish.`,
       );
-    const same = item.versions.find(other => other.contentDigest === version.contentDigest);
+    // Only a version make-current would accept is a version to point back to: a retired one, or one a catalog that
+    // joined later may not serve, is published again as a new number instead, so the two never refuse each other.
+    const same = item.versions.find(
+      other => other.contentDigest === version.contentDigest && canBeMadeCurrent(document, item, other),
+    );
     if (same !== undefined)
       throw new CatalogRefusal(
         'same_as_version',
@@ -845,6 +923,60 @@ export class SharedCatalogService {
     });
   }
 
+  /**
+   * The revision a member's version list would be signed at, from a plain read: no write queue, no signing, nothing
+   * noted. The item route asks first so a poll that has nothing new costs a read; `item_unknown` when the catalog does
+   * not offer the item (it never listed it, or withdrew it).
+   */
+  async versionsRevision(catalogId: string, itemId: string): Promise<number> {
+    const document = await this.#document();
+    const catalog = findCatalog(document, catalogId);
+    const entry = findEntry(catalog, itemId);
+    if (entry.withdrawnAt !== undefined)
+      throw new CatalogRefusal('item_unknown', `${catalog.name} does not offer ${itemId}.`);
+    return catalog.revision;
+  }
+
+  /**
+   * The versions of one item this catalog offers, signed as of the manifest's revision. Made from the same document read
+   * as the manifest, so the two always agree: the revision and instant are the catalog's, the current version is its line's.
+   */
+  signedVersions(catalogId: string, itemId: string): Promise<SignedCatalogItemVersions> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      const catalog = findCatalog(document, catalogId);
+      const entry = findEntry(catalog, itemId);
+      const item = itemOf(document, itemId);
+      if (entry.withdrawnAt !== undefined)
+        throw new CatalogRefusal('item_unknown', `${item.name} is not offered by ${catalog.name}.`);
+      const versions: SharedCatalogItemVersions = {
+        format: SHARED_CATALOG_VERSIONS_FORMAT,
+        version: 1,
+        publisher: identity.daemonId,
+        catalogId: catalog.id,
+        itemId,
+        revision: catalog.revision,
+        issuedAt: catalog.issuedAt,
+        current: item.current,
+        offered: offeredVersions(item, entry).map(stored => {
+          const binding = bindingOf(stored, catalog.id);
+          return {
+            version: stored.version,
+            digest: binding.digest,
+            size: binding.size,
+            publishedAt: stored.publishedAt,
+            summary: stored.summary,
+          };
+        }),
+      };
+      const signed = await signCatalogItemVersions(this.deps.crypto, identity, versions);
+      if (!signed.ok) throw new CatalogRefusal('store_damaged', signed.reason);
+      this.#ledger.noteSigned(catalog.id, catalog.revision);
+      return signed.value;
+    });
+  }
+
   /** One frozen version of a live item, checked against the digests the document lists for it. */
   async frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem> {
     const document = await this.#document();
@@ -855,9 +987,11 @@ export class SharedCatalogService {
     const stored = item.versions.find(candidate => candidate.version === version);
     if (stored === undefined)
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
-    // A catalog serves the versions from the one it joined (or was relisted) at onward: the person who added the
-    // item reviewed that version, and nothing older.
-    if (version < (entry.sinceVersion ?? 1))
+    if (stored.retiredAt !== undefined)
+      throw new CatalogRefusal('item_unknown', `Version ${String(version)} of ${item.name} is not offered.`);
+    // A catalog serves the version it was added at and those published after it joined: the person who added the
+    // item reviewed that one, and never the older ones (or newer ones that already existed). The current is always allowed.
+    if (version !== item.current && !mayServe(entry, version))
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)} in this catalog.`);
     return await this.#frozen(catalogId, item, stored);
   }
@@ -924,21 +1058,28 @@ export class SharedCatalogService {
   }
 
   /**
-   * The document for a read. A version 1 file is upgraded first, and only inside the queue: whoever gets
-   * there first does it, the rest find version 2.
+   * The document for a read. A version 1 or 2 file is upgraded first, and only inside the queue: whoever gets
+   * there first does it, the rest find version 3.
    */
   async #document(): Promise<CatalogsDocument> {
     const raw = await this.deps.documents.readRaw();
-    if (raw.version === 2) return raw.doc;
+    if (raw.version === 3) return raw.doc;
     if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
     return await this.#serially(() => this.#writable());
   }
 
-  /** The document for a write, which already runs in the queue: version 1 is upgraded here, once. */
+  /** The document for a write, which already runs in the queue: version 1 or 2 is upgraded here, once. */
   async #writable(): Promise<CatalogsDocument> {
     const raw = await this.deps.documents.readRaw();
-    if (raw.version === 2) return raw.doc;
+    if (raw.version === 3) return raw.doc;
     if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
+    if (raw.version === 2) {
+      // Version 2 to 3 changes no data. The old file is kept first so that a build which wrote it can be restored.
+      const upgraded = upgradeCatalogsV2(raw.doc);
+      await this.deps.documents.writeBackupV2(raw.text);
+      await this.deps.documents.write(upgraded);
+      return upgraded;
+    }
     // Three repeatable steps, in this order: the shared copies, the old file kept as it was, the new file. A crash
     // between any two leaves the old file in place and is repaired by the next call making the same bytes.
     const migration = await migrateCatalogs(this.deps.crypto, raw.doc, digest => this.deps.blobs.get(digest));
@@ -1065,6 +1206,7 @@ export class SharedCatalogService {
         size: version.size,
         publishedAt: version.publishedAt,
         summary: version.summary,
+        ...(version.retiredAt === undefined ? {} : { retiredAt: version.retiredAt }),
         ...(version.fileCount === undefined ? {} : { fileCount: version.fileCount }),
         usedBy: { catalogIds: version.version === item.current ? live : [] },
       })),
@@ -1333,6 +1475,7 @@ export class SharedCatalogService {
           digest: binding.digest,
           size: binding.size,
           publishedAt: version.publishedAt,
+          ...(version.retiredAt === undefined ? {} : { retiredAt: version.retiredAt }),
         };
       }),
     };

@@ -1,6 +1,7 @@
 import { type AuditDetail, type AuditEvent, type AuditOutcome, classifyConfigPath } from '@ferretry/protocol';
+import { MAX_REQUEST_BODY_BYTES } from '../api/body.ts';
 import { ApiError } from '../api/error.ts';
-import { decodeParameter } from '../api/http.ts';
+import { type ApiRequest, decodeParameter } from '../api/http.ts';
 import type { ApiRoute, RouteContext } from '../api/route.ts';
 import type { SocketAttachment, SocketRoute } from '../api/socket.ts';
 import { agentAuditDetail, auditActorOf, auditOutcomeOf } from './policy.ts';
@@ -63,7 +64,18 @@ export interface AuditedRouteRule {
    * `review` or `already` with a 2xx and changed nothing); it is recorded when the field holds this word, or is absent
    * or unreadable. A refusal or an error is always recorded.
    */
-  readonly recordOnlyWhen?: { readonly field: string; readonly equals: string };
+  readonly recordOnlyWhen?: { readonly field: string; readonly equals: string | boolean };
+  /**
+   * One route does two opposite things (retire a version, bring it back) and its REQUEST says which, by a
+   * top-level boolean. `detail.action` becomes `whenTrue` or `whenFalse` for every outcome, so a refused
+   * unretire is not recorded as a retire; a body that is unreadable or has no such boolean keeps the rule's own
+   * `detail.action`. The body is read once here and handed to the handler as it was.
+   */
+  readonly actionByRequestField?: {
+    readonly field: string;
+    readonly whenTrue: string;
+    readonly whenFalse: string;
+  };
   /**
    * A top-level field of a successful JSON response holding a configuration file PATH, copied into `detail.kind`
    * as the file's KIND only (`warden`, `login`, `accountDefaults` …) — never the path or the name in it, which a
@@ -603,6 +615,34 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     },
   },
   {
+    method: 'PUT',
+    path: '/v1/catalog-items/:itemId/current',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'make-current' },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['itemVersion'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
+    },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/catalog-items/:itemId/versions/:version',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'retirement' },
+    actionByRequestField: { field: 'retired', whenTrue: 'retire', whenFalse: 'unretire' },
+    recordOnlyWhen: { field: 'changed', equals: true },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['version'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
+    },
+  },
+  {
     method: 'DELETE',
     path: '/v1/catalogs/:id/items/:itemId',
     event: 'catalog.changed',
@@ -847,8 +887,13 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
       let status: number | undefined;
       let body: string | undefined;
       let code: string | undefined;
+      const peeked = rule.actionByRequestField === undefined ? undefined : peekRequest(context);
+      const action =
+        peeked === undefined || rule.actionByRequestField === undefined
+          ? undefined
+          : actionInRequest(await peeked.text, rule.actionByRequestField);
       try {
-        const response = await route.handle(context);
+        const response = await route.handle(peeked === undefined ? context : { ...context, request: peeked.request });
         status = response.status;
         body = response.body;
         return response;
@@ -861,8 +906,8 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
         // person would retry something that happened. `AuditLog` already reports its own failures; this
         // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
         if (!changedNothing(rule, status, body))
-          await record(subsystem, context, rule, { status, body, subject, subjectName, code }).catch((error: unknown) =>
-            subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
+          await record(subsystem, context, rule, { status, body, subject, subjectName, code, action }).catch(
+            (error: unknown) => subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
           );
       }
     },
@@ -890,6 +935,8 @@ interface Answer {
   readonly subject: string | undefined;
   readonly subjectName: string | undefined;
   readonly code: string | undefined;
+  /** What the REQUEST says the act was, when the rule reads it. */
+  readonly action?: string | undefined;
 }
 
 async function record(
@@ -920,6 +967,7 @@ async function record(
     ...agentAuditDetail(credential),
     ...settings,
     ...fields,
+    ...(answer.action === undefined ? {} : { action: answer.action }),
     ...(configKind === undefined ? {} : { kind: configKind }),
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
     ...(names === undefined ? {} : { [(rule.responseNames ?? 'names').split('.').at(-1) as string]: names }),
@@ -1041,6 +1089,37 @@ function fieldsIn(
       else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
     }
     return Object.keys(detail).length === 0 ? undefined : detail;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads the request body once, ahead of the handler, and gives the handler a request whose `text` replays it —
+ * a failed read (too large, unreadable) is replayed as the same failure, so the handler answers it as it would have.
+ */
+function peekRequest(context: RouteContext): {
+  readonly text: Promise<string | undefined>;
+  readonly request: ApiRequest;
+} {
+  const read = context.request.text(MAX_REQUEST_BODY_BYTES);
+  const text = read.then(
+    value => value,
+    () => undefined,
+  );
+  return { text, request: { ...context.request, text: async () => await read } };
+}
+
+/** Which of two words the request chooses, by its top-level boolean `field`; nothing when the body says neither. */
+function actionInRequest(
+  body: string | undefined,
+  choice: NonNullable<AuditedRouteRule['actionByRequestField']>,
+): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body ?? '');
+    const asked =
+      typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>)[choice.field] : undefined;
+    return typeof asked === 'boolean' ? (asked ? choice.whenTrue : choice.whenFalse) : undefined;
   } catch {
     return undefined;
   }

@@ -2475,6 +2475,10 @@ renew  = Ed25519(member key, "ferretry-member-renew-v1" ‖ 0x00 ‖ TH ‖ LP(n
 Fields enter as their base64url text, as §6's do. `@ferretry/relay`'s `member-session.ts` builds these
 messages and parses both records; both ends use it.
 
+The daemon's two **catalog** signatures have labels of their own too, so neither can stand in for a member proof, for
+each other, or for anything above: `ferretry-catalog-manifest-v1` signs a catalog manifest and
+`ferretry-catalog-versions-v1` signs the version list of one item in it, each `label ‖ 0x00 ‖ SHA-256(canonical JSON)`.
+
 **`join`: one redemption, then the session ends.**
 
 ```json
@@ -2605,21 +2609,31 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   forgotten capability is still unreachable to a member. Its requests carry a member principal that
   meets **no** credential minimum of the main table (`authenticated`, `operator`, `admin-token`), and
   a test sweeps the main table to prove it.
-- **The member route table, as built** (`/v1/shared/*`, nine routes, no other):
+- **The member route table, as built** (`/v1/shared/*`, ten routes, no other):
 
-  | Route                                                          | Needs                                                       |
-  | -------------------------------------------------------------- | ----------------------------------------------------------- |
-  | `POST /v1/shared/passkeys/options`, `POST /v1/shared/passkeys` | the key; inside its window with no passkey yet, or unlocked |
-  | `POST /v1/shared/unlock/options`, `POST /v1/shared/unlock`     | the key (and a registered passkey)                          |
-  | `GET /v1/shared/me`                                            | unlocked                                                    |
-  | `GET /v1/shared/catalogs/:catalogId/manifest`                  | unlocked; `ETag` is the revision, `304` on a match          |
-  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/:version`    | unlocked                                                    |
-  | `POST /v1/shared/redeem`                                       | unlocked                                                    |
-  | `DELETE /v1/shared/me/keys/self`                               | unlocked (a browser leaving)                                |
+  | Route                                                          | Needs                                                                                                                                     |
+  | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+  | `POST /v1/shared/passkeys/options`, `POST /v1/shared/passkeys` | the key; inside its window with no passkey yet, or unlocked                                                                               |
+  | `POST /v1/shared/unlock/options`, `POST /v1/shared/unlock`     | the key (and a registered passkey)                                                                                                        |
+  | `GET /v1/shared/me`                                            | unlocked                                                                                                                                  |
+  | `GET /v1/shared/catalogs/:catalogId/manifest`                  | unlocked; `ETag` is the revision, `304` on a match                                                                                        |
+  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/versions`    | unlocked; the signed version list, `ETag` is the revision, `304` on a match (no signing); `404 item_unknown` when withdrawn or not listed |
+  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/:version`    | unlocked; `404 item_unknown` for a retired, withdrawn or not-servable version, with the same fixed body as `/versions`                    |
+  | `POST /v1/shared/redeem`                                       | unlocked                                                                                                                                  |
+  | `DELETE /v1/shared/me/keys/self`                               | unlocked (a browser leaving)                                                                                                              |
 
   Every request re-reads the member's current grants before its handler runs; a key that is gone, or whose
   member changed, is one `401`. A locked session asking for an unlocked route gets `403 member_locked`.
   A catalog the member is not granted is a `404 catalog_unknown`, identical to one that does not exist.
+  **`item_unknown` on both item routes carries one fixed sentence**, so a member cannot tell a retired version from one
+  the catalog never served, nor either from a withdrawn or never-listed item.
+
+  **A member app and `/versions`.** The member's `me` answer has no feature flags and gains none. An old daemon answers
+  `/versions` with `404 item_unknown`, exactly as a daemon does for an item it does not offer, so the app reads the
+  **signed manifest** first: an id in its `withdrawn[]` is withdrawn; an item it lists live whose `/versions` answers
+  404 means "this machine offers no version list" (an old daemon, or a race with a withdrawal) and the app shows only the
+  manifest line. See [catalogs.md](catalogs.md).
+
   Answers are `Cache-Control: no-store`. The main dispatcher refuses any request that carries a member
   principal with `403` before it looks at a route, and the sweep test (`surface.test.ts`) walks every
   route of the main table to prove a member is refused by each, and that no device credential is ever
@@ -2657,7 +2671,8 @@ an unknown `t` and ends the session with `4400`.
 from IP Y, a handshake, sealed records, a close. It sees **that** a join or a member session happened,
 because the pre-auth slot timing and the record sizes differ from a device's, and never the code, the
 keys, the member's name, the catalogs or any content. Whether a join succeeded it can infer from timing
-and the session that follows, as said above.
+and the session that follows, as said above. The sizes and timing of the manifest and version-list answers also show
+roughly how many items and versions a catalog has and when they change, never what they contain.
 
 ### What this tunnel does not carry
 

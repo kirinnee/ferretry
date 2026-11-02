@@ -128,6 +128,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/catalog-items/:itemId/changes operator any',
   'POST /v1/catalog-items/:itemId/versions/preview operator any',
   'POST /v1/catalog-items/:itemId/versions operator person',
+  'PUT /v1/catalog-items/:itemId/current operator person',
+  'PATCH /v1/catalog-items/:itemId/versions/:version operator person',
   'POST /v1/catalogs operator person',
   'PATCH /v1/catalogs/:id operator person',
   'DELETE /v1/catalogs/:id operator person',

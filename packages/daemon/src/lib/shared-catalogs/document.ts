@@ -1,5 +1,5 @@
 /**
- * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`, schema version 2),
+ * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`, schema version 3),
  * and the pure rules that change it (docs/catalogs.md § The publisher side).
  *
  * ## One table of items, listed by catalogs
@@ -50,7 +50,14 @@ import { z } from 'zod';
 import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from './freeze.ts';
 import { CatalogRefusal } from './refusal.ts';
 
-export const CATALOGS_SCHEMA_VERSION = 2;
+/**
+ * The file's version. 3 is the same shape as 2 (3c-1 and 3d-1 wrote 2), raised only so that a build which does not know
+ * `joinedAtMax` or retirement fails closed on the file instead of reading it and writing it back without them.
+ */
+export const CATALOGS_SCHEMA_VERSION = 3;
+
+/** The version 3c-1 and 3d-1 wrote: the same shape, read once to be upgraded and never written. */
+export const CATALOGS_SCHEMA_VERSION_V2 = 2;
 
 const BindingSchema = z.strictObject({
   /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
@@ -69,7 +76,7 @@ const StoredVersionSchema = z.strictObject({
   /** Bytes of that shared copy. For display only. */
   size: z.number().int().min(1),
   fileCount: z.number().int().min(0).optional(),
-  /** Set by a later slice (retiring a version); the schema is ready for it. */
+  /** When the version was retired: it stays kept and installs of it keep working, but no catalog offers it. */
   retiredAt: InstantSchema.optional(),
   bindings: z.record(SharedCatalogIdSchema, BindingSchema),
 });
@@ -94,6 +101,12 @@ const CatalogEntrySchema = z.strictObject({
   addedAt: InstantSchema,
   /** The first version this catalog serves; absent means 1 (every version), as for catalogs made before 3c-2. */
   sinceVersion: z.number().int().min(1).optional(),
+  /**
+   * The newest version that existed when this catalog joined (or was relisted), set only when it is newer than
+   * `sinceVersion`. The person who added the item reviewed `sinceVersion` and nothing between it and this, so
+   * those versions are never served here; a version published after it is. Absent means there is no such gap.
+   */
+  joinedAtMax: z.number().int().min(1).optional(),
   withdrawnAt: InstantSchema.optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
@@ -166,8 +179,15 @@ function firstProblem(document: {
       const lists = listedBy.get(entry.itemId) ?? new Set<string>();
       lists.add(catalog.id);
       listedBy.set(entry.itemId, lists);
-      if (entry.withdrawnAt === undefined && entry.sinceVersion !== undefined && entry.sinceVersion > item.current)
-        return `${catalog.name} serves ${entry.itemId} from version ${String(entry.sinceVersion)}, which is newer than its current version ${String(item.current)}`;
+      if (
+        entry.joinedAtMax !== undefined &&
+        (entry.joinedAtMax <= sinceVersionOf(entry) || entry.joinedAtMax > item.versions.length)
+      )
+        return `${catalog.name} lists ${entry.itemId} as joined up to version ${String(entry.joinedAtMax)}, which is not a version after ${String(sinceVersionOf(entry))} that exists`;
+      if (entry.withdrawnAt === undefined && sinceVersionOf(entry) > item.current)
+        return `${catalog.name} serves ${entry.itemId} from version ${String(sinceVersionOf(entry))}, which is newer than its current version ${String(item.current)}`;
+      if (entry.withdrawnAt === undefined && !mayServe(entry, item.current))
+        return `${catalog.name} serves ${entry.itemId} without the versions up to ${String(entry.joinedAtMax)}, which includes its current version ${String(item.current)}`;
       if (entry.withdrawnAt !== undefined) {
         withdrawn += 1;
         continue;
@@ -196,19 +216,32 @@ function firstProblem(document: {
   return undefined;
 }
 
-export const CatalogsDocumentSchema = z
-  .strictObject({
-    schemaVersion: z.literal(CATALOGS_SCHEMA_VERSION),
-    defaultCatalogId: SharedCatalogIdSchema.optional(),
-    items: z.array(StoredSharedItemSchema),
-    catalogs: z.array(StoredCatalogSchema),
-  })
-  .check(ctx => {
-    const problem = firstProblem(ctx.value);
-    if (problem !== undefined)
-      ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
-  });
+const documentSchemaFor = <V extends number>(version: V) =>
+  z
+    .strictObject({
+      schemaVersion: z.literal(version),
+      defaultCatalogId: SharedCatalogIdSchema.optional(),
+      items: z.array(StoredSharedItemSchema),
+      catalogs: z.array(StoredCatalogSchema),
+    })
+    .check(ctx => {
+      const problem = firstProblem(ctx.value);
+      if (problem !== undefined)
+        ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
+    });
+
+export const CatalogsDocumentSchema = documentSchemaFor(CATALOGS_SCHEMA_VERSION);
 export type CatalogsDocument = z.infer<typeof CatalogsDocumentSchema>;
+
+/** A version 2 file, read only to be upgraded to this one (`upgradeCatalogsV2`). */
+export const CatalogsDocumentV2Schema = documentSchemaFor(CATALOGS_SCHEMA_VERSION_V2);
+export type CatalogsDocumentV2 = z.infer<typeof CatalogsDocumentV2Schema>;
+
+/** Version 2 to 3 changes no data, only the number a build that does not know the new rules cannot read. */
+export const upgradeCatalogsV2 = (document: CatalogsDocumentV2): CatalogsDocument => ({
+  ...document,
+  schemaVersion: CATALOGS_SCHEMA_VERSION,
+});
 
 export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = {
   schemaVersion: CATALOGS_SCHEMA_VERSION,
@@ -424,16 +457,14 @@ export function withListedItem(
   assertRoom(document, catalog, item);
   if (entry !== undefined) {
     const { withdrawnAt: _forgotten, ...kept } = entry;
-    const listed = { ...kept, sinceVersion: item.current };
+    const { joinedAtMax: _oldMax, ...fresh } = kept;
+    const listed = { ...fresh, ...joinedAt(item) };
     return replaceCatalog(
       document,
       bumped({ ...catalog, entries: catalog.entries.map(other => (other === entry ? listed : other)) }, now),
     );
   }
-  const next = bumped(
-    { ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, sinceVersion: item.current }] },
-    now,
-  );
+  const next = bumped({ ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, ...joinedAt(item) }] }, now);
   return {
     ...replaceCatalog(document, next),
     items: document.items.map(other =>
@@ -487,6 +518,152 @@ export function withPublishedVersion(
     catalogs: document.catalogs.map(catalog =>
       liveEntries(catalog).some(live => live.itemId === itemId) ? bumped(catalog, now) : catalog,
     ),
+  };
+}
+
+/** The live catalogs that list an item, in the order the store keeps them. */
+const liveCatalogsOf = (document: CatalogsDocument, itemId: string): readonly StoredCatalog[] =>
+  document.catalogs.filter(catalog => liveEntries(catalog).some(live => live.itemId === itemId));
+
+/** The first version a catalog serves for an entry: its `sinceVersion`, or 1 for a line made before there was one. */
+export const sinceVersionOf = (entry: CatalogEntry): number => entry.sinceVersion ?? 1;
+
+/**
+ * What a catalog's line records when an item joins it at the item's current version: where it began and, if newer
+ * versions already exist (the current one was rolled back), the newest of them, which this catalog was never shown.
+ */
+const joinedAt = (item: StoredSharedItem): Pick<CatalogEntry, 'sinceVersion' | 'joinedAtMax'> => {
+  const newest = item.versions.reduce((most, stored) => Math.max(most, stored.version), 0);
+  return newest > item.current ? { sinceVersion: item.current, joinedAtMax: newest } : { sinceVersion: item.current };
+};
+
+/**
+ * Whether a catalog may serve a version of one of its lines: the version it began at, or one published after it
+ * joined. Never one before it began, and never one that already existed and sits after it (the person who added the
+ * item reviewed the first and was never shown those).
+ */
+export const mayServe = (entry: CatalogEntry, version: number): boolean => {
+  const since = sinceVersionOf(entry);
+  return version === since || (version > since && version > (entry.joinedAtMax ?? since));
+};
+
+/**
+ * The versions a catalog offers for one of its lines: those it may serve, not retired, and always the current one.
+ * A catalog that joined at version 3 never offers 1 or 2, retired or not.
+ */
+export const offeredVersions = (item: StoredSharedItem, entry: CatalogEntry): readonly StoredVersion[] =>
+  item.versions.filter(
+    version =>
+      version.version === item.current || (mayServe(entry, version.version) && version.retiredAt === undefined),
+  );
+
+/** Every live catalog's new revision after a change to an item's versions. */
+export const revisionsOf = (document: CatalogsDocument, itemId: string): readonly CatalogRevision[] =>
+  liveCatalogsOf(document, itemId).map(catalog => ({ catalogId: catalog.id, revision: catalog.revision }));
+
+export interface CatalogRevision {
+  readonly catalogId: string;
+  readonly revision: number;
+}
+
+const bumpLive = (document: CatalogsDocument, itemId: string, now: string): StoredCatalog[] =>
+  document.catalogs.map(catalog =>
+    liveEntries(catalog).some(live => live.itemId === itemId) ? bumped(catalog, now) : catalog,
+  );
+
+/**
+ * Whether `withCurrentVersion` would accept this version: it is the current one, or it is not retired and every live
+ * catalog that lists the item may serve it. A version that is not is not one a republish can point back to.
+ */
+export const canBeMadeCurrent = (document: CatalogsDocument, item: StoredSharedItem, version: StoredVersion): boolean =>
+  version.version === item.current ||
+  (version.retiredAt === undefined &&
+    liveCatalogsOf(document, item.itemId).every(catalog => mayServe(findEntry(catalog, item.itemId), version.version)));
+
+/**
+ * Makes a kept version the one every live catalog serves. Every catalog that lists the item live rises a revision in
+ * this one change, as a publish does.
+ *
+ * - `current_changed` when `from` is no longer the current version (the person saw a stale page).
+ * - `version_unknown` for a number the item never had; `version_retired` for a retired one (bring it back first).
+ * - `nothing_to_publish` when it already is the current version.
+ * - `version_before_join` when any live catalog may not serve that version (below its `sinceVersion`, or between it and
+ *   `joinedAtMax`): nothing here changes either. The sentence names the catalogs.
+ */
+export function withCurrentVersion(
+  document: CatalogsDocument,
+  itemId: string,
+  version: number,
+  from: number,
+  now: string,
+): CatalogsDocument {
+  const item = findItem(document, itemId);
+  if (item.current !== from)
+    throw new CatalogRefusal(
+      'current_changed',
+      `${item.name} is at version ${String(item.current)} now, not ${String(from)}. Look again before choosing.`,
+    );
+  const target = item.versions.find(candidate => candidate.version === version);
+  if (target === undefined)
+    throw new CatalogRefusal('version_unknown', `${item.name} has no version ${String(version)}.`);
+  if (target.retiredAt !== undefined)
+    throw new CatalogRefusal(
+      'version_retired',
+      `Version ${String(version)} of ${item.name} is retired. Bring it back before making it current.`,
+    );
+  if (version === item.current)
+    throw new CatalogRefusal(
+      'nothing_to_publish',
+      `Version ${String(version)} of ${item.name} is already the current version.`,
+    );
+  const cannot = liveCatalogsOf(document, itemId).filter(catalog => !mayServe(findEntry(catalog, itemId), version));
+  if (cannot.length > 0)
+    throw new CatalogRefusal(
+      'version_before_join',
+      `Version ${String(version)} of ${item.name} is not one ${cannot.map(catalog => catalog.name).join(', ')} may serve: a catalog serves an item from the version it was added at, and never the versions that already existed then.`,
+    );
+  return {
+    ...document,
+    items: document.items.map(other => (other.itemId === itemId ? { ...item, current: version } : other)),
+    catalogs: bumpLive(document, itemId, now),
+  };
+}
+
+/**
+ * Retires a version (it stops being offered; installs of it keep working) or brings it back. Every live catalog rises a
+ * revision, because the signed version list each one serves changes. Asking for the state the version is already in
+ * changes nothing and raises nothing.
+ *
+ * - `version_unknown` for a number the item never had.
+ * - `version_current` when the version is the current one: make another current first.
+ */
+export function withRetired(
+  document: CatalogsDocument,
+  itemId: string,
+  version: number,
+  retired: boolean,
+  now: string,
+): CatalogsDocument {
+  const item = findItem(document, itemId);
+  const target = item.versions.find(candidate => candidate.version === version);
+  if (target === undefined)
+    throw new CatalogRefusal('version_unknown', `${item.name} has no version ${String(version)}.`);
+  if (retired && version === item.current)
+    throw new CatalogRefusal(
+      'version_current',
+      `Version ${String(version)} of ${item.name} is the current version. Make another version current before retiring it.`,
+    );
+  if ((target.retiredAt !== undefined) === retired) return document;
+  const { retiredAt: _was, ...kept } = target;
+  const next: StoredVersion = retired ? { ...kept, retiredAt: now } : kept;
+  return {
+    ...document,
+    items: document.items.map(other =>
+      other.itemId === itemId
+        ? { ...item, versions: item.versions.map(stored => (stored.version === version ? next : stored)) }
+        : other,
+    ),
+    catalogs: bumpLive(document, itemId, now),
   };
 }
 

@@ -2,7 +2,14 @@ import { describe, it } from 'bun:test';
 import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDeviceView } from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
-import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
+import {
+  ApiDispatcher,
+  ApiError,
+  type ApiRoute,
+  ApiRouter,
+  jsonResponse,
+  jsonTextResponse,
+} from '../../../src/lib/api/index.ts';
 import type { RouteContext } from '../../../src/lib/api/route.ts';
 import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import {
@@ -860,6 +867,190 @@ describe('auditedRoutes', () => {
       revisions: '4,7',
     });
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
+  });
+
+  it('should record making a version current and retiring one by ids only, telling retire from unretire', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const answers: ReturnType<typeof jsonResponse>[] = [
+      jsonResponse({
+        itemId: ITEM,
+        itemVersion: 1,
+        current: 1,
+        catalogs: [{ catalogId: CAT, revision: 5 }],
+        item: { name: 'secret name text' },
+      }),
+      jsonResponse({
+        itemId: ITEM,
+        version: 2,
+        retiredAt: '2026-01-01T00:00:00.000Z',
+        changed: true,
+        catalogs: [{ catalogId: CAT, revision: 6 }],
+      }),
+      jsonResponse({ itemId: ITEM, version: 2, changed: true, catalogs: [{ catalogId: CAT, revision: 7 }] }),
+      jsonResponse('not an object'),
+      jsonTextResponse('{not json'),
+    ];
+    const { journal, routes } = decorated({
+      'PUT /v1/catalog-items/:itemId/current': async () => answers[0] as ReturnType<typeof jsonResponse>,
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+        answers.splice(1, 1)[0] as ReturnType<typeof jsonResponse>,
+    });
+    const api = await dispatcher(routes);
+    const ask = async (method: string, path: string, body: unknown) =>
+      await api.dispatch(request({ method, path, headers: ADMIN, loopback: true, body: JSON.stringify(body) }));
+
+    // Act
+    await ask('PUT', `/v1/catalog-items/${ITEM}/current`, { version: 1, from: 2 });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: false });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual(Array(5).fill('catalog.changed'));
+    should(logged[0]?.detail).containEql({
+      action: 'make-current',
+      itemId: ITEM,
+      itemVersion: 1,
+      catalogIds: CAT,
+      revisions: 5,
+    });
+    should(logged[1]?.detail).containEql({ action: 'retire', itemId: ITEM, itemVersion: 2, revisions: 6 });
+    should(logged[2]?.detail).containEql({ action: 'unretire', itemId: ITEM, itemVersion: 2, revisions: 7 });
+    should(logged[3]?.detail).containEql({ action: 'retire' });
+    should(logged[4]?.detail).containEql({ action: 'retire' });
+    should(logged[0]?.subject).equal(ITEM);
+    should(JSON.stringify(logged)).not.match(/secret name/u);
+  });
+
+  it('should record nothing for a retire or an unretire that found the version already so', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const answers = [
+      jsonResponse({
+        itemId: ITEM,
+        version: 2,
+        retiredAt: '2026-01-01T00:00:00.000Z',
+        changed: false,
+        catalogs: [{ catalogId: CAT, revision: 6 }],
+      }),
+      jsonResponse({ itemId: ITEM, version: 2, changed: false, catalogs: [{ catalogId: CAT, revision: 6 }] }),
+    ];
+    const { journal, routes } = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+        answers.shift() as ReturnType<typeof jsonResponse>,
+    });
+    const api = await dispatcher(routes);
+    const ask = async (retired: boolean) =>
+      await api.dispatch(
+        request({
+          method: 'PATCH',
+          path: `/v1/catalog-items/${ITEM}/versions/2`,
+          headers: ADMIN,
+          loopback: true,
+          body: JSON.stringify({ retired }),
+        }),
+      );
+
+    // Act
+    await ask(true);
+    await ask(false);
+
+    // Assert
+    should(records(journal)).have.length(0);
+  });
+
+  it('should record a refused retire or unretire under the action the request asked for', async () => {
+    // Arrange
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    // A refusal folds into the one before it, so each request is recorded in a journal of its own.
+    const askedAs = async (body: string) => {
+      const { journal, routes } = decorated({
+        'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+          jsonResponse({ code: 'version_current', message: 'refused' }, 409),
+      });
+      const api = await dispatcher(routes);
+      await api.dispatch(
+        request({
+          method: 'PATCH',
+          path: `/v1/catalog-items/${ITEM}/versions/3`,
+          headers: ADMIN,
+          loopback: true,
+          body,
+        }),
+      );
+      const logged = records(journal);
+      should(logged).have.length(1);
+      should(logged[0]?.outcome).not.equal('succeeded');
+      return logged[0]?.detail?.action;
+    };
+
+    // Act / Assert
+    should(await askedAs(JSON.stringify({ retired: false }))).equal('unretire');
+    should(await askedAs(JSON.stringify({ retired: true }))).equal('retire');
+    should(await askedAs('{not json')).equal('retirement');
+    should(await askedAs(JSON.stringify({ retired: 'yes' }))).equal('retirement');
+  });
+
+  it('should hand the handler the body it read, whole, and the same failure when the body cannot be read', async () => {
+    // Arrange
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const seen: string[] = [];
+    const { journal, routes } = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async context => {
+        seen.push(await context.request.text());
+        seen.push(await context.request.text());
+        return jsonResponse({ itemId: ITEM, version: 2, changed: true, catalogs: [] });
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'PATCH',
+        path: `/v1/catalog-items/${ITEM}/versions/2`,
+        headers: ADMIN,
+        loopback: true,
+        body: JSON.stringify({ retired: false }),
+      }),
+    );
+
+    // Assert
+    should(seen).deepEqual([JSON.stringify({ retired: false }), JSON.stringify({ retired: false })]);
+    should(records(journal)[0]?.detail).containEql({ action: 'unretire', itemId: ITEM });
+
+    // A body that cannot be read is the handler's failure too, and is recorded without an action from the request.
+    const unreadable = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async context => {
+        await context.request.text();
+        return jsonResponse({ ok: true });
+      },
+    });
+    const failing = await unreadable.routes.find(
+      route => route.method === 'PATCH' && route.path.includes('/versions/:version'),
+    )?.handle;
+    if (failing === undefined) throw new Error('no route');
+    const cannotRead = request({
+      method: 'PATCH',
+      path: `/v1/catalog-items/${ITEM}/versions/2`,
+      headers: ADMIN,
+      loopback: true,
+      body: '',
+    });
+    const refused = await failing({
+      request: { ...cannotRead, text: async () => await Promise.reject(new Error('gone')) },
+      params: new Map([['itemId', ITEM]]),
+    } as unknown as Parameters<typeof failing>[0]).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(refused?.message).equal('gone');
+    should(records(unreadable.journal)[0]?.detail?.action).equal('retirement');
   });
 
   it('should record a one-tap Add and its Undo by id, and nothing for an answer that changed nothing', async () => {

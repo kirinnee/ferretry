@@ -26,6 +26,7 @@ import {
   SharedMeSchema,
   SharedRedeemRequestSchema,
   SharedRedeemResponseSchema,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
   type SharedCatalogItem,
   StepUpAssertionSchema,
@@ -57,6 +58,8 @@ import type { CatalogMemberService, MemberAccess } from './service.ts';
 export interface SharedCatalogReader {
   catalogs(): Promise<readonly { readonly id: string; readonly name: string; readonly revision: number }[]>;
   signedManifest(catalogId: string): Promise<SignedCatalogManifest>;
+  versionsRevision(catalogId: string, itemId: string): Promise<number>;
+  signedVersions(catalogId: string, itemId: string): Promise<SignedCatalogItemVersions>;
   frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem>;
 }
 
@@ -106,6 +109,20 @@ const PASSKEY_STATUS: Readonly<Record<MemberPasskeyRefusal, { readonly status: n
 };
 
 const ITEM_VERSION = /^[1-9][0-9]{0,8}$/u;
+
+/** The one thing a member is told when an item is not theirs to read: never a name, never why. */
+const ITEM_NOT_OFFERED = 'this catalog does not offer that';
+
+/** Never-listed, withdrawn, retired and below-join all read the same to a member, so the answer cannot be used to probe. */
+async function asNotOffered<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof CatalogRefusal && (error.refusal === 'item_unknown' || error.refusal === 'item_withdrawn'))
+      throw new ApiError(404, ITEM_NOT_OFFERED, 'item_unknown');
+    throw error;
+  }
+}
 
 const CATALOG_STATUS: Partial<Record<CatalogRefusalCode, number>> = {
   catalog_unknown: 404,
@@ -259,6 +276,26 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
       },
     },
     {
+      // Before `:version`, which would otherwise take the word "versions" and answer 404.
+      method: 'GET',
+      path: '/v1/shared/catalogs/:catalogId/items/:itemId/versions',
+      needs: 'unlocked',
+      handle: async context => {
+        const catalogId = requireCatalog(context, context.params.get('catalogId'));
+        const itemId = SharedCatalogItemIdSchema.safeParse(decodeParameter(context.params.get('itemId') ?? ''));
+        if (!itemId.success) throw new ApiError(404, ITEM_NOT_OFFERED, 'item_unknown');
+        // A plain read first, so an item this catalog does not offer answers 404 whatever tag was sent, and a poll that
+        // has nothing new never waits behind a write or signs anything.
+        const revision = await asNotOffered(async () => await deps.catalogs.versionsRevision(catalogId, itemId.data));
+        const asked = context.request.headers.get('if-none-match');
+        const known = `"${String(revision)}"`;
+        if (asked !== undefined && namesTag(asked, known))
+          return { status: 304, headers: new Map([['etag', known]]), body: '' };
+        const signed = await asNotOffered(async () => await deps.catalogs.signedVersions(catalogId, itemId.data));
+        return jsonResponse(signed, 200, { etag: `"${String(signed.versions.revision)}"` });
+      },
+    },
+    {
       method: 'GET',
       path: '/v1/shared/catalogs/:catalogId/items/:itemId/:version',
       needs: 'unlocked',
@@ -266,8 +303,10 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
         const catalogId = requireCatalog(context, context.params.get('catalogId'));
         const itemId = SharedCatalogItemIdSchema.safeParse(decodeParameter(context.params.get('itemId') ?? ''));
         const version = context.params.get('version') ?? '';
-        if (!itemId.success || !ITEM_VERSION.test(version)) throw new ApiError(404, 'no such item', 'item_unknown');
-        return jsonResponse(await deps.catalogs.frozenItem(catalogId, itemId.data, Number(version)));
+        if (!itemId.success || !ITEM_VERSION.test(version)) throw new ApiError(404, ITEM_NOT_OFFERED, 'item_unknown');
+        return jsonResponse(
+          await asNotOffered(async () => await deps.catalogs.frozenItem(catalogId, itemId.data, Number(version))),
+        );
       },
     },
     { method: 'POST', path: '/v1/shared/redeem', needs: 'unlocked', handle: redeem },
