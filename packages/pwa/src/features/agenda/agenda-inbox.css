@@ -1876,14 +1876,16 @@ a.fy-inbox-row:focus-visible {
 }
 .fy-inbox-machine-notes__moves li {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--gap-xs);
 }
 .fy-inbox-machine-notes__ferret {
+  flex: none;
   font-weight: var(--weight-strong);
 }
 .fy-inbox-machine-notes__moves code {
+  flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--fg);

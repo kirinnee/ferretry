@@ -145,12 +145,20 @@ describe('the Inbox’s Machine group', () => {
             const text = title?.querySelector('.fy-item-view__title-text');
             return {
               pad: notes === null ? 0 : Number.parseFloat(getComputedStyle(notes).paddingLeft),
+              rights: [...document.querySelectorAll('[data-inbox-machine-move] [data-onboarding-copy]')].map(button =>
+                Math.round(button.getBoundingClientRect().right),
+              ),
+              tops: [...document.querySelectorAll('[data-inbox-machine-move]')].map(row =>
+                Math.round(row.getBoundingClientRect().height),
+              ),
               copies: document.querySelectorAll('[data-inbox-machine-move] [data-onboarding-copy]').length,
               titleCut: title === null || text === null ? true : title.scrollHeight > title.clientHeight + 1,
             };
           });
           expect(laid.pad).toBeGreaterThanOrEqual(8);
           expect(laid.copies).toBe(3);
+          expect(new Set(laid.rights).size).toBe(1);
+          expect(Math.max(...laid.tops) - Math.min(...laid.tops)).toBeLessThanOrEqual(2);
           expect(laid.titleCut).toBe(false);
           const chat = await tab.evaluate(() =>
             [...document.querySelectorAll('[data-inbox-open]')]
