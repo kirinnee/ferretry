@@ -168,6 +168,8 @@ export const TRUNCATED_SENTENCE =
 
 export const TOO_LARGE_SENTENCE = 'Too big to compare line by line. Read the whole file in the full review.';
 
+export const HIDDEN_SENTENCE = 'Changed. Hidden, because it may hold a secret. Open it yourself to compare.';
+
 /** The `@@ -3,4 +3,6 @@` line over a hunk. */
 export const hunkHeader = (hunk: {
   readonly beforeStart: number;

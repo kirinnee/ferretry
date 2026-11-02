@@ -2,7 +2,6 @@ import { beforeAll, describe, it } from 'bun:test';
 import type { CatalogInstallTarget, SharedCatalogItem } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
-import { HIDDEN, HIDDEN_DIFFERENT } from '../../../src/lib/catalog-installs/hide-secrets.ts';
 import { mcpItem, newIdentity, skillItem } from '../../support/catalog-fixtures.ts';
 import { GOVERNANCE, projectTarget, request, rig, ROOT, runtimeTarget, STEP_UP, type Rig } from './service-support.ts';
 
@@ -34,16 +33,34 @@ async function install(r: Rig, item: SharedCatalogItem, target: CatalogInstallTa
 /** The whole answer, as a ferret would receive it. */
 const wire = (value: unknown): string => JSON.stringify(value);
 
-const typedInto = (r: Rig, env: Record<string, string>) => {
+const typedInto = (r: Rig, env: Record<string, string>, args?: string[]) => {
   const current = r.fleet.components.get('mcp')?.[0];
   const detail = current?.detail as { env?: Record<string, string> };
   r.fleet.components.set('mcp', [
-    { ...current, name: 'acme-mcp', detail: { ...detail, env: { ...detail.env, ...env } } },
+    {
+      ...current,
+      name: 'acme-mcp',
+      detail: { ...detail, ...(args === undefined ? {} : { args }), env: { ...detail.env, ...env } },
+    },
   ]);
 };
 
-describe('see changes never carries a value typed in by hand', () => {
-  it('should hide a short password typed into a runtime server’s environment', async () => {
+/** Preview replacing a project skill whose file on disk reads `onDisk`, offering `offered`. */
+async function skillPreview(onDisk: string, offered = '# two\n') {
+  const r = rig();
+  await install(r, skillV(1, '# one\n'), projectTarget());
+  r.folders.folders.get(FOLDER)?.set('SKILL.md', onDisk);
+  return r.service.preview(
+    'project',
+    await request(alice, skillV(2, offered), projectTarget(), { replaceEdited: true }),
+  );
+}
+
+const hiddenEntry = (preview: { changes?: { entries: readonly { label: string; hidden?: true }[] } }) =>
+  preview.changes?.entries.find(entry => entry.hidden === true);
+
+describe('see changes never carries text that may be a secret', () => {
+  it('should hide a short password typed into a runtime server’s environment, showing only that it changed', async () => {
     const r = rig();
     await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
     typedInto(r, { DB_PASSWORD: PASSWORD });
@@ -52,8 +69,9 @@ describe('see changes never carries a value typed in by hand', () => {
       await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
     );
     should(wire(preview)).not.match(new RegExp(PASSWORD, 'u'));
-    const entry = preview.changes?.entries.find(candidate => candidate.before === HIDDEN);
-    should(entry?.change).equal('removed');
+    should(preview.changes?.entries).eql([
+      { label: 'Environment DB_PASSWORD', change: 'changed', document: false, hidden: true, flag: 'command' },
+    ]);
   });
 
   it('should hide a short password in a project server’s entry', async () => {
@@ -69,43 +87,52 @@ describe('see changes never carries a value typed in by hand', () => {
       await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), projectTarget(), { replaceEdited: true }),
     );
     should(wire(preview)).not.match(new RegExp(PASSWORD, 'u'));
-    should(preview.changes?.entries.some(entry => entry.before === HIDDEN)).equal(true);
+    should(hiddenEntry(preview)).be.ok();
   });
 
-  it('should hide the offered side with the same rule, and say a hidden value differs', async () => {
+  it('should never show an environment value, hidden on both sides and different', async () => {
     const r = rig();
-    await install(r, mcpV(1, { DB_PASSWORD: PASSWORD }), runtimeTarget());
+    await install(r, mcpV(1, { REGION: 'eu-west-1' }), runtimeTarget());
     const preview = await r.service.preview(
       'runtime',
-      await request(alice, mcpV(2, { DB_PASSWORD: 'swordfish99' }), runtimeTarget()),
+      await request(alice, mcpV(2, { REGION: 'us-east-2' }), runtimeTarget()),
     );
-    should(wire(preview.changes)).not.match(/swordfish99|hunter2xyz/u);
-    const entry = preview.changes?.entries.find(candidate => candidate.after === HIDDEN_DIFFERENT);
-    should(entry?.before).equal(HIDDEN);
+    should(wire(preview.changes)).not.match(/eu-west-1|us-east-2/u);
+    should(preview.changes?.entries).eql([
+      { label: 'Environment REGION', change: 'changed', document: false, hidden: true, flag: 'command' },
+    ]);
   });
 
-  it('should not report a hidden value as changed when it is the same on both sides', async () => {
+  it('should say a value that is the same on both sides is unchanged, without showing it', async () => {
     const r = rig();
     await install(r, mcpV(1, { DB_PASSWORD: PASSWORD }), runtimeTarget());
     const preview = await r.service.preview(
       'runtime',
       await request(alice, mcpV(2, { DB_PASSWORD: PASSWORD }), runtimeTarget()),
     );
-    // The review shows the offered item whole (the publisher's own text); the comparison is what is checked.
     should(wire(preview.changes)).not.match(new RegExp(PASSWORD, 'u'));
     should(preview.changes?.entries).eql([]);
+    should(preview.changes?.unchanged).be.above(0);
   });
 
-  it('should hide a token pasted into a project skill, wherever the answer carries text', async () => {
+  it('should hide a file when only a secret differs on disk, and still call it a change', async () => {
     const r = rig();
-    await install(r, skillV(1, '# one\nsame\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', `# one\nAPI_TOKEN=${TOKEN}\nsame\n`);
+    await install(r, skillV(1, 'API_TOKEN=exampleexample1\n'), projectTarget());
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'API_TOKEN=myrealtoken99x\n');
     const preview = await r.service.preview(
       'project',
-      await request(alice, skillV(2, '# two\nsame\n'), projectTarget(), { replaceEdited: true }),
+      await request(alice, skillV(2, 'API_TOKEN=exampleexample1\n'), projectTarget(), { replaceEdited: true }),
     );
-    should(wire(preview)).not.match(/ghp_abcdefgh/u);
-    should(wire(preview.changes)).match(/API_TOKEN=‹hidden›/u);
+    should(wire(preview.changes)).not.match(/myrealtoken99x|exampleexample1/u);
+    should(hiddenEntry(preview)?.label).equal('Skill file SKILL.md');
+  });
+
+  it('should still draw a plain file as a normal diff', async () => {
+    const preview = await skillPreview('# one\nsame\nold line\n', '# one\nsame\nnew line\n');
+    const entry = preview.changes?.entries[0];
+    should(entry?.hidden).be.undefined();
+    should(entry?.hunks?.[0]?.lines.map(line => `${line.kind}:${line.text}`)).containEql('remove:old line');
+    should(entry?.hunks?.[0]?.lines.map(line => `${line.kind}:${line.text}`)).containEql('add:new line');
   });
 
   it('should hide a token pasted into a runtime skill', async () => {
@@ -117,34 +144,15 @@ describe('see changes never carries a value typed in by hand', () => {
       await request(alice, skillV(2, '# two\n'), runtimeTarget(), { replaceEdited: true }),
     );
     should(wire(preview)).not.match(/ghp_abcdefgh/u);
+    should(hiddenEntry(preview)).be.ok();
   });
 
-  it('should hide a token split across lines, whole file, in the answer and the edited list', async () => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', `# one\n${SPLIT.join('\n')}\n`);
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
-    );
+  it('should hide a token split across lines, in the answer and the edited list', async () => {
+    const preview = await skillPreview(`# one\n${SPLIT.join('\n')}\n`);
     const json = wire(preview);
     should(json).not.match(/p_abcdefghijkl/u);
     should(json).not.match(/abcdefghijklmnopqrstuvwxyz0123456789/u);
-    should(wire(preview.changes)).match(/‹hidden›/u);
-  });
-
-  it('should say a wholly hidden file differs from the offered one that is hidden too', async () => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', `# one\n${SPLIT.join('\n')}\n`);
-    const other = `# two\n${SPLIT.join('\n')}\nmore\n`;
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, other), projectTarget(), { replaceEdited: true }),
-    );
-    // The review shows the offered file whole: it is the publisher's own text. The comparison is what must not.
-    should(wire(preview.changes)).not.match(/p_abcdefghijkl/u);
-    should(wire(preview.changes)).match(/hidden, different/u);
+    should(hiddenEntry(preview)).be.ok();
   });
 
   it('should refuse an edited file without leaking its text in the refusal', async () => {
@@ -159,59 +167,10 @@ describe('see changes never carries a value typed in by hand', () => {
     }
   });
 
-  it.each([
-    ['a word before the break', `notes\ngh\np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
-    ['an indented continuation', `notes\n    gh\n    p_abcdefghijklmnopqrstuvwxyz0123456789\n`],
-  ])('should hide a token split across lines with %s, in the whole answer', async (_label, text) => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview)).not.match(/p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789/u);
-  });
-
-  it('should show a hidden change as a change when only a secret differs on disk', async () => {
-    const r = rig();
-    await install(r, skillV(1, 'API_TOKEN=exampleexample1\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'API_TOKEN=myrealtoken99x\n');
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, 'API_TOKEN=exampleexample1\n'), projectTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview.changes)).not.match(/myrealtoken99x/u);
-    should(preview.changes?.entries.length).be.above(0);
-  });
-
-  it('should hide a short password under a name that announces a secret', async () => {
-    const r = rig();
-    await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
-    typedInto(r, { DB_PASSWORD: 'hunter2' });
-    const preview = await r.service.preview(
-      'runtime',
-      await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview)).not.match(/hunter2/u);
-  });
-
   it('should hide a password that follows its flag, and one in the user info of an environment address', async () => {
     const r = rig();
     await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
-    const current = r.fleet.components.get('mcp')?.[0];
-    const detail = current?.detail as { env?: Record<string, string> };
-    r.fleet.components.set('mcp', [
-      {
-        ...current,
-        name: 'acme-mcp',
-        detail: {
-          ...detail,
-          args: ['--stdio', '--password', 'hunter2xyz'],
-          env: { ...detail.env, DB_URL: 'postgres://app:pa55word99@db/app' },
-        },
-      },
-    ]);
+    typedInto(r, { DB_URL: 'postgres://app:pa55word99@db/app' }, ['--stdio', '--password', 'hunter2xyz']);
     const preview = await r.service.preview(
       'runtime',
       await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
@@ -219,10 +178,22 @@ describe('see changes never carries a value typed in by hand', () => {
     should(wire(preview)).not.match(/hunter2xyz|pa55word99/u);
   });
 
+  it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {
+    const r = rig();
+    await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
+    typedInto(r, { PASS: 'abc1', DB_PASS: 'zz9' }, ['--stdio', '--pass', 'hunter2']);
+    const preview = await r.service.preview(
+      'runtime',
+      await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
+    );
+    should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
+  });
+
   it.each([
     ['a trailing space', `notes\ngh \np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
     ['carriage returns only', 'notes\rgh\rp_abcdefghijklmnopqrstuvwxyz0123456789\r'],
     ['a path before the break', `see path/gh\np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
+    ['an indented continuation', `notes\n    gh\n    p_abcdefghijklmnopqrstuvwxyz0123456789\n`],
     ['a short password', 'password: hunter2\n'],
     ['a short password on the next line', 'password:\nhunter2\n'],
     ['a space before the separator', 'password =\nhunter2\n'],
@@ -243,10 +214,7 @@ describe('see changes never carries a value typed in by hand', () => {
     ['a name after a slash', 'see /PASSWORD:\nhunter2hunter2xyz\n'],
     ['a name after a dollar sign', 'export $PASSWORD=\nhunter2hunter2xyz\n'],
     ['a name after a bar', '|api_key:\nhunter2hunter2xyz\n'],
-    [
-      'a token that starts with the separator of the line before',
-      'ghp_abcdefghijklmnopqrstuvwxyz0123456789\n=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n',
-    ],
+    ['a token that starts with the separator of the line before', `${TOKEN}\n=${TOKEN}\n`],
     ['a token glued after a query value', 'x &Q=sk-abcdefghijklmnopqrst<&ghp_zyxwvutsrqponmlkjihg\n'],
     ['a base64 value glued after a query value', '?Q=sk-abcdefghijklmnopqrst<&c2VjcmV0cGFzc3dvcmQ=\n'],
     ['a short value glued after a token', ';Q=ghp_abcdefghijklmnopqrst>&tok3nvalue99\n'],
@@ -255,53 +223,24 @@ describe('see changes never carries a value typed in by hand', () => {
     ['a short token and a value after a colon line', 'z:\nghp_aaaa>tok3nvalue99\n'],
     ['a token glued after a brace, with no name', 'a{sk-abcdefghijklmnopqrst and x<&ghp_zyxwvutsrqponmlkjihg\n'],
     ['a key id glued after a bar', 'k|AKIAIOSFODNN7EXAMPLE|\n'],
-  ])('should hide a secret in a skill file with %s, in the whole answer', async (_label, text) => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
-    );
+    ['a default in an expansion', 'run=${X:-tok3nvalue99}\n'],
+    ['an assigned default in an expansion', 'run=${X:=tok3nvalue99}\n'],
+    ['an assignment in an expansion', 'run=${X=tok3nvalue99}\n'],
+    ['an alternative in an expansion', 'run=${X:+tok3nvalue99}\n'],
+    ['user info with no name', 'git clone https://bob:tok3nvalue99@example.com/r.git\n'],
+    ['a private key block', '-----BEGIN OPENSSH PRIVATE KEY-----\ntok3nvalue99\n'],
+  ])('should hide a file with %s, in the whole answer', async (_label, text) => {
+    const preview = await skillPreview(text);
     should(wire(preview)).not.match(
       /p_abcdefghijkl|abcdefghijklmnopqrst|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy|zyxwvutsrqpon|tok3nvalue99|ghp_aaaa|sk-qqqq|AKIAIOSF/u,
     );
+    should(hiddenEntry(preview)?.label).equal('Skill file SKILL.md');
   });
 
-  it('should leave a pointer to a secret on the next line whole', async () => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'Set the token=\n${secret:TOKEN}\n');
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview.changes))
-      .match(/\$\{secret:TOKEN\}/u)
-      .and.not.match(/‹hidden›\}/u);
-  });
-
-  it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {
-    const r = rig();
-    await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
-    const current = r.fleet.components.get('mcp')?.[0];
-    const detail = current?.detail as { env?: Record<string, string> };
-    r.fleet.components.set('mcp', [
-      {
-        ...current,
-        name: 'acme-mcp',
-        detail: {
-          ...detail,
-          args: ['--stdio', '--pass', 'hunter2'],
-          env: { ...detail.env, PASS: 'abc1', DB_PASS: 'zz9' },
-        },
-      },
-    ]);
-    const preview = await r.service.preview(
-      'runtime',
-      await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
+  it('should hide a file the offered side makes secret-looking, with the same rule', async () => {
+    const preview = await skillPreview('# one\nplain\n', `# two\nAPI_TOKEN=${TOKEN}\n`);
+    should(hiddenEntry(preview)).be.ok();
+    should(wire(preview.changes)).not.match(/ghp_abcdefgh/u);
   });
 
   it.each([
@@ -311,14 +250,11 @@ describe('see changes never carries a value typed in by hand', () => {
       '2 MiB of nested block openers',
       Array.from({ length: (2 * 1024 * 1024) / 16 }, (_, depth) => `${' '.repeat(depth % 8)}pw: |`).join('\n'),
     ],
-  ])('should answer %s on disk with the whole file hidden, not read', async (_label, text) => {
-    const r = rig();
-    await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
-    const preview = await r.service.preview(
-      'project',
-      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
-    );
-    should(wire(preview.changes)).match(/‹hidden›/u);
+    ['2 MiB of repeated token prefixes', 'sk-'.repeat((2 * 1024 * 1024) / 3)],
+  ])('should answer %s on disk in bounded time, with no text drawn', async (_label, text) => {
+    const started = performance.now();
+    const preview = await skillPreview(text);
+    should(performance.now() - started).be.below(15_000);
+    should(wire(preview.changes)).not.match(/pw: \||sk-sk-/u);
   });
 });

@@ -792,48 +792,29 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   not text is shown as too large. An MCP server is read from the project `.mcp.json` entry or the stored
   component, with the values the install filled in mapped back to their placeholders. If the installed copy
   cannot be rebuilt, `changes` is left out and the preview still stands.
-  **A value typed in by hand is never in `changes`.** The preview is open to a ferret and the installed copy is
-  read from this machine's own bytes, so BOTH sides of the comparison, the installed copy and the offered item,
-  go through the fleet's own rules first (`looksSecret`, `redactText`): (a) an environment value that is not a
-  whole `${secret:…}` placeholder (or an indirect `$VAR`) is shown as `‹hidden›` at **any length** when its NAME
-  announces a secret (`PASSWORD`, `PASS`, `TOKEN`, …, the fleet's rule plus the catalog's key words; in a file the same
-  rule reads `password: x` and `password:⏎x`), or when `looksSecret(name, value)` flags it (a known token prefix);
-  any other value has its user info and secret-looking query values cut; (b) a skill file has each line that holds
-  such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command, arguments and
-  address have the same lines cut, and an address's user name and password and its secret-looking query values;
-  an argument that follows a flag naming a secret (`--password x`), or is that flag's `=` value, is cut too;
-  (d) a file whose lines **joined across each line break** (`\n`, `\r\n` or a lone `\r`, blank lines skipped, the
-  part of the last word after its last non-word character tried too) still hold a secret (one split over lines), or that holds a private key block, is hidden whole. Wherever a value is cut and the raw texts of the two
-  sides differ while what is shown is the same, the offered side reads `‹hidden, different›` (in a file, an
-  environment value, the command, an argument or the address), so a change is never shown as no change. **Work is
-  bounded**: text with a line over 4 KiB or a word over 1 KiB, or a file of more than 20 000 lines, is hidden whole
-  before any pattern runs on it (the text is a publisher's, or whoever typed it here), and the fleet's own
-  `redactText` reads a name only where a run of name characters starts, so it is linear. A name and its value are on
-  ONE line in the assignment pass (`db:⏎  pass: x` reads `pass: x`), and a value that is no secret is searched for a
-  name of its own (`Q= apikey:x`); a second pass over the lines reads a name that ends its line (`password =⏎x`,
-  spaces allowed, after any character that is not part of a name: `/PASSWORD:`, `$PASSWORD=`, `|api_key:`), or that
-  stands alone with its separator starting the next line (`PASSWORD⏎= x`), as owning the next non-blank line's first
-  word, unless that line is a key of its own (`name:` then a space or the end; a word that ends in `=` is a value,
-  because base64 does), and `password: |` / `>-` as owning the more-indented lines after it (the block of a name that
-  says nothing is not read, and a block inside a read one is not read again), for every caller of `redactText`, the
-  fleet's component view included. A word that starts with a separator (`ghp_…⏎=ghp_…`) is tried without it, and a
-  pointer (`$VAR`, `${secret:NAME}`) is never cut. **A well-known token is cut wherever it stands**, with no name,
-  separator or word boundary needed (`x<&ghp_…`, `{sk-…`): the fleet owns ONE list of formats (`TOKEN_FORMATS` in
-  `account/import.ts`: GitHub, OpenAI / Anthropic `sk-`, Slack, AWS key ids, GitLab, npm, Hugging Face, Google API),
-  each a fixed prefix and a linear body of a minimum length, and `redactText` (so every caller, See changes
-  included) cuts each match, and a private-key block from header to footer. The price is that a word that merely
-  contains a prefix and a long run after it (`risk-assessment-notes`) is cut too; a preview shows too little rather
-  than a secret. The glued value after a query value is read by `redactText` before the query pass, and a first
-  value on the next line that begins with a hidden token hides the rest of its run. **The floor is tested**:
-  `redact-differential.test.ts` keeps main's own `redactText` (`tests/support/redact-reference.ts`, frozen) and
-  generates 20 000 texts twice: structured ones from a seeded alphabet of secret names, `:` `=` `|` `>-`, tabs, CR,
-  CRLF and LF, base64 padding, `ghp_` / `sk-` prefixes, quotes, lead characters, nesting, a second secret glued by
-  `< > { & ? &amp;` and a value alone on a line before a separator line; and a soup of the whole alphabet with no
-  structure at all. Every secret value that function hid must also be hidden by the current
-  `redactText` and by See changes, and a failure prints the smallest text that leaks (`REDACT_FUZZ_SEED` and
-  `REDACT_FUZZ_CASES` re-run it with another seed and more cases). The rest of the answer
-  (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
-  is the offered item, the publisher's own text.
+  **See changes is conservative: a part that MAY hold a secret is not drawn.** The preview is open to a ferret and
+  the installed copy is read from this machine's own bytes, which can hold a password pasted into a skill or a server's
+  environment. So nothing is cut out and nothing is guessed: the installed side and the offered side of each changed
+  entry are first checked by a broad detector (`mayHoldSecret`, `lib/catalog-installs/conservative-changes.ts`). If
+  EITHER side trips it, the entry is `{ change: 'changed', hidden: true }` with **no hunks, no before and no after**,
+  and the screen says "changed — hidden: this file may hold a secret. Open it yourself to compare." An entry that is
+  the same on both sides stays "unchanged", decided by comparing the two, never by showing either. **The detector
+  trips on** any text holding a name that announces a secret, in any case, with any separator or none (`pass`,
+  `pwd`, `secret`, `token`, `key`, `auth`, `cred`, `bearer`, `jwt`, `cookie`, `private`, `signature`, `dsn`,
+  `webhook`: `api_key`, `apikey`, `X-Auth`, `passphrase`); a well-known token prefix (`ghp_` `gho_` `ghu_` `ghs_`
+  `ghr_`, `github_pat_`, `sk-`, `xox`, `AKIA`, `ASIA`, `glpat-`, `npm_`, `hf_`, `AIza`, `eyJ`, `-----BEGIN`); a
+  `${…}` expansion (`${X:-default}` included); any run of 24 or more base64, base64url or hex-like characters; and
+  credentials in an address (`scheme://user:pw@host`, `user:pw@host`). The names, prefixes and `${` are tried again with invisible format
+  characters and line breaks taken out, so a name or token split by one is still seen. **A server's environment
+  values are never shown**: a changed one is only "changed" (hidden), whatever it holds. A new or old warning that
+  carries a value (an address, a registry, a package) and trips the detector reads "Hidden: this may hold a secret".
+  **Over-hiding is the accepted cost**: a file that merely says "token" or "key" is hidden whole, and a plain file
+  with none of these still gets a normal line-by-line diff. **The detector is linear and bounded**: plain scans, no
+  backtracking pattern, and a text over 2 MiB is hidden without being read. It never runs the fleet's `redactText`
+  (or any pattern that can backtrack) on a publisher's bytes. The same function (`conservativeChanges(onDisk,
+offered, budget?)`, with `mayHoldSecret`) is what any other install path that shows an on-disk comparison uses.
+  The rest of the answer (`edited`, warnings, the refusal text) names paths and servers only, never text from disk;
+  the full `review` is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are
   files it wrote whose hash changed (a stored component, or the server's `.mcp.json` entry), the preview is
   refused with **`catalog_install_edited`** (409), naming the paths. Nothing is changed. **Keep** is

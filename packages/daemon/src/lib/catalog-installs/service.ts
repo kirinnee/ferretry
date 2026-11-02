@@ -36,7 +36,6 @@ import {
   type CatalogInstallWarning,
   type CatalogProvenance,
   type CatalogSecretBindings,
-  catalogItemChanges,
   catalogItemReview,
   catalogItemWarnings,
   catalogSecretPlaceholders,
@@ -64,7 +63,7 @@ import {
   renderMcpProjectFile,
 } from '../session-mcp/project-file.ts';
 import { type EditedHashes, editedView, editedWords, hasEdits, NO_EDITS, sameEdits } from './edited.ts';
-import { hideSecrets } from './hide-secrets.ts';
+import { conservativeChanges } from './conservative-changes.ts';
 import {
   mcpAsInstalled,
   setupOfProjectEntry,
@@ -533,8 +532,7 @@ export class CatalogInstallService {
     try {
       const installed = await this.#installedItem(replaces, item, resolved, reading);
       if (installed === undefined) return undefined;
-      const [before, after] = hideSecrets(installed.item, item);
-      const changes = catalogItemChanges(before, after, newDiffBudget());
+      const changes = conservativeChanges(installed.item, item, newDiffBudget());
       return item.kind === 'skill' && installed.unreadable.length > 0
         ? withUnreadableFiles(changes, installed.unreadable, item)
         : changes;

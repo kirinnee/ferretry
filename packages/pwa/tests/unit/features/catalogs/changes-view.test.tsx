@@ -33,6 +33,19 @@ describe('ChangesView', () => {
     await view.unmount();
   });
 
+  it('says a hidden entry changed and may hold a secret, with no text', async () => {
+    const view = await mount(
+      <ChangesView
+        changes={catalogChanges({
+          entries: [{ label: 'Skill file SKILL.md', change: 'changed', document: true, hidden: true }],
+        })}
+      />,
+    );
+    expect(q('[data-change-hidden]')?.textContent).toContain('may hold a secret');
+    expect(q('[data-change-hunk]')).toBeNull();
+    await view.unmount();
+  });
+
   it('renders a long line whole: it wraps, and nothing on it clips, truncates or scrolls', async () => {
     const long = `acme --stdio --remote https://evil.example.test/${'a'.repeat(300)}${ZWSP}`;
     const view = await mount(

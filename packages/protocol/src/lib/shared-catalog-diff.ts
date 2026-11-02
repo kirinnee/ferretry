@@ -76,6 +76,8 @@ export const CatalogChangeSchema = z.strictObject({
   hunks: z.array(CatalogChangeHunkSchema).readonly().optional(),
   /** Too big to show as a diff: read the whole file in the full review. */
   tooLarge: z.literal(true).optional(),
+  /** It changed, and may hold a secret: no text is carried, a person opens it themselves to compare. */
+  hidden: z.literal(true).optional(),
   flag: CatalogChangeFlagSchema.optional(),
 });
 export type CatalogChange = z.infer<typeof CatalogChangeSchema>;

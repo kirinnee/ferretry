@@ -113,6 +113,8 @@ function renderChange(change: CatalogChange): string {
   const flag = change.flag === undefined ? '' : ` [${change.flag}]`;
   const deep = `${INDENT}${INDENT}`;
   const head = `${INDENT}${CHANGE_MARK[change.change]} ${change.label}${flag}`;
+  if (change.hidden === true)
+    return `${head}\n${deep}changed — hidden: this may hold a secret. Open it yourself to compare.`;
   if (!change.document) {
     const lines = [
       ...(change.before === undefined ? [] : [`${deep}was: ${change.before}`]),

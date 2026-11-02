@@ -17,6 +17,7 @@ import {
   hunkHeader,
   LINE_SIGN,
   TOO_LARGE_SENTENCE,
+  HIDDEN_SENTENCE,
   TRUNCATED_SENTENCE,
 } from './versions-model.ts';
 
@@ -55,6 +56,12 @@ function WholeText({ kind, text }: { readonly kind: 'add' | 'remove'; readonly t
 }
 
 function EntryBody({ entry }: { readonly entry: CatalogChange }) {
+  if (entry.hidden === true)
+    return (
+      <p className="m-0 px-3 py-2 text-cell text-muted" data-change-hidden="">
+        {HIDDEN_SENTENCE}
+      </p>
+    );
   if (entry.tooLarge === true)
     return (
       <p className="m-0 px-3 py-2 text-cell text-muted" data-change-too-large="">
