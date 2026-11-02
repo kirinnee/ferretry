@@ -14,7 +14,7 @@ import {
   type BoardProjectId,
   TaskKindSchema,
 } from '@ferretry/protocol';
-import { Bot, GitBranch, ListFilter, X } from 'lucide-react';
+import { Bot, ListFilter, X } from 'lucide-react';
 import { useId, useState } from 'react';
 import { type BoardDateRange, type BoardFilters, NO_BOARD_FILTERS, NO_DATE_RANGE } from '../../lib/board-model.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -38,7 +38,7 @@ export interface BoardFiltersProps {
   readonly archive?: boolean;
   /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
   readonly quietFerret?: string | null;
-  /** Whether the daemons tell human cards from agent cards: the "Internal" filter is offered only then. */
+  /** Whether the daemons tell human cards from agent cards: the "Ferret cards" filter is offered only then. */
   readonly splitsAgents?: boolean;
 }
 
@@ -46,13 +46,13 @@ export interface BoardFiltersProps {
 const cleared = (filters: BoardFilters): BoardFilters => ({
   ...NO_BOARD_FILTERS,
   agents: filters.agents,
-  subCards: filters.subCards,
 });
 
 /**
- * "Internal": cards ferrets made for other ferrets (asked by an agent, not a person), off by default. It is on
- * whenever a ferret or an activity is chosen (those show internal cards by themselves), so it is drawn pressed
- * and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps working.
+ * "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards, not asked for by a person),
+ * off by default. It is on whenever a ferret or an activity is chosen (those show ferret cards by themselves), so
+ * it is drawn pressed and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps
+ * working.
  */
 export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
   const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
@@ -61,7 +61,9 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
       className="fy-board-filters__agents"
       data-forced={forced ? '' : undefined}
       title={
-        forced ? 'Internal cards show while a ferret or an activity is chosen' : 'Cards ferrets made for other ferrets'
+        forced
+          ? 'Ferret cards show while a ferret or an activity is chosen'
+          : 'Cards ferrets made for their own work (sub-cards and helper cards)'
       }
     >
       <input
@@ -72,37 +74,7 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
         type="checkbox"
       />
       <Bot aria-hidden="true" size={12} />
-      Internal
-    </label>
-  );
-}
-
-/**
- * "Show sub-cards": cards a ferret made under a bigger card for one piece of work. The owner tests the parent, never
- * the sub-card, so they are off by default and sit inside their parent's detail. It is drawn pressed and locked while a
- * ferret is chosen, because that ferret's own card is often a sub-card.
- */
-function SubCardsToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
-  const forced = !filters.subCards && filters.ferret !== null;
-  return (
-    <label
-      className="fy-board-filters__agents"
-      data-forced={forced ? '' : undefined}
-      title={
-        forced
-          ? 'Sub-cards show while a ferret is chosen'
-          : 'Cards made under a bigger card; the parent carries the test'
-      }
-    >
-      <input
-        checked={filters.subCards || forced}
-        data-filter="sub-cards"
-        disabled={forced}
-        onChange={event => onChange({ ...filters, subCards: event.target.checked })}
-        type="checkbox"
-      />
-      <GitBranch aria-hidden="true" size={12} />
-      Show sub-cards
+      Ferret cards
     </label>
   );
 }
@@ -378,7 +350,6 @@ export function BoardFilterBar({
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
         {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
-        <SubCardsToggle filters={filters} onChange={onChange} />
         {count > 0 ? (
           <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={11} />
@@ -396,7 +367,7 @@ export function BoardFilterBar({
 }
 
 /**
- * The phone's filters: a button that opens a bottom sheet holding every field, "Internal" included (a touch-sized
+ * The phone's filters: a button that opens a bottom sheet holding every field, "Ferret cards" included (a touch-sized
  * toggle would add a row to the header), so the page keeps its height.
  * Fields apply as they are picked (the URL is the state); "Done" only closes the sheet.
  */
@@ -446,7 +417,6 @@ export function BoardFilterSheet({
         </h2>
         <div className="fy-board-filter-sheet__fields">
           {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
-          <SubCardsToggle filters={filters} onChange={onChange} />
           <BoardFilterFields archive={archive} choices={choices} filters={filters} onChange={onChange} />
         </div>
         <div className="fy-board-filter-sheet__actions">

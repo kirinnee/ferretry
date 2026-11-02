@@ -611,10 +611,12 @@ and its lead writes them.
 
 ## Human and agent cards
 
-The Board shows what the OWNER asked for by default, and folds the rest away behind the **Internal** filter (off
-unless chosen), each agent card under its `humanParent` where it has one. A card is internal when the daemon says
-`askedBy: agent`; the app reads that through one helper (`taskAsker`) that falls back to `origin` for a daemon
-that predates `askedBy`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, internal cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
+The Board shows what the OWNER asked for by default, and folds the rest away behind the one **Ferret cards** filter
+(off unless chosen; hint "Cards ferrets made for their own work (sub-cards and helper cards)"), each agent card under
+its `humanParent` where it has one. A **ferret card** is one the daemon says `askedBy: agent`, or a sub-card (a card
+with a parent) that no person asked for; a sub-card a person asked for stays on the board. The field and URL parameter
+are still `agents`, so a saved link keeps working. The app reads that through one helper (`taskAsker`) that falls back to `origin` for a daemon
+that predates `askedBy`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, ferret cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
 1. the owner made it (the Board page, a paired device, the admin CLI);
@@ -702,11 +704,11 @@ idempotent).
 and a sub-card is never "awaiting the owner" in the app. The parent's roll-up (`rollup`) is unchanged by this: a closed
 child counts under `closed`, so the parent still reads shipped, active or waiting from the children it has.
 
-**On the Board** sub-cards are hidden by default, with the filter **Show sub-cards** to bring them back (URL
-`subCards=1`; on a phone it is in the Filters sheet beside **Internal**). Choosing a ferret shows them, because a
-sub-ferret's own card is a sub-card. While hidden they are in no lane and in none of the header counts (To test, Active,
+**On the Board** sub-cards are ferret cards (unless a person asked for them): hidden by default, with the one
+**Ferret cards** filter to bring them back (URL `agents=1`; on a phone it is in the Filters sheet). Choosing a ferret
+or an activity shows them, because a sub-ferret's own card is a sub-card. While hidden they are in no lane and in none of the header counts (To test, Active,
 Waiting on you, Stale, Orphaned), so a count and its cards agree. They are always in the **parent's detail**, under
-"Sub-cards", open or closed. The Archive follows the same toggle; the ferret's own Tasks tab always lists its cards.
+"Sub-cards", open or closed. The Archive follows the same filter; the ferret's own Tasks tab always lists its cards.
 
 ## Authority
 

@@ -27,7 +27,7 @@ const data = (cards: ReturnType<typeof card>[]): BoardMachineData => ({
   quarantined: [],
 });
 
-const model = (cards: ReturnType<typeof card>[]) => mergeBoard([data(cards)], { ...NO_BOARD_FILTERS, subCards: true });
+const model = (cards: ReturnType<typeof card>[]) => mergeBoard([data(cards)], NO_BOARD_FILTERS);
 
 describe('parsing', () => {
   it('falls back to Kanban', () => {

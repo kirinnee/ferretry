@@ -381,7 +381,7 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
 /** What a newer daemon says about each card: every fourth big card was made by a ferret for the one before it. */
 const withOrigin = (cards: readonly BoardTaskView[], firstId: number): BoardTaskView[] =>
   cards.map((item, index) =>
-    index % 4 === 1 && firstId >= 300
+    (index % 4 === 1 || (SUBS_ON && index % 4 === 2)) && firstId >= 300
       ? Object.assign(item, { origin: 'agent', askedBy: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
       : Object.assign(item, { origin: 'human', askedBy: 'person', humanParent: null }),
   );
@@ -493,7 +493,7 @@ function Harness() {
   const [search, setSearch] = useState(() => {
     const view = params.get('view');
     const start = view === null || view === 'kanban' ? [] : [`view=${view}`];
-    const passed = ['at', 'agents', 'subCards', 'window'].flatMap(key => {
+    const passed = ['at', 'agents', 'window'].flatMap(key => {
       const value = params.get(key);
       return value === null ? [] : [`${key}=${value}`];
     });

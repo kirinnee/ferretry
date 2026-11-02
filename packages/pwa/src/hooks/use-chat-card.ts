@@ -62,10 +62,7 @@ export const useChatCard = ({
   const projectId = session.config.projectId ?? null;
   // Every card is read, agent cards too: the header chip must find a sub-ferret's own focus card. What the
   // Tasks tab draws is `chatCards`' business.
-  const filters = useMemo(
-    () => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true, subCards: true }),
-    [projectId],
-  );
+  const filters = useMemo(() => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true }), [projectId]);
   const board = useBoard(store === undefined || !reading ? IDLE_STORE : store, machines, filters);
   const focus = session.config.focusTask;
   const relatives = useMemo(

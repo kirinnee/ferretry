@@ -4,7 +4,7 @@ import { NO_BOARD_FILTERS } from '../../src/lib/board-model.ts';
 import { boardModelOf, card } from './board-support.ts';
 
 const placed = async (extra: Record<string, unknown>) => {
-  const model = await boardModelOf([card('F1', extra)], { ...NO_BOARD_FILTERS, agents: true, subCards: true });
+  const model = await boardModelOf([card('F1', extra)], { ...NO_BOARD_FILTERS, agents: true });
   const group = model.groups[0];
   const found = group?.lanes.flatMap(lane => lane.cards).find(candidate => candidate.task.id === 'F1');
   if (group === undefined || found === undefined) throw new Error('fixture card missing');

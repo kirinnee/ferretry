@@ -235,7 +235,7 @@ describe('chatChip', () => {
 describe('chatCards and "Internal"', () => {
   // The chat reads every card (the chip must find a sub-ferret's own focus); what it draws is chatCards'.
   const everyCard = (cards: Parameters<typeof boardModelOf>[0]) =>
-    boardModelOf(cards, { ...NO_BOARD_FILTERS, agents: true, subCards: true });
+    boardModelOf(cards, { ...NO_BOARD_FILTERS, agents: true });
   const mixed = () =>
     everyCard([
       originCard('F18', 'human', null, { owner: SELF, laneId: 'plan' }),

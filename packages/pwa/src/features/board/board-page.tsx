@@ -208,11 +208,9 @@ export function BoardPage({
   };
 
   // The page's own read: what is open. The Archive keeps it for the header's numbers.
-  // The Tree and the Dependencies draw how cards relate, so a sub-card is never hidden from them.
-  const relational = view === 'tree' || view === 'dependencies';
   const openFilters = useMemo<BoardFilters>(
-    () => ({ ...filters, ...(archive ? { state: 'open' as const } : {}), ...(relational ? { subCards: true } : {}) }),
-    [archive, filters, relational],
+    () => (archive ? { ...filters, state: 'open' } : filters),
+    [archive, filters],
   );
   const board = useBoard(store, machines, openFilters);
   // The Archive's two extra reads; an empty machine list reads nothing.
@@ -370,10 +368,7 @@ export function BoardPage({
   // The open card's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
   // machine with every state and every sub-card in, which only an open card pays for.
   const detailMachines = useMemo(() => (detailMachine === undefined ? NO_MACHINES : [detailMachine]), [detailMachine]);
-  const detailFilters = useMemo<BoardFilters>(
-    () => ({ ...NO_BOARD_FILTERS, state: 'all', agents: true, subCards: true }),
-    [],
-  );
+  const detailFilters = useMemo<BoardFilters>(() => ({ ...NO_BOARD_FILTERS, state: 'all', agents: true }), []);
   const detailRead = useBoard(store, detailMachines, detailFilters, { beat: false });
   const detailPlaces = useMemo(() => cardPlaces(detailRead.model), [detailRead.model]);
   const siblings = useMemo(

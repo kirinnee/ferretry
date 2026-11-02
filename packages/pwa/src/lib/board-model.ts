@@ -41,7 +41,7 @@ import {
   type TaskKind,
   TaskKindSchema,
 } from '@ferretry/protocol';
-import { isAgentTask, splitAvailable } from './board-human.ts';
+import { isFerretCard, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 // ---------------------------------------------------------------------------------------------------
@@ -125,10 +125,8 @@ export interface BoardFilters {
   readonly activity: BoardActivityFilter | null;
   /** The cards the owner created or that wait on the owner. */
   readonly mine: boolean;
-  /** "Internal": cards ferrets made for other ferrets. Off, the board is what the owner asked for. */
+  /** "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards). Off, the board is what the owner asked for. */
   readonly agents: boolean;
-  /** "Show sub-cards": cards a ferret made under a bigger card. Off, the board is the cards the owner tests. */
-  readonly subCards: boolean;
   /** A lane id, or a lane name in the card's own project (case does not matter). */
   readonly lane: string | null;
   /** When the card was created (`createdAt`). */
@@ -147,7 +145,6 @@ export const NO_BOARD_FILTERS: BoardFilters = Object.freeze({
   activity: null,
   mine: false,
   agents: false,
-  subCards: false,
   lane: null,
   created: NO_DATE_RANGE,
   touched: NO_DATE_RANGE,
@@ -172,11 +169,8 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
   return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
 };
 
-/** The URL parameter "Internal" lives in, on the Board and on a ferret's Tasks tab alike. */
+/** The URL parameter "Ferret cards" lives in, on the Board and on a ferret's Tasks tab alike. */
 export const AGENTS_PARAM = 'agents';
-
-/** The URL parameter "Show sub-cards" lives in. */
-const SUB_CARDS_PARAM = 'subCards';
 
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
   if (range.preset !== null) {
@@ -209,7 +203,6 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
     activity: activity.success ? activity.data : null,
     mine: mine === '1' || mine === 'true',
     agents: params.get(AGENTS_PARAM) === '1',
-    subCards: params.get(SUB_CARDS_PARAM) === '1',
     lane: nonEmpty(params.get('lane')),
     created: parseDateRange(params, 'created'),
     touched: parseDateRange(params, 'touched'),
@@ -231,7 +224,6 @@ export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => 
   if (filters.activity !== null) params.set('activity', filters.activity);
   if (filters.mine) params.set('mine', '1');
   if (filters.agents) params.set(AGENTS_PARAM, '1');
-  if (filters.subCards) params.set(SUB_CARDS_PARAM, '1');
   if (filters.lane !== null) params.set('lane', filters.lane);
   writeDateRange(params, 'created', filters.created);
   writeDateRange(params, 'touched', filters.touched);
@@ -282,13 +274,6 @@ export const serverQueryKey = (query: BoardServerQuery): string =>
  */
 export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'activity'>): boolean =>
   filters.agents || filters.ferret !== null || filters.activity !== null;
-
-/**
- * Whether sub-cards are on the board. They are when asked for, and also when the reader narrowed the board to
- * one ferret: that ferret's own card is often a sub-card, and choosing the ferret must show it.
- */
-export const showsSubCards = (filters: Pick<BoardFilters, 'subCards' | 'ferret'>): boolean =>
-  filters.subCards || filters.ferret !== null;
 
 /** Whether the owner has a stake in the card: they raised it, or it waits on their answer. */
 export const isMine = (task: Pick<BoardTaskView, 'createdBy' | 'waitingOnOwner'>): boolean =>
@@ -436,7 +421,7 @@ export interface BoardModel {
   readonly quarantined: readonly BoardQuarantine[];
   /** More than one machine is in the model: the page shows a machine chip. */
   readonly multiMachine: boolean;
-  /** The machines say who asked for a card, so "Internal" means something; an older daemon says nothing. */
+  /** The machines say who asked for a card, so "Ferret cards" means something; an older daemon says nothing. */
   readonly splitsAgents: boolean;
 }
 
@@ -470,7 +455,7 @@ const COUNTED: readonly (readonly [
   ['active', 'active'],
 ];
 
-/** A machine's header counts without the agent and sub-cards the board is not showing, so a pill and its cards agree. */
+/** A machine's header counts without the ferret cards the board is not showing, so a pill and its cards agree. */
 const withoutCards = (
   counts: BoardCounts,
   hidden: readonly { readonly task: BoardTaskView; readonly category: LaneCategory | null }[],
@@ -510,7 +495,6 @@ export const mergeBoard = (
 ): BoardModel => {
   const versions = machines.map(({ daemonId, machine, version }) => ({ daemonId, machine, version }));
   const showAgents = showsAgents(filters);
-  const showSubCards = showsSubCards(filters);
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);
   const groups: BoardGroup[] = [];
   const cards: BoardCard[] = [];
@@ -524,7 +508,7 @@ export const mergeBoard = (
     }
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
-      if ((!showAgents && isAgentTask(task)) || (!showSubCards && isSubCard(task))) {
+      if (!showAgents && isFerretCard(task)) {
         hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }
@@ -571,7 +555,7 @@ export const mergeBoard = (
     counts,
     quarantined,
     multiMachine: kept.length > 1,
-    splitsAgents: kept.some(data => splitAvailable(data.cards)),
+    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubCard)),
   };
 };
 

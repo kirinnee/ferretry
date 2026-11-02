@@ -106,7 +106,6 @@ describe('BoardFilterBar', () => {
     const { root } = await drawn();
     const names = [...root.querySelectorAll('[data-filter]')].map(node => node.getAttribute('data-filter'));
     expect(names).toEqual([
-      'sub-cards',
       'project',
       'machine',
       'ferret',

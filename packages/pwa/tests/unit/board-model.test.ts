@@ -17,7 +17,6 @@ import {
   parseBoardFilters,
   runningOn,
   showsAgents,
-  showsSubCards,
   serverQueryKey,
   toServerQuery,
 } from '../../src/lib/board-model.ts';
@@ -156,7 +155,7 @@ describe('mergeBoard', () => {
     expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
   });
 
-  it('keeps a card an agent asked for (askedBy alone) out of every count while Internal is off', () => {
+  it('keeps a card an agent asked for (askedBy alone) out of every count while Ferret cards is off', () => {
     const asked = (id: string, askedBy: 'person' | 'agent') => card(id, { laneId: 'tested', askedBy });
     const cards = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
     const read = (agents: boolean) =>
@@ -171,26 +170,37 @@ describe('mergeBoard', () => {
     expect(read(true).cards.map(entry => entry.task.id)).toEqual(['F1', 'F2', 'F3']);
   });
 
-  it('hides sub-cards unless asked, or unless a ferret is chosen', () => {
-    const machines = [data(laptop, 'laptop', [card('F1'), card('F2', { parent: { id: 'F1' } })])];
+  it('counts a sub-card as a ferret card unless a person asked for it', () => {
+    const machines = [
+      data(laptop, 'laptop', [
+        card('F1'),
+        card('F2', { parent: { id: 'F1' }, askedBy: 'agent' }),
+        card('F3', { parent: { id: 'F1' }, askedBy: 'person' }),
+        card('F4', { parent: { id: 'F1' }, askedBy: 'agent' }),
+      ]),
+    ];
     const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
-    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1']);
-    expect(ids({ ...NO_BOARD_FILTERS, subCards: true })).toEqual(['F1', 'F2']);
-    expect(ids({ ...NO_BOARD_FILTERS, ferret: CHILD })).toEqual(['F1', 'F2']);
-    expect(showsSubCards(NO_BOARD_FILTERS)).toBe(false);
-    expect(showsSubCards({ ...NO_BOARD_FILTERS, subCards: true })).toBe(true);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1', 'F3']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3', 'F4']);
+    expect(ids({ ...NO_BOARD_FILTERS, ferret: CHILD })).toEqual(['F1', 'F2', 'F3', 'F4']);
   });
 
-  it('takes sub-cards out of the header counts while they are hidden, and back in when shown', () => {
+  it('treats a sub-card from a daemon that says nothing about who asked as a ferret card, and offers the filter', () => {
+    const machines = [data(laptop, 'laptop', unasked([card('F1'), card('F2', { parent: { id: 'F1' } })]))];
+    expect(mergeBoard(machines, NO_BOARD_FILTERS).cards.map(entry => entry.task.id)).toEqual(['F1']);
+    expect(mergeBoard(machines, NO_BOARD_FILTERS).splitsAgents).toBe(true);
+  });
+
+  it('takes ferret sub-cards out of the header counts while they are hidden, and back in when shown', () => {
     const cards = [
       card('F1', { laneId: 'tested' }),
-      card('F2', { laneId: 'tested', parent: { id: 'F1' } }),
-      card('F3', { laneId: 'tested', parent: { id: 'F1' }, activity: 'active' }),
+      card('F2', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent' }),
+      card('F3', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent', activity: 'active' }),
     ];
-    const read = (subCards: boolean) =>
+    const read = (agents: boolean) =>
       mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3, active: 1 } }], {
         ...NO_BOARD_FILTERS,
-        subCards,
+        agents,
       }).counts;
     expect(read(false)).toMatchObject({ toTest: 1, active: 0 });
     expect(read(true)).toMatchObject({ toTest: 3, active: 1 });
@@ -274,7 +284,6 @@ describe('filters and the URL', () => {
     activity: 'waiting_on_you',
     mine: true,
     agents: true,
-    subCards: true,
     lane: 'Review/CI',
     created: { preset: '7d', from: null, to: null },
     touched: { preset: null, from: '2026-10-01', to: '2026-10-30' },
@@ -291,9 +300,6 @@ describe('filters and the URL', () => {
     expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, agents: true }).toString()).toBe('agents=1');
     expect(parseBoardFilters('agents=1').agents).toBe(true);
     expect(parseBoardFilters('agents=0').agents).toBe(false);
-    expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, subCards: true }).toString()).toBe('subCards=1');
-    expect(parseBoardFilters('subCards=1').subCards).toBe(true);
-    expect(parseBoardFilters('subCards=0').subCards).toBe(false);
   });
 
   it('writes a lane and each date range in the URL, a preset or a custom range but never both', () => {
