@@ -10,7 +10,14 @@ import {
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
+import { ApiError } from '../../../src/lib/api/error.ts';
+import type { RouteContext } from '../../../src/lib/api/route.ts';
+import { agendaRoutes } from '../../../src/lib/runtime/index.ts';
+import { jsonBody, request } from '../api/support.ts';
+import { NO_HELD_REPLIES } from '../runtime/mounts/support.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
+import { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
+import { type AttachmentOriginalsPort, SessionAttachmentStore } from '../../../src/lib/attachments/index.ts';
 import {
   type AgendaActor,
   AgendaAgentClearer,
@@ -108,6 +115,8 @@ interface Faults {
   readonly noCarrier?: boolean;
   /** Carrying a file throws. */
   readonly carryThrows?: boolean;
+  /** The real attachment store behind both the board's file check and the carrier, instead of stand-ins that accept any id. */
+  readonly attachmentStore?: StoreBoardAttachments;
 }
 
 /** The duplicates sweep's marker, in memory. */
@@ -141,7 +150,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       reopen,
       done,
       gates: { written: async id => await gates?.written(id) },
-      attachments: {
+      attachments: faults.attachmentStore ?? {
         describe: async (_session, ids) => ids.map(id => ({ id, filename: `${id}.png`, mime: 'image/png' })),
       },
     }),
@@ -208,7 +217,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     ...(faults.noCarrier === true
       ? {}
       : {
-          files: {
+          files: faults.attachmentStore ?? {
             carry: async (from: string, to: string, ids: readonly string[]) => {
               if (faults.carryThrows === true) throw new Error('the copy failed');
               carried.push([from, to, ids]);
@@ -1083,6 +1092,383 @@ describe('a Not good with files', () => {
   });
 });
 
+/** Originals held in memory, behind the real attachment store. */
+class MemoryOriginals implements AttachmentOriginalsPort {
+  readonly trees = new Map<string, Map<string, { readonly original: Uint8Array; readonly manifest: string }>>();
+
+  async attachmentIds(sessionId: string): Promise<readonly string[]> {
+    return [...(this.trees.get(sessionId)?.keys() ?? [])];
+  }
+
+  async readManifest(sessionId: string, attachmentId: string): Promise<string | undefined> {
+    return this.trees.get(sessionId)?.get(attachmentId)?.manifest;
+  }
+
+  async readOriginal(sessionId: string, attachmentId: string): Promise<Uint8Array> {
+    const entry = this.trees.get(sessionId)?.get(attachmentId);
+    if (entry === undefined) throw new Error('missing');
+    return entry.original.slice();
+  }
+
+  async publish(sessionId: string, attachmentId: string, original: Uint8Array, manifest: string): Promise<void> {
+    const tree = this.trees.get(sessionId) ?? new Map();
+    tree.set(attachmentId, { original: original.slice(), manifest });
+    this.trees.set(sessionId, tree);
+  }
+}
+
+describe('a Not good with files, against the real attachment store', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const NOWHERE = `att_${'d'.repeat(64)}`;
+  const AGENT: AgendaActor = { kind: 'agent', sessionId: 'grandchild', name: null };
+
+  const atGate = async (overrides: Partial<BoardTask> = {}) => {
+    const originals = new MemoryOriginals();
+    const store = new SessionAttachmentStore({
+      daemonId: 'daemon-1',
+      originals,
+      decrypt: async () => new Uint8Array(),
+      now: () => new Date('2026-10-30T10:00:00.000Z'),
+    });
+    const world = fixture([external({ laneId: 'tested', ...overrides })], {
+      attachmentStore: new StoreBoardAttachments(store),
+    });
+    await world.gates.backfill();
+    const session = overrides.assignee === 'gone' ? 'child' : 'grandchild';
+    const upload = async (to: string) =>
+      (await store.upload(to, { filename: 'flicker.png', mime: 'image/png', bytes: PNG })).id;
+    return { world, upload, session, item: world.open(session)[0] as AgendaItem, originals };
+  };
+
+  const leftAlone = (world: Awaited<ReturnType<typeof atGate>>['world'], item: AgendaItem, session: string) => {
+    should(world.stored().laneId).equal('tested');
+    should(world.reopen.notices).be.empty();
+    should(world.open(session).map(each => each.id)).eql([item.id]);
+    should(world.closed(session)).be.empty();
+  };
+
+  it('carries a file the session holds, and the reopen names it where the ferret holds it', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      note: 'still flickers',
+      attachments: { from: session, ids: [id] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored().laneId).equal('implement');
+    should(world.reopen.notices[0]?.attachments).eql({ from: 'grandchild', ids: [id] });
+    should(world.closed(session).map(each => each.id)).eql([item.id]);
+  });
+
+  it('refuses an id the session never held, and moves nothing', async () => {
+    // Arrange
+    const { world, session, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      note: 'still flickers',
+      attachments: { from: session, ids: [NOWHERE] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    leftAlone(world, item, session);
+  });
+
+  it('refuses an id that only a stranger session holds, and moves nothing', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const theirs = await upload('stranger');
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      note: 'still flickers',
+      attachments: { from: session, ids: [theirs] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    leftAlone(world, item, session);
+  });
+
+  it('carries a file from the agenda the item is on into the session of a card’s ferret elsewhere', async () => {
+    // Arrange — the assignee is gone, so the item sits on the owner ferret's agenda
+    const { world, upload, session, item } = await atGate({ assignee: 'gone' });
+    const id = await upload(session);
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      sessionId: session,
+      note: 'still flickers',
+      attachments: { from: session, ids: [id] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored().laneId).equal('implement');
+    should(world.reopen.notices[0]?.attachments).eql({ from: 'gone', ids: [id] });
+  });
+
+  it('refuses across sessions an id that only a stranger session holds, and moves nothing', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate({ assignee: 'gone' });
+    const theirs = await upload('stranger');
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      sessionId: session,
+      note: 'still flickers',
+      attachments: { from: session, ids: [theirs] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    leftAlone(world, item, session);
+  });
+
+  it('refuses across sessions an id that exists nowhere, and moves nothing', async () => {
+    // Arrange
+    const { world, session, item } = await atGate({ assignee: 'gone' });
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      sessionId: session,
+      note: 'still flickers',
+      attachments: { from: session, ids: [NOWHERE] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    leftAlone(world, item, session);
+  });
+
+  it('refuses files with words that are only whitespace, and moves nothing', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      note: '   \n\t ',
+      attachments: { from: session, ids: [id] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('say what is not good');
+    leftAlone(world, item, session);
+  });
+
+  it('refuses files from an agent, however well the files check out', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      actor: AGENT,
+      note: 'still flickers',
+      attachments: { from: session, ids: [id] },
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'forbidden' } });
+    leftAlone(world, item, session);
+  });
+
+  it('takes the same answer again as the item it already closed, and delivers the reopen once', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+    const again = { note: 'still flickers', attachments: { from: session, ids: [id] } };
+    await world.answer(item.id, choose('Not good'), again);
+
+    // Act
+    const replay = await world.answer(item.id, choose('Not good'), again);
+
+    // Assert
+    should(replay).match({ handled: true, mutation: { ok: true, change: 'unchanged' } });
+    should(world.reopen.notices).have.length(1);
+    should(world.stored().laneId).equal('implement');
+  });
+
+  it('takes two identical answers sent at once as one answer', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+    const same = { note: 'still flickers', attachments: { from: session, ids: [id] } };
+
+    // Act
+    const both = await Promise.all([
+      world.answer(item.id, choose('Not good'), same),
+      world.answer(item.id, choose('Not good'), same),
+    ]);
+
+    // Assert
+    should(both.every(each => 'mutation' in each && each.mutation.ok)).be.true();
+    should(world.reopen.notices).have.length(1);
+  });
+
+  it('does not take a different answer to a closed item as a replay', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+    await world.answer(item.id, choose('Not good'), {
+      note: 'still flickers',
+      attachments: { from: session, ids: [id] },
+    });
+
+    // Act
+    const other = await world.answer(item.id, choose('Done'));
+
+    // Assert
+    should(other).eql({ handled: false });
+  });
+
+  it('refuses an agent replaying an answer the owner gave', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+    const files = { note: 'still flickers', attachments: { from: session, ids: [id] } };
+    await world.answer(item.id, choose('Not good'), files);
+
+    // Act
+    const replay = await world.answer(item.id, choose('Not good'), { ...files, actor: AGENT });
+
+    // Assert
+    should(replay).match({ handled: true, refused: { code: 'forbidden' } });
+  });
+
+  it('refuses a replay from a device the grant does not let answer', async () => {
+    // Arrange
+    const { world, upload, session, item } = await atGate();
+    const id = await upload(session);
+    const files = { note: 'still flickers', attachments: { from: session, ids: [id] } };
+    await world.answer(item.id, choose('Not good'), files);
+
+    // Act
+    const replay = await world.answer(item.id, choose('Not good'), { ...files, permitted: () => 'not on this grant' });
+
+    // Assert
+    should(replay).match({ handled: true, refused: { code: 'forbidden', message: 'not on this grant' } });
+  });
+
+  describe('over the agenda route', () => {
+    const send = async (world: Awaited<ReturnType<typeof atGate>>['world'], session: string, body: unknown) => {
+      const context: RouteContext = {
+        request: request({
+          method: 'POST',
+          path: `/v1/sessions/${session}/agenda`,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+        params: new Map([['sessionId', session]]),
+        actor: 'admin-cli',
+        credential: { kind: 'authenticated', tokenClass: 'admin' },
+        governance: { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) },
+      };
+      const route = agendaRoutes(
+        world.agenda,
+        { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
+        NO_HELD_REPLIES,
+        undefined,
+        world.gates,
+      ).find(each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda');
+      try {
+        const response = await (route as NonNullable<typeof route>).handle(context);
+        return { status: response.status, body: jsonBody(response) as Record<string, unknown> };
+      } catch (error) {
+        if (!(error instanceof ApiError)) throw error;
+        return { status: error.status, body: { error: error.message, code: error.code } };
+      }
+    };
+
+    it('answers a repeat of a successful Not good with files as it answered the first, and reopens once', async () => {
+      // Arrange
+      const { world, upload, session, item } = await atGate();
+      const id = await upload(session);
+      const body = {
+        action: 'resolve',
+        id: item.id,
+        response: choose('Not good'),
+        note: 'still flickers',
+        attachments: { from: session, ids: [id] },
+      };
+      const first = await send(world, session, body);
+
+      // Act — the response was lost, so the same request comes again
+      const second = await send(world, session, body);
+
+      // Assert
+      should(first).match({ status: 200 });
+      should(second.status).equal(200);
+      should(world.reopen.notices).have.length(1);
+      should(world.stored().laneId).equal('implement');
+    });
+
+    it('answers two identical Not goods with files sent at once with success, and reopens once', async () => {
+      // Arrange
+      const { world, upload, session, item } = await atGate();
+      const id = await upload(session);
+      const body = {
+        action: 'resolve',
+        id: item.id,
+        response: choose('Not good'),
+        note: 'still flickers',
+        attachments: { from: session, ids: [id] },
+      };
+
+      // Act
+      const both = await Promise.all([send(world, session, body), send(world, session, body)]);
+
+      // Assert
+      should(both.map(each => each.status)).eql([200, 200]);
+      should(world.reopen.notices).have.length(1);
+    });
+
+    it('still refuses files on an item that is no gate item', async () => {
+      // Arrange
+      const { world, upload, session } = await atGate();
+      const id = await upload(session);
+      const plain = await world.agenda.raise(
+        session,
+        { source: 'agent-raised', sourceRef: null, kind: 'info', subject: 'Noted', why: 'w', howToResolve: 'h' },
+        { kind: 'daemon', cause: 'system' },
+      );
+      const noted = (plain as { item: AgendaItem }).item;
+
+      // Act
+      const response = await send(world, session, {
+        action: 'resolve',
+        id: noted.id,
+        response: choose('Not good'),
+        attachments: { from: session, ids: [id] },
+      });
+
+      // Assert
+      should(response).match({ status: 400, body: { code: 'invalid' } });
+    });
+  });
+
+  it('does not take the daemon closing an item because the card moved on as an answer', async () => {
+    // Arrange
+    const { world, session, item } = await atGate();
+    await world.move('implement', OWNER, 'one more fix');
+
+    // Act
+    const late = await world.answer(item.id, choose('Not good'), { note: 'still flickers' });
+
+    // Assert
+    should(world.closed(session).map(each => each.id)).eql([item.id]);
+    should(late).eql({ handled: false });
+  });
+});
+
 describe('answers a gate does not take', () => {
   const at = async (laneId: string) => {
     const world = fixture([external({ laneId })]);
@@ -1269,7 +1655,7 @@ describe('the security review’s ways around a gate item (&F364 PR B)', () => {
     should(world.stored().laneId).equal('tested');
   });
 
-  it('takes two Not goods at once in turn: one reopen, one follow-up, the second told the card moved on', async () => {
+  it('takes two Not goods at once in turn: one reopen, one follow-up, the second an unchanged success', async () => {
     // Arrange
     const { world, item } = await atGate();
 
@@ -1281,7 +1667,7 @@ describe('the security review’s ways around a gate item (&F364 PR B)', () => {
 
     // Assert
     should(first).match({ handled: true, mutation: { ok: true } });
-    should(second).match({ handled: false });
+    should(second).match({ handled: true, mutation: { ok: true, change: 'unchanged' } });
     should(world.reopen.notices).have.length(1);
     should(world.open().map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
   });

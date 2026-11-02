@@ -33,6 +33,7 @@ import {
   type AgendaItem,
   type AgendaResponse,
   type AgendaSnapshot,
+  type ResolvedAgendaItem,
   type BoardReopenAttachments,
   type BoardTask,
   type BoardTaskActionRequest,
@@ -362,6 +363,10 @@ export class GateItems implements CardWriteObserver {
     if (answer.gate === true && item !== undefined && item.gate === undefined && item.gateAttached === undefined) {
       return refused('moved-on', `${answer.id} no longer carries a card's gate, so nothing was moved`);
     }
+    if (item === undefined && listed.ok) {
+      const replay = await this.replayed(answer, listed.value.resolved);
+      if (replay !== undefined) return replay;
+    }
     const cardId = (item?.gate ?? (answer.gate === true ? item?.gateAttached : undefined))?.cardId;
     if (cardId === undefined) return { handled: false };
     // Answers to one card's gate take turns: the second reads the board the first one left.
@@ -374,6 +379,11 @@ export class GateItems implements CardWriteObserver {
     // A gate item IS the gate; a thread answers it only when the answer says it picks the gate's option.
     const attached = item?.gate === undefined;
     const gate = item?.gate ?? (answer.gate === true ? item?.gateAttached : undefined);
+    if (item === undefined && listed.ok) {
+      // The first of two identical answers closed the item while this one waited its turn.
+      const replay = await this.replayed(answer, listed.value.resolved);
+      if (replay !== undefined) return replay;
+    }
     if (item === undefined || gate === undefined) return { handled: false };
     if (answer.actor.kind !== 'human') {
       return refused(
@@ -422,6 +432,27 @@ export class GateItems implements CardWriteObserver {
       this.answering.delete(card.task.id);
       await this.written(card.task.id);
     }
+  }
+
+  /**
+   * An answer that repeats one the owner already gave to a gate item (a lost response replayed, or the same request
+   * twice): the item comes back unchanged and nothing moves, as any answer to a closed item does. `undefined` when the
+   * item is no answered gate item, or was answered otherwise. The refusals of a first answer still apply.
+   */
+  private async replayed(
+    answer: GateAnswer,
+    resolved: readonly ResolvedAgendaItem[],
+  ): Promise<GateAnswerOutcome | undefined> {
+    const closed = resolved.find(each => each.id === answer.id);
+    if (closed?.gate === undefined || closed.response === undefined) return undefined;
+    if (JSON.stringify(closed.response) !== JSON.stringify(answer.response)) return undefined;
+    if (answer.actor.kind !== 'human') {
+      return refused('forbidden', `only the owner answers ${answer.id}`);
+    }
+    const denied = answer.permitted?.();
+    if (denied !== undefined) return refused('forbidden', denied);
+    const mutation = await this.ports.agenda.answer(answer.sessionId, answer.id, answer.response, answer.actor);
+    return { handled: true, mutation };
   }
 
   /** The agendas a card's gate item belongs on: the home of its assignee first, then the home of its owner ferret. */

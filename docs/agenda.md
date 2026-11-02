@@ -835,7 +835,7 @@ them to the card's ferret (its assignee, else its owner ferret) **before the boa
 carried leaves the card where it is and the item open, saying so; it then reopens the card with `{ from: <that ferret>, ids }`,
 and the ferret reads them as it does on the Board. Only a Not good takes files: "Not yet" and the forward option are
 refused with them, and the Inbox draws no "+" on "Not yet". A resolve with files on anything that is not a gate item is
-refused `400 invalid` rather than dropping them. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
+refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged, files or not, and the card is moved and the ferret told **once**; a repeat from anyone else, or one that answers differently, is not a replay. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
 takes them; the app draws the "+" only there, and an older machine keeps Not good as words alone.
 
 ### What the side panel's Cards view shows
