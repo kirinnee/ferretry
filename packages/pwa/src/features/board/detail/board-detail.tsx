@@ -294,8 +294,8 @@ function DetailBody({
   const settle = async (
     answer: BoardAnswer,
     work: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>,
-  ): Promise<boolean> => {
-    if (busy) return false;
+  ): Promise<string | null> => {
+    if (busy) return 'Another answer is still being sent.';
     setPressed(answer);
     setAnswerProblem(null);
     setBusy(true);
@@ -306,13 +306,13 @@ function DetailBody({
     setPressed(null);
     if (result.ok) {
       setDialog(null);
-      return true;
+      return null;
     }
     const message = result.error?.message ?? 'That did not go through.';
     // An answer's refusal is said beside the answers; a lane pick's beside the comment box, and a composer's in it.
     if (dialog === null && answer !== 'move') setAnswerProblem(message);
     else setProblem(message);
-    return false;
+    return message;
   };
 
   const requestMove = (to: string, answer: BoardAnswer = 'move'): void => {
@@ -353,13 +353,13 @@ function DetailBody({
     if (dialog.kind === 'drop') void run(() => actions.drop(target, reason));
     else if (dialog.kind === 'undepend') void run(() => actions.undepend(target, dialog.ref, reason));
   };
-  const submitSendBack = ({ reason, attachmentIds }: SendBack): void => {
-    if (dialog?.kind !== 'move' && dialog?.kind !== 'rework') return;
+  const submitSendBack = async ({ reason, attachmentIds }: SendBack): Promise<string | null> => {
+    if (dialog?.kind !== 'move' && dialog?.kind !== 'rework') return null;
     const files =
       attachmentIds.length === 0 || sendBackFiles === null
         ? undefined
         : { from: sendBackFiles.sessionId, ids: [...attachmentIds] };
-    void settle(dialog.kind === 'rework' ? 'not-good' : 'move', () =>
+    return await settle(dialog.kind === 'rework' ? 'not-good' : 'move', () =>
       actions.moveTask(moveTarget, dialog.to, reason, files),
     );
   };
@@ -383,12 +383,12 @@ function DetailBody({
           ? { placeholder: 'Why does it no longer wait?', submitLabel: 'Stop waiting', busyLabel: 'Saving…' }
           : dialog.kind === 'rework'
             ? {
-                placeholder: 'What is not good? The ferret reads this.',
+                placeholder: 'What went wrong?',
                 submitLabel: 'Send back',
                 busyLabel: 'Sending…',
               }
             : {
-                placeholder: 'Why is it going back? The ferret reads this.',
+                placeholder: 'Why is it going back?',
                 submitLabel: 'Move back',
                 busyLabel: 'Moving…',
               };
@@ -748,7 +748,7 @@ function DetailBody({
         <div className="fy-board__scrim">
           <BoardSendBack
             busy={busy}
-            error={problem}
+            error={null}
             files={sendBackFiles}
             heading={dialogHeading}
             onCancel={() => {
@@ -756,6 +756,7 @@ function DetailBody({
               setProblem(null);
             }}
             onSubmit={submitSendBack}
+            target={{ daemon: machine.connection, sessionId: sendBackFiles?.sessionId ?? recipient ?? task.id }}
             {...dialogWords}
           />
         </div>

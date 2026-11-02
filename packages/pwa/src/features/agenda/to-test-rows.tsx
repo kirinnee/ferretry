@@ -64,28 +64,29 @@ const NO_HOST: ToTestHost = {
   connectionOf: () => undefined,
 };
 
-/** The answers on the rows, and the reason box a Not good opens (draw `composer` once on the page). */
+/** The answers on the rows; the box a Not good opens is drawn by the row itself, under its card (`composerFor`). */
 export const useToTestAnswers = (host: ToTestHost | undefined, phone: boolean) => {
   const [notice, setNotice] = useState<string | null>(null);
   const live = host ?? NO_HOST;
-  const { requestMove, answerFor, composer } = useBoardAnswers({
+  const { requestMove, answerFor, composerFor } = useBoardAnswers({
     actions: live.actions,
     ports: live.ports,
     connectionOf: live.connectionOf,
     phone,
     onNotice: setNotice,
-    portal: true,
+    inline: true,
   });
   return {
     notice,
-    composer,
-    ...toTestAnswersOver({ requestMove, answerFor, snooze: snoozeOver(live.actions, setNotice) }),
+    ...toTestAnswersOver({ requestMove, answerFor, composerFor, snooze: snoozeOver(live.actions, setNotice) }),
   };
 };
 
 /** What a row needs to answer a card: any surface holding the Board's own `useBoardAnswers` flow can hand these over. */
 export interface ToTestAnswers {
   readonly answerFor: BoardAnswers['answerFor'];
+  /** The Not good box under this row's card while it waits for words (as wide as the card); absent where the host draws its own. */
+  readonly composerFor?: BoardAnswers['composerFor'];
   readonly done: (row: ToTestCard) => void;
   readonly notGood: (row: ToTestCard) => void;
   /** Park the card until `until`, or wake it now (`null`). It is the owner's, kept on the machine, so every device agrees. */
@@ -104,9 +105,12 @@ export const snoozeOver =
 export const toTestAnswersOver = ({
   requestMove,
   answerFor,
+  composerFor,
   snooze,
-}: Pick<BoardAnswers, 'requestMove' | 'answerFor'> & { readonly snooze: ToTestAnswers['snooze'] }): ToTestAnswers => ({
+}: Pick<BoardAnswers, 'requestMove' | 'answerFor'> &
+  Partial<Pick<BoardAnswers, 'composerFor'>> & { readonly snooze: ToTestAnswers['snooze'] }): ToTestAnswers => ({
   answerFor,
+  ...(composerFor === undefined ? {} : { composerFor }),
   snooze,
   done: row => requestMove(row.card, row.group, row.doneLaneId, 'done'),
   notGood: row =>
@@ -337,179 +341,187 @@ function ToTestRow({
   const release = releaseWords(row.card.task.shippedIn);
   const title = row.card.task.title;
   const empty = row.howToTest.trim() === '';
+  const notGoodBox = answers.composerFor?.(row.card) ?? null;
   return (
-    <li
-      className="fy-totest"
-      data-swipe-direction={swipe.compass?.revealed ? 'down' : (direction ?? undefined)}
-      data-swipe-committed={swipe.intent?.committed || undefined}
-      data-swipe-answer={direction === null ? undefined : words[direction]}
-      data-to-test={row.key}
-    >
-      <span aria-hidden="true" className="fy-totest__reveal" data-side="right" data-to-test-reveal="right">
-        <Check size={16} />
-        {words.right}
-      </span>
-      <span aria-hidden="true" className="fy-totest__reveal" data-side="left" data-to-test-reveal="left">
-        {words.left}
-        <X size={16} />
-      </span>
-      {swipe.compass?.revealed ? (
-        <SwipeCompass notNeeded={AVAILABLE.notNeeded} slot={swipe.compass.slot} snooze={AVAILABLE.snooze} />
-      ) : null}
-      <div
-        className="fy-totest__surface"
-        data-dragging={swipe.dragging ? '' : undefined}
-        ref={swipe.surface}
-        {...swipe.handlers}
-        style={{
-          touchAction: 'pan-y',
-          transform:
-            swipe.offsetX === 0 && swipe.offsetY === 0
-              ? undefined
-              : `translate3d(${swipe.offsetX}px, ${swipe.offsetY}px, 0)`,
-        }}
+    <>
+      <li
+        className="fy-totest"
+        data-swipe-direction={swipe.compass?.revealed ? 'down' : (direction ?? undefined)}
+        data-swipe-committed={swipe.intent?.committed || undefined}
+        data-swipe-answer={direction === null ? undefined : words[direction]}
+        data-to-test={row.key}
       >
-        <div className="fy-totest__sticky">
-          <CardHead
-            className="fy-totest__top"
-            info={{ controls: infoId, open: infoOpen, onToggle: () => setInfoOpen(open => !open) }}
-            meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
-            snooze={{
-              onSnooze: until => snooze(row, until),
-              label: `Snooze: ${title}`,
-              disabled: busy,
-              ...(now === undefined ? {} : { now }),
-            }}
-            title={
-              <MarqueeTitle
-                title={title}
-                wrap={text => (
-                  <RouteLink
-                    className="fy-totest__title"
-                    data-to-test-title=""
-                    onNavigate={onNavigate}
-                    to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
-                  >
-                    {text}
-                  </RouteLink>
-                )}
-              />
-            }
-            {...(pager === undefined ? {} : { pager })}
-            {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
-          />
-          {infoOpen ? (
-            <div className="fy-totest__info" data-to-test-info="" id={infoId}>
-              <p className="fy-totest__meta">
-                <span data-to-test-machine="">{row.card.machine}</span>
-                <span aria-hidden="true">·</span>
-                {release === null ? null : (
-                  <>
-                    <span data-to-test-release="">{release}</span>
-                    <span aria-hidden="true">·</span>
-                  </>
-                )}
-                <span>{words.what}</span>
-              </p>
-              {skipButton ? (
-                <div className="fy-totest__quiet">
-                  <button
-                    aria-label={`Skip: ${title}`}
-                    className="kt-btn"
-                    data-to-test-skip=""
-                    data-variant="ghost"
-                    disabled={busy}
-                    onClick={() => onSkip(row)}
-                    type="button"
-                  >
-                    <SkipForward aria-hidden="true" size={14} />
-                    Skip
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <CardMetaLine
-            chat={
-              row.taskSession == null
+        <span aria-hidden="true" className="fy-totest__reveal" data-side="right" data-to-test-reveal="right">
+          <Check size={16} />
+          {words.right}
+        </span>
+        <span aria-hidden="true" className="fy-totest__reveal" data-side="left" data-to-test-reveal="left">
+          {words.left}
+          <X size={16} />
+        </span>
+        {swipe.compass?.revealed ? (
+          <SwipeCompass notNeeded={AVAILABLE.notNeeded} slot={swipe.compass.slot} snooze={AVAILABLE.snooze} />
+        ) : null}
+        <div
+          className="fy-totest__surface"
+          data-dragging={swipe.dragging ? '' : undefined}
+          ref={swipe.surface}
+          {...swipe.handlers}
+          style={{
+            touchAction: 'pan-y',
+            transform:
+              swipe.offsetX === 0 && swipe.offsetY === 0
                 ? undefined
-                : {
-                    to: daemonSessionPath(row.card.daemonId, row.taskSession),
-                    onNavigate,
-                    hooks: { 'data-to-test-open-chat': '' },
-                  }
-            }
-            hooks={{ 'data-to-test-who': '' }}
-          >
-            <CardKindChip kind={TASK_CARD_KIND} />
-            {row.taskName === null || sameWords(row.taskName, title) ? null : (
-              <span className="fy-meta-line__ferret" data-to-test-ferret="">
-                {row.taskName}
-              </span>
-            )}
-            {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
-            {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
-          </CardMetaLine>
-        </div>
-        {empty ? null : (
-          <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
-            <h3 className="fy-totest__how-title">{words.section}</h3>
-            <HowToTest renderProse={cardProse} text={row.howToTest} />
-          </section>
-        )}
-        {state.error === null ? null : (
-          <p className="fy-totest__error" data-to-test-error="" role="alert">
-            {state.error}
-          </p>
-        )}
-        <div className="fy-totest__actions">
-          <div className="fy-totest__answers">
-            <button
-              aria-label={`${words.left}: ${title}`}
-              className="kt-btn"
-              data-to-test-not-good=""
-              data-variant="ghost"
-              disabled={busy}
-              onClick={() => notGood(row)}
-              type="button"
+                : `translate3d(${swipe.offsetX}px, ${swipe.offsetY}px, 0)`,
+          }}
+        >
+          <div className="fy-totest__sticky">
+            <CardHead
+              className="fy-totest__top"
+              info={{ controls: infoId, open: infoOpen, onToggle: () => setInfoOpen(open => !open) }}
+              meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
+              snooze={{
+                onSnooze: until => snooze(row, until),
+                label: `Snooze: ${title}`,
+                disabled: busy,
+                ...(now === undefined ? {} : { now }),
+              }}
+              title={
+                <MarqueeTitle
+                  title={title}
+                  wrap={text => (
+                    <RouteLink
+                      className="fy-totest__title"
+                      data-to-test-title=""
+                      onNavigate={onNavigate}
+                      to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
+                    >
+                      {text}
+                    </RouteLink>
+                  )}
+                />
+              }
+              {...(pager === undefined ? {} : { pager })}
+              {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
+            />
+            {infoOpen ? (
+              <div className="fy-totest__info" data-to-test-info="" id={infoId}>
+                <p className="fy-totest__meta">
+                  <span data-to-test-machine="">{row.card.machine}</span>
+                  <span aria-hidden="true">·</span>
+                  {release === null ? null : (
+                    <>
+                      <span data-to-test-release="">{release}</span>
+                      <span aria-hidden="true">·</span>
+                    </>
+                  )}
+                  <span>{words.what}</span>
+                </p>
+                {skipButton ? (
+                  <div className="fy-totest__quiet">
+                    <button
+                      aria-label={`Skip: ${title}`}
+                      className="kt-btn"
+                      data-to-test-skip=""
+                      data-variant="ghost"
+                      disabled={busy}
+                      onClick={() => onSkip(row)}
+                      type="button"
+                    >
+                      <SkipForward aria-hidden="true" size={14} />
+                      Skip
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <CardMetaLine
+              chat={
+                row.taskSession == null
+                  ? undefined
+                  : {
+                      to: daemonSessionPath(row.card.daemonId, row.taskSession),
+                      onNavigate,
+                      hooks: { 'data-to-test-open-chat': '' },
+                    }
+              }
+              hooks={{ 'data-to-test-who': '' }}
             >
-              {state.pressed === 'not-good' || state.pressed === 'send-back' ? (
-                <Spinner size={14} />
-              ) : (
-                <ArrowLeft aria-hidden="true" size={14} />
+              <CardKindChip kind={TASK_CARD_KIND} />
+              {row.taskName === null || sameWords(row.taskName, title) ? null : (
+                <span className="fy-meta-line__ferret" data-to-test-ferret="">
+                  {row.taskName}
+                </span>
               )}
-              {words.left}
-            </button>
-            <button
-              aria-label={`${words.right}: ${title}`}
-              className="kt-btn"
-              data-to-test-done=""
-              data-variant="primary"
-              disabled={busy}
-              onClick={() => done(row)}
-              type="button"
-            >
-              {state.pressed === 'done' ? <Spinner size={14} /> : <ArrowRight aria-hidden="true" size={14} />}
-              {words.right}
-            </button>
+              {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
+              {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
+            </CardMetaLine>
+          </div>
+          {empty ? null : (
+            <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
+              <h3 className="fy-totest__how-title">{words.section}</h3>
+              <HowToTest renderProse={cardProse} text={row.howToTest} />
+            </section>
+          )}
+          {state.error === null ? null : (
+            <p className="fy-totest__error" data-to-test-error="" role="alert">
+              {state.error}
+            </p>
+          )}
+          <div className="fy-totest__actions">
+            <div className="fy-totest__answers">
+              <button
+                aria-label={`${words.left}: ${title}`}
+                className="kt-btn"
+                data-to-test-not-good=""
+                data-variant="ghost"
+                disabled={busy}
+                onClick={() => notGood(row)}
+                type="button"
+              >
+                {state.pressed === 'not-good' || state.pressed === 'send-back' ? (
+                  <Spinner size={14} />
+                ) : (
+                  <ArrowLeft aria-hidden="true" size={14} />
+                )}
+                {words.left}
+              </button>
+              <button
+                aria-label={`${words.right}: ${title}`}
+                className="kt-btn"
+                data-to-test-done=""
+                data-variant="primary"
+                disabled={busy}
+                onClick={() => done(row)}
+                type="button"
+              >
+                {state.pressed === 'done' ? <Spinner size={14} /> : <ArrowRight aria-hidden="true" size={14} />}
+                {words.right}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      {custom ? (
-        <div aria-label="Snooze until" className="fy-attn-deck__custom" data-to-test-custom="" role="dialog">
-          <CustomSnoozeForm
-            now={Date.now()}
-            onSnooze={until => {
-              setCustom(false);
-              snooze(row, until);
-            }}
-          />
-          <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(false)} type="button">
-            Cancel
-          </button>
-        </div>
-      ) : null}
-    </li>
+        {custom ? (
+          <div aria-label="Snooze until" className="fy-attn-deck__custom" data-to-test-custom="" role="dialog">
+            <CustomSnoozeForm
+              now={Date.now()}
+              onSnooze={until => {
+                setCustom(false);
+                snooze(row, until);
+              }}
+            />
+            <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(false)} type="button">
+              Cancel
+            </button>
+          </div>
+        ) : null}
+      </li>
+      {notGoodBox === null ? null : (
+        <li className="fy-totest-compose" data-to-test-compose={row.key}>
+          {notGoodBox}
+        </li>
+      )}
+    </>
   );
 }
 
@@ -548,8 +560,10 @@ export function ToTestList({
 }) {
   const list = useRef<HTMLUListElement>(null);
   const scrollToNext = (row: ToTestCard): void => {
-    const current = [...(list.current?.children ?? [])].find(item => item.getAttribute('data-to-test') === row.key);
-    current?.nextElementSibling?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    // The rows only: a Not good box open under a card is not the next card.
+    const items = [...(list.current?.querySelectorAll(':scope > [data-to-test]') ?? [])];
+    const at = items.findIndex(item => item.getAttribute('data-to-test') === row.key);
+    items[at + 1]?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   return (
     <ul aria-label="Ready to test" className="fy-totest-list" data-to-test-list="" ref={list}>

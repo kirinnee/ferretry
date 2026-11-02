@@ -96,7 +96,7 @@ import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../li
 import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
 import { itemCardKind } from '../../lib/card-kind.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
-import type { DaemonId } from '../../lib/daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
 import { escapeCloses } from '../../lib/escape-closes.ts';
 import {
@@ -576,17 +576,21 @@ function CardTools({
 /** The words "Not good" waits for, asked where the answer row was; the refusal, if any, shows beside its buttons. */
 function GateWhy({
   card,
+  daemon,
   error,
   optional,
   onSend,
   onCancel,
 }: {
   readonly card: InboxCard;
+  /** The card's machine; a machine that has gone has nowhere to send the answer, so no box is drawn for it. */
+  readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
   readonly optional: boolean;
   readonly onSend: (reason: string) => void;
   readonly onCancel: () => void;
 }) {
+  if (daemon === undefined) return null;
   return (
     <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>
       <BoardSendBack
@@ -600,9 +604,13 @@ function GateWhy({
         }
         submitLabel={optional ? 'Not yet' : 'Send back'}
         wordsOptional={optional}
-        placeholder={optional ? 'Optional: what should the ferret know?' : 'What is not good? The ferret reads this.'}
+        placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
         onCancel={onCancel}
-        onSubmit={sent => onSend(sent.reason)}
+        onSubmit={sent => {
+          onSend(sent.reason);
+          return null;
+        }}
+        target={{ daemon, sessionId: card.view.config.id }}
       />
     </div>
   );
@@ -1873,6 +1881,7 @@ export function AgendaInboxPage({
               {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
                 <GateWhy
                   card={deck[0]}
+                  daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
                   onCancel={() => setGateWhy(null)}
@@ -1913,7 +1922,6 @@ export function AgendaInboxPage({
             </div>
           </div>
         )}
-        {toTestAnswers.composer}
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );
@@ -1967,7 +1975,6 @@ export function AgendaInboxPage({
       ) : (
         openBody
       )}
-      {toTestAnswers.composer}
       <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );
