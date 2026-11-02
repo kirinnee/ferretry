@@ -104,7 +104,6 @@ import {
   type GateItem,
   gateAnswerAction,
   gateAsksWords,
-  gateVerb,
   gateWordsFor,
   isGateItem,
 } from '../../lib/gate-items.ts';
@@ -525,9 +524,6 @@ function GateMeta({
       hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(item)} />
-      <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
-        {gateVerb(item)}
-      </span>
       {gate.projectName === undefined ? null : (
         <>
           <MetaDot />

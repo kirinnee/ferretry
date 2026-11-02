@@ -549,6 +549,26 @@ the facts around it — so every NEW item a ferret raises must carry both:
 - **Only new items.** It is checked when an item is raised, never when one is read or edited: an item already
   on a board keeps working without them, and `agenda edit` may still reword either.
 
+## The kind chip
+
+Every card wears one chip that says what the OWNER does with it, in plain words. The words live in ONE place —
+`AGENDA_KIND_LABELS` in `@ferretry/protocol` (`agenda-card.ts`, with `agendaKindLabel(item)` to read it) — and the
+app's card pill, the Inbox chip, the card header and the row's meta line all read it; the app keeps only the tone.
+
+| Kind (`--kind`)   | Chip     | The owner…                                      |
+| ----------------- | -------- | ----------------------------------------------- |
+| `reply`           | Question | answers in words                                |
+| `choice`, `yesno` | Decision | picks an option                                 |
+| `task`            | To do    | does the steps (with steps or without)          |
+| `permission`      | Approve  | says yes or no to a request                     |
+| `info`, a notice  | FYI      | reads it and says Got it                        |
+| `review`          | Review   | reads the work and approves or asks for changes |
+| `form`            | Fill in  | fills in the card's fields                      |
+| `input`           | Type in  | types in what the card asks for                 |
+
+A **gate item** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
+go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message kinds are another thing and keep their own words.
+
 ## What I need from you
 
 **Every card has one answer shape, and it says it in one place.** Under the premise and the context, before any
@@ -720,8 +740,8 @@ tomorrow / custom) snoozes; the arrow keys are unchanged. Snooze is offered only
 
 A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (`item.gate`: the card, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
-the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — "Try it"
-(a card in a verify lane) or "OK to build?" (a plan awaiting approval) — the project, the ferret and "Open chat ›". It repeats
+the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — the **Test** chip
+(a card in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats
 nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
 options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.
 

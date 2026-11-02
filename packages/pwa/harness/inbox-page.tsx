@@ -12,6 +12,8 @@
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
+ *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
+ *   ?view=input           an INPUT item open (a short typed value: the Type in chip)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
@@ -265,7 +267,7 @@ const GATE = item('G61', 3, 'daemon', {
   raisedBy: 'daemon',
   raisedBySession: null,
   raisedByName: null,
-  ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
+  ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
   gate: {
     cardId: 'F61',
     laneId: 'tested',
@@ -280,6 +282,32 @@ const GATE = item('G61', 3, 'daemon', {
   },
 } as Partial<AgendaItem>);
 const GATE_CARD = card(GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const GATE_PLAN = item('G62', 3, 'daemon', {
+  ...GATE,
+  title: 'Pairing a second phone',
+  subject: 'OK to build: pairing a second phone',
+  why: 'The plan for pairing a second phone is ready.',
+  body: '1. Add a second pairing code route.\n2. Show every paired phone in Devices.\n3. Let the owner revoke one phone.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Change the plan' }, { label: 'Approve' }] },
+  gate: {
+    ...GATE.gate,
+    cardId: 'F62',
+    laneId: 'plan',
+    laneName: 'Plan',
+    options: [
+      { id: 'o0', label: 'Approve', outcome: 'next' },
+      { id: 'o1', label: 'Change the plan', outcome: 'reopen-with-agenda' },
+    ],
+  },
+} as Partial<AgendaItem>);
+const GATE_PLAN_CARD = card(GATE_PLAN, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const INPUT = item('A44', 5, 'ottilie', {
+  title: 'Work email',
+  kind: 'input',
+  subject: 'What is your work email, for the alerts?',
+  ask: { kind: 'open-question' },
+  premise: '- Alerts go to one inbox\n- It is only used for the relay alerts',
+} as Partial<AgendaItem>);
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
@@ -287,6 +315,8 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-7': card(SEVEN, RELEASE, 'studio'),
   form: card(FORM, RELAY, 'studio'),
   gate: GATE_CARD,
+  'gate-plan': GATE_PLAN_CARD,
+  input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
 };
 

@@ -1,10 +1,11 @@
-import type {
-  AgendaAsk,
-  AgendaBy,
-  AgendaItem,
-  AgendaResponse,
-  AgendaSnapshot,
-  ResolvedAgendaItem,
+import {
+  AGENDA_KIND_LABELS,
+  type AgendaAsk,
+  type AgendaBy,
+  type AgendaItem,
+  type AgendaResponse,
+  type AgendaSnapshot,
+  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import {
   ArrowRight,
@@ -48,17 +49,37 @@ export const agendaKindMeta = (
     };
   switch (item.ask.kind) {
     case 'permission':
-      return { tone: 'permission', label: 'Permission', icon: ShieldQuestion, action: 'Approve or reject' };
+      return {
+        tone: 'permission',
+        label: AGENDA_KIND_LABELS.permission,
+        icon: ShieldQuestion,
+        action: 'Approve or reject',
+      };
     case 'multiple-choice':
-      return { tone: 'multiple-choice', label: 'Pick one', icon: ListChecks, action: 'Choose an answer' };
+      return {
+        tone: 'multiple-choice',
+        label: AGENDA_KIND_LABELS.choice,
+        icon: ListChecks,
+        action: 'Choose an answer',
+      };
     case 'answer-review':
-      return { tone: 'answer-review', label: 'Review answer', icon: BadgeCheck, action: 'Accept it, or ask for more' };
+      return {
+        tone: 'answer-review',
+        label: AGENDA_KIND_LABELS.review,
+        icon: BadgeCheck,
+        action: 'Accept it, or ask for more',
+      };
     case 'open-question':
-      return { tone: 'open-question', label: 'Open question', icon: MessageCircleQuestion, action: 'Write an answer' };
+      return {
+        tone: 'open-question',
+        label: AGENDA_KIND_LABELS.reply,
+        icon: MessageCircleQuestion,
+        action: 'Write an answer',
+      };
     case 'task':
       return {
         tone: 'task',
-        label: 'To do',
+        label: AGENDA_KIND_LABELS.task,
         icon: ListTodo,
         action: 'Do it, then mark it done — or ask for more info',
       };

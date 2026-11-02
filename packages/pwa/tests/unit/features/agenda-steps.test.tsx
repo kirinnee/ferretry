@@ -329,6 +329,6 @@ describe('a pinned to-do keeps its header and actions in view', () => {
     const scroll = must(view.container.querySelector('[data-agenda-scroll]'), 'scroll region');
     expect(scroll.querySelector('header')).toBeNull();
     expect(scroll.contains(done(view.container))).toBe(false);
-    expect(view.container.querySelector('header')?.textContent).toContain('Task');
+    expect(view.container.querySelector('header')?.textContent).toContain('To do');
   });
 });

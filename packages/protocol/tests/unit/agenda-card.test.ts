@@ -7,10 +7,12 @@ import {
   agendaAnswerProblems,
 } from '../../src/lib/agenda.ts';
 import {
+  AGENDA_KIND_LABELS,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaCardKind,
   agendaInDiscussion,
+  agendaKindLabel,
   agendaTitle,
   answerInDirection,
   askForKind,
@@ -341,5 +343,28 @@ describe('a gate item', () => {
 
   it('should refuse a gate with no options or more than three', () => {
     should(parse({ ...gateItem, gate: { ...gateItem.gate, options: [] } }).success).be.false();
+  });
+});
+
+describe('the kind chip words', () => {
+  it('names every kind in plain words for what the owner does', () => {
+    should(AGENDA_KIND_LABELS).eql({
+      reply: 'Question',
+      choice: 'Decision',
+      yesno: 'Decision',
+      task: 'To do',
+      permission: 'Approve',
+      info: 'FYI',
+      review: 'Review',
+      form: 'Fill in',
+      input: 'Type in',
+    });
+  });
+
+  it('reads the word from the raised kind, else from the ask an old item carries', () => {
+    should(agendaKindLabel({ kind: 'permission' })).equal('Approve');
+    should(agendaKindLabel({ ask: { kind: 'open-question' } })).equal('Question');
+    should(agendaKindLabel({ ask: { kind: 'task' } })).equal('To do');
+    should(agendaKindLabel({})).equal('FYI');
   });
 });

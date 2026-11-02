@@ -217,7 +217,7 @@ for (const form of ['phone', 'desktop'] as const) {
     // A gate item open: what it is, where it waits, how to test it, and its options.
     const gate = await open(context, theme, 'gate');
     check(
-      (await gate.locator('[data-inbox-gate-stage]').textContent()) === 'Try it' &&
+      (await gate.locator('[data-card-kind="task"]').first().textContent()) === 'Test' &&
         (await gate.locator('[data-inbox-gate-project]').textContent()) === 'ferretry' &&
         (await gate.locator('[data-inbox-open-chat]').count()) === 1 &&
         (await gate.locator('[data-inbox-who]').count()) === 1,

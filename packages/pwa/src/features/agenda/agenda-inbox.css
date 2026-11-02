@@ -1518,11 +1518,6 @@ a.fy-inbox-row:focus-visible {
   color: var(--fg);
 }
 
-/* A GATE ITEM says what it is under the who-and-what line: the gate it waits at, its project and its lane. */
-.fy-inbox-gate__stage {
-  color: var(--fg);
-  font-weight: 600;
-}
 /* The plain buttons for the compass's quiet moves, kept under the head's ⓘ so the card body keeps its room. */
 .fy-inbox-tools {
   display: flex;

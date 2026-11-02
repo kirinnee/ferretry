@@ -4,11 +4,11 @@ import { TASK_CARD_KIND } from '../../../src/lib/card-kind.ts';
 import { mount, must } from '../../support/dom.ts';
 
 describe('CardKindChip', () => {
-  it('says Task with the check box, and an agenda word with the speech bubble', async () => {
+  it('says Test with the check box, and an agenda word with the speech bubble', async () => {
     const task = await mount(<CardKindChip kind={TASK_CARD_KIND} />);
     const taskChip = must(task.container.querySelector('[data-card-kind]'), 'the task chip');
     expect(taskChip.getAttribute('data-card-kind')).toBe('task');
-    expect(taskChip.textContent).toBe('Task');
+    expect(taskChip.textContent).toBe('Test');
     expect(taskChip.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     await task.unmount();
 

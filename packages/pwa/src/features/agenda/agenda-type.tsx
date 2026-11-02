@@ -1,10 +1,12 @@
 /**
  * WHAT KIND OF AGENDA ITEM THIS IS, in one word — the pill in the card's top bar, tinted by a theme token (never a
- * colour alone). The kinds are the protocol's (`agendaCardKind`); a to-do that carries steps is called a to-do, one
- * that does not, a task. No line of advice goes with it: the card says what to do by what it asks.
+ * colour alone). The words are the protocol's (`AGENDA_KIND_LABELS`, plain words for what the owner does); only the
+ * tone is the app's. A card waiting to be tried is a Test. No line of advice goes with it: the card says what to do by
+ * what it asks.
  */
 
-import { type AgendaItem, type AgendaKind, agendaCardKind } from '@ferretry/protocol';
+import { AGENDA_KIND_LABELS, type AgendaItem, type AgendaKind, agendaCardKind } from '@ferretry/protocol';
+import { gateVerb } from '../../lib/gate-items.ts';
 
 type AgendaTypeTone = 'decision' | 'approval' | 'todo' | 'review' | 'note' | 'reply';
 
@@ -14,20 +16,20 @@ export interface AgendaTypeMeta {
   readonly label: string;
 }
 
-const META: Readonly<Record<AgendaKind, Omit<AgendaTypeMeta, 'kind'>>> = {
-  choice: { tone: 'decision', label: 'Decision' },
-  yesno: { tone: 'decision', label: 'Decision' },
-  permission: { tone: 'approval', label: 'Approval' },
-  task: { tone: 'todo', label: 'Task' },
-  review: { tone: 'review', label: 'Review' },
-  info: { tone: 'note', label: 'Note' },
-  reply: { tone: 'reply', label: 'Reply' },
-  form: { tone: 'reply', label: 'Form' },
-  input: { tone: 'approval', label: 'Input' },
+const TONES: Readonly<Record<AgendaKind, AgendaTypeTone>> = {
+  choice: 'decision',
+  yesno: 'decision',
+  permission: 'approval',
+  task: 'todo',
+  review: 'review',
+  info: 'note',
+  reply: 'reply',
+  form: 'reply',
+  input: 'approval',
 };
 
-export const agendaTypeMeta = (item: Pick<AgendaItem, 'kind' | 'ask' | 'steps'>): AgendaTypeMeta => {
+export const agendaTypeMeta = (item: Pick<AgendaItem, 'kind' | 'ask' | 'gate' | 'subject'>): AgendaTypeMeta => {
   const kind = agendaCardKind(item);
-  const todo = kind === 'task' && (item.steps?.length ?? 0) > 0;
-  return { kind, ...META[kind], ...(todo ? { label: 'To-do' } : {}) };
+  const label = item.gate === undefined ? AGENDA_KIND_LABELS[kind] : gateVerb(item);
+  return { kind, tone: TONES[kind], label };
 };
