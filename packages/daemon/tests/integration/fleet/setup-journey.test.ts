@@ -658,8 +658,8 @@ const TARGET_SECRET = 'ghp_targetplaceholderplaceholder000000000';
  * A target that is signed in: the login `claude-you` (the id the source's own login has, so a copy has
  * to deal with a clash), its credential-store entry with a placeholder token, and a secret the store holds.
  */
-async function signedInTarget(name: string): Promise<Machine> {
-  const target = await machine(name, { claude: false });
+async function signedInTarget(name: string, emails?: Readonly<Record<string, string>>): Promise<Machine> {
+  const target = await machine(name, { claude: false, ...(emails === undefined ? {} : { emails }) });
   const steps = [
     { kind: 'credential.add', id: 'claude-you', harness: 'claude' },
     { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
@@ -1169,6 +1169,30 @@ describe('a repeat copy (update) over real files', () => {
       component => component.clonedFromKey !== undefined,
     );
     should(linked.length).be.above(0);
+  });
+
+  it('should reuse the signed-in login with the same email, in another case, and leave it byte-identical', async () => {
+    // Arrange: the source's login is signed in as Kirin@Example.TEST; the target already holds that account as
+    // an unlinked, signed-in login (no origin key, so only the email can pair them).
+    const source = await machine('studio', { claude: true, emails: { 'claude-you': 'Kirin@Example.TEST' } });
+    await importHost(source);
+    const target = await signedInTarget('work-email', { 'claude-you': 'kirin@example.test' });
+    const bundle = await exported(source);
+    should(bundle.credentials.map(credential => credential.email)).deepEqual(['Kirin@Example.TEST']);
+    const before = await signedInState(target);
+    const loginsBefore = Object.keys((await declared(target)).credentials);
+
+    // Act
+    const review = await target.setup.reviewClone({ bundle });
+    await apply(target, { kind: 'clone.import', mode: 'update', bundle, reviewed: review.fingerprint, decisions: {} });
+
+    // Assert: the review said the login is already here, no slot or login was added, the copied runtime uses it,
+    // and everything that makes it signed in is exactly as it was.
+    should(review.logins).deepEqual([{ sourceId: 'claude-you', outcome: 'matched', target: 'claude-you' }]);
+    const model = await declared(target);
+    should(Object.keys(model.credentials)).deepEqual(loginsBefore);
+    should(model.runtimes['claude-default']?.credential).equal('claude-you');
+    should(await signedInState(target)).deepEqual(before);
   });
 
   for (const choice of ['keep', 'remove'] as const) {

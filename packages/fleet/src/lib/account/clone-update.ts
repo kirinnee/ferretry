@@ -55,6 +55,7 @@ import {
   cloneItemDigest,
   cloneLoginRunnable,
   cloneRunnables,
+  matchCloneSignIn,
   type FleetCloneBundle,
   type FleetCloneFile,
   type FleetCloneReview,
@@ -1520,16 +1521,17 @@ export function describeCloneUpdate(plan: CloneUpdatePlan, machine: string, sour
 /**
  * Which login here each login of the source is: the record's link (the login this source's login was
  * last paired with), then a login here that carries the source login's origin key. Two logins here
- * claiming one key is a question for the person, never a guess. Only then is `fallback` asked — the seam
- * for the shared same-harness email/label matcher (https://github.com/kirinnee/ferretry/pull/1369), which
- * answers the logins here a source login could be. A login with no pairing is an empty slot — an existing
- * login is only ever pointed at, never rewritten (design §14.4).
+ * claiming one key is a question for the person, never a guess. Only then the shared sign-in matcher
+ * (`matchCloneSignIn`: same harness, email case-insensitive, else exact label when neither side has an
+ * email; two or more fits ask). `targetEmails` is login id → account email, as the credentials surface
+ * reports it. An API-key (environment) login is config and is never sign-in matched. A login with no pairing
+ * is an empty slot — an existing login is only ever pointed at, never rewritten (design §14.4).
  */
 export function resolveCloneLogins(
   bundle: FleetCloneBundle,
   target: AccountModel,
   base: CloneBaseSource | undefined,
-  fallback?: CloneLoginFallback,
+  targetEmails: Readonly<Record<string, string | undefined>> = {},
 ): CloneLoginResolution {
   const keys = cloneOriginKeys(bundle);
   const matched = new Map<string, string>();
@@ -1539,6 +1541,13 @@ export function resolveCloneLogins(
     else if (found.length > 1) ask.set(credential.id, found);
     return found.length > 0;
   };
+  const heldLogins = Object.entries(target.credentials).map(([id, held]) => ({
+    id,
+    harness: held.harness,
+    store: held.store,
+    email: targetEmails[id],
+    label: held.label,
+  }));
   for (const credential of bundle.credentials) {
     const key = keys.get(`login/${credential.id}`);
     if (key !== undefined) {
@@ -1554,17 +1563,10 @@ export function resolveCloneLogins(
         .toSorted();
       if (settle(credential, claimants)) continue;
     }
-    // The record and the key said nothing: the fallback matcher, when one is given, is next.
-    if (fallback !== undefined) settle(credential, [...new Set(fallback(credential, target))].toSorted());
+    // The record and the key said nothing: the shared sign-in matcher is next.
+    if (credential.store === 'environment') continue;
+    const fit = matchCloneSignIn(credential, heldLogins);
+    settle(credential, fit.kind === 'one' ? [fit.id] : fit.kind === 'many' ? fit.ids : []);
   }
   return { matched, ask };
 }
-
-/**
- * The logins here a source login could be when neither the record nor an origin key says (same harness,
- * then email, then label). Supplied by the shared matcher once it lands in `@ferretry/protocol`.
- */
-export type CloneLoginFallback = (
-  credential: FleetCloneBundle['credentials'][number],
-  target: AccountModel,
-) => readonly string[];

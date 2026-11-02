@@ -1530,35 +1530,124 @@ describe('files a take removes (#F544 finding 6)', () => {
   });
 });
 
-describe('the seam for matching a login by email or label (#F544 finding 7, PR 2)', () => {
-  const bundle = sourceBundle({ credentials: [{ id: 'you', harness: 'claude', label: 'work' }] });
-  const target = parseAccountModel({
-    version: 2,
-    credentials: {
-      existing: { harness: 'claude', store: 'ferretry', label: 'work' },
-      other: { harness: 'claude', store: 'ferretry', label: 'work' },
-    },
+describe('matching a login by email or label after the record and the key (#F544 finding 7)', () => {
+  const sourceLogin = (patch: Record<string, unknown> = {}) =>
+    sourceBundle({ credentials: [{ id: 'you', harness: 'claude', label: 'work', ...patch }] });
+  const heldBy = (credentials: Record<string, Record<string, unknown>>) =>
+    parseAccountModel({
+      version: 2,
+      credentials: Object.fromEntries(
+        Object.entries(credentials).map(([id, held]) => [id, { harness: 'claude', store: 'ferretry', ...held }]),
+      ),
+    });
+  const resolved = (
+    bundle: FleetCloneBundle,
+    target: ReturnType<typeof parseAccountModel>,
+    emails: Record<string, string | undefined> = {},
+  ) => resolveCloneLogins(bundle, target, undefined, emails);
+
+  it('should reuse the same-harness login with the same label when neither side has an email', () => {
+    const found = resolved(sourceLogin(), heldBy({ existing: { label: 'work' }, other: { label: 'play' } }));
+    should([...found.matched]).eql([['you', 'existing']]);
+    should(found.ask.size).equal(0);
   });
 
-  it('should ask the fallback only when the record and the key said nothing', () => {
-    should([...resolveCloneLogins(bundle, target, undefined).matched]).eql([]);
-    should([...resolveCloneLogins(bundle, target, undefined, () => ['existing']).matched]).eql([['you', 'existing']]);
-    should([...resolveCloneLogins(bundle, target, undefined, () => ['other', 'existing', 'other']).ask]).eql([
-      ['you', ['existing', 'other']],
-    ]);
+  it('should reuse a login by email, ignoring case and spaces', () => {
+    const found = resolved(
+      sourceLogin({ email: 'Person@Example.test' }),
+      heldBy({ existing: { label: 'unrelated' } }),
+      { existing: ' person@example.TEST ' },
+    );
+    should([...found.matched]).eql([['you', 'existing']]);
+  });
+
+  it('should not fall back to the label when either side has an email', () => {
+    should(
+      resolved(sourceLogin({ email: 'a@example.test' }), heldBy({ existing: { label: 'work' } })).matched.size,
+    ).equal(0);
+    should(
+      resolved(sourceLogin(), heldBy({ existing: { label: 'work' } }), { existing: 'a@example.test' }).matched.size,
+    ).equal(0);
+  });
+
+  it('should never match a login of another harness, or an API-key login', () => {
+    const target = heldBy({
+      codex: { harness: 'codex', label: 'work' },
+      api: { store: 'environment', label: 'work', env: { ANTHROPIC_API_KEY: '${secret:API_TOKEN}' } },
+    });
+    const found = resolved(sourceLogin(), target);
+    should(found.matched.size).equal(0);
+    should(found.ask.size).equal(0);
+    const api = sourceBundle({
+      credentials: [
+        {
+          id: 'you',
+          harness: 'claude',
+          label: 'work',
+          store: 'environment',
+          env: { ANTHROPIC_API_KEY: '${secret:API_TOKEN}' },
+        },
+      ],
+    });
+    should(resolved(api, heldBy({ existing: { label: 'work' } })).matched.size).equal(0);
+  });
+
+  it('should ask when two logins fit, listing both', () => {
+    const found = resolved(sourceLogin(), heldBy({ zed: { label: 'work' }, abe: { label: 'work' } }));
+    should(found.matched.size).equal(0);
+    should([...found.ask]).eql([['you', ['abe', 'zed']]]);
+  });
+
+  it('should ask the matcher only when the record and the key said nothing', () => {
     const keyed = sourceBundle({
       keys: { 'login/you': KEY_API },
       credentials: [{ id: 'you', harness: 'claude', label: 'work' }],
     });
-    const linked = parseAccountModel({
-      version: 2,
-      credentials: { linked: { harness: 'claude', store: 'ferretry', ...FROM, clonedFromKey: KEY_API } },
+    const linked = heldBy({ linked: { label: 'other', ...FROM, clonedFromKey: KEY_API }, same: { label: 'work' } });
+    should([...resolved(keyed, linked).matched]).eql([['you', 'linked']]);
+  });
+
+  describe('through an update', () => {
+    const runtimeOn = (login: Record<string, unknown>) =>
+      sourceBundle({
+        credentials: [{ id: 'you', harness: 'claude', ...login }],
+        runtimes: { agent: { credential: 'you', profile: 'default', agent: false } },
+        profiles: { default: { layers: [] } },
+      });
+    const update = (
+      bundle: FleetCloneBundle,
+      target: ReturnType<typeof parseAccountModel>,
+      emails: Record<string, string | undefined> = {},
+    ): CloneUpdateInput => bareInput(bundle, target, [], { logins: resolved(bundle, target, emails) });
+    const TAKE = { decisions: { 'runtime/agent': 'add' } } as const;
+
+    it('should point a new runtime at the existing login, with no slot and no new login', () => {
+      const target = heldBy({ existing: { label: 'work' } });
+      const before = JSON.stringify(target.credentials);
+      const input = update(runtimeOn({ label: 'work' }), target);
+      should(reviewed(input).logins).eql([{ sourceId: 'you', outcome: 'matched', target: 'existing' }]);
+      const plan = planCloneUpdate(analyseCloneUpdate(input), TAKE);
+      should(plan.slots).eql([]);
+      should(Object.keys(plan.model.credentials)).eql(['existing']);
+      should(plan.model.runtimes.agent?.credential).equal('existing');
+      should(JSON.stringify(plan.model.credentials)).equal(before);
     });
-    should([
-      ...resolveCloneLogins(keyed, linked, undefined, () => {
-        throw new Error('not asked');
-      }).matched,
-    ]).eql([['you', 'linked']]);
+
+    it('should put the matched login in the review fingerprint', () => {
+      const bundle = runtimeOn({ label: 'work' });
+      const one = analyseCloneUpdate(update(bundle, heldBy({ a: { label: 'work' } }))).fingerprint;
+      const other = analyseCloneUpdate(update(bundle, heldBy({ b: { label: 'work' } }))).fingerprint;
+      should(one).not.equal(other);
+    });
+
+    it('should list two candidates for the person and refuse to apply without a decision', () => {
+      const input = update(runtimeOn({ label: 'work' }), heldBy({ abe: { label: 'work' }, zed: { label: 'work' } }));
+      should(reviewed(input).logins).eql([{ sourceId: 'you', outcome: 'ask', candidates: ['abe', 'zed'] }]);
+      should(() => planCloneUpdate(analyseCloneUpdate(input), TAKE)).throw(CloneRefusal);
+      const plan = planCloneUpdate(analyseCloneUpdate(input), { ...TAKE, logins: { you: 'zed' } });
+      should(plan.model.runtimes.agent?.credential).equal('zed');
+      should(plan.slots).eql([]);
+    });
   });
 });
 

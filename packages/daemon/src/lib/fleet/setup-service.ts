@@ -786,7 +786,7 @@ export class FleetSetupService {
       ...(source === undefined ? {} : { source }),
       ...(base === undefined ? {} : { base }),
       targetFiles: await this.#targetFiles(reading.model),
-      logins: resolveCloneLogins(bundle, reading.model, base),
+      logins: resolveCloneLogins(bundle, reading.model, base, await this.#emails()),
       installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
       existingSkillItems: await this.deps.skillItems(),
       existingSecrets: await this.deps.secrets.names().catch(() => []),
