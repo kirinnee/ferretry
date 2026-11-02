@@ -117,6 +117,22 @@ describe("the composer pickers over the daemon's work search", () => {
     expect(found[0]).toBe('!A3');
   });
 
+  it('shows a snoozed or replied item with its standing as the chip, asking for open work only', async () => {
+    const { port, asked } = fakePort([
+      agendaHit('A9', { standing: 'snoozed' }),
+      agendaHit('A8', { standing: 'replied' }),
+    ]);
+    const result = await ladder(port).candidates(context('@', 'region', 3));
+    const chips = result.candidates.map(candidate => [candidate.replacement, candidate.badge]);
+    expect(chips).toEqual(
+      expect.arrayContaining([
+        ['!A9', 'snoozed'],
+        ['!A8', 'replied'],
+      ]),
+    );
+    expect(asked).toEqual([{ q: 'region', kind: 'agenda', open: true, limit: 20 }]);
+  });
+
   it("offers only this session's agenda items, since an id in another session would not prove", async () => {
     const { port } = fakePort([agendaHit('A5', { sessionId: 'another/session' })]);
     expect(replacements(await ladder(port).candidates(context('@', 'region', 3)))).not.toContain('!A5');

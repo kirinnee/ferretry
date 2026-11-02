@@ -63,6 +63,16 @@ export function renderHits(hits: readonly WorkHit[], context: HitRenderContext):
   });
 }
 
+/**
+ * The line that says the 30-day window kept closed work out, so an empty or short answer never reads as
+ * "that work does not exist". Empty when nothing was left out, or when the daemon is too old to count.
+ */
+export function renderOlderHidden(olderHidden: number | undefined, retry: string): string[] {
+  if (olderHidden === undefined || olderHidden < 1) return [];
+  const noun = olderHidden === 1 ? 'older closed item' : 'older closed items';
+  return [`${String(olderHidden)} ${noun} hidden — ${retry}`];
+}
+
 /** What an empty answer says, naming the kind the person asked about. */
 export function renderNoMatch(query: string, kind: WorkKind | undefined): string {
   const subject = kind === 'task' ? 'cards' : kind === 'agenda' ? 'agenda items' : 'cards or agenda items';

@@ -209,6 +209,8 @@ export function CommandPalette({
           q: trimmedQuery,
           ...(workFilter.kind === 'all' ? {} : { kind: workFilter.kind }),
           open: workFilter.open,
+          // "Everything" also lifts the daemon's 30-day window; "Open" has no closed work to window.
+          all: !workFilter.open,
           limit: WORK_SEARCH_LIMIT,
         }
       : null;

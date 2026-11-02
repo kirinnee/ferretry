@@ -89,6 +89,7 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
+import { findRows, isFinding } from '../../lib/agenda-inbox-find.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
@@ -127,6 +128,7 @@ import { AgendaItemView } from './agenda-item-view.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
+import { InboxFindResults } from './inbox-find-results.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -1307,6 +1309,7 @@ export function AgendaInboxPage({
     [inbox.cards, inbox.withFerret, inbox.parked, inbox.resolved],
   );
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
+  const finding = isFinding(query);
   const listFilter: InboxListFilter = { machine: machineFilter, query, from, mode: kind };
   const visible = filterInboxCards(inbox.cards, listFilter);
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
@@ -1346,6 +1349,26 @@ export function AgendaInboxPage({
   const deckSelected = deckCards.find(card => card.key === deckPlace);
   const stepRow = toTestRows.find(row => row.key === deckPlace);
 
+  // Words typed make Find look in every tab, and the snoozed, replied and resolved ones come from the resolved read.
+  const loadResolved = inbox.loadResolved;
+  useEffect(() => {
+    if (finding) loadResolved();
+  }, [finding, loadResolved]);
+  const findResults = finding
+    ? findRows(
+        {
+          cards: inbox.cards,
+          withFerret: inbox.withFerret,
+          parked: inbox.parked,
+          resolved: inbox.resolved,
+          toTest: inbox.toTest,
+          toTestSnoozed: inbox.toTestSnoozed,
+        },
+        listFilter,
+        from !== null || kind !== 'all',
+        now ?? Date.now(),
+      )
+    : [];
   const choose = (next: InboxFilter): void => {
     setFilter(next);
     if (next !== 'open') inbox.loadResolved();
@@ -1360,7 +1383,7 @@ export function AgendaInboxPage({
   // j/k and ↑/↓ walk the rows on a wider screen, unless the reader is typing.
   const keyState = useRef({ navigable, selectedKey });
   keyState.current = { navigable, selectedKey };
-  const keysLive = !phone && filter === 'open' && !deckOpen;
+  const keysLive = !phone && filter === 'open' && !deckOpen && !finding;
   useEffect(() => {
     if (!keysLive || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent): void => {
@@ -1788,7 +1811,18 @@ export function AgendaInboxPage({
           {toTestAnswers.notice}
         </p>
       )}
-      {filter === 'snoozed' || filter === 'replied' ? (
+      {finding ? (
+        <InboxFindResults
+          onClear={clearFilters}
+          onNavigate={onNavigate}
+          onOpen={key => {
+            setFilter('open');
+            openAt(key);
+          }}
+          reading={inbox.reading || inbox.resolvedReading}
+          rows={findResults}
+        />
+      ) : filter === 'snoozed' || filter === 'replied' ? (
         <InboxParkedList
           answers={toTestAnswers}
           filter={filter}

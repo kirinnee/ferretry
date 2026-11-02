@@ -220,6 +220,18 @@ describe('the finder over the daemon work search', () => {
     expect(asked.at(-1)?.kind).toBe('agenda');
   });
 
+  it('asks for the whole history under Everything, and not under Open', async () => {
+    const { port, asked } = fakePort();
+    await open({ workSearch: port });
+    await type('relay');
+    await settle();
+    expect(asked.at(-1)?.all).toBe(true);
+
+    await interact(() => chip('Open').click());
+    await settle();
+    expect(asked.at(-1)?.all).toBe(false);
+  });
+
   it('keeps closed work visible by default and drops it under Open', async () => {
     const { port } = fakePort();
     await open({ workSearch: port });

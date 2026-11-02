@@ -17,7 +17,7 @@ import { z } from 'zod';
 import type { BrowserWait, TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
 import { instructionsReport, renderInstructionsReport } from '../instructions/report.ts';
-import { hitReference, matchLine, renderNoMatch } from '../work-search/render.ts';
+import { hitReference, matchLine, renderNoMatch, renderOlderHidden } from '../work-search/render.ts';
 import { MCP_CONFIG_TOOLS, MCP_INSTRUCTIONS_TOOL, MCP_LESSON_TOOLS, MCP_SEARCH_TOOLS, MCP_TOOLS } from './tools.ts';
 
 /**
@@ -152,12 +152,14 @@ const SearchArgumentsSchema = z
     query: z.string().trim().min(1).max(200),
     kind: z.enum(['task', 'agenda']).optional(),
     open: z.boolean().optional(),
+    all: z.boolean().optional(),
   })
   .strict();
 
 /** The hits as the model reads them: one line each — id, kind, standing, title, then the matching line. */
 function renderSearch(query: string, kind: 'task' | 'agenda' | undefined, answer: WorkSearchResponse): string {
-  if (answer.hits.length === 0) return renderNoMatch(query, kind);
+  const older = renderOlderHidden(answer.olderHidden, 'search_work again with all: true');
+  if (answer.hits.length === 0) return [renderNoMatch(query, kind), ...older].join('\n');
   const lines = answer.hits.map(hit => {
     const match = matchLine(hit);
     const owner = hit.kind === 'agenda' ? ` (agenda of ${hit.sessionId})` : '';
@@ -167,7 +169,7 @@ function renderSearch(query: string, kind: 'task' | 'agenda' | undefined, answer
     answer.total > answer.hits.length
       ? [`(${String(answer.hits.length)} of ${String(answer.total)} shown; narrow it with kind or open)`]
       : [];
-  return [...lines, ...more].join('\n');
+  return [...lines, ...more, ...older].join('\n');
 }
 
 function lessonContent(result: AgentLessonToolResult) {
@@ -374,12 +376,13 @@ export class McpServer {
   private async search(id: string | number, args: Record<string, unknown>): Promise<JsonRpcResponse> {
     const call = SearchArgumentsSchema.safeParse(args);
     if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
-    const { query, kind, open } = call.data;
+    const { query, kind, open, all } = call.data;
     try {
       const answer = await this.tools.search({
         q: query,
         ...(kind === undefined ? {} : { kind }),
         open: open === true,
+        all: all === true,
       });
       return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: renderSearch(query, kind, answer) }] } };
     } catch (error) {

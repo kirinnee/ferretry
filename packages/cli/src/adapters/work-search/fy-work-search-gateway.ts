@@ -24,6 +24,7 @@ const queryString = (query: WorkSearchQueryInput): string => {
   const parameters = new URLSearchParams({ q: query.q });
   if (query.kind !== undefined) parameters.set('kind', query.kind);
   if (query.open === true) parameters.set('open', 'true');
+  if (query.all !== undefined) parameters.set('all', String(query.all));
   if (query.project !== undefined) parameters.set('project', query.project);
   if (query.limit !== undefined) parameters.set('limit', String(query.limit));
   return `?${parameters.toString()}`;
