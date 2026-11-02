@@ -476,6 +476,154 @@ describe('planClone alongside', () => {
     should(plan.files).deepEqual([{ path: 'components/hooks/scripts/guard.sh', content: '#!/bin/sh' }]);
   });
 
+  it('should move a hooks folder that clashes with the target’s own and send every carried file with it', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: { hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } } },
+    });
+    const bundle = bundleWith({
+      components: { hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } } },
+      profiles: { default: { layers: ['hooks/guard'] } },
+      files: [
+        { path: 'components/hooks/guard/send.sh', content: 'source send' },
+        { path: 'components/hooks/guard/lib/util.sh', content: 'source util' },
+      ],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks['guard-2']?.directory).equal('components/hooks/guard-2');
+    should(plan.model.components.hooks.guard?.directory).equal('components/hooks/guard');
+    should(plan.files).deepEqual([
+      { path: 'components/hooks/guard-2/send.sh', content: 'source send' },
+      { path: 'components/hooks/guard-2/lib/util.sh', content: 'source util' },
+    ]);
+    should(plan.runnables.flatMap(runnable => runnable.entries.map(entry => entry.label))).deepEqual([
+      'Script components/hooks/guard-2/lib/util.sh',
+      'Script components/hooks/guard-2/send.sh',
+    ]);
+  });
+
+  it('should move a hooks folder that sits inside a folder the target already uses', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: { hooks: { all: { harness: 'claude', directory: 'components/hooks' } } },
+    });
+    const bundle = bundleWith({
+      components: { hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } } },
+      profiles: { default: { layers: ['hooks/guard'] } },
+      files: [{ path: 'components/hooks/guard/send.sh', content: 'source send' }],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks.guard?.directory).equal('components/hooks-2/guard');
+    should(plan.files).deepEqual([{ path: 'components/hooks-2/guard/send.sh', content: 'source send' }]);
+  });
+
+  it('should move a hooks folder that contains a path the target already uses', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: { hooks: { mine: { harness: 'claude', directory: 'components/hooks/scripts/mine' } } },
+    });
+    const bundle = bundleWith({
+      components: { hooks: { scripts: { harness: 'claude', directory: 'components/hooks/scripts' } } },
+      profiles: { default: { layers: ['hooks/scripts'] } },
+      files: [{ path: 'components/hooks/scripts/guard.sh', content: 'source guard' }],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks.scripts?.directory).equal('components/hooks/scripts-2');
+    should(plan.files).deepEqual([{ path: 'components/hooks/scripts-2/guard.sh', content: 'source guard' }]);
+  });
+
+  it('should not treat a folder whose name merely starts with the target’s as inside it', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: { hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } } },
+    });
+    const bundle = bundleWith({
+      components: { hooks: { guards: { harness: 'claude', directory: 'components/hooks/guards' } } },
+      profiles: { default: { layers: ['hooks/guards'] } },
+      files: [{ path: 'components/hooks/guards/send.sh', content: 'source send' }],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks.guards?.directory).equal('components/hooks/guards');
+    should(plan.files).deepEqual([{ path: 'components/hooks/guards/send.sh', content: 'source send' }]);
+  });
+
+  it('should send two components that share one hooks folder to one moved folder', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: { hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } } },
+    });
+    const bundle = bundleWith({
+      components: {
+        hooks: {
+          first: { harness: 'claude', directory: 'components/hooks/guard' },
+          second: { harness: 'codex', directory: 'components/hooks/guard' },
+        },
+      },
+      profiles: { default: { layers: ['hooks/first'] } },
+      files: [{ path: 'components/hooks/guard/send.sh', content: 'source send' }],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks.first?.directory).equal('components/hooks/guard-2');
+    should(plan.model.components.hooks.second?.directory).equal('components/hooks/guard-2');
+    should(plan.files).deepEqual([{ path: 'components/hooks/guard-2/send.sh', content: 'source send' }]);
+  });
+
+  it('should keep a clashing document moving by its own rule next to a hooks folder that moves', () => {
+    // Arrange
+    const target = emptyTarget({
+      components: {
+        hooks: {
+          guard: { harness: 'claude', file: 'components/hooks/guard.json' },
+          scripts: { harness: 'claude', directory: 'components/hooks/scripts' },
+        },
+      },
+    });
+    const bundle = bundleWith({
+      components: {
+        hooks: {
+          guard: { harness: 'claude', file: 'components/hooks/guard.json' },
+          scripts: { harness: 'claude', directory: 'components/hooks/scripts' },
+        },
+      },
+      profiles: { default: { layers: ['hooks/guard', 'hooks/scripts'] } },
+      files: [
+        { path: 'components/hooks/guard.json', content: '{}' },
+        { path: 'components/hooks/scripts/send.sh', content: 'source send' },
+      ],
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options());
+
+    // Assert
+    should(plan.model.components.hooks['guard-2']?.file).equal('components/hooks/guard-2.json');
+    should(plan.model.components.hooks['scripts-2']?.directory).equal('components/hooks/scripts-2');
+    should(plan.files).deepEqual([
+      { path: 'components/hooks/guard-2.json', content: '{}' },
+      { path: 'components/hooks/scripts-2/send.sh', content: 'source send' },
+    ]);
+  });
+
   it('should keep a skill the target already holds, drop its files and say so', () => {
     // Arrange
     const bundle = bundleWith({
@@ -1224,9 +1372,9 @@ describe('Clone writes nothing the review did not list (review H1)', () => {
     const plan = planClone(ownHook, bundle, options({ skip: ['hooks/g'] }));
 
     // Assert
-    should(plan.files.map(file => file.path)).deepEqual(['components/hooks/g.json']);
+    should(plan.files.map(file => file.path)).deepEqual(['components/hooks-2/g.json']);
     should(describeClone(plan, bundle, 'work-linux').join('\n')).containEql(
-      'Runs: hooks/h — Script components/hooks/g.json',
+      'Runs: hooks/h — Script components/hooks-2/g.json',
     );
   });
 

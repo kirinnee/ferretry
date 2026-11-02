@@ -381,6 +381,35 @@ function movedFile(file: string, from: string, to: string, used: ReadonlySet<str
   return `${freeStem}${extension}`;
 }
 
+/** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
+function pathsOverlap(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+/** The folder a renamed component's scripts move to, never one that overlaps a path the target already uses. */
+function movedFolder(folder: string, from: string, to: string, used: ReadonlySet<string>): string {
+  const clashes = (candidate: string): boolean => [...used].some(path => pathsOverlap(candidate, path));
+  if (!clashes(folder)) return folder;
+  // Inside a folder the target uses, no sibling name escapes it: step out beside that outermost folder.
+  const outer = [...used].filter(path => folder.startsWith(`${path}/`)).toSorted((a, b) => a.length - b.length)[0];
+  if (outer !== undefined) {
+    const rest = folder.slice(outer.length);
+    return `${freeName(outer, candidate => clashes(`${candidate}${rest}`))}${rest}`;
+  }
+  const renamed = from !== to && folder.endsWith(`/${from}`) ? `${folder.slice(0, -from.length)}${to}` : folder;
+  return freeName(renamed, clashes);
+}
+
+/** Where a carried file lands when a folder above it moved, or undefined when none did. */
+function movedUnderFolder(path: string, folderMoves: ReadonlyMap<string, string>): string | undefined {
+  let best: string | undefined;
+  for (const [folder, moved] of folderMoves) {
+    if (moved === folder || !path.startsWith(`${folder}/`)) continue;
+    if (best === undefined || folder.length > best.length) best = folder;
+  }
+  return best === undefined ? undefined : `${folderMoves.get(best) as string}${path.slice(best.length)}`;
+}
+
 /** Every asset-tree document the model's components name. */
 function referencedFiles(model: AccountModel): Set<string> {
   const files = new Set<string>();
@@ -446,6 +475,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   const componentNames = new Map<string, string>();
   const usedFiles = referencedFiles(base);
   const fileMoves = new Map<string, string>();
+  const folderMoves = new Map<string, string>();
   const checkPaths: { reference: string; path: string }[] = [];
   const contents = new Map(bundle.files.map(file => [file.path, file.content]));
   for (const kind of COMPONENT_KINDS) {
@@ -455,13 +485,19 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       componentNames.set(`${kind}/${name}`, `${kind}/${free}`);
       const { clonedFrom: _claimed, clonedFromDaemon: _claimedDaemon, ...own } = value;
       const copy: Record<string, unknown> = { ...own, ...origin };
-      for (const field of ['file', 'directory'] as const) {
-        const file = copy[field];
-        if (typeof file !== 'string' || !isAssetRelative(file) || field === 'directory') continue;
+      const file = copy.file;
+      if (typeof file === 'string' && isAssetRelative(file)) {
         const moved = fileMoves.get(file) ?? movedFile(file, name, free, usedFiles);
         fileMoves.set(file, moved);
         usedFiles.add(moved);
-        copy[field] = moved;
+        copy.file = moved;
+      }
+      const directory = copy.directory;
+      if (typeof directory === 'string' && isAssetRelative(directory)) {
+        const moved = folderMoves.get(directory) ?? movedFolder(directory, name, free, usedFiles);
+        folderMoves.set(directory, moved);
+        if (moved !== directory) usedFiles.add(moved);
+        copy.directory = moved;
       }
       components[kind][free] = copy;
       const text = [JSON.stringify(value), ...['file', 'directory'].map(field => contents.get(value[field] as string))]
@@ -528,7 +564,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   const keptSkillItems = new Set<string>();
   const files: FleetCloneFile[] = [];
   for (const file of bundle.files) {
-    const moved = fileMoves.get(file.path);
+    const moved = fileMoves.get(file.path) ?? movedUnderFolder(file.path, folderMoves);
     if (moved !== undefined) {
       files.push({ path: moved, content: file.content });
       continue;
@@ -615,7 +651,12 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     notCopied: bundle.notCopied,
     runnables: cloneRunnables(bundle).map(runnable => {
       const reference = componentNames.get(runnable.reference) as string;
-      return { ...runnable, reference, name: reference.slice(runnable.kind.length + 1) };
+      const entries = runnable.entries.map(entry => {
+        const original = entry.label.startsWith('Script ') ? entry.label.slice('Script '.length) : undefined;
+        const landed = original === undefined ? undefined : movedUnderFolder(original, folderMoves);
+        return landed === undefined ? entry : { ...entry, label: `Script ${landed}` };
+      });
+      return { ...runnable, reference, name: reference.slice(runnable.kind.length + 1), entries };
     }),
     skipped,
     defaultRuntime,
