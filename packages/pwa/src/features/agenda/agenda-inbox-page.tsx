@@ -1936,9 +1936,7 @@ export function AgendaInboxPage({
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
-              {toastInFoot ? (
-                <AgendaUndoToast inbox={inbox} inline {...(clock === undefined ? {} : { clock })} />
-              ) : null}
+              <AgendaUndoToast inbox={inbox} inline {...(clock === undefined ? {} : { clock })} />
               {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
                 <GateWhy
                   card={deck[0]}
