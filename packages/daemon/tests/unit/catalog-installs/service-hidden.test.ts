@@ -218,4 +218,57 @@ describe('see changes never carries a value typed in by hand', () => {
     );
     should(wire(preview)).not.match(/hunter2xyz|pa55word99/u);
   });
+
+  it.each([
+    ['a trailing space', `notes\ngh \np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
+    ['carriage returns only', 'notes\rgh\rp_abcdefghijklmnopqrstuvwxyz0123456789\r'],
+    ['a path before the break', `see path/gh\np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
+    ['a short password', 'password: hunter2\n'],
+    ['a short password on the next line', 'password:\nhunter2\n'],
+  ])('should hide a secret in a skill file with %s, in the whole answer', async (_label, text) => {
+    const r = rig();
+    await install(r, skillV(1, '# one\n'), projectTarget());
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
+    );
+    should(wire(preview)).not.match(/p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2/u);
+  });
+
+  it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {
+    const r = rig();
+    await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
+    const current = r.fleet.components.get('mcp')?.[0];
+    const detail = current?.detail as { env?: Record<string, string> };
+    r.fleet.components.set('mcp', [
+      {
+        ...current,
+        name: 'acme-mcp',
+        detail: {
+          ...detail,
+          args: ['--stdio', '--pass', 'hunter2'],
+          env: { ...detail.env, PASS: 'abc1', DB_PASS: 'zz9' },
+        },
+      },
+    ]);
+    const preview = await r.service.preview(
+      'runtime',
+      await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
+    );
+    should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
+  });
+
+  it('should answer a 256 KiB file on disk without reading it, and say it was hidden', async () => {
+    const r = rig();
+    await install(r, skillV(1, '# one\n'), projectTarget());
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'a'.repeat(256 * 1024));
+    const started = performance.now();
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
+    );
+    should(performance.now() - started).be.below(5000);
+    should(wire(preview.changes)).match(/‹hidden›/u);
+  });
 });
