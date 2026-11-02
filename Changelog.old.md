@@ -1,3 +1,15 @@
+## [4.231.0](https://github.com/kirinnee/ferretry/compare/v4.230.1...v4.231.0) (2026-11-02)
+
+### Features
+
+* **pwa:** Sharing becomes Subscriptions, My catalogs and People (B131 A3) ([#1345](https://github.com/kirinnee/ferretry/issues/1345)) ([55073fe](https://github.com/kirinnee/ferretry/commit/55073fedf05f4d8e6d2ee3fe22b12b78a655a9db))
+* **tidy:** add fy tidy to drop a ferret's own unwanted cards and tracking items ([#1344](https://github.com/kirinnee/ferretry/issues/1344)) ([8fa3f13](https://github.com/kirinnee/ferretry/commit/8fa3f13b4ffc9ca8d8c08d9da2c8d89ec35036f5))
+
+### Fixes
+
+* **credentials:** CLI words, owner calls !A243 and !A244, and the hold re-check (audit PR 3) ([#1334](https://github.com/kirinnee/ferretry/issues/1334)) ([e5e6e3a](https://github.com/kirinnee/ferretry/commit/e5e6e3a4e869ffa84c978a881bd0225c57c4e1f6)), closes [#1331](https://github.com/kirinnee/ferretry/issues/1331)
+* **input:** judge a page card's lock per page, and say why it is long ([#1333](https://github.com/kirinnee/ferretry/issues/1333)) ([cd9ee64](https://github.com/kirinnee/ferretry/commit/cd9ee645c7cb47fa18501cd4e002246f9caaf21f))
+
 ## [4.230.1](https://github.com/kirinnee/ferretry/compare/v4.230.0...v4.230.1) (2026-11-02)
 
 ### Fixes
