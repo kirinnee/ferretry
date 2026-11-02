@@ -1032,15 +1032,24 @@ describe('a repeat copy (update) over real files', () => {
     });
     should(await instructionsFile(target)).equal('Edited here.\n');
 
+    // Keeping settles it: the next review calls it changed here, and only keep is allowed.
     const reviewAgain = await target.setup.reviewClone({ bundle });
-    await apply(target, {
+    should(reviewAgain.items.find(row => row.ref === ref)?.outcome).equal('mine');
+
+    // The other direction, from a fresh both-changed state.
+    const fresh = await copiedPair();
+    await editInstructions(fresh.source, 'Edited on the source.\n');
+    await editInstructions(fresh.target, 'Edited here.\n');
+    const freshBundle = await exported(fresh.source);
+    const freshReview = await fresh.target.setup.reviewClone({ bundle: freshBundle });
+    await apply(fresh.target, {
       kind: 'clone.import',
       mode: 'update',
-      bundle,
-      reviewed: reviewAgain.fingerprint,
+      bundle: freshBundle,
+      reviewed: freshReview.fingerprint,
       decisions: { [ref]: 'take' },
     });
-    should(await instructionsFile(target)).equal('Edited on the source.\n');
+    should(await instructionsFile(fresh.target)).equal('Edited on the source.\n');
   });
 
   it('should still link an item renamed by hand on both machines', async () => {
