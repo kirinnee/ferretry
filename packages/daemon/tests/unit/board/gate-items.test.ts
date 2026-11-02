@@ -1405,7 +1405,7 @@ describe('a card that changes hands keeps ONE gate item (&B138)', () => {
   });
 
   it('leaves the item where it is, and says why, when no agenda of the card’s takes it', async () => {
-    // Arrange — the assignee's agenda already closed this gate once, and the owner ferret has none
+    // Arrange — the assignee's agenda closed this gate once (the daemon did, so it is no answer); no owner ferret
     const world = fixture([external({ laneId: 'tested', owner: 'ghost' })]);
     const first = await raiseOn(world, 'grandchild');
     await world.agenda.resolve('grandchild', first.id, DAEMON_ACTOR);
@@ -1465,6 +1465,40 @@ describe('a card that changes hands keeps ONE gate item (&B138)', () => {
     const open = world.open();
     should(open.filter(item => item.gate !== undefined)).have.length(1);
     should(open.filter(item => item.gate === undefined).map(item => item.id)).eql([id, later.id]);
+  });
+
+  it('asks again when the one item that stood is gone, since closing its duplicates was no answer', async () => {
+    // Arrange — moved from one ferret to another, then the agenda that held it lost it
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    await assign(world, 'peer');
+    world.ledgers.ledgers.delete('peer');
+
+    // Act
+    await world.gates.written('F1');
+
+    // Assert — asked again on the card's ferret's agenda, not left unasked
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['peer']);
+  });
+
+  it('takes only the fields a moved item keeps from what it carries', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    const gate = (first as AgendaItem).gate as NonNullable<AgendaItem['gate']>;
+    const forged = { ...(first as AgendaItem), id: 'A99', subject: 'forged', waitingSince: '2026-10-01T10:00:00.000Z' };
+
+    // Act
+    const moved = await world.agenda.raise(
+      'peer',
+      { ...gateRaise(gate, world.stored()), carried: forged },
+      DAEMON_ACTOR,
+    );
+
+    // Assert — the id and the words are the new item's own; only the waiting time came over
+    should(moved).match({ ok: true, item: { id: 'A1', waitingSince: '2026-10-01T10:00:00.000Z' } });
+    should(moved.ok && moved.item?.subject).not.equal('forged');
   });
 
   it('carries nothing over onto an item that is not a gate, and lets no ferret carry a gate', async () => {
