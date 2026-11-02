@@ -89,8 +89,8 @@ export interface SessionResumeSubsystem {
     message: string | undefined,
     policy?: ResumePolicy,
     /**
-     * Asked, at the moment it would happen, before a PAIRED DEVICE brings back a session the owner cut off: it throws
-     * the refusal when the device may not (C4). Absent: a device's restore is refused.
+     * Asked, at the moment it would happen, before ANY caller brings back a session the owner cut off: it throws the
+     * refusal when the caller may not (C4; secrev-1329-delta 2). Absent: the restore is refused.
      */
     confirmRestore?: () => void,
   ): Promise<SessionView>;
@@ -140,10 +140,11 @@ export function resumeActorOf(actor: ApiActor | undefined): ResumeActor {
 const RESTORE_DEMAND: CapabilityDemand = { capability: 'fleet', axis: 'configure' };
 
 /**
- * WHAT A PAIRED DEVICE NEEDS TO BRING BACK A FERRET THE OWNER CUT OFF (secrev-1329b M2): restoring rotates in a new
- * credential, so it is a widen. The grant must allow `fleet.configure` for this device, and the device must have
- * proved a passkey for this one act (`resume-cut-off`), taken here in one step so one confirmation restores one
- * session. A caller the grants do not govern (the app on the host) is asked nothing more.
+ * WHAT A CALLER NEEDS TO BRING BACK A FERRET THE OWNER CUT OFF (secrev-1329b M2, delta 2): restoring rotates in a new
+ * credential, so it is a widen. For every caller the grants govern (a paired device, the admin token off loopback),
+ * the grant must allow `fleet.configure`, and a passkey must be proved for this one act (`resume-cut-off`), taken
+ * here in one step so one confirmation restores one session; a caller with no proven device holds none. A caller the
+ * grants do not govern (the CLI and the app on the host) is asked nothing more.
  */
 function confirmRestore(context: RouteContext): () => void {
   return () => {

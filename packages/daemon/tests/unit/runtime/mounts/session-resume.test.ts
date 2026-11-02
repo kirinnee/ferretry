@@ -344,12 +344,4 @@ describe('a paired device bringing back a ferret the owner cut off (secrev-1329b
     should([plain.status, onHost.status]).eql([200, 200]);
     should([...plain.claimed, ...onHost.claimed]).eql([]);
   });
-
-  it('should ask the route before the daemon restores a cut-off session for a device, and refuse when it cannot', async () => {
-    const fyd = (await Bun.file(new URL('../../../../bin/fyd.ts', import.meta.url)).text()).replaceAll(/\s+/gu, ' ');
-    should(fyd).containEql(
-      "if (cutOff === 'restore' && actor === 'device') { if (confirmRestore === undefined) throw new SessionResumeError('refused',",
-    );
-    should(fyd).containEql("confirmRestore(); } if (cutOff === 'restore') await restoreCredential(storage, id);");
-  });
 });

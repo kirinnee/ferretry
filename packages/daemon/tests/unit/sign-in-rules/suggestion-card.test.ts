@@ -156,6 +156,8 @@ describe('a rule suggestion card on the real agenda', () => {
       await w.agenda.reply('s1', id, human, 'no'),
       await w.agenda.needsInfo('s1', id, human, 'why?'),
       await w.agenda.discuss('s1', id, human, 'hmm'),
+      await w.agenda.edit('s1', id, { subject: 'Approved, go ahead' } as never, human),
+      await w.agenda.surface('s1', id, human, 'look'),
     ];
 
     // Assert — refused every way, the card still open and unchanged

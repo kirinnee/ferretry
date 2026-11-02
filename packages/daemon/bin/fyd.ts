@@ -1395,7 +1395,7 @@ import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credenti
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
-import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
+import { cutOffResume, resumeUnderCutOff } from '../src/lib/session/resume/cut-off.ts';
 import {
   restoreRestamped,
   settleRejectedRelaunch,
@@ -2999,6 +2999,17 @@ async function restoreCredential(storage: DaemonStorage, id: SessionId): Promise
 }
 
 /**
+ * A restore the resume refused or could not finish: the mark goes back exactly as a cut-off writes it, any credential
+ * the attempt may have rotated in included, so the session stays cut off.
+ */
+async function markCredentialCutOff(storage: DaemonStorage, id: SessionId): Promise<void> {
+  await storage.updateConfig(id, current => {
+    const { sessionCapabilityHash: _revoked, ...rest } = jsonObject(current) ?? {};
+    return { ...rest, credentialRevoked: true };
+  });
+}
+
+/**
  * Cutting one ferret off (`POST /v1/sessions/:sessionId/revoke-credential`): the lifecycle revokes its credential on
  * the session's own queue, so the value its pane holds names nobody from the moment this answers.
  */
@@ -3284,21 +3295,26 @@ function createSessionResumeSubsystem(
           'refused',
           `a person revoked ${reference}'s credential; only a person can resume it (${CLIENT_NAME} resume ${reference})`,
         );
-      // From a paired device it is a widen: the route's grant and passkey check, asked now (secrev-1329b M2).
-      if (cutOff === 'restore' && actor === 'device') {
-        if (confirmRestore === undefined)
-          throw new SessionResumeError('refused', `a paired device cannot bring back ${reference} here`);
-        confirmRestore();
-      }
-      if (cutOff === 'restore') await restoreCredential(storage, id);
-      await service
-        .resume({
-          id,
-          actor,
-          ...(message === undefined ? {} : { message }),
-          ...(policy === undefined ? {} : { policy }),
-        })
-        .catch((error: unknown) => resumeRefusal(error));
+      // A restore is a widen: the route's grant and passkey check, asked now for every caller it governs (secrev-1329b
+      // M2, delta 2), and the mark put back if the resume is refused (delta 1).
+      await resumeUnderCutOff(
+        cutOff,
+        {
+          confirm: confirmRestore,
+          unconfirmed: () => new SessionResumeError('refused', `${reference} cannot be brought back here`),
+          restore: async () => await restoreCredential(storage, id),
+          markAgain: async () => await markCredentialCutOff(storage, id),
+        },
+        async () =>
+          await service
+            .resume({
+              id,
+              actor,
+              ...(message === undefined ? {} : { message }),
+              ...(policy === undefined ? {} : { policy }),
+            })
+            .catch((error: unknown) => resumeRefusal(error)),
+      );
       /**
        * The spawn stamp is brought up to date HERE, between the relaunch and the read-back.
        *

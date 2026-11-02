@@ -615,7 +615,7 @@ leaves the session's stored environment.
   ferret ends its own harness), no peer's `fy resume`, no `/v1/restarts`, no migration, no revive on a send hands
   it a credential again. The Warden skips it, and a resume by anyone but a person is refused before anything is
   touched. A **person's** resume (`fy resume <session>`, or Resume in the app, on this host or on a paired device: the
-  device actor `device:<id>` is a person; from a paired device it is a widen, so it also needs `fleet.configure` and a passkey proved for that one act, `resume-cut-off`) clears the mark, and that launch is
+  device actor `device:<id>` is a person; from anywhere but the host it is a widen, so it also needs `fleet.configure` and a passkey proved for that one act, `resume-cut-off`; a resume that is then refused puts the cut-off mark back) clears the mark, and that launch is
   handed a fresh credential. A person's restart or migration of a marked session is refused too: resume it
   first.
 - **Recorded** in the security log as `session.credential-revoked`, named by the session, never by a value.
