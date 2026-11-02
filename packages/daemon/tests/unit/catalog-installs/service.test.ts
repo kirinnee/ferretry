@@ -778,8 +778,8 @@ describe('catalog install: conflicts', () => {
     r.folders.folders.get(`${ROOT}/.claude/skills/pdf-tools`)?.set('SKILL.md', 'edited by hand');
     const v2 = skillItem(alice.daemonId, { itemVersion: 2 });
     const error = await refusal(r.service.preview('project', await request(alice, v2, projectTarget())));
-    should(error.code).equal('catalog_install_conflict');
-    should(error.message).match(/edited on this machine/u);
+    should(error.code).equal('catalog_install_edited');
+    should(error.message).match(/Edited on this machine/u);
   });
 
   it('should refuse replacing a folder that gained a file we did not write', async () => {
@@ -815,8 +815,8 @@ describe('catalog install: conflicts', () => {
     r.mcp.text = (r.mcp.text ?? '').replace('acme-mcp"', 'acme-mcp"').replace('--stdio', '--edited');
     const v2 = mcpItem(alice.daemonId, { itemVersion: 2 });
     const error = await refusal(r.service.preview('project', await request(alice, v2, projectTarget())));
-    should(error.code).equal('catalog_install_conflict');
-    should(error.message).match(/edited on this machine/u);
+    should(error.code).equal('catalog_install_edited');
+    should(error.message).match(/Edited on this machine/u);
   });
 
   it('should install again over a server a person removed from .mcp.json', async () => {
@@ -1009,8 +1009,8 @@ describe('catalog install: a runtime', () => {
     r.fleet.components.set('mcp', [{ name: 'acme-mcp', detail: {} }]);
     const v2 = mcpItem(alice.daemonId, { itemVersion: 2 });
     const error = await refusal(r.service.preview('runtime', await request(alice, v2, runtimeTarget())));
-    should(error.code).equal('catalog_install_conflict');
-    should(error.message).match(/edited on this machine/u);
+    should(error.code).equal('catalog_install_edited');
+    should(error.message).match(/Edited on this machine/u);
   });
 
   it('should refuse a skill folder holding files nobody of ours wrote', async () => {
@@ -1236,7 +1236,7 @@ describe('catalog install: a runtime component is judged by what it holds, not b
     const error = await refusal(
       r.service.preview('runtime', await request(alice, mcpItem(alice.daemonId, { itemVersion: 2 }), runtimeTarget())),
     );
-    should(error.message).match(/edited on this machine/u);
+    should(error.message).match(/Edited on this machine/u);
   });
 
   it('should refuse removing a component edited by hand even though its provenance is kept', async () => {

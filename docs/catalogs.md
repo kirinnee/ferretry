@@ -713,6 +713,8 @@ Installing is two steps and every route has exactly one capability. A project wr
 | `GET /v1/catalog-installs`                       | `fleet.use`            | what is installed, and where                                              |
 | `DELETE /v1/catalog-installs/project/:installId` | `filesystem.configure` | removes exactly what that install wrote                                   |
 | `DELETE /v1/catalog-installs/runtime/:installId` | `fleet.configure`      | the same, for a runtime install                                           |
+| `PATCH /v1/catalog-installs/project/:installId`  | `filesystem.use`       | stay on this version / skip one (no file is touched)                      |
+| `PATCH /v1/catalog-installs/runtime/:installId`  | `fleet.use`            | the same, for a runtime install                                           |
 
 - **The preview** runs the checks above in that order. Each refusal has its own code and a plain
   sentence (`CATALOG_INSTALL_REFUSALS`); the first one to fail is the one reported. The body is refused
@@ -740,10 +742,10 @@ Installing is two steps and every route has exactly one capability. A project wr
   refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
   file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
-  hash B recorded (files are compared by exact relative path); a file edited by hand is a conflict that
-  says so. A runtime component is compared by a hash of what it holds, recorded at install, so a hand
+  hash B recorded (files are compared by exact relative path); a file edited by hand is refused as
+  `catalog_install_edited` (see [Updating an install](#updating-an-install-catalogs-3d-3)). A runtime component is compared by a hash of what it holds, recorded at install, so a hand
   edit is found even when its provenance is kept. B records the resolved project folder and root, so a
-  removal needs no re-derivation from the spelling the install used. Keeping your edits is phase 3.
+  removal needs no re-derivation from the spelling the install used.
 - **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
   `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
   opens the machine, and only a passkey proved for this act counts. Each proof is stamped with the act it
@@ -762,6 +764,99 @@ Installing is two steps and every route has exactly one capability. A project wr
   with a `schemaVersion` and checked on read. It holds each install with the SHA-256 of every file it
   wrote, the publishers, the pin per catalog and the highest revision seen. A damaged file stops every
   install route with `500 catalog_installs_unreadable` instead of starting afresh.
+
+### Updating an install (catalogs 3d-3)
+
+Installing again over an install of the same item at the same target is an **update**. Everything
+below is on the installing machine and the daemon decides it from that machine's own bytes. Nothing here
+is automatic: an update is always a new preview and a new yes (and, from a governed device, a fresh
+`catalog-install` passkey).
+
+- **Move to any offered version.** The preview request may carry `signedVersions`, the publisher's signed
+  version list ([above](#making-a-version-current-retiring-one-and-the-signed-version-list-catalogs-3d-2)).
+  When `item.itemVersion` is **not** the version the manifest lists as current it is **required**, and the
+  installer checks it with `verifyCatalogItemAgainstVersions`: the list must be signed by the pinned
+  publisher, be for this catalog, this item and this manifest revision, and offer that version with the
+  digest of the bytes sent. A list lifted from another catalog, item or revision is refused
+  (`catalog_signature_invalid` / `catalog_item_mismatch`). A version the publisher retired is not on the
+  list and so is refused. The provenance records the version moved to and its digest. A move below the
+  installed version still needs `allowOlder` and shows the older-version warning. The
+  `catalog_revision_older` pin applies to an install chosen from the list exactly as to the current one.
+  Installs already on a retired version are untouched.
+- **See what changes.** When the preview `replaces` an install it also answers `changes`: the diff from
+  **the copy on this machine, as installed now, local edits included** to the offered version
+  (`catalogItemChanges`, the same 8M-step budget as the publisher's diff). Skill files are read through the
+  same no-link rules as every other skill read, bounded to what a catalog skill may be; a file too large or
+  not text is shown as too large. An MCP server is read from the project `.mcp.json` entry or the stored
+  component, with the values the install filled in mapped back to their placeholders. If the installed copy
+  cannot be rebuilt, `changes` is left out and the preview still stands.
+  **A value typed in by hand is never in `changes`.** The preview is open to a ferret and the installed copy is
+  read from this machine's own bytes, so BOTH sides of the comparison, the installed copy and the offered item,
+  go through the fleet's own rules first (`looksSecret`, `redactText`): (a) an environment value that is not a
+  whole `${secret:…}` placeholder (or an indirect `$VAR`) is shown as `‹hidden›` at **any length** when its NAME
+  announces a secret (`PASSWORD`, `PASS`, `TOKEN`, …, the fleet's rule plus the catalog's key words; in a file the same
+  rule reads `password: x` and `password:⏎x`), or when `looksSecret(name, value)` flags it (a known token prefix);
+  any other value has its user info and secret-looking query values cut; (b) a skill file has each line that holds
+  such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command, arguments and
+  address have the same lines cut, and an address's user name and password and its secret-looking query values;
+  an argument that follows a flag naming a secret (`--password x`), or is that flag's `=` value, is cut too;
+  (d) a file whose lines **joined across each line break** (`\n`, `\r\n` or a lone `\r`, blank lines skipped, the
+  part of the last word after its last non-word character tried too) still hold a secret (one split over lines), or that holds a private key block, is hidden whole. Wherever a value is cut and the raw texts of the two
+  sides differ while what is shown is the same, the offered side reads `‹hidden, different›` (in a file, an
+  environment value, the command, an argument or the address), so a change is never shown as no change. **Work is
+  bounded**: text with a line over 4 KiB or a word over 1 KiB, or a file of more than 20 000 lines, is hidden whole
+  before any pattern runs on it (the text is a publisher's, or whoever typed it here), and the fleet's own
+  `redactText` reads a name only where a run of name characters starts, so it is linear. A name and its value are on
+  ONE line in the assignment pass (`db:⏎  pass: x` reads `pass: x`), and a value that is no secret is searched for a
+  name of its own (`Q= apikey:x`); a second pass over the lines reads a name that ends its line (`password =⏎x`,
+  spaces allowed, after any character that is not part of a name: `/PASSWORD:`, `$PASSWORD=`, `|api_key:`), or that
+  stands alone with its separator starting the next line (`PASSWORD⏎= x`), as owning the next non-blank line's first
+  word, unless that line is a key of its own (`name:` then a space or the end; a word that ends in `=` is a value,
+  because base64 does), and `password: |` / `>-` as owning the more-indented lines after it (the block of a name that
+  says nothing is not read, and a block inside a read one is not read again), for every caller of `redactText`, the
+  fleet's component view included. A word that starts with a separator (`ghp_…⏎=ghp_…`) is tried without it, and a
+  pointer (`$VAR`, `${secret:NAME}`) is never cut. **A well-known token is cut wherever it stands**, with no name,
+  separator or word boundary needed (`x<&ghp_…`, `{sk-…`): the fleet owns ONE list of formats (`TOKEN_FORMATS` in
+  `account/import.ts`: GitHub, OpenAI / Anthropic `sk-`, Slack, AWS key ids, GitLab, npm, Hugging Face, Google API),
+  each a fixed prefix and a linear body of a minimum length, and `redactText` (so every caller, See changes
+  included) cuts each match, and a private-key block from header to footer. The price is that a word that merely
+  contains a prefix and a long run after it (`risk-assessment-notes`) is cut too; a preview shows too little rather
+  than a secret. The glued value after a query value is read by `redactText` before the query pass, and a first
+  value on the next line that begins with a hidden token hides the rest of its run. **The floor is tested**:
+  `redact-differential.test.ts` keeps main's own `redactText` (`tests/support/redact-reference.ts`, frozen) and
+  generates 20 000 texts twice: structured ones from a seeded alphabet of secret names, `:` `=` `|` `>-`, tabs, CR,
+  CRLF and LF, base64 padding, `ghp_` / `sk-` prefixes, quotes, lead characters, nesting, a second secret glued by
+  `< > { & ? &amp;` and a value alone on a line before a separator line; and a soup of the whole alphabet with no
+  structure at all. Every secret value that function hid must also be hidden by the current
+  `redactText` and by See changes, and a failure prints the smallest text that leaks (`REDACT_FUZZ_SEED` and
+  `REDACT_FUZZ_CASES` re-run it with another seed and more cases). The rest of the answer
+  (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
+  is the offered item, the publisher's own text.
+- **Keep my edits, or replace them.** If the place is held by this install and the only differences are
+  files it wrote whose hash changed (a stored component, or the server's `.mcp.json` entry), the preview is
+  refused with **`catalog_install_edited`** (409), naming the paths. Nothing is changed. **Keep** is
+  doing nothing. **Replace** is the same preview with `replaceEdited: true`: it lists `edited` with an
+  `edited-locally` warning and **saves the hashes it saw**. The apply re-reads the place and compares it with those
+  hashes (`sameEdits`), so a file edited again after the review is refused `catalog_install_edited` again; an
+  edit **undone** after the review is no edit, and the write is guarded by what is on disk at the apply, not by the
+  hash once reviewed. A project server's `.mcp.json` entry is checked again at the write, against the entry the
+  check saw, so a file that moves between the two is `catalog_install_conflict`. A file the
+  install has no hash for, or anything another install holds, is never overwritten or deleted: that stays
+  `catalog_install_conflict`, and it wins over `edited`.
+- **Stay or skip.** `PATCH …/:installId` with `{hold?: boolean, skippedVersion?: int | null}` records the
+  person's choice about future versions and answers the install (with `hold` / `skippedVersion` when set).
+  `hold: false` and `skippedVersion: null` clear. It touches no file and asks for no passkey, but it is the
+  person's act, so a ferret is refused. The choice lives in `<FY_HOME>/state/catalog-install-prefs.json`
+  (`schemaVersion` 1, `0600`, written by temp file and rename; a damaged file refuses every NEW choice, never
+  "no choices", but it does not hide the installs: the list shows all of them without any choice and a `note` that
+  says the file is damaged), apart from `catalog-installs.json`, which stays at version 1. A choice is dropped when its
+  install is removed or replaced. Neither choice ever updates, or stops, anything on its own.
+- **Declared gap: the revision a machine has seen rises only on an apply.** A machine that never installed from
+  revision r+1 accepts a cached (manifest r, version list r) pair, exactly as the current-version path does:
+  `catalog_revision_older` is judged against what this machine has installed from, not against what it has
+  merely been shown.
+- **Feature flag.** `GET /v1/health` lists `catalog-installs.updates.1` once the daemon does all of this, so
+  an app can tell a daemon that answers `changes` from one that does not.
 
 ### The command line
 

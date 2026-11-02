@@ -13,8 +13,10 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rm, rmdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
+import { CATALOG_SKILL_FILE_MAX_BYTES, CATALOG_SKILL_MAX_BYTES } from '@ferretry/protocol';
 import {
+  type SkillFilesReading,
   SkillFolderChanged,
   type SkillFolderChange,
   type SkillFolderReading,
@@ -107,6 +109,74 @@ export async function inspectSkillFolder(root: string, folder: string): Promise<
   return checked.exists
     ? { exists: true, files: await readTree(checked.absolute) }
     : { exists: false, files: new Map() };
+}
+
+/** A path a record can name: relative, inside the folder, with no empty or dot segments. */
+const insideFolder = (path: string): boolean =>
+  path !== '' && !path.startsWith('/') && path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
+
+/** One file's bytes, or `undefined` when it is not there. A link or special file is refused. */
+async function readIfPresent(
+  path: string,
+): Promise<{ readonly size: number; readonly bytes?: Uint8Array } | undefined> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(
+    (error: unknown) =>
+      codeOf(error) === 'ENOENT'
+        ? undefined
+        : Promise.reject(NOT_PLAIN_OPEN_CODES.has(codeOf(error) ?? '') ? notPlain(path) : error),
+  );
+  if (handle === undefined) return undefined;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw notPlain(path);
+    // Never trust the size from `stat`: the file may grow before it is read. Read one byte past the cap and count them.
+    const buffer = new Uint8Array(CATALOG_SKILL_FILE_MAX_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    return length > CATALOG_SKILL_FILE_MAX_BYTES ? { size: length } : { size: length, bytes: buffer.slice(0, length) };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * The text of the named files of a folder, for a diff. The same no-link rules as every read here (each
+ * directory `lstat`ed, each file opened `O_NOFOLLOW`), and bounded by what a catalog skill may be: a file over
+ * 256 KiB, one that would take the total past 2 MiB, or one that is not UTF-8 text is `tooLarge` (it cannot be
+ * shown), not read into memory whole.
+ */
+export async function readSkillFiles(
+  root: string,
+  folder: string,
+  paths: readonly string[],
+): Promise<SkillFilesReading> {
+  const files = new Map<string, string>();
+  const tooLarge: string[] = [];
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let total = 0;
+  for (const path of new Set(paths)) {
+    if (!insideFolder(path)) throw new SkillFolderRefused(`${path} is not a path inside a skill folder.`);
+    const parent = posix.dirname(path);
+    const checked = await checkedFolder(root, parent === '.' ? folder : `${folder}/${parent}`);
+    if (!checked.exists) continue;
+    const read = await readIfPresent(join(checked.absolute, posix.basename(path)));
+    if (read === undefined) continue;
+    if (read.bytes === undefined || total + read.size > CATALOG_SKILL_MAX_BYTES) {
+      tooLarge.push(path);
+      continue;
+    }
+    total += read.size;
+    try {
+      files.set(path, decoder.decode(read.bytes));
+    } catch {
+      tooLarge.push(path);
+    }
+  }
+  return { files, tooLarge };
 }
 
 /** Create `absolute` and any missing parents under `base`, refusing a link at each step. */

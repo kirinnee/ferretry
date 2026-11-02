@@ -34,6 +34,16 @@ export class SkillFolderChanged extends Error {
   }
 }
 
+/**
+ * A few named files of a folder, read for a diff: their text, and the paths that could not be shown — a file
+ * over the per-file bound, one that ran past the total bound, or one that is not text. A path that is simply
+ * not there is in neither.
+ */
+export interface SkillFilesReading {
+  readonly files: ReadonlyMap<string, string>;
+  readonly tooLarge: readonly string[];
+}
+
 export interface SkillFolderChange {
   /** Files to put, relative to the folder. */
   readonly write: readonly { readonly path: string; readonly content: string }[];
@@ -49,6 +59,8 @@ export interface SkillFolderChange {
  */
 export interface ProjectSkillFiles {
   inspect(root: string, folder: string): Promise<SkillFolderReading>;
+  /** The text of exactly `paths` (relative to the folder), under the same no-link rules and bounded in size. */
+  read(root: string, folder: string, paths: readonly string[]): Promise<SkillFilesReading>;
   /** Put and delete exactly `change`, each file by temp + rename, after re-checking `expected`. Empty folders are pruned. */
   apply(root: string, folder: string, change: SkillFolderChange): Promise<void>;
 }
@@ -56,6 +68,8 @@ export interface ProjectSkillFiles {
 /** The skill folders of this machine's fleet (`<fleet>/assets/skills/<name>`). The fleet service writes; this reads and prunes. */
 export interface RuntimeSkillAssets {
   inspect(name: string): Promise<SkillFolderReading>;
+  /** The text of exactly `paths` (relative to the folder), under the same no-link rules and bounded in size. */
+  read(name: string, paths: readonly string[]): Promise<SkillFilesReading>;
   /**
    * Delete exactly the files `expected` names, each only if it still has the hash the caller VERIFIED
    * (the guard is the caller's reading, not one taken here), then the folder if it is empty.

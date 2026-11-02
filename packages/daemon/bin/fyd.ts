@@ -672,6 +672,7 @@ interface AutoResumeBoot {
 }
 
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
+import { FileCatalogInstallPrefsStore } from '../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
 import {
@@ -13388,6 +13389,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogInstalls: new CatalogInstallService({
           crypto: new WebCryptoRelayCrypto(),
           store: new FileCatalogInstallStore(paths, stateFiles),
+          prefs: new FileCatalogInstallPrefsStore(paths, stateFiles),
           projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
           mcpFiles: new FileMcpProjectFiles(),
           skillFiles: new FileProjectSkillFiles(),

@@ -1799,6 +1799,229 @@ describe('redactText', () => {
   });
 });
 
+describe('redactText: where a name and its value are', () => {
+  it.each([
+    ['a nested key', 'db:\n  passwd: hunter2hunter2', 'db:\n  passwd: ‹hidden›'],
+    ['a nested key with a quoted value', 'auth:\n  api_token: "hunter2hunter2"', 'auth:\n  api_token: "‹hidden›"'],
+    ['a nested password', 'database:\n  password: hunter2hunter2xyz', 'database:\n  password: ‹hidden›'],
+    ['a nested token', 'env:\n  GITHUB_TOKEN: ghp_abcdefghijklmnop', 'env:\n  GITHUB_TOKEN: ‹hidden›'],
+    ['a name that starts with a digit', '9TOKEN=abcdefghij', '9TOKEN=‹hidden›'],
+    ['a name that starts with digits and a letter', '1API_KEY=abcdefghij', '1API_KEY=‹hidden›'],
+    ['a run of separators before the name', '-=TOKEN=abcdefghij', '-=TOKEN=‹hidden›'],
+    ['a dot run before the name', '.=.TOKEN:ghp_abcdefghijklmnop', '.=.TOKEN:‹hidden›'],
+  ])('should hide the value of %s and nothing else', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it.each([
+    ['a value on the next line', 'password:\nhunter2hunter2xyz', 'password:\n‹hidden›'],
+    ['a name with a trailing underscore', 'TOKEN_:\nhunter2hunter2xyz', 'TOKEN_:\n‹hidden›'],
+    ['a space before the separator', 'password =\nhunter2hunter2xyz', 'password =\n‹hidden›'],
+    ['blank lines between', 'password :\r\n\r\n  "hunter2hunter2xyz" tail', 'password :\r\n\r\n  "‹hidden›" tail'],
+    ['a block scalar', 'password: |\n  hunter2hunter2xyz\n  more\nnext: 1', 'password: |\n  ‹hidden›\n  more\nnext: 1'],
+    ['a folded block scalar', 'password: >-\n  hunter2hunter2xyz', 'password: >-\n  ‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it.each([
+    ['a base64 value ending in =', 'password:\n  c2VjcmV0cGFzc3dvcmQ=', 'password:\n  ‹hidden›'],
+    ['a base64 value ending in ==', 'api_token:\n  aHVudGVyMmh1bnRlcjI==', 'api_token:\n  ‹hidden›'],
+    ['a separator that starts the next line', 'PASSWORD\n= hunter2hunter2xyz', 'PASSWORD\n= ‹hidden›'],
+    ['a separator after a carriage return', 'TOKEN\r:hunter2hunter2xyz', 'TOKEN\r:‹hidden›'],
+    ['a separator alone on its line', 'PASSWORD\n=\nhunter2hunter2xyz', 'PASSWORD\n=\n‹hidden›'],
+    ['a name after a slash', 'see /PASSWORD:\nhunter2hunter2xyz', 'see /PASSWORD:\n‹hidden›'],
+    ['a name after a dollar sign', 'export $PASSWORD=\nhunter2hunter2xyz', 'export $PASSWORD=\n‹hidden›'],
+    ['a name after a bar', '|api_key:\nhunter2hunter2xyz', '|api_key:\n‹hidden›'],
+    [
+      'a token that starts with the separator of the line before',
+      'ghp_abcdefghijklmnop\n=ghp_abcdefghijklmnop',
+      '‹hidden›\n=‹hidden›',
+    ],
+    ['a token that starts with a colon', 'x\n:ghp_abcdefghijklmnop', 'x\n:‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it.each([
+    ['a pointer on the same line', 'Set the token=${secret:TOKEN}'],
+    ['a pointer on the next line', 'Set the token=\n${secret:TOKEN}'],
+    ['a variable on the next line', 'password:\n$DATABASE_PASSWORD'],
+  ])('should leave %s whole', (_label, text) => {
+    should(redactText(text)).deepEqual({ text, redacted: false });
+  });
+
+  it('should count the work on nested block openers, not square it', () => {
+    const lines = 4000;
+    const stair = Array.from({ length: lines }, (_, depth) => `${' '.repeat(depth)}k: |`).join('\n');
+    let asked = 0;
+    redactText(stair, () => {
+      asked += 1;
+      return false;
+    });
+    should(asked).be.belowOrEqual(lines);
+    let wide = 0;
+    redactText(
+      Array.from({ length: (256 * 1024) / 8 }, (_, depth) => `${' '.repeat(depth % 64)}k: |`).join('\n'),
+      () => {
+        wide += 1;
+        return false;
+      },
+    );
+    should(wide).be.belowOrEqual((256 * 1024) / 8);
+  });
+
+  it('should leave a block or a next line alone when the name says nothing or the next line is a key', () => {
+    should(redactText('mode: |\n  hunter2hunter2xyz').redacted).equal(false);
+    should(redactText('password:\nuser_name: hunter2hunter2xyz').text).not.match(/^password:\n‹hidden›/u);
+    should(redactText('password: |').redacted).equal(false);
+    should(redactText('password:').redacted).equal(false);
+  });
+
+  it('should finish on very many name lines, blank lines and block lines', () => {
+    const started = performance.now();
+    redactText('a:\n'.repeat(100_000));
+    redactText(`password:${'\n'.repeat(200_000)}x`);
+    redactText(`password: |${'\n  x'.repeat(100_000)}`);
+    redactText('a'.repeat(200_000) + ':');
+    should(performance.now() - started).be.below(5000);
+  });
+
+  it('should not take the next line as the value of a name at the end of a line', () => {
+    should(redactText('auth:\nlogin_page: https://example.com/signin').redacted).equal(false);
+  });
+});
+
+describe('redactText: a secret glued to the end of another value', () => {
+  it.each([
+    ['a glued token after a query value', 'x &Q=sk-abcdefghijklmnopqrst<&ghp_zyxwvutsrqponmlkjihg', 'x &Q=‹hidden›'],
+    ['a glued base64 value after a query value', '?Q=sk-abcdefghijklmnopqrst<&c2VjcmV0cGFzc3dvcmQ=', '?Q=‹hidden›'],
+    ['a glued short value after a query value', ';Q=ghp_zyxwvutsrqponmlkjihg>&tok3nvalue99', ';Q=‹hidden›'],
+    ['a short token and a value on the next line', 'Y=\nghp_aaaa{tok3nvalue99', 'Y=\n‹hidden›'],
+    ['a short token and a base64 value after a carriage return', 'Q=\rsk-qqqq{c2VjcmV0cGFzc3dvcmQ=', 'Q=\r‹hidden›'],
+    ['a short token and a value after a colon line', 'z:\nghp_aaaa>tok3nvalue99', 'z:\n‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text).text).equal(expected);
+  });
+
+  it.each(['=', ':', '&', '?', '|', '/', '$', '@', '=:', '&?'])(
+    'should hide a value that starts with %s whose prefix says it is a token, with or without a name',
+    lead => {
+      // These prefixes are not in the context-free list, so only the word with its leading separators taken off finds them.
+      should(redactText(`${lead}eyJhbGciOiJIUzI1NiJ9`).text).equal(`${lead}‹hidden›`);
+      should(redactText(`a ${lead}ya29.a0AfH6SMBxyz`).text).equal(`a ${lead}‹hidden›`);
+      should(redactText(`b ${lead}ghp_abcd`).text).equal(`b ${lead}‹hidden›`);
+    },
+  );
+});
+
+describe('redactText: a well-known token anywhere', () => {
+  const TOKENS = [
+    'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+    'gho_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghs_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghu_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghr_abcdefghijklmnopqrstuvwxyz0123456789',
+    'github_pat_11ABCDEFG0abcdefghijkl_abcdefghijklmnop',
+    'sk-abcdefghijklmnopqrst',
+    'sk-proj-abcdefghijklmnopqrst',
+    'sk-ant-api03-abcdefghijklmnopqrst',
+    'sk_live_abcdefghijklmnopqrst',
+    'xoxb-1234567890-abcdefghijkl',
+    'xoxp-1234567890-abcdefghijkl',
+    'xoxa-1234567890-abcdefghijkl',
+    'xoxr-1234567890-abcdefghijkl',
+    'xoxs-1234567890-abcdefghijkl',
+    'AKIAIOSFODNN7EXAMPLE',
+    'ASIAIOSFODNN7EXAMPLE',
+    'glpat-abcdefghijklmnopqrst',
+    'npm_abcdefghijklmnopqrstuvwxyz0123456789',
+    'hf_abcdefghijklmnopqrstuvwxyz',
+    'AIzaSyabcdefghijklmnopqrstuvwxyz012345',
+  ];
+  const BEFORE = ['<', '>', '{', '&', '?', '=', ':', '/', '|', '"', "'", '`', '(', '$', '@', '#', 'x', '9', '&amp;'];
+
+  it.each(TOKENS.flatMap(token => BEFORE.map(before => [token, before] as const)))(
+    'should hide %s after %s',
+    (token, before) => {
+      should(redactText(`a ${before}${token} z`)).deepEqual({ text: `a ${before}‹hidden› z`, redacted: true });
+    },
+  );
+
+  it('should hide every token of a text and stop at the end of each', () => {
+    should(redactText('x<&ghp_abcdefghijklmnop{ysk-qrstuvwxyz012345?plain!').text).equal(
+      'x<&‹hidden›{y‹hidden›?plain!',
+    );
+  });
+
+  it('should hide a private-key block, header to footer, and what follows it stays', () => {
+    const block = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEA+/ab==\n-----END OPENSSH PRIVATE KEY-----';
+    should(redactText(`before\n${block}\nafter`)).deepEqual({ text: 'before\n‹hidden›\nafter', redacted: true });
+    should(redactText(`k: ${block.replace('OPENSSH ', '')}`).text).equal('k: ‹hidden›');
+  });
+
+  it('should hide a private-key header that has no footer, with the body after it', () => {
+    should(redactText('-----BEGIN RSA PRIVATE KEY-----\nMIIEabc+/=\n. tail').text).equal('‹hidden›. tail');
+  });
+
+  it('should leave a token body that is too short, and a name that only shares a prefix', () => {
+    should(redactText('see sk-a and ghp_ and AKIA123 and npm_x')).deepEqual({
+      text: 'see sk-a and ghp_ and AKIA123 and npm_x',
+      redacted: false,
+    });
+  });
+
+  it('should finish on a very long run of one token, of token prefixes and of key headers', () => {
+    const started = performance.now();
+    const long = redactText(`ghp_${'a'.repeat(1_000_000)}`);
+    const prefixes = redactText('sk-'.repeat(200_000));
+    const unfinished = redactText('-----BEGIN PRIVATE KEY-----'.repeat(20_000));
+    const nearly = redactText('ghp_abc '.repeat(100_000));
+    should(long.text).equal('‹hidden›');
+    should(prefixes.text).equal('‹hidden›');
+    should(unfinished.redacted).equal(true);
+    should(nearly.redacted).equal(false);
+    should(performance.now() - started).be.below(5000);
+  });
+});
+
+describe('redactText: bounded work', () => {
+  // Quadratic work on a run of name characters takes minutes at this size; linear work takes milliseconds. The
+  // margin is a thousandfold, so this is a bound on the pattern and not a timing of the machine.
+  const WITHIN_MS = 5000;
+  const timed = (text: string) => {
+    const started = performance.now();
+    const actual = redactText(text);
+    return { actual, took: performance.now() - started };
+  };
+
+  it('should finish on a very long run of name characters with no separator', () => {
+    const { actual, took } = timed('a'.repeat(256 * 1024));
+    should(actual.redacted).equal(false);
+    should(took).be.below(WITHIN_MS);
+  });
+
+  it('should finish on a long run of name characters ended by a separator, and still hide its value', () => {
+    const { actual, took } = timed(`${'a-b.c_'.repeat(40_000)}=value\nAPI_TOKEN=ghp_abcdefghijklmnop`);
+    should(actual.redacted).equal(true);
+    should(actual.text).match(/API_TOKEN=‹hidden›$/u);
+    should(took).be.below(WITHIN_MS);
+  });
+
+  it('should finish on a long run of separators and spaces', () => {
+    should(timed(`${'= '.repeat(100_000)}x`).took).be.below(WITHIN_MS);
+    should(timed(`a${' '.repeat(200_000)}b`).took).be.below(WITHIN_MS);
+  });
+
+  it('should ask the rule it is given instead of the fleet one', () => {
+    should(redactText('password: hunter2', (name, value) => name === 'password' && value === 'hunter2')).deepEqual({
+      text: 'password: ‹hidden›',
+      redacted: true,
+    });
+    should(redactText('password: hunter2').redacted).equal(false);
+  });
+});
+
 describe('flattenSettings', () => {
   it('should treat an empty document as no entries', () => {
     // Act & Assert
