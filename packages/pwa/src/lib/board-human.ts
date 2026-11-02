@@ -13,7 +13,7 @@
  * limited to; there, silence reads as no.
  */
 
-import type { TaskRef } from '@ferretry/protocol';
+import { isSubCard, type TaskRef } from '@ferretry/protocol';
 
 type TaskAsker = 'person' | 'agent';
 
@@ -34,6 +34,10 @@ export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent
 
 /** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
 export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
+
+/** A FERRET card: one a ferret asked for, or a sub-card no person asked for (hidden unless "Ferret cards" is on). */
+export const isFerretCard = (task: { readonly parent: TaskRef | null }): boolean =>
+  isAgentTask(task) || (isSubCard(task) && !askedByPerson(task));
 
 /** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
 export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskAsker(task) !== null);

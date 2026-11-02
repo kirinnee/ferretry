@@ -38,17 +38,21 @@ export interface BoardFiltersProps {
   readonly archive?: boolean;
   /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
   readonly quietFerret?: string | null;
-  /** Whether the daemons tell human cards from agent cards: the "Internal" filter is offered only then. */
+  /** Whether the daemons tell human cards from agent cards: the "Ferret cards" filter is offered only then. */
   readonly splitsAgents?: boolean;
 }
 
 /** What "Clear" resets: every filter, but not the choice of seeing agent tasks (that is a view, not a filter). */
-const cleared = (filters: BoardFilters): BoardFilters => ({ ...NO_BOARD_FILTERS, agents: filters.agents });
+const cleared = (filters: BoardFilters): BoardFilters => ({
+  ...NO_BOARD_FILTERS,
+  agents: filters.agents,
+});
 
 /**
- * "Internal": cards ferrets made for other ferrets (asked by an agent, not a person), off by default. It is on
- * whenever a ferret or an activity is chosen (those show internal cards by themselves), so it is drawn pressed
- * and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps working.
+ * "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards, not asked for by a person),
+ * off by default. It is on whenever a ferret or an activity is chosen (those show ferret cards by themselves), so
+ * it is drawn pressed and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps
+ * working.
  */
 export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
   const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
@@ -57,7 +61,9 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
       className="fy-board-filters__agents"
       data-forced={forced ? '' : undefined}
       title={
-        forced ? 'Internal cards show while a ferret or an activity is chosen' : 'Cards ferrets made for other ferrets'
+        forced
+          ? 'Ferret cards show while a ferret or an activity is chosen'
+          : 'Cards ferrets made for their own work (sub-cards and helper cards)'
       }
     >
       <input
@@ -68,7 +74,7 @@ export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'f
         type="checkbox"
       />
       <Bot aria-hidden="true" size={12} />
-      Internal
+      Ferret cards
     </label>
   );
 }
@@ -361,7 +367,7 @@ export function BoardFilterBar({
 }
 
 /**
- * The phone's filters: a button that opens a bottom sheet holding every field, "Internal" included (a touch-sized
+ * The phone's filters: a button that opens a bottom sheet holding every field, "Ferret cards" included (a touch-sized
  * toggle would add a row to the header), so the page keeps its height.
  * Fields apply as they are picked (the URL is the state); "Done" only closes the sheet.
  */

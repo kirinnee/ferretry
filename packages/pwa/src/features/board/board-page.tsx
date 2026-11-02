@@ -22,7 +22,7 @@ import {
 } from '../../hooks/use-board.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
+import { type BoardFilters, boardFiltersToSearch, NO_BOARD_FILTERS } from '../../lib/board-model.ts';
 import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
 import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
@@ -365,18 +365,24 @@ export function BoardPage({
 
   const detailMachine =
     openCard === null ? undefined : machines.find(machine => machine.connection.daemonId === openCard.daemonId);
+  // The open card's sub-cards are in its detail whether or not the board shows them, open or closed: a read of its
+  // machine with every state and every sub-card in, which only an open card pays for.
+  const detailMachines = useMemo(() => (detailMachine === undefined ? NO_MACHINES : [detailMachine]), [detailMachine]);
+  const detailFilters = useMemo<BoardFilters>(() => ({ ...NO_BOARD_FILTERS, state: 'all', agents: true }), []);
+  const detailRead = useBoard(store, detailMachines, detailFilters, { beat: false });
+  const detailPlaces = useMemo(() => cardPlaces(detailRead.model), [detailRead.model]);
   const siblings = useMemo(
     () =>
       openCard === null
         ? []
-        : model.cards
+        : detailRead.model.cards
             .filter(card => card.daemonId === openCard.daemonId)
             .map(card => ({
               task: card.task,
-              laneName: places.get(card.key)?.laneName ?? card.task.laneId,
+              laneName: detailPlaces.get(card.key)?.laneName ?? card.task.laneId,
               runningOn: card.runningOn,
             })),
-    [model.cards, places, openCard],
+    [detailRead.model.cards, detailPlaces, openCard],
   );
   const composeMachine = detailMachine ?? machines[0];
   // CALLED ON `agenda`, NEVER COPIED OFF IT. The app passes the agenda client itself, a class whose methods

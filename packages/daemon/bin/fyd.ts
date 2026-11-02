@@ -10699,6 +10699,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           })
           .catch(() => undefined);
       });
+      // Sub-cards that sat in Released · to test before sub-cards closed themselves close now (docs/board.md § Sub-cards
+      // close themselves). Idempotent, so every boot runs it; a card it cannot write is reported and left for the next boot.
+      unrefTimer(3000, () => {
+        void boardWorld.board
+          .closeStrandedSubCards()
+          .then(closed => {
+            if (closed > 0) process.stderr.write(`board: closed ${String(closed)} finished sub-card(s)\n`);
+          })
+          .catch(() => undefined);
+      });
       // The one-time import of the old per-session task files onto the project boards. It shares the board's
       // store with the board service (one id counter), proposes lanes through the lane service above, and
       // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.

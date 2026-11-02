@@ -14,6 +14,7 @@ import {
   gateAnswers,
   gateAskOptions,
   gateReference,
+  isSubCard,
   type GateOption,
   type GateOutcomeError,
   gateOptions,
@@ -105,13 +106,16 @@ export interface GateCard {
 
 /**
  * The gate the card waits at NOW, or `undefined`: an external card, not dropped, in a lane whose stage is a gate,
- * with the history entry that put it there. An internal card never waits on the owner (its lead passes its gate).
+ * with the history entry that put it there. An internal card never waits on the owner (its lead passes its gate),
+ * and a sub-card never waits at a lane the owner tries things in (the parent carries the test).
  */
 export const gateOf = (card: GateCard, lanes: GateLanes): AgendaGate | undefined => {
   const { task, laneSet } = card;
   if (card.audience !== 'external' || task.dropped !== null || laneSet === null) return undefined;
   const lane = laneOf(laneSet, task.laneId);
   if (!lane.ok) return undefined;
+  // The owner tests the parent: a sub-card never asks them to try it.
+  if (isSubCard(task) && lane.value.category === 'verify') return undefined;
   const options = lanes.options(lane.value);
   if (options.length === 0) return undefined;
   const entry = gateEntry(task);

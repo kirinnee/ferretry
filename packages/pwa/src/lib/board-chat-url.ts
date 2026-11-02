@@ -15,7 +15,7 @@ const FULL = 'full';
 export interface ChatTasksUrl {
   /** The board fills the whole chat area instead of sitting in the Info panel. */
   readonly expanded: boolean;
-  /** "Internal" is on. */
+  /** "Ferret cards" is on. */
   readonly agents: boolean;
 }
 

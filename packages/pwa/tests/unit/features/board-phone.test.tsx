@@ -278,7 +278,7 @@ describe('Board on a phone — counts and filters', () => {
     expect(written.get('view')).toBe('list');
   });
 
-  it('keeps "Internal" in the Filters sheet, not the header, so the header gains no row', async () => {
+  it('keeps "Ferret cards" in the Filters sheet, not the header, so the header gains no row', async () => {
     const split = [
       originCard('F1', 'human', null, { laneId: 'implement' }),
       originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
@@ -290,12 +290,12 @@ describe('Board on a phone — counts and filters', () => {
       document.querySelector<HTMLInputElement>('.fy-board-filter-sheet [data-filter="agents"]'),
       'the agents toggle',
     );
-    expect(toggle.closest('label')?.textContent).toBe('Internal');
+    expect(toggle.closest('label')?.textContent).toBe('Ferret cards');
     await click(document.body, '.fy-board-filter-sheet [data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
   });
 
-  it('offers no "Internal" in the sheet when the daemon does not say who asked', async () => {
+  it('offers no "Ferret cards" in the sheet when the daemon does not say who asked', async () => {
     const { root } = await open('', {}, unasked(OPEN));
     await click(root, '.fy-board-filters__toggle');
     expect(document.querySelector('.fy-board-filter-sheet')).not.toBeNull();
