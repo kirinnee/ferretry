@@ -28,8 +28,8 @@ import {
   MemoryRuleStore,
   NOW,
   OTHER_DEVICE,
-  signIn,
   SUDO,
+  signIn,
   T,
   tappedFact,
   totpKey,
@@ -355,7 +355,8 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
 
     // Assert
     should(staged).containDeep({ totp: true, fields: ['username', 'password', 'totp'] });
-    should(staged.summary[0]).equal('Ferretry types the username, password and 2FA code without asking');
+    should(staged.rows.find(row => row.label === 'Types')?.value).equal('username, password and 2FA code');
+    should(staged.rows.find(row => row.label === 'Code key')?.value).equal('key tf_000000000002');
     const challenge = w.service.challengeOf(staged.stage, DEVICE) ?? new Uint8Array();
     const view = await w.service.commit(deviceOwner(), staged.stage, () => evidenceFor(challenge));
     should(rules(w)[0]?.body.pins.factor).equal('tf_000000000002');
@@ -671,7 +672,7 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
     const staged = await w.service.stage(deviceOwner(), SUDO_DRAFT);
 
     // Assert
-    should(eligible).eql({ signIn: SUDO, eligible: true });
+    should(eligible).eql({ signIn: SUDO, eligible: true, history: 2 });
     should(staged).containDeep({
       signIn: SUDO,
       place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
@@ -680,10 +681,13 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
       root: true,
       expiresAt: new Date(NOW + SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS * 1_000).toISOString(),
     });
-    should(staged.summary.slice(0, 3)).eql([
-      'Ferretry types the password without asking',
-      'into sudo: root on kirin-box for every ferret it covers',
-      'sudo on sudo@kirin-box',
+    should(staged.does).equal('Ferretry types your sudo password for any ferret on kirin-box, without asking.');
+    should(staged.rows.slice(0, 5)).eql([
+      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Types', value: 'the sudo password' },
+      { label: 'Who', value: 'Any ferret on this machine' },
+      { label: 'Until', value: staged.expiresAt.slice(0, 16).replace('T', ' ') + ' UTC' },
+      { label: 'Uses', value: 'No limit' },
     ]);
   });
 
@@ -869,7 +873,7 @@ describe('terminal rules as this build reports them', () => {
       [true, ['password'], 'terminal'],
       [true, ['password'], 'terminal'],
     ]);
-    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({ signIn: SUDO, eligible: true });
+    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({ signIn: SUDO, eligible: true, history: 2 });
     should([ssh.status, ssh.code]).eql([409, 'tool_not_covered']);
     should(await w.service.eligibility(deviceOwner(), SSH as never)).eql({
       signIn: SSH,

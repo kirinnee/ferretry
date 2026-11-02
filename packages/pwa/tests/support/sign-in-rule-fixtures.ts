@@ -10,8 +10,8 @@ import {
   SignInRuleSuggestionViewSchema,
   type SignInRuleView,
   SignInRuleViewSchema,
+  signInRuleWords,
 } from '@ferretry/protocol';
-import { stagedSummary } from '../../../daemon/src/lib/sign-in-rules/words.ts';
 
 export const RULE_ID = `sr_${'a'.repeat(24)}`;
 const RULE_ID_2 = `sr_${'b'.repeat(24)}`;
@@ -57,7 +57,8 @@ export const terminalRule = (extra: Partial<SignInRuleView> = {}): SignInRuleVie
     id: RULE_ID_2,
     revision: 1,
     signIn: SUDO_SIGN_IN,
-    account: { id: 'SUDO_BOX', label: 'sudo on kirin-box' },
+    account: { id: 'SUDO_BOX', label: 'kirin' },
+    username: 'kirin',
     place: sudoPlace,
     fields: ['password'],
     totp: false,
@@ -74,11 +75,17 @@ export const terminalRule = (extra: Partial<SignInRuleView> = {}): SignInRuleVie
 export const suspendedRule = (): SignInRuleView =>
   pageRule({ status: 'suspended', suspended: { at: '2026-10-31T09:00:00.000Z', because: 'place-changed' } });
 
+/** What the daemon resolves for a stage's words that the stage itself does not carry: the username and the pinned 2FA key. */
+export interface StageWordFacts {
+  readonly username?: string;
+  readonly codeKey?: string;
+}
+
 /**
- * A stage as the daemon makes it: its summary is the daemon's own `stagedSummary` of the same fields, so it ends with
- * when the rule stops and how many uses it has. A test that wants a clipped or odd summary passes one.
+ * A stage as the daemon makes it: its `does` and `rows` are the protocol's own `signInRuleWords` of the same fields, so
+ * they end with when the rule stops and how many uses it has. A test that wants odd words passes `does` or `rows`.
  */
-export const stagedRule = (extra: Partial<SignInRuleStaged> = {}): SignInRuleStaged => {
+export const stagedRule = (extra: Partial<SignInRuleStaged> = {}, facts: StageWordFacts = {}): SignInRuleStaged => {
   const base = {
     stage: STAGE_ID,
     rule: RULE_ID,
@@ -95,24 +102,32 @@ export const stagedRule = (extra: Partial<SignInRuleStaged> = {}): SignInRuleSta
     stageExpiresAt: STAGE_EXPIRES,
     ...extra,
   } as const;
-  return SignInRuleStagedSchema.parse({
+  const words = signInRuleWords({
     ...base,
-    summary: extra.summary ?? stagedSummary(base),
+    ...(facts.username === undefined ? {} : { username: facts.username }),
+    ...(facts.codeKey === undefined ? {} : { codeKey: facts.codeKey }),
   });
+  return SignInRuleStagedSchema.parse({ ...base, does: extra.does ?? words.does, rows: extra.rows ?? words.rows });
 };
 
 /** A terminal stage lasts a day, the most a daemon stages for sudo without a longer pick, and never past 7. */
-export const machineStage = (extra: Partial<SignInRuleStaged> = {}): SignInRuleStaged =>
-  stagedRule({
-    signIn: SUDO_SIGN_IN,
-    account: { id: 'SUDO_BOX', label: 'sudo on kirin-box' },
-    place: sudoPlace,
-    fields: ['password'],
-    root: true,
-    expiresAt: '2026-11-02T09:55:00.000Z',
-    machine: { askedAt: '2026-11-01T09:55:00.000Z' },
-    ...extra,
-  });
+export const machineStage = (
+  extra: Partial<SignInRuleStaged> = {},
+  facts: StageWordFacts = { username: 'kirin' },
+): SignInRuleStaged =>
+  stagedRule(
+    {
+      signIn: SUDO_SIGN_IN,
+      account: { id: 'SUDO_BOX', label: 'kirin' },
+      place: sudoPlace,
+      fields: ['password'],
+      root: true,
+      expiresAt: '2026-11-02T09:55:00.000Z',
+      machine: { askedAt: '2026-11-01T09:55:00.000Z' },
+      ...extra,
+    },
+    facts,
+  );
 
 export const ruleList = (extra: Partial<SignInRuleList> = {}): SignInRuleList =>
   SignInRuleListSchema.parse({ health: 'ok', rules: [], stages: [], ...extra });

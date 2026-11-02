@@ -22,6 +22,7 @@ import { machineOffers } from '../../lib/daemon-health.ts';
 import type { InputClient } from '../../lib/input-api.ts';
 import { readAccounts, readInputRequest } from '../../lib/input-api.ts';
 import { fieldsOf } from '../../lib/input-card.ts';
+import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { InputCard } from './input-card.tsx';
@@ -172,7 +173,7 @@ export function InputCardHost({
               askPasskey:
                 askRuleStage === undefined
                   ? undefined
-                  : (stage: `srs_${string}`, words: string) => askRuleStage(connection, stage, words),
+                  : (stage: `srs_${string}`, words: StepUpWords) => askRuleStage(connection, stage, words),
             },
           })}
     />

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { SignInRuleStageIdSchema } from '../../src/lib/account-ids.ts';
 import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../src/lib/accounts.ts';
 import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
-import { SignInRuleStageIdSchema } from '../../src/lib/account-ids.ts';
 import * as rules from '../../src/lib/sign-in-rules.ts';
 import {
   canonicalSignInRule,
@@ -15,16 +15,16 @@ import {
   SIGN_IN_RULE_SUSPENSIONS,
   SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
-  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   type SignInRuleBody,
   SignInRuleBodySchema,
   SignInRuleDraftSchema,
   SignInRuleNarrowSchema,
   type SignInRuleRecord,
   SignInRuleRecordSchema,
-  SignInRulesDocumentSchema,
   SignInRuleStagedSchema,
+  SignInRulesDocumentSchema,
   SignInRuleViewSchema,
   signInRuleChallenge,
   signInRuleEffective,
@@ -137,7 +137,15 @@ const staged = {
   signIn: SIGN_IN,
   account: { id: 'GITHUB_KIRINNEE', label: 'GitHub' },
   place: { kind: 'site', domains: ['github.com'], match: [] },
-  summary: ['Username and password and codes for GitHub · kirinnee on github.com'],
+  does: 'Ferretry signs in to github.com as GitHub for any ferret, without asking.',
+  rows: [
+    { label: 'Site', value: 'github.com' },
+    { label: 'Types', value: 'username, password and 2FA code' },
+    { label: 'Who', value: 'Any ferret on this machine' },
+    { label: 'Until', value: '2026-12-01 14:00 UTC' },
+    { label: 'Uses', value: 'No limit' },
+    { label: 'Code key', value: 'Authenticator' },
+  ],
   fields: ['username', 'password', 'totp'],
   totp: true,
   root: false,
@@ -282,6 +290,7 @@ const cases: SchemaCase[] = [
     value: {
       ...staged,
       place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1, 5)],
       fields: ['password'],
       totp: false,
       root: true,
@@ -302,6 +311,13 @@ const cases: SchemaCase[] = [
   { name: 'narrow', schema: SignInRuleNarrowSchema, value: { dropTotp: true } },
   { name: 'ineligible', schema: rules.SignInRuleIneligibleSchema, value: 'no-history' },
   { name: 'eligibility: yes', schema: rules.SignInRuleEligibilitySchema, value: { signIn: SIGN_IN, eligible: true } },
+  {
+    name: 'eligibility: yes, with its history',
+    schema: rules.SignInRuleEligibilitySchema,
+    value: { signIn: SIGN_IN, eligible: true, history: 3 },
+  },
+  { name: 'row label', schema: rules.SignInRuleRowLabelSchema, value: 'Code key' },
+  { name: 'row', schema: rules.SignInRuleRowSchema, value: { label: 'Until', value: '2026-12-01 14:00 UTC' } },
   {
     name: 'eligibility: no, with its rule',
     schema: rules.SignInRuleEligibilitySchema,
@@ -525,25 +541,40 @@ describe('standing sign-in rules: the wire', () => {
   });
 
   it('should carry the root warning and the terminal honest limit, word for word', () => {
-    should(SIGN_IN_RULE_ROOT_WARNING).equal(
-      'This gives every ferret on this machine root whenever it asks, while the rule lasts.',
-    );
+    should(SIGN_IN_RULE_ROOT_WARNING).equal('Any ferret on this machine gets root while this rule lasts.');
     should(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT).equal(
       'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.',
     );
     should(SIGN_IN_RULE_TERMINAL_RESIDUAL).equal(
-      "In the split second between Ferretry's last check and the moment it types, a ferret could swap in its own program and read the password once; Ferretry then stops the rule and tells you.",
+      'In the split second before it types, a ferret could swap in its own program and read the password once. Ferretry then stops the rule.',
     );
+  });
+
+  it('should keep the one red block to two short sentences: the residual is 25 words or fewer', () => {
+    // Arrange
+    const words = (text: string): number => text.split(/\s+/u).filter(word => word !== '').length;
+
+    // Act / Assert
+    should(words(SIGN_IN_RULE_TERMINAL_RESIDUAL)).be.belowOrEqual(25);
+    should(words(SIGN_IN_RULE_ROOT_WARNING)).be.belowOrEqual(25);
+    should(words(rules.SIGN_IN_RULE_TOTP_WARNING)).be.belowOrEqual(25);
   });
 
   it('should flag a terminal rule root, and only a terminal rule, in the view and the stage (secrev-1268 N1)', () => {
     // Arrange
     const sudoPlace = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } as const;
-    const sudoStaged = { ...staged, place: sudoPlace, fields: ['password'], totp: false, root: true };
+    const sudoStaged = {
+      ...staged,
+      place: sudoPlace,
+      fields: ['password'],
+      totp: false,
+      root: true,
+      rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1, 5)],
+    };
     const sudoView = { ...view, place: sudoPlace, fields: ['password'], flags: ['root'] };
 
-    // Act / Assert — the structured flag decides the red line, whatever the summary says
-    should(SignInRuleStagedSchema.parse({ ...sudoStaged, summary: ['x'.repeat(240)] }).root).be.true();
+    // Act / Assert — the structured flag decides the red line, whatever the words say
+    should(SignInRuleStagedSchema.parse({ ...sudoStaged, does: 'x'.repeat(240) }).root).be.true();
     assertRejects([
       { name: 'a sudo stage not flagged root', schema: SignInRuleStagedSchema, value: { ...sudoStaged, root: false } },
       { name: 'a page stage flagged root', schema: SignInRuleStagedSchema, value: { ...staged, root: true } },
@@ -970,11 +1001,21 @@ describe('standing sign-in rules: what the owner sees and sends', () => {
         schema: SignInRuleStagedSchema,
         value: { ...staged, fields: ['username', 'password'] },
       },
-      { name: 'a staged rule with no words', schema: SignInRuleStagedSchema, value: { ...staged, summary: [] } },
+      { name: 'a staged rule with no words', schema: SignInRuleStagedSchema, value: { ...staged, does: '', rows: [] } },
       {
-        name: 'a staged summary line with a line break',
+        name: 'a staged line with a line break',
         schema: SignInRuleStagedSchema,
-        value: { ...staged, summary: ['one\ntwo'] },
+        value: { ...staged, does: 'one\ntwo' },
+      },
+      {
+        name: 'a staged row with a line break',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [{ label: 'Site', value: 'one\ntwo' }, ...staged.rows.slice(1)] },
+      },
+      {
+        name: 'a staged summary, the shape this replaced',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, summary: ['x'] },
       },
       {
         name: 'a stage view whose code the totp flag hides',
@@ -1036,9 +1077,9 @@ describe('standing sign-in rules: review fixes (secrev-1271)', () => {
     // Arrange
     const { account: _account, ...noAccount } = staged;
     const { place: _place, ...noPlace } = staged;
-    const longLabel = { ...staged, summary: [`Username and password and codes for ${'G'.repeat(200)}`] };
+    const longLabel = { ...staged, does: `Ferretry signs in to ${'G'.repeat(200)}` };
 
-    // Act / Assert — the host survives a summary clipped before it
+    // Act / Assert — the host survives a line clipped before it
     should(SignInRuleStagedSchema.parse(longLabel).place).deepEqual({
       kind: 'site',
       domains: ['github.com'],
@@ -1148,5 +1189,216 @@ describe('standing sign-in rules: review fixes (secrev-1271)', () => {
       should(Buffer.from(nonce, 'base64url')).have.length(32);
     }
     should(() => signInRuleChallenge(Buffer.alloc(31).toString('base64url'), subject)).throw(RangeError);
+  });
+});
+
+const words = (extra: Partial<rules.SignInRuleWordsFacts> = {}): ReturnType<typeof rules.signInRuleWords> =>
+  rules.signInRuleWords({
+    fields: ['username', 'password'],
+    account: { id: 'GITHUB_KIRINNEE', label: 'GitHub' },
+    place: { kind: 'site', domains: ['github.com', 'login.github.com'], match: [] },
+    scope: { kind: 'any' },
+    expiresAt: EXPIRES,
+    revision: 1,
+    ...extra,
+  });
+const sudo = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } as const;
+const labels = (result: ReturnType<typeof words>): string[] => result.rows.map(row => row.label);
+
+describe('standing sign-in rules: the words of a rule', () => {
+  it('should say a page rule in one plain line and the facts the passkey binds, in order', () => {
+    // Act
+    const result = words();
+
+    // Assert
+    should(result.does).equal('Ferretry signs in to github.com as GitHub for any ferret, without asking.');
+    should(result.rows).deepEqual([
+      { label: 'Site', value: 'github.com, login.github.com' },
+      { label: 'Types', value: 'username and password' },
+      { label: 'Who', value: 'Any ferret on this machine' },
+      { label: 'Until', value: '2026-12-01 14:00 UTC' },
+      { label: 'Uses', value: 'No limit' },
+    ]);
+  });
+
+  it('should say a terminal rule as the password of the tool on the machine, yours or the account’s', () => {
+    // Act
+    const mine = words({ fields: ['password'], place: sudo, expiresAt: '2026-11-02T09:55:00.000Z' });
+    const theirs = words({ fields: ['password'], place: sudo, username: 'kirin' });
+
+    // Assert
+    should(mine.does).equal('Ferretry types your sudo password for any ferret on kirin-box, without asking.');
+    should(theirs.does).equal("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
+    should(mine.rows.slice(0, 2)).deepEqual([
+      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Types', value: 'the sudo password' },
+    ]);
+    should(mine.rows.find(row => row.label === 'Until')).deepEqual({ label: 'Until', value: '2026-11-02 09:55 UTC' });
+  });
+
+  it('should name a narrower scope in the line and in Who', () => {
+    // Act
+    const project = words({ scope: { kind: 'project', project: PROJECT } });
+    const session = words({ scope: { kind: 'session', session: 'mvx-1' }, place: sudo, fields: ['password'] });
+
+    // Assert
+    should(project.does).equal(
+      `Ferretry signs in to github.com as GitHub for ferrets in board project ${PROJECT}, without asking.`,
+    );
+    should(project.rows.find(row => row.label === 'Who')?.value).equal(`Ferrets in board project ${PROJECT}`);
+    should(session.does).equal(
+      "Ferretry types your sudo password for one session's ferrets on kirin-box, without asking.",
+    );
+    should(session.rows.find(row => row.label === 'Who')?.value).equal('Session mvx-1');
+  });
+
+  it('should say the use cap, the code and its key, and what a re-approval or a suspension resumes', () => {
+    // Act
+    const plain = words({ uses: 3 });
+    const code = words({ fields: ['username', 'password', 'totp'], codeKey: 'Authenticator' });
+    const noKey = words({ fields: ['username', 'password', 'totp'] });
+    const again = words({ revision: 3, suspended: 'place-changed' });
+
+    // Assert
+    should(plain.rows.find(row => row.label === 'Uses')?.value).equal('At most 3 times');
+    should(code.rows.find(row => row.label === 'Types')?.value).equal('username, password and 2FA code');
+    should(code.rows.find(row => row.label === 'Code key')?.value).equal('Authenticator');
+    should(labels(noKey)).not.containEql('Code key');
+    should(labels(plain)).not.containEql('Note');
+    should(again.rows.filter(row => row.label === 'Note')).deepEqual([
+      { label: 'Note', value: 'Approves this rule again (revision 3)' },
+      { label: 'Note', value: `Suspended: ${signInRuleSuspensionWords('place-changed')}` },
+    ]);
+  });
+
+  it('should name a site that has only a "for" host, and never invent a code key for a rule without the code', () => {
+    // Act
+    const result = words({ place: { kind: 'site', domains: [], match: ['vercel.com'] }, codeKey: 'Authenticator' });
+
+    // Assert
+    should(result.does).equal('Ferretry signs in to vercel.com as GitHub for any ferret, without asking.');
+    should(result.rows[0]).deepEqual({ label: 'Site', value: 'vercel.com' });
+    should(labels(result)).not.containEql('Code key');
+  });
+
+  it('should keep every string one line, free of control characters, and inside the line limit', () => {
+    // Arrange
+    const messy = 'Git\u0000Hub\n\u202Eevil\tlabel';
+    const long = 'G'.repeat(400);
+
+    // Act
+    const result = words({ account: { id: 'GITHUB_KIRINNEE', label: messy } });
+    const clipped = words({
+      account: { id: 'GITHUB_KIRINNEE', label: long },
+      scope: { kind: 'session', session: long },
+    });
+
+    // Assert
+    should(result.does).equal('Ferretry signs in to github.com as Git Hub evil label for any ferret, without asking.');
+    for (const text of [clipped.does, ...clipped.rows.map(row => row.value)]) {
+      should(text).match(/^[^\p{Cc}\p{Cf}]{1,240}$/u);
+    }
+    should(clipped.does).have.length(240);
+    should(clipped.does.endsWith('…')).be.true();
+    should(rules.signInRuleFieldWords([])).equal('');
+  });
+
+  it('should produce rows the staged schema accepts, for every shape of rule', () => {
+    // Arrange
+    const shapes = [
+      words(),
+      words({ fields: ['username', 'password', 'totp'], codeKey: 'Authenticator', uses: 2 }),
+      words({ place: sudo, fields: ['password'], revision: 2, suspended: 'program-changed' }),
+    ];
+
+    // Act / Assert
+    for (const shape of shapes)
+      should(rules.SignInRuleRowSchema.array().min(5).max(8).safeParse(shape.rows).success).be.true();
+  });
+});
+
+describe('standing sign-in rules: the rows the passkey binds are strict', () => {
+  const without = (label: string): typeof staged.rows => staged.rows.filter(row => row.label !== label);
+  const sudoStagedRows = [
+    { label: 'Machine', value: 'sudo on kirin-box' },
+    { label: 'Types', value: 'the sudo password' },
+    { label: 'Who', value: 'Any ferret on this machine' },
+    { label: 'Until', value: '2026-12-01 14:00 UTC' },
+    { label: 'Uses', value: 'No limit' },
+  ];
+  const sudoStaged = {
+    ...staged,
+    place: sudo,
+    fields: ['password'],
+    totp: false,
+    root: true,
+    does: 'Ferretry types your sudo password for any ferret on kirin-box, without asking.',
+    rows: sudoStagedRows,
+  };
+
+  it('should accept the Machine row for a terminal rule and the Site row for a page rule', () => {
+    should(SignInRuleStagedSchema.safeParse(staged).success).be.true();
+    should(SignInRuleStagedSchema.safeParse(sudoStaged).success).be.true();
+    should(rules.SignInRuleStageViewSchema.safeParse({ ...sudoStaged, state: 'waiting' }).success).be.true();
+  });
+
+  it('should refuse rows that leave a fact out, say one twice, or name the wrong place', () => {
+    assertRejects([
+      { name: 'no Until row', schema: SignInRuleStagedSchema, value: { ...staged, rows: without('Until') } },
+      { name: 'no Types row', schema: SignInRuleStagedSchema, value: { ...staged, rows: without('Types') } },
+      {
+        name: 'two Types rows',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [...staged.rows, { label: 'Types', value: 'the password' }] },
+      },
+      {
+        name: 'a Machine row on a page rule',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1)] },
+      },
+      {
+        name: 'a Site row on a terminal rule',
+        schema: SignInRuleStagedSchema,
+        value: { ...sudoStaged, rows: [{ label: 'Site', value: 'github.com' }, ...sudoStagedRows.slice(1)] },
+      },
+      {
+        name: 'both a Site and a Machine row',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows] },
+      },
+      {
+        name: 'three notes',
+        schema: SignInRuleStagedSchema,
+        value: {
+          ...staged,
+          rows: [...staged.rows, ...Array.from({ length: 3 }, () => ({ label: 'Note', value: 'n' }))],
+        },
+      },
+      {
+        name: 'a code key twice',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [...staged.rows, { label: 'Code key', value: 'Another' }] },
+      },
+      {
+        name: 'a code key on a rule that types no code',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, fields: ['username', 'password'], totp: false, rows: staged.rows },
+      },
+      {
+        name: 'a row label nobody defined',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [...staged.rows, { label: 'Secret', value: 'x' }] },
+      },
+      {
+        name: 'a stage view missing its Until row',
+        schema: rules.SignInRuleStageViewSchema,
+        value: { ...staged, rows: without('Until'), state: 'waiting' },
+      },
+    ]);
+  });
+
+  it('should accept a rule with its code key and up to two notes', () => {
+    const noted = [...staged.rows, { label: 'Note', value: 'a' }, { label: 'Note', value: 'b' }];
+    should(SignInRuleStagedSchema.safeParse({ ...staged, rows: noted }).success).be.true();
   });
 });

@@ -1,7 +1,6 @@
 import {
   AccountIdSchema,
   DAEMON_FEATURES,
-  LOGIN_ONE_FACTOR_WARNING,
   placeKeys,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
@@ -9,6 +8,7 @@ import {
   SIGN_IN_RULE_STAGE_TTL_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
   SignInIdSchema,
   type SignInRuleDraft,
   type SignInRuleNarrow,
@@ -79,21 +79,25 @@ const placeWords = (place: SignInRuleView['place']): string => placeKeys(place).
 export const AUTO_RECIPE_WARNING = "Its recipe takes a ferret's edits without your review.";
 
 /**
- * The warnings a staged or listed rule carries, drawn from its STRUCTURED flags and never from its summary's words,
- * which may be clipped (secrev-1301 L2): the red root line and the residual sentence for a terminal rule, the red
- * one-factor line for a code, the auto-recipe line, and the honest limit on every rule.
+ * What a staged or listed rule warns of, drawn from its STRUCTURED flags and never from its rows' words, which may be
+ * clipped (secrev-1301 L2): ONE red block (a terminal rule's root line and its residual sentence, or a code's own
+ * sentence), the amber auto-recipe line, then "How it's checked:" with the proof and the honest limit under it.
  */
 export function ruleWarnings(
   rule: { readonly root: boolean; readonly totp: boolean; readonly autoRecipe: boolean },
   red: (text: string) => string,
 ): readonly string[] {
+  const block = rule.root
+    ? `${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`
+    : rule.totp
+      ? SIGN_IN_RULE_TOTP_WARNING
+      : undefined;
   return [
-    ...(rule.root
-      ? [red(SIGN_IN_RULE_ROOT_WARNING), SIGN_IN_RULE_TERMINAL_HONEST_LIMIT, SIGN_IN_RULE_TERMINAL_RESIDUAL]
-      : []),
-    ...(rule.totp ? [red(LOGIN_ONE_FACTOR_WARNING)] : []),
+    ...(block === undefined ? [] : [red(block)]),
     ...(rule.autoRecipe ? [AUTO_RECIPE_WARNING] : []),
-    SIGN_IN_RULE_HONEST_LIMIT,
+    "How it's checked:",
+    ...(rule.root ? [`  ${SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}`] : []),
+    `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
   ];
 }
 
@@ -120,9 +124,12 @@ function renderRule(rule: SignInRuleView, red: (text: string) => string): string
   return lines.join('\n');
 }
 
+/** The staged rule in the one shape every app shows: what it does, the facts the passkey binds, then the warnings. */
 function renderStaged(staged: SignInRuleStaged, red: (text: string) => string): readonly string[] {
+  const width = Math.max(...staged.rows.map(row => row.label.length));
   return [
-    ...staged.summary.map(line => `  ${showUntrusted(line)}`),
+    `  ${showUntrusted(staged.does)}`,
+    ...staged.rows.map(row => `  ${row.label.padEnd(width)}  ${showUntrusted(row.value)}`),
     ...ruleWarnings(staged, red).map(line => `  ${line}`),
   ];
 }
@@ -263,7 +270,7 @@ export class RulesController {
   #code(options: RulesStageOptions): boolean {
     if (options.totp === true && options.iUnderstandOneFactor !== true)
       throw new Error(
-        `--totp makes the sign-in one factor. ${LOGIN_ONE_FACTOR_WARNING} Add --i-understand-one-factor to go on.`,
+        `--totp makes the sign-in one factor. ${SIGN_IN_RULE_TOTP_WARNING} Add --i-understand-one-factor to go on.`,
       );
     if (options.totp !== true && options.iUnderstandOneFactor === true)
       throw new Error('--i-understand-one-factor goes with --totp only');

@@ -65,7 +65,7 @@ describe('reading the rules', () => {
     try {
       await settle();
       expect(q(mounted.container, '[data-rule-none]').textContent).toContain('No standing rule');
-      expect(q(mounted.container, '[data-rule-honest]')).toBeTruthy();
+      expect(mounted.container.querySelector('[data-rule-honest]')).toBeNull();
       expect(mounted.container.querySelector('[data-rule]')).toBeNull();
     } finally {
       await mounted.unmount();
@@ -114,7 +114,7 @@ describe('making a rule', () => {
   it('stages the ticks, asks the passkey, commits, and reads the list again', async () => {
     const asked: string[] = [];
     const rules = binding({}, async (stage, words) => {
-      asked.push(stage, words);
+      asked.push(stage, words.does);
       return true;
     });
     const mounted = await mount(panel(rules));
@@ -122,7 +122,7 @@ describe('making a rule', () => {
       await settle();
       await click(q(mounted.container, '[data-rule-start]'));
       await settle();
-      expect(q(mounted.container, '[data-rule-subject]').textContent).toBe('GitHub · kirinnee');
+      expect(q(mounted.container, '[data-rule-does]').textContent).toContain(' as GitHub for any ferret');
       expect(rules.keys()).toContain(`GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}`);
       await click(q(mounted.container, '[data-rule-approve]'));
       await settle();

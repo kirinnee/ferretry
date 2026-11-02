@@ -212,15 +212,31 @@ describe('the offer after a hand-tapped sign-in', () => {
     };
   };
 
-  it('reads nothing until the owner taps it', async () => {
+  it('reads only the eligibility until the owner taps it', async () => {
     const { fake, element } = offer({});
     const mounted = await mount(element);
     try {
       await settle();
       expect(q(mounted.container, '[data-rule-offer-button]').textContent).toContain('Don’t ask again');
-      expect(fake.calls).toHaveLength(0);
+      expect(fake.keys().every(key => key.startsWith('GET /v1/sign-in-rules/eligibility'))).toBe(true);
     } finally {
       await mounted.unmount();
+    }
+  });
+
+  it('draws nothing when eligibility says no or cannot be read', async () => {
+    const worlds: readonly RuleWorld[] = [
+      { eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } },
+      { fail: key => (key.startsWith('GET /v1/sign-in-rules/eligibility') ? refused('offline') : undefined) },
+    ];
+    for (const world of worlds) {
+      const mounted = await mount(offer(world).element);
+      try {
+        await settle();
+        expect(mounted.container.querySelector('[data-rule-offer]')).toBeNull();
+      } finally {
+        await mounted.unmount();
+      }
     }
   });
 
@@ -228,9 +244,10 @@ describe('the offer after a hand-tapped sign-in', () => {
     const { fake, element } = offer({});
     const mounted = await mount(element);
     try {
+      await settle();
       await click(q(mounted.container, '[data-rule-offer-button]'));
       await settle();
-      expect(q(mounted.container, '[data-rule-subject]').textContent).toBe('GitHub · kirinnee');
+      expect(q(mounted.container, '[data-rule-does]').textContent).toContain(' as GitHub for any ferret');
       await click(q(mounted.container, '[data-rule-approve]'));
       await settle();
       expect(q(mounted.container, '[data-rule-offer-saved]').textContent).toContain('Standing rule saved');
@@ -244,6 +261,7 @@ describe('the offer after a hand-tapped sign-in', () => {
     const { element } = offer({});
     const mounted = await mount(element);
     try {
+      await settle();
       await click(q(mounted.container, '[data-rule-offer-button]'));
       await settle();
       await click(q(mounted.container, '[data-rule-cancel]'));
@@ -257,6 +275,7 @@ describe('the offer after a hand-tapped sign-in', () => {
     const { element } = offer({}, 'si_0000000000000099');
     const mounted = await mount(element);
     try {
+      await settle();
       await click(q(mounted.container, '[data-rule-offer-button]'));
       await settle();
       expect(q(mounted.container, '[data-rule-failure]').textContent).toBe('That sign-in is no longer saved.');
@@ -267,9 +286,12 @@ describe('the offer after a hand-tapped sign-in', () => {
   });
 
   it('gives one sentence and no names on a device the daemon refuses', async () => {
-    const { element } = offer({ fail: () => refused('forbidden', { status: 403 }) });
+    const { element } = offer({
+      fail: key => (key === 'GET /v1/accounts' ? refused('forbidden', { status: 403 }) : undefined),
+    });
     const mounted = await mount(element);
     try {
+      await settle();
       await click(q(mounted.container, '[data-rule-offer-button]'));
       await settle();
       expect(q(mounted.container, '[data-rule-failure]').textContent).toBe(RULE_NO_ACCOUNTS_DEVICE_WORDS);
@@ -279,9 +301,12 @@ describe('the offer after a hand-tapped sign-in', () => {
   });
 
   it('says the daemon’s message for any other failure', async () => {
-    const { element } = offer({ fail: () => refused('the daemon is offline') });
+    const { element } = offer({
+      fail: key => (key === 'GET /v1/accounts' ? refused('the daemon is offline') : undefined),
+    });
     const mounted = await mount(element);
     try {
+      await settle();
       await click(q(mounted.container, '[data-rule-offer-button]'));
       await settle();
       expect(q(mounted.container, '[data-rule-failure]').textContent).toBe('the daemon is offline');

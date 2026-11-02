@@ -88,12 +88,12 @@ const client = {
   request: async (path, schema, init) => schema.parse(answerFor(path, init?.method ?? 'GET')),
 };
 
-const eligible = { signIn: SITE_SIGN_IN, eligible: true };
+const eligible = { signIn: SITE_SIGN_IN, eligible: true, history: 3 };
 const sheet = (extra = {}) => (
   <div className="fy-card" data-harness-card="">
-    <SignInRuleSheet accountName={view === 'create-terminal' ? 'sudo on kirin-box' : 'github work'} autoRecipe={false} canUsePasskey codeAvailable eligibility={eligible}
+    <SignInRuleSheet accountName={view === 'create-terminal' ? 'kirin' : 'github work'} autoRecipe={false} canUsePasskey codeAvailable eligibility={eligible}
       onApprove={quiet} onCancel={quiet} origin="owner" phase={{ kind: 'idle' }} place={sitePlace}
-      scopes={[{ kind: 'any' }]} username="kirin@atomi.cloud" {...extra} />
+      codeKey="GitHub authenticator" scopes={[{ kind: 'any' }]} username="kirin@atomi.cloud" {...extra} />
   </div>
 );
 const ruleCard = rule => (
@@ -134,7 +134,10 @@ const itemView = (extra, shown = item) => (
 
 if (view === 'passkey') {
   const gate = new StepUpGate({ ceremony: () => new Promise(() => undefined), describe: () => 'unknown' });
-  globalThis.__openGate = () => void gate.require(connection, passkeyWords(machineStage()), 'explicit', 'approve-sign-in-rule', STAGE_ID);
+  globalThis.__openGate = () => {
+    const words = passkeyWords(machineStage());
+    void gate.require(connection, words.does, 'explicit', 'approve-sign-in-rule', STAGE_ID, words);
+  };
   globalThis.__gate = gate;
 }
 
@@ -142,7 +145,7 @@ const root = document.getElementById('root');
 const body = () => {
   switch (view) {
     case 'create-totp': return sheet();
-    case 'create-terminal': return sheet({ place: sudoPlace, username: undefined, codeAvailable: false });
+    case 'create-terminal': return sheet({ place: sudoPlace, username: 'kirin', codeAvailable: false, codeKey: undefined });
     case 'ineligible': return sheet({ eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } });
     case 'suggestion': return (
       <div className="fy-card" data-harness-card="">

@@ -27,6 +27,17 @@ import { STEP_UP_FALLBACK_ACT } from './grants.ts';
 /** The staged thing a bound passkey is for: a 2FA seed (`add-2fa-key`) or a task-plan selection (`approve-task-plan`). */
 export type StepUpSubject = NonNullable<StepUpOptionsRequest['subject']>;
 
+/**
+ * What a bound passkey for a standing sign-in rule shows, as STRUCTURE: the daemon's one plain line, its label/value
+ * rows, and the red warnings the structured flags give. Nothing here is split out of text, so a row can never land in
+ * the warnings (secrev-1320 L1).
+ */
+export interface StepUpWords {
+  readonly does: string;
+  readonly rows: readonly { readonly label: string; readonly value: string }[];
+  readonly warnings: readonly string[];
+}
+
 /** What the prompt shows: which machine is asking, which acts, and whether the last attempt failed and why. */
 export interface StepUpPrompt {
   readonly daemon: DaemonConnection;
@@ -37,6 +48,8 @@ export interface StepUpPrompt {
   readonly bound?: true;
   /** A bound request is waiting WITH other requests: the one proof is stamped for none of them, so a bound approval asks again. */
   readonly shared?: true;
+  /** The structured words of the one bound request, when it brought them (a standing sign-in rule): only while `bound`. */
+  readonly words?: StepUpWords;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
   /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
@@ -81,6 +94,8 @@ interface Waiting {
   /** The staged seeds waiting requests named (`add-2fa-key` is bound to one). */
   readonly subjects: Set<StepUpSubject>;
   unnamed: boolean;
+  /** The structured words the first request brought, if any. */
+  words: StepUpWords | undefined;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
 }
@@ -136,6 +151,7 @@ export class StepUpGate {
     origin: PromptOrigin = 'explicit',
     actId?: StepUpAct,
     subject?: StepUpSubject,
+    words?: StepUpWords,
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
@@ -143,6 +159,7 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        waiting.words ??= words;
         const covered = this.#boundness(waiting);
         if (actId === undefined) waiting.unnamed = true;
         else waiting.actIds.add(actId);
@@ -162,6 +179,7 @@ export class StepUpGate {
         actIds: new Set(actId === undefined ? [] : [actId]),
         subjects: new Set(subject === undefined ? [] : [subject]),
         unnamed: actId === undefined,
+        words,
         explicit,
       };
       this.#waiting.set(daemon.daemonId, entry);
@@ -246,7 +264,7 @@ export class StepUpGate {
   }
 
   #show(waiting: Waiting): void {
-    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false, ...this.#boundness(waiting) });
+    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false, ...this.#boundWords(waiting) });
     const read = this.deps.scope;
     if (read !== undefined)
       void read(waiting.daemon).then(
@@ -274,11 +292,11 @@ export class StepUpGate {
     const prompt = this.#prompt;
     if (prompt === null || prompt.daemon.daemonId !== daemonId) return;
     const waiting = this.#waiting.get(daemonId);
-    const { bound: _bound, shared: _shared, ...rest } = prompt;
+    const { bound: _bound, shared: _shared, words: _words, ...rest } = prompt;
     this.#set({
       ...rest,
       acts: [...(waiting?.acts ?? [])],
-      ...(waiting === undefined ? {} : this.#boundness(waiting)),
+      ...(waiting === undefined ? {} : this.#boundWords(waiting)),
     });
   }
 
@@ -288,6 +306,12 @@ export class StepUpGate {
     const sole =
       !waiting.unnamed && waiting.actIds.size === 1 && waiting.subjects.size === 1 && waiting.acts.length === 1;
     return sole ? { bound: true } : { shared: true };
+  }
+
+  /** The boundness, plus the structured words only while exactly one bound request is waiting. */
+  #boundWords(waiting: Waiting): Pick<StepUpPrompt, 'bound' | 'shared' | 'words'> {
+    const boundness = this.#boundness(waiting);
+    return boundness.bound === true && waiting.words !== undefined ? { ...boundness, words: waiting.words } : boundness;
   }
 
   #set(prompt: StepUpPrompt | null): void {

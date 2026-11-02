@@ -6,19 +6,9 @@
  */
 
 import type { SignInRuleNarrow, SignInRuleView } from '@ferretry/protocol';
-import { TriangleAlert } from 'lucide-react';
 import { useId, useState } from 'react';
-import {
-  canRenew,
-  canResume,
-  RULE_TERMINAL_RESIDUAL,
-  rootBadge,
-  scopeWords,
-  statusWords,
-  timeWords,
-  usesLeftWords,
-  viewFlags,
-} from '../../lib/sign-in-rules.ts';
+import { canRenew, canResume, ruleWordsOf, statusWords, viewFlags } from '../../lib/sign-in-rules.ts';
+import { SignInRuleWords } from './sign-in-rule-words.tsx';
 
 export interface SignInRuleCardProps {
   readonly rule: SignInRuleView;
@@ -47,7 +37,6 @@ export function SignInRuleCard({
   const [dropTotp, setDropTotp] = useState(false);
   const [endDays, setEndDays] = useState('');
   const [cap, setCap] = useState('');
-  const flags = viewFlags(rule);
   const live = rule.status === 'active' || rule.status === 'suspended';
   const leftDays = Math.max(1, Math.floor((Date.parse(rule.expiresAt) - Date.now()) / DAY_MS));
 
@@ -70,59 +59,19 @@ export function SignInRuleCard({
       data-rule={rule.id}
       data-rule-status={rule.status}
     >
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <span className="min-w-0 break-words text-ui font-medium text-fg" data-rule-title="">
           {rule.account.label}
           {rule.username === undefined ? '' : ` · ${rule.username}`}
         </span>
-        <span className="min-w-0 break-words text-meta text-muted" data-rule-place="">
-          {rule.place.kind === 'terminal' ? `${rule.place.tool} on ${rule.place.host}` : rule.place.domains.join(', ')}
+        <span
+          className={`text-meta ${rule.status === 'active' ? 'text-ok' : rule.status === 'suspended' ? 'text-warn' : 'text-muted'}`}
+          data-rule-status-words=""
+        >
+          {statusWords(rule)}
         </span>
       </div>
-      <span
-        className={`text-meta ${rule.status === 'active' ? 'text-ok' : rule.status === 'suspended' ? 'text-warn' : 'text-muted'}`}
-        data-rule-status-words=""
-      >
-        {statusWords(rule)}
-      </span>
-      {flags.map(flag => (
-        <span
-          className={`flex items-start gap-1.5 text-meta font-medium ${flag.tone === 'err' ? 'text-err' : 'text-warn'}`}
-          data-rule-flag={flag.name}
-          key={flag.name}
-        >
-          <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-          <span className="min-w-0 break-words">
-            {flag.name === 'root' ? `${rootBadge(rule.place)} · ${flag.words}` : flag.words}
-          </span>
-        </span>
-      ))}
-      {flags.some(flag => flag.name === 'root') ? (
-        <span className="text-meta text-err" data-rule-terminal-residual="">
-          {RULE_TERMINAL_RESIDUAL}
-        </span>
-      ) : null}
-      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-meta text-muted">
-        <dt>Types</dt>
-        <dd className="m-0 min-w-0 break-words text-fg" data-rule-fields="">
-          {rule.fields.map(field => (field === 'totp' ? '6-digit code' : field)).join(', ')}
-        </dd>
-        <dt>Who</dt>
-        <dd className="m-0 min-w-0 break-words text-fg">{scopeWords(rule.scope)}</dd>
-        <dt>Until</dt>
-        <dd className="m-0 text-fg">
-          <span className="mono">{timeWords(rule.expiresAt)}</span>
-        </dd>
-        <dt>Uses</dt>
-        <dd className="m-0 text-fg" data-rule-uses="">
-          {usesLeftWords(rule)} · used {rule.usage.count}×
-          {rule.usage.lastUsedAt === undefined ? '' : `, last ${timeWords(rule.usage.lastUsedAt)}`}
-        </dd>
-        <dt>Approved with</dt>
-        <dd className="m-0 min-w-0 break-words text-fg" data-rule-device="">
-          {rule.approvedWith.device ?? 'a paired device'}
-        </dd>
-      </dl>
+      <SignInRuleWords {...ruleWordsOf(rule)} flags={viewFlags(rule)} />
       {failure === undefined ? null : (
         <p className="m-0 text-meta text-err" data-rule-failure="" role="alert">
           {failure}

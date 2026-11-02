@@ -18,6 +18,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineOffers } from '../../lib/daemon-health.ts';
 import { readAccounts } from '../../lib/input-api.ts';
 import {
+  codeKeyLabel,
   dismissSuggestion,
   failureWords,
   isForbidden,
@@ -28,7 +29,6 @@ import {
 import { useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
-import { RuleHonestLine } from '../accounts/sign-in-rule-sheet.tsx';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 
 export interface SignInRuleSuggestionHostProps {
@@ -131,6 +131,7 @@ export function SignInRuleSuggestionHost({
         accountName={account.label}
         autoRecipe={signIn.autoApplyRecipe === true}
         codeAvailable={account.fields.totp}
+        codeKey={codeKeyLabel(account.factors)}
         onCancel={() => setSheet(false)}
         onSettled={() => {
           setSheet(false);
@@ -150,7 +151,6 @@ export function SignInRuleSuggestionHost({
       data-rule-suggestion={suggestion.id}
       data-rule-suggestion-surface={suggestion.surface}
     >
-      <RuleHonestLine />
       <p className="m-0 min-w-0 break-words text-ui text-fg" data-rule-suggestion-subject="">
         {signIn === undefined || account === undefined
           ? 'That sign-in is no longer saved.'

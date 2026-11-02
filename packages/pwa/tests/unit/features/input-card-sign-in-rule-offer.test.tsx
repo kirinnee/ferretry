@@ -5,6 +5,7 @@ import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { fieldsOf } from '../../../src/lib/input-card.ts';
+import type { RuleClient } from '../../../src/lib/sign-in-rules.ts';
 import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
@@ -32,10 +33,15 @@ const delivered = (call: Call) => ({
 
 const card = async (value: InputRequest, ruleOffer: boolean) => {
   const fake = fakeClient(delivered);
+  const rules = ruleClient();
+  const route = (path: string): RuleClient => (path.startsWith('/v1/sign-in-rules') ? rules.client : fake.client);
+  const client = {
+    request: async (path: string, schema: never, init?: RequestInit) => await route(path).request(path, schema, init),
+  } as never;
   const view = await mount(
     <InputCard
       agentName="Hadi"
-      client={fake.client}
+      client={client}
       fields={fieldsOf(value)}
       now={NOW}
       onDone={() => undefined}
@@ -137,7 +143,8 @@ describe('the input card host', () => {
     await click(view.container.querySelector('[data-rule-approve]'));
     for (let tries = 0; tries < 4; tries += 1) await settle();
 
-    expect(store.stepUp.snapshot()?.acts[0]).toContain('until 2026-');
+    expect(store.stepUp.snapshot()?.words?.does).toContain('for any ferret, without asking');
+    expect(store.stepUp.snapshot()?.words?.rows.some(row => row.label === 'Until')).toBe(true);
     store.stepUp.dismiss();
     for (let tries = 0; tries < 4; tries += 1) await settle();
   });

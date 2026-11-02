@@ -15,6 +15,7 @@ import type {
 } from '@ferretry/protocol';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
+  codeKeyLabel,
   draftOf,
   failureWords,
   readEligibility,
@@ -28,7 +29,7 @@ import {
   suspendWarning,
 } from '../../lib/sign-in-rules.ts';
 import { SignInRuleCard } from './sign-in-rule-card.tsx';
-import { RuleHonestLine, type RuleSheetPhase, SignInRuleSheet } from './sign-in-rule-sheet.tsx';
+import { type RuleSheetPhase, SignInRuleSheet } from './sign-in-rule-sheet.tsx';
 import { type RulesBinding, useSignInRules } from './use-sign-in-rules.ts';
 
 export interface SignInRuleSheetHostProps {
@@ -41,6 +42,8 @@ export interface SignInRuleSheetHostProps {
   readonly before?: SignInRuleView;
   readonly replaces?: SignInRuleId;
   readonly codeAvailable: boolean;
+  /** The label of the 2FA key a ticked code would use. */
+  readonly codeKey?: string | undefined;
   readonly autoRecipe: boolean;
   readonly scopes?: readonly SignInRuleScope[];
   readonly onSettled: (rule: SignInRuleView) => void;
@@ -74,6 +77,7 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
       autoRecipe={props.autoRecipe}
       canUsePasskey={rules.askPasskey !== undefined}
       codeAvailable={props.codeAvailable}
+      codeKey={props.codeKey}
       eligibility={eligibility}
       onApprove={ticks =>
         void runRuleApproval(
@@ -142,7 +146,6 @@ export function SignInRulePanel({ rules, signIn, account }: SignInRulePanelProps
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-accounts-panel="rule" data-rule-panel="ready">
-      <RuleHonestLine />
       {read.list.health === 'damaged' ? (
         <p className="m-0 text-ui text-err" data-rule-damaged="" role="alert">
           {RULE_DAMAGED_WORDS}
@@ -153,6 +156,7 @@ export function SignInRulePanel({ rules, signIn, account }: SignInRulePanelProps
           accountName={account.label}
           autoRecipe={signIn.autoApplyRecipe === true}
           codeAvailable={account.fields.totp}
+          codeKey={codeKeyLabel(account.factors)}
           onCancel={() => setSheet(undefined)}
           onSettled={finish}
           origin={sheet.origin}

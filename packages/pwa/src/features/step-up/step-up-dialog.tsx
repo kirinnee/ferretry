@@ -95,10 +95,11 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
         ? sharedBoundNote(prompt.scope ?? STEP_UP_SCOPE_NOTE)
         : (prompt.scope ?? copy.scope);
   // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own
-  // words). After a blank line come warnings, which stand apart from the list so it reads as what is approved.
-  const sections = prompt.acts.map(act => act.split('\n\n'));
-  const lines = sections.flatMap(([approved]) => (approved ?? '').split('\n'));
-  const warnings = sections.flatMap(([, ...rest]) => rest.join('\n').split('\n')).filter(line => line !== '');
+  // words).
+  // A standing sign-in rule brings its words as STRUCTURE (`prompt.words`): its rows and its red block are separate
+  // lists, so a row can never be drawn as a warning. Other acts bring text, split here.
+  const structured = prompt.words;
+  const lines = prompt.acts.flatMap(act => act.split('\n'));
   const listed = prompt.bound === true && stepUp;
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
@@ -166,7 +167,38 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </>
           )}
         </p>
-        {listed ? (
+        {listed && structured !== undefined ? (
+          <>
+            <p className="m-0 mt-2 break-words text-ui font-medium leading-base text-fg" data-step-up-does="">
+              {structured.does}
+            </p>
+            <dl
+              className="m-0 mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ui leading-base"
+              data-step-up-summary=""
+            >
+              {structured.rows.map(row => (
+                <div className="contents" data-step-up-row={row.label} key={`${row.label}\n${row.value}`}>
+                  <dt className="text-muted">{row.label}</dt>
+                  <dd className="m-0 min-w-0 break-words text-fg">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+            {structured.warnings.length > 0 ? (
+              <div
+                className="mt-2 flex flex-col gap-1 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-meta leading-base text-err"
+                data-step-up-warnings=""
+                role="note"
+              >
+                {structured.warnings.map(line => (
+                  <p className="m-0 break-words" key={line}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {listed && structured === undefined ? (
           <ul
             className="m-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-ui leading-base text-fg"
             data-step-up-summary=""
@@ -177,19 +209,6 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
               </li>
             ))}
           </ul>
-        ) : null}
-        {listed && warnings.length > 0 ? (
-          <div
-            className="mt-2 flex flex-col gap-1 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-meta leading-base text-err"
-            data-step-up-warnings=""
-            role="note"
-          >
-            {warnings.map(line => (
-              <p className="m-0 break-words" key={line}>
-                {line}
-              </p>
-            ))}
-          </div>
         ) : null}
         {scope === null ? null : (
           <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">

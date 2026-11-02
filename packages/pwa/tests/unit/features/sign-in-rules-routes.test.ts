@@ -1,7 +1,11 @@
 /** The rule routes and the sentences each refusal gets: what the browser sends, and what it says back. */
 
 import { describe, expect, it } from 'bun:test';
-import { SIGN_IN_RULE_ERROR_CODES } from '@ferretry/protocol';
+import {
+  SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+} from '@ferretry/protocol';
 import {
   canRenew,
   canResume,
@@ -16,7 +20,6 @@ import {
   RULE_NO_PASSKEY_DEVICE_WORDS,
   readEligibility,
   revokeRule,
-  rootRuleWords,
   runMachineRuleConfirm,
   runRuleApproval,
   scopeWords,
@@ -32,8 +35,6 @@ import {
   RULE_ID,
   SITE_SIGN_IN,
   STAGE_ID,
-  sitePlace,
-  sudoPlace,
   suspendedRule,
   terminalRule,
 } from '../../support/sign-in-rule-fixtures.ts';
@@ -154,12 +155,16 @@ describe('what a refused approval says', () => {
 describe('a rule staged at the machine', () => {
   it('binds the stage, asks the passkey for it and commits', async () => {
     const asked: string[] = [];
+    const rows: string[] = [];
+    const warnings: string[] = [];
     const fake = ruleClient({ staged: machineStage() });
     const outcome = await runMachineRuleConfirm(
       {
         client: fake.client,
         askPasskey: async (stage, words) => {
-          asked.push(stage, words);
+          asked.push(stage, words.does);
+          rows.push(...words.rows.map(row => row.label));
+          warnings.push(...words.warnings);
           return true;
         },
       },
@@ -171,7 +176,9 @@ describe('a rule staged at the machine', () => {
       `POST /v1/sign-in-rules/stages/${STAGE_ID}/commit`,
     ]);
     expect(asked[0]).toBe(STAGE_ID);
-    expect(asked[1]).toContain('until 2026-11-02');
+    expect(asked[1]).toBe("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
+    expect(rows).toEqual(['Machine', 'Types', 'Who', 'Until', 'Uses']);
+    expect(warnings).toEqual([SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULE_TERMINAL_RESIDUAL]);
   });
 
   it('drops a dismissed stage and commits nothing', async () => {
@@ -238,19 +245,9 @@ describe('the owner’s words', () => {
     expect(suspendWarning(2)).toBe('Saving this suspends 2 standing rules: you approve again with a passkey.');
   });
 
-  it('names the password, the host and the root it hands over', () => {
-    expect(rootRuleWords(sudoPlace, 'kirin')).toBe(
-      'Ferretry types kirin’s password into sudo on kirin-box for any ferret: root on kirin-box',
-    );
-    expect(rootRuleWords(sudoPlace)).toContain('types the password into sudo');
-    expect(rootRuleWords(sitePlace)).toBe(
-      'Ferretry types a password into sudo, su or doas for any ferret: root on this machine',
-    );
-  });
-
   it('refuses a "most uses" that is not a whole number of 1 or more', () => {
-    expect(ticksProblem({ ...ticks, uses: 0 }, 'page')).toBe('The most uses is a whole number, 1 or more.');
-    expect(ticksProblem({ ...ticks, uses: 2.5 }, 'page')).toBe('The most uses is a whole number, 1 or more.');
+    expect(ticksProblem({ ...ticks, uses: 0 }, 'page')).toBe('The most uses is a whole number, 1 to 1000.');
+    expect(ticksProblem({ ...ticks, uses: 2.5 }, 'page')).toBe('The most uses is a whole number, 1 to 1000.');
     expect(ticksProblem({ ...ticks, uses: 3 }, 'page')).toBeUndefined();
   });
 });

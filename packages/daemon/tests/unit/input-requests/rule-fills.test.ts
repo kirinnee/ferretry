@@ -1186,6 +1186,22 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
     should(view.state).equal('delivered');
   });
 
+  it('should leave a sudo raise a normal card while `sign-in-rules.1` is not advertised, even with the terminal feature on (secrev-1320 L4)', async () => {
+    // Arrange — a sudo rule on disk, the terminal feature reported, the rule feature not
+    const h = await harness({ terminal: true, advertised: false });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const { view, request } = await raised(h, SUDO_RAISE);
+
+    // Assert — nothing typed, no rule decision on the card, and the owner still has to answer it
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.quietAtRaise).deepEqual([false]);
+    should(request?.preapproval).be.undefined();
+  });
+
   it('should ask the target to prove the reader again before Enter, for a terminal rule only (secrev-1301 M1)', async () => {
     const terminal = await harness();
     terminal.setFacts(sudoPrompt());

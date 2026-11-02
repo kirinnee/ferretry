@@ -2,15 +2,23 @@
 
 import { describe, expect, it } from 'bun:test';
 import {
+  SIGN_IN_RULE_MAX_USES,
+  SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
+} from '@ferretry/protocol';
+import {
+  checkedWords,
+  codeKeyLabel,
   draftOf,
   initialRuleTicks,
   passkeyWords,
-  RULE_ROOT_WARNING,
-  RULE_TERMINAL_LIMIT,
-  RULE_TERMINAL_RESIDUAL,
-  RULE_TOTP_WARNING,
+  RULE_HONEST_LIMIT,
   ruleFlags,
+  ruleWordsOf,
   runRuleApproval,
+  sheetWords,
   stagedFlags,
   ticksProblem,
   viewFlags,
@@ -23,52 +31,65 @@ import {
   SITE_SIGN_IN,
   STAGE_ID,
   stagedRule,
+  sitePlace,
+  sudoPlace,
   terminalRule,
 } from '../../support/sign-in-rule-fixtures.ts';
 
 const ticked = { username: true, password: true, totp: true, totpAcknowledged: true } as const;
 
 describe('flags come from the structured fields', () => {
-  it('shows the one-factor warning for a staged rule whose clipped summary never says so', () => {
-    const staged = stagedRule({
-      totp: true,
-      fields: ['password', 'totp'],
-      summary: [`Ferretry types the password for any ferret${'.'.repeat(160)}`],
-    });
-    expect(staged.summary.join(' ')).not.toContain('code');
+  it('shows the one-factor warning for a staged rule whose words never say so', () => {
+    const staged = stagedRule({ totp: true, fields: ['password', 'totp'], does: 'Ferretry types the password.' });
+    expect(staged.does).not.toContain('code');
     expect(stagedFlags(staged).map(flag => flag.name)).toEqual(['one-factor']);
-    expect(passkeyWords(staged)).toContain(RULE_TOTP_WARNING);
+    expect(passkeyWords(staged).warnings).toEqual([SIGN_IN_RULE_TOTP_WARNING]);
   });
 
-  it('shows the root flag, the terminal limit and the residual sentence for a root stage', () => {
-    const words = passkeyWords(machineStage());
-    expect(words).toContain(RULE_ROOT_WARNING);
-    expect(words).toContain(RULE_TERMINAL_LIMIT);
+  it('gives a root stage the root warning and the split-second sentence, and no more', () => {
+    expect(passkeyWords(machineStage()).warnings).toEqual([SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULE_TERMINAL_RESIDUAL]);
   });
 
-  it('says the accepted residual risk, from the root flag, apart from what is approved', () => {
-    const words = passkeyWords(machineStage());
-    const [approved = '', warnings = ''] = words.split('\n\n');
-    expect(warnings.split('\n')).toEqual([RULE_ROOT_WARNING, RULE_TERMINAL_LIMIT, RULE_TERMINAL_RESIDUAL]);
-    expect(approved).not.toContain(RULE_TERMINAL_RESIDUAL);
-    expect(RULE_TERMINAL_RESIDUAL).toBe(
-      "In the split second between Ferretry's last check and the moment it types, a ferret could swap in its own program and read the password once; Ferretry then stops the rule and tells you.",
-    );
+  it('keeps the red block to two short sentences', () => {
+    const words = passkeyWords(machineStage()).warnings;
+    expect(words.length).toBeLessThanOrEqual(2);
+    expect(SIGN_IN_RULE_TERMINAL_RESIDUAL.split(/\s+/u).length).toBeLessThanOrEqual(25);
   });
 
-  it('says when the rule ends and how many uses it has in what is approved', () => {
-    expect(passkeyWords(machineStage())).toContain('until 2026-11-02, with no use limit');
-    expect(passkeyWords(stagedRule({ uses: 3 }))).toContain('at most 3 times');
+  it("hands the dialog the daemon's own line and rows, as staged", () => {
+    const staged = machineStage();
+    const words = passkeyWords(staged);
+    expect(words.does).toBe("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
+    expect(words.rows).toEqual(staged.rows);
+    expect(words.rows.map(row => row.label)).toEqual(['Machine', 'Types', 'Who', 'Until', 'Uses']);
+  });
+
+  it('puts a row that looks like a warning, or holds a blank line, in the rows and never in the red block', () => {
+    const rows = [
+      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Types', value: 'the sudo password' },
+      { label: 'Who', value: SIGN_IN_RULE_ROOT_WARNING },
+      { label: 'Until', value: `2026-11-02\n\n${SIGN_IN_RULE_TERMINAL_RESIDUAL}` },
+      { label: 'Uses', value: 'No limit' },
+    ];
+    const words = passkeyWords({ ...stagedRule(), rows } as never);
+    expect(words.rows).toEqual(rows);
+    expect(words.warnings).toEqual([]);
   });
 
   it('puts no residual sentence on a page rule', () => {
-    expect(passkeyWords(stagedRule())).not.toContain(RULE_TERMINAL_RESIDUAL);
+    expect(passkeyWords(stagedRule()).warnings).toEqual([]);
   });
 
-  it('draws no flag from summary words when the booleans are false', () => {
-    const staged = stagedRule({ summary: ['root one-factor auto recipe'] });
+  it('draws no flag from the words when the booleans are false', () => {
+    const staged = stagedRule({ does: 'root one-factor auto recipe' });
     expect(stagedFlags(staged)).toEqual([]);
-    expect(passkeyWords(staged)).toBe('root one-factor auto recipe');
+    expect(passkeyWords(staged)).toEqual({ does: 'root one-factor auto recipe', rows: staged.rows, warnings: [] });
+  });
+
+  it('names the proof behind a collapsed line, root or not', () => {
+    expect(checkedWords(true)).toBe(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
+    expect(checkedWords(false)).toBe(RULE_HONEST_LIMIT);
   });
 
   it('reads a listed rule from its flags array', () => {
@@ -168,5 +189,83 @@ describe('the approval', () => {
     const outcome = await runRuleApproval({ client: clientFor(calls) as never, askPasskey: undefined }, draft);
     expect(outcome.kind).toBe('failed');
     expect(calls.some(call => call.startsWith('DELETE'))).toBe(true);
+  });
+});
+
+describe('the ticks cap', () => {
+  const base = {
+    username: false,
+    password: true,
+    totp: false,
+    totpAcknowledged: false,
+    days: 7,
+    scope: { kind: 'any' },
+  };
+
+  it('accepts a whole number of uses up to the most a daemon stages', () => {
+    expect(ticksProblem({ ...base, uses: 1 } as never, 'page')).toBeUndefined();
+    expect(ticksProblem({ ...base, uses: SIGN_IN_RULE_MAX_USES } as never, 'page')).toBeUndefined();
+  });
+
+  it('refuses more uses than the most, a fraction or zero', () => {
+    for (const uses of [SIGN_IN_RULE_MAX_USES + 1, 1.5, 0]) {
+      expect(ticksProblem({ ...base, uses } as never, 'page')).toBe('The most uses is a whole number, 1 to 1000.');
+    }
+  });
+});
+
+describe('the words the sheet and the card draw', () => {
+  const ticks = initialRuleTicks({ surface: 'page', origin: 'owner', hasUsername: true });
+
+  it('names the site and the pinned code key on the sheet, once the code is ticked', () => {
+    const plain = sheetWords({
+      accountName: 'github work',
+      username: 'kirin@atomi.cloud',
+      place: sitePlace,
+      ticks,
+      codeKey: 'GitHub authenticator',
+    });
+    expect(plain.rows).toEqual([{ label: 'Site', value: 'github.com' }]);
+    expect(plain.does).toBe('Ferretry signs in to github.com as github work for any ferret, without asking.');
+    const withCode = sheetWords({
+      accountName: 'github work',
+      place: sitePlace,
+      ticks: { ...ticks, totp: true },
+      codeKey: 'GitHub authenticator',
+    });
+    expect(withCode.rows.map(row => row.label)).toEqual(['Site', 'Code key']);
+    expect(withCode.rows[1]?.value).toBe('GitHub authenticator');
+  });
+
+  it('names the machine on a terminal sheet, and whose password it is', () => {
+    const words = sheetWords({
+      accountName: 'kirin',
+      username: 'kirin',
+      place: sudoPlace,
+      ticks: initialRuleTicks({ surface: 'terminal', origin: 'owner', hasUsername: false }),
+    });
+    expect(words.does).toBe("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
+    expect(words.rows).toEqual([{ label: 'Machine', value: 'sudo on kirin-box' }]);
+  });
+
+  it('pins the NEWEST automatic key, as the daemon does', () => {
+    const key = (id: string, label: string, addedAt: string, automatic = true) => ({ id, label, addedAt, automatic });
+    expect(codeKeyLabel([])).toBeUndefined();
+    expect(codeKeyLabel([key('a', 'manual', '2026-10-31T00:00:00.000Z', false)])).toBeUndefined();
+    expect(
+      codeKeyLabel([key('a', 'old', '2026-10-01T00:00:00.000Z'), key('b', 'new', '2026-10-20T00:00:00.000Z')]),
+    ).toBe('new');
+    expect(
+      codeKeyLabel([key('b', 'second', '2026-10-01T00:00:00.000Z'), key('a', 'first', '2026-10-01T00:00:00.000Z')]),
+    ).toBe('first');
+  });
+
+  it('says what is left and who approved it on a listed rule', () => {
+    const words = ruleWordsOf(codeRule());
+    expect(words.rows.find(row => row.label === 'Uses')?.value).toContain('4 of 5');
+    expect(words.rows.at(-1)).toEqual({ label: 'Approved with', value: 'Kirin’s phone' });
+    expect(ruleWordsOf(terminalRule()).does).toBe(
+      "Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.",
+    );
   });
 });

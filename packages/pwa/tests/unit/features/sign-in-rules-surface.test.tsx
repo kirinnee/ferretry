@@ -4,11 +4,10 @@ import { describe, expect, it } from 'bun:test';
 import { MachineRuleStage, SignInRulesSurface } from '../../../src/features/secure-copy/sign-in-rules-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
-  RULE_ROOT_WARNING,
-  RULE_TERMINAL_LIMIT,
-  RULE_TERMINAL_RESIDUAL,
-  RULE_TOTP_WARNING,
-} from '../../../src/lib/sign-in-rules.ts';
+  SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
+} from '@ferretry/protocol';
 import { mount, must } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
 import { type RuleWorld, refused, ruleClient } from '../../support/sign-in-rule-client.ts';
@@ -55,12 +54,20 @@ describe('a machine’s staged rule', () => {
     />
   );
 
-  it('draws the root warning, the program limit and the residual from the root flag', async () => {
-    const mounted = await mount(stage(machineStage(), { kind: 'idle' }));
+  it('draws the plain line, the rows and ONE red block from the root flag', async () => {
+    const staged = machineStage();
+    const mounted = await mount(stage(staged, { kind: 'idle' }));
     try {
-      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toBe(RULE_ROOT_WARNING);
-      expect(q(mounted.container, '[data-rule-terminal-limit]').textContent).toBe(RULE_TERMINAL_LIMIT);
-      expect(q(mounted.container, '[data-rule-terminal-residual]').textContent).toBe(RULE_TERMINAL_RESIDUAL);
+      expect(q(mounted.container, '[data-rule-does]').textContent).toBe(staged.does);
+      expect(mounted.container.querySelectorAll('[data-rule-row]')).toHaveLength(staged.rows.length);
+      const red = q(mounted.container, '[data-rule-warnings]');
+      expect(red.getAttribute('role')).toBe('note');
+      expect([...red.querySelectorAll('p')].map(p => p.textContent)).toEqual([
+        SIGN_IN_RULE_ROOT_WARNING,
+        SIGN_IN_RULE_TERMINAL_RESIDUAL,
+      ]);
+      expect(red.querySelector('[data-rule-row]')).toBeNull();
+      expect(q(mounted.container, '[data-rule-checked] summary').textContent).toBe('How it’s checked');
       expect(q(mounted.container, '[data-rule-machine]').textContent).toBe(
         'A machine asked for this rule at 2026-11-01 09:55 UTC',
       );
@@ -69,12 +76,11 @@ describe('a machine’s staged rule', () => {
     }
   });
 
-  it('draws the one-factor flag from the code flag and no root block for a page rule', async () => {
+  it('draws the one-factor flag from the code flag and no root sentences for a page rule', async () => {
     const mounted = await mount(stage(stagedRule({ totp: true, fields: ['password', 'totp'] }), { kind: 'idle' }));
     try {
-      expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toBe(RULE_TOTP_WARNING);
-      expect(mounted.container.querySelector('[data-rule-root]')).toBeNull();
-      expect(mounted.container.querySelector('[data-rule-terminal-residual]')).toBeNull();
+      expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toBe(SIGN_IN_RULE_TOTP_WARNING);
+      expect(mounted.container.querySelector('[data-rule-flag="root"]')).toBeNull();
       expect(q(mounted.container, '[data-rule-machine]').textContent).toBe('A machine asked for this rule');
     } finally {
       await mounted.unmount();

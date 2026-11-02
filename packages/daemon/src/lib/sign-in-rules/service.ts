@@ -34,17 +34,19 @@ import {
   signInRuleBodyProblems,
   signInRuleClockProblems,
   signInRuleEffective,
+  signInRuleFieldWords,
   signInRuleLifetime,
   signInRuleNarrowed,
   signInRuleSuspensionWords,
+  signInRuleWords,
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { PasskeysChange } from '../step-up/passkeys-changed.ts';
 import { type RuleListing, ruleDrift, samePins, snapshotPins } from './drift.ts';
-import { ineligibleBecause, ruleSurfaceOf } from './eligibility.ts';
+import { ineligibleBecause, ruleSurfaceOf, tappedCount } from './eligibility.ts';
 import { checkRuleProof, ruleChallenge, type SignInRuleProofPort } from './proof.ts';
-import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
+import { auditText } from './words.ts';
 
 /**
  * STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): one owner-signed permission for Ferretry to fill
@@ -170,6 +172,8 @@ interface Stage {
   readonly account: AccountRef;
   readonly username?: string | undefined;
   readonly place: Place;
+  /** The label of the pinned 2FA key, when the rule types the code. */
+  readonly codeKey?: string | undefined;
   readonly autoRecipe: boolean;
   readonly expiresAtMs: number;
   /** The one device whose passkey may approve it, once known, and the body and challenge bound to it. */
@@ -392,7 +396,7 @@ export class SignInRuleService {
       ineligibleBecause(found) ??
       ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
     return because === undefined
-      ? { signIn, eligible: true, ...(rule === undefined ? {} : { rule }) }
+      ? { signIn, eligible: true, history: tappedCount(found), ...(rule === undefined ? {} : { rule }) }
       : { signIn, eligible: false, because, ...(rule === undefined ? {} : { rule }) };
   }
 
@@ -505,6 +509,7 @@ export class SignInRuleService {
       account: { id: snap.account.id, label: snap.account.label },
       ...(snap.account.username === undefined ? {} : { username: snap.account.username }),
       place: snap.signIn.place,
+      ...(snap.codeKey === undefined ? {} : { codeKey: snap.codeKey }),
       autoRecipe: snap.signIn.autoApplyRecipe === true,
       expiresAtMs: now + STAGE_TTL_MS,
       state: 'waiting',
@@ -1229,20 +1234,18 @@ export class SignInRuleService {
       signIn: body.signIn,
       account: stage.account,
       place: stage.place,
-      summary: [
-        ...stagedSummary({
-          fields: body.fields,
-          account: stage.account,
-          username: stage.username,
-          place: stage.place,
-          scope: body.scope,
-          expiresAt: body.expiresAt,
-          uses: body.uses,
-          autoRecipe: stage.autoRecipe,
-          revision: body.revision,
-          suspended: stage.replaces?.suspended,
-        }),
-      ],
+      ...signInRuleWords({
+        fields: body.fields,
+        account: stage.account,
+        username: stage.username,
+        place: stage.place,
+        scope: body.scope,
+        expiresAt: body.expiresAt,
+        uses: body.uses,
+        codeKey: stage.codeKey,
+        revision: body.revision,
+        suspended: stage.replaces?.suspended,
+      }),
       fields: [...body.fields],
       totp: body.fields.includes('totp'),
       root: body.surface === 'terminal',
@@ -1313,7 +1316,7 @@ export class SignInRuleService {
         revision: body.revision,
         signIn: body.signIn,
         account: body.pins.account,
-        fields: ruleFieldWords(body.fields).replaceAll(' and ', '+').replaceAll(', ', '+'),
+        fields: signInRuleFieldWords(body.fields).replaceAll(' and ', '+').replaceAll(', ', '+'),
         scope: body.scope.kind,
         expiresAt: body.expiresAt,
         ...(body.uses === undefined ? {} : { uses: body.uses }),

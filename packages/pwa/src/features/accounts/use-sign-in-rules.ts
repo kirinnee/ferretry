@@ -2,7 +2,7 @@
 
 import type { SignInRuleList } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
-import { failureWords, isForbidden, listRules, type RuleClient } from '../../lib/sign-in-rules.ts';
+import { failureWords, isForbidden, listRules, type RuleAsk, type RuleClient } from '../../lib/sign-in-rules.ts';
 
 export type RulesRead =
   | { readonly kind: 'loading' }
@@ -14,7 +14,7 @@ export type RulesRead =
 export interface RulesBinding {
   readonly client: RuleClient;
   /** `undefined` when this device cannot ask for a passkey. */
-  readonly askPasskey: ((stage: `srs_${string}`, words: string) => Promise<boolean>) | undefined;
+  readonly askPasskey: RuleAsk | undefined;
 }
 
 /** The list, read once and again on `reload`. A 403 is stated once and not asked again. */

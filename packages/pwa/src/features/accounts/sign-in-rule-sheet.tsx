@@ -13,7 +13,6 @@ import type {
   SignInRuleSurface,
   SignInRuleView,
 } from '@ferretry/protocol';
-import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useId, useState } from 'react';
 import {
   daysWords,
@@ -21,24 +20,20 @@ import {
   INELIGIBLE_WORDS,
   initialRuleTicks,
   lifetimeDaysOptions,
-  RULE_AUTO_RECIPE_WORDS,
   RULE_DISMISSED_WORDS,
-  RULE_HONEST_LIMIT,
   RULE_NO_PASSKEY_DEVICE_WORDS,
-  RULE_ROOT_WARNING,
   RULE_STILL_ASKED,
-  RULE_TERMINAL_LIMIT,
-  RULE_TERMINAL_RESIDUAL,
   RULE_TOTP_ACK_WORDS,
-  RULE_TOTP_WARNING,
   type RuleOrigin,
   type RuleProgress,
   type RuleTicks,
-  rootRuleWords,
+  ruleFlags,
   scopeWords,
+  sheetWords,
   surfaceOf,
   ticksProblem,
 } from '../../lib/sign-in-rules.ts';
+import { SignInRuleWords } from './sign-in-rule-words.tsx';
 
 export type RuleSheetPhase =
   | { readonly kind: 'idle' }
@@ -58,6 +53,8 @@ export interface SignInRuleSheetProps {
   readonly eligibility: SignInRuleEligibility | undefined;
   /** Whether the account has a 2FA key Ferretry makes codes for. */
   readonly codeAvailable: boolean;
+  /** The label of the 2FA key a ticked code would use (the one the daemon pins). */
+  readonly codeKey?: string | undefined;
   /** Whether the sign-in applies its recipe by itself (a structured fact the daemon reports). */
   readonly autoRecipe: boolean;
   /** Where the rule may apply, "any ferret" first. */
@@ -78,46 +75,6 @@ const ANY_SCOPE: SignInRuleScope = { kind: 'any' };
 
 const scopeKey = (scope: SignInRuleScope): string =>
   scope.kind === 'any' ? 'any' : scope.kind === 'project' ? `project:${scope.project}` : `session:${scope.session}`;
-
-function Flag({ tone, name, children }: { tone: 'err' | 'warn'; name: string; children: string }) {
-  return (
-    <span
-      className={`flex items-start gap-1.5 text-meta font-medium ${tone === 'err' ? 'text-err' : 'text-warn'}`}
-      data-rule-flag={name}
-    >
-      <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-      <span className="min-w-0 break-words">{children}</span>
-    </span>
-  );
-}
-
-/** The honest-client line: said on every sheet and card. */
-export function RuleHonestLine() {
-  return (
-    <p className="m-0 flex items-start gap-2 text-meta text-muted" data-rule-honest="">
-      <ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-      <span className="min-w-0 break-words">{RULE_HONEST_LIMIT}</span>
-    </p>
-  );
-}
-
-/** Red root warning, from the structured place kind, with the program-proof limit and the residual sentence. */
-export function RuleRootBlock({ place, username }: { readonly place: Place; readonly username?: string }) {
-  return (
-    <div className="flex flex-col gap-1" data-rule-root="">
-      <Flag name="root" tone="err">
-        {RULE_ROOT_WARNING}
-      </Flag>
-      <span className="text-meta text-err">{rootRuleWords(place, username)}</span>
-      <span className="text-meta text-muted" data-rule-terminal-limit="">
-        {RULE_TERMINAL_LIMIT}
-      </span>
-      <span className="text-meta text-err" data-rule-terminal-residual="">
-        {RULE_TERMINAL_RESIDUAL}
-      </span>
-    </div>
-  );
-}
 
 /** What a rule can't cover, said on every sheet. */
 export function RuleStillAsked() {
@@ -182,6 +139,11 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
   const problem = ticksProblem(ticks, surface);
   const blocked = !canUsePasskey;
   const ineligible = eligibility?.eligible === false ? eligibility.because : undefined;
+  const times = eligibility?.eligible === true ? eligibility.history : undefined;
+  const history =
+    times === undefined || times < 1
+      ? undefined
+      : `You signed in here yourself ${String(times)} ${times === 1 ? 'time' : 'times'}.`;
   const set = (change: Partial<RuleTicks>): void => setTicks(current => ({ ...current, ...change }));
   const scopes = props.scopes.some(scope => scope.kind === 'any') ? props.scopes : [ANY_SCOPE, ...props.scopes];
 
@@ -191,15 +153,17 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
   return (
     <div className="flex min-w-0 flex-col gap-3" data-rule-sheet={surface} data-rule-origin={origin}>
       <h3 className="m-0 text-ui font-semibold text-fg">{heading}</h3>
-      <p className="m-0 min-w-0 break-words text-ui text-fg" data-rule-subject="">
-        {accountName}
-        {username === undefined ? '' : ` · ${username}`}
-        <span className="text-muted">{place.kind === 'terminal' ? ` · ${place.tool} on ${place.host}` : ''}</span>
-      </p>
-      <RuleHonestLine />
-      {surface === 'terminal' ? (
-        <RuleRootBlock place={place} {...(username === undefined ? {} : { username })} />
-      ) : null}
+      <SignInRuleWords
+        {...sheetWords({
+          accountName,
+          username,
+          place,
+          ticks,
+          codeKey: props.codeKey,
+        })}
+        flags={ruleFlags({ root: surface === 'terminal', totp: ticks.totp, autoRecipe: props.autoRecipe })}
+        note={history}
+      />
 
       {eligibility === undefined ? (
         <p className="m-0 text-ui text-muted" data-rule-eligibility="reading" role="status">
@@ -251,7 +215,6 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
                 tone="err"
               >
                 <span className="text-fg">Also fill the 6-digit code</span>
-                <span data-rule-one-factor="">{RULE_TOTP_WARNING}</span>
               </Tick>
             ) : null}
             {ticks.totp ? (
@@ -267,12 +230,6 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
               </Tick>
             ) : null}
           </fieldset>
-
-          {props.autoRecipe ? (
-            <Flag name="auto-recipe" tone="warn">
-              {RULE_AUTO_RECIPE_WORDS}
-            </Flag>
-          ) : null}
 
           <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-days`}>
             How long

@@ -45,6 +45,7 @@ import { machineOffers } from '../../lib/daemon-health.ts';
 import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { daemonSharingPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
+import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -221,7 +222,7 @@ function AccountsPanel({ connection }: DaemonSettingsTabProps) {
               askPasskey:
                 requireRule === undefined
                   ? undefined
-                  : (stage: `srs_${string}`, words: string) => requireRule(connection, stage, words),
+                  : (stage: `srs_${string}`, words: StepUpWords) => requireRule(connection, stage, words),
             },
           }
         : {})}

@@ -64,6 +64,7 @@ import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
 import { isMachineSetupStepId } from './features/fleet/setup/onboarding-model.ts';
+import { machineItemHash } from './features/fleet/setup/settings-route.ts';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import { machineHash } from './features/fleet/shell/machine-route.ts';
@@ -170,6 +171,7 @@ import {
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
 import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
+import { useRuleDeepLink } from './hooks/use-rule-deep-link.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
 import { useSendView } from './hooks/use-send-view.ts';
 import {
@@ -260,6 +262,7 @@ import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
+import { captureRuleDeepLink } from './lib/rule-deep-link.ts';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
@@ -2512,7 +2515,10 @@ function DeviceRefusedGate({
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
   useState(() => {
-    if (typeof window !== 'undefined') captureAgendaDeepLink();
+    if (typeof window !== 'undefined') {
+      captureAgendaDeepLink();
+      captureRuleDeepLink();
+    }
   });
   const layout = useLayoutMode();
   const install = useInstallPrompt();
@@ -2591,6 +2597,19 @@ export function AppShell() {
   const toTest = useToTestCards(store.board, everyPairedMachine);
   const inboxMachines = useInboxMachines(store.fleet, everyPairedMachine);
   useAgendaDeepLink(inboxMachines, navigate);
+  const ruleLinkRecord =
+    connectionSnapshot.connections.find(candidate => candidate.daemonId === connectionSnapshot.selectedDaemonId) ??
+    connectionSnapshot.connections[0];
+  const ruleLinkMachine = useMemo(
+    () =>
+      ruleLinkRecord === undefined
+        ? null
+        : {
+            secureCopyPath: `${daemonSettingsPath(ruleLinkRecord.daemonId)}${machineItemHash(distinctDaemonName(ruleLinkRecord, connectionSnapshot.connections), 'machine', 'secure-copy')}`,
+          },
+    [connectionSnapshot.connections, ruleLinkRecord],
+  );
+  useRuleDeepLink(ruleLinkMachine, connectionSnapshot.connections.length > 0, navigate);
   const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(

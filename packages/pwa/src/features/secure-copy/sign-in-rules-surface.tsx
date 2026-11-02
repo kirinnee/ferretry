@@ -7,9 +7,9 @@
  */
 
 import type { SignInRuleList, SignInRuleStaged, SignInRuleView } from '@ferretry/protocol';
-import { TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { clearRuleDeepLink, pendingRuleDeepLink, subscribeRuleDeepLink } from '../../lib/rule-deep-link.ts';
 import {
   dropRuleStage,
   failureWords,
@@ -17,7 +17,9 @@ import {
   listRules,
   narrowRule,
   RULE_DAMAGED_WORDS,
+  RULE_LINKED_STAGE_GONE_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
+  type RuleAsk,
   type RuleClient,
   type RuleProgress,
   revokeRule,
@@ -28,11 +30,12 @@ import {
 import { useApproveSignInRuleStepUp } from '../../lib/store.tsx';
 import { SignInRuleCard } from '../accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
-import { RuleHonestLine, RuleRootBlock, RuleStillAsked } from '../accounts/sign-in-rule-sheet.tsx';
+import { RuleStillAsked } from '../accounts/sign-in-rule-sheet.tsx';
+import { SignInRuleWords } from '../accounts/sign-in-rule-words.tsx';
 
 const POLL_MS = 5_000;
 
-type Ask = ((stage: `srs_${string}`, words: string) => Promise<boolean>) | undefined;
+type Ask = RuleAsk | undefined;
 
 export interface SignInRulesSurfaceProps {
   readonly connection: DaemonConnection;
@@ -60,6 +63,7 @@ export function MachineRuleStage({
   staged,
   phase,
   canUsePasskey,
+  highlighted = false,
   onConfirm,
   onDeny,
 }: {
@@ -70,40 +74,28 @@ export function MachineRuleStage({
     | { readonly kind: 'dismissed' }
     | { readonly kind: 'failed'; readonly words: string };
   readonly canUsePasskey: boolean;
+  /** The row a `#rules/<stage>` link named: ringed and scrolled to, never confirmed. */
+  readonly highlighted?: boolean;
   readonly onConfirm: () => void;
   readonly onDeny: () => void;
 }) {
-  const flags = stagedFlags(staged);
   const working = phase.kind === 'working';
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (highlighted) ref.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [highlighted]);
   return (
     <article
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className={`flex min-w-0 flex-col gap-2 rounded-control border bg-surface-2 p-3 ${highlighted ? 'border-accent ring-2 ring-accent' : 'border-border'}`}
       data-rule-stage={staged.stage}
+      {...(highlighted ? { 'data-highlighted': '' } : {})}
+      ref={ref}
     >
       <p className="m-0 text-ui font-medium text-fg" data-rule-machine="">
         A machine asked for this rule
         {staged.machine === undefined ? '' : ` at ${timeWords(staged.machine.askedAt)}`}
       </p>
-      <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-ui text-fg" data-rule-machine-summary="">
-        {staged.summary.map(line => (
-          <li className="break-words" key={line}>
-            {line}
-          </li>
-        ))}
-      </ul>
-      {staged.root ? <RuleRootBlock place={staged.place} /> : null}
-      {flags
-        .filter(flag => flag.name !== 'root')
-        .map(flag => (
-          <span
-            className={`flex items-start gap-1.5 text-meta font-medium ${flag.tone === 'err' ? 'text-err' : 'text-warn'}`}
-            data-rule-flag={flag.name}
-            key={flag.name}
-          >
-            <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-            <span className="min-w-0 break-words">{flag.words}</span>
-          </span>
-        ))}
+      <SignInRuleWords does={staged.does} flags={stagedFlags(staged)} rows={staged.rows} />
       <p className="m-0 text-meta text-muted">
         Waits until <span className="mono">{timeWords(staged.stageExpiresAt)}</span>. The rule ends{' '}
         <span className="mono">{timeWords(staged.expiresAt)}</span>.
@@ -176,6 +168,20 @@ export function SignInRulesSurface({
   >(undefined);
   const [reads, setReads] = useState(0);
   const forbidden = useRef(false);
+  const link = useSyncExternalStore(subscribeRuleDeepLink, pendingRuleDeepLink, pendingRuleDeepLink);
+  const [linked, setLinked] = useState<{ readonly stage: string; readonly listed: boolean } | undefined>(undefined);
+
+  // A `#rules/<stage>` link only picks a row to show. It is settled once the daemon's list has been read: listed, the row
+  // is highlighted; not listed, the owner is told so. Nothing here binds or asks for a passkey.
+  useEffect(() => {
+    if (link === null || (read.kind !== 'ready' && read.kind !== 'forbidden')) return;
+    setLinked(
+      read.kind === 'ready'
+        ? { stage: link.stage, listed: read.list.stages.some(each => each.stage === link.stage) }
+        : undefined,
+    );
+    clearRuleDeepLink();
+  }, [link, read]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read after a change
   useEffect(() => {
@@ -269,9 +275,6 @@ export function SignInRulesSurface({
         Sign-ins you approved once, for any ferret, with a passkey. They end on time, on their cap, or the moment you
         revoke them.
       </p>
-      <div className="mt-2 flex flex-col gap-2">
-        <RuleHonestLine />
-      </div>
       {read.kind === 'forbidden' ? (
         <p className="mb-0 mt-3 text-ui text-warn" data-sign-in-rules-forbidden="" role="status">
           {RULE_NO_ACCOUNTS_DEVICE_WORDS}
@@ -308,9 +311,15 @@ export function SignInRulesSurface({
               {...(again.rule.username === undefined ? {} : { username: again.rule.username })}
             />
           )}
+          {linked !== undefined && !linked.listed ? (
+            <p className="m-0 text-ui text-warn" data-rule-linked-gone="" role="status">
+              {RULE_LINKED_STAGE_GONE_WORDS}
+            </p>
+          ) : null}
           {read.list.stages.map(staged => (
             <MachineRuleStage
               canUsePasskey={ask !== undefined}
+              highlighted={linked?.listed === true && linked.stage === staged.stage}
               key={staged.stage}
               onConfirm={() => confirmStage(staged)}
               onDeny={() => {

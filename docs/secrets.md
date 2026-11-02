@@ -508,7 +508,9 @@ are matched by the screens in the app: the sheet (Accounts › a sign-in › Sta
 sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
 ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
 `fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
-rule's structured flags, never from its summary text. Editing a sign-in's method or recipe says how many rules that
+rule's structured flags, never from its words. Every rule card has ONE shape: a plain `does` line, label/value `rows`
+(Types, Who, Until, Uses, plus Machine or Site, Code key and History where they apply), ONE red block, and "How it's
+checked" for the proof, all built by the protocol's `signInRuleWords`. Editing a sign-in's method or recipe says how many rules that
 suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
 device that may not use secrets sees one sentence and the app stops asking.
 
@@ -649,9 +651,11 @@ exactly the pinned key; one password field; the form the owner's taps have histo
 suspends nothing and tells the ferret nothing it would not be told with no rule. The rule is asked once more inside the
 terminal's own turn, right before the guarded tmux write (`proceed()`), so a revoke that lands then types nothing.
 
-Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim:
+Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim. The first
+is the red block, with the accepted race (`SIGN_IN_RULE_TERMINAL_RESIDUAL`) as its second sentence; the second is under "How
+it's checked":
 
-> This gives every ferret on this machine root whenever it asks, while the rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
+> Any ferret on this machine gets root while this rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
 
 > Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
 > process gave itself. A ferret starts that program, so it could start another program root installed under the name
@@ -685,7 +689,7 @@ before anything is checked again. What a rule adds is that the swap is SEEN and 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
 audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
 
-**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`).** The owner switched sudo rules on knowing this: in the split second between
+**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before it types, a ferret could swap in its own program and read the password once. Ferretry then stops the rule.").** The owner switched sudo rules on knowing this: in the split second between
 Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
 and that program could read the password once. Ferretry then notices, stops the rule and tells the owner, so the same
 approval can never be used to try again. A sudo rule also means every ferret can get root on this machine while the rule

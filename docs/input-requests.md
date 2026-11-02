@@ -1439,12 +1439,13 @@ What it does NOT do, said plainly:
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, red on every terminal
+- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, the first sentence of the one red block on every terminal
   rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`, then the accepted race `SIGN_IN_RULE_TERMINAL_RESIDUAL`): what
   reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
   could start another such program (`passwd`, say) as `sudo`:
 
-> This gives every ferret on this machine root whenever it asks, while the rule lasts.
+> Any ferret on this machine gets root while this rule lasts. In the split second before it types, a ferret could swap in
+> its own program and read the password once. Ferretry then stops the rule.
 
 > Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
 > process gave itself. A ferret starts that program, so it could start another program root installed under the name

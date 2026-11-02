@@ -1,6 +1,7 @@
 /** The standing sign-in rule screens: sheet, card, Settings surface, a ferret's suggestion, and the input-card offer. */
 
 import { describe, expect, it } from 'bun:test';
+import { SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULE_TOTP_WARNING } from '@ferretry/protocol';
 import { unitClock } from '../../../../daemon/tests/support/unit-clock.ts';
 import { SignInRuleCard } from '../../../src/features/accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheet } from '../../../src/features/accounts/sign-in-rule-sheet.tsx';
@@ -12,9 +13,6 @@ import {
   deviceRevokeWarning,
   INELIGIBLE_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
-  RULE_ROOT_WARNING,
-  RULE_TERMINAL_LIMIT,
-  RULE_TOTP_WARNING,
 } from '../../../src/lib/sign-in-rules.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import {
@@ -72,7 +70,7 @@ describe('the create sheet', () => {
     const mounted = await mount(sheet());
     try {
       await interact(() => q<HTMLInputElement>(mounted.container, '[data-rule-tick="totp"]').click());
-      expect(q(mounted.container, '[data-rule-one-factor]').textContent).toBe(RULE_TOTP_WARNING);
+      expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toBe(SIGN_IN_RULE_TOTP_WARNING);
       expect(q<HTMLButtonElement>(mounted.container, '[data-rule-approve]').disabled).toBe(true);
       await interact(() => q<HTMLInputElement>(mounted.container, '[data-rule-tick="totp-ack"]').click());
       expect(q<HTMLButtonElement>(mounted.container, '[data-rule-approve]').disabled).toBe(false);
@@ -86,9 +84,8 @@ describe('the create sheet', () => {
       sheet({ place: sudoPlace, username: undefined, codeAvailable: false, eligibility: { ...eligible } }),
     );
     try {
-      const text = q(mounted.container, '[data-rule-root]').textContent ?? '';
-      expect(text).toContain(RULE_ROOT_WARNING);
-      expect(q(mounted.container, '[data-rule-terminal-limit]').textContent).toBe(RULE_TERMINAL_LIMIT);
+      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toBe(SIGN_IN_RULE_ROOT_WARNING);
+      expect(mounted.container.querySelectorAll('[data-rule-warnings]')).toHaveLength(1);
       expect(mounted.container.querySelector('[data-rule-tick="username"]')).toBeNull();
       expect(mounted.container.querySelector('[data-rule-tick="totp"]')).toBeNull();
     } finally {
@@ -143,8 +140,8 @@ describe('the rule card', () => {
   it('flags a code rule from the flags array and names the code once', async () => {
     const mounted = await mount(card(codeRule()));
     try {
-      expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toContain(RULE_TOTP_WARNING);
-      expect(q(mounted.container, '[data-rule-fields]').textContent).toBe('username, password, 6-digit code');
+      expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toContain(SIGN_IN_RULE_TOTP_WARNING);
+      expect(q(mounted.container, '[data-rule-row="Types"]').textContent).toContain('2FA code');
     } finally {
       await mounted.unmount();
     }
@@ -153,7 +150,7 @@ describe('the rule card', () => {
   it('flags a terminal rule root', async () => {
     const mounted = await mount(card(terminalRule()));
     try {
-      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toContain('root on kirin-box');
+      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toBe(SIGN_IN_RULE_ROOT_WARNING);
     } finally {
       await mounted.unmount();
     }
@@ -192,7 +189,7 @@ describe('Settings › Secure copy', () => {
     );
     try {
       expect(q(mounted.container, '[data-rule-stage]').getAttribute('data-rule-stage')).toBe(STAGE_ID);
-      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toContain(RULE_ROOT_WARNING);
+      expect(q(mounted.container, '[data-rule-flag="root"]').textContent).toContain(SIGN_IN_RULE_ROOT_WARNING);
       expect(calls).toEqual(['GET /v1/sign-in-rules']);
     } finally {
       await mounted.unmount();

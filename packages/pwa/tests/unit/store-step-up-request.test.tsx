@@ -6,6 +6,7 @@ import {
   createAppStore,
   StoreProvider,
   useAddKeyStepUp,
+  useApproveSignInRuleStepUp,
   useApproveTaskPlanStepUp,
   useStepUpRequest,
 } from '../../src/lib/store.tsx';
@@ -69,6 +70,51 @@ describe('useApproveTaskPlanStepUp', () => {
     const answer = ask?.(alpha, `tps_${'a'.repeat(24)}` as never, 'Line 2: sign in to vercel.com');
 
     expect(store.stepUp.snapshot()?.acts).toEqual(['Line 2: sign in to vercel.com']);
+    store.stepUp.dismiss();
+    expect(await answer).toBe(false);
+    await view.unmount();
+  });
+});
+
+type ApproveSignInRule = ReturnType<typeof useApproveSignInRuleStepUp>;
+
+function ApproveSignInRuleProbe({ onAsk }: { readonly onAsk: (ask: ApproveSignInRule) => void }) {
+  onAsk(useApproveSignInRuleStepUp());
+  return null;
+}
+
+describe('useApproveSignInRuleStepUp', () => {
+  it('is no prompt at all outside the app’s store', async () => {
+    let ask: ApproveSignInRule = () => Promise.resolve(true);
+    const view = await mount(<ApproveSignInRuleProbe onAsk={value => (ask = value)} />);
+
+    expect(ask).toBeUndefined();
+    await view.unmount();
+  });
+
+  it('asks the one prompt for the approve-sign-in-rule act, bound to the stage, with the words as structure', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+    });
+    let ask: ApproveSignInRule;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <ApproveSignInRuleProbe onAsk={value => (ask = value)} />
+      </StoreProvider>,
+    );
+    const words = {
+      does: 'Ferretry types your sudo password for any ferret on kirin-box, without asking.',
+      rows: [{ label: 'Who', value: 'any ferret' }],
+      warnings: ['Any ferret on this machine gets root while this rule lasts.'],
+    };
+
+    const answer = ask?.(alpha, `srs_${'a'.repeat(24)}` as never, words);
+
+    const prompt = store.stepUp.snapshot();
+    expect(prompt?.acts).toEqual([words.does]);
+    expect(prompt?.words).toEqual(words);
     store.stepUp.dismiss();
     expect(await answer).toBe(false);
     await view.unmount();

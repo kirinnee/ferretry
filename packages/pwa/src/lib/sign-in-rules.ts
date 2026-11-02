@@ -9,14 +9,15 @@
 
 import {
   type IFyApiClient,
-  LOGIN_TOTP_WARNING,
   type Place,
   SIGN_IN_RULE_ERROR_CODES,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
+  SIGN_IN_RULE_MAX_USES,
   SIGN_IN_RULE_ROOT_WARNING,
-  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
   type SignInId,
   type SignInRuleDraft,
   type SignInRuleEligibility,
@@ -26,10 +27,11 @@ import {
   type SignInRuleList,
   SignInRuleListSchema,
   type SignInRuleNarrow,
+  type SignInRuleRow,
   type SignInRuleScope,
-  type SignInRuleStageId,
   type SignInRuleStaged,
   SignInRuleStagedSchema,
+  type SignInRuleStageId,
   type SignInRuleSuggestionList,
   SignInRuleSuggestionListSchema,
   type SignInRuleSurface,
@@ -37,8 +39,11 @@ import {
   SignInRuleViewSchema,
   signInRuleLifetime,
   signInRuleSuspensionWords,
+  signInRuleWords,
+  type TwoFactorKeySummary,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { StepUpWords } from './step-up-gate.ts';
 
 export type RuleClient = Pick<IFyApiClient, 'request'>;
 
@@ -121,16 +126,10 @@ export async function dismissSuggestion(client: RuleClient, suggestion: string):
 
 /** On every rule card, sheet and Settings group, verbatim. */
 export const RULE_HONEST_LIMIT = SIGN_IN_RULE_HONEST_LIMIT;
-/** Red, on every terminal (sudo, su, doas) rule, drawn from the structured root flag. */
-export const RULE_ROOT_WARNING = SIGN_IN_RULE_ROOT_WARNING;
-/** Beside the root line: what the program proof is worth. */
-export const RULE_TERMINAL_LIMIT = SIGN_IN_RULE_TERMINAL_HONEST_LIMIT;
-/** Beside the program-proof limit: the race the owner accepted (!A226), from the structured root flag. */
-export const RULE_TERMINAL_RESIDUAL = SIGN_IN_RULE_TERMINAL_RESIDUAL;
-/** The red one-factor warning under a ticked code. */
-export const RULE_TOTP_WARNING = LOGIN_TOTP_WARNING;
+/** The red one-factor warning under a ticked code: one or two short sentences. */
+const RULE_TOTP_WARNING = SIGN_IN_RULE_TOTP_WARNING;
 export const RULE_TOTP_ACK_WORDS = 'I understand this makes the sign-in one factor, with no one to approve a code.';
-export const RULE_AUTO_RECIPE_WORDS =
+const RULE_AUTO_RECIPE_WORDS =
   'This sign-in applies its recipe by itself, so the form it fills is one a ferret may have written.';
 export const RULE_NO_ACCOUNTS_DEVICE_WORDS =
   'This device can’t see your accounts, so it can’t show standing rules. Use a device that can.';
@@ -141,6 +140,8 @@ export const RULE_NO_PASSKEY_DEVICE_WORDS =
 export const RULE_DAMAGED_WORDS =
   'The standing rules file could not be read, so no rule fills until you approve one again. Every sign-in asks you.';
 const RULE_STAGE_GONE_WORDS = 'That approval timed out or was already answered. Start it again.';
+/** A `#rules/<stage>` link whose stage the daemon no longer lists. */
+export const RULE_LINKED_STAGE_GONE_WORDS = 'That approval timed out or was already answered.';
 
 /** What a rule can't cover, listed on every sheet under "You’ll still be asked". */
 export const RULE_STILL_ASKED: readonly string[] = [
@@ -196,7 +197,7 @@ export const timeWords = (instant: string): string => `${instant.slice(0, 16).re
 /** "30 days", "1 day". */
 export const daysWords = (days: number): string => `${String(days)} ${days === 1 ? 'day' : 'days'}`;
 
-export const usesLeftWords = (rule: Pick<SignInRuleView, 'uses' | 'remaining'>): string =>
+const usesLeftWords = (rule: Pick<SignInRuleView, 'uses' | 'remaining'>): string =>
   rule.uses === undefined || rule.remaining === undefined
     ? 'No limit'
     : `${String(rule.remaining)} of ${String(rule.uses)} uses left`;
@@ -209,24 +210,6 @@ export interface RuleFlag {
   readonly words: string;
 }
 
-const terminalOf = (place: Place): { readonly tool: string; readonly host: string } | undefined =>
-  place.kind === 'terminal' ? { tool: place.tool, host: place.host } : undefined;
-
-/** "Ferretry types kirin’s password into sudo on kirin-box for any ferret: root on kirin-box". */
-export function rootRuleWords(place: Place, username?: string): string {
-  const terminal = terminalOf(place);
-  const tool = terminal?.tool ?? 'sudo, su or doas';
-  const host = terminal?.host;
-  return host === undefined
-    ? `Ferretry types a password into ${tool} for any ferret: root on this machine`
-    : `Ferretry types ${username === undefined ? 'the' : `${username}’s`} password into ${tool} on ${host} for any ferret: root on ${host}`;
-}
-
-export const rootBadge = (place: Place): string => {
-  const terminal = terminalOf(place);
-  return terminal === undefined ? 'root on this machine' : `root on ${terminal.host}`;
-};
-
 /** The flags of a rule or a staged rule, in a fixed order, each drawn only from a structured field. */
 export function ruleFlags(facts: {
   readonly root: boolean;
@@ -234,7 +217,7 @@ export function ruleFlags(facts: {
   readonly autoRecipe: boolean;
 }): readonly RuleFlag[] {
   return [
-    ...(facts.root ? [{ name: 'root', tone: 'err', words: RULE_ROOT_WARNING } as const] : []),
+    ...(facts.root ? [{ name: 'root', tone: 'err', words: SIGN_IN_RULE_ROOT_WARNING } as const] : []),
     ...(facts.totp ? [{ name: 'one-factor', tone: 'err', words: RULE_TOTP_WARNING } as const] : []),
     ...(facts.autoRecipe ? [{ name: 'auto-recipe', tone: 'warn', words: RULE_AUTO_RECIPE_WORDS } as const] : []),
   ];
@@ -253,14 +236,99 @@ export const viewFlags = (rule: Pick<SignInRuleView, 'flags'>): readonly RuleFla
   });
 
 /**
- * The passkey dialog's body: what is approved (the daemon's summary lines, which end with when it stops and how many
- * uses), then a blank line and the warnings, each drawn from a structured flag, so the dialog can set them apart.
+ * The ONE red block's sentences for a set of flags, in order: a root rule says it and then the split-second risk; the
+ * one-factor and the auto-recipe flags say their own. Each is drawn only from a structured flag.
  */
-export function passkeyWords(staged: Pick<SignInRuleStaged, 'summary' | 'root' | 'totp' | 'autoRecipe'>): string {
-  const warnings = stagedFlags(staged).flatMap(flag =>
-    flag.name === 'root' ? [flag.words, RULE_TERMINAL_LIMIT, RULE_TERMINAL_RESIDUAL] : [flag.words],
-  );
-  return warnings.length === 0 ? staged.summary.join('\n') : `${staged.summary.join('\n')}\n\n${warnings.join('\n')}`;
+export const flagSentences = (flags: readonly RuleFlag[]): readonly string[] =>
+  flags.flatMap(flag => (flag.name === 'root' ? [flag.words, SIGN_IN_RULE_TERMINAL_RESIDUAL] : [flag.words]));
+
+/** The kernel-proof detail behind "How it's checked": what the program proof is worth, by kind of rule. */
+export const checkedWords = (root: boolean): string =>
+  root ? SIGN_IN_RULE_TERMINAL_HONEST_LIMIT : SIGN_IN_RULE_HONEST_LIMIT;
+
+/**
+ * The passkey dialog's body, as STRUCTURE: the daemon's one plain line and its rows, exactly as staged, and the warnings
+ * the staged rule's flags give. The rows and the warnings are separate lists, never one text split in two, so a row can
+ * never be drawn in the red block.
+ */
+export function passkeyWords(
+  staged: Pick<SignInRuleStaged, 'does' | 'rows' | 'root' | 'totp' | 'autoRecipe'>,
+): StepUpWords {
+  return { does: staged.does, rows: staged.rows, warnings: flagSentences(stagedFlags(staged)) };
+}
+
+/**
+ * A listed rule in the one shape every rule screen draws: the plain line and the rows, built by the protocol's one
+ * builder from the daemon's structured view. Its Uses row says what is left and what was used.
+ */
+export function ruleWordsOf(rule: SignInRuleView): { readonly does: string; readonly rows: readonly RuleRow[] } {
+  const words = signInRuleWords({
+    fields: rule.fields,
+    account: rule.account,
+    username: rule.username,
+    place: rule.place,
+    scope: rule.scope,
+    expiresAt: rule.expiresAt,
+    uses: rule.uses,
+    revision: 1,
+  });
+  const last = rule.usage.lastUsedAt === undefined ? '' : `, last ${timeWords(rule.usage.lastUsedAt)}`;
+  return {
+    does: words.does,
+    rows: [
+      ...words.rows.map(row =>
+        row.label === 'Uses'
+          ? { label: row.label, value: `${usesLeftWords(rule)} · used ${String(rule.usage.count)}×${last}` }
+          : row,
+      ),
+      { label: 'Approved with', value: rule.approvedWith.device ?? 'a paired device' },
+    ],
+  };
+}
+
+/** A label and one line, as any rule screen draws it. */
+export type RuleRow = Pick<SignInRuleRow, 'value'> & { readonly label: string };
+
+/** The sheet has no end time until the daemon stages one; its rows leave the Until row out. */
+const SHEET_PLACEHOLDER_UNTIL = '1970-01-01T00:00:00.000Z';
+
+/**
+ * The create sheet's lead: the plain line for what is ticked and the facts that do not move with a tick (the place, and
+ * the 2FA key when the code is ticked). The daemon's own rows are what the passkey shows afterwards.
+ */
+export function sheetWords(input: {
+  readonly accountName: string;
+  readonly username?: string | undefined;
+  readonly place: Place;
+  readonly ticks: RuleTicks;
+  readonly codeKey?: string | undefined;
+}): { readonly does: string; readonly rows: readonly SignInRuleRow[] } {
+  const { ticks } = input;
+  const words = signInRuleWords({
+    fields: [
+      ...(ticks.username ? (['username'] as const) : []),
+      ...(ticks.password || !ticks.username ? (['password'] as const) : []),
+      ...(ticks.totp ? (['totp'] as const) : []),
+    ],
+    account: { id: 'SHEET', label: input.accountName },
+    username: input.username,
+    place: input.place,
+    scope: ticks.scope,
+    expiresAt: SHEET_PLACEHOLDER_UNTIL,
+    codeKey: input.codeKey,
+    revision: 1,
+  });
+  return { does: words.does, rows: words.rows.filter(row => ['Machine', 'Site', 'Code key'].includes(row.label)) };
+}
+
+/** The label of the 2FA key a code rule would pin: the newest key Ferretry makes codes for (the daemon pins the same). */
+export function codeKeyLabel(
+  factors: readonly Pick<TwoFactorKeySummary, 'automatic' | 'addedAt' | 'id' | 'label'>[],
+): string | undefined {
+  return [...factors]
+    .filter(key => key.automatic)
+    .sort((left, right) => Date.parse(right.addedAt) - Date.parse(left.addedAt) || left.id.localeCompare(right.id))[0]
+    ?.label;
 }
 
 // ── Where the rule sits ──────────────────────────────────────────────────────────────────────────────
@@ -368,8 +436,11 @@ export function ticksProblem(ticks: RuleTicks, surface: SignInRuleSurface): stri
     return 'A rule for sudo, su or doas types the password only.';
   if (ticks.totp && !ticks.password) return 'The code is typed only after its own password.';
   if (ticks.totp && !ticks.totpAcknowledged) return 'Tick that you understand the code makes this one factor.';
-  if (ticks.uses !== undefined && (!Number.isInteger(ticks.uses) || ticks.uses < 1))
-    return 'The most uses is a whole number, 1 or more.';
+  if (
+    ticks.uses !== undefined &&
+    (!Number.isInteger(ticks.uses) || ticks.uses < 1 || ticks.uses > SIGN_IN_RULE_MAX_USES)
+  )
+    return `The most uses is a whole number, 1 to ${String(SIGN_IN_RULE_MAX_USES)}.`;
   return undefined;
 }
 
@@ -395,13 +466,17 @@ export type RuleOutcome =
   | { readonly kind: 'dismissed' }
   | { readonly kind: 'failed'; readonly words: string };
 
+/** Asks for the passkey bound to a stage; the words are the daemon's rows and the flags' sentences, as structure. */
+export type RuleAsk = (stage: SignInRuleStageId, words: StepUpWords) => Promise<boolean>;
+
 export interface RulePorts {
   readonly client: RuleClient;
   /**
-   * Asks for the `approve-sign-in-rule` passkey bound to the stage. `words` is the DAEMON's summary of the staged bytes
-   * and the structured flags' sentences; nothing a ferret wrote reaches it. `undefined` when this device cannot ask.
+   * Asks for the `approve-sign-in-rule` passkey bound to the stage. `words` is the DAEMON's own plain line and rows of
+   * the staged bytes and the structured flags' sentences, as separate lists; nothing a ferret wrote reaches it.
+   * `undefined` when this device cannot ask.
    */
-  readonly askPasskey: ((stage: SignInRuleStageId, words: string) => Promise<boolean>) | undefined;
+  readonly askPasskey: RuleAsk | undefined;
   readonly report?: (progress: RuleProgress) => void;
 }
 

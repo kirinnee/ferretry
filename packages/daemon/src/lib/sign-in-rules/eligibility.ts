@@ -1,6 +1,7 @@
 import {
   type LoginObserved,
   placeKeys,
+  SIGN_IN_RULE_HISTORY_MAX,
   SIGN_IN_RULE_HISTORY_TAPS,
   type SignInRuleIneligible,
   type SignInRuleSurface,
@@ -42,6 +43,18 @@ export function tappedIdentities(signIn: Pick<SignInSummary, 'place' | 'observed
   const keys = new Set(placeKeys(signIn.place));
   const seen = (signIn.observed ?? []).filter(fact => keys.has(fact.at) && ownerHistory(fact));
   return [...new Set(seen.map(fact => fact.identity))].sort();
+}
+
+/**
+ * How many times in a row the owner has signed in to this sign-in by hand: the highest tapped count among the facts
+ * that qualify, at its own place keys, for the owner to read beside "you have signed in N times". Zero: none qualify.
+ */
+export function tappedCount(signIn: Pick<SignInSummary, 'place' | 'observed'>): number {
+  const keys = new Set(placeKeys(signIn.place));
+  const counts = (signIn.observed ?? [])
+    .filter(fact => keys.has(fact.at) && ownerHistory(fact))
+    .map(fact => fact.tapped?.count ?? 0);
+  return Math.min(Math.max(0, ...counts), SIGN_IN_RULE_HISTORY_MAX);
 }
 
 /** The surface a rule for this sign-in would be for: its place's kind. */
