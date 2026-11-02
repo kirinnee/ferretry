@@ -1,4 +1,5 @@
 import type {
+  DaemonId,
   IFyApiClient,
   SignInRuleDraft,
   SignInRuleEligibility,
@@ -31,7 +32,7 @@ export interface IRulesGateway {
   revokeAccount(account: string): Promise<number>;
   /** Whether the owner could make a rule for this sign-in now, and why not. */
   eligibility(signIn: string): Promise<SignInRuleEligibility>;
-  /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
+  /** The features the daemon reports (`DAEMON_FEATURES`); throws `DaemonFeaturesUnreadable` when it cannot be asked. */
   features(): Promise<readonly string[]>;
 }
 
@@ -48,8 +49,13 @@ export interface RulesPorts {
   readonly nowMs: () => number;
   /** Draws a red warning; the identity when colour is off. */
   readonly red: (text: string) => string;
-  /** The app's address, where a staged rule is confirmed (`<origin>/#rules/<stage>`); absent, no link is printed. */
+  /** The app's address, where a staged rule is confirmed (`ruleDeepLink`); absent, no link is printed. */
   readonly appOrigin?: string | undefined;
+  /**
+   * This daemon's id, which the link names so the app opens the machine that holds the stage. Absent, or answering
+   * `undefined` (or failing), the link names no machine and the app opens its selected one.
+   */
+  readonly machine?: (() => Promise<DaemonId | undefined>) | undefined;
   /** Said with the link when a set app address was refused and the hosted one stands. */
   readonly appOriginNote?: string | undefined;
   /** Hands a link to this host's browser; resolves to whether one was launched. */

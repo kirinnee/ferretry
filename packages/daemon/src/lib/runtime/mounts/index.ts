@@ -28,6 +28,7 @@ import type { PinService } from '../../pins/index.ts';
 import type { SignInRuleService } from '../../sign-in-rules/service.ts';
 import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
+import type { PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SharedDraftService } from '../../shared-drafts/index.ts';
@@ -417,6 +418,8 @@ export interface MountedSubsystems {
   readonly secureCopy: {
     readonly copies: CopyListing;
     readonly rules: PasteRuleService;
+    /** Paste rules waiting for their bound `approve-paste-rule` passkey (RAM only, owner decision !A244). */
+    readonly stages: PasteRuleStages;
     /** Task plans (RAM only): the paste-plan routes answer from them too. */
     readonly plans: TaskPlanService;
     /** Where a terminal rule's program lives, so a rule into the owner's own profile says so. */
@@ -554,6 +557,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.secrets.seeds,
           subsystems.secureCopy.plans,
           subsystems.signInRules,
+          subsystems.secureCopy.stages,
         ),
         // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
         // literal no other subsystem uses, so it can neither shadow nor be shadowed.
@@ -730,6 +734,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.secureCopy.copies,
           subsystems.secureCopy.rules,
           subsystems.secureCopy.plans,
+          subsystems.secureCopy.stages,
           subsystems.secureCopy.homes,
         ),
         // `/v1/task-plans` and `/v1/sessions/:sessionId/task-plans/*` are literals no other subsystem uses.

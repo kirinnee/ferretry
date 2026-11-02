@@ -4,14 +4,22 @@ import {
   CopyRouteFromSchema,
   type CopyRouteTo,
   CopyRouteToSchema,
+  DAEMON_FEATURES,
+  PASSKEY_CHALLENGE_TTL_SECONDS,
+  PASTE_RULES_SCREEN_PATH,
   type PasteRule,
   type PasteRuleCreate,
   type PasteRuleList,
   type PasteRuleSettingsView,
+  type PasteRuleStaged,
+  type PasteRuleStageState,
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
+  STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
+import { daemonNeedsUpdate, isUnknownRoute } from '../daemon/features.ts';
+import { OWNER_COMMAND_REFUSAL, refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
 
@@ -29,8 +37,8 @@ export interface CopyRuleOptions extends CopyCommandOptions {
   readonly expires?: string | undefined;
 }
 
-/** Said when a ferret reaches for the owner's command. */
-export const COPY_FERRET_REFUSAL = "this is the owner's command; a ferret cannot approve its own pastes";
+/** Said when a ferret reaches for the owner's command: the one neutral sentence, a read refused as well as a change. */
+export const COPY_FERRET_REFUSAL = OWNER_COMMAND_REFUSAL;
 
 const UNITS: Readonly<Record<string, number>> = { s: 1, m: 60, h: 3_600, d: 86_400 };
 
@@ -75,6 +83,20 @@ export const toText = (to: CopyRouteTo): string =>
       ? `secret:${to.name}`
       : `browser:${to.origin}`;
 
+/** What `fy copy rules profile` changes, in the words `fy copy rules ls` prints it with. */
+const PROFILE_SETTING = 'programs in your own profile';
+
+/** Said when turning the profile setting on: what it lets a ferret do. */
+export const PROFILE_TARGETS_WARNING =
+  'a paste rule into a terminal program may now match one from your own Nix profile (~/.nix-profile), and any ferret runs as you and can swap that program for its own';
+
+/**
+ * Said when a caller off this machine (a governed one) turns it on without a passkey confirmation: the daemon's
+ * `403 grant_step_up_required`. A passkey is proved in the app, so that is where the switch is.
+ */
+export const PROFILE_TARGETS_NEEDS_PASSKEY =
+  'turning on programs in your own profile from here needs your passkey: switch it on in the app (Settings › Secure copy › Pastes approved in advance), or run this at the machine itself. Nothing was changed';
+
 /** What a rule into a program from the owner's own profile is labelled with (docs/secure-copy.md). */
 const PROFILE_RULE_BADGE = '[your profile — a ferret could swap this program]';
 
@@ -100,18 +122,33 @@ function renderRule(rule: PasteRule, inProfile = false): string {
  */
 function renderRules(list: PasteRuleList, view: PasteRuleSettingsView | undefined): string {
   const profile = new Set(view?.profileRules ?? []);
-  const setting =
-    view === undefined
-      ? []
-      : [
-          `programs in your own profile: ${view.settings.allowProfileTargets ? 'allowed' : 'not allowed (they ask you)'}`,
-        ];
+  const setting = view === undefined ? [] : [`${PROFILE_SETTING}: ${profileWords(view.settings.allowProfileTargets)}`];
   const rules =
     list.rules.length === 0
-      ? ['no pastes are approved in advance']
+      ? ['no paste rules: every paste asks you']
       : list.rules.map(rule => renderRule(rule, profile.has(rule.id)));
   return [...setting, ...rules].join('\n');
 }
+
+const profileWords = (allowed: boolean): string => (allowed ? 'allowed' : 'not allowed (they ask you)');
+
+/** A staged paste rule as every app shows it: the daemon's line, its rows, then the red line its flag gives. */
+function renderStagedRule(staged: PasteRuleStaged): readonly string[] {
+  const width = Math.max(...staged.rows.map(row => row.label.length));
+  return [
+    `  ${showUntrusted(staged.does)}`,
+    ...staged.rows.map(row => `  ${row.label.padEnd(width)}  ${showUntrusted(row.value)}`),
+    ...(staged.runsAnything ? [`  ${RUNS_WHAT_IT_READS_WARNING}`] : []),
+  ];
+}
+
+const STAGED_RULE_OUTCOME: Readonly<
+  Record<Exclude<PasteRuleStageState, 'waiting'>, (rule: string | undefined) => string>
+> = {
+  approved: rule => `Approved with your passkey: the paste rule ${rule?.slice(0, 8) ?? ''} is in force.`,
+  denied: () => 'Denied. No paste rule was made.',
+  expired: () => 'Timed out. No paste rule was made; run the command again.',
+};
 
 function renderCopy(copy: CopyMeta): string {
   const from = showUntrusted(copy.from.origin ?? copy.from.path ?? copy.from.program ?? copy.from.kind);
@@ -165,6 +202,29 @@ export class CopyController {
     }
   }
 
+  /**
+   * `fy copy rules profile on|off`: whether a terminal paste rule may match a program from the owner's own profile.
+   * On loosens what a rule matches: the daemon lets this machine's own caller do it, and asks anyone else for a passkey.
+   */
+  async profile(state: string, options: CopyCommandOptions): Promise<void> {
+    this.#refuseFerret();
+    const word = state.trim().toLowerCase();
+    if (word !== 'on' && word !== 'off') throw new Error(`say on or off, not "${state}"`);
+    const allowProfileTargets = word === 'on';
+    const settings = await this.ports.gateway.changeRuleSettings({ allowProfileTargets }).catch((error: unknown) => {
+      if (error instanceof FyHttpError && error.code === STEP_UP_REQUIRED_CODE)
+        throw new Error(PROFILE_TARGETS_NEEDS_PASSKEY);
+      if (isUnknownRoute(error)) throw new Error(daemonNeedsUpdate(PROFILE_SETTING));
+      throw error;
+    });
+    if (settings.allowProfileTargets) this.ports.out.diagnostic(`warning: ${PROFILE_TARGETS_WARNING}`);
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify(settings, null, 2)
+        : `${PROFILE_SETTING}: ${profileWords(settings.allowProfileTargets)}`,
+    );
+  }
+
   async addRule(options: CopyRuleOptions): Promise<void> {
     this.#refuseFerret();
     if (options.from === undefined || options.to === undefined)
@@ -179,12 +239,57 @@ export class CopyController {
       ...(count === undefined ? {} : { count }),
       ...(options.expires === undefined ? {} : { expiresInSeconds: parseLifetime(options.expires) }),
     };
+    if ((await this.ports.gateway.features()).includes(DAEMON_FEATURES.pasteRulePasskey))
+      return await this.#stageAndWait(request, options);
+    // A daemon from before !A244 makes the rule in one step.
     if (request.to.kind === 'terminal' && runsWhatItReads(request.to.program))
       this.ports.out.diagnostic(`warning: ${request.to.program}: ${RUNS_WHAT_IT_READS_WARNING}`);
     const rule = await this.ports.gateway.addRule(request);
     this.ports.out.success(
       options.json === true ? JSON.stringify(rule, null, 2) : `Approved in advance: ${renderRule(rule)}`,
     );
+  }
+
+  /**
+   * A PASTE RULE IS NEVER MADE HERE (owner decision !A244): it is staged, its daemon rows are shown, and the owner makes
+   * it with a passkey bound to that one rule in the app. There is no commit in {@link ICopyGateway} for this to call,
+   * and the machine's token could not prove one anyway. This waits for the answer, as `fy rules add` does.
+   */
+  async #stageAndWait(request: PasteRuleCreate, options: CopyRuleOptions): Promise<void> {
+    const staged = await this.ports.gateway.stageRule(request);
+    for (const line of renderStagedRule(staged)) this.#say(options, line);
+    this.#say(
+      options,
+      `Confirm it with your passkey in the Ferretry app (${PASTE_RULES_SCREEN_PATH}). Nothing is allowed until you do; waiting up to ${String(PASSKEY_CHALLENGE_TTL_SECONDS / 60)} minutes…`,
+    );
+    const { state, rule } = await this.#waitFor(staged.stage);
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify({ stage: staged.stage, state, ...(rule === undefined ? {} : { rule }) }, null, 2)
+        : STAGED_RULE_OUTCOME[state](rule),
+    );
+  }
+
+  async #waitFor(
+    stage: string,
+  ): Promise<{ readonly state: Exclude<PasteRuleStageState, 'waiting'>; readonly rule?: string }> {
+    const until = this.ports.nowMs() + (PASSKEY_CHALLENGE_TTL_SECONDS + 5) * 1_000;
+    for (;;) {
+      const view = await this.ports.gateway.ruleStage(stage).catch((error: unknown) => {
+        if (error instanceof FyHttpError && error.status === 404) return undefined;
+        throw error;
+      });
+      if (view === undefined) return { state: 'expired' };
+      if (view.state !== 'waiting')
+        return { state: view.state, ...(view.rule === undefined ? {} : { rule: view.rule }) };
+      if (this.ports.nowMs() >= until) return { state: 'expired' };
+      await this.ports.sleep(1_000);
+    }
+  }
+
+  #say(options: CopyCommandOptions, message: string): void {
+    if (options.json === true) this.ports.out.diagnostic(message);
+    else this.ports.out.success(message);
   }
 
   async removeRule(reference: string, options: CopyCommandOptions): Promise<void> {
@@ -212,14 +317,7 @@ export class CopyController {
 }
 
 /** Refuses a command run inside a ferret's pane or with an agent's credential: these are the owner's. */
-export function refuseFerret(caller: {
-  readonly ownSessionId: string | undefined;
-  readonly agentCredential: string | undefined;
-}): void {
-  const credential = caller.agentCredential?.trim() ?? '';
-  const own = caller.ownSessionId?.trim() ?? '';
-  if (own !== '' || credential !== '') throw new Error(COPY_FERRET_REFUSAL);
-}
+export const refuseFerret = refuseOwnerCommandInPane;
 
 /** The one thing a reference names, by the start of its id; `listing` is the command that shows them. */
 export function unique<T>(found: readonly T[], reference: string, what: string, listing: string): T {

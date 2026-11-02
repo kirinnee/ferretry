@@ -25,20 +25,30 @@ import {
   PasteRuleSettingsSchema,
   type PasteRuleSettingsView,
   PasteRuleSettingsViewSchema,
+  type PasteRuleStaged,
+  PasteRuleStagedSchema,
+  PasteRuleStageDroppedSchema,
+  type PasteRuleStageId,
+  PasteRuleStageListSchema,
+  RUNS_WHAT_IT_READS_WARNING,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { z } from 'zod';
 import { targetRef } from './input-card.ts';
+import type { StepUpWords } from './step-up-gate.ts';
 
 export type CopyClient = Pick<IFyApiClient, 'request'>;
 
 const RULES_PATH = '/v1/copy-rules';
+const STAGES_PATH = `${RULES_PATH}/stages`;
+const stagePath = (stage: PasteRuleStageId): string => `${STAGES_PATH}/${encodeURIComponent(stage)}`;
 const RemovedSchema = z.strictObject({ removed: z.literal(true) });
 
 export async function listRules(client: CopyClient): Promise<PasteRuleList> {
   return await client.request(RULES_PATH, PasteRuleListSchema);
 }
 
+/** The one-step create, for a daemon that does not stage paste rules (`copy-rules.passkey.1` not reported). */
 export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promise<PasteRule> {
   return await client.request(RULES_PATH, PasteRuleSchema, {
     method: 'POST',
@@ -79,6 +89,85 @@ export async function changeCopySettings(client: CopyClient, settings: PasteRule
   });
 }
 
+/** STAGE a paste rule: nothing is allowed yet. Answers the daemon's own line and rows, which the passkey prompt lists. */
+export async function stagePasteRule(client: CopyClient, rule: PasteRuleCreate): Promise<PasteRuleStaged> {
+  return await client.request(STAGES_PATH, PasteRuleStagedSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
+  });
+}
+
+/** The paste rules waiting for a passkey, such as one `fy copy rules add` staged at the machine. */
+export async function listPasteRuleStages(client: CopyClient): Promise<readonly PasteRuleStaged[]> {
+  return (await client.request(STAGES_PATH, PasteRuleStageListSchema)).stages;
+}
+
+/** COMMIT: only after the `approve-paste-rule` passkey bound to this stage. */
+async function commitPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<PasteRule> {
+  return await client.request(`${stagePath(stage)}/commit`, PasteRuleSchema, { method: 'POST' });
+}
+
+/** Drops a staged paste rule: the prompt was dismissed, or the owner denied it. Nothing is allowed. */
+export async function dropPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<void> {
+  await client.request(stagePath(stage), PasteRuleStageDroppedSchema, { method: 'DELETE' });
+}
+
+/** What the passkey prompt shows for a staged paste rule: the daemon's line and rows, and the red line its flag gives. */
+const pasteRulePasskeyWords = (staged: PasteRuleStaged): StepUpWords => ({
+  does: staged.does,
+  rows: staged.rows.map(row => ({ label: row.label, value: row.value })),
+  warnings: staged.runsAnything ? [RUNS_WHAT_IT_READS_WARNING] : [],
+});
+
+/** Asks for the `approve-paste-rule` passkey bound to a stage, showing the daemon's words; `false` when dismissed. */
+export type PasteRuleAsk = (stage: PasteRuleStageId, words: StepUpWords) => Promise<boolean>;
+
+/** Said when this device cannot run a passkey ceremony at all: the stage is dropped and nothing is approved. */
+export const PASTE_RULE_NO_PASSKEY_WORDS =
+  'This device cannot confirm with a passkey, so it cannot approve a paste rule. Nothing was approved.';
+
+export type PasteRuleOutcome =
+  | { readonly kind: 'made'; readonly rule: PasteRule }
+  | { readonly kind: 'dismissed' }
+  | { readonly kind: 'failed'; readonly words: string };
+
+const causeWords = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+
+/**
+ * THE OWNER'S APPROVAL OF ONE STAGED PASTE RULE (owner decision !A244): ask for the passkey bound to the stage with the
+ * daemon's own rows, then commit. A dismissed or failed prompt DROPS the stage, so nothing waits half-approved.
+ */
+export async function confirmPasteRuleStage(
+  client: CopyClient,
+  ask: PasteRuleAsk | undefined,
+  staged: PasteRuleStaged,
+): Promise<PasteRuleOutcome> {
+  const drop = async (): Promise<void> => {
+    await dropPasteRuleStage(client, staged.stage).catch(() => undefined);
+  };
+  if (ask === undefined) {
+    await drop();
+    return { kind: 'failed', words: PASTE_RULE_NO_PASSKEY_WORDS };
+  }
+  let given: boolean;
+  try {
+    given = await ask(staged.stage, pasteRulePasskeyWords(staged));
+  } catch (cause) {
+    await drop();
+    return { kind: 'failed', words: causeWords(cause) };
+  }
+  if (!given) {
+    await drop();
+    return { kind: 'dismissed' };
+  }
+  try {
+    return { kind: 'made', rule: await commitPasteRuleStage(client, staged.stage) };
+  } catch (cause) {
+    return { kind: 'failed', words: causeWords(cause) };
+  }
+}
+
 export async function removeRule(client: CopyClient, id: string): Promise<void> {
   await client.request(`${RULES_PATH}/${encodeURIComponent(id)}`, RemovedSchema, { method: 'DELETE' });
 }
@@ -96,17 +185,8 @@ export async function answerPlan(client: CopyClient, plan: CopyPlan, items: read
   );
 }
 
-/** Where a value comes from, in plain words: "what gh prints", "text on https://github.com". */
-export function fromWords(from: CopyRouteFrom): string {
-  if (from.kind === 'command') return `what ${from.program} prints`;
-  return from.kind === 'browser' ? `text on ${from.origin}` : `the clipboard of ${from.origin}`;
-}
-
-/** Where a value goes, in plain words: "vercel in a terminal", "a field on https://vercel.com", "the secret NAME". */
-export function toWords(to: CopyRouteTo): string {
-  if (to.kind === 'terminal') return `${to.program} in a terminal`;
-  return to.kind === 'browser' ? `a field on ${to.origin}` : `the secret ${to.name}`;
-}
+/** Where a value comes from and goes, in plain words: the protocol's, which the daemon's rows use too. */
+export { pasteFromWords as fromWords, pasteToWords as toWords } from '@ferretry/protocol';
 
 /** What a rule still allows, and for how long, in one line. */
 export function ruleLimits(rule: PasteRule): string {

@@ -1032,6 +1032,7 @@ import {
   PassTrigger,
   type PassTriggerTimers,
   PasteRuleService,
+  PasteRuleStages,
   PhoneApprovalAgendaAdapter,
   PhoneApprovalAuditAdapter,
   type PhoneApprovalPushPort,
@@ -12787,6 +12788,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         secureCopy: {
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
+          stages: new PasteRuleStages({ rules: pasteRules, clock: { now: () => Date.now() } }),
           plans: copyPlans,
           homes: machineProgramHomes(
             homedir(),

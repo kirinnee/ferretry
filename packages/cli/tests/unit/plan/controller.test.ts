@@ -1,10 +1,25 @@
 import { describe, it } from 'bun:test';
-import type { CopyMeta, PasteRule, PasteRuleCreate, PasteRuleList, PasteRuleSettingsView } from '@ferretry/protocol';
+import {
+  type CopyMeta,
+  type PasteRule,
+  type PasteRuleCreate,
+  type PasteRuleList,
+  type PasteRuleSettings,
+  type PasteRuleSettingsView,
+  type PasteRuleStaged,
+  type PasteRuleStageView,
+  PASTE_RULES_SCREEN_PATH,
+  RUNS_WHAT_IT_READS_WARNING,
+  STEP_UP_REQUIRED_CODE,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
+import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
 import {
   COPY_FERRET_REFUSAL,
   CopyController,
+  PROFILE_TARGETS_NEEDS_PASSKEY,
+  PROFILE_TARGETS_WARNING,
   parseFrom,
   parseLifetime,
   parseTo,
@@ -37,6 +52,9 @@ const COPY: CopyMeta = {
 class FakeGateway implements ICopyGateway {
   readonly added: PasteRuleCreate[] = [];
   readonly removed: string[] = [];
+  readonly changed: PasteRuleSettings[] = [];
+  /** What the settings write answers: the settings as given, unless a test says the daemon refused. */
+  refuseSettings: unknown;
   async copies(): Promise<readonly CopyMeta[]> {
     return [COPY];
   }
@@ -47,6 +65,11 @@ class FakeGateway implements ICopyGateway {
   async ruleSettings(): Promise<PasteRuleSettingsView> {
     throw new FyHttpError('not found', 404, 'not_found');
   }
+  async changeRuleSettings(settings: PasteRuleSettings): Promise<PasteRuleSettings> {
+    this.changed.push(settings);
+    if (this.refuseSettings !== undefined) throw this.refuseSettings;
+    return settings;
+  }
   async addRule(rule: PasteRuleCreate): Promise<PasteRule> {
     this.added.push(rule);
     return { ...RULE, from: rule.from, to: rule.to };
@@ -54,19 +77,53 @@ class FakeGateway implements ICopyGateway {
   async removeRule(id: string): Promise<void> {
     this.removed.push(id);
   }
+  /** An older daemon reports no features, so a rule is made in one step unless a test says the daemon stages them. */
+  features_: readonly string[] = [];
+  async features(): Promise<readonly string[]> {
+    return this.features_;
+  }
+  readonly staged: PasteRuleCreate[] = [];
+  /** The states the stage reads as, one per poll; the last repeats. */
+  states: PasteRuleStageView['state'][] = ['approved'];
+  async stageRule(rule: PasteRuleCreate): Promise<PasteRuleStaged> {
+    this.staged.push(rule);
+    return STAGED;
+  }
+  async ruleStage(): Promise<PasteRuleStageView> {
+    const state =
+      this.states.length > 1 ? (this.states.shift() as PasteRuleStageView['state']) : (this.states[0] ?? 'waiting');
+    return { ...STAGED, state, ...(state === 'approved' ? { rule: RULE.id } : {}) };
+  }
 }
+
+const STAGED: PasteRuleStaged = {
+  stage: `prs_${'1'.repeat(24)}`,
+  does: 'Ferretry pastes what gh prints into bash in a terminal, for any ferret on this machine, without asking.',
+  rows: [
+    { label: 'From', value: 'what gh prints' },
+    { label: 'To', value: 'bash in a terminal' },
+    { label: 'Who', value: 'Any ferret on this machine' },
+    { label: 'Pastes', value: 'Any number' },
+    { label: 'Until', value: 'No end: until you remove it' },
+  ],
+  runsAnything: true,
+  expiresAt: '2026-10-31T12:02:00.000Z',
+};
 
 function rig(overrides: Partial<CopyPorts> = {}) {
   const gateway = new FakeGateway();
   const said: string[] = [];
+  const warned: string[] = [];
   const controller = new CopyController({
     gateway,
-    out: { success: message => void said.push(message), diagnostic: () => undefined },
+    out: { success: message => void said.push(message), diagnostic: message => void warned.push(message) },
     ownSessionId: undefined,
     agentCredential: undefined,
+    sleep: async () => undefined,
+    nowMs: () => 0,
     ...overrides,
   });
-  return { gateway, said, controller };
+  return { gateway, said, warned, controller };
 }
 
 const failure = async (work: Promise<unknown>): Promise<string> =>
@@ -74,6 +131,50 @@ const failure = async (work: Promise<unknown>): Promise<string> =>
     () => 'no error',
     (error: Error) => error.message,
   );
+
+describe('fy copy rules profile', () => {
+  it('should turn programs in your own profile on with its warning, and off without one', async () => {
+    const on = rig();
+    await on.controller.profile('on', {});
+    const off = rig();
+    await off.controller.profile(' OFF ', { json: true });
+
+    should(on.gateway.changed).eql([{ allowProfileTargets: true }]);
+    should(on.said).eql(['programs in your own profile: allowed']);
+    should(on.warned).eql([`warning: ${PROFILE_TARGETS_WARNING}`]);
+    should(off.gateway.changed).eql([{ allowProfileTargets: false }]);
+    should(JSON.parse(off.said[0] as string)).eql({ allowProfileTargets: false });
+    should(off.warned).eql([]);
+  });
+
+  it('should send nothing for a word that is not on or off', async () => {
+    const { controller, gateway } = rig();
+
+    should(await failure(controller.profile('yes', {}))).equal('say on or off, not "yes"');
+    should(gateway.changed).eql([]);
+  });
+
+  it('should point to the app when the daemon wants a passkey, and say an old daemon needs an update', async () => {
+    const stepUp = rig();
+    stepUp.gateway.refuseSettings = new FyHttpError('needs a passkey', 403, STEP_UP_REQUIRED_CODE);
+    const old = rig();
+    old.gateway.refuseSettings = new FyHttpError('no route', 404, 'unknown_route');
+
+    should(await failure(stepUp.controller.profile('on', {}))).equal(PROFILE_TARGETS_NEEDS_PASSKEY);
+    should(PROFILE_TARGETS_NEEDS_PASSKEY).containEql('Settings › Secure copy › Pastes approved in advance');
+    should(await failure(old.controller.profile('on', {}))).containEql(
+      "this machine's daemon is too old for programs in your own profile",
+    );
+    should(stepUp.warned).eql([]);
+  });
+
+  it('should refuse inside a ferret pane in the one neutral sentence, before any call', async () => {
+    const { controller, gateway } = rig({ ownSessionId: 's1' });
+
+    should(await failure(controller.profile('off', {}))).equal(OWNER_COMMAND_REFUSAL);
+    should(gateway.changed).eql([]);
+  });
+});
 
 describe('fy copy', () => {
   it('should refuse every command inside a ferret, before it calls the daemon', async () => {
@@ -88,6 +189,8 @@ describe('fy copy', () => {
     ]);
 
     should(new Set(refusals)).eql(new Set([COPY_FERRET_REFUSAL]));
+    should(COPY_FERRET_REFUSAL).equal("this is the owner's command; a ferret's pane can't run it");
+    should(COPY_FERRET_REFUSAL).not.containEql('pastes');
     should([inPane.gateway.added, withCredential.gateway.removed]).eql([[], []]);
   });
 
@@ -155,7 +258,7 @@ describe('fy copy', () => {
     gateway.rules = async () => ({ rules: [] });
     gateway.ruleSettings = async () => ({ settings: { allowProfileTargets: true }, profileRules: [] });
     await controller.rules({});
-    should(said[1]).equal('programs in your own profile: allowed\nno pastes are approved in advance');
+    should(said[1]).equal('programs in your own profile: allowed\nno paste rules: every paste asks you');
   });
 
   it('should warn when the setting cannot be read for any reason but an older daemon, and still list', async () => {
@@ -257,12 +360,14 @@ describe('fy copy --json and empty listings', () => {
       out: { success: message => void said.push(message), diagnostic: () => undefined },
       ownSessionId: undefined,
       agentCredential: undefined,
+      sleep: async () => undefined,
+      nowMs: () => 0,
     });
 
     await controller.list({ session: 's1' });
     await controller.rules({});
 
-    should(said).eql(['s1 holds no secure copies', 'no pastes are approved in advance']);
+    should(said).eql(['s1 holds no secure copies', 'no paste rules: every paste asks you']);
   });
 });
 
@@ -276,11 +381,63 @@ describe('fy copy: the last words', () => {
       out: { success: message => void said.push(message), diagnostic: () => undefined },
       ownSessionId: undefined,
       agentCredential: undefined,
+      sleep: async () => undefined,
+      nowMs: () => 0,
     });
 
     await controller.rules({});
 
     should(said[0]).containEql('command:gh → browser:https://vercel.com');
     should(await failure(controller.removeRule(' ', {}))).equal('name the rule by its id (see `copy rules ls`)');
+  });
+});
+
+describe('fy copy rules add: a passkey bound to that one rule (!A244)', () => {
+  it("should stage the rule, show the daemon's rows, and make nothing itself", async () => {
+    const { gateway, said, controller } = rig();
+    gateway.features_ = ['copy-rules.passkey.1'];
+    gateway.states = ['waiting', 'approved'];
+
+    await controller.addRule({ from: 'command:gh', to: 'terminal:bash' });
+
+    should(gateway.staged).eql([
+      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'bash' } },
+    ]);
+    should(gateway.added).eql([]);
+    should(said).containEql(`  ${STAGED.does}`);
+    should(said).containEql('  To      bash in a terminal');
+    should(said).containEql(`  ${RUNS_WHAT_IT_READS_WARNING}`);
+    should(said.join('\n')).containEql(`Confirm it with your passkey in the Ferretry app (${PASTE_RULES_SCREEN_PATH})`);
+    should(said.at(-1)).equal(`Approved with your passkey: the paste rule ${RULE.id.slice(0, 8)} is in force.`);
+  });
+
+  it('should say a denied or timed-out stage made nothing, and answer the state as JSON', async () => {
+    const denied = rig();
+    denied.gateway.features_ = ['copy-rules.passkey.1'];
+    denied.gateway.states = ['denied'];
+    await denied.controller.addRule({ from: 'command:gh', to: 'terminal:vercel' });
+    should(denied.said.at(-1)).equal('Denied. No paste rule was made.');
+
+    let now = 0;
+    const late = rig({
+      nowMs: () => now,
+      sleep: async ms => {
+        now += ms * 1_000;
+      },
+    });
+    late.gateway.features_ = ['copy-rules.passkey.1'];
+    late.gateway.states = ['waiting'];
+    await late.controller.addRule({ from: 'command:gh', to: 'terminal:vercel', json: true });
+    should(JSON.parse(late.said.at(-1) ?? '{}')).eql({ stage: STAGED.stage, state: 'expired' });
+    should(late.gateway.added).eql([]);
+  });
+
+  it('should keep the one-step add on a daemon that does not stage paste rules', async () => {
+    const { gateway, controller } = rig();
+
+    await controller.addRule({ from: 'command:gh', to: 'terminal:vercel' });
+
+    should(gateway.staged).eql([]);
+    should(gateway.added.length).equal(1);
   });
 });

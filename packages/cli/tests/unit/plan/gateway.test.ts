@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { PasteRule } from '@ferretry/protocol';
 import should from 'should';
+import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import { ProtocolCopyGateway, ProtocolPlanGateway } from '../../../src/lib/plan/gateway';
 import { health } from '../daemon/fixtures';
 
@@ -76,6 +77,15 @@ describe('ProtocolCopyGateway', () => {
         () => 'refused',
       ),
     ).equal('refused');
+  });
+
+  it('should write the profile setting with PUT on the settings route, parsed both ways', async () => {
+    const { calls, copy } = gateway(() => ({ allowProfileTargets: true }));
+
+    should(await copy.changeRuleSettings({ allowProfileTargets: true })).eql({ allowProfileTargets: true });
+    should(calls.map(call => `${call.method} ${call.path}`)).eql(['PUT /v1/copy-rules/settings']);
+    should(calls[0]?.body).eql({ allowProfileTargets: true });
+    should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
   });
 
   it('should refuse a reply that does not match the protocol', async () => {
@@ -185,12 +195,12 @@ describe('ProtocolPlanGateway', () => {
     should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
   });
 
-  it('should read the features the daemon reports from its health route, and none when it can not be read', async () => {
+  it('should read the features the daemon reports from its health route, and say so when it can not be read', async () => {
     const { calls, plans } = planGateway(() => health({ features: ['task-plan.1'] }));
     const broken = new ProtocolPlanGateway({ request: () => Promise.reject(new Error('down')) });
 
     should(await plans.features()).eql(['task-plan.1']);
-    should(await broken.features()).eql([]);
+    await should(broken.features()).be.rejectedWith(DaemonFeaturesUnreadable);
     should(calls.map(call => `${call.method} ${call.path}`)).eql(['GET /v1/health']);
   });
 

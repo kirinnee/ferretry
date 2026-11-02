@@ -10,6 +10,7 @@ import {
   type TwoFactorSeedStageView,
   TwoFactorSeedStageViewSchema,
 } from '@ferretry/protocol';
+import { readDaemonFeatures } from '../daemon/features.ts';
 import type { AccountApiClient } from './account-ports.ts';
 
 /**
@@ -20,6 +21,8 @@ export interface ITwoFactorSeedGateway {
   stage(account: string, body: StageTwoFactorSeedRequest): Promise<TwoFactorSeedStaged>;
   confirmInApp(account: string, stage: string, body: ConfirmTwoFactorSeedRequest): Promise<TwoFactorSeedConfirming>;
   view(account: string, stage: string): Promise<TwoFactorSeedStageView>;
+  /** The features the daemon reports; throws `DaemonFeaturesUnreadable` when it cannot be asked. */
+  features(): Promise<readonly string[]>;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
@@ -61,5 +64,9 @@ export class ProtocolTwoFactorSeedGateway implements ITwoFactorSeedGateway {
       `/v1/accounts/${encodeURIComponent(account)}/factors/seed/${encodeURIComponent(stage)}`,
       TwoFactorSeedStageViewSchema,
     );
+  }
+
+  async features(): Promise<readonly string[]> {
+    return await readDaemonFeatures(this.client);
   }
 }

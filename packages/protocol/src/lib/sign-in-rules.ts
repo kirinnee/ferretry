@@ -125,6 +125,9 @@ const DEVICE_LABEL_MAX_CHARS = 200;
 export const SIGN_IN_RULE_HONEST_LIMIT =
   "This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.";
 
+/** Where the app lists every standing rule on a machine and a waiting one is confirmed: said by `fy rules`, verbatim. */
+export const SIGN_IN_RULES_SCREEN_PATH = 'Settings › Secure copy › Standing sign-in rules';
+
 /** The red line on every terminal rule (sudo, su, doas), first in its one red block, verbatim. */
 export const SIGN_IN_RULE_ROOT_WARNING = 'Any ferret on this machine gets root while this rule lasts.';
 
@@ -409,7 +412,7 @@ export const signInRuleSuspensionOf = (reason: GrantMissReason): SignInRuleSuspe
 
 const SUSPENSION_ONLY_WORDS = {
   'passkey-removed': 'the passkey or device that approved it was removed',
-  'store-write-failed': "Ferretry couldn't save the rule's state, so it stopped using it",
+  'store-write-failed': "Ferretry couldn't save the rule's state, so it suspended the rule",
 } as const satisfies Partial<Record<SignInRuleSuspension, string>>;
 
 /** The owner's sentence for a suspension: Settings, Accounts and the suspension's audit read it. */
@@ -627,6 +630,25 @@ export const SignInRuleViewSchema = z
     for (const message of problems) context.addIssue({ code: 'custom', message });
   });
 export type SignInRuleView = z.infer<typeof SignInRuleViewSchema>;
+
+const STATUS_WORDS = {
+  active: 'Active',
+  suspended: 'Suspended',
+  'used-up': 'All uses spent',
+  expired: 'Expired',
+} as const satisfies Record<SignInRuleStatus, string>;
+
+/** The owner's words for a rule's status, on every surface that lists rules: a suspended one says why. */
+export function signInRuleStatusWords(rule: Pick<SignInRuleView, 'status' | 'suspended' | 'unverified'>): string {
+  if (rule.status === 'suspended' && rule.suspended !== undefined)
+    return `Suspended: ${signInRuleSuspensionWords(rule.suspended.because)}`;
+  if (rule.status === 'active' && rule.unverified === true) return 'Active once Ferretry has checked it';
+  return STATUS_WORDS[rule.status];
+}
+
+/** Whether a suspended rule can be resumed with a new passkey: not when its sign-in is gone. */
+export const signInRuleResumable = (rule: Pick<SignInRuleView, 'status' | 'suspended'>): boolean =>
+  rule.status === 'suspended' && rule.suspended?.because !== 'sign-in-gone';
 
 // ── Staging: the owner's draft, the stage the passkey is bound to, narrowing ─────────────────────────
 

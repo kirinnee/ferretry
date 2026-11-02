@@ -25,6 +25,9 @@ import {
   UnlockGrantedSchema,
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
+  PASTE_RULE_ERROR_CODES,
+  PASTE_RULE_REFUSAL_WORDS,
+  type PasteRuleStageId,
   SIGN_IN_RULE_ERROR_CODES,
   SIGN_IN_RULE_REFUSAL_WORDS,
   STEP_UP_ACTS,
@@ -121,11 +124,20 @@ export interface StagedSignInRuleBinding {
   challengeOf(stage: SignInRuleStageId, deviceId: string): Uint8Array | undefined;
 }
 
+/**
+ * What the step-up options need of the staged paste rules (owner decision !A244): what a proof for one is bound to, or
+ * nothing when it is not waiting. Absent: this daemon stages none, so it issues no challenge for `approve-paste-rule`.
+ */
+export interface StagedPasteRuleBinding {
+  boundSubjectOf(stage: PasteRuleStageId): string | undefined;
+}
+
 export function stepUpRoutes(
   service: StepUpService,
   seeds?: StagedSeedBinding,
   plans?: StagedTaskPlanBinding,
   rules?: StagedSignInRuleBinding,
+  pasteRules?: StagedPasteRuleBinding,
 ): readonly ApiRoute[] {
   return [
     {
@@ -198,6 +210,21 @@ export function stepUpRoutes(
               404,
               'that task plan selection is not waiting for a passkey: stage it again from the plan card',
               TASK_PLAN_ERROR_CODES.stageNotFound,
+            );
+          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+            StepUpOptionsSchema.parse(value),
+          );
+        }
+        // Making a paste rule binds its challenge, and so its proof, to the ONE staged rule it names
+        // (`pasteRuleApprovalSubject(stage, canonical)`): only that stage's commit can spend it.
+        if (body.act === STEP_UP_ACTS.approvePasteRule) {
+          const bound =
+            body.subject === undefined ? undefined : pasteRules?.boundSubjectOf(body.subject as PasteRuleStageId);
+          if (bound === undefined)
+            return errorResponse(
+              404,
+              PASTE_RULE_REFUSAL_WORDS.paste_rule_stage_not_found,
+              PASTE_RULE_ERROR_CODES.stageNotFound,
             );
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
             StepUpOptionsSchema.parse(value),

@@ -3,6 +3,7 @@ import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema 
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
+import { PasteRuleStageIdSchema } from './secure-copy.ts';
 import { STEP_UP_DEFAULT_WINDOW_MINUTES } from './security.ts';
 
 /**
@@ -81,20 +82,22 @@ export const StepUpActSchema = z.enum([
   'approve-task-plan',
   'approve-sign-in-rule',
   'resume-cut-off',
+  'approve-paste-rule',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
 /**
  * THE ACTS ASKED OF EVERY CALLER, the machine itself included: no "governed" or loopback check may skip them, a
  * window grant, an unlock or `stepUpOnActions` never stands in for one, and each proof is bound to ONE thing
- * (`subject`: the staged 2FA seed, the staged task-plan selection, or the staged standing rule) so it cannot be spent
- * on another. The daemon's claim takes that subject as a required argument for these acts, so a route cannot ask for
- * one the short way.
+ * (`subject`: the staged 2FA seed, the staged task-plan selection, the staged standing rule, or the staged paste rule)
+ * so it cannot be spent on another. The daemon's claim takes that subject as a required argument for these acts, so a
+ * route cannot ask for one the short way.
  */
 export const STEP_UP_ACTS_EVERY_CALLER = [
   'add-2fa-key',
   'approve-task-plan',
   'approve-sign-in-rule',
+  'approve-paste-rule',
 ] as const satisfies readonly StepUpAct[];
 export type EveryCallerStepUpAct = (typeof STEP_UP_ACTS_EVERY_CALLER)[number];
 /** An act the machine itself (its admin token, on loopback) is never asked to prove. */
@@ -106,13 +109,15 @@ export const stepUpSkippableAtMachine = (act: StepUpAct): act is MachineSkippabl
 
 /**
  * The kind of staged thing each every-caller act is bound to: a 2FA seed's stage for `add-2fa-key`, a task-plan
- * selection's stage for `approve-task-plan`, a standing rule's stage for `approve-sign-in-rule`. A proof asked with
- * another act's stage is refused before any challenge is minted, so one ceremony can never be dressed up as another.
+ * selection's stage for `approve-task-plan`, a standing rule's stage for `approve-sign-in-rule`, a paste rule's stage
+ * for `approve-paste-rule`. A proof asked with another act's stage is refused before any challenge is minted, so one
+ * ceremony can never be dressed up as another.
  */
 export const STEP_UP_SUBJECTS = {
   'add-2fa-key': TwoFactorStageIdSchema,
   'approve-task-plan': TaskPlanStageIdSchema,
   'approve-sign-in-rule': SignInRuleStageIdSchema,
+  'approve-paste-rule': PasteRuleStageIdSchema,
 } as const satisfies Record<EveryCallerStepUpAct, z.ZodType<string>>;
 /** The stage id an every-caller act's proof is bound to. */
 export type StepUpSubjectOf<Act extends EveryCallerStepUpAct> = z.infer<(typeof STEP_UP_SUBJECTS)[Act]>;
@@ -139,13 +144,15 @@ export const stepUpKeepsProof = (act: StepUpAct): act is StoredProofStepUpAct =>
  * for it. Absent, the proof is unstamped and no such act takes it.
  *
  * `subject` is the one thing a {@link STEP_UP_ACTS_EVERY_CALLER} act is for (the staged seed, `st_…`; the staged task-plan
- * selection, `tps_…`; the staged standing rule, `srs_…`): the daemon binds the challenge, and so the proof, to it, and
- * the commit takes only a proof for that act AND that subject. Sent exactly with such an act, of that act's own kind
- * ({@link STEP_UP_SUBJECTS}), and never with another.
+ * selection, `tps_…`; the staged standing rule, `srs_…`; the staged paste rule, `prs_…`): the daemon binds the
+ * challenge, and so the proof, to it, and the commit takes only a proof for that act AND that subject. Sent exactly with
+ * such an act, of that act's own kind ({@link STEP_UP_SUBJECTS}), and never with another.
  */
 export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
   act: StepUpActSchema.optional(),
-  subject: z.union([TwoFactorStageIdSchema, TaskPlanStageIdSchema, SignInRuleStageIdSchema]).optional(),
+  subject: z
+    .union([TwoFactorStageIdSchema, TaskPlanStageIdSchema, SignInRuleStageIdSchema, PasteRuleStageIdSchema])
+    .optional(),
 }).refine(
   request =>
     request.act === undefined || stepUpSkippableAtMachine(request.act)
@@ -432,6 +439,13 @@ export const STEP_UP_ACTS = {
    * A session nobody cut off resumes without it; the CLI and the app on the host never ask.
    */
   resumeCutOff: 'resume-cut-off',
+  /**
+   * Making or widening a SECURE-COPY PASTE RULE (docs/secure-copy.md, owner decision !A244): Ferretry then pastes a
+   * sealed copy along that route for ferrets with no tap. Asked of EVERY caller, the machine included, and its proof
+   * is bound to the one staged rule it commits (`pasteRuleApprovalSubject`), so a held step-up window is never enough.
+   * The passkey prompt lists the daemon's rows of what the rule allows. Removing a rule never asks.
+   */
+  approvePasteRule: 'approve-paste-rule',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

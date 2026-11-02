@@ -1039,10 +1039,7 @@ function addressById(
     }
     // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
     if (target.item.copyPlan !== undefined) {
-      return failure(
-        'use_input_form',
-        `${command.id} is a paste plan: answer it on its card, or with fy copy plan approve`,
-      );
+      return failure('use_input_form', `${command.id} is a paste plan: answer it on its card, or with fy plan approve`);
     }
     // A staged 2FA seed is saved only by the passkey ceremony its card runs: an agenda answer would save nothing.
     if (target.item.twoFactorSeed !== undefined) {

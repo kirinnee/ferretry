@@ -34,7 +34,7 @@ function remaining(request: InputRequest, now: number): string {
   return seconds < 90 ? `${seconds}s left` : `${Math.round(seconds / 60)}m left`;
 }
 
-/** The saved login the daemon matched to this target, as a handle and a label; nothing more of it. */
+/** The account the daemon matched to this target, as a handle and a label; nothing more of it. */
 function matchedLogin(request: InputRequest): { readonly id: string; readonly text: string } | undefined {
   const offer = request.saved?.offers.find(candidate => candidate.matched);
   return offer === undefined ? undefined : { id: offer.id, text: `${offer.id} (${compact(offer.label, 80)})` };
@@ -46,20 +46,20 @@ export function renderInputList(list: InputRequestList, now: number): string {
   return list.requests
     .map(request => {
       const login = matchedLogin(request);
-      return `!${request.agendaItemId}  ${request.state}  ${request.sensitivity}  ${inputTargetReference(request)}  ${remaining(request, now)}\n      the agent says: ${compact(request.prompt, 120)}${login === undefined ? '' : `\n      use: ${login.text}`}`;
+      return `!${request.agendaItemId}  ${request.state}  ${request.sensitivity}  ${inputTargetReference(request)}  ${remaining(request, now)}\n      the ferret says: ${compact(request.prompt, 120)}${login === undefined ? '' : `\n      use: ${login.text}`}`;
     })
     .join('\n');
 }
 
-/** What the daemon saw at the target, drawn before the owner types: the agent's words stay small. */
+/** What the daemon saw at the target, drawn before the owner types: the ferret's words stay small. */
 export function renderInputFacts(request: InputRequest): string[] {
   const lines = [
     `!${request.agendaItemId} wants a ${request.sensitivity} value typed into ${inputTargetReference(request)}`,
-    `the agent says: ${compact(request.prompt, 200)}`,
+    `the ferret says: ${compact(request.prompt, 200)}`,
   ];
   if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${showUntrusted(request.risk.reason)}`);
   const login = matchedLogin(request);
-  if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
+  if (login !== undefined) lines.push(`an account matches: ${login.text} (answer with --account ${login.id})`);
   if (request.source !== undefined) {
     const from =
       request.source.from.origin ?? request.source.from.path ?? request.source.from.program ?? request.source.from.kind;
@@ -99,7 +99,7 @@ const REASONS: Readonly<Record<InputReason, string>> = {
   insecure_origin: 'the page is not a secure origin',
   interrupted: 'the daemon was interrupted',
   owner_declined: 'declined',
-  agent_cancelled: 'the agent cancelled it',
+  agent_cancelled: 'the ferret cancelled it',
   check_failures: 'the target kept changing, so nothing was typed; ask the ferret to request again',
   expired: 'it expired',
   copy_gone: 'the secure copy it was to paste is gone',

@@ -2,6 +2,7 @@ import {
   type ConfigChangeKind,
   DaemonCarriersViewSchema,
   type PairingResponse,
+  type PasteRuleStageId,
   type SignInRuleStageId,
   type TaskPlanStageId,
   type TwoFactorStageId,
@@ -1369,6 +1370,26 @@ export function useApproveSignInRuleStepUp():
         ? undefined
         : async (daemon: DaemonConnection, stage: SignInRuleStageId, words: StepUpWords) =>
             await store.stepUp.require(daemon, words.does, 'explicit', 'approve-sign-in-rule', stage, words),
+    [store],
+  );
+}
+
+/**
+ * The passkey for ONE staged paste rule, asked BEFORE the commit is sent (owner decision !A244): the proof is bound to
+ * this stage (act `approve-paste-rule`, subject the stage id), so the daemon takes it for that commit and no other, and
+ * a held step-up window never stands in for it. The prompt lists the daemon's own line and rows of what the rule allows,
+ * as STRUCTURE. Outside a provider there is no prompt.
+ */
+export function useApprovePasteRuleStepUp():
+  | ((daemon: DaemonConnection, stage: PasteRuleStageId, words: StepUpWords) => Promise<boolean>)
+  | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, stage: PasteRuleStageId, words: StepUpWords) =>
+            await store.stepUp.require(daemon, words.does, 'explicit', 'approve-paste-rule', stage, words),
     [store],
   );
 }

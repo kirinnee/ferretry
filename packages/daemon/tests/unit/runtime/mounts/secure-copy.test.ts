@@ -1,14 +1,24 @@
 import { describe, it } from 'bun:test';
-import { type PasteRule, type PasteRuleSettings, STEP_UP_ACTS, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
+import {
+  type PasteRule,
+  type PasteRuleCreate,
+  type PasteRuleSettings,
+  type PasteRuleStageId,
+  RUNS_WHAT_IT_READS_WARNING,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+} from '@ferretry/protocol';
 import should from 'should';
 import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiRoute, RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
   EphemeralValues,
   type PasteRuleCaller,
   PasteRuleService,
+  PasteRuleStages,
   SecureCopyService,
   TaskPlanService,
 } from '../../../../src/lib/index.ts';
@@ -78,14 +88,96 @@ async function served(guard: CapabilityGuard = GRANTED) {
     { from: RULE.from, to: INTO_STORE, why: 'kept for the deploy script' },
     { from: RULE.from, to: INTO_PAGE, why: 'the env page' },
   ]);
-  const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans, {
+  let stageCount = 0;
+  const stages = new PasteRuleStages({
+    rules,
+    clock,
+    stageId: () => `prs_${(++stageCount).toString(16).padStart(24, '0')}` as PasteRuleStageId,
+  });
+  const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans, stages, {
     profileCouldStandFor: async program => {
       if (program === 'broken') throw new Error('cannot look');
       return program === 'vercel';
     },
   });
   const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, guard);
-  return { dispatch, routes, stored, plan, rules };
+  return { dispatch, routes, stored, plan, rules, stages };
+}
+
+type Served = Awaited<ReturnType<typeof served>>;
+
+/**
+ * Who commits a staged paste rule, through the route alone, as the boundary would hand it over. `bound` holds a fresh
+ * `approve-paste-rule` proof bound to the stage's subject (`step-up/registry.ts` claims it once); `window` holds only
+ * a held step-up window and a proof for no act; `other-act` a proof for `allow-profile-targets`; `host` is the
+ * machine's own token, which never holds a proof.
+ */
+type Committer = 'bound' | 'window' | 'other-act' | 'other-stage' | 'host';
+
+async function commitAs(
+  world: Served,
+  stage: string,
+  committer: Committer,
+  proof = { held: true },
+): Promise<{ status: number; body: Record<string, unknown>; claims: [string | undefined, string | undefined][] }> {
+  const path = `/v1/copy-rules/stages/${stage}/commit`;
+  const found = new ApiRouter(world.routes).lookup('POST', path);
+  if (found.kind !== 'matched') throw new Error('no commit route');
+  const device = committer !== 'host';
+  const claims: [string | undefined, string | undefined][] = [];
+  const subject = world.stages.boundSubjectOf(stage as PasteRuleStageId);
+  const context: RouteContext = {
+    request: request({ method: 'POST', path }),
+    params: found.params,
+    actor: device ? 'device:d1' : 'admin-cli',
+    credential: device
+      ? { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' }
+      : { kind: 'authenticated', tokenClass: 'admin' },
+    governance: { governed: device, decide: () => ({ allowed: true, refusal: 'granted' }) },
+    presentation: {
+      loopback: !device,
+      adminToken: !device,
+      actor: device ? 'device:d1' : 'admin-cli',
+      // Every device here holds a live window and a fresh proof: only the claim says what the proof is for.
+      stepUp: device,
+      freshStepUp: device,
+    },
+    ...(device
+      ? {
+          claimFreshStepUp: ((act?: string, claimed?: string) => {
+            claims.push([act, claimed]);
+            const stamped =
+              committer === 'bound' || committer === 'other-stage'
+                ? STEP_UP_ACTS.approvePasteRule
+                : committer === 'other-act'
+                  ? STEP_UP_ACTS.allowProfileTargets
+                  : undefined;
+            const boundTo = committer === 'other-stage' ? 'f'.repeat(64) : subject;
+            if (stamped === undefined || act !== stamped || claimed !== boundTo || !proof.held) return false;
+            proof.held = false;
+            return true;
+          }) as RouteContext['claimFreshStepUp'],
+          spendFreshStepUp: () => undefined,
+        }
+      : {}),
+  };
+  try {
+    const response = await found.route.handle(context);
+    return { status: response.status, body: jsonBody(response) as Record<string, unknown>, claims };
+  } catch (error) {
+    // The dispatcher turns a thrown refusal into its answer; the route alone throws it.
+    if (!(error instanceof ApiError)) throw error;
+    return { status: error.status, body: { code: error.code, error: error.message }, claims };
+  }
+}
+
+/** Stages a rule through the boundary, then commits it with its own bound passkey: how the app makes one. */
+async function addRule(world: Served, rule: PasteRuleCreate): Promise<{ id: string }> {
+  const staged = await world.dispatch.dispatch(post('/v1/copy-rules/stages', rule));
+  if (staged.status !== 201) throw new Error(`not staged: ${JSON.stringify(jsonBody(staged))}`);
+  const made = await commitAs(world, String(jsonBody(staged).stage), 'bound');
+  if (made.status !== 201) throw new Error(`not made: ${JSON.stringify(made.body)}`);
+  return made.body as { id: string };
 }
 
 const post = (path: string, body: unknown, headers: Readonly<Record<string, string>> = human, reads = bodyReads()) =>
@@ -111,6 +203,9 @@ describe('the secure copy routes', () => {
 
       const answers = await Promise.all([
         dispatch.dispatch(as(post('/v1/copy-rules', RULE, agent, reads))),
+        dispatch.dispatch(as(post('/v1/copy-rules/stages', RULE, agent, reads))),
+        dispatch.dispatch(as(post(`/v1/copy-rules/stages/prs_${'1'.repeat(24)}/commit`, {}, agent, reads))),
+        dispatch.dispatch(as(request({ method: 'GET', path: '/v1/copy-rules/stages', headers: agent }))),
         dispatch.dispatch(
           as(post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }, agent, reads)),
         ),
@@ -139,16 +234,16 @@ describe('the secure copy routes', () => {
     });
 
   it('should let the owner add, list and remove a rule', async () => {
-    const { dispatch, stored } = await served();
+    const world = await served();
+    const { dispatch, stored } = world;
 
-    const added = await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, count: 2 }));
+    const { id } = await addRule(world, { ...RULE, count: 2 });
     const listed = await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules', headers: human }));
-    const id = (jsonBody(added) as { id: string }).id;
     const removed = await dispatch.dispatch(
       request({ method: 'DELETE', path: `/v1/copy-rules/${id}`, headers: human }),
     );
 
-    should([added.status, listed.status, removed.status]).eql([201, 200, 200]);
+    should([listed.status, removed.status]).eql([200, 200]);
     should((jsonBody(listed).rules as unknown[]).length).equal(1);
     should(stored.rules).eql([]);
   });
@@ -204,6 +299,11 @@ describe('the secure copy routes', () => {
       // Turning profile targets ON demands terminal.configure and a passkey inside the route; OFF only narrows.
       'PUT /v1/copy-rules/settings use',
       'POST /v1/copy-rules configure',
+      'POST /v1/copy-rules/stages configure',
+      'GET /v1/copy-rules/stages use',
+      'GET /v1/copy-rules/stages/:stage use',
+      'POST /v1/copy-rules/stages/:stage/commit configure',
+      'DELETE /v1/copy-rules/stages/:stage use',
       'DELETE /v1/copy-rules/:ruleId use',
       'GET /v1/copy-plans use',
       'POST /v1/sessions/:sessionId/copy-plans/:planId/approve configure',
@@ -225,6 +325,7 @@ describe('the secure copy routes, when a service fails unexpectedly', () => {
           throw new Error('the board fell over');
         },
       } as never,
+      {} as never,
     ).find(route => route.path === approve?.path);
     const dispatch = new ApiDispatcher(new ApiRouter(failing === undefined ? [] : [failing]), CREDENTIALS, GRANTED);
 
@@ -240,12 +341,12 @@ describe('approving pastes into the secret store', () => {
   it('should need the secrets grant to add a rule into the store, but not a rule into a terminal', async () => {
     const { dispatch, stored } = await served(withoutSecretsConfigure('not-granted'));
 
-    const store = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_STORE }));
-    const terminal = await dispatch.dispatch(post('/v1/copy-rules', RULE));
+    const store = await dispatch.dispatch(post('/v1/copy-rules/stages', { from: RULE.from, to: INTO_STORE }));
+    const terminal = await dispatch.dispatch(post('/v1/copy-rules/stages', RULE));
 
     should([store.status, terminal.status]).eql([403, 201]);
     should(jsonBody(store).code).equal('grant_not_granted');
-    should(stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+    should(stored.rules).be.undefined();
   });
 
   it('should need the secrets grant to approve a plan item into the store, and not for the terminal item alone', async () => {
@@ -267,12 +368,11 @@ describe('approving pastes into the secret store', () => {
   });
 
   it('should add a rule into the store for a caller holding the grant', async () => {
-    const { dispatch, stored } = await served();
+    const world = await served();
 
-    const response = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_STORE }));
+    await addRule(world, { from: RULE.from, to: INTO_STORE });
 
-    should(response.status).equal(201);
-    should(stored.rules?.map(rule => rule.to)).eql([INTO_STORE]);
+    should(world.stored.rules?.map(rule => rule.to)).eql([INTO_STORE]);
   });
 });
 
@@ -282,12 +382,12 @@ describe('approving pastes into a page', () => {
   it('should need the browser grant to add a rule into a page, as allowing one would', async () => {
     const { dispatch, stored } = await served(NO_BROWSER);
 
-    const page = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_PAGE }));
-    const terminal = await dispatch.dispatch(post('/v1/copy-rules', RULE));
+    const page = await dispatch.dispatch(post('/v1/copy-rules/stages', { from: RULE.from, to: INTO_PAGE }));
+    const terminal = await dispatch.dispatch(post('/v1/copy-rules/stages', RULE));
 
     should([page.status, terminal.status]).eql([403, 201]);
     should(String(jsonBody(page).error)).containEql('needs the browser permission');
-    should(stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+    should(stored.rules).be.undefined();
   });
 
   it('should need the browser grant to approve a plan item into a page, and not for the others', async () => {
@@ -366,11 +466,12 @@ async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: S
 
 describe('the secure copy settings: profile targets', () => {
   it('should leave the rules list as an older app parses it, and say the settings on their own route', async () => {
-    const { dispatch } = await served();
-    await dispatch.dispatch(post('/v1/copy-rules', RULE));
-    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: { kind: 'terminal', program: 'psql' } }));
-    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: { kind: 'terminal', program: 'broken' } }));
-    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: INTO_PAGE }));
+    const world = await served();
+    const { dispatch } = world;
+    await addRule(world, RULE);
+    await addRule(world, { ...RULE, to: { kind: 'terminal', program: 'psql' } });
+    await addRule(world, { ...RULE, to: { kind: 'terminal', program: 'broken' } });
+    await addRule(world, { ...RULE, to: INTO_PAGE });
 
     const listed = jsonBody(
       await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules', headers: human })),
@@ -470,5 +571,113 @@ describe('the paste plans, read by the owner', () => {
     should(listed.status).equal(200);
     should((jsonBody(listed).plans as readonly { id: string }[]).map(entry => entry.id)).containEql(plan.id);
     should([direct.status, direct.code]).deepEqual([403, 'owner_only']);
+  });
+});
+
+describe('making a paste rule: a passkey bound to that one rule (!A244)', () => {
+  it('should make nothing on the old one-step create, and say how to make one', async () => {
+    const { dispatch, stored } = await served();
+
+    const answer = await dispatch.dispatch(post('/v1/copy-rules', RULE));
+
+    should(answer.status).equal(409);
+    should(jsonBody(answer).code).equal('paste_rule_passkey_needed');
+    should(stored.rules).be.undefined();
+  });
+
+  it("should stage a rule with the daemon's own line and rows, and allow nothing yet", async () => {
+    const { dispatch, rules } = await served();
+
+    const staged = await dispatch.dispatch(
+      post('/v1/copy-rules/stages', {
+        ...RULE,
+        to: { kind: 'terminal', program: 'bash' },
+        count: 3,
+        sessionId: SESSION,
+      }),
+    );
+    const waiting = await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules/stages', headers: human }));
+
+    should(staged.status).equal(201);
+    should(jsonBody(staged)).match({
+      does: `Ferretry pastes what gh prints into bash in a terminal, for session ${SESSION}, without asking.`,
+      rows: [
+        { label: 'From', value: 'what gh prints' },
+        { label: 'To', value: 'bash in a terminal' },
+        { label: 'Who', value: `Session ${SESSION}` },
+        { label: 'Pastes', value: 'At most 3' },
+        { label: 'Until', value: 'No end: until you remove it' },
+      ],
+      runsAnything: true,
+    });
+    should(RUNS_WHAT_IT_READS_WARNING).be.a.String();
+    should((jsonBody(waiting).stages as unknown[]).length).equal(1);
+    should(rules.list(OWNER)).eql([]);
+  });
+
+  it('should refuse the commit with no proof, a held window, a proof for another act or stage, or at the machine', async () => {
+    const world = await served();
+    const stage = String(jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', RULE))).stage);
+
+    for (const committer of ['window', 'other-act', 'other-stage', 'host'] as const) {
+      const refused = await commitAs(world, stage, committer);
+      should(refused.status).equal(403);
+      should(refused.body).match({
+        code: STEP_UP_REQUIRED_CODE,
+        demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.approvePasteRule },
+      });
+    }
+    // The device asked only for the bound act, and only with this stage's subject.
+    const asked = await commitAs(world, stage, 'window');
+    should(asked.claims).eql([[STEP_UP_ACTS.approvePasteRule, world.stages.boundSubjectOf(stage as PasteRuleStageId)]]);
+    should(world.stored.rules).be.undefined();
+    should(world.stages.boundSubjectOf(stage as PasteRuleStageId)).be.a.String();
+  });
+
+  it('should make exactly the staged rule with a bound proof, once', async () => {
+    const world = await served();
+    const stage = String(
+      jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', { ...RULE, count: 2 }))).stage,
+    );
+    const proof = { held: true };
+
+    const made = await commitAs(world, stage, 'bound', proof);
+    const again = await commitAs(world, stage, 'bound', { held: true });
+    const view = await world.dispatch.dispatch(
+      request({ method: 'GET', path: `/v1/copy-rules/stages/${stage}`, headers: human }),
+    );
+
+    should(made.status).equal(201);
+    should(made.body).match({ ...RULE, remaining: 2, used: 0 });
+    should(proof.held).be.false();
+    should(again.status).equal(404);
+    should(again.body.code).equal('paste_rule_stage_not_found');
+    should(jsonBody(view)).match({ state: 'approved', rule: made.body.id });
+    should(world.stored.rules?.length).equal(1);
+  });
+
+  it('should drop a staged rule with no passkey, and then commit nothing', async () => {
+    const world = await served();
+    const stage = String(jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', RULE))).stage);
+
+    const dropped = await world.dispatch.dispatch(
+      request({ method: 'DELETE', path: `/v1/copy-rules/stages/${stage}`, headers: human }),
+    );
+    const late = await commitAs(world, stage, 'bound');
+
+    should(dropped.status).equal(200);
+    should(jsonBody(dropped)).eql({ stage, dropped: true });
+    should(late.status).equal(404);
+    should(world.stored.rules).be.undefined();
+  });
+
+  it('should keep removing a rule, and dropping a stage, tap-free: narrowing routes ask no passkey', async () => {
+    const { routes } = await served();
+
+    const narrowing = routes
+      .filter(route => route.capability?.narrowing === true)
+      .map(route => `${route.method} ${route.path}`);
+
+    should(narrowing).eql(['DELETE /v1/copy-rules/stages/:stage', 'DELETE /v1/copy-rules/:ruleId']);
   });
 });

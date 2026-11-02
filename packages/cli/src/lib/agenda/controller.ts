@@ -31,6 +31,18 @@ import {
   wasWithdrawn,
 } from './render.ts';
 import { parseNeededBy } from './when.ts';
+import { DaemonFeaturesUnreadable } from '../daemon/features.ts';
+
+/**
+ * The daemon's features for the agenda's OPTIONAL probes, with a failed health read taken as "none reported". Lenient
+ * on purpose, as it always was: each probe only drops an optional field (or the bulk clear) on an older daemon, and the
+ * agenda call that follows still says what went wrong if the daemon really is down.
+ */
+const featuresOrNone = async (gateway: Pick<IAgendaGateway, 'features'>): Promise<readonly string[]> =>
+  await gateway.features().catch((error: unknown) => {
+    if (error instanceof DaemonFeaturesUnreadable) return [];
+    throw error;
+  });
 
 /**
  * Refuses a new item that does not say what is going on and the facts around it: the owner reads it cold, so the premise
@@ -400,7 +412,7 @@ export class AgendaController {
         'only the owner can clear the agent ferrets’ agenda items — this is running inside a ferret session (FY_SESSION_ID is set); ask the owner to run it at their own shell',
       );
     }
-    if (!(await this.gateway.features()).includes(DAEMON_FEATURES.agendaClearAgents)) {
+    if (!(await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaClearAgents)) {
       throw new Error('this daemon is older than clearing the agent ferrets’ agenda items; update the daemon first');
     }
     const found = await this.gateway.clearAgents(true);
@@ -472,7 +484,7 @@ export class AgendaController {
     request: Extract<AgendaActionRequest, { action: 'add' }>,
     card: TaskRef,
   ): Promise<Extract<AgendaActionRequest, { action: 'add' }>> {
-    if ((await this.gateway.features()).includes(DAEMON_FEATURES.agendaTask)) return { ...request, task: card };
+    if ((await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaTask)) return { ...request, task: card };
     this.out.diagnostic(
       `this daemon is older than agenda items tied to cards, so the item is raised without ${formatTaskRef(card)}; update the daemon to tie it`,
     );
@@ -486,7 +498,7 @@ export class AgendaController {
   async #withOfferClose(
     request: Extract<AgendaActionRequest, { action: 'add' }>,
   ): Promise<Extract<AgendaActionRequest, { action: 'add' }>> {
-    if ((await this.gateway.features()).includes(DAEMON_FEATURES.agendaOfferClose)) {
+    if ((await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaOfferClose)) {
       return { ...request, offerClose: true };
     }
     this.out.diagnostic(

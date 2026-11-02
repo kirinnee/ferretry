@@ -414,8 +414,11 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
   /**
    * Whether the reader the kernel proved before the write still holds the terminal after the value went in without
    * Enter: the same foreground process and group, still the one setuid-root program, echo off, line mode, in the same
-   * pane. A line-mode reader can't have read the value yet, so the real sudo is always still there; anything else
-   * means the reader changed in the race between the last look and the write. A look that fails counts as changed.
+   * pane. A line-mode reader can't read the value before Enter, so a reader that is still the one proved before gets
+   * it. This narrows the race, it does not close it: a ferret that swaps the reader in the split second before the
+   * write can read the value once, and one that puts everything back before this look goes unnoticed. That is the
+   * residual the owner accepted for terminal rules (`SIGN_IN_RULE_TERMINAL_RESIDUAL`, !A226, re-confirmed in !A239).
+   * Anything else means the reader changed in the race; a look that fails counts as changed.
    */
   private async sameReader(
     sessionId: string,

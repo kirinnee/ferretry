@@ -4,7 +4,10 @@ import type {
   PasteRule,
   PasteRuleCreate,
   PasteRuleList,
+  PasteRuleSettings,
   PasteRuleSettingsView,
+  PasteRuleStaged,
+  PasteRuleStageView,
   TaskPlan,
   TaskPlanApproval,
   TaskPlanApprovalAnswer,
@@ -25,8 +28,23 @@ export interface ICopyGateway {
   rules(): Promise<PasteRuleList>;
   /** The secure-copy settings and the rules a profile program could satisfy; rejects on a daemon without them. */
   ruleSettings(): Promise<PasteRuleSettingsView>;
+  /**
+   * `PUT /v1/copy-rules/settings`: the settings as the daemon now keeps them. Turning `allowProfileTargets` on from a
+   * governed (remote) caller is refused with `403 grant_step_up_required` until a passkey confirms that one act.
+   */
+  changeRuleSettings(settings: PasteRuleSettings): Promise<PasteRuleSettings>;
+  /** The one-step create, for a daemon that does not report `copy-rules.passkey.1`. */
   addRule(rule: PasteRuleCreate): Promise<PasteRule>;
+  /**
+   * STAGES a paste rule (owner decision !A244). There is NO commit here, on purpose: a paste rule is made only with a
+   * passkey bound to its stage, which the machine's token cannot prove, so the owner commits it in the app.
+   */
+  stageRule(rule: PasteRuleCreate): Promise<PasteRuleStaged>;
+  /** Where a staged paste rule stands, for the wait. */
+  ruleStage(stage: string): Promise<PasteRuleStageView>;
   removeRule(id: string): Promise<void>;
+  /** The features the daemon reports (`DAEMON_FEATURES`); throws `DaemonFeaturesUnreadable` when it cannot be asked. */
+  features(): Promise<readonly string[]>;
 }
 
 /**
@@ -56,6 +74,8 @@ interface CallerPorts {
 export interface CopyPorts extends CallerPorts {
   readonly gateway: ICopyGateway;
   readonly out: ICopyOutput;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly nowMs: () => number;
 }
 
 export interface PlanPorts extends CallerPorts {

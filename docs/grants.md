@@ -398,11 +398,13 @@ right after an unlock. **A fresh proof is stamped with the act it was proved for
 it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
 for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
 at admission, so one passkey buys one install. At the machine, nothing is asked — **except saving a 2FA seed**
-(act `add-2fa-key`), **approving a task plan's sign-in lines** (act `approve-task-plan`) **and approving a standing
-sign-in rule** (act `approve-sign-in-rule`): those three are asked of EVERY caller, the admin token on loopback
-included, and each proof is bound to the one staged thing it commits (`subject`: the staged save `st_…`, the staged
-selection `tps_…` or the staged rule `srs_…`, never another's), opens no step-up window, and is never the fresh proof
-another act takes ([secrets.md](secrets.md#2fa-keys), [secure-copy.md](secure-copy.md#task-plans)). A standing rule's
+(act `add-2fa-key`), **approving a task plan's sign-in lines** (act `approve-task-plan`), **approving a standing
+sign-in rule** (act `approve-sign-in-rule`) **and making or widening a paste rule** (act `approve-paste-rule`, owner
+decision !A244): those four are asked of EVERY caller, the admin token on loopback included, and each proof is bound
+to the one staged thing it commits (`subject`: the staged save `st_…`, the staged selection `tps_…`, the staged
+rule `srs_…` or the staged paste rule `prs_…`, never another's), opens no step-up window, and is never the fresh
+proof another act takes; a held window is never enough ([secrets.md](secrets.md#2fa-keys),
+[secure-copy.md](secure-copy.md#task-plans), [secure-copy.md](secure-copy.md#approving-in-advance)). A standing rule's
 proof is also a **stored proof** (`STEP_UP_ACTS_STORED_PROOF`): its challenge is derived from the rule's signed bytes
 and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Its options
 answer only the paired device the stage waits on; any other caller, or a stage that is not waiting, gets
@@ -582,14 +584,16 @@ the boundary still asks its grant and a proven device, and an unlock still stand
 per-act passkey
 — whatever "ask again for each act" (`stepUpOnActions`) says, and on a machine with the unlock off too. Those
 routes are: revoking a task plan (`POST …/task-plans/:planId/revoke`); narrowing or revoking a standing sign-in
-rule, one or an account's; revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a device's grants
-(`PATCH /v1/pair/devices/:deviceId/grants`), where a widen in the same patch is judged inside and still wants a
-passkey proved for it. These must be instant in an emergency. **Not** on the list, deliberately: **deleting stored
+rule, one or an account's; removing a paste rule (`DELETE /v1/copy-rules/:ruleId`) and dropping a staged one
+(`DELETE /v1/copy-rules/stages/:stage`); choosing a default account (`PUT /v1/accounts/defaults`), where only
+removing a line (`account: null`) skips the passkey (owner decision !A243) and setting or changing one is judged
+inside and still asks `loosen-config`; revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a
+device's grants (`PATCH /v1/pair/devices/:deviceId/grants`), where a widen in the same patch is judged inside and
+still wants a passkey proved for it. These must be instant in an emergency. **Not** on the list, deliberately: **deleting stored
 data** (a 2FA key, a sign-in or an account: `DELETE /v1/accounts/:id/factors/:factor`,
 `DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`), which
-cannot be undone, so "ask again for each act" still asks for it; removing an account default (it changes which account a
-card offers first, so it asks `loosen-config` like every change to that file) and paste rules — both are open
-owner calls.
+cannot be undone, so "ask again for each act" still asks for it. Removing a default through the configuration
+file itself (`PUT /v1/config/file`) is still an ordinary edit to that file and is judged as one.
 
 ## A grant only ever narrows
 
