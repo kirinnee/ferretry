@@ -75,14 +75,21 @@ const item = (patch: Partial<CloneBaseItem> = {}): CloneBaseItem => ({
 const entry = (key: string, patch: Partial<CloneBaseItem> = {}): CloneBaseEntry => ({ key, ...item(patch) });
 
 /** A model whose instructions carry these origin keys, so they count as linked to a source. */
-const linkedModel = (...keys: string[]): AccountModel =>
+const linkedModel = (...keys: string[]): AccountModel => linkedModelFrom(undefined, ...keys);
+
+/** As {@link linkedModel}, the items stamped with the daemon id a browser verified for their source. */
+const linkedModelFrom = (daemon: string | undefined, ...keys: string[]): AccountModel =>
   parseAccountModel({
     version: 2,
     components: {
       instructions: Object.fromEntries(
         keys.map((key, index) => [
           `item${String(index)}`,
-          { file: `components/instructions/${String(index)}.md`, clonedFromKey: key },
+          {
+            file: `components/instructions/${String(index)}.md`,
+            clonedFromKey: key,
+            ...(daemon === undefined ? {} : { clonedFromDaemon: daemon }),
+          },
         ]),
       ),
     },
@@ -241,6 +248,39 @@ describe('cloneSourceIdentity', () => {
     const bundle = { ...V2(), daemon: 'd'.repeat(200) } as ReturnType<typeof V2>;
 
     // Act + Assert
+    should(cloneSourceIdentity(bundle, undefined, undefined)).be.undefined();
+  });
+
+  it.each([
+    { length: 195, verified: undefined, identified: true },
+    { length: 196, verified: undefined, identified: false },
+    { length: 200, verified: undefined, identified: false },
+    { length: 195, verified: 'browser', identified: true },
+    { length: 196, verified: 'browser', identified: true },
+    { length: 200, verified: 'browser', identified: true },
+  ])(
+    'should give a $length character id an identity: $identified, when verified is $verified',
+    ({ length, verified, identified }) => {
+      // Arrange
+      const id = 'd'.repeat(length);
+      const bundle = { ...V2(), daemon: id } as ReturnType<typeof V2>;
+
+      // Act
+      const identity = cloneSourceIdentity(bundle, verified === undefined ? undefined : id, undefined);
+
+      // Assert
+      should(identity !== undefined).equal(identified);
+      if (identity !== undefined) should(identity.verified).equal(verified === undefined ? 'self' : 'browser');
+    },
+  );
+
+  it('should refuse an id of 201 characters beside the same verified id, and give it no identity alone', () => {
+    // Arrange
+    const id = 'd'.repeat(201);
+    const bundle = { ...V2(), daemon: id } as ReturnType<typeof V2>;
+
+    // Act + Assert
+    should(() => cloneSourceIdentity(bundle, id, undefined)).throw(CloneSourceMismatch);
     should(cloneSourceIdentity(bundle, undefined, undefined)).be.undefined();
   });
 
@@ -729,12 +769,70 @@ describe('applyCloneToBase: a source is only ever its own entry', () => {
         source: { id: 'b', name: 'b', verified: 'browser' },
         copied: [entry(KEY_A)],
         sourceKeys: new Set([KEY_A]),
-        model: linkedModel(KEY_A),
+        model: linkedModelFrom('b', KEY_A),
       }),
     );
 
     // Assert
     should(Object.keys(next.sources)).deepEqual(['b']);
+  });
+
+  it('should keep a browser-verified source whose copy sits beside a copy of the same bundle made from a file', () => {
+    // Arrange: a browser copy from "a", then the same bundle copied from a file (it names itself "a" too)
+    const bundle = V2({
+      daemon: 'a',
+      credentials: [],
+      profiles: {},
+      runtimes: {},
+      keys: { 'instructions/main': KEY_A },
+    });
+    const browser = cloneSourceIdentity(bundle, 'a', undefined);
+    const file = cloneSourceIdentity(bundle, undefined, undefined);
+    if (browser === undefined || file === undefined) throw new Error('both copies have an identity');
+    const first = planClone(emptyTarget(), bundle, options({ sourceDaemon: 'a' }));
+    const afterBrowser = applyCloneToBase(
+      EMPTY_CLONE_BASE,
+      update({ source: browser, copied: first.base, sourceKeys: first.sourceKeys, model: first.model }),
+    );
+    const second = planClone(first.model, bundle, options());
+
+    // Act
+    const next = applyCloneToBase(
+      afterBrowser,
+      update({ source: file, copied: second.base, sourceKeys: second.sourceKeys, model: second.model }),
+    );
+
+    // Assert: both copies are in the setup, and each source keeps a record of its own items
+    should(Object.keys(second.model.components.instructions).toSorted()).deepEqual(['main', 'main-2']);
+    should(second.model.components.instructions.main?.clonedFromDaemon).equal('a');
+    should(second.model.components.instructions['main-2']?.clonedFromDaemon).be.undefined();
+    should(Object.keys(next.sources).toSorted()).deepEqual(['a', `${SELF_REPORTED_PREFIX}a`]);
+    should(next.sources.a).deepEqual(afterBrowser.sources.a);
+    should(next.sources.a?.verified).equal('browser');
+    should(Object.keys(next.sources.a?.items ?? {})).deepEqual([KEY_A]);
+    should(Object.keys(next.sources[`${SELF_REPORTED_PREFIX}a`]?.items ?? {})).deepEqual([KEY_A]);
+  });
+
+  it('should drop a source from a file once only a browser copy of the same keys is left', () => {
+    // Arrange
+    const previous: CloneBase = {
+      version: 1,
+      sources: { a: { ...source({ [KEY_A]: item() }), verified: 'browser' }, 'self:a': source({ [KEY_A]: item() }) },
+    };
+
+    // Act: the only item left was copied by the browser from "a"
+    const next = applyCloneToBase(
+      previous,
+      update({
+        source: { id: 'a', name: 'a', verified: 'browser' },
+        copied: [],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModelFrom('a', KEY_A),
+      }),
+    );
+
+    // Assert
+    should(Object.keys(next.sources)).deepEqual(['a']);
   });
 
   it('should keep another source whose own items are still linked here', () => {

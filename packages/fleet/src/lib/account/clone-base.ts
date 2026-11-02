@@ -247,11 +247,10 @@ export function cloneSourceIdentity(
   displayName: string | undefined,
 ): CloneSourceIdentity | undefined {
   const claimed = bundle.version === 2 ? bundle.daemon : undefined;
-  // The id is the key of a record entry, so one the record cannot hold is not an identity at all.
-  const reported =
-    claimed !== undefined && CloneSourceIdSchema.safeParse(`${SELF_REPORTED_PREFIX}${claimed}`).success
-      ? claimed
-      : undefined;
+  // The id is the key of a record entry, so one the record cannot hold is not an identity at all. Only an
+  // id filed under the self-reported prefix pays for it; a browser-verified id keeps the full length.
+  const filedAs = verifiedDaemon === undefined ? `${SELF_REPORTED_PREFIX}${claimed ?? ''}` : claimed;
+  const reported = claimed !== undefined && CloneSourceIdSchema.safeParse(filedAs).success ? claimed : undefined;
   if (verifiedDaemon !== undefined && claimed !== undefined && reported === undefined) {
     throw new CloneSourceMismatch(claimed === verifiedDaemon ? 'id-too-long' : 'another-machine');
   }
@@ -393,14 +392,26 @@ export interface CloneBaseUpdate {
   readonly model: AccountModel;
 }
 
-/** Every origin key the model's items carry. */
-export function linkedKeys(model: AccountModel): ReadonlySet<OriginKey> {
+/**
+ * Every origin key the model's items carry; with `from`, only those on items copied from that source. A
+ * browser-verified source owns the items stamped with its id; a source filed under {@link SELF_REPORTED_PREFIX}
+ * owns the items no browser stamped (a copy made from a file), so one source never keeps another's entry alive.
+ */
+export function linkedKeys(
+  model: AccountModel,
+  from?: Pick<CloneSourceIdentity, 'id' | 'verified'>,
+): ReadonlySet<OriginKey> {
   const keys = new Set<OriginKey>();
-  const take = (item: { readonly clonedFromKey?: string }): void => {
-    if (item.clonedFromKey !== undefined) keys.add(item.clonedFromKey);
+  const take = (item: { readonly clonedFromKey?: string; readonly clonedFromDaemon?: string }): void => {
+    if (item.clonedFromKey === undefined) return;
+    if (from !== undefined && item.clonedFromDaemon !== (from.verified === 'browser' ? from.id : undefined)) return;
+    keys.add(item.clonedFromKey);
   };
   for (const entries of Object.values(model.components)) {
-    for (const item of Object.values(entries as Readonly<Record<string, { clonedFromKey?: string }>>)) take(item);
+    for (const item of Object.values(
+      entries as Readonly<Record<string, { clonedFromKey?: string; clonedFromDaemon?: string }>>,
+    ))
+      take(item);
   }
   for (const item of Object.values(model.profiles)) take(item);
   for (const item of Object.values(model.runtimes)) take(item);
@@ -431,14 +442,12 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
   for (const [key, item] of Object.entries(before?.items ?? {})) items[key] = item;
   for (const { key, ...entry } of update.copied) items[key] = entry;
 
-  const here = linkedKeys(update.model);
-  // A key this copy stamped on an item now belongs to this source, however it was filed before.
-  const stamped = new Set(update.copied.map(copied => copied.key));
+  // Only items copied from THIS source keep its entries: another source's copy of the same key is not a link
+  // to it. What this copy just stamped belongs to it, however the entry was filed before.
+  const here = new Set([...linkedKeys(update.model, update.source), ...update.copied.map(copied => copied.key)]);
   const loginsHere = new Set(Object.keys(update.model.credentials));
   const viaLogin = (item: CloneBaseItem): boolean => item.login !== undefined && loginsHere.has(item.login);
   const linked = (key: string, item: CloneBaseItem): boolean => here.has(key) || viaLogin(item);
-  const linkedToAnother = (key: string, item: CloneBaseItem): boolean =>
-    (here.has(key) && !stamped.has(key)) || viaLogin(item);
   const kept = plain<CloneBaseItem>();
   for (const [key, item] of Object.entries(items)) {
     if (update.sourceKeys.has(key) || linked(key, item)) kept[key] = item;
@@ -447,9 +456,9 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
   // A Replace can leave another source with nothing here to link to; that source goes too.
   const sources = plain<CloneBaseSource>();
   for (const [id, source] of Object.entries(previous.sources)) {
-    if (id !== update.source.id && Object.entries(source.items).some(([key, item]) => linkedToAnother(key, item))) {
-      sources[id] = source;
-    }
+    if (id === update.source.id) continue;
+    const its = linkedKeys(update.model, { id, verified: source.verified });
+    if (Object.entries(source.items).some(([key, item]) => its.has(key) || viaLogin(item))) sources[id] = source;
   }
   if (
     Object.entries(kept).some(([key, item]) => linked(key, item)) &&
