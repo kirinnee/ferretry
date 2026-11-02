@@ -85,7 +85,7 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
 
   it('should refuse a code made for a member who has gone and leave it live', async () => {
     // Arrange
-    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing' }));
+    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing', newPasskey: true }));
     const r = await rig({ shares });
 
     // Act
@@ -134,7 +134,9 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
     // Arrange: member 7 holds 60; the code brings 5 more
     const held = Array.from({ length: 60 }, (_, index) => catalogId(index + 1));
     const added = Array.from({ length: 5 }, (_, index) => catalogId(index + 61));
-    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing', catalogIds: added }));
+    const shares = sharesDoc(
+      storedShare(1, { memberId: memberId(7), memberKind: 'existing', newPasskey: true, catalogIds: added }),
+    );
     const r = await rig({ members: membersDoc(storedMember(7, { catalogIds: held })), shares });
 
     // Act
@@ -458,6 +460,7 @@ describe('CatalogMemberService.admitRedeem: owner decision Q5', () => {
       storedShare(1, {
         memberId: memberId(5),
         memberKind: 'existing',
+        newPasskey: true,
         uses: { kind: 'multi', cap: 2 },
       }),
     );

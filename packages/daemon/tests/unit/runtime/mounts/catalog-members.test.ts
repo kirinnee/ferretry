@@ -25,7 +25,7 @@ import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { crypto } from '../../shared-catalogs/support.ts';
 
 /**
- * `/v1/catalog-shares` and `/v1/catalog-members`: the eight routes, driven as the dispatcher would. What is
+ * `/v1/catalog-shares` and `/v1/catalog-members`: the ten routes, driven as the dispatcher would. What is
  * asserted is the route's own contract — who may reach it, what minting demands of a governed device, how each
  * refusal is worded in HTTP, that a bad id never reaches the service, and that the code leaves in the mint's
  * answer and nowhere else. The sharing itself is the service's, proven in its own unit tests.
@@ -95,6 +95,10 @@ class FakeMembers implements Members {
   async mint(req: unknown) {
     this.#record('mint', req);
     return MINTED as never;
+  }
+  async markNewPasskey(shareId: string, on: boolean) {
+    this.#record('markNewPasskey', shareId, on);
+    return { ...SHARE_VIEW, ...(on ? { newPasskey: true } : {}) } as never;
   }
   async listShares() {
     this.#record('listShares');
@@ -215,6 +219,8 @@ describe('the route table', () => {
   const routes = catalogMemberRoutes({ members: new FakeMembers() });
   const table = [
     ['POST', '/v1/catalog-shares'],
+    ['PUT', '/v1/catalog-shares/:shareId/new-passkey'],
+    ['DELETE', '/v1/catalog-shares/:shareId/new-passkey'],
     ['GET', '/v1/catalog-shares'],
     ['DELETE', '/v1/catalog-shares/:shareId'],
     ['GET', '/v1/catalog-members'],
@@ -224,7 +230,7 @@ describe('the route table', () => {
     ['DELETE', '/v1/catalog-members/:memberId/catalogs/:catalogId'],
   ] as const;
 
-  it('has exactly the eight routes', () => {
+  it('has exactly the ten routes', () => {
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual(table.map(([m, p]) => `${m} ${p}`));
   });
 
@@ -384,6 +390,8 @@ describe('how a refusal is worded in HTTP', () => {
     member_key_unknown: 404,
     catalog_unknown: 404,
     share_unknown: 404,
+    share_not_live: 409,
+    new_passkey_multi: 400,
     shares_full: 409,
     catalogs_full: 409,
     share_link_unavailable: 503,
@@ -502,6 +510,144 @@ describe('ending a share', () => {
 
     should(answer.status).equal(404);
     should(answer.code).equal('share_unknown');
+  });
+});
+
+describe('"They need a new passkey" on an invite', () => {
+  const PATH = `/v1/catalog-shares/${SHARE}/new-passkey`;
+
+  it('marks the invite on PUT, handing the service the id and true', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'PUT', PATH, undefined);
+
+    should(answer.status).equal(200);
+    should(answer.body).deepEqual({ ...SHARE_VIEW, newPasskey: true });
+    should(members.calls).deepEqual([{ act: 'markNewPasskey', args: [SHARE, true] }]);
+  });
+
+  it('asks nothing of the machine itself, which is ungoverned', async () => {
+    const answer = await drive(new FakeMembers(), 'PUT', PATH, undefined, HOST);
+
+    should(answer.status).equal(200);
+    should(answer.claimedActs).deepEqual([]);
+  });
+
+  it('asks a governed device for the sharing passkey, and the service is not reached without it', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'PUT', PATH, undefined, DEVICE);
+
+    should(answer.status).equal(403);
+    should(answer.body.code).equal(STEP_UP_REQUIRED_CODE);
+    should(answer.body.demand).deepEqual({ capability: 'sharing', axis: 'use', act: STEP_UP_ACTS.shareCatalog });
+    should(answer.claimedActs).deepEqual([STEP_UP_ACTS.shareCatalog]);
+    should(members.calls).deepEqual([]);
+  });
+
+  it('marks for a device that proved it, claiming the proof once', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'PUT', PATH, undefined, FRESH_DEVICE);
+
+    should(answer.status).equal(200);
+    should(answer.claimed).equal(1);
+    should(members.calls.map(call => call.act)).deepEqual(['markNewPasskey']);
+  });
+
+  it('spends one proof on one mark, so a second mark asks again', async () => {
+    const members = new FakeMembers();
+    const proofs = { left: 1 };
+
+    const first = await drive(members, 'PUT', PATH, undefined, DEVICE, proofs);
+    const second = await drive(members, 'PUT', PATH, undefined, DEVICE, proofs);
+
+    should([first.status, second.status]).deepEqual([200, 403]);
+    should(members.calls).have.length(1);
+  });
+
+  it('takes the mark back on DELETE with no passkey, handing the service the id and false', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'DELETE', PATH, undefined, DEVICE);
+
+    should(answer.status).equal(200);
+    should(answer.body).deepEqual(SHARE_VIEW);
+    should(answer.claimedActs).deepEqual([]);
+    should(members.calls).deepEqual([{ act: 'markNewPasskey', args: [SHARE, false] }]);
+  });
+
+  it('refuses a ferret on PUT before it touches a proof, naming the owner', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'PUT', PATH, undefined, { ...FERRET, proofs: 1 });
+
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(answer.message).containEql('a ferret cannot approve a new passkey for an invite; the owner does');
+    should(answer.claimedActs).deepEqual([]);
+    should(members.calls).deepEqual([]);
+  });
+
+  it('refuses a ferret on its own session credential on DELETE', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'DELETE', PATH, undefined, FERRET_OWN);
+
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(answer.message).containEql('a ferret cannot take back the approval of a new passkey');
+    should(members.calls).deepEqual([]);
+  });
+
+  for (const method of ['PUT', 'DELETE']) {
+    for (const bad of ['nope', CAT, '%zz']) {
+      it(`answers 404 share_unknown for ${method} ${JSON.stringify(bad)} without reaching the service`, async () => {
+        const members = new FakeMembers();
+
+        const answer = await drive(members, method, `/v1/catalog-shares/${bad}/new-passkey`, undefined, FRESH_DEVICE);
+
+        should([answer.status, answer.code]).deepEqual([404, 'share_unknown']);
+        should(members.calls).deepEqual([]);
+      });
+    }
+
+    for (const [code, status] of [
+      ['share_not_live', 409],
+      ['new_passkey_multi', 400],
+      ['share_unknown', 404],
+    ] as const) {
+      it(`answers the service's ${code} as ${String(status)} on ${method}`, async () => {
+        const members = new FakeMembers();
+        members.failure = new CatalogMemberRefusal(code, 'the sentence');
+
+        const answer = await drive(members, method, PATH, undefined, FRESH_DEVICE);
+
+        should([answer.status, answer.code, answer.message]).deepEqual([status, code, 'the sentence']);
+      });
+    }
+  }
+
+  it('hands a mint the newPasskey mark and answers noPasskeyLeft as the service says it', async () => {
+    const members = new FakeMembers();
+    const request = { ...MINT, newPasskey: true };
+    members.mint = async req => {
+      members.calls.push({ act: 'mint', args: [req] });
+      return { ...MINTED, noPasskeyLeft: true } as never;
+    };
+
+    const answer = await drive(members, 'POST', '/v1/catalog-shares', request, FRESH_DEVICE);
+
+    should(answer.status).equal(201);
+    should(answer.body.noPasskeyLeft).equal(true);
+    should(members.calls).deepEqual([{ act: 'mint', args: [request] }]);
+  });
+
+  it('never marks an invite on a plain mint: only the mint request or the PUT does', async () => {
+    const members = new FakeMembers();
+
+    await drive(members, 'POST', '/v1/catalog-shares', MINT, FRESH_DEVICE);
+
+    should(members.calls.map(call => call.act)).deepEqual(['mint']);
+    should((members.calls[0]?.args[0] as { newPasskey?: boolean } | undefined)?.newPasskey).equal(undefined);
   });
 });
 

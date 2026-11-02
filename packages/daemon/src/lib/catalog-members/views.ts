@@ -33,6 +33,7 @@ export function shareView(share: StoredShare, now: number): CatalogShareView {
     expiresAt: share.expiresAt,
     uses: share.uses,
     state: shareState(share, now),
+    ...(share.newPasskey === true ? { newPasskey: true } : {}),
     usedBy: share.usedBy.map(entry => ({ clientName: entry.clientName, keyId: entry.keyId, at: entry.at })),
   };
 }

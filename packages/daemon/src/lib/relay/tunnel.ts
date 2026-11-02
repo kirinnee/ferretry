@@ -39,6 +39,7 @@ import {
   fromBase64Url,
   MAX_PLAINTEXT_BYTES,
   MemberAuthRecordSchema,
+  MemberJoinOptionsRecordSchema,
   MemberJoinRecordSchema,
   type RelayCloseCode,
   SESSION_PROTOCOL_ID,
@@ -236,6 +237,7 @@ export const RelayTunnelClientMessageSchema = z.union([
     // A join and a member session are the other two jobs a credential record can commit to. Their shapes
     // are the relay package's, so the browser and this daemon cannot disagree about them.
     MemberJoinRecordSchema,
+    MemberJoinOptionsRecordSchema,
     MemberAuthRecordSchema,
     z.strictObject({
       t: z.literal('req'),
@@ -278,6 +280,7 @@ export type RelayTunnelRequestPart = Extract<RelayTunnelClientMessage, { t: 'req
 export type RelayTunnelStream = Extract<RelayTunnelClientMessage, { t: 'stream' }>;
 export type RelayTunnelPair = Extract<RelayTunnelClientMessage, { t: 'pair' }>;
 export type RelayTunnelJoin = Extract<RelayTunnelClientMessage, { t: 'join' }>;
+export type RelayTunnelJoinOptions = Extract<RelayTunnelClientMessage, { t: 'join-options' }>;
 export type RelayTunnelMember = Extract<RelayTunnelClientMessage, { t: 'member' }>;
 export type RelayTunnelData = Extract<RelayTunnelClientMessage, { t: 'data' }>;
 

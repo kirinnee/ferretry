@@ -143,6 +143,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/catalog-items/quick-add/undo operator person',
   'POST /v1/catalogs/:id/export operator person',
   'POST /v1/catalog-shares operator person',
+  'PUT /v1/catalog-shares/:shareId/new-passkey operator person',
+  'DELETE /v1/catalog-shares/:shareId/new-passkey operator person',
   'GET /v1/catalog-shares operator any',
   'DELETE /v1/catalog-shares/:shareId operator person',
   'GET /v1/catalog-members operator any',

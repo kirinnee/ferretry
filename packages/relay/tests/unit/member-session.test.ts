@@ -5,6 +5,9 @@ import {
   deviceRenewMessage,
   MEMBER_AUTH_LABEL,
   MEMBER_JOIN_LABEL,
+  MEMBER_JOIN_OPTIONS_LABEL,
+  MemberJoinOptionsRecordSchema,
+  memberJoinOptionsMessage,
   MEMBER_RENEW_LABEL,
   MemberAuthRecordSchema,
   MemberBoxKeySchema,
@@ -198,5 +201,129 @@ describe('member records', () => {
       extra: 'x'.repeat(MEMBER_JOIN_OUTCOME_BYTES),
     };
     should(padJoinOutcome(tooBig as never)).be.null();
+  });
+});
+
+describe('a join that proves the person', () => {
+  const ORIGIN = 'https://app.ferretry.example';
+  const assertion = {
+    credentialId: 'Y3JlZA',
+    clientDataJSON: 'Y2xpZW50',
+    authenticatorData: 'YXV0aA',
+    signature: 'c2ln',
+  };
+  const joinRecord = (key: string) => ({
+    t: 'join',
+    protocol: 'ferretry-relay/2',
+    code: `fy_share_${'Q'.repeat(22)}`,
+    clientName: 'Firefox on a Mac',
+    memberKey: key,
+    boxKey: BOX,
+    proof: 'p'.repeat(86),
+  });
+  const options = {
+    challenge: toBase64Url(new Uint8Array(32).fill(5)),
+    rpId: 'app.ferretry.example',
+    allowCredentials: [{ type: 'public-key' as const, id: 'Y3JlZA' }],
+    timeout: 120_000,
+  };
+
+  it('should sign a join-options under a label of its own, binding the key, the origin and the session', async () => {
+    const key = await memberKey();
+    const message = memberJoinOptionsMessage(TH, key.spki, ORIGIN);
+    should(MEMBER_JOIN_OPTIONS_LABEL).equal('ferretry-member-join-options-v1');
+    should(new TextDecoder().decode(message.slice(0, MEMBER_JOIN_OPTIONS_LABEL.length))).equal(
+      MEMBER_JOIN_OPTIONS_LABEL,
+    );
+    should(message[MEMBER_JOIN_OPTIONS_LABEL.length]).equal(0);
+    const proof = await signDeviceProof(relayCrypto, key.privateKey, message);
+    should(await verifyDeviceProof(relayCrypto, key.spki, proof, message)).be.true();
+    should(
+      await verifyDeviceProof(relayCrypto, key.spki, proof, memberJoinOptionsMessage(OTHER_TH, key.spki, ORIGIN)),
+    ).be.false();
+    should(
+      await verifyDeviceProof(
+        relayCrypto,
+        key.spki,
+        proof,
+        memberJoinOptionsMessage(TH, key.spki, 'https://other.example'),
+      ),
+    ).be.false();
+    // The same key and transcript, signed for a join: the label keeps the two apart.
+    should(await verifyDeviceProof(relayCrypto, key.spki, proof, memberJoinMessage(TH, key.spki, ORIGIN))).be.false();
+  });
+
+  it('should read a join-options record, and refuse an extra field, another dialect or a missing origin', async () => {
+    const key = await memberKey();
+    const record = {
+      t: 'join-options',
+      protocol: 'ferretry-relay/2',
+      code: `fy_share_${'Q'.repeat(22)}`,
+      memberKey: key.spki,
+      origin: ORIGIN,
+      proof: 'p'.repeat(86),
+    };
+    should(MemberJoinOptionsRecordSchema.safeParse(record).success).be.true();
+    should(MemberJoinOptionsRecordSchema.safeParse({ ...record, boxKey: BOX }).success).be.false();
+    should(MemberJoinOptionsRecordSchema.safeParse({ ...record, protocol: 'ferretry-relay/1' }).success).be.false();
+    should(MemberJoinOptionsRecordSchema.safeParse({ ...record, origin: undefined }).success).be.false();
+    should(MemberJoinOptionsRecordSchema.safeParse({ ...record, origin: 'x'.repeat(257) }).success).be.false();
+  });
+
+  it('should carry the passkey assertion on a join only when it is a plain one', async () => {
+    const key = await memberKey();
+    const join = joinRecord(key.spki);
+    should(MemberJoinRecordSchema.safeParse(join).success).be.true();
+    should(MemberJoinRecordSchema.safeParse({ ...join, passkey: assertion }).success).be.true();
+    should(
+      MemberJoinRecordSchema.safeParse({ ...join, passkey: { ...assertion, rotation: { deviceKey: 'a', proof: 'b' } } })
+        .success,
+    ).be.false();
+    should(
+      MemberJoinRecordSchema.safeParse({ ...join, passkey: { credentialId: assertion.credentialId } }).success,
+    ).be.false();
+  });
+
+  it('should answer join-options with a challenge or an open door, padded to the same size as a refusal', () => {
+    const challenge = padJoinOutcome({
+      t: 'join-challenge',
+      protocol: 'ferretry-relay/2',
+      memberLabel: 'Alice',
+      options,
+    });
+    const open = padJoinOutcome({ t: 'join-open', protocol: 'ferretry-relay/2', why: 'owner-approved' });
+    const refused = padJoinOutcome({ t: 'join-refused', protocol: 'ferretry-relay/2', reason: 'join_refused' });
+    for (const text of [challenge, open, refused]) {
+      should(text).not.be.null();
+      should(new TextEncoder().encode(text ?? '').length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    }
+    should(MemberJoinOutcomeSchema.safeParse(JSON.parse(challenge ?? '')).success).be.true();
+    should(MemberJoinOutcomeSchema.safeParse(JSON.parse(open ?? '')).success).be.true();
+    const bad = JSON.parse(open ?? '') as Record<string, unknown>;
+    should(MemberJoinOutcomeSchema.safeParse({ ...bad, why: 'because' }).success).be.false();
+    should(MemberJoinOutcomeSchema.safeParse({ ...bad, pad: 'xx' }).success).be.false();
+    const first = JSON.parse(challenge ?? '') as Record<string, unknown>;
+    should(
+      MemberJoinOutcomeSchema.safeParse({ ...first, options: { ...options, allowCredentials: [] } }).success,
+    ).be.false();
+  });
+
+  it('should fit the largest challenge a daemon can send', () => {
+    const credentials = Array.from({ length: 8 }, (_, index) => ({
+      type: 'public-key' as const,
+      id: 'A'.repeat(1_300 + index),
+    }));
+    const content = {
+      t: 'join-challenge' as const,
+      protocol: 'ferretry-relay/2' as const,
+      memberLabel: '€'.repeat(80),
+      options: { ...options, challenge: 'A'.repeat(128), rpId: 'a'.repeat(253), allowCredentials: credentials },
+    };
+    // The worst case must really be a valid answer, or this test would prove nothing.
+    const worst = MemberJoinOutcomeSchema.safeParse({ ...content, pad: '' });
+    should(worst.success ? 'parsed' : JSON.stringify(worst.error.issues[0])).equal('parsed');
+    const text = padJoinOutcome(content);
+    should(text).not.be.null();
+    should(new TextEncoder().encode(text ?? '').length).equal(MEMBER_JOIN_OUTCOME_BYTES);
   });
 });

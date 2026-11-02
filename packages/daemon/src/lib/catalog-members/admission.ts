@@ -10,6 +10,9 @@
  *
  * 1. Find the share by the code's SHA-256, compared in constant time against EVERY stored share and a dummy.
  * 2. It must be live: a code that is unknown, spent, expired or ended is one refusal.
+ * 2b. A code for a person who already has a passkey needs that passkey PROVEN ({@link joinNeed}); without the proof the
+ *    join is refused and THE CODE STAYS LIVE. The proof is verified before this step is asked and its outcome is
+ *    handed in (`proven`): this function never sees an assertion.
  * 3. Room: the publisher's members and keys, the member's own keys, the member's catalogs. A refusal for
  *    room LEAVES THE CODE LIVE.
  * 4. The share's own hourly count of successful joins and redeems. Also leaves the code live.
@@ -57,7 +60,9 @@ type AdmissionReason =
   | 'catalogs'
   | 'hourly'
   | 'other-member'
-  | 'new-member';
+  | 'new-member'
+  | 'proof-required'
+  | 'approval-required';
 
 /** A browser of one member used a code made for another (owner decision Q5): the owner is told. */
 export interface CrossMemberUse {
@@ -68,6 +73,13 @@ export interface CrossMemberUse {
   readonly shareMemberId: string;
 }
 
+/**
+ * How a join was let in. `first-browser`: the person had no passkey to prove (a new person, or one minted for before
+ * they joined). `proof`: one of their passkeys was proved. `owner-approved`: the owner marked this invite "They need a
+ * new passkey" (D8), so the new browser registers its own.
+ */
+type JoinEntry = 'first-browser' | 'proof' | 'owner-approved';
+
 export interface JoinReservation {
   readonly kind: 'join';
   readonly reservationId: string;
@@ -75,6 +87,8 @@ export interface JoinReservation {
   readonly memberId: string;
   readonly memberLabel: string;
   readonly catalogIds: readonly string[];
+  /** How the join was let in, for the audit. Absent in a reservation written before this existed. */
+  readonly entry?: JoinEntry;
 }
 
 export interface RedeemReservation {
@@ -119,6 +133,8 @@ export interface Probe {
   readonly digest: string;
   readonly compare: DigestComparison;
   readonly reservationId: string;
+  /** The share and person a passkey proof was just verified for, when one was. */
+  readonly proven?: { readonly shareId: string; readonly memberId: string };
 }
 
 /** A share's state at `now`: a stored `live` whose time has passed reads as `expired`. */
@@ -155,6 +171,30 @@ const refused = (
   leftLive: extra.shares === undefined,
   ...(extra.crossMember === undefined ? {} : { crossMember: extra.crossMember }),
 });
+
+/** What a join with this share needs: nothing, a proof of the person's passkey, or the owner's say-so first. */
+export type JoinNeed = 'first-browser' | 'owner-approved' | 'proof' | 'blocked';
+
+/**
+ * What a join through this share needs (docs/catalogs.md § Joining as someone who is already here). Pure.
+ *
+ * - No such person yet: nothing; this is their first browser.
+ * - The owner marked the invite (D8): nothing; the new browser registers its own passkey.
+ * - The person has a passkey: a proof of one of them, EXCEPT on a group link (a multi-use code minted for a person who
+ *   did not exist yet), whose whole point is that many strangers join the one name the owner chose.
+ * - The person has no passkey and the code was minted for them while they existed: BLOCKED until the owner marks the
+ *   invite. Nothing is ever approved by the machine; a forwarded invite for a person with no passkey left is refused
+ *   rather than opened.
+ * - The person has no passkey and the code was minted before they joined: nothing; the owner made two invites for a
+ *   new person and the second arrives within the first browser's window.
+ */
+export function joinNeed(share: StoredShare, member: StoredMember | undefined): JoinNeed {
+  if (member === undefined) return 'first-browser';
+  if (share.newPasskey === true) return 'owner-approved';
+  if (member.keys.some(key => key.passkeyCount > 0))
+    return share.uses.kind === 'multi' && share.memberKind === 'new' ? 'first-browser' : 'proof';
+  return share.memberKind === 'new' ? 'first-browser' : 'blocked';
+}
 
 /** The share, or the refusal for a code that is not live. */
 function liveShare(probe: Probe): StoredShare | Refused {
@@ -210,6 +250,10 @@ export function admitJoin(probe: Probe): JoinAdmission {
   // A code made for a member who has since gone cannot make a browser of them: it is refused and left alone,
   // because ending the member ended their shares and this one only survives a failed write.
   if (member === undefined && share.memberKind === 'existing') return refused(probe, 'share_refused', 'member-gone');
+  const need = joinNeed(share, member);
+  if (need === 'blocked') return refused(probe, 'share_refused', 'approval-required');
+  if (need === 'proof' && (probe.proven?.shareId !== share.shareId || probe.proven.memberId !== share.memberId))
+    return refused(probe, 'share_refused', 'proof-required');
   const room = roomProblem(probe, share, member);
   if (room !== undefined) return refused(probe, 'members_full', room);
   if (recentSuccesses(share, probe.now).length >= MEMBER_JOINS_PER_HOUR)
@@ -224,6 +268,7 @@ export function admitJoin(probe: Probe): JoinAdmission {
       memberId: share.memberId,
       memberLabel: member?.label ?? share.memberLabel,
       catalogIds: share.catalogIds,
+      entry: need === 'proof' ? 'proof' : need === 'owner-approved' ? 'owner-approved' : 'first-browser',
     },
   };
 }

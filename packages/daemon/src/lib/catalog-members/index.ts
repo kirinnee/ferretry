@@ -25,7 +25,18 @@ export type { MemberRename } from './names.ts';
 export { CATALOG_MEMBER_REFUSALS, CatalogMemberRefusal } from './refusal.ts';
 export type { CatalogMemberRefusalCode } from './refusal.ts';
 export { CatalogMemberService } from './service.ts';
-export type { CatalogMemberDeps, Durable, JoinedMember, MemberAccess, NewMemberKey, RedeemedBy } from './service.ts';
+export type {
+  CatalogMemberDeps,
+  Durable,
+  JoinedMember,
+  JoinNeeded,
+  JoinProven,
+  MemberAccess,
+  NewMemberKey,
+  RedeemedBy,
+} from './service.ts';
+export { MemberJoinProver } from './join-proof.ts';
+export type { JoinProofDeps, JoinProofSubject } from './join-proof.ts';
 export { LiveMemberSessions } from './sessions.ts';
 export { MemberGateway } from './gateway.ts';
 export type { MemberGatewayDeps } from './gateway.ts';

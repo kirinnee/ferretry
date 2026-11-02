@@ -5,7 +5,7 @@
  * the request session's three needs: the key to verify, the live registration, and the member route table.
  * `dispatch` is the ONLY door a member's request has — the link never hands one to the device dispatcher.
  */
-import type { MemberJoinedResponse } from '@ferretry/protocol';
+import type { MemberJoinedResponse, MemberJoinProof, StepUpOptions } from '@ferretry/protocol';
 import type { ApiRequest, ApiResponse, SessionMember } from '../api/http.ts';
 
 /**
@@ -23,12 +23,35 @@ export interface MemberJoinAttempt {
   readonly clientName: string;
   readonly memberKey: string;
   readonly boxKey: string;
+  /** One of the person's passkeys proved, for a code that names a person who already has one. */
+  readonly passkey?: MemberJoinProof;
   /** Run only after the cheap checks pass, so a stranger cannot make this daemon verify a signature first. */
   readonly prove: () => Promise<boolean>;
 }
 
 /** `ok: false` is the one generic refusal; the port never says why. */
 export type MemberJoinResult = { readonly ok: true; readonly response: MemberJoinedResponse } | { readonly ok: false };
+
+/** A `join-options` record exactly as the browser sent it. */
+export interface MemberJoinOptionsAttempt {
+  readonly code: string;
+  readonly memberKey: string;
+  /** The page's origin: the passkeys offered are the ones made there. */
+  readonly origin: string;
+  /** Run only after the cheap checks pass, so a stranger cannot make this daemon verify a signature first. */
+  readonly prove: () => Promise<boolean>;
+}
+
+/**
+ * What joining with a code needs. `open`: no proof (the person's first browser, or an invite the owner marked "They need
+ * a new passkey"). `challenge`: prove one of these passkeys. `ok: false` is the one generic refusal, which also covers
+ * "this person has no passkey that answers at this page".
+ */
+export type MemberJoinAnswer =
+  | { readonly kind: 'open'; readonly why: 'first-browser' | 'owner-approved' }
+  | { readonly kind: 'challenge'; readonly memberLabel: string; readonly options: StepUpOptions };
+
+export type MemberJoinOptionsResult = { readonly ok: true; readonly answer: MemberJoinAnswer } | { readonly ok: false };
 
 /** The key a browser must prove, and whose it is. */
 export interface MemberKeyLookup {
@@ -39,6 +62,8 @@ export interface MemberKeyLookup {
 export interface RelayMemberSessions {
   /** One redemption of a share code. Never throws: anything that goes wrong is a refusal. */
   join(attempt: MemberJoinAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinResult>;
+  /** What a join with this code needs, spending nothing. Never throws: anything that goes wrong is a refusal. */
+  joinOptions(attempt: MemberJoinOptionsAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinOptionsResult>;
   /** The filed key of a browser, or nothing when it is unknown, revoked or idle-expired. */
   key(keyId: string): Promise<MemberKeyLookup | undefined>;
   /**
@@ -66,6 +91,10 @@ export class DeferredMemberSessions implements RelayMemberSessions {
 
   async join(attempt: MemberJoinAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinResult> {
     return this.#bound === undefined ? { ok: false } : await this.#bound.join(attempt, carrier);
+  }
+
+  async joinOptions(attempt: MemberJoinOptionsAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinOptionsResult> {
+    return this.#bound === undefined ? { ok: false } : await this.#bound.joinOptions(attempt, carrier);
   }
 
   async key(keyId: string): Promise<MemberKeyLookup | undefined> {

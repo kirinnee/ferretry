@@ -320,7 +320,15 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) �
    nothing a remote device has to undo: what was exported stays exported, a leaked device is revoked
    through `pairing`, and the host's own `fy catalog` commands are ungoverned. Members (phase 2b-1) are
    `sharing.use` too: minting a share needs a fresh `share-catalog` passkey from a governed caller, and a
-   ferret may list shares and members but never mint, end or revoke. The remote turn-off warning will need
+   ferret may list shares and members but never mint, end or revoke. The same holds for the owner's mark
+   "They need a new passkey" on an invite ([catalogs.md](catalogs.md#lost-devices-they-need-a-new-passkey)):
+   `PUT /v1/catalog-shares/:shareId/new-passkey` is `sharing.use` for a person caller only (a ferret is refused) and,
+   because it widens who a code can add, takes a fresh `share-catalog` passkey from a governed caller, claimed like
+   a mint's. `DELETE` on the same path only narrows, so it takes no step-up. The mint accepts an optional
+   `newPasskey` under the same step-up it already needs, and its answer carries an optional `noPasskeyLeft` that
+   only pre-ticks the app's box; no route sets the mark by itself. A later join of an existing person proves one of
+   their passkeys over the sealed `join-options`/`join` records, which are no route and carry no grant
+   ([relay-protocol.md](relay-protocol.md) §14). The remote turn-off warning will need
    the "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) §3.6 describes now that members
    can hold live sessions (built in 2b-2; revoking a member closes them). A share link a relay carries
    changes none of this: it is minted under the same `sharing.use` and step-up, and the relay adds a

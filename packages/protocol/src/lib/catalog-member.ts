@@ -25,6 +25,7 @@ import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './pairing.ts';
 import { CatalogLabelSchema, HIDDEN_IN_LINE, SharedCatalogIdSchema } from './shared-catalog.ts';
+import { StepUpAssertionSchema } from './step-up.ts';
 
 export const CATALOG_SHARES_PATH = '/v1/catalog-shares' as const;
 export const CATALOG_MEMBERS_PATH = '/v1/catalog-members' as const;
@@ -391,17 +392,17 @@ const distinctCatalogs = z
  * `POST /v1/catalog-shares`: mint one share. A governed caller confirms with a passkey proved for this
  * act alone (`share-catalog`), as minting a pairing code does: it adds access.
  */
-export const CatalogShareMintRequestSchema = z
-  .strictObject({
-    catalogIds: distinctCatalogs,
-    member: CatalogShareMemberSchema,
-    expiresIn: CatalogShareExpirySchema,
-    uses: CatalogShareUsesSchema,
-  })
-  .refine(
-    request => request.uses.kind === 'single' || !('kind' in request.member) || request.member.kind === 'new',
-    'a code for many people cannot name someone already in yet: name a new person, or use a single-use code',
-  );
+export const CatalogShareMintRequestSchema = z.strictObject({
+  catalogIds: distinctCatalogs,
+  member: CatalogShareMemberSchema,
+  expiresIn: CatalogShareExpirySchema,
+  uses: CatalogShareUsesSchema,
+  /**
+   * D8: the owner's own mark that this one invite is for a person who needs a NEW passkey (a lost device). Never set by
+   * the machine; refused on a multi-use code. Absent is "no": a person who already has a passkey proves it to join.
+   */
+  newPasskey: z.boolean().optional(),
+});
 export type CatalogShareMintRequest = z.infer<typeof CatalogShareMintRequestSchema>;
 
 export const CatalogShareStateSchema = z.enum(['live', 'spent', 'expired', 'ended']);
@@ -417,6 +418,8 @@ export const CatalogShareViewSchema = z.strictObject({
   expiresAt: InstantSchema,
   uses: CatalogShareUsesSchema,
   state: CatalogShareStateSchema,
+  /** The owner marked this invite "They need a new passkey" (D8). Absent when they did not. */
+  newPasskey: z.boolean().optional(),
   /** Who used it, newest last: the browser's own name for itself and when. A multi-use code lists each. */
   usedBy: z
     .array(z.strictObject({ clientName: MemberClientNameSchema, keyId: CatalogMemberKeyIdSchema, at: InstantSchema }))
@@ -436,6 +439,11 @@ export const CatalogShareMintResponseSchema = z.strictObject({
     .string()
     .max(2_048)
     .regex(/^https?:\/\/[^\s#]+#v1;/u, 'a share link'),
+  /**
+   * The person this invite names is here and has NO passkey left on any browser, so nobody can prove one for them. The
+   * app pre-ticks "They need a new passkey" from this; the owner still marks it, and the machine never does.
+   */
+  noPasskeyLeft: z.boolean().optional(),
 });
 export type CatalogShareMintResponse = z.infer<typeof CatalogShareMintResponseSchema>;
 
@@ -501,6 +509,14 @@ export const CatalogMemberCatalogRemovedSchema = z.strictObject({
 export type CatalogMemberCatalogRemoved = z.infer<typeof CatalogMemberCatalogRemovedSchema>;
 
 // ── The joining browser ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * A passkey assertion that proves a person at a later join: what `navigator.credentials.get` produced, over the
+ * challenge the daemon sent in the `join-challenge` answer. The same bytes a step-up assertion has, minus the
+ * rotation a join has no use for.
+ */
+export const MemberJoinProofSchema = StepUpAssertionSchema.omit({ rotation: true });
+export type MemberJoinProof = z.infer<typeof MemberJoinProofSchema>;
 
 /**
  * What a browser is told the one moment its join succeeded, inside the sealed `joined` record. Like the

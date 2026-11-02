@@ -193,6 +193,7 @@ export class DirectSession implements SocketHandler {
         : {
             members: {
               join: (attempt, carrier) => members.join(attempt, carrier),
+              joinOptions: (attempt, carrier) => members.joinOptions(attempt, carrier),
               key: keyId => members.key(keyId),
               dispatch: request => members.dispatch(request),
               // A member's key proven is the moment this socket stops being an unproven one, as a device's is.

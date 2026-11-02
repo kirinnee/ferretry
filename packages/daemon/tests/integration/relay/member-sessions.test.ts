@@ -231,6 +231,7 @@ async function publisher() {
   });
   const gate = new MemberJoinGate({
     members,
+    proof: { options: async () => undefined, verify: async () => false },
     publisher: () => ({ daemonId: identity.daemonId, daemonName: 'studio', carriers: [], memberUnlockDays: 30 }),
     audit,
     now: () => clock.now,

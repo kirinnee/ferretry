@@ -140,6 +140,7 @@ export function probeOf(
     now?: number;
     code?: string;
     compare?: DigestComparison;
+    proven?: { shareId: string; memberId: string };
   } = {},
 ): Probe {
   return {
@@ -150,6 +151,7 @@ export function probeOf(
     digest: digestOf(parts.code ?? codeOf(1)),
     compare: parts.compare ?? ((left, right) => left === right),
     reservationId: 'rsv-new',
+    ...(parts.proven === undefined ? {} : { proven: parts.proven }),
   };
 }
 
@@ -344,6 +346,7 @@ export const multiNamed = (
 export const singleForMember = (memberN: number, ids: readonly string[] = [catalogId(1)]): CatalogShareMintRequest => ({
   catalogIds: [...ids],
   member: { kind: 'existing', memberId: memberId(memberN) },
+  newPasskey: true,
   expiresIn: '1h',
   uses: { kind: 'single' },
 });

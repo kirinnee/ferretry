@@ -9,6 +9,8 @@ import type { ApiRequest, ApiResponse, SessionMember } from '../api/http.ts';
 import type {
   MemberJoinAttempt,
   MemberJoinCarrier,
+  MemberJoinOptionsAttempt,
+  MemberJoinOptionsResult,
   MemberJoinResult,
   MemberKeyLookup,
   RelayMemberSessions,
@@ -19,7 +21,7 @@ import type { LiveMemberSessions } from './sessions.ts';
 import type { CatalogMemberService } from './service.ts';
 
 export interface MemberGatewayDeps {
-  readonly gate: Pick<MemberJoinGate, 'join'>;
+  readonly gate: Pick<MemberJoinGate, 'join' | 'options'>;
   readonly dispatcher: Pick<MemberDispatcher, 'dispatch'>;
   readonly members: Pick<CatalogMemberService, 'access' | 'touchKey'>;
   readonly live: Pick<LiveMemberSessions, 'track'>;
@@ -30,6 +32,10 @@ export class MemberGateway implements RelayMemberSessions {
 
   async join(attempt: MemberJoinAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinResult> {
     return await this.deps.gate.join(attempt, carrier);
+  }
+
+  async joinOptions(attempt: MemberJoinOptionsAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinOptionsResult> {
+    return await this.deps.gate.options(attempt, carrier);
   }
 
   /** `undefined` for every reason a key is not to be trusted: the link cannot tell them apart, and neither can a peer. */

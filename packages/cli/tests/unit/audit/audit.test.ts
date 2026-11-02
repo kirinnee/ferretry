@@ -100,6 +100,11 @@ describe('audit render', () => {
       'One browser of a person who reads shared catalogs was removed',
       'A shared catalog was taken away from a person',
       "A share code made for one person was used by another person's browser",
+      'A new browser joined a person after one of their passkeys proved it',
+      "A browser was turned away because it could not prove the person's passkey",
+      'A browser joined a person on an invite approved for a new passkey',
+      'An invite was approved to let a person set up a new passkey',
+      'The approval for a new passkey was taken off an invite',
     ])
       expect(lines.join('\n')).toContain(phrase);
   });

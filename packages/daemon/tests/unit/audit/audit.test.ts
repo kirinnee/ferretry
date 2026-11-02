@@ -1169,10 +1169,13 @@ describe('auditedRoutes', () => {
           catalogIds: [CAT],
           uses: { kind: 'single' },
           expiresAt: '2026-01-01T00:00:00.000Z',
+          newPasskey: true,
         },
         code: CODE,
         link: LINK,
       },
+      'PUT /v1/catalog-shares/:shareId/new-passkey': { shareId: SHARE, memberId: MEMBER, newPasskey: true },
+      'DELETE /v1/catalog-shares/:shareId/new-passkey': { shareId: SHARE, memberId: MEMBER },
       'DELETE /v1/catalog-shares/:shareId': { shareId: SHARE },
       'PATCH /v1/catalog-members/:memberId': { memberId: MEMBER, label: 'A Name The Owner Typed', keys: [] },
       'DELETE /v1/catalog-members/:memberId': { memberId: MEMBER, keysRemoved: 2, sharesEnded: 1 },
@@ -1187,6 +1190,8 @@ describe('auditedRoutes', () => {
     // Act
     for (const [method, path] of [
       ['POST', '/v1/catalog-shares'],
+      ['PUT', `/v1/catalog-shares/${SHARE}/new-passkey`],
+      ['DELETE', `/v1/catalog-shares/${SHARE}/new-passkey`],
       ['DELETE', `/v1/catalog-shares/${SHARE}`],
       ['PATCH', `/v1/catalog-members/${MEMBER}`],
       ['DELETE', `/v1/catalog-members/${MEMBER}`],
@@ -1199,6 +1204,8 @@ describe('auditedRoutes', () => {
     const logged = records(journal);
     should(logged.map(record => record.event)).deepEqual([
       'catalog.share.minted',
+      'catalog.share.new-passkey-marked',
+      'catalog.share.new-passkey-cleared',
       'catalog.share.ended',
       'catalog.member.renamed',
       'catalog.member.revoked',
@@ -1212,12 +1219,17 @@ describe('auditedRoutes', () => {
       uses: 'single',
       expiresAt: '2026-01-01T00:00:00.000Z',
     });
+    should(logged[0]?.detail).containEql({ newPasskey: true });
     should(logged[1]?.subject).equal(SHARE);
-    should(logged[2]?.subject).equal(MEMBER);
-    should(logged[3]?.subject).equal(MEMBER);
-    should(logged[3]?.detail).containEql({ keysRemoved: 2, sharesEnded: 1 });
-    should(logged[4]?.detail).containEql({ keyId: KEY });
-    should(logged[5]?.detail).containEql({ catalogId: CAT });
+    should(logged[1]?.detail).containEql({ memberId: MEMBER });
+    should(logged[2]?.subject).equal(SHARE);
+    should(logged[2]?.detail).containEql({ memberId: MEMBER });
+    should(logged[3]?.subject).equal(SHARE);
+    should(logged[4]?.subject).equal(MEMBER);
+    should(logged[5]?.subject).equal(MEMBER);
+    should(logged[5]?.detail).containEql({ keysRemoved: 2, sharesEnded: 1 });
+    should(logged[6]?.detail).containEql({ keyId: KEY });
+    should(logged[7]?.detail).containEql({ catalogId: CAT });
     should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(
       /fy_share_|Some Person|A Name The Owner|app\.example|share=/u,
     );

@@ -11,23 +11,32 @@
  * join   = Ed25519(member key, "ferretry-member-join-v1"  ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(boxKey))
  * member = Ed25519(member key, "ferretry-member-auth-v1"  ‖ 0x00 ‖ TH ‖ LP("member") ‖ LP(keyId) ‖ LP(appSession))
  * renew  = Ed25519(member key, "ferretry-member-renew-v1" ‖ 0x00 ‖ TH ‖ LP(nonce))
+ * options = Ed25519(member key, "ferretry-member-join-options-v1" ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(origin))
  * ```
  *
  * Each field enters as its base64url TEXT, as every other proof in §6 does. `TH` binds the session, so a
  * captured proof verifies for no other session.
  *
- * TWO RECORDS AT SEQUENCE 1, each committing its session to one job, added to §14's strict union:
+ * THREE RECORDS AT SEQUENCE 1, each committing its session to one job, added to §14's strict union:
  *
  * - `join` — one redemption of a share code, one sealed outcome (`joined` or the generic `join-refused`),
  *   then the session ends with `4440`. Never a path to serving: a browser that joined reconnects with
- *   `member`.
+ *   `member`. A code for a person who already has a passkey also carries that person's passkey assertion.
+ * - `join-options` — what a join of this code needs, spending nothing: the sealed answer is `join-open` (the
+ *   first browser of a person, or an owner-approved new passkey: join with no proof), `join-challenge` (a
+ *   WebAuthn challenge for one of the person's passkeys) or the generic `join-refused`. Then `4440`.
  * - `member` — a request session on the MEMBER route table (`/v1/shared/*`) and nothing else, with the
  *   same lease, renew and close rules a device's request session has.
  *
  * A `guest` record (public catalogs, design §2.8) is reserved for phase 4 and is not part of this union.
  * The publisher's side of every record is 2b's; this module is the shared wire both ends parse with.
  */
-import { MemberJoinedResponseSchema } from '@ferretry/protocol';
+import {
+  CatalogMemberLabelSchema,
+  MemberJoinedResponseSchema,
+  MemberJoinProofSchema,
+  StepUpOptionsSchema,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import { concatBytes, fromBase64UrlFixed, isAllZero, lengthPrefixed, utf8Bytes } from './binary.ts';
 import { SESSION_PROTOCOL_ID, X25519_PUBLIC_KEY_BYTES } from './constants.ts';
@@ -37,6 +46,7 @@ import { AppSessionSchema, DeviceKeySchema, DeviceProofSchema } from './device-p
 export const MEMBER_JOIN_LABEL = 'ferretry-member-join-v1' as const;
 export const MEMBER_AUTH_LABEL = 'ferretry-member-auth-v1' as const;
 export const MEMBER_RENEW_LABEL = 'ferretry-member-renew-v1' as const;
+export const MEMBER_JOIN_OPTIONS_LABEL = 'ferretry-member-join-options-v1' as const;
 
 /** The `t` a member proof signs, so the label and the record agree on what the session is for. */
 export const MEMBER_SESSION_KIND = 'member' as const;
@@ -52,6 +62,11 @@ const labelled = (label: string, transcriptHash: Uint8Array, fields: readonly st
 /** `"ferretry-member-join-v1" ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(boxKey)`, each key as its base64url text. */
 export function memberJoinMessage(transcriptHash: Uint8Array, memberKey: string, boxKey: string): Uint8Array {
   return labelled(MEMBER_JOIN_LABEL, transcriptHash, [memberKey, boxKey]);
+}
+
+/** `"ferretry-member-join-options-v1" ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(origin)`, each as its text. */
+export function memberJoinOptionsMessage(transcriptHash: Uint8Array, memberKey: string, origin: string): Uint8Array {
+  return labelled(MEMBER_JOIN_OPTIONS_LABEL, transcriptHash, [memberKey, origin]);
 }
 
 /** `"ferretry-member-auth-v1" ‖ 0x00 ‖ TH ‖ LP("member") ‖ LP(keyId) ‖ LP(appSession)` */
@@ -101,8 +116,31 @@ export const MemberJoinRecordSchema = z.strictObject({
   memberKey: z.string().min(1).max(128),
   boxKey: z.string().min(1).max(128),
   proof: z.string().min(1).max(128),
+  /**
+   * The assertion of one of the person's passkeys, for a code that names a person who already has one. Optional so a
+   * first join, and an older app, send the record they always did; a code that needs it and finds it missing is the
+   * one generic refusal, with the code unspent.
+   */
+  passkey: MemberJoinProofSchema.optional(),
 });
 export type MemberJoinRecord = z.infer<typeof MemberJoinRecordSchema>;
+
+/**
+ * `join-options`: ask what joining with this code needs, without spending it. Like `join` it is deliberately
+ * loose about what a code or a key may BE (a malformed field is the one generic refusal), and the key proves
+ * this session holds it, so a stranger cannot make the daemon issue a challenge for a key it does not hold.
+ * `origin` is the page's origin: the passkeys offered are the ones made there, and it is checked against the
+ * origins this machine serves.
+ */
+export const MemberJoinOptionsRecordSchema = z.strictObject({
+  t: z.literal('join-options'),
+  protocol: Dialect,
+  code: z.string().min(1).max(64),
+  memberKey: z.string().min(1).max(128),
+  origin: z.string().min(1).max(256),
+  proof: z.string().min(1).max(128),
+});
+export type MemberJoinOptionsRecord = z.infer<typeof MemberJoinOptionsRecordSchema>;
 
 /** `member`: open a request session on the member route table, proving the member key filed at join. */
 export const MemberAuthRecordSchema = z.strictObject({
@@ -137,7 +175,7 @@ export const MEMBER_JOIN_OUTCOME_BYTES = 24 * 1024;
 const JoinPadSchema = z.string().regex(/^ *$/u, 'padding is spaces only').max(MEMBER_JOIN_OUTCOME_BYTES);
 
 /**
- * The publisher's sealed answers to a `join`, each padded by {@link padJoinOutcome}, then `4440`. ONE refusal for every cause — an unknown,
+ * The publisher's sealed answers to a `join` or a `join-options`, each padded by {@link padJoinOutcome}, then `4440`. ONE refusal for every cause — an unknown,
  * spent or expired code, a full publisher, a malformed field, a proof that did not verify — so a surface
  * the whole internet can reach is no oracle. As with pairing, a publisher with no live share still keys
  * the channel and refuses identically.
@@ -153,6 +191,24 @@ export const MemberJoinOutcomeSchema = z.discriminatedUnion('t', [
     t: z.literal('join-refused'),
     protocol: Dialect,
     reason: z.literal('join_refused'),
+    pad: JoinPadSchema,
+  }),
+  /**
+   * The answer to `join-options` for a person who already has a passkey: prove one of these. The person's name is the
+   * one the invite names, which the holder of the code was always going to be told.
+   */
+  z.strictObject({
+    t: z.literal('join-challenge'),
+    protocol: Dialect,
+    memberLabel: CatalogMemberLabelSchema,
+    options: StepUpOptionsSchema,
+    pad: JoinPadSchema,
+  }),
+  /** The answer to `join-options` when no proof is wanted: the first browser of a person, or an owner-approved new passkey. */
+  z.strictObject({
+    t: z.literal('join-open'),
+    protocol: Dialect,
+    why: z.enum(['first-browser', 'owner-approved']),
     pad: JoinPadSchema,
   }),
 ]);

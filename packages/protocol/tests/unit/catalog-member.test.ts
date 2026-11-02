@@ -11,6 +11,7 @@ import {
   formatShareFragment,
   MEMBER_PASSKEY_NAME_MAX_BYTES,
   MemberJoinedResponseSchema,
+  MemberJoinProofSchema,
   memberPasskeyName,
   parseShareFragment,
   SHARE_FRAGMENT_PATTERN,
@@ -124,6 +125,47 @@ describe('minting a share', () => {
     expect(
       CatalogShareMintResponseSchema.safeParse({ share: view, code: CODE, link: 'javascript:alert(1)' }).success,
     ).toBe(false);
+  });
+});
+
+describe('a join proof and the owner’s new-passkey mark', () => {
+  const request = {
+    catalogIds: [CATALOG],
+    member: { kind: 'existing', memberId: MEMBER },
+    expiresIn: '1h',
+    uses: { kind: 'single' },
+  } as const;
+  const assertion = {
+    credentialId: 'Y3JlZA',
+    clientDataJSON: 'Y2xpZW50',
+    authenticatorData: 'YXV0aA',
+    signature: 'c2ln',
+  };
+
+  it('takes the mark as an optional boolean on a mint request and a share view', () => {
+    expect(CatalogShareMintRequestSchema.safeParse(request).success).toBe(true);
+    expect(CatalogShareMintRequestSchema.safeParse({ ...request, newPasskey: true }).success).toBe(true);
+    expect(CatalogShareMintRequestSchema.safeParse({ ...request, newPasskey: 'yes' }).success).toBe(false);
+    expect(CatalogShareViewSchema.safeParse(view).success).toBe(true);
+    expect(CatalogShareViewSchema.safeParse({ ...view, newPasskey: true }).success).toBe(true);
+    expect(CatalogShareViewSchema.safeParse({ ...view, newPasskey: 1 }).success).toBe(false);
+  });
+
+  it('says on the mint answer only that nobody has a passkey left, as an optional flag', () => {
+    const link = shareLinkUrl('https://ferretry.pages.dev', { daemonUrl: URL_, daemonId: DAEMON, code: CODE });
+    const answer = { share: view, code: CODE, link };
+    expect(CatalogShareMintResponseSchema.safeParse(answer).success).toBe(true);
+    expect(CatalogShareMintResponseSchema.safeParse({ ...answer, noPasskeyLeft: true }).success).toBe(true);
+    expect(CatalogShareMintResponseSchema.safeParse({ ...answer, noPasskeyLeft: 'yes' }).success).toBe(false);
+  });
+
+  it('is a step-up assertion with no rotation, and refuses anything extra', () => {
+    expect(MemberJoinProofSchema.safeParse(assertion).success).toBe(true);
+    expect(MemberJoinProofSchema.safeParse({ ...assertion, rotation: { deviceKey: 'a', proof: 'b' } }).success).toBe(
+      false,
+    );
+    expect(MemberJoinProofSchema.safeParse({ ...assertion, extra: 1 }).success).toBe(false);
+    expect(MemberJoinProofSchema.safeParse({ credentialId: assertion.credentialId }).success).toBe(false);
   });
 });
 
@@ -283,7 +325,12 @@ describe('no member schema has a field for a code, a key or a proof — except t
     );
     expect(schemas.length).toBeGreaterThan(15);
     // The mint answer hands the code to its owner once; a redeem spends one. Nothing else may hold one.
-    const allowed = new Set(['CatalogShareMintResponseSchema.code', 'SharedRedeemRequestSchema.code']);
+    // A join proof names the credential that signed it: an assertion over a fresh challenge, not a secret.
+    const allowed = new Set([
+      'CatalogShareMintResponseSchema.code',
+      'SharedRedeemRequestSchema.code',
+      'MemberJoinProofSchema.credentialId',
+    ]);
     const forbidden = /code|secret|token|password|private|proof|spki|memberkey|boxkey|digest|hash|credential/iu;
     const offenders = schemas.flatMap(([name, schema]) =>
       fieldNames(schema as z.ZodType)

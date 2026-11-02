@@ -29,6 +29,7 @@ import {
   HEARTBEAT_RESPONSE,
   memberAuthMessage,
   memberJoinMessage,
+  memberJoinOptionsMessage,
   openChannel,
   openRecord,
   type PrivateKeyHandle,
@@ -834,12 +835,21 @@ describe('what a tunnel session reports about its own life', () => {
 describe('a shared-catalog member on a direct socket', () => {
   function members(options: { readonly keyKnown?: boolean; readonly opens?: boolean } = {}) {
     const joins: Array<{ readonly code: string; readonly proven: boolean; readonly carrier: MemberJoinCarrier }> = [];
+    const optionAsks: Array<{
+      readonly origin: string;
+      readonly proven: boolean;
+      readonly carrier: MemberJoinCarrier;
+    }> = [];
     const opened: unknown[] = [];
     const dispatched: ApiRequest[] = [];
     const port: RelayMemberSessions = {
       join: async (attempt, how) => {
         joins.push({ code: attempt.code, proven: await attempt.prove(), carrier: how });
         return { ok: false };
+      },
+      joinOptions: async (attempt, how) => {
+        optionAsks.push({ origin: attempt.origin, proven: await attempt.prove(), carrier: how });
+        return { ok: true, answer: { kind: 'open', why: 'first-browser' } };
       },
       key: async keyId =>
         options.keyKnown !== false && keyId === MEMBER_KEY_ID
@@ -854,7 +864,7 @@ describe('a shared-catalog member on a direct socket', () => {
         return { status: 200, headers: new Map(), body: '{"shared":true}' };
       },
     };
-    return { port, joins, opened, dispatched };
+    return { port, joins, optionAsks, opened, dispatched };
   }
 
   const claim = async (transcript: Uint8Array) => ({
@@ -932,6 +942,33 @@ describe('a shared-catalog member on a direct socket', () => {
       { code: 'CODE-1234', proven: true, carrier: { kind: 'direct', rateLimitKey: '203.0.113.77' } },
     ]);
     should(await records(wire, channel)).containDeep([{ t: 'join-refused', reason: 'join_refused' }]);
+    should(wire.closes[0]?.code).equal(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
+  });
+
+  it('should hand a join-options record to the member port keyed by the socket’s own peer, and answer open', async () => {
+    const fake = members();
+    const { route } = carrier({ members: fake.port });
+    const { handler, wire, sessionId } = await connect(route, { clientAddress: '203.0.113.78' });
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    const origin = 'https://app.ferretry.test';
+    const proof = await signDeviceProof(
+      crypto_,
+      memberKey,
+      memberJoinOptionsMessage(transcript, memberKeyText, origin),
+    );
+
+    await send(
+      handler,
+      wire,
+      channel,
+      { t: 'join-options', protocol: SESSION_PROTOCOL_ID, code: 'CODE-1234', memberKey: memberKeyText, origin, proof },
+      'closed',
+    );
+
+    should(fake.optionAsks).deepEqual([
+      { origin, proven: true, carrier: { kind: 'direct', rateLimitKey: '203.0.113.78' } },
+    ]);
+    should(await records(wire, channel)).containDeep([{ t: 'join-open', why: 'first-browser' }]);
     should(wire.closes[0]?.code).equal(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
   });
 });
