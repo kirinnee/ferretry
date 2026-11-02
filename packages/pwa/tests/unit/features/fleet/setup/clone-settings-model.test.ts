@@ -7,12 +7,16 @@ import {
   type CloneItemId,
   type CloneNeed,
   cloneLogins,
+  cloneLoginTargets,
   cloneNeeds,
   controlsChange,
   keysToCopy,
+  type MatchableLogin,
+  needsAfterCopy,
   needsSentence,
   outcomeSentence,
   providersNeededBy,
+  signInLink,
   type SourceSettingsFile,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
@@ -524,5 +528,88 @@ describe('outcomeSentence', () => {
     expect(outcomeSentence(itemOf('voice'), { kind: 'refused', reason: 'The file does not check.' })).toBe(
       'Voice clean-up: not copied. The file does not check.',
     );
+  });
+});
+
+describe('the Done screen sign-in needs', () => {
+  const signIn = (id: string): CloneNeed => ({
+    key: `sign-in:${id}`,
+    kind: 'sign-in',
+    name: `Codex login (${id})`,
+    credentialId: id,
+    why: 'Work',
+    held: false,
+  });
+  const secret: CloneNeed = { key: 'secret:KEY', kind: 'secret', name: 'KEY', why: 'login glm', held: false };
+  const login = (
+    id: string,
+    harness: string,
+    status: string,
+    fields: { email?: string; label?: string; store?: string } = {},
+  ): MatchableLogin => ({ id, harness: harness as MatchableLogin['harness'], status: { word: status }, ...fields });
+  const sources = (...credentials: FleetCloneBundle['credentials']): FleetCloneBundle['credentials'] => credentials;
+
+  it('drops the need of a matched login that is signed in, and keeps the need of a new slot', () => {
+    const before = [login('claude-mine', 'claude', 'ready', { email: 'me@work.example' })];
+    const targets = cloneLoginTargets(
+      sources(
+        { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
+        { id: 'codex-you', harness: 'codex', label: 'Work' },
+      ),
+      before,
+    );
+    const after = [...before, login('codex-you', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const needs = [signIn('claude-you'), signIn('codex-you'), secret];
+    expect(needsAfterCopy(needs, targets, after)).toEqual([signIn('codex-you'), secret]);
+    expect(signInLink(signIn('codex-you'), targets, after)).toBe('codex-you');
+  });
+
+  it('counts only ready and refresh_due as signed in', () => {
+    const credentials = sources({ id: 'codex-you', harness: 'codex', label: 'Work' });
+    const need = signIn('codex-you');
+    for (const [status, shown] of [
+      ['ready', false],
+      ['refresh_due', false],
+      ['checking', true],
+      ['needs_sign_in', true],
+      ['expired', true],
+    ] as const) {
+      const here = [login('codex-mine', 'codex', status, { label: 'Work' })];
+      const targets = cloneLoginTargets(credentials, here);
+      expect(needsAfterCopy([need], targets, here)).toEqual(shown ? [need] : []);
+    }
+  });
+
+  it('keeps the need of a matched login that is not signed in, pointing at that login', () => {
+    const here = [login('codex-mine', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const targets = cloneLoginTargets(sources({ id: 'codex-you', harness: 'codex', label: 'Work' }), here);
+    const need = signIn('codex-you');
+    expect(needsAfterCopy([need], targets, here)).toEqual([need]);
+    expect(signInLink(need, targets, here)).toBe('codex-mine');
+  });
+
+  it('points an ambiguous sign-in at the slot the copy made, never at one of the logins that fit', () => {
+    const before = [
+      login('codex-you', 'codex', 'needs_sign_in', { label: 'Work' }),
+      login('codex-other', 'codex', 'needs_sign_in', { label: 'Work' }),
+    ];
+    const targets = cloneLoginTargets(sources({ id: 'codex-you', harness: 'codex', label: 'Work' }), before);
+    expect(targets.get('codex-you')).toEqual({
+      kind: 'new',
+      id: 'codex-you-2',
+      candidates: ['codex-other', 'codex-you'],
+    });
+    const after = [...before, login('codex-you-2', 'codex', 'needs_sign_in', { label: 'Work' })];
+    const need = signIn('codex-you');
+    expect(needsAfterCopy([need], targets, after)).toEqual([need]);
+    expect(signInLink(need, targets, after)).toBe('codex-you-2');
+  });
+
+  it('keeps a need the copy did not settle, linked only to a login of its own id', () => {
+    const ghost = signIn('ghost');
+    const after = [login('codex-here', 'codex', 'ready', { label: 'Work' })];
+    expect(needsAfterCopy([ghost, secret], new Map(), after)).toEqual([ghost, secret]);
+    expect(signInLink(ghost, new Map(), after)).toBeUndefined();
+    expect(signInLink(signIn('codex-here'), new Map(), after)).toBe('codex-here');
   });
 });

@@ -256,7 +256,9 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
   writeOptions(
     machine
       .command('clone')
-      .description('copy a setup exported from another machine; its logins arrive as empty slots to sign in')
+      .description(
+        'copy a setup exported from another machine; a login this machine already has is reused; any other arrives as an empty slot to sign in',
+      )
       .argument('<file>', `the output of \`${bin} machine export\` on the other machine`)
       .option('--replace', 'replace this machine’s profiles and runtimes instead of adding alongside (logins are kept)')
       .option(
@@ -282,7 +284,7 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
       options: writeFlags(options),
     });
     if (outcome !== undefined && options.json !== true) {
-      deps.out.report(`Sign in to use the copied logins: \`${bin} credentials\` lists each one.`);
+      deps.out.report(`Sign in to any copied login that is new here: \`${bin} credentials\` lists each one.`);
     }
   });
 }
