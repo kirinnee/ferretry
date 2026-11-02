@@ -1,3 +1,9 @@
+## [4.230.1](https://github.com/kirinnee/ferretry/compare/v4.230.0...v4.230.1) (2026-11-02)
+
+### Fixes
+
+* **accounts:** a second account on one site, and know who is signing in ([#1331](https://github.com/kirinnee/ferretry/issues/1331)) ([51b54b5](https://github.com/kirinnee/ferretry/commit/51b54b56ebee8fac5e3519f9ba59325bb675baf2))
+
 ## [4.230.0](https://github.com/kirinnee/ferretry/compare/v4.229.2...v4.230.0) (2026-11-02)
 
 ### Features
