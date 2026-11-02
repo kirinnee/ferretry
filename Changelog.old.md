@@ -1,3 +1,10 @@
+## [4.239.0](https://github.com/kirinnee/ferretry/compare/v4.238.0...v4.239.0) (2026-11-02)
+
+### Features
+
+* **daemon:** copy a skill from this machine into a project or runtime ([#1342](https://github.com/kirinnee/ferretry/issues/1342)) ([7c37118](https://github.com/kirinnee/ferretry/commit/7c371186651bb254733c1fefe55a1607af50a1ac))
+* **search:** find snoozed, replied, parked and old closed work, with the state shown ([#1343](https://github.com/kirinnee/ferretry/issues/1343)) ([0bc801e](https://github.com/kirinnee/ferretry/commit/0bc801eee43d59c55fb11a732434db489518e664))
+
 ## [4.238.0](https://github.com/kirinnee/ferretry/compare/v4.237.0...v4.238.0) (2026-11-02)
 
 ### Features

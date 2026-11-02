@@ -1,3 +1,9 @@
+## [4.239.1](https://github.com/kirinnee/ferretry/compare/v4.239.0...v4.239.1) (2026-11-02)
+
+### Fixes
+
+* **daemon:** refuse a token before a full stop and a PGP private key block ([#1361](https://github.com/kirinnee/ferretry/issues/1361)) ([5757de2](https://github.com/kirinnee/ferretry/commit/5757de2af8e13f1108c63631da9745c12df0cbb4))
+
 ## [4.239.0](https://github.com/kirinnee/ferretry/compare/v4.238.0...v4.239.0) (2026-11-02)
 
 ### Features
