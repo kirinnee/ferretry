@@ -196,6 +196,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sessions/:sessionId/runtime operator any',
   'POST /v1/sessions/:sessionId/signal operator any',
   'POST /v1/sessions/:sessionId/rename operator any',
+  'POST /v1/sessions/:sessionId/pin operator person',
+  'POST /v1/sessions/:sessionId/unpin operator person',
   'PATCH /v1/sessions/:sessionId/hypermedia operator any',
   'GET /v1/sessions/:sessionId/agenda-mode operator any',
   'PATCH /v1/sessions/:sessionId/agenda-mode operator any',

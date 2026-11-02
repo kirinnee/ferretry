@@ -4,6 +4,7 @@ import {
   DEFAULT_LIST_FILTER,
   hasAgenda,
   isGuideBuilder,
+  isPinned,
   isStopped,
   listedBeforeMode,
   listTallies,
@@ -20,6 +21,49 @@ import { sessionView } from '../support/sessions.ts';
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');
 const ago = (milliseconds: number): string => new Date(NOW - milliseconds).toISOString();
 const DAY = 24 * 60 * 60 * 1000;
+
+describe('pinned ferrets', () => {
+  const pin = (id: string, minutes: number, status = 'running') =>
+    sessionView(id, {
+      state: { status: status as never },
+      pinnedAt: new Date(Date.UTC(2026, 10, 2, 10, minutes)).toISOString(),
+    });
+  const filter = { mode: 'all' as const, showStopped: false };
+
+  test('lift into Pinned, oldest pin first, and are not repeated in their project group', () => {
+    const plain = sessionView('plain');
+    const result = sessionsBarView([plain, pin('late', 9), pin('early', 1)], [], filter);
+    expect(result.pinned.map(row => row.config.id)).toEqual(['early', 'late']);
+    expect(result.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['plain']);
+    expect(isPinned(plain)).toBe(false);
+  });
+
+  test('a pinned ferret that has open Attention shows once, in Pinned, not in Needs you', () => {
+    const asking = sessionView('ask', {
+      state: { status: 'running', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+      pinnedAt: ago(5_000),
+    });
+    const result = sessionsBarView([asking], [], filter);
+    expect(result.pinned.map(row => row.config.id)).toEqual(['ask']);
+    expect(result.needsYou).toEqual([]);
+  });
+
+  test('a finished pinned ferret stays listed with Show stopped off; an unpinned one is hidden', () => {
+    const done = pin('done', 2, 'completed');
+    const gone = sessionView('gone', { state: { status: 'completed' } });
+    expect(listedBeforeMode(done, filter)).toBe(true);
+    expect(listedBeforeMode(gone, filter)).toBe(false);
+    expect(sessionsBarView([done, gone], [], filter).pinned.map(row => row.config.id)).toEqual(['done']);
+  });
+
+  test('the kind filter applies to Pinned, and the tallies count the pinned ferret once', () => {
+    const interactive = sessionView('i', { config: { mode: 'interactive' }, pinnedAt: ago(1_000) });
+    const agent = pin('a', 3);
+    const onlyInteractive = sessionsBarView([interactive, agent], [], { mode: 'interactive', showStopped: false });
+    expect(onlyInteractive.pinned.map(row => row.config.id)).toEqual(['i']);
+    expect(onlyInteractive.counts).toEqual({ all: 2, auto: 1, interactive: 1 });
+  });
+});
 
 describe('how much a row says', () => {
   test('is one line unless the reader chose Full', () => {

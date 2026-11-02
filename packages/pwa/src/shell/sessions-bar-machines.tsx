@@ -21,12 +21,23 @@ import { readOnlyReason } from '../lib/machine-outage.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
 import { MachineHeadControls, type MoveMachine, useMachineReorder } from './machine-reorder.tsx';
 import { SessionMenuContext } from './session-menu-context.ts';
+import { SessionPinContext } from './session-pin-context.ts';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
+import { SessionsBarPinned } from './sessions-bar-pinned.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
 
 const NO_MOVE: MoveMachine = () => undefined;
+
+const everythingMoved = (pinned: number, needsYou: number): string | null =>
+  pinned > 0 && needsYou > 0
+    ? 'Everything here is pinned or in Needs you.'
+    : pinned > 0
+      ? 'Everything here is pinned.'
+      : needsYou > 0
+        ? 'Everything here is in Needs you.'
+        : null;
 
 export interface SessionsBarMachinesProps {
   readonly view: AllMachinesView;
@@ -69,17 +80,21 @@ export function SessionsBarMachines({
   const learns = (machine: DaemonId, session: SessionView): boolean =>
     (machineLearners?.get(machine) ?? (machine === daemonId ? learningPassive : undefined))?.has(session.config.id) ===
     true;
+  const entryRows = (entries: AllMachinesView['pinned']) =>
+    entries.map(entry => ({ daemonId: entry.daemonId, view: entry.view, machine: entry.machineName }));
   return (
     <>
+      <SessionsBarPinned
+        isActive={row => active(row.daemonId, row.view)}
+        learns={row => learns(row.daemonId, row.view)}
+        onNavigate={onNavigate}
+        rows={entryRows(view.pinned)}
+      />
       <SessionsBarNeedsYou
         isActive={row => active(row.daemonId, row.view)}
         learns={() => false}
         onNavigate={onNavigate}
-        rows={view.needsYou.map(entry => ({
-          daemonId: entry.daemonId,
-          view: entry.view,
-          machine: entry.machineName,
-        }))}
+        rows={entryRows(view.needsYou)}
       />
       {reorder.drawn
         .flatMap(id => byId.get(id) ?? [])
@@ -108,9 +123,7 @@ export function SessionsBarMachines({
                 <span className="fy-sbar__count">{machine.total}</span>
               </h2>
               {machine.groups.length === 0 ? (
-                <p className="fy-sbar__empty">
-                  {machine.needsYou > 0 ? 'Everything here is in Needs you.' : 'No sessions.'}
-                </p>
+                <p className="fy-sbar__empty">{everythingMoved(machine.pinned, machine.needsYou) ?? 'No sessions.'}</p>
               ) : (
                 // A machine that is down keeps its last rows, openable but READ-ONLY: no row menu, because
                 // Stop, Rename or Migrate would only fail on a machine nobody can reach — and the title says why.
@@ -150,7 +163,13 @@ export function SessionsBarMachines({
  * element, so the rows keep exactly the layout every other machine's rows have.
  */
 function OfflineRows({ offline, children }: { readonly offline: boolean; readonly children: ReactNode }) {
-  return offline ? <SessionMenuContext.Provider value={undefined}>{children}</SessionMenuContext.Provider> : children;
+  return offline ? (
+    <SessionMenuContext.Provider value={undefined}>
+      <SessionPinContext.Provider value={undefined}>{children}</SessionPinContext.Provider>
+    </SessionMenuContext.Provider>
+  ) : (
+    children
+  );
 }
 
 /**
@@ -164,6 +183,11 @@ export function SessionsRailMachineDots({
   onNavigate,
 }: Omit<SessionsBarMachinesProps, 'learningPassive' | 'machineLearners' | 'now'>) {
   // Unread dots lead whichever machine they are on (an offline machine's stay in its own group above).
+  const pinned = view.pinned.map(entry => ({
+    daemonId: entry.daemonId,
+    machine: entry.machineName,
+    view: entry.view,
+  }));
   const rows = agendaFirst(
     [
       ...view.needsYou.map(entry => ({ daemonId: entry.daemonId, machine: entry.machineName, view: entry.view })),
@@ -177,7 +201,7 @@ export function SessionsRailMachineDots({
   );
   return (
     <>
-      {rows.map(row => (
+      {[...pinned, ...rows].map(row => (
         <li key={`${row.daemonId}:${row.view.config.id}`}>
           <SessionsRailDot
             active={row.daemonId === daemonId && row.view.config.id === activeSessionId}

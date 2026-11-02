@@ -33,6 +33,7 @@ export * from './mounts/session-migrate.ts';
 export * from './mounts/session-restart.ts';
 export * from './mounts/session-reads.ts';
 export * from './mounts/session-rename.ts';
+export * from './mounts/session-pin.ts';
 export * from './mounts/session-resume.ts';
 export * from './mounts/session-runtime.ts';
 export * from './mounts/session-send.ts';

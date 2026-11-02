@@ -185,6 +185,7 @@
         "harness/task-plan-screenshot.tsx",
         "harness/agenda-switch-screenshot.tsx",
         "harness/needs-you-sidebar-screenshot.tsx",
+        "harness/pinned-sidebar-screenshot.tsx",
         "harness/ended-agenda-sidebar-screenshot.tsx",
         "harness/agenda-default-screenshot.tsx",
         "harness/page-scripts-screenshot.tsx",

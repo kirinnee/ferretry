@@ -540,6 +540,7 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
+import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -1384,9 +1385,12 @@ import {
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
+  AgentPinService,
+  AgentPinSubsystem,
   withContext,
   withLivenessLedger,
   withOutdated,
+  withPinned,
   withRevive,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
@@ -12608,6 +12612,36 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { next: () => crypto.randomUUID() },
       );
       sharedDraftsHolder.service = sharedDraftService;
+      // The owner's pins live with the daemon of the machine that owns the ferret; the list carries them to every device.
+      const agentPins = new AgentPinService(
+        new FileAgentPinRepository(paths, stateFiles),
+        clock,
+        new KeyedSerialExecutor(),
+      );
+      const pinnedSessions = withPinned(
+        withRevive(
+          withContext(
+            withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
+            {
+              // The window the account's catalog declares for each session's model, read once per roster.
+              declared: async () => {
+                const fleet = await accounts.accounts();
+                return view => {
+                  const account = findAccountByAgent(fleet, view.config.agent);
+                  const model = view.config.model ?? view.config.modelHint;
+                  return account === undefined || model === undefined
+                    ? undefined
+                    : declaredModel(account, model)?.context;
+                };
+              },
+              overrides: contextWindowOverrides,
+              now: () => Date.parse(clock.now()),
+              ttlMs: 30_000,
+            },
+          ),
+        ),
+        agentPins,
+      );
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -12841,27 +12875,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           nextPeer: () => crypto.randomUUID(),
           clock: { nowMs: () => Date.now() },
         },
-        sessions: withRevive(
-          withContext(
-            withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
-            {
-              // The window the account's catalog declares for each session's model, read once per roster.
-              declared: async () => {
-                const fleet = await accounts.accounts();
-                return view => {
-                  const account = findAccountByAgent(fleet, view.config.agent);
-                  const model = view.config.model ?? view.config.modelHint;
-                  return account === undefined || model === undefined
-                    ? undefined
-                    : declaredModel(account, model)?.context;
-                };
-              },
-              overrides: contextWindowOverrides,
-              now: () => Date.parse(clock.now()),
-              ttlMs: 30_000,
-            },
-          ),
-        ),
+        sessions: pinnedSessions,
+        sessionPin: new AgentPinSubsystem(pinnedSessions, agentPins),
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.
         sessionAddresses: {
