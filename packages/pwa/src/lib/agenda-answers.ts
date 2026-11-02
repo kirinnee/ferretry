@@ -162,13 +162,8 @@ export const cardAnswers = (item: AnswerSource): readonly AgendaCardAnswer[] => 
   const answers = agendaCardAnswers(item);
   // A card in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
   const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret' && !agendaInDiscussion(item);
-  const open = waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
-  return item.gate === undefined ? open : open.map(mirrored);
+  return waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
 };
-
-/** A gate item answers the owner's one model — → is Done, ← is Not good — so the protocol's ← first option is turned around. */
-const mirrored = (answer: AgendaCardAnswer): AgendaCardAnswer =>
-  answer.direction === 'up' ? answer : { ...answer, direction: answer.direction === 'left' ? 'right' : 'left' };
 
 /** What one swipe (or arrow) gives: its label for the stamp, and the action — `null` until a clarify has text. */
 export interface SwipeTarget {

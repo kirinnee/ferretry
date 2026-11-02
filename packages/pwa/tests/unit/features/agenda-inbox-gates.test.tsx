@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaItem } from '@ferretry/protocol';
+import { gateAskOptions, type AgendaGate, type AgendaItem } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import {
@@ -15,6 +15,13 @@ import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
+const GATE_OPTIONS: Pick<AgendaGate, 'options'> = {
+  options: [
+    { id: 'o0', label: 'Done', outcome: 'close' },
+    { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+  ],
+};
+
 const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
   agendaItem(id, {
     subject: 'Try it: open the pairing page',
@@ -24,8 +31,7 @@ const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): 
     kind: 'choice',
     raisedBy: 'daemon',
     raisedBySession: null,
-    // The daemon lays the options out in swipe order: Done first, Not good last; the app turns them: → Done, ← Not good.
-    ask: choices('Done', 'Not good'),
+    ask: { kind: 'multiple-choice', options: gateAskOptions(GATE_OPTIONS) } as AgendaItem['ask'],
     gate: {
       cardId,
       laneId: 'tested',
@@ -33,10 +39,7 @@ const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): 
       entry: 1,
       projectId: 'p1',
       projectName: 'Ferretry',
-      options: [
-        { id: 'o0', label: 'Done', outcome: 'close' },
-        { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
-      ],
+      options: [...GATE_OPTIONS.options],
     },
     ...extra,
   } as Partial<AgendaItem>);
