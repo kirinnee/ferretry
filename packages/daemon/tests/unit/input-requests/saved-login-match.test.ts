@@ -574,3 +574,70 @@ describe('who the page is signing in', () => {
     should(saved.newAccount).deepEqual({ id: 'GOOGLE_B_2', label: 'Google · b@y.com' });
   });
 });
+
+describe('an account saved for ANOTHER site is only a second step, never the default (B137-B)', () => {
+  const okta = site('LIFTOFF_OKTA_COM', ['liftoff.okta.com']);
+  const google = site('ACCOUNTS_GOOGLE_COM', ['accounts.google.com']);
+  const bare = account('BARE');
+  const list = listing([account('LIFTOFF_OKTA_COM'), account('ACCOUNTS_GOOGLE_COM'), bare], [okta, google]);
+
+  it('should keep another site’s account out of the one-tap and say where it signs in', () => {
+    const saved = savedFor('secret', 'accounts.google.com', list);
+    const okt = saved.offers.find(offer => offer.id === 'LIFTOFF_OKTA_COM');
+    should(okt).deepEqual({
+      id: 'LIFTOFF_OKTA_COM',
+      label: 'liftoff_okta_com',
+      fills: 'password',
+      matched: false,
+      elsewhere: ['liftoff.okta.com'],
+    });
+    should(saved.offers.filter(offer => offer.primary === true).map(offer => offer.id)).deepEqual([
+      'ACCOUNTS_GOOGLE_COM',
+    ]);
+    should(saved.offers.filter(offer => offer.matched).map(offer => offer.id)).deepEqual(['ACCOUNTS_GOOGLE_COM']);
+  });
+
+  it('should offer it as the only account on a site nothing signs in at, still by hand and never primary', () => {
+    const saved = savedFor('secret', 'accounts.google.com', listing([account('LIFTOFF_OKTA_COM')], [okta]));
+    should(saved.offers.map(offer => [offer.id, offer.matched, offer.primary === true])).deepEqual([
+      ['LIFTOFF_OKTA_COM', false, false],
+    ]);
+    should(saved.offers[0]?.elsewhere).deepEqual(['liftoff.okta.com']);
+    should(saved).not.have.property('differentFrom');
+  });
+
+  it('should list the accounts that sign in nowhere without a place, after the ones here and before those elsewhere', () => {
+    const saved = savedFor('secret', 'accounts.google.com', list);
+    should(saved.offers.map(offer => [offer.id, offer.elsewhere])).deepEqual([
+      ['ACCOUNTS_GOOGLE_COM', undefined],
+      ['BARE', undefined],
+      ['LIFTOFF_OKTA_COM', ['liftoff.okta.com']],
+    ]);
+  });
+
+  it('should not call a site’s account "elsewhere" when a sign-in of it is only FOR this site', () => {
+    const forSite = site('VERCEL', ['login.vercel.example'], { match: ['vercel.com', 'login.vercel.example'] });
+    const saved = savedFor('secret', 'vercel.com', listing([account('VERCEL')], [forSite]));
+    should(saved.offers.map(offer => [offer.id, offer.matched, offer.elsewhere])).deepEqual([
+      ['VERCEL', false, undefined],
+    ]);
+  });
+
+  it('should name a terminal place and every place of an account, once each', () => {
+    const both = [site('MULTI', ['a.example']), site('MULTI', ['b.example', 'a.example']), tty('MULTI', 'sudo', 'box')];
+    const saved = savedFor('secret', 'accounts.google.com', listing([account('MULTI')], both));
+    should(saved.offers[0]?.elsewhere).deepEqual(['a.example', 'b.example', 'sudo@box']);
+  });
+
+  it('should hold the same for a card of several fields', () => {
+    const fields = [
+      { id: 'email', sensitivity: 'plain' as const },
+      { id: 'password', sensitivity: 'secret' as const },
+    ];
+    const withName = listing([account('LIFTOFF_OKTA_COM', { username: 'kirin' })], [okta]);
+    const saved = savedForFields(fields, 'accounts.google.com', withName);
+    should(saved.offers.map(offer => [offer.id, offer.matched, offer.elsewhere])).deepEqual([
+      ['LIFTOFF_OKTA_COM', false, ['liftoff.okta.com']],
+    ]);
+  });
+});

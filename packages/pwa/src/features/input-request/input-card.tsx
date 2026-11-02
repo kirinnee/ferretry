@@ -68,6 +68,7 @@ import {
   offersPressEnter,
   oneFactorLine,
   offerUsername,
+  OTHER_SITE_ACCOUNTS_WORDS,
   pastedWords,
   pickOneOffers,
   plainFlagWords,
@@ -80,6 +81,7 @@ import {
   usernameLocked,
   savedBody,
   savedButtonWords,
+  signsInAtWords,
   savedOutcomeWords,
   sealedBody,
   sendBlock,
@@ -784,7 +786,7 @@ function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonl
 
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh, extra }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
-  const { primary, others: rest } = splitOffers(request.saved);
+  const { primary, others: rest, elsewhere } = splitOffers(request.saved);
   const pickOne = pickOneOffers(request.saved);
   const others = rest.filter(offer => !pickOne.includes(offer));
   const reasonLine = choiceReasonWords(request.saved, primary);
@@ -958,6 +960,11 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
             no username saved
           </span>
         ) : null}
+        {offer.elsewhere === undefined ? null : (
+          <span className="text-meta font-normal opacity-80" data-input-signs-in-at="">
+            {signsInAtWords(offer)}
+          </span>
+        )}
         {offer.hinted === true ? (
           <span className="text-meta font-normal opacity-80" data-input-hinted="">
             the ferret suggested this
@@ -1173,7 +1180,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         </div>
       ) : null}
 
-      {others.length === 0 ? null : (
+      {others.length === 0 && elsewhere.length === 0 ? null : (
         <details className="min-w-0" data-input-others="">
           <summary className="cursor-pointer text-cell text-muted">Choose another account</summary>
           <div className="mt-2 flex flex-col items-stretch gap-2">
@@ -1182,6 +1189,14 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               <p className="m-0 text-meta text-muted" data-input-one-factor="">
                 {othersOneFactor}
               </p>
+            )}
+            {elsewhere.length === 0 ? null : (
+              <details className="min-w-0" data-input-elsewhere="">
+                <summary className="cursor-pointer text-cell text-muted">{OTHER_SITE_ACCOUNTS_WORDS}</summary>
+                <div className="mt-2 flex flex-col items-stretch gap-2">
+                  {elsewhere.map(offer => offerButton(offer, false))}
+                </div>
+              </details>
             )}
           </div>
         </details>

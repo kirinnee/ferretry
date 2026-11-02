@@ -36,6 +36,7 @@ import {
   shotBoxes,
   showsHeaderRisk,
   signInWords,
+  signsInAtWords,
   splitOffers,
   targetRef,
   titleWords,
@@ -141,7 +142,24 @@ describe('offers ordering', () => {
   });
 
   it('has no primary and no others when nothing is saved', () => {
-    expect(splitOffers(undefined)).toEqual({ primary: undefined, others: [] });
+    expect(splitOffers(undefined)).toEqual({ primary: undefined, others: [], elsewhere: [] });
+  });
+
+  it('puts an account that signs in at another site in a list of its own, never the primary or the others', () => {
+    const here = offer({ id: 'HERE', label: 'here', matched: false });
+    const away = offer({ id: 'AWAY', label: 'away', matched: false, elsewhere: ['liftoff.okta.com'] });
+
+    const split = splitOffers(saved({ offers: [here, away] }));
+
+    expect(split.primary).toBeUndefined();
+    expect(split.others).toEqual([here]);
+    expect(split.elsewhere).toEqual([away]);
+  });
+
+  it('says where an account from another site signs in', () => {
+    const away = offer({ matched: false, elsewhere: ['liftoff.okta.com', 'sudo@box'] });
+
+    expect(signsInAtWords(away)).toBe('signs in at liftoff.okta.com, sudo@box');
   });
 });
 

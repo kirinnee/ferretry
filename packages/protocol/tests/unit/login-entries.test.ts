@@ -134,6 +134,9 @@ describe('what an input card offers', () => {
     expect(card([{ ...primary, signIn: undefined }])).toBe(false);
     expect(card([{ ...primary, why: 'site' }])).toBe(false);
     expect(card([{ ...primary, why: 'ferret', project: undefined }])).toBe(true);
+    expect(card([{ ...older, matched: false, elsewhere: ['liftoff.okta.com'] }])).toBe(true);
+    expect(card([{ ...older, matched: false, elsewhere: [] }])).toBe(false);
+    expect(card([{ ...older, elsewhere: ['liftoff.okta.com'] }])).toBe(false);
   });
 
   it('should fill the password for a secret, the code for a private value and the username for plain', () => {

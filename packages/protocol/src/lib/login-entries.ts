@@ -388,6 +388,13 @@ export const InputSavedOfferSchema = z
     fills: LoginFieldRoleSchema,
     matched: z.boolean(),
     hinted: z.boolean().optional(),
+    /**
+     * Where this account signs in, when that is somewhere else (place keys, names only: `liftoff.okta.com`,
+     * `sudo@kirin-box`). Only on an offer picked by hand (`matched: false`): the card puts it behind a second step
+     * that says where it signs in, and it is never the one-tap choice. Absent: it signs in nowhere (offered with the
+     * rest by hand), or an older daemon, whose card keeps it in the one list.
+     */
+    elsewhere: z.array(LoginMatchSchema).min(1).max(LOGIN_MATCH_MAX).readonly().optional(),
     signIn: SignInIdSchema.optional(),
     primary: z.literal(true).optional(),
     why: SignInChoiceReasonSchema.optional(),
@@ -406,6 +413,12 @@ export const InputSavedOfferSchema = z
         code: 'custom',
         path: ['codes'],
         message: 'only a matched offer that fills a code names the keys it makes codes from',
+      });
+    if (offer.elsewhere !== undefined && offer.matched)
+      context.addIssue({
+        code: 'custom',
+        path: ['elsewhere'],
+        message: 'an offer that signs in here is not one from somewhere else',
       });
     if (offer.primary === true && !offer.matched)
       context.addIssue({ code: 'custom', path: ['primary'], message: 'only a matched offer is the one-tap choice' });

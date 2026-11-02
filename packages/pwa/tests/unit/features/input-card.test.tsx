@@ -225,6 +225,57 @@ describe('next time: a saved login', () => {
 
     expect((deliver(calls).body as Record<string, unknown>).entry).toBe('GITHUB_KIRINNEE');
   });
+
+  describe('accounts saved for another site (B137-B)', () => {
+    const okta = offer({
+      id: 'LIFTOFF_OKTA_COM',
+      label: 'Liftoff Okta',
+      matched: false,
+      elsewhere: ['liftoff.okta.com'],
+    });
+
+    it('keeps them out of "Choose another account" and behind a second step that says where each signs in', async () => {
+      const here = offer({ id: 'GOOGLE_B', label: 'Google b', matched: true, signIn: 'si_0123456789abcdee' });
+      const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, here, okta] })));
+
+      const first = must(q('[data-input-others]'), 'the choose-another list');
+      const second = must(first.querySelector('[data-input-elsewhere]'), 'the second step');
+      expect(second.querySelector('summary')?.textContent).toBe('Use an account from another site…');
+      expect(second.querySelector('[data-input-offer="LIFTOFF_OKTA_COM"]')).not.toBeNull();
+      expect(second.querySelector('[data-input-signs-in-at]')?.textContent).toBe('signs in at liftoff.okta.com');
+      // The first step lists none of them.
+      const firstStep = [...first.querySelectorAll('[data-input-offer]')].filter(node => !second.contains(node));
+      expect(firstStep.map(node => node.getAttribute('data-input-offer'))).not.toContain('LIFTOFF_OKTA_COM');
+    });
+
+    it('never makes one a one-tap, even as the only account on the card', async () => {
+      const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [okta] })));
+
+      expect(q('[data-input-offer-matched]')).toBeNull();
+      expect(q('[data-variant="primary"][data-input-offer]')).toBeNull();
+      expect(q('[data-input-value]')).not.toBeNull();
+      expect(q('[data-input-elsewhere] [data-input-offer="LIFTOFF_OKTA_COM"]')).not.toBeNull();
+    });
+
+    it('sends the account the owner picked there, as a hand pick with no sign-in', async () => {
+      const { q, calls } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [okta] })));
+
+      await click(q('[data-input-elsewhere] [data-input-offer="LIFTOFF_OKTA_COM"]'));
+      await settle();
+
+      const body = deliver(calls).body as Record<string, unknown>;
+      expect(body.entry).toBe('LIFTOFF_OKTA_COM');
+      expect(body.signIn).toBeUndefined();
+    });
+
+    it('draws no second step when no offer signs in elsewhere', async () => {
+      const other = offer({ id: 'GITHUB_KIRINNEE', label: 'GitHub (kirinnee)', matched: false });
+      const { q } = await show(withSaved(saved({ offers: [matched, other] })));
+
+      expect(q('[data-input-others]')).not.toBeNull();
+      expect(q('[data-input-elsewhere]')).toBeNull();
+    });
+  });
 });
 
 describe('first time: typing and saving', () => {

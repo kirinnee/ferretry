@@ -519,6 +519,13 @@ describe('account names on the card routes (secrev-1331 M1, L4)', () => {
             fills: 'password',
             matched: true,
           },
+          {
+            id: 'LIFTOFF_OKTA_COM',
+            label: 'Liftoff Okta',
+            fills: 'password',
+            matched: false,
+            elsewhere: ['liftoff.okta.com'],
+          },
         ],
       },
     };
@@ -534,7 +541,15 @@ describe('account names on the card routes (secrev-1331 M1, L4)', () => {
     } as unknown as InputRequestService;
     return { dispatch: new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, guard), delivered };
   }
-  const NAMES = ['kirinnee97', 'ernest', 'ACCOUNTS_GOOGLE_COM', 'GOOGLE_ERNEST', 'Google kirinnee97'];
+  const NAMES = [
+    'kirinnee97',
+    'ernest',
+    'ACCOUNTS_GOOGLE_COM',
+    'GOOGLE_ERNEST',
+    'Google kirinnee97',
+    'LIFTOFF_OKTA_COM',
+    'liftoff.okta.com',
+  ];
 
   it('should answer a device without secrets.use the cards with no account or person named in them', async () => {
     const blind = named(withoutGrant({ capability: 'secrets', axis: 'use' }));
@@ -557,6 +572,7 @@ describe('account names on the card routes (secrev-1331 M1, L4)', () => {
       for (const name of NAMES) should(String(answer.body)).not.containEql(name);
     }
     should(String(granted.body)).containEql('kirinnee97@gmail.com');
+    should(String(granted.body)).containEql('liftoff.okta.com');
   });
 
   it('should refuse typing a saved account without secrets.use, and Save as without secrets.configure', async () => {
