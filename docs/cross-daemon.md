@@ -59,6 +59,9 @@ summary is [security.md](security.md).
   same path twice, a component reference spelled two ways, or a file **no carried component owns** —
   which would otherwise overwrite one of the target's own hooks while the review listed nothing. The
   app shows the refusal instead of offering Copy. An honest export writes every path one plain way.
+  A hooks **folder** that clashes with a path the target already uses (the same folder, one inside it, or
+  one holding it) moves with its component to a free name (`hooks/guard` → `hooks/guard-2`), and every
+  carried file under it follows, so a copy never writes into the target's own hook scripts.
 - **3b. Paths outside the setup folder — refused early.** A bundle carrying an absolute, `~`, `$`,
   `..` or backslashed file path is refused by name before anything is planned. The provisioner's own
   containment check stays the last line.
