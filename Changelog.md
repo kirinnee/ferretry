@@ -1,3 +1,9 @@
+## [4.227.1](https://github.com/kirinnee/ferretry/compare/v4.227.0...v4.227.1) (2026-11-02)
+
+### Fixes
+
+* **agenda:** read a board past one bad entry, and say why the Inbox could not read it ([#1322](https://github.com/kirinnee/ferretry/issues/1322)) ([8e1fa1e](https://github.com/kirinnee/ferretry/commit/8e1fa1ea8f46470f17829b9027a890d927c0e03d))
+
 ## [4.227.0](https://github.com/kirinnee/ferretry/compare/v4.226.1...v4.227.0) (2026-11-02)
 
 ### Features
