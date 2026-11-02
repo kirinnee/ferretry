@@ -344,15 +344,14 @@ describe('minting a share', () => {
     should(members.calls).deepEqual([]);
   });
 
-  it('refuses a code for many people that names someone already in, until join-by-proof, and spends no proof', async () => {
+  it('hands a code for many people that names someone already in to the service, which has each browser prove', async () => {
     const members = new FakeMembers();
     const many = { ...MINT, member: { kind: 'existing', memberId: MEMBER }, uses: { kind: 'multi', cap: 5 } };
 
     const answer = await drive(members, 'POST', '/v1/catalog-shares', many, FRESH_DEVICE);
 
-    should(answer.status).equal(400);
-    should(answer.claimedActs).deepEqual([]);
-    should(members.calls).deepEqual([]);
+    should(answer.status).equal(201);
+    should(members.calls.map(call => call.act)).deepEqual(['mint']);
   });
 
   it('hands a code for many people that names a person by ID to the service, which says whether they are in', async () => {

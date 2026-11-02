@@ -68,6 +68,11 @@ const stepUpCases: SchemaCase[] = [
     value: { challenge: CHALLENGE, rpId: 'app.ferretry.test', allowCredentials: allow, timeout: 120_000 },
   },
   {
+    name: 'join-proof options',
+    schema: stepUp.JoinProofOptionsSchema,
+    value: { challenge: CHALLENGE, rpId: 'app.ferretry.test', allowCredentials: allow, timeout: 120_000 },
+  },
+  {
     name: 'assertion',
     schema: stepUp.StepUpAssertionSchema,
     value: { credentialId: CREDENTIAL, clientDataJSON: 'e30', authenticatorData: 'AAAA', signature: 'MEUC' },

@@ -33,9 +33,9 @@
  */
 import {
   CatalogMemberLabelSchema,
+  JoinProofOptionsSchema,
   MemberJoinedResponseSchema,
   MemberJoinProofSchema,
-  StepUpOptionsSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { concatBytes, fromBase64UrlFixed, isAllZero, lengthPrefixed, utf8Bytes } from './binary.ts';
@@ -201,7 +201,7 @@ export const MemberJoinOutcomeSchema = z.discriminatedUnion('t', [
     t: z.literal('join-challenge'),
     protocol: Dialect,
     memberLabel: CatalogMemberLabelSchema,
-    options: StepUpOptionsSchema,
+    options: JoinProofOptionsSchema,
     pad: JoinPadSchema,
   }),
   /** The answer to `join-options` when no proof is wanted: the first browser of a person, or an owner-approved new passkey. */

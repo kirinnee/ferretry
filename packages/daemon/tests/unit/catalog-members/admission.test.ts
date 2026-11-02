@@ -595,7 +595,12 @@ describe('admitJoin: spending the code', () => {
 
   it('should name the member by the stored label when the member exists', () => {
     // Arrange
-    const members = membersDoc(storedMember(1, { label: 'Alice (renamed)' }));
+    const members = membersDoc(
+      storedMember(1, {
+        label: 'Alice (renamed)',
+        keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })],
+      }),
+    );
     const shares = sharesDoc(storedShare(1, { memberLabel: 'Alice', memberKind: 'new' }));
 
     // Act
@@ -906,7 +911,7 @@ describe('joinNeed', () => {
 
   it('should need nothing for a person who is not here yet', () => {
     // Arrange / Act / Assert
-    should(joinNeed(storedShare(1), undefined)).equal('first-browser');
+    should(joinNeed(storedShare(1), undefined, T0)).equal('first-browser');
   });
 
   it('should need a proof of a person who has a passkey', () => {
@@ -914,7 +919,7 @@ describe('joinNeed', () => {
     const share = storedShare(1, { memberKind: 'existing' });
 
     // Act / Assert
-    should(joinNeed(share, withPasskey)).equal('proof');
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
   });
 
   it('should need a proof when only one of the person’s browsers has a passkey', () => {
@@ -922,7 +927,7 @@ describe('joinNeed', () => {
     const some = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 }), storedKey(2)] });
 
     // Act / Assert
-    should(joinNeed(storedShare(1, { memberKind: 'existing' }), some)).equal('proof');
+    should(joinNeed(storedShare(1, { memberKind: 'existing' }), some, T0)).equal('proof');
   });
 
   it('should let the owner’s mark stand in for the proof, for a person with or without a passkey', () => {
@@ -930,8 +935,8 @@ describe('joinNeed', () => {
     const share = storedShare(1, { memberKind: 'existing', newPasskey: true });
 
     // Act / Assert
-    should(joinNeed(share, withPasskey)).equal('owner-approved');
-    should(joinNeed(share, withoutPasskey)).equal('owner-approved');
+    should(joinNeed(share, withPasskey, T0)).equal('owner-approved');
+    should(joinNeed(share, withoutPasskey, T0)).equal('owner-approved');
   });
 
   it('should not read a mark that is false as the owner’s say-so', () => {
@@ -939,8 +944,8 @@ describe('joinNeed', () => {
     const share = storedShare(1, { memberKind: 'existing', newPasskey: false });
 
     // Act / Assert
-    should(joinNeed(share, withPasskey)).equal('proof');
-    should(joinNeed(share, withoutPasskey)).equal('blocked');
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
   });
 
   it('should block a person with no passkey left, unless the owner marks the invite', () => {
@@ -948,16 +953,38 @@ describe('joinNeed', () => {
     const share = storedShare(1, { memberKind: 'existing' });
 
     // Act / Assert
-    should(joinNeed(share, withoutPasskey)).equal('blocked');
-    should(joinNeed(share, storedMember(1))).equal('blocked');
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
+    should(joinNeed(share, storedMember(1), T0)).equal('blocked');
   });
 
-  it('should need nothing for a person with no passkey when the code was made before they joined', () => {
+  it('should need nothing for a person with no passkey while their first browser can still register one', () => {
     // Arrange
     const share = storedShare(1, { memberKind: 'new' });
+    const open = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })] });
 
     // Act / Assert
-    should(joinNeed(share, withoutPasskey)).equal('first-browser');
+    should(joinNeed(share, open, T0)).equal('first-browser');
+  });
+
+  it('should block a second invite made before the person joined once no passkey window is open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new' });
+    const closing = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0) })] });
+    const swept = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 })] });
+
+    // Act / Assert
+    should(joinNeed(share, closing, T0)).equal('blocked');
+    should(joinNeed(share, swept, T0)).equal('blocked');
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
+    should(joinNeed(share, storedMember(1), T0)).equal('blocked');
+  });
+
+  it('should still let the owner’s mark open a second pre-join invite once no window is open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new', newPasskey: true });
+
+    // Act / Assert
+    should(joinNeed(share, withoutPasskey, T0)).equal('owner-approved');
   });
 
   it('should let a group link keep joining strangers to the one name, though that name has a passkey now', () => {
@@ -966,8 +993,8 @@ describe('joinNeed', () => {
     const multiForExisting = storedShare(1, { memberKind: 'existing', uses: { kind: 'multi', cap: 50 } });
 
     // Act / Assert
-    should(joinNeed(group, withPasskey)).equal('first-browser');
-    should(joinNeed(multiForExisting, withPasskey)).equal('proof');
+    should(joinNeed(group, withPasskey, T0)).equal('first-browser');
+    should(joinNeed(multiForExisting, withPasskey, T0)).equal('proof');
   });
 
   it('should still need a proof for a single-use code made before the person joined, once they have a passkey', () => {
@@ -975,7 +1002,7 @@ describe('joinNeed', () => {
     const share = storedShare(1, { memberKind: 'new', uses: { kind: 'single' } });
 
     // Act / Assert
-    should(joinNeed(share, withPasskey)).equal('proof');
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
   });
 });
 

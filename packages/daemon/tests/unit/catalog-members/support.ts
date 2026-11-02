@@ -346,9 +346,17 @@ export const multiNamed = (
 export const singleForMember = (memberN: number, ids: readonly string[] = [catalogId(1)]): CatalogShareMintRequest => ({
   catalogIds: [...ids],
   member: { kind: 'existing', memberId: memberId(memberN) },
-  newPasskey: true,
   expiresIn: '1h',
   uses: { kind: 'single' },
+});
+
+/** The same invite, marked by the owner "They need a new passkey" (D8): a join through it needs no proof. */
+export const singleForMemberD8 = (
+  memberN: number,
+  ids: readonly string[] = [catalogId(1)],
+): CatalogShareMintRequest => ({
+  ...singleForMember(memberN, ids),
+  newPasskey: true,
 });
 
 export async function refusal(work: () => Promise<unknown>): Promise<CatalogMemberRefusal> {

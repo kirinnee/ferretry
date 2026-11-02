@@ -313,7 +313,7 @@ export class CatalogMemberService {
     const member = state.members.members.find(entry => entry.memberId === share.memberId);
     if (member === undefined && share.memberKind === 'existing') return undefined;
     return {
-      need: joinNeed(share, member),
+      need: joinNeed(share, member, now),
       shareId: share.shareId,
       memberId: share.memberId,
       memberLabel: member?.label ?? share.memberLabel,
@@ -920,11 +920,11 @@ export class CatalogMemberService {
     );
   }
 
-  #alreadyIn(member: StoredMember): CatalogMemberRefusal {
+  #reservedForOne(holder: { memberId: string; label: string }): CatalogMemberRefusal {
     return new CatalogMemberRefusal(
       'member_exists',
-      `${member.label} is already in. A code for many people can't add to someone already in yet; use a single-use code.`,
-      member.memberId,
+      `${holder.label} has an invite that nobody has used yet. A code for many people can't name them; use a single-use code, or pick a name nobody holds.`,
+      holder.memberId,
     );
   }
 
@@ -947,7 +947,6 @@ export class CatalogMemberService {
     if ('kind' in member && member.kind === 'existing') {
       const found = state.members.members.find(entry => entry.memberId === member.memberId);
       if (found === undefined) throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
-      if (uses.kind === 'multi') throw this.#alreadyIn(found);
       return { kind: 'existing', memberId: found.memberId, label: found.label, existing: found };
     }
     const name = 'kind' in member ? member.label : member.name;
@@ -956,9 +955,9 @@ export class CatalogMemberService {
       return { kind: 'new', memberId: `mbr_${randomText(this.deps.crypto)}`, label: name, existing: undefined };
     if ('kind' in member) throw this.#taken(name, holder.memberId);
     const found = state.members.members.find(entry => entry.memberId === holder.memberId);
-    // Until a joiner can prove they are the person (join-by-proof), a code for many people never reaches someone
-    // who is already in: every stranger who held it would arrive as them. A person only reserved may still have one.
-    if (found !== undefined && uses.kind === 'multi') throw this.#alreadyIn(found);
+    // A reserved name IS the person (docs/catalogs.md § People): a code for many people would let every stranger who
+    // held it join as them before they have a passkey to prove, so only a name nobody holds or reserves gets one.
+    if (found === undefined && uses.kind === 'multi') throw this.#reservedForOne(holder);
     return { kind: found === undefined ? 'new' : 'existing', ...holder, existing: found };
   }
 

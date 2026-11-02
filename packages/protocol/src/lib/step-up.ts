@@ -177,6 +177,22 @@ export const StepUpOptionsSchema = z.strictObject({
 export type StepUpOptions = z.infer<typeof StepUpOptionsSchema>;
 
 /**
+ * How many passkeys a join challenge may offer. A person has up to 200 browsers with up to
+ * {@link MAX_PASSKEYS_PER_DEVICE} passkeys each, and the browser can only pick from this list, so a device's own cap
+ * is far too small here.
+ */
+export const MAX_JOIN_PROOF_PASSKEYS = 64 as const;
+
+/** The options a later join is challenged with: an unlock's, with room for every browser of the person. */
+export const JoinProofOptionsSchema = StepUpOptionsSchema.extend({
+  allowCredentials: z
+    .array(z.strictObject({ type: z.literal('public-key'), id: Base64UrlSchema(1_366) }))
+    .min(1)
+    .max(MAX_JOIN_PROOF_PASSKEYS),
+});
+export type JoinProofOptions = z.infer<typeof JoinProofOptionsSchema>;
+
+/**
  * A device key replacing the one that opened this session (`docs/design/zero-trust.md` B6): the NEW
  * key's SPKI, and its signature over `"ferretry-device-rotate-v2" ‖ 0x00 ‖ TH ‖ LP(deviceId) ‖ LP(deviceKey)`
  * for the transcript of the session carrying it. Bounded here; the daemon checks it is an Ed25519 key.

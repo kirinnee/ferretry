@@ -25,10 +25,10 @@
  * and another person's credential all find nothing.
  */
 import {
-  MAX_PASSKEYS_PER_DEVICE,
+  type JoinProofOptions,
+  MAX_JOIN_PROOF_PASSKEYS,
   PASSKEY_CHALLENGE_TTL_SECONDS,
   type MemberJoinProof,
-  type StepUpOptions,
 } from '@ferretry/protocol';
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
@@ -36,6 +36,11 @@ import { relyingPartyIdFor } from '../step-up/service.ts';
 import type { PasskeyStore, PasskeyVerifierPort, StepUpClock, StepUpRandom, StoredPasskey } from '../step-up/types.ts';
 
 const CHALLENGE_BYTES = 32;
+/**
+ * The credential ids one challenge may list, in characters. The sealed answer is padded to a fixed size and one that
+ * does not fit becomes a refusal, so a person with very long ids is offered their newest ones that fit.
+ */
+const ALLOWED_IDS_BUDGET = 12 * 1024;
 /** Challenges held at once, across every share. Past it the oldest go first. */
 const CHALLENGES_MAX = 1_024;
 /** Challenges held for one share: a holder of one code cannot push everyone else's out. */
@@ -66,6 +71,19 @@ export interface JoinProofDeps {
   readonly allowedOrigins: () => readonly string[];
 }
 
+/** The newest passkeys first, as many as the challenge may list (the count cap and the size budget). */
+function newestFitting(passkeys: readonly StoredPasskey[]): readonly StoredPasskey[] {
+  const newest = [...passkeys].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const chosen: StoredPasskey[] = [];
+  let size = 0;
+  for (const passkey of newest) {
+    size += passkey.credentialId.length;
+    if (chosen.length >= MAX_JOIN_PROOF_PASSKEYS || size > ALLOWED_IDS_BUDGET) break;
+    chosen.push(passkey);
+  }
+  return chosen;
+}
+
 const keyOf = (subject: JoinProofSubject): string => `${subject.shareId}\u0000${subject.memberKey}`;
 
 export class MemberJoinProver {
@@ -77,7 +95,7 @@ export class MemberJoinProver {
    * The challenge for one of this person's passkeys made at `origin`, or nothing when this machine does not serve
    * that origin or the person has no passkey that answers there (they cannot prove, so the join is refused).
    */
-  async options(subject: JoinProofSubject, origin: string): Promise<StepUpOptions | undefined> {
+  async options(subject: JoinProofSubject, origin: string): Promise<JoinProofOptions | undefined> {
     if (!this.deps.allowedOrigins().includes(origin)) return undefined;
     const usable = (await this.deps.passkeysOf(subject.memberId)).filter(passkey => passkey.origin === origin);
     if (usable.length === 0) return undefined;
@@ -87,9 +105,10 @@ export class MemberJoinProver {
     return {
       challenge: toBase64Url(challenge),
       rpId: relyingPartyIdFor(origin),
-      allowCredentials: usable
-        .slice(0, MAX_PASSKEYS_PER_DEVICE)
-        .map(passkey => ({ type: 'public-key' as const, id: passkey.credentialId })),
+      allowCredentials: newestFitting(usable).map(passkey => ({
+        type: 'public-key' as const,
+        id: passkey.credentialId,
+      })),
       timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
     };
   }

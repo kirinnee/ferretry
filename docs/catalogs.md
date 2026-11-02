@@ -974,10 +974,12 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   (`existing`), and an ID nobody holds makes a new person. The older arms stay accepted. `{ "kind": "new",
 "label" }` for an ID that is taken is refused `409 member_exists` with the `memberId` that holds it ("Someone
   here already has the user ID ‹id›. Pick another."), so a mint never makes a second person of the same ID. A
-  code for many people may name a person who has **not joined yet** (every browser then joins that one new
-  person) but is **refused** for someone already in (`409 member_exists`, or a 400 for `{ "kind": "existing" }`):
-  until a joiner proves a passkey of the person (join by proof, a later change), a forwarded code would let up to
-  its cap of strangers in as them. Use a single-use code to add catalogs to an existing person.
+  code for many people (a **group link**) takes only a name **nobody holds or reserves**: every browser then joins
+  that one new person. For a name that is **reserved** (an invite for it is waiting, nobody has joined) it is refused
+  `409 member_exists` with the `memberId` that holds it, because a reserved name IS the person: the second code
+  would let every stranger who held it join as them, with no passkey to prove, once the first browser had one. Use a
+  single-use code for them, or a name nobody holds. For someone **already in**, a code for many people is allowed and
+  each browser proves a passkey of the person to join (join by proof, below).
 - **A new ID is reserved.** An invite for an ID nobody holds yet holds it, as the shares themselves do (nothing
   is stored apart): the ID is held while any live share that names the person has not been used, and while a join
   with it is in flight, and lets go by itself when every invite naming them is used up, ended or expired and they
@@ -1023,9 +1025,11 @@ code is spent until the proof holds.
 
 1. The browser asks `join-options` with the code ([relay-protocol.md](relay-protocol.md) §14). The answer is one of
    `join-open` (no proof wanted), `join-challenge` (prove one of these passkeys) or the one generic refusal.
-2. For a challenge, the app has the browser sign it with ONE of the person's passkeys. `allowCredentials` is every
-   passkey that person has made at this page's origin, so a passkey synced to this browser, or one on a phone through
-   its hybrid QR code, just works.
+2. For a challenge, the app has the browser sign it with ONE of the person's passkeys. `allowCredentials` is the
+   passkeys that person has made at this page's origin, **newest first, up to 64** (and at most 12 KiB of ids, so the
+   sealed answer always fits), so a passkey synced to this browser, a passkey made on a newer browser, or one on a
+   phone through its hybrid QR code, just works. (A step-up lists at most 8, one device's own passkeys; a person
+   spans many devices, so `join-challenge` has its own larger bound.)
 3. The browser sends `join` with that assertion. The daemon checks it exactly as an unlock does (origin, rpId, a
    challenge bound to this join, user verification as the unlock rule asks, and the signature counter), against the
    passkeys of THIS person only. Only then is the code spent and the browser's key filed.
@@ -1061,11 +1065,14 @@ even though the person exists; the browser then registers its own passkey as usu
 
 #### The decisions behind it
 
-- **A group link is exempt.** A multi-use code made for a person who does not exist yet (a workshop) has nobody to
-  prove, so every browser joins that new person as before.
+- **A group link is exempt.** A multi-use code made for a name nobody held or reserved (a workshop) has nobody to
+  prove, so every browser joins that new person as before. The mint decides this, not the join: a code for many
+  people is refused for a reserved name (above), so a multi-use code that names a new person can only be a group link.
 - **An existing person with no passkey and no D8 mark is blocked.** The join is refused (the code stays live) rather
-  than opened by default. The owner marks the invite, or mints one that does. A share for a new person
-  (`memberKind: 'new'`) still joins freely.
+  than opened by default. The owner marks the invite, or mints one that does. A second invite for a person who
+  has not joined (`memberKind: 'new'`) joins freely **only while a browser of theirs is inside its passkey window**
+  (the owner made two invites and the second arrives while the first browser is registering); once no window is
+  open, the person is as good as one who existed and the invite is blocked until the owner marks it.
 - **`join-options` tells a holder of a live code three things:** the person's name (which the invite names anyway),
   the credential ids of the passkeys that can answer (ids, never keys), and that the code is live. It is the price of
   letting the browser pick the right passkey, and it needs only the code. It spends nothing and issues at most 16 live

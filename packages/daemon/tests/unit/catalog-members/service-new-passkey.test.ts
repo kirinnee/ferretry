@@ -15,17 +15,12 @@ import {
   sharesDoc,
   singleFor,
   singleForMember,
+  singleForMemberD8,
   storedKey,
   storedMember,
   storedShare,
   T0,
 } from './support.ts';
-
-/** An invite for person `n` with NO owner mark: the shape every ordinary later invite has. */
-const unmarkedFor = (n: number): CatalogShareMintRequest => {
-  const { newPasskey: _mark, ...unmarked } = singleForMember(n);
-  return unmarked;
-};
 
 const dana = (passkeys: number) =>
   storedMember(7, {
@@ -40,7 +35,7 @@ describe('CatalogMemberService.mint: the owner’s "they need a new passkey" mar
     const r = await rig({ members: membersDoc(dana(1)) });
 
     // Act
-    const minted = await r.service.mint(singleForMember(7));
+    const minted = await r.service.mint(singleForMemberD8(7));
 
     // Assert
     should(r.shares.document.shares[0]?.newPasskey).be.true();
@@ -52,7 +47,7 @@ describe('CatalogMemberService.mint: the owner’s "they need a new passkey" mar
     const r = await rig({ members: membersDoc(dana(0)) });
 
     // Act
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
 
     // Assert
     should(minted.noPasskeyLeft).be.true();
@@ -65,7 +60,7 @@ describe('CatalogMemberService.mint: the owner’s "they need a new passkey" mar
     const r = await rig({ members: membersDoc(dana(1)) });
 
     // Act
-    const minted = await r.service.mint({ ...unmarkedFor(7), newPasskey: false });
+    const minted = await r.service.mint({ ...singleForMember(7), newPasskey: false });
 
     // Assert
     should(r.shares.document.shares[0]).not.have.property('newPasskey');
@@ -75,7 +70,7 @@ describe('CatalogMemberService.mint: the owner’s "they need a new passkey" mar
   it('should refuse the mark on a multi-use code, and write nothing', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const request: CatalogShareMintRequest = { ...singleForMember(7), uses: { kind: 'multi', cap: 5 } };
+    const request: CatalogShareMintRequest = { ...singleForMemberD8(7), uses: { kind: 'multi', cap: 5 } };
 
     // Act
     const error = await refusal(() => r.service.mint(request));
@@ -94,9 +89,9 @@ describe('CatalogMemberService.mint: the owner’s "they need a new passkey" mar
 
     // Act
     const answers = {
-      none: await none.service.mint(unmarkedFor(7)),
-      some: await some.service.mint(unmarkedFor(7)),
-      nobrowser: await nobrowser.service.mint(unmarkedFor(7)),
+      none: await none.service.mint(singleForMember(7)),
+      some: await some.service.mint(singleForMember(7)),
+      nobrowser: await nobrowser.service.mint(singleForMember(7)),
       fresh: await fresh.service.mint(singleFor('Alice')),
     };
 
@@ -112,7 +107,7 @@ describe('CatalogMemberService.markNewPasskey', () => {
   it('should put the mark on a live single-use invite, write it, and show it', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(0)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
     await r.service.flushed();
     r.log.length = 0;
 
@@ -128,7 +123,7 @@ describe('CatalogMemberService.markNewPasskey', () => {
   it('should take the mark off again, and show the invite as unmarked', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(singleForMember(7));
+    const minted = await r.service.mint(singleForMemberD8(7));
 
     // Act
     const view = await r.service.markNewPasskey(minted.share.shareId, false);
@@ -142,8 +137,8 @@ describe('CatalogMemberService.markNewPasskey', () => {
   it('should write nothing when the invite already is as asked', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const marked = await r.service.mint(singleForMember(7));
-    const unmarked = await r.service.mint(unmarkedFor(7));
+    const marked = await r.service.mint(singleForMemberD8(7));
+    const unmarked = await r.service.mint(singleForMember(7));
     await r.service.flushed();
     const writes = r.shares.writes;
 
@@ -208,7 +203,7 @@ describe('CatalogMemberService.markNewPasskey', () => {
   it('should let the marked invite join like a first browser, though the person has a passkey', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
     should(refusedOf(r.service.admitJoin(minted.code, T0)).reason).equal('proof-required');
 
     // Act
@@ -234,8 +229,8 @@ describe('CatalogMemberService.joinNeed', () => {
   it('should answer nothing for a code that is no longer live', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const ended = await r.service.mint(singleForMember(7));
-    const expiring = await r.service.mint(singleForMember(7));
+    const ended = await r.service.mint(singleForMemberD8(7));
+    const expiring = await r.service.mint(singleForMemberD8(7));
     await r.service.endShare(ended.share.shareId);
 
     // Act / Assert
@@ -271,7 +266,7 @@ describe('CatalogMemberService.joinNeed', () => {
   it('should say a person with a passkey must prove one, under the name they have now', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
 
     // Act
     const needed = r.service.joinNeed(minted.code, T0);
@@ -288,7 +283,7 @@ describe('CatalogMemberService.joinNeed', () => {
   it('should say a person with no passkey left is blocked until the owner marks the invite', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(0)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
 
     // Act
     const before = r.service.joinNeed(minted.code, T0)?.need;
@@ -303,7 +298,7 @@ describe('CatalogMemberService.joinNeed', () => {
   it('should spend nothing and write nothing', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
     await r.service.flushed();
     const writes = r.shares.writes;
 
@@ -322,7 +317,7 @@ describe('CatalogMemberService.admitJoin: a proof for the person', () => {
   it('should admit the proven person, and say the entry was a proof', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
 
     // Act
     const refused = refusedOf(r.service.admitJoin(minted.code, T0));
@@ -339,7 +334,7 @@ describe('CatalogMemberService.admitJoin: a proof for the person', () => {
   it('should refuse a proof that was verified for another person, and leave the code live', async () => {
     // Arrange
     const r = await rig({ members: membersDoc(dana(1)) });
-    const minted = await r.service.mint(unmarkedFor(7));
+    const minted = await r.service.mint(singleForMember(7));
 
     // Act
     const refused = refusedOf(

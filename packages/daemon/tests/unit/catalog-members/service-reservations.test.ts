@@ -20,6 +20,7 @@ import {
   shareId,
   singleFor,
   singleForMember,
+  singleForMemberD8,
   sharesDoc,
   storedKey,
   storedMember,
@@ -56,7 +57,7 @@ describe('a join in flight when the owner takes something away', () => {
   it('should not bring a revoked member back', async () => {
     // Arrange
     const r = await rig({ members: holders() });
-    const { code } = await r.service.mint(singleForMember(7, [catalogId(2)]));
+    const { code } = await r.service.mint(singleForMemberD8(7, [catalogId(2)]));
     const reservation = joinOf(r.service.admitJoin(code, T0));
 
     // Act
@@ -71,7 +72,7 @@ describe('a join in flight when the owner takes something away', () => {
   it('should not file a catalog the owner took away from that member', async () => {
     // Arrange
     const r = await rig({ members: holders() });
-    const { code } = await r.service.mint(singleForMember(7, [catalogId(1), catalogId(2)]));
+    const { code } = await r.service.mint(singleForMemberD8(7, [catalogId(1), catalogId(2)]));
     const reservation = joinOf(r.service.admitJoin(code, T0));
 
     // Act

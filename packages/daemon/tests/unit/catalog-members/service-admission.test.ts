@@ -20,6 +20,7 @@ import {
   sharesDoc,
   singleFor,
   singleForMember,
+  singleForMemberD8,
   storedKey,
   storedMember,
   storedShare,
@@ -119,7 +120,7 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
     // Arrange
     const keys = Array.from({ length: 200 }, (_, index) => storedKey(index + 1));
     const r = await rig({ members: membersDoc(storedMember(7, { keys })) });
-    const minted = await r.service.mint(singleForMember(7));
+    const minted = await r.service.mint(singleForMemberD8(7));
 
     // Act
     const result = refusedOf(r.service.admitJoin(minted.code, T0));

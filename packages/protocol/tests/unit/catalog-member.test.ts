@@ -81,13 +81,13 @@ describe('minting a share', () => {
     }
   });
 
-  it('makes a many-person code name a person by ID, and refuses one for a member already in until join-by-proof', () => {
+  it('makes a many-person code name a person by ID, whether or not they are already in', () => {
     const multi = { ...request, uses: { kind: 'multi', cap: 50 } };
     expect(CatalogShareMintRequestSchema.safeParse(multi).success).toBe(true);
     expect(CatalogShareMintRequestSchema.safeParse({ ...multi, member: { name: 'Alice' } }).success).toBe(true);
     expect(
       CatalogShareMintRequestSchema.safeParse({ ...multi, member: { kind: 'existing', memberId: MEMBER } }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       CatalogShareMintRequestSchema.safeParse({ ...request, member: { kind: 'existing', memberId: MEMBER } }).success,
     ).toBe(true);

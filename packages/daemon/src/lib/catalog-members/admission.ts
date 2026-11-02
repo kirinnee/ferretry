@@ -181,19 +181,26 @@ export type JoinNeed = 'first-browser' | 'owner-approved' | 'proof' | 'blocked';
  * - No such person yet: nothing; this is their first browser.
  * - The owner marked the invite (D8): nothing; the new browser registers its own passkey.
  * - The person has a passkey: a proof of one of them, EXCEPT on a group link (a multi-use code minted for a person who
- *   did not exist yet), whose whole point is that many strangers join the one name the owner chose.
+ *   did not exist yet), whose whole point is that many strangers join the one name the owner chose. A multi-use code
+ *   is `memberKind: 'new'` only when the mint found nobody holding or reserving the name (the mint refuses a multi-use
+ *   code for a reserved name), so `new` plus multi means exactly "a group link".
  * - The person has no passkey and the code was minted for them while they existed: BLOCKED until the owner marks the
  *   invite. Nothing is ever approved by the machine; a forwarded invite for a person with no passkey left is refused
  *   rather than opened.
- * - The person has no passkey and the code was minted before they joined: nothing; the owner made two invites for a
- *   new person and the second arrives within the first browser's window.
+ * - The person has no passkey and the code was minted before they joined: nothing, but only while a browser of theirs
+ *   is still inside its passkey window (the owner made two invites for a new person and the second arrives within the
+ *   first browser's window). Once no window is open, the person is as good as one who existed, so it is BLOCKED and the
+ *   owner marks the invite.
  */
-export function joinNeed(share: StoredShare, member: StoredMember | undefined): JoinNeed {
+export function joinNeed(share: StoredShare, member: StoredMember | undefined, now: number): JoinNeed {
   if (member === undefined) return 'first-browser';
   if (share.newPasskey === true) return 'owner-approved';
   if (member.keys.some(key => key.passkeyCount > 0))
     return share.uses.kind === 'multi' && share.memberKind === 'new' ? 'first-browser' : 'proof';
-  return share.memberKind === 'new' ? 'first-browser' : 'blocked';
+  const inWindow = member.keys.some(
+    key => key.passkeyWindowEndsAt !== undefined && Date.parse(key.passkeyWindowEndsAt) > now,
+  );
+  return share.memberKind === 'new' && inWindow ? 'first-browser' : 'blocked';
 }
 
 /** The share, or the refusal for a code that is not live. */
@@ -250,7 +257,7 @@ export function admitJoin(probe: Probe): JoinAdmission {
   // A code made for a member who has since gone cannot make a browser of them: it is refused and left alone,
   // because ending the member ended their shares and this one only survives a failed write.
   if (member === undefined && share.memberKind === 'existing') return refused(probe, 'share_refused', 'member-gone');
-  const need = joinNeed(share, member);
+  const need = joinNeed(share, member, probe.now);
   if (need === 'blocked') return refused(probe, 'share_refused', 'approval-required');
   if (need === 'proof' && (probe.proven?.shareId !== share.shareId || probe.proven.memberId !== share.memberId))
     return refused(probe, 'share_refused', 'proof-required');

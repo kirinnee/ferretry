@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { MAX_PASSKEYS_PER_DEVICE, PASSKEY_CHALLENGE_TTL_SECONDS, type MemberJoinProof } from '@ferretry/protocol';
+import {
+  MAX_JOIN_PROOF_PASSKEYS,
+  MAX_PASSKEYS_PER_DEVICE,
+  PASSKEY_CHALLENGE_TTL_SECONDS,
+  type MemberJoinProof,
+} from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import {
@@ -113,13 +118,46 @@ describe('MemberJoinProver.options', () => {
     should(state.randomCalls).equal(1);
   });
 
-  it('should never offer more passkeys than a device can hold', async () => {
-    const many = Array.from({ length: MAX_PASSKEYS_PER_DEVICE + 3 }, (_, index) => passkey(index + 1, 1));
+  it('should offer up to the join-proof cap, so a person with several browsers is not shut out', async () => {
+    const many = Array.from({ length: MAX_JOIN_PROOF_PASSKEYS + 3 }, (_, index) => passkey(index + 1, 1));
     const { prover } = rig({ [memberId(1)]: many });
 
     const options = await prover.options(subject(), ORIGIN);
 
-    should(options?.allowCredentials.length).equal(MAX_PASSKEYS_PER_DEVICE);
+    should(options?.allowCredentials.length).equal(MAX_JOIN_PROOF_PASSKEYS);
+    should(MAX_JOIN_PROOF_PASSKEYS).be.above(MAX_PASSKEYS_PER_DEVICE);
+  });
+
+  it('should offer the newest passkeys first, so one made on a newer browser is offered past the cap', async () => {
+    const old = Array.from({ length: MAX_JOIN_PROOF_PASSKEYS }, (_, index) =>
+      passkey(index + 1, 1, { createdAt: '2026-03-01T00:00:00.000Z' }),
+    );
+    const newer = passkey(200, 9, { createdAt: '2026-06-01T00:00:00.000Z' });
+    const { prover } = rig({ [memberId(1)]: [...old, newer] });
+
+    const options = await prover.options(subject(), ORIGIN);
+
+    should(options?.allowCredentials.length).equal(MAX_JOIN_PROOF_PASSKEYS);
+    should(options?.allowCredentials[0]).eql({ type: 'public-key', id: credentialOf(200) });
+    should(options?.allowCredentials.map(entry => entry.id)).not.containEql(credentialOf(MAX_JOIN_PROOF_PASSKEYS));
+  });
+
+  it('should stop at the size budget for very long credential ids, keeping the newest that fit', async () => {
+    const longId = (n: number): string => toBase64Url(new Uint8Array(750).fill(n));
+    const long = Array.from({ length: 20 }, (_, index) =>
+      passkey(index + 1, 1, {
+        credentialId: longId(index + 1),
+        createdAt: new Date(Date.UTC(2026, 2, 1, 0, index)).toISOString(),
+      }),
+    );
+    const { prover } = rig({ [memberId(1)]: long });
+
+    const options = await prover.options(subject(), ORIGIN);
+
+    const offered = options?.allowCredentials ?? [];
+    should(offered.length).be.above(0).and.below(20);
+    should(offered.reduce((sum, entry) => sum + entry.id.length, 0)).be.belowOrEqual(12 * 1024);
+    should(offered[0]?.id).equal(longId(20));
   });
 
   it('should give a different challenge every time', async () => {

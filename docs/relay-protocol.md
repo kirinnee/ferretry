@@ -2617,7 +2617,8 @@ it does not hold. The answer is one sealed, padded outcome (the same `MEMBER_JOI
 - **`join-open`** (`why` is `first-browser` or `owner-approved`): no proof is wanted; send `join` as before.
 - **`join-challenge`**: sign `options` with ONE of the listed passkeys and send a **second session**, a `join` whose
   optional `passkey` field is the assertion (`credentialId`, `clientDataJSON`, `authenticatorData`, `signature`). Each
-  session is one attempt and ends with `4440`, so the options session and the join session are two.
+  session is one attempt and ends with `4440`, so the options session and the join session are two. `allowCredentials`
+  lists the person's passkeys at the page's origin, newest first, at most 64.
 - **The challenge** is random and issued per (share, browser key). It lives two minutes, is kept in memory only, and is
   **spent whenever a `join` for that share and key arrives, whether or not the assertion verifies**, so a replay needs
   fresh options. The ledger is bounded: 1,024 challenges in all and 16 per share, the oldest first. It is not the
