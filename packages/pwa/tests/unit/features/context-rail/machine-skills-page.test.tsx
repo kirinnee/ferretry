@@ -28,7 +28,7 @@ import {
   WARNED_PREVIEW,
 } from '../../../support/local-skills.ts';
 import { deferred, fakeMembers } from '../../../support/shared-screens.ts';
-import { SKILLS } from './context-rail-fixtures.ts';
+import { SKILLS, skill } from './context-rail-fixtures.ts';
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -448,6 +448,46 @@ describe('Install from this machine', () => {
     await settle();
     expect(q('[data-add-skills-landed]')?.textContent).toContain(NOT_HERE);
     await second.view.unmount();
+  });
+
+  it('reads the session’s skills again after a copy lands, so the copied skill leaves this machine’s list', async () => {
+    let reads = 0;
+    const { host } = hostWith({
+      [PREVIEW_PROJECT]: () => localPreview(),
+      [APPLY_PROJECT]: () => localInstalled(),
+    });
+    const view = await mount(
+      <AddSkillsPage
+        {...host}
+        loadInventory={async () => {
+          reads += 1;
+          return reads === 1
+            ? SKILLS
+            : {
+                ...SKILLS,
+                skills: [
+                  ...SKILLS.skills,
+                  skill({ name: 'pdf-tools', path: '/work/app/.claude/skills/pdf-tools/SKILL.md' }),
+                ],
+              };
+        }}
+        onNavigate={() => undefined}
+      />,
+    );
+    await settle();
+    await settle();
+    expect(machineRows().map(row => row.querySelector('span')?.textContent)).toContain('pdf-tools');
+    await installRow('pdf-tools');
+    await click(q('[data-local-preview]'));
+    await settle();
+    await click(q('[data-local-install]'));
+    await settle();
+    await click(q('[data-local-done]'));
+    await settle();
+    await settle();
+    expect(reads).toBe(2);
+    expect(machineRows().map(row => row.querySelector('span')?.textContent)).not.toContain('pdf-tools');
+    await view.unmount();
   });
 
   it('closes without copying anything, and says nothing landed', async () => {
