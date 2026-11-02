@@ -316,6 +316,26 @@ describe('names that were not yet IDs, on a real disk', () => {
     should(JSON.stringify(audited)).not.containEql('Alice');
   });
 
+  it('should refuse to write two people of one name, and leave the file on disk as it was', async () => {
+    const { paths } = await legacyFixture(JSON.stringify({ schemaVersion: 1, members: [person('a', 'Sam', AT)] }));
+    const store = new FileCatalogMembersStore(paths, new StateFileSystem(paths));
+    const document = await store.read();
+    const first = document.members[0];
+    if (first === undefined) throw new Error('fixture');
+    const twin = { ...first, memberId: `mbr_${'z'.repeat(22)}`, label: 'SAM' };
+    const before = await readFile(paths.catalogMembers, 'utf8');
+
+    const failure = await store.write({ ...document, members: [first, twin] }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    should(failure).be.instanceOf(CatalogMemberRefusal);
+    should(failure).have.property('refusal', 'store_damaged');
+    should((failure as Error).message).containEql('members.json was not written');
+    should(await readFile(paths.catalogMembers, 'utf8')).equal(before);
+  });
+
   it('should keep the first original when a second file of duplicates is upgraded later', async () => {
     const { boot, paths } = await legacyFixture();
     const first = legacy();
