@@ -1235,6 +1235,63 @@ describe('auditedRoutes', () => {
     );
   });
 
+  it('should record a download link by id, kind and end, and never the url, the key or the bundle', async () => {
+    // Arrange
+    const LINK = `lnk_${'L'.repeat(22)}`;
+    const ITEM = `itm_${'I'.repeat(22)}`;
+    const URL_WITH_KEY = 'https://app.example/l#v1;b=BUNDLEBUNDLE;k=KEYKEYKEYKEY';
+    const answers: Record<string, unknown> = {
+      'POST /v1/catalog-links': {
+        link: {
+          linkId: LINK,
+          itemId: ITEM,
+          version: 2,
+          kind: 'public',
+          expiresAt: '2026-02-01T00:00:00.000Z',
+          installCap: 5,
+          name: 'A skill name the owner typed',
+        },
+        url: URL_WITH_KEY,
+      },
+      'POST /v1/catalog-links/:linkId/copy': { url: URL_WITH_KEY },
+      'DELETE /v1/catalog-links/:linkId': { linkId: LINK, state: 'ended', url: URL_WITH_KEY },
+    };
+    const { journal, routes } = decorated(
+      Object.fromEntries(Object.entries(answers).map(([key, body]) => [key, async () => jsonResponse(body)] as const)),
+    );
+    const api = await dispatcher(routes);
+
+    // Act
+    for (const [method, path] of [
+      ['POST', '/v1/catalog-links'],
+      ['POST', `/v1/catalog-links/${LINK}/copy`],
+      ['DELETE', `/v1/catalog-links/${LINK}`],
+    ] as const)
+      await api.dispatch(request({ method, path, headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual([
+      'catalog.link.minted',
+      'catalog.link.copied',
+      'catalog.link.ended',
+    ]);
+    should(logged[0]?.detail).containEql({
+      linkId: LINK,
+      itemId: ITEM,
+      version: 2,
+      kind: 'public',
+      expiresAt: '2026-02-01T00:00:00.000Z',
+      installCap: 5,
+    });
+    should(logged[1]?.subject).equal(LINK);
+    should(logged[2]?.subject).equal(LINK);
+    should(logged[2]?.detail).containEql({ state: 'ended' });
+    should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(
+      /KEYKEY|BUNDLEBUNDLE|app\.example|A skill name/u,
+    );
+  });
+
   it('should record which KIND of configuration file a Settings confirmation put into effect, never its name or path', async () => {
     // Arrange
     const confirmed: Record<string, unknown> = {

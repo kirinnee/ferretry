@@ -968,3 +968,26 @@ describe('the agenda block beside the older attention block', () => {
     should(agendaBlockNotice('both')).match(/"agenda" wins/);
   });
 });
+
+describe('catalogs.linkStore', () => {
+  it('should default to the discovered store', () => {
+    // Act + Assert
+    should(parseDaemonConfig({}).catalogs.linkStore).deepEqual({ source: 'discovery' });
+  });
+
+  it('should take your own https store, or turn links off, and refuse anything else', () => {
+    // Act + Assert
+    should(
+      parseDaemonConfig({ catalogs: { linkStore: { url: 'https://links.example.test' } } }).catalogs.linkStore,
+    ).deepEqual({
+      url: 'https://links.example.test',
+    });
+    should(parseDaemonConfig({ catalogs: { linkStore: { enabled: false } } }).catalogs.linkStore).deepEqual({
+      enabled: false,
+    });
+    for (const url of ['http://links.example.test', 'https://links.example.test/path', 'links.example.test', ''])
+      should(() => parseDaemonConfig({ catalogs: { linkStore: { url } } })).throw();
+    should(() => parseDaemonConfig({ catalogs: { linkStore: { enabled: true } } })).throw();
+    should(() => parseDaemonConfig({ catalogs: { linkStore: { url: 'https://a.test', enabled: false } } })).throw();
+  });
+});

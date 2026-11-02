@@ -101,6 +101,7 @@ import {
   withDefault,
   withListedItem,
   withNewItem,
+  withUnlistedItem,
   upgradeCatalogsV2,
   withoutCatalog,
   withoutEntry,
@@ -170,6 +171,34 @@ interface Prepared {
   readonly version: number;
   readonly location: string;
   readonly problems: readonly CatalogSourceProblem[];
+}
+
+/** A kept source changed since the item was shared, so no link can carry "the same" item: a catalog publishes the new version. */
+export class LinkSourceChanged extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LinkSourceChanged';
+  }
+}
+
+/** The one item a download link carries, read and frozen. Nothing of it is written until `keep` runs. */
+export interface LinkSubject {
+  readonly itemId: string;
+  readonly version: number;
+  /** True when no kept item has this item yet: `keep` writes it, unlisted. */
+  readonly newItem: boolean;
+  readonly kind: 'skill' | 'mcp';
+  readonly name: string;
+  readonly summary: string;
+  readonly harness?: StoredSharedItem['harness'];
+  readonly location: string;
+  /** The digest of the shared copy: what the person previewed and confirms. */
+  readonly contentDigest: string;
+  readonly publishedAt: string;
+  /** The shared copy, under the placeholder catalog, item and version. */
+  readonly shared: SharedCatalogItem;
+  readonly problems: readonly CatalogSourceProblem[];
+  readonly keep: (() => Promise<void>) | undefined;
 }
 
 /** An id of 128 random bits in the characters base64url writes — never the placeholder a shared copy is stored under. */
@@ -376,6 +405,106 @@ export class SharedCatalogService {
         ? {}
         : { changes: catalogItemChanges(await this.#sharedCopy(existing, current), item) }),
     };
+  }
+
+  // ── Download links ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The one item a download link would carry, read and frozen, and NOTHING written: the preview calls this, and
+   * a mint calls it and keeps the item only once the link store has accepted the upload.
+   *
+   * A kept item and version are named by `itemId` and `version`. A source is resolved to what this machine keeps:
+   * no kept item has this source, so a new unlisted item at version 1; a kept item whose current version hashes
+   * the same, so that item; otherwise `item_source_changed`, because publishing a version is a catalog's act and
+   * a link never makes one.
+   */
+  async linkSubject(
+    selection: { readonly itemId: string; readonly version: number } | { readonly source: CatalogItemSource },
+    summary?: string,
+  ): Promise<LinkSubject> {
+    const identity = await this.#identity();
+    const document = await this.#document();
+    if ('itemId' in selection) {
+      const item = findItem(document, selection.itemId);
+      const stored = this.#versionOfItem(item, selection.version);
+      if (stored.retiredAt !== undefined)
+        throw new CatalogRefusal('version_retired', `${item.name} version ${stored.version} was retired.`);
+      const shared = await this.#sharedCopy(item, stored);
+      return {
+        itemId: item.itemId,
+        version: stored.version,
+        newItem: false,
+        kind: item.kind,
+        name: item.name,
+        summary: stored.summary,
+        ...(item.harness === undefined ? {} : { harness: item.harness }),
+        location: stored.source.kind === 'skill' ? stored.source.path : stored.source.name,
+        contentDigest: stored.contentDigest,
+        publishedAt: stored.publishedAt,
+        shared,
+        problems: [],
+        keep: undefined,
+      };
+    }
+    const reference = await this.#resolve(selection.source);
+    const kept = document.items.filter(candidate => sameSource(currentVersion(candidate).source, reference));
+    const prepared = await this.#prepare({ reference, summary });
+    const frozen = freezeItem(this.#input(identity, NORMALISED_CATALOG_ID, prepared, NORMALISED_ITEM_ID, 1));
+    const print = await fingerprint(this.deps.crypto, frozen);
+    const same = kept.filter(candidate => currentVersion(candidate).contentDigest === print.contentDigest);
+    if (kept.length > 0 && same.length === 0)
+      throw new LinkSourceChanged(
+        `${prepared.name} changed since it was shared. Publish a new version of it from a catalog, then share that version.`,
+      );
+    const reused = same[0];
+    if (same.length > 1)
+      throw new CatalogRefusal(
+        'source_ambiguous',
+        `More than one kept item is ${prepared.name}. Share one by its version.`,
+      );
+    if (reused !== undefined)
+      return await this.linkSubject({ itemId: reused.itemId, version: currentVersion(reused).version });
+    const itemId = randomId(this.deps.crypto, 'itm_');
+    const version = await this.#versionOf(frozen, prepared, itemId, 1, []);
+    const now = instant(this.deps.now());
+    return {
+      itemId,
+      version: 1,
+      newItem: true,
+      kind: prepared.body.kind,
+      name: prepared.name,
+      summary: prepared.summary,
+      ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
+      location: prepared.location,
+      contentDigest: version.contentDigest,
+      publishedAt: now,
+      shared: sharedCopy(frozen),
+      problems: prepared.problems,
+      keep: () =>
+        this.#serially(async () => {
+          const writable = await this.#writable();
+          if (writable.items.some(candidate => candidate.itemId === itemId)) return;
+          const item: StoredSharedItem = {
+            itemId,
+            kind: prepared.body.kind,
+            name: prepared.name,
+            ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
+            ownSummary: summary !== undefined,
+            createdAt: now,
+            current: 1,
+            versions: [version.stored(now)],
+          };
+          await this.deps.blobs.put(version.contentDigest, version.text);
+          await this.#commit(withUnlistedItem(writable, item));
+        }),
+    };
+  }
+
+  /** Whether this machine keeps this version of this item, unretired: what a pending public link needs before it is committed. */
+  async holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
+    const item = (await this.#document()).items.find(candidate => candidate.itemId === itemId);
+    const stored = item?.versions.find(candidate => candidate.version === version);
+    return stored !== undefined && stored.retiredAt === undefined;
   }
 
   // ── Catalogs ───────────────────────────────────────────────────────────────────────────────────
@@ -1301,7 +1430,7 @@ export class SharedCatalogService {
   async #prepare(
     from:
       | { readonly source: CatalogItemSource; readonly summary?: string | undefined }
-      | { readonly reference: CatalogSourceReference; readonly summary?: undefined }
+      | { readonly reference: CatalogSourceReference; readonly summary?: string | undefined }
       | { readonly item: StoredSharedItem; readonly entry?: CatalogEntry },
   ): Promise<Prepared> {
     const existing = 'item' in from ? from.item : undefined;

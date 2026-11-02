@@ -13,6 +13,7 @@ import {
   HOSTED_APP_ORIGIN,
   isLoopbackHost,
   isWildcardHost,
+  linkStoreOriginProblem,
   LOOPBACK,
   MEMBER_UNLOCK_DAYS_DEFAULT,
   MEMBER_UNLOCK_DAYS_MAX,
@@ -373,6 +374,22 @@ export const DaemonConfigDocumentSchema = z
           .min(MEMBER_UNLOCK_DAYS_MIN)
           .max(MEMBER_UNLOCK_DAYS_MAX)
           .default(MEMBER_UNLOCK_DAYS_DEFAULT),
+        /**
+         * WHERE DOWNLOAD LINKS ARE KEPT (docs/catalogs.md § Links). `{ source: 'discovery' }` (the default) asks the
+         * hosted link store the relay directory points at; `{ url }` is a store you host yourself, and the links it
+         * makes carry its address; `{ enabled: false }` makes no link. Read at start; a change needs a restart.
+         */
+        linkStore: z
+          .union([
+            z.strictObject({ source: z.literal('discovery') }),
+            z.strictObject({
+              url: z.string().refine(value => linkStoreOriginProblem(value) === null, {
+                message: 'a link store address is an https origin with nothing after the host',
+              }),
+            }),
+            z.strictObject({ enabled: z.literal(false) }),
+          ])
+          .default({ source: 'discovery' }),
       })
       .prefault({}),
     /**

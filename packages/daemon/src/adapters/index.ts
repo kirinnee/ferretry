@@ -10,6 +10,7 @@ export * from './browser/proxy/index.ts';
 export * from './browser/runtime/index.ts';
 export * from './browser/transport/index.ts';
 export * from './catalog/index.ts';
+export * from './catalog-links/index.ts';
 export * from './catalog-members/index.ts';
 export * from './cgroups/index.ts';
 export * from './core/index.ts';

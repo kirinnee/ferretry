@@ -20,6 +20,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'a read with a body (an empty one): re-reads the item’s source and shows what would change; writes nothing; the publish is audited',
   'POST /v1/catalogs/:id/items/preview':
     'a read with a body: previews what a publish would carry and writes nothing; the add it precedes is audited',
+  'POST /v1/catalog-links/preview':
+    'a read with a body: previews what a link would hold and signs, uploads and writes nothing; the mint it precedes is audited',
   'POST /v1/passkeys/options': 'mints a one-time challenge; the registration that spends it is audited',
   'POST /v1/step-up/options': 'mints a one-time challenge; the step-up that spends it is audited',
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',

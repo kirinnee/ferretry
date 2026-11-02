@@ -1,3 +1,4 @@
+import type { CatalogLinkSubsystem } from '../../../../src/lib/runtime/mounts/catalog-links.ts';
 import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
 import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { describe, it } from 'bun:test';
@@ -853,6 +854,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   secrets: secretSubsystem(),
   sharedCatalogs: { catalogs: {} as SharedCatalogSubsystem['catalogs'] },
   catalogMembers: { members: {} as CatalogMemberSubsystem['members'] },
+  catalogLinks: { links: {} as CatalogLinkSubsystem['links'] },
   warden: new FakeWarden(),
   transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(
@@ -1003,6 +1005,7 @@ describe('the mounted daemon surface', () => {
       7 + // copying a skill from this machine into a project or runtime: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       10 + // the people a catalog is shared with: mint, list and end a share, approve a new passkey for an invite; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
+      7 + // the download links this machine makes: the store's status, a preview, list, mint, one link, Copy and turn off (docs/catalogs.md § Links)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
       1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
@@ -1226,6 +1229,13 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/catalog-members/:memberId',
       'DELETE /v1/catalog-members/:memberId/keys/:keyId',
       'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId',
+      'GET /v1/catalog-links/store',
+      'POST /v1/catalog-links/preview',
+      'GET /v1/catalog-links',
+      'POST /v1/catalog-links',
+      'GET /v1/catalog-links/:linkId',
+      'POST /v1/catalog-links/:linkId/copy',
+      'DELETE /v1/catalog-links/:linkId',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',

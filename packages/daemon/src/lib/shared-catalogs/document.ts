@@ -737,3 +737,10 @@ export function documentProblem(
   const where = first === undefined || first.path.length === 0 ? '' : ` (at ${first.path.join('.')})`;
   return `${first?.message ?? 'it is malformed'}${where}`;
 }
+
+/** A new item no catalog lists yet: kept so a download link has a copy to serve, and listable by any catalog later. */
+export function withUnlistedItem(document: CatalogsDocument, item: StoredSharedItem): CatalogsDocument {
+  if (document.items.length >= SHARED_ITEMS_MAX)
+    throw new CatalogRefusal('items_full', `This machine keeps at most ${SHARED_ITEMS_MAX} shared items.`);
+  return { ...document, items: [...document.items, item] };
+}

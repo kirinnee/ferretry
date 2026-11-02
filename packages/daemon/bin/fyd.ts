@@ -271,6 +271,11 @@ import {
   FileCatalogBlobStore,
   FileCatalogDocumentStore,
   FileCatalogMembersStore,
+  FileLinkDocumentStore,
+  FileLinkKeyVault,
+  HttpLinkStoreClient,
+  ConfiguredLinkStoreLocator,
+  type LinkStoreSetting,
   FileCatalogSharesStore,
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
@@ -800,6 +805,7 @@ import {
   buildLaunchArgv,
   CapabilityGrantService,
   type CatalogIdentitySource,
+  CatalogLinkService,
   CatalogMemberService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -4228,6 +4234,7 @@ interface SessionPackHooks {
 const AGENDA_DEADLINE_SWEEP_MS = 5 * 60_000;
 /** How often the member sweep looks for browsers whose passkey window closed or that sat idle. */
 const MEMBER_SWEEP_INTERVAL_MS = 60_000;
+const LINK_RECONCILE_INTERVAL_MS = 60_000;
 
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -7755,6 +7762,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         readonly carriers: PublishedCarrierView;
         readonly origins: () => readonly string[];
         readonly unlockDays: () => number;
+        readonly linkStore: () => LinkStoreSetting;
       }
     | undefined;
   // ONE journal for the owner's acts — grant changes and re-opened passkey windows — so two writers never
@@ -9409,6 +9417,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         carriers,
         origins: () => browserOrigins(config),
         unlockDays: () => config.catalogs.memberUnlockDays,
+        linkStore: () => config.catalogs.linkStore,
       };
       analyticsMachineName = state.daemonName;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
@@ -12578,7 +12587,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const mounted: Omit<
         MountedSubsystems,
-        'sessionMcp' | 'catalogInstalls' | 'localSkillInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers'
+        | 'sessionMcp'
+        | 'catalogInstalls'
+        | 'localSkillInstalls'
+        | 'mcpInventory'
+        | 'sharedCatalogs'
+        | 'catalogMembers'
+        | 'catalogLinks'
       > = {
         pack: {
           service: packService,
@@ -13659,6 +13674,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         crypto: new WebCryptoRelayCrypto(),
         now: () => millisecondClock.now(),
       });
+      // Download links: one item behind a URL. The key of a public link is sealed under the vault's own key; a
+      // one-time link's key is never written. The store is the one this machine discovered or was configured with.
+      const linkCrypto = new WebCryptoRelayCrypto();
+      const linkStoreClient = new HttpLinkStoreClient(linkCrypto, sharedCatalogIdentity);
+      const catalogLinks = new CatalogLinkService({
+        documents: new FileLinkDocumentStore(paths, stateFiles),
+        vault: new FileLinkKeyVault(paths, stateFiles, new FileSecretKey(secretDocuments.keyFile, stateFiles)),
+        locator: new ConfiguredLinkStoreLocator(
+          () => facts().linkStore(),
+          () => environment.relayDirectoryOrigin(),
+          linkStoreClient,
+        ),
+        client: linkStoreClient,
+        items: sharedCatalogs,
+        identity: sharedCatalogIdentity,
+        crypto: linkCrypto,
+        now: () => millisecondClock.now(),
+        appOrigin: HOSTED_APP_ORIGIN,
+        random: () => Math.random(),
+      });
+      // Settles an upload or an end a crash left half done, and retries an end the store could not take.
+      new MemberSweepTimer(
+        systemSweepClock,
+        async () => await catalogLinks.reconcile(),
+        (error: unknown) =>
+          process.stderr.write(`link reconcile failed: ${error instanceof Error ? error.message : String(error)}\n`),
+      ).start(LINK_RECONCILE_INTERVAL_MS);
       return {
         ...mounted,
         // Built after the rest because it reads three of them: the session directory, and the project
@@ -13707,6 +13749,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         mcpInventory,
         sharedCatalogs: { catalogs: sharedCatalogs },
         catalogMembers: { members: catalogMembers },
+        catalogLinks: { links: catalogLinks },
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

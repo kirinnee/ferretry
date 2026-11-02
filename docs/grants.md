@@ -337,6 +337,10 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
    changes none of this: it is minted under the same `sharing.use` and step-up, and the relay adds a
    carrier for the sealed `join` and `member` records, never a route or a grant
    ([catalogs.md](catalogs.md) "A link works on the carriers pairing uses").
+   Download links ([catalogs.md](catalogs.md#the-daemon-3f-4)) are `sharing.use` as well: making one wants a fresh
+   `share-link` passkey from a governed caller (the act `share-catalog` does not buy, and the reverse), Copy needs
+   only the unlock, and turning one off asks for nothing. A ferret may list and read links but never preview, make,
+   copy or turn one off (403 `forbidden`). A link's URL and key leave the machine in the make and Copy answers only.
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
    the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
    switch: in phase 1 turning it off stops nothing beyond the catalog routes.
