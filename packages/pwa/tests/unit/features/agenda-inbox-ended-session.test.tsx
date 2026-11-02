@@ -168,6 +168,7 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     await settle();
 
     expect(calls.filter(call => call.method === 'revalidate').map(call => call.sessionId)).toEqual([
+      '@machine',
       'home-manager',
       'retired',
     ]);
