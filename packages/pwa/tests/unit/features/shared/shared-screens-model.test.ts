@@ -1,31 +1,37 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
 import type { SharedCatalogManifestEntry, SharedRedeemResponse } from '@ferretry/protocol';
-import {
-  catalogBlock,
-  cardState,
-  isRefused,
-  itemLine,
-  joinFacts,
-  kindLabel,
-  nameProblem,
-  REDEEM_LOCKED_SENTENCE,
-  redeemView,
-  shareHost,
-  UNLOCK_THEN_LINK,
-  windowAnnouncement,
-  withdrawnSummary,
-  withdrawnInstalledLine,
-} from '../../../../src/features/shared/shared-screens-model.ts';
+import { FyHttpError } from '@ferretry/protocol/client';
 import {
   JOIN_REFUSED_SENTENCE,
   passkeyWindow,
   redeemRefusal,
   WINDOW_CLOSED_SENTENCE,
 } from '../../../../src/features/shared/shared-model.ts';
+import {
+  cardState,
+  catalogBlock,
+  createPasskeyFor,
+  INVITE_SENDER,
+  isRefused,
+  itemLine,
+  joinFacts,
+  kindLabel,
+  nameProblem,
+  noPasskeyHere,
+  plainSentence,
+  REDEEM_LOCKED_SENTENCE,
+  redeemView,
+  shareHost,
+  signInWithPasskey,
+  signingInAs,
+  UNLOCK_THEN_LINK,
+  windowAnnouncement,
+  withdrawnInstalledLine,
+  withdrawnSummary,
+} from '../../../../src/features/shared/shared-screens-model.ts';
 import { fingerprintHead } from '../../../../src/lib/member-keys.ts';
-import { failedAttempt, okAttempt, refusedAttempt, SEED, sharedItemFixture } from '../../../support/shared-screens.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
+import { failedAttempt, okAttempt, refusedAttempt, SEED, sharedItemFixture } from '../../../support/shared-screens.ts';
 
 const entry = (change: Partial<SharedCatalogManifestEntry> = {}): SharedCatalogManifestEntry =>
   ({
@@ -187,5 +193,35 @@ describe('withdrawnSummary', () => {
   });
   it('never invents a name for an item it knows only by id', () => {
     expect(withdrawnSummary([{ itemId: 'zzz' }], new Map([['other', 'x']])).installed).toEqual([]);
+  });
+});
+
+describe('the sentences of an invite for a named person', () => {
+  it('should say who they are signing in as and where, in three pieces and in one', () => {
+    const sentence = signingInAs('alice', 'Studio');
+    expect(sentence).toEqual({ before: "You're signing in as ", name: 'alice', after: ' on Studio.' });
+    expect(plainSentence(sentence)).toBe("You're signing in as alice on Studio.");
+  });
+
+  it('should say what a first invite does and what a later one does, to the word', () => {
+    expect(plainSentence(createPasskeyFor('alice'))).toBe("Create a passkey for alice. You'll use it to sign in here.");
+    expect(plainSentence(signInWithPasskey('alice'))).toBe('Sign in with your alice passkey to add this browser.');
+  });
+
+  it('should say who the invite is for and who to ask, to the word', () => {
+    expect(plainSentence(noPasskeyHere('alice', INVITE_SENDER))).toBe(
+      'This invite is for alice. Use alice\'s passkey (on another device: choose "use a phone or tablet"), or ask the person who sent you this link to let you set up a new one.',
+    );
+  });
+
+  it('should spell out a hidden character in the name and in the machine, never show it raw', () => {
+    const hidden = 'al\u202Eice';
+    for (const sentence of [
+      signingInAs(hidden, 'Stu\u202Edio'),
+      createPasskeyFor(hidden),
+      signInWithPasskey(hidden),
+      noPasskeyHere(hidden, INVITE_SENDER),
+    ])
+      expect(plainSentence(sentence)).not.toContain('\u202E');
   });
 });

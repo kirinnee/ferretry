@@ -14,6 +14,8 @@
  */
 
 import {
+  type JoinProofOptions,
+  type MemberJoinProof,
   parseShareFragment,
   SHARED_CATALOG_FILE_FORMAT,
   type SharedCatalogItem,
@@ -35,8 +37,14 @@ import {
 } from '@ferretry/relay';
 import type { MemberClient } from '../../lib/member-client.ts';
 import type { MemberKeyStore, MemberSubscription, MintedMemberKeys } from '../../lib/member-keys.ts';
-import { assertPasskey, type CredentialsPort, createPasskey } from '../../lib/passkeys.ts';
-import type { JoinResult } from '../../lib/relay-join.ts';
+import {
+  assertPasskey,
+  type CredentialsPort,
+  createPasskey,
+  PasskeyCeremonyError,
+  passkeySentence,
+} from '../../lib/passkeys.ts';
+import type { JoinOptionsResult, JoinResult } from '../../lib/relay-join.ts';
 import type { OpenedCatalogFile } from '../catalogs/catalog-install-model.ts';
 import {
   leavePublisher,
@@ -62,6 +70,9 @@ import {
 
 /** An item that did not verify against its signed manifest: its sentence is shown, the item never is. */
 class ItemNotVerifiedError extends Error {}
+
+export const PASSKEY_NOT_USABLE = 'This browser could not use a passkey for this invite. Try again.';
+const COULD_NOT_REACH = 'Could not reach the publisher. Check you are online, then try again.';
 
 export const ITEM_NOT_THE_LISTED_ONE = 'This item is not the one the catalog lists, so it was not opened.';
 
@@ -93,7 +104,17 @@ export interface SharedControllerPorts {
     readonly seed: ShareLinkSeed;
     readonly clientName: string;
     readonly keys: MintedMemberKeys;
+    /** One of the person's passkeys signing the publisher's challenge; absent on a first join. */
+    readonly passkey?: MemberJoinProof;
   }) => Promise<JoinResult>;
+  /**
+   * Asks the publisher what joining with this link needs, spending nothing. Absent, the controller joins as it
+   * always did (an app built without the question, or a publisher that does not know it).
+   */
+  readonly joinOptions?: (options: {
+    readonly seed: ShareLinkSeed;
+    readonly keys: MintedMemberKeys;
+  }) => Promise<JoinOptionsResult>;
   readonly openClient: (subscription: MemberSubscription) => Promise<MemberClient>;
   readonly credentials: CredentialsPort;
   readonly origin: string;
@@ -111,11 +132,32 @@ export type BeginResult =
   | { readonly kind: 'new'; readonly seed: ShareLinkSeed }
   | { readonly kind: 'known'; readonly seed: ShareLinkSeed; readonly subscription: MemberSubscription };
 
-export type JoinOutcome =
-  | { readonly kind: 'joined'; readonly subscription: MemberSubscription }
+/** How a join ended once the publisher was asked to file this browser. */
+export type JoinEnd =
+  /** `proved`: one of the person's existing passkeys vouched for this browser first (a later invite). */
+  | { readonly kind: 'joined'; readonly subscription: MemberSubscription; readonly proved: boolean }
   | { readonly kind: 'refused'; readonly sentence: string }
   | { readonly kind: 'unreachable'; readonly sentence: string }
   | { readonly kind: 'unsupported'; readonly sentence: string };
+
+/** The person's passkey could not vouch for this browser here: none on this device, dismissed, or not the right one. */
+export interface NoPasskeyHere {
+  readonly kind: 'no-passkey';
+  readonly memberLabel: string;
+}
+
+/**
+ * A later invite for someone who already has a passkey: the publisher wants one of theirs first. `prove` is run on
+ * the person's NEXT tap (a passkey prompt needs its own tap, and the challenge it signs lives two minutes), and
+ * holds the keys this browser made, because the challenge was issued for exactly them.
+ */
+export interface ProveStep {
+  readonly kind: 'prove';
+  readonly memberLabel: string;
+  readonly prove: () => Promise<JoinEnd | NoPasskeyHere>;
+}
+
+export type JoinOutcome = JoinEnd | ProveStep;
 
 /** One call to a publisher: it worked, the publisher refused the KEY, or it failed for a stated reason. */
 export type Attempt<T> =
@@ -177,14 +219,56 @@ export class SharedController {
     } catch (error) {
       return { kind: 'unsupported', sentence: error instanceof Error ? error.message : 'This browser cannot join.' };
     }
-    const result = await this.#ports.join({ seed, clientName: this.#ports.clientName(), keys });
+    const asked = this.#ports.joinOptions === undefined ? undefined : await this.#ports.joinOptions({ seed, keys });
+    if (asked?.kind === 'refused') return { kind: 'refused', sentence: JOIN_REFUSED_SENTENCE };
+    if (asked?.kind === 'unreachable') return { kind: 'unreachable', sentence: COULD_NOT_REACH };
+    if (asked?.kind === 'answer' && asked.answer.kind === 'challenge') {
+      const { memberLabel, options } = asked.answer;
+      return { kind: 'prove', memberLabel, prove: async () => await this.#prove(seed, keys, memberLabel, options) };
+    }
+    return await this.#file(seed, keys);
+  }
+
+  /** The person's tap: one of their passkeys signs the challenge, and the join carries the assertion. */
+  async #prove(
+    seed: ShareLinkSeed,
+    keys: MintedMemberKeys,
+    memberLabel: string,
+    options: JoinProofOptions,
+  ): Promise<JoinEnd | NoPasskeyHere> {
+    let passkey: MemberJoinProof;
+    try {
+      passkey = await assertPasskey(this.#ports.credentials, options, this.#ports.passkeysSupported);
+    } catch (error) {
+      // A browser says "dismissed", "timed out" and "no passkey matched" with one error on purpose, so all three are
+      // the same answer here: this device cannot vouch for them.
+      if (error instanceof PasskeyCeremonyError) {
+        if (error.kind === 'cancelled' || error.kind === 'no-passkey') return { kind: 'no-passkey', memberLabel };
+        return { kind: 'unsupported', sentence: passkeySentence(error.kind, this.#ports.origin) };
+      }
+      return { kind: 'unsupported', sentence: PASSKEY_NOT_USABLE };
+    }
+    const ended = await this.#file(seed, keys, passkey);
+    // A refused proof (wrong passkey, an expired challenge) cannot be told from a dead code on the wire, and the code is
+    // not spent either way: the person is sent to try again, which asks afresh.
+    return ended.kind === 'refused' ? { kind: 'no-passkey', memberLabel } : ended;
+  }
+
+  /** Sends the `join` and, only after `joined`, keeps the keys. */
+  async #file(seed: ShareLinkSeed, keys: MintedMemberKeys, passkey?: MemberJoinProof): Promise<JoinEnd> {
+    const result = await this.#ports.join({
+      seed,
+      clientName: this.#ports.clientName(),
+      keys,
+      ...(passkey === undefined ? {} : { passkey }),
+    });
     if (result.kind === 'refused') return { kind: 'refused', sentence: JOIN_REFUSED_SENTENCE };
     if (result.kind === 'unreachable') {
       return {
         kind: 'unreachable',
         sentence: result.maybeSpentUnheard
           ? 'The link may have been used, but no answer came back. If it does not work again, ask for a new one.'
-          : 'Could not reach the publisher. Check you are online, then try again.',
+          : COULD_NOT_REACH,
       };
     }
     const { response, carrier } = result;
@@ -209,7 +293,7 @@ export class SharedController {
     };
     this.#dropClient(subscription.daemonId);
     await this.#ports.keys.save(subscription);
-    return { kind: 'joined', subscription };
+    return { kind: 'joined', subscription, proved: passkey !== undefined };
   }
 
   /** The one passkey, made inside the window. */

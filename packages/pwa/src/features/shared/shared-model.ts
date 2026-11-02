@@ -69,9 +69,6 @@ export function passkeyWindow(endsAt: string, now: Date): PasskeyWindow {
   };
 }
 
-export const passkeyHeading = (memberLabel: string, publisherLabel: string): string =>
-  `Add a passkey for ${revealHidden(memberLabel)} on ${revealHidden(publisherLabel)}`;
-
 export const PASSKEY_EXPLAIN = 'A passkey is how you unlock these catalogs next time.';
 export const PASSKEY_BUTTON = 'Add a passkey';
 export const UNLOCK_BUTTON = 'Unlock with passkey';

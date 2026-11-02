@@ -6,45 +6,68 @@
  * with that key instead. A key the publisher refused is never deleted here: the person decides.
  */
 
+import { revealHidden, type ShareLinkSeed } from '@ferretry/protocol';
 import { ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { revealHidden, type ShareLinkSeed } from '@ferretry/protocol';
 import type { MemberSubscription } from '../../lib/member-keys.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { FailureLine } from '../catalogs/catalog-parts.tsx';
 import { AccessRefused, JoinAgain } from './access-refused.tsx';
-import type { SharedController } from './shared-controller.ts';
+import type { ProveStep, SharedController } from './shared-controller.ts';
 import {
   PASSKEY_BUTTON,
   PASSKEY_EXPLAIN,
   type Problem,
-  passkeyHeading,
   passkeyWindow,
   UNLOCK_BUTTON,
   WINDOW_CLOSED_SENTENCE,
 } from './shared-model.ts';
+import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import {
   ADD_FROM_LINK,
   ADDING,
   BACK_TO_START,
+  createPasskeyFor,
   INVALID_TITLE,
+  INVITE_SENDER,
   JOIN_BUTTON,
   JOIN_NOTHING_SENT,
   JOIN_TITLE,
   JOINING,
   joinFacts,
+  type NamedSentence,
+  noPasskeyHere,
   OLD_KEY_NOTE,
   OPEN_SHARED,
   PASSKEY_ADDED,
+  plainSentence,
   redeemView,
+  SIGN_IN_BUTTON,
+  signInWithPasskey,
+  signingInAs,
   TRY_AGAIN,
-  UNLOCKED_THEN_LINK,
   UNLOCK_THEN_LINK,
+  UNLOCKED_THEN_LINK,
   WORKING,
   windowAnnouncement,
 } from './shared-screens-model.ts';
-import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import { secondTicker, type Ticker, useClock } from './use-clock.ts';
+
+/** A sentence with the person's name in bold, so the eye finds who the invite is for. */
+function Named({ sentence }: { readonly sentence: NamedSentence }) {
+  return (
+    <>
+      {sentence.before}
+      <strong className="font-semibold">{sentence.name}</strong>
+      {sentence.after}
+    </>
+  );
+}
+
+/** The heading for a screen that knows who the invite is for: the same words as the plain title, the name in bold. */
+function whoHeading(sentence: NamedSentence) {
+  return <span className="font-normal">{<Named sentence={sentence} />}</span>;
+}
 
 type JoinPort = Pick<SharedController, 'begin' | 'join' | 'addPasskey' | 'unlock' | 'redeem' | 'forget' | 'tryAgain'>;
 
@@ -74,8 +97,24 @@ type Phase =
       readonly sentence: string;
     }
   | {
+      readonly kind: 'prove';
+      readonly seed: ShareLinkSeed;
+      readonly oldKey: boolean;
+      readonly memberLabel: string;
+      readonly step: ProveStep['prove'];
+      readonly busy: boolean;
+    }
+  | {
+      readonly kind: 'no-passkey';
+      readonly seed: ShareLinkSeed;
+      readonly oldKey: boolean;
+      readonly memberLabel: string;
+    }
+  | {
       readonly kind: 'passkey';
       readonly sub: MemberSubscription;
+      /** A passkey of the person's vouched for this browser (a later invite); the invite is not their first. */
+      readonly proved: boolean;
       readonly stage: 'add' | 'unlock';
       readonly busy: boolean;
       readonly failure?: Problem;
@@ -119,17 +158,37 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
   const join = async (seed: ShareLinkSeed, oldKey: boolean): Promise<void> => {
     setPhase({ kind: 'joining', seed, oldKey });
     const outcome = await members.join(seed);
-    if (outcome.kind === 'joined') setPhase({ kind: 'passkey', sub: outcome.subscription, stage: 'add', busy: false });
+    if (outcome.kind === 'joined')
+      setPhase({ kind: 'passkey', sub: outcome.subscription, proved: outcome.proved, stage: 'add', busy: false });
+    else if (outcome.kind === 'prove')
+      setPhase({
+        kind: 'prove',
+        seed,
+        oldKey,
+        memberLabel: outcome.memberLabel,
+        step: outcome.prove,
+        busy: false,
+      });
     else setPhase({ kind: 'join-failed', seed, oldKey, why: outcome.kind, sentence: outcome.sentence });
   };
 
-  const passkeyStep = async (sub: MemberSubscription, stage: 'add' | 'unlock'): Promise<void> => {
-    setPhase({ kind: 'passkey', sub, stage, busy: true });
+  const proveStep = async (current: Extract<Phase, { kind: 'prove' }>): Promise<void> => {
+    setPhase({ ...current, busy: true });
+    const outcome = await current.step();
+    const { seed, oldKey, memberLabel } = current;
+    if (outcome.kind === 'no-passkey') setPhase({ kind: 'no-passkey', seed, oldKey, memberLabel });
+    else if (outcome.kind === 'joined')
+      setPhase({ kind: 'passkey', sub: outcome.subscription, proved: outcome.proved, stage: 'add', busy: false });
+    else setPhase({ kind: 'join-failed', seed, oldKey, why: outcome.kind, sentence: outcome.sentence });
+  };
+
+  const passkeyStep = async (sub: MemberSubscription, proved: boolean, stage: 'add' | 'unlock'): Promise<void> => {
+    setPhase({ kind: 'passkey', sub, proved, stage, busy: true });
     const attempt = await (stage === 'add' ? members.addPasskey(sub) : members.unlock(sub));
     if (attempt.kind === 'refused') setPhase({ kind: 'refused', sub });
     else if (attempt.kind === 'failed')
-      setPhase({ kind: 'passkey', sub, stage, busy: false, failure: attempt.problem });
-    else if (stage === 'add') setPhase({ kind: 'passkey', sub, stage: 'unlock', busy: false });
+      setPhase({ kind: 'passkey', sub, proved, stage, busy: false, failure: attempt.problem });
+    else if (stage === 'add') setPhase({ kind: 'passkey', sub, proved, stage: 'unlock', busy: false });
     else onShared(sub.daemonId);
   };
 
@@ -250,14 +309,58 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
           </div>
         </SharedPage>
       );
+    case 'prove': {
+      const sentence = signInWithPasskey(phase.memberLabel);
+      const who = signingInAs(phase.memberLabel, joinFacts(phase.seed).host);
+      return (
+        <SharedPage title={plainSentence(who)} heading={whoHeading(who)}>
+          <p className="m-0 text-cell text-fg" data-join-prove="">
+            <Named sentence={sentence} />
+          </p>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={phase.busy}
+            onClick={() => void proveStep(phase)}
+            data-join-prove-button=""
+          >
+            {phase.busy ? WORKING : SIGN_IN_BUTTON}
+          </Button>
+        </SharedPage>
+      );
+    }
+    case 'no-passkey': {
+      const who = signingInAs(phase.memberLabel, joinFacts(phase.seed).host);
+      return (
+        <SharedPage title={plainSentence(who)} heading={whoHeading(who)}>
+          <p className="m-0 text-cell text-fg" role="status" data-join-no-passkey="">
+            <Named sentence={noPasskeyHere(phase.memberLabel, INVITE_SENDER)} />
+          </p>
+          <div className="flex flex-wrap gap-xs">
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => void join(phase.seed, phase.oldKey)}
+              data-join-again-try=""
+            >
+              {TRY_AGAIN}
+            </Button>
+            <Button type="button" onClick={onHome} data-join-home="">
+              {BACK_TO_START}
+            </Button>
+          </div>
+        </SharedPage>
+      );
+    }
     case 'passkey': {
       const { sub } = phase;
       const countdown = passkeyWindow(sub.passkeyWindowEndsAt, clock);
       const closed = phase.stage === 'add' && (!countdown.open || phase.failure?.kind === 'window-closed');
-      const heading = passkeyHeading(sub.memberLabel, sub.ownLabel);
+      const who = signingInAs(sub.memberLabel, sub.ownLabel);
+      const heading = plainSentence(who);
       if (closed)
         return (
-          <SharedPage title={heading}>
+          <SharedPage title={heading} heading={whoHeading(who)}>
             <FailureLine sentence={WINDOW_CLOSED_SENTENCE} />
             <JoinAgain />
             <Button type="button" onClick={onHome} data-join-home="">
@@ -267,8 +370,14 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
         );
       const again = phase.failure !== undefined && phase.failure.kind !== 'window-closed';
       return (
-        <SharedPage title={heading}>
-          <p className="m-0 text-cell text-fg">{PASSKEY_EXPLAIN}</p>
+        <SharedPage title={heading} heading={whoHeading(who)}>
+          <p className="m-0 text-cell text-fg" data-passkey-explain="">
+            {phase.proved || phase.stage === 'unlock' ? (
+              PASSKEY_EXPLAIN
+            ) : (
+              <Named sentence={createPasskeyFor(sub.memberLabel)} />
+            )}
+          </p>
           {phase.stage === 'add' ? (
             <>
               <p
@@ -294,7 +403,7 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
             type="button"
             variant="primary"
             disabled={phase.busy}
-            onClick={() => void passkeyStep(sub, phase.stage)}
+            onClick={() => void passkeyStep(sub, phase.proved, phase.stage)}
             data-passkey-step={phase.stage}
           >
             {phase.busy ? WORKING : again ? TRY_AGAIN : phase.stage === 'add' ? PASSKEY_BUTTON : UNLOCK_BUTTON}

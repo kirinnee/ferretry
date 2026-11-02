@@ -9,8 +9,11 @@ export function SharedPage({
   children,
   flush = false,
   embedded = false,
+  heading,
 }: {
   readonly title: string;
+  /** The page's h1 when it is more than `title` (a name set in bold); `title` stays its plain text. */
+  readonly heading?: ReactNode;
   readonly children: ReactNode;
   /** No frame padding: the caller sits inside a layout that has its own. */
   readonly flush?: boolean;
@@ -29,7 +32,9 @@ export function SharedPage({
       className={cn('mx-auto flex w-full min-w-0 max-w-[680px] flex-col gap-sm', flush ? '' : 'px-3 py-4')}
       data-shared-page=""
     >
-      <h1 className="m-0 break-words font-display text-display font-bold tracking-display text-fg">{title}</h1>
+      <h1 className="m-0 break-words font-display text-display font-bold tracking-display text-fg">
+        {heading ?? title}
+      </h1>
       {children}
     </main>
   );

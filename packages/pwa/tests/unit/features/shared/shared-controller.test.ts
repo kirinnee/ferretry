@@ -7,12 +7,14 @@ import { beforeAll, describe, it } from 'bun:test';
 import {
   CatalogShareCodeSchema,
   formatShareFragment,
+  type JoinProofOptions,
   type MemberJoinedResponse,
+  type MemberJoinProof,
   type SharedCatalogItem,
   SharedCatalogItemSchema,
   type SharedCatalogManifest,
-  type SignedCatalogItemVersions,
   type ShareLinkSeed,
+  type SignedCatalogItemVersions,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonIdentity } from '@ferretry/relay';
@@ -20,6 +22,7 @@ import should from 'should';
 import type { z } from 'zod';
 import {
   ITEM_NOT_THE_LISTED_ONE,
+  PASSKEY_NOT_USABLE,
   type SharedBrowse,
   SharedController,
   type SharedControllerPorts,
@@ -31,10 +34,10 @@ import {
   NOT_A_SHARE_LINK,
   NOT_SHOWN_SENTENCE,
 } from '../../../../src/features/shared/shared-model.ts';
-import { MemberRefusedError, MemberUnreachableError, type MemberClient } from '../../../../src/lib/member-client.ts';
+import { type MemberClient, MemberRefusedError, MemberUnreachableError } from '../../../../src/lib/member-client.ts';
 import { MemberKeyUnsupportedError, type MemberSubscription } from '../../../../src/lib/member-keys.ts';
-import type { CredentialsPort } from '../../../../src/lib/passkeys.ts';
-import type { JoinResult } from '../../../../src/lib/relay-join.ts';
+import { type CredentialsPort, passkeySentence } from '../../../../src/lib/passkeys.ts';
+import type { JoinOptionsResult, JoinResult } from '../../../../src/lib/relay-join.ts';
 import {
   crypto,
   mcpItem,
@@ -113,6 +116,7 @@ interface Rig {
   readonly keys: MemoryMemberKeyStore;
   readonly opened: MemberSubscription[];
   readonly joins: number[];
+  readonly passkeys: (MemberJoinProof | undefined)[];
   readonly clients: FakeClient[];
 }
 
@@ -123,13 +127,15 @@ const rig = (
   const keys = new MemoryMemberKeyStore();
   const opened: MemberSubscription[] = [];
   const joins: number[] = [];
+  const passkeys: (MemberJoinProof | undefined)[] = [];
   const clients: FakeClient[] = [];
   const { join: joinResult, ...ports } = overrides;
   const controller = new SharedController({
     keys,
     mint: testMemberKeys,
-    join: async () => {
+    join: async ({ passkey }) => {
       joins.push(1);
+      passkeys.push(passkey);
       return (
         joinResult ?? {
           kind: 'joined',
@@ -152,7 +158,7 @@ const rig = (
     passkeysSupported: true,
     ...ports,
   });
-  return { controller, keys, opened, joins, clients };
+  return { controller, keys, opened, joins, passkeys, clients };
 };
 
 describe('begin', () => {
@@ -289,6 +295,139 @@ describe('join', () => {
     await controller.join(seed);
     await Promise.resolve();
     should(clients[0]?.closed).equal(1);
+  });
+});
+
+const CHALLENGE: JoinProofOptions = {
+  challenge: 'AAAA',
+  rpId: 'app.ferretry.test',
+  allowCredentials: [{ type: 'public-key', id: 'qg' }],
+  timeout: 60_000,
+};
+const DIRECT = { kind: 'direct', daemonUrl: 'https://studio.example.test' } as const;
+const answer = (a: Extract<JoinOptionsResult, { kind: 'answer' }>['answer']): JoinOptionsResult => ({
+  kind: 'answer',
+  answer: a,
+  carrier: DIRECT,
+});
+const challenge = (): JoinOptionsResult => answer({ kind: 'challenge', memberLabel: 'Alice', options: CHALLENGE });
+const failingCredentials = (error: unknown): CredentialsPort => ({
+  create: credentials().create,
+  get: async () => {
+    throw error;
+  },
+});
+const named = (name: string) => Object.assign(new Error(name), { name });
+
+describe('join when the publisher asks for a passkey first', () => {
+  it('should join as it always did when the publisher says no proof is wanted', async () => {
+    const { controller, joins, passkeys } = rig(
+      {},
+      { joinOptions: async () => answer({ kind: 'open', why: 'first-browser' }) },
+    );
+    should(await controller.join(seed)).match({ kind: 'joined', proved: false });
+    should(joins).have.length(1);
+    should(passkeys).eql([undefined]);
+  });
+
+  it('should join as it always did when the publisher is too old to know the question', async () => {
+    const { controller, joins } = rig({}, { joinOptions: async () => ({ kind: 'older' }) });
+    should(await controller.join(seed)).match({ kind: 'joined', proved: false });
+    should(joins).have.length(1);
+  });
+
+  it('should say the one refusal and send no join when the options ask is refused', async () => {
+    const { controller, joins } = rig({}, { joinOptions: async () => ({ kind: 'refused' }) });
+    should(await controller.join(seed)).match({ kind: 'refused', sentence: JOIN_REFUSED_SENTENCE });
+    should(joins).be.empty();
+  });
+
+  it('should say it could not reach the publisher, and send no join, when no carrier answers the options ask', async () => {
+    const { controller, joins } = rig({}, { joinOptions: async () => ({ kind: 'unreachable' }) });
+    should(await controller.join(seed)).match({ kind: 'unreachable' });
+    should(joins).be.empty();
+  });
+
+  it('should hold the join until the person taps, then join with their passkey and save the keys', async () => {
+    const { controller, joins, keys, passkeys } = rig({}, { joinOptions: async () => challenge() });
+    const step = await controller.join(seed);
+    if (step.kind !== 'prove') throw new Error('expected a prove step');
+    should(step.memberLabel).equal('Alice');
+    should(joins).be.empty();
+    should(keys.saved).be.empty();
+    const ended = await step.prove();
+    should(ended).match({ kind: 'joined', proved: true });
+    should(joins).have.length(1);
+    should(passkeys[0]).match({ credentialId: 'qg' });
+    should(keys.saved).deepEqual([publisher.daemonId]);
+  });
+
+  it('should say no passkey here, and join nothing, when the person dismisses or has none', async () => {
+    for (const error of [named('NotAllowedError'), named('AbortError')]) {
+      const { controller, joins } = rig(
+        {},
+        { joinOptions: async () => challenge(), credentials: failingCredentials(error) },
+      );
+      const step = await controller.join(seed);
+      if (step.kind !== 'prove') throw new Error('expected a prove step');
+      should(await step.prove()).eql({ kind: 'no-passkey', memberLabel: 'Alice' });
+      should(joins).be.empty();
+    }
+    const none = rig(
+      {},
+      {
+        joinOptions: async () =>
+          answer({
+            kind: 'challenge',
+            memberLabel: 'Alice',
+            options: { ...CHALLENGE, allowCredentials: [] } as unknown as JoinProofOptions,
+          }),
+      },
+    );
+    const step = await none.controller.join(seed);
+    if (step.kind !== 'prove') throw new Error('expected a prove step');
+    should(await step.prove()).eql({ kind: 'no-passkey', memberLabel: 'Alice' });
+  });
+
+  it('should say why when the passkey ceremony cannot run here', async () => {
+    const insecure = rig(
+      {},
+      { joinOptions: async () => challenge(), credentials: failingCredentials(named('SecurityError')) },
+    );
+    const first = await insecure.controller.join(seed);
+    if (first.kind !== 'prove') throw new Error('expected a prove step');
+    should(await first.prove()).match({ kind: 'unsupported', sentence: passkeySentence('insecure-origin', ORIGIN) });
+
+    const old = rig({}, { joinOptions: async () => challenge(), passkeysSupported: false });
+    const second = await old.controller.join(seed);
+    if (second.kind !== 'prove') throw new Error('expected a prove step');
+    should(await second.prove()).match({ kind: 'unsupported', sentence: passkeySentence('unsupported', ORIGIN) });
+
+    const odd = rig({}, { joinOptions: async () => challenge(), credentials: failingCredentials(new Error('boom')) });
+    const third = await odd.controller.join(seed);
+    if (third.kind !== 'prove') throw new Error('expected a prove step');
+    should(await third.prove()).match({ kind: 'unsupported', sentence: PASSKEY_NOT_USABLE });
+  });
+
+  it('should send the person to try again when the publisher refuses the proof, and keep nothing', async () => {
+    const { controller, keys } = rig(
+      {},
+      { joinOptions: async () => challenge(), join: { kind: 'refused', maybeSpentUnheard: false } },
+    );
+    const step = await controller.join(seed);
+    if (step.kind !== 'prove') throw new Error('expected a prove step');
+    should(await step.prove()).eql({ kind: 'no-passkey', memberLabel: 'Alice' });
+    should(keys.saved).be.empty();
+  });
+
+  it('should pass on a publisher that cannot be reached once the proof is signed', async () => {
+    const { controller } = rig(
+      {},
+      { joinOptions: async () => challenge(), join: { kind: 'unreachable', maybeSpentUnheard: false, tried: 2 } },
+    );
+    const step = await controller.join(seed);
+    if (step.kind !== 'prove') throw new Error('expected a prove step');
+    should(await step.prove()).match({ kind: 'unreachable' });
   });
 });
 

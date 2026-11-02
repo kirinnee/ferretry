@@ -18,19 +18,19 @@ import {
 } from '../../../../src/features/shared/shared-screens-model.ts';
 import type { Ticker } from '../../../../src/features/shared/use-clock.ts';
 import { fingerprintHead, type MemberSubscription } from '../../../../src/lib/member-keys.ts';
+import { interact, mount } from '../../../support/dom.ts';
+import { click, settle } from '../../../support/dom-form.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
 import {
   deferred,
-  failedAttempt,
   FAKE_FRAGMENT,
+  failedAttempt,
   fakeMembers,
   type Members,
   okAttempt,
   refusedAttempt,
   SEED,
 } from '../../../support/shared-screens.ts';
-import { click, settle } from '../../../support/dom-form.ts';
-import { interact, mount } from '../../../support/dom.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
 beforeEach(() => {
@@ -87,7 +87,7 @@ async function open(handlers: Parameters<typeof fakeMembers>[0], start = '2026-1
 }
 
 const fresh = { begin: async () => ({ kind: 'new' as const, seed: SEED }) } satisfies Partial<Members>;
-const joined = (): Partial<Members> => ({ join: async () => ({ kind: 'joined', subscription: sub }) });
+const joined = (): Partial<Members> => ({ join: async () => ({ kind: 'joined', subscription: sub, proved: false }) });
 
 describe('a link that is not a share link', () => {
   it('says so in a heading and a sentence, and offers the way out', async () => {
@@ -136,14 +136,14 @@ describe('a publisher this browser has not met', () => {
         tries += 1;
         return tries === 1
           ? { kind: 'unreachable', sentence: 'Could not reach the publisher.' }
-          : { kind: 'joined', subscription: sub };
+          : { kind: 'joined', subscription: sub, proved: false };
       },
     });
     await click(q('[data-join-button]'));
     expect(q('h1')?.textContent).toBe('Could not reach the publisher');
     expect(text()).toContain('Could not reach the publisher.');
     await click(q('[data-join-again-try]'));
-    expect(q('h1')?.textContent).toBe('Add a passkey for Alice on Studio');
+    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
     expect(calls).toEqual(['begin', 'join', 'join']);
     await view.unmount();
   });
@@ -183,8 +183,10 @@ describe('adding the passkey', () => {
   it('names who and where, explains it, and counts down live', async () => {
     const { view, time } = await open({ ...fresh, ...joined() });
     await click(q('[data-join-button]'));
-    expect(q('h1')?.textContent).toBe('Add a passkey for Alice on Studio');
-    expect(text()).toContain(PASSKEY_EXPLAIN);
+    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
+    expect(q('[data-passkey-explain]')?.textContent).toBe("Create a passkey for Alice. You'll use it to sign in here.");
+    expect(q('[data-passkey-explain] strong')?.textContent).toBe('Alice');
+    expect(q('h1 strong')?.textContent).toBe('Alice');
     expect(q('[data-passkey-countdown]')?.textContent).toBe(
       'Add a passkey in the next 8:41 or this link stops working.',
     );
@@ -354,7 +356,7 @@ describe('a key the publisher refused', () => {
     expect(text()).toContain('only replaced after you join');
     expect(calls).toEqual(['begin']);
     await click(q('[data-join-button]'));
-    expect(q('h1')?.textContent).toContain('Add a passkey');
+    expect(q('h1')?.textContent).toContain('signing in as');
     await view.unmount();
   });
 });
@@ -485,6 +487,102 @@ describe('a publisher this browser already belongs to', () => {
     const { view } = await open({ ...known, redeem: async () => refusedAttempt() });
     await click(q('[data-known-redeem]'));
     expect(q('[data-access-refused] h2')?.textContent).toBe(REFUSED_TITLE);
+    await view.unmount();
+  });
+});
+
+type ProveEnd = Awaited<ReturnType<Extract<Awaited<ReturnType<Members['join']>>, { kind: 'prove' }>['prove']>>;
+const proving = (prove: () => Promise<ProveEnd>, memberLabel = 'Alice'): Partial<Members> => ({
+  join: async () => ({ kind: 'prove', memberLabel, prove }),
+});
+
+describe('a later invite for someone who already has a passkey', () => {
+  it('names who and where, asks for their passkey, and sends nothing until the tap', async () => {
+    let proves = 0;
+    const { view } = await open({
+      ...fresh,
+      ...proving(async () => {
+        proves += 1;
+        return { kind: 'joined', subscription: sub, proved: true };
+      }),
+    });
+    await click(q('[data-join-button]'));
+    expect(q('h1')?.textContent).toBe("You're signing in as Alice on box.example.test.");
+    expect(q('h1 strong')?.textContent).toBe('Alice');
+    expect(q('[data-join-prove]')?.textContent).toBe('Sign in with your Alice passkey to add this browser.');
+    expect(q('[data-join-prove] strong')?.textContent).toBe('Alice');
+    expect(q('[data-join-prove-button]')?.textContent).toBe('Sign in with passkey');
+    expect(proves).toBe(0);
+    await view.unmount();
+  });
+
+  it('says Working… while the passkey is asked for, then goes on to add this browser’s own passkey', async () => {
+    const gate = deferred<ProveEnd>();
+    const { view } = await open({ ...fresh, ...proving(async () => await gate.promise) });
+    await click(q('[data-join-button]'));
+    await click(q('[data-join-prove-button]'));
+    expect(q('[data-join-prove-button]')?.textContent).toBe('Working…');
+    expect(q('[data-join-prove-button]')?.hasAttribute('disabled')).toBe(true);
+    gate.resolve({ kind: 'joined', subscription: sub, proved: true });
+    await settle();
+    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
+    expect(q('[data-passkey-explain]')?.textContent).toBe(PASSKEY_EXPLAIN);
+    expect(q('[data-passkey-step]')?.getAttribute('data-passkey-step')).toBe('add');
+    await view.unmount();
+  });
+
+  it('says this invite is for Alice, with a way to try again, when this device cannot vouch for them', async () => {
+    let asks = 0;
+    const { view, homes, calls } = await open({
+      ...fresh,
+      join: async () => {
+        asks += 1;
+        return {
+          kind: 'prove',
+          memberLabel: 'Alice',
+          prove: async () => ({ kind: 'no-passkey', memberLabel: 'Alice' }),
+        };
+      },
+    });
+    await click(q('[data-join-button]'));
+    await click(q('[data-join-prove-button]'));
+    expect(q('h1')?.textContent).toBe("You're signing in as Alice on box.example.test.");
+    expect(q('[data-join-no-passkey]')?.textContent).toBe(
+      'This invite is for Alice. Use Alice\'s passkey (on another device: choose "use a phone or tablet"), or ask the person who sent you this link to let you set up a new one.',
+    );
+    expect(q('[data-join-no-passkey] strong')?.textContent).toBe('Alice');
+    await click(q('[data-join-again-try]'));
+    expect(asks).toBe(2);
+    expect(calls.filter(call => call === 'join')).toHaveLength(2);
+    expect(q('[data-join-prove]')).not.toBeNull();
+    await click(q('[data-join-prove-button]'));
+    await click(q('[data-join-home]'));
+    expect(homes()).toBe(1);
+    await view.unmount();
+  });
+
+  it('ends as the other join failures do when the publisher cannot be reached after the passkey', async () => {
+    const { view } = await open({
+      ...fresh,
+      ...proving(async () => ({ kind: 'unreachable', sentence: 'Could not reach the publisher.' })),
+    });
+    await click(q('[data-join-button]'));
+    await click(q('[data-join-prove-button]'));
+    expect(q('h1')?.textContent).toBe('Could not reach the publisher');
+    expect(q('[data-join-again-try]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('never shows a hidden character raw in the name', async () => {
+    const hidden = 'Al\u202Eice';
+    const { view } = await open({
+      ...fresh,
+      ...proving(async () => ({ kind: 'no-passkey', memberLabel: hidden }), hidden),
+    });
+    await click(q('[data-join-button]'));
+    expect(text()).not.toContain('\u202E');
+    await click(q('[data-join-prove-button]'));
+    expect(text()).not.toContain('\u202E');
     await view.unmount();
   });
 });

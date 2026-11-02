@@ -1,5 +1,5 @@
 /**
- * The Share sheet: who a catalog is for, for how long, for how many, then a link shown once.
+ * The Invite people sheet: their user ID, for how long, for how many, then a link shown once.
  *
  * ## THE LINK LIVES IN THIS COMPONENT'S STATE AND NOWHERE ELSE
  *
@@ -8,10 +8,12 @@
  * live region. The QR is drawn here from that state, so no image service ever sees the credential.
  * This is why the harness shows a fixed fake code.
  *
- * ## AN EXISTING MEMBER IS WARNED BEFORE ANYTHING IS MADE
+ * ## ONE FIELD, AND THE SHEET SAYS WHAT IT MEANS BEFORE ANYTHING IS MADE
  *
- * A link for a person who can already read things lets whoever opens it read all of it. That sentence is
- * on screen the moment the owner picks such a person, before the passkey button, not after.
+ * The owner types a user ID. An ID someone already has reaches that same person (they sign in with their own
+ * passkey); a new one makes a new person. The line under the field says which, before the passkey button.
+ * "They need a new passkey" (D8) appears only for an existing person on a single-use invite and is never on
+ * unless the owner ticked it or the person has no passkey left.
  *
  * ## THE PASSKEY IS THE CARRIER'S JOB
  *
@@ -25,7 +27,7 @@ import {
   type OwnedCatalog,
   shareLinkNotice,
 } from '@ferretry/protocol';
-import { CircleAlert, Copy, Fingerprint, TriangleAlert } from 'lucide-react';
+import { CircleAlert, Copy, Fingerprint } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useState } from 'react';
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -38,12 +40,14 @@ import { endShare, listMembers, mintShare } from './catalog-shares-api.ts';
 import {
   CAP_PROBLEM,
   DEFAULT_CAP_TEXT,
-  EXISTING_MEMBER_ADVICE,
   EXPIRY_CHOICES,
   emptyDraft,
-  existingMemberWarning,
   expiryLine,
   mintRequest,
+  newPasskeyChoice,
+  newPasskeyHelp,
+  newPasskeyPreTicked,
+  personWithId,
   recipientName,
   SHARE_CAP_LABEL,
   SHARE_CLOSE_NOTE,
@@ -51,14 +55,14 @@ import {
   SHARE_COPIED_LINE,
   SHARE_COPY_FAILED_LINE,
   SHARE_ENDED_LINE,
-  SHARE_EXISTING_PERSON_LABEL,
   SHARE_MANY_LABEL,
-  SHARE_MANY_NEEDS_NEW,
-  SHARE_NEW_PERSON_LABEL,
-  SHARE_NO_ONE_YET,
+  SHARE_NEW_PASSKEY_LABEL,
   SHARE_ONE_LABEL,
   SHARE_QR_FAILED_LINE,
   SHARE_QR_LABEL,
+  SHARE_USER_ID_HELP,
+  SHARE_USER_ID_LABEL,
+  SHARE_USER_ID_PLACEHOLDER,
   SHARE_WAITING_LABEL,
   type ShareDraft,
   shareCountdown,
@@ -67,6 +71,9 @@ import {
   shareSheetTitle,
   sharingRefusal,
   shownOnceLine,
+  suggestPeople,
+  userIdLine,
+  userIdProblem,
 } from './catalog-sharing-model.ts';
 import type { CatalogClientFactory } from './catalogs-api.ts';
 import type { OwnerRefusal } from './catalogs-model.ts';
@@ -75,6 +82,8 @@ export interface ShareSheetProps {
   readonly connection: DaemonConnection;
   readonly createClient?: CatalogClientFactory;
   readonly catalog: OwnedCatalog;
+  /** Every catalog on this machine, so an existing person's line can name theirs. */
+  readonly catalogs?: readonly OwnedCatalog[];
   readonly onClose: () => void;
   /** Called after a code is made or ended, so the lists behind the sheet read again. */
   readonly onChanged?: () => void;
@@ -96,6 +105,7 @@ export function ShareSheet({
   connection,
   createClient: injected,
   catalog,
+  catalogs = [catalog],
   onClose,
   onChanged,
   now = Date.now,
@@ -125,14 +135,14 @@ export function ShareSheet({
   }, [connection, createClient]);
 
   const members = people.kind === 'ready' ? people.members : [];
-  const problem = shareProblem(draft, members);
+  const problem = shareProblem(draft);
 
   const mint = async (): Promise<void> => {
     if (problem !== null || busy) return;
     setBusy(true);
     setFailure(null);
     try {
-      const response = await mintShare(await createClient(connection), mintRequest(catalog.id, draft));
+      const response = await mintShare(await createClient(connection), mintRequest(catalog.id, draft, members));
       setMade({ response, name: recipientName(draft, members) });
       onChanged?.();
     } catch (error) {
@@ -144,11 +154,12 @@ export function ShareSheet({
 
   const title = made === null ? shareSheetTitle(catalog.name) : shareResultTitle(made.name);
   return (
-    <CatalogSheet name="share" title={title} closeLabel="Close the share sheet" onClose={onClose}>
+    <CatalogSheet name="share" title={title} closeLabel="Close the invite sheet" onClose={onClose}>
       {made === null ? (
         <ShareForm
           draft={draft}
           members={members}
+          catalogs={catalogs}
           people={people}
           problem={problem}
           busy={busy}
@@ -177,6 +188,7 @@ export function ShareSheet({
 function ShareForm({
   draft,
   members,
+  catalogs,
   people,
   problem,
   busy,
@@ -188,6 +200,7 @@ function ShareForm({
 }: {
   readonly draft: ShareDraft;
   readonly members: readonly CatalogMemberView[];
+  readonly catalogs: readonly OwnedCatalog[];
   readonly people: Read;
   readonly problem: string | null;
   readonly busy: boolean;
@@ -197,14 +210,10 @@ function ShareForm({
   readonly onDraft: (next: ShareDraft) => void;
   readonly onSubmit: () => void;
 }) {
-  const nameId = useId();
-  const memberId = useId();
+  const idField = useId();
   const expiryId = useId();
   const capId = useId();
-  const whoGroup = useId();
   const usesGroup = useId();
-  const existing = draft.who.kind === 'existing' ? draft.who : null;
-  const picked = existing === null ? undefined : members.find(member => member.memberId === existing.memberId);
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     onSubmit();
@@ -213,93 +222,72 @@ function ShareForm({
   if (people.kind === 'failed' && people.refusal.sharingOff)
     return <SharingOffPanel connection={connection} createClient={createClient} />;
 
+  const line = userIdLine(draft, members, catalogs);
+  const hidden = userIdProblem(draft.userId);
+  const suggestions = suggestPeople(draft.userId, members);
+  const person = personWithId(draft.userId, members);
+  const passkey = newPasskeyChoice(draft, members);
+
   return (
     <form className="flex min-w-0 flex-col gap-sm" onSubmit={submit} data-share-form="">
-      <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-labelledby={whoGroup}>
-        <legend id={whoGroup} className="p-0 text-meta font-semibold text-muted">
-          Who is this for?
-        </legend>
-        <label className="flex items-center gap-2 text-cell text-fg">
-          <input
-            type="radio"
-            name={whoGroup}
-            checked={draft.who.kind === 'new'}
-            onChange={() => onDraft({ ...draft, who: { kind: 'new', name: '' } })}
-            data-share-who-new=""
-          />
-          {SHARE_NEW_PERSON_LABEL}
+      <div className="flex min-w-0 flex-col gap-1">
+        <label htmlFor={idField} className="text-meta font-semibold text-muted">
+          {SHARE_USER_ID_LABEL}
         </label>
-        <label className="flex items-center gap-2 text-cell text-fg">
-          <input
-            type="radio"
-            name={whoGroup}
-            checked={draft.who.kind === 'existing'}
-            disabled={members.length === 0}
-            onChange={() =>
-              onDraft({
-                ...draft,
-                who: { kind: 'existing', memberId: members[0]?.memberId ?? '' },
-                howMany: { kind: 'single' },
-              })
-            }
-            data-share-who-existing=""
-          />
-          {SHARE_EXISTING_PERSON_LABEL}
-        </label>
-        {members.length === 0 && people.kind === 'ready' ? (
-          <p className="m-0 text-meta text-muted" data-share-no-members="">
-            {SHARE_NO_ONE_YET}
-          </p>
-        ) : null}
-      </fieldset>
-
-      {draft.who.kind === 'new' ? (
-        <div className="flex min-w-0 flex-col gap-1">
-          <label htmlFor={nameId} className="text-meta font-semibold text-muted">
-            Their name
-          </label>
-          <input
-            id={nameId}
-            className="kt-input"
-            value={draft.who.name}
-            maxLength={80}
-            autoComplete="off"
-            onChange={event => onDraft({ ...draft, who: { kind: 'new', name: event.target.value } })}
-            data-share-name=""
-          />
-        </div>
-      ) : (
-        <div className="flex min-w-0 flex-col gap-xs">
-          <label htmlFor={memberId} className="text-meta font-semibold text-muted">
-            Which person
-          </label>
-          <select
-            id={memberId}
-            className="kt-input"
-            value={draft.who.memberId}
-            onChange={event => onDraft({ ...draft, who: { kind: 'existing', memberId: event.target.value } })}
-            data-share-member=""
+        <input
+          id={idField}
+          className="kt-input"
+          value={draft.userId}
+          placeholder={SHARE_USER_ID_PLACEHOLDER}
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          aria-describedby={`${idField}-help ${idField}-line`}
+          aria-invalid={hidden === null ? undefined : true}
+          onChange={event => onDraft({ ...draft, userId: event.target.value, newPasskey: null })}
+          data-share-user-id=""
+        />
+        <p id={`${idField}-help`} className="m-0 text-meta text-muted" data-share-user-id-help="">
+          {SHARE_USER_ID_HELP}
+        </p>
+        {suggestions.length === 0 ? null : (
+          <ul
+            className="m-0 flex min-w-0 list-none flex-wrap gap-xs p-0"
+            aria-label="People already here"
+            data-share-suggestions=""
           >
-            {members.map(member => (
-              <option key={member.memberId} value={member.memberId}>
-                {member.label}
-              </option>
+            {suggestions.map(suggestion => (
+              <li key={suggestion.memberId} className="min-w-0">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="min-h-[44px] max-w-full break-all"
+                  onClick={() => onDraft({ ...draft, userId: suggestion.label, newPasskey: null })}
+                  data-share-suggestion=""
+                >
+                  {suggestion.label}
+                </Button>
+              </li>
             ))}
-          </select>
-          {picked === undefined ? null : (
-            <div
-              className="flex min-w-0 flex-col gap-1 rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-warn"
-              data-share-existing-warning=""
-            >
-              <p className="m-0 flex items-start gap-2 break-words text-cell font-semibold">
-                <TriangleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
-                <span>{existingMemberWarning(picked.label)}</span>
-              </p>
-              <p className="m-0 text-cell">{EXISTING_MEMBER_ADVICE}</p>
-            </div>
+          </ul>
+        )}
+        <p
+          id={`${idField}-line`}
+          className="m-0 break-words text-cell text-fg"
+          aria-live="polite"
+          data-share-user-id-line=""
+        >
+          {hidden !== null ? (
+            hidden
+          ) : line === null ? null : (
+            <>
+              {line.before}
+              <strong>{line.id}</strong>
+              {line.after}
+            </>
           )}
-        </div>
-      )}
+        </p>
+      </div>
 
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={expiryId} className="text-meta font-semibold text-muted">
@@ -324,7 +312,7 @@ function ShareForm({
         <legend id={usesGroup} className="p-0 text-meta font-semibold text-muted">
           How many people?
         </legend>
-        <label className="flex items-center gap-2 text-cell text-fg">
+        <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
           <input
             type="radio"
             name={usesGroup}
@@ -334,22 +322,16 @@ function ShareForm({
           />
           {SHARE_ONE_LABEL}
         </label>
-        <label className="flex items-center gap-2 text-cell text-fg">
+        <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
           <input
             type="radio"
             name={usesGroup}
             checked={draft.howMany.kind === 'multi'}
-            disabled={draft.who.kind === 'existing'}
             onChange={() => onDraft({ ...draft, howMany: { kind: 'multi', cap: DEFAULT_CAP_TEXT } })}
             data-share-uses-multi=""
           />
           {SHARE_MANY_LABEL}
         </label>
-        {draft.who.kind === 'existing' ? (
-          <p className="m-0 text-meta text-muted" data-share-many-note="">
-            {SHARE_MANY_NEEDS_NEW}
-          </p>
-        ) : null}
       </fieldset>
 
       {draft.howMany.kind === 'multi' ? (
@@ -372,12 +354,30 @@ function ShareForm({
         </div>
       ) : null}
 
+      {passkey.offered && person !== undefined ? (
+        <div className="flex min-w-0 flex-col gap-1" data-share-new-passkey="">
+          <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
+            <input
+              type="checkbox"
+              checked={passkey.ticked}
+              onChange={event => onDraft({ ...draft, newPasskey: event.target.checked })}
+              aria-describedby={`${idField}-passkey`}
+              data-share-new-passkey-box=""
+            />
+            {SHARE_NEW_PASSKEY_LABEL}
+          </label>
+          <p id={`${idField}-passkey`} className="m-0 break-words text-meta text-muted" data-share-new-passkey-help="">
+            {passkey.preTicked ? newPasskeyPreTicked(person.label) : newPasskeyHelp(person.label)}
+          </p>
+        </div>
+      ) : null}
+
       {failure === null ? null : failure.sharingOff ? (
         <SharingOffPanel connection={connection} createClient={createClient} />
       ) : (
         <FailureLine sentence={failure.sentence} />
       )}
-      {problem === null || busy ? null : (
+      {problem === null || busy || hidden !== null ? null : (
         <p className="m-0 text-meta text-muted" data-share-problem="">
           {problem}
         </p>

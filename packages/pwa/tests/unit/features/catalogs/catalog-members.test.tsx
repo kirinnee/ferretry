@@ -3,10 +3,19 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import { CatalogMembersPanel } from '../../../../src/features/catalogs/catalog-members.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
-import { KEY_A1, MEMBER_A, memberView, SHARE_1, SHARE_2, shareView, T0_MS } from '../../../support/catalog-sharing.ts';
+import {
+  KEY_A1,
+  MEMBER_A,
+  MEMBER_B,
+  memberView,
+  SHARE_1,
+  SHARE_2,
+  shareView,
+  T0_MS,
+} from '../../../support/catalog-sharing.ts';
 import { CATALOG, ownedCatalog } from '../../../support/catalog-views.ts';
 import { mount } from '../../../support/dom.ts';
-import { click, settle } from '../../../support/dom-form.ts';
+import { click, settle, typeInto } from '../../../support/dom-form.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
 beforeEach(() => {
@@ -44,6 +53,14 @@ const tap = async (selector: string) => {
 };
 
 describe('CatalogMembersPanel', () => {
+  it('titles each card by user ID, labelled "User ID", with since, browsers and passkeys', async () => {
+    const { view } = await open();
+    expect(q('[data-members-user-id]')?.textContent).toBe('Alice');
+    expect(q('[data-members-person="Alice"]')?.textContent).toContain('User ID');
+    expect(q('[data-members-facts]')?.textContent).toBe('since Oct 31 · 2 browsers · 1 passkey');
+    await view.unmount();
+  });
+
   it('lists each person with their catalogs and every browser', async () => {
     const { view } = await open();
     expect(q('[data-members-person="Alice"]')).not.toBeNull();
@@ -207,6 +224,83 @@ describe('CatalogMembersPanel', () => {
     });
     expect(q('[data-sharing-off]')).not.toBeNull();
     await off.view.unmount();
+  });
+
+  it('says what a rename does before it is done, and saves the new user ID', async () => {
+    const { view, fake } = await open({
+      [`PATCH /v1/catalog-members/${MEMBER_A}`]: () => memberView({ label: 'alicia' }),
+    });
+    await tap('[data-members-rename="Alice"]');
+    expect(q('[data-members-rename-save]')?.hasAttribute('disabled')).toBe(true);
+    await typeInto(q('[data-members-rename-input]'), 'alicia');
+    expect(q('[data-members-rename-says]')?.textContent).toBe(
+      'Alice becomes alicia. They keep their browsers, passkeys and installs. Passkeys they already made keep the old name in their password manager, and still sign them in.',
+    );
+    expect(fake.calls.some(call => call.method === 'PATCH')).toBe(false);
+    await tap('[data-members-rename-save]');
+    expect(fake.calls.find(call => call.method === 'PATCH')?.body).toEqual({ label: 'alicia' });
+    expect(q('[data-members-note]')?.textContent).toContain('Alice is now alicia.');
+    expect(q('[data-members-rename-form]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('refuses a user ID someone else has, before asking the machine', async () => {
+    const bob = memberView({ memberId: MEMBER_B, label: 'sam' });
+    const { view, fake } = await open({ 'GET /v1/catalog-members': () => ({ members: [memberView(), bob] }) });
+    await tap('[data-members-rename="Alice"]');
+    await typeInto(q('[data-members-rename-input]'), 'Sam');
+    expect(q('[data-members-rename-problem]')?.textContent).toBe(
+      'Someone here already has the user ID Sam. Pick another.',
+    );
+    expect(q('[data-members-rename-save]')?.hasAttribute('disabled')).toBe(true);
+    expect(fake.calls.some(call => call.method === 'PATCH')).toBe(false);
+    await view.unmount();
+  });
+
+  it('shows the machine’s own taken-ID answer on the form and keeps it open', async () => {
+    const { view } = await open({
+      [`PATCH /v1/catalog-members/${MEMBER_A}`]: () => {
+        throw new FyHttpError('taken', 409, 'member_exists');
+      },
+    });
+    await tap('[data-members-rename="Alice"]');
+    await typeInto(q('[data-members-rename-input]'), 'sam');
+    await tap('[data-members-rename-save]');
+    expect(q('[data-members-rename-problem]')?.textContent).toBe(
+      'Someone here already has the user ID sam. Pick another.',
+    );
+    expect(q('[data-members-rename-form]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('closes the form and says why when a rename fails another way', async () => {
+    const { view } = await open({
+      [`PATCH /v1/catalog-members/${MEMBER_A}`]: () => {
+        throw new FyHttpError('gone', 404, 'member_unknown');
+      },
+    });
+    await tap('[data-members-rename="Alice"]');
+    await typeInto(q('[data-members-rename-input]'), 'alicia');
+    await tap('[data-members-rename-save]');
+    expect(q('[data-catalog-failure]')?.textContent).toContain('That person is gone');
+    expect(q('[data-members-rename-form]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('keeps the old user ID when the owner backs out, and forgets a stale refusal', async () => {
+    const { view } = await open({
+      [`PATCH /v1/catalog-members/${MEMBER_A}`]: () => {
+        throw new FyHttpError('taken', 409, 'member_exists');
+      },
+    });
+    await tap('[data-members-rename="Alice"]');
+    await typeInto(q('[data-members-rename-input]'), 'sam');
+    await tap('[data-members-rename-save]');
+    await tap('[data-members-rename-cancel]');
+    expect(q('[data-members-rename-form]')).toBeNull();
+    await tap('[data-members-rename="Alice"]');
+    expect(q('[data-members-rename-problem]')).toBeNull();
+    await view.unmount();
   });
 
   it('goes back', async () => {

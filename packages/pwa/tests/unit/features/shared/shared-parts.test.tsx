@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { AccessRefused, JoinAgain } from '../../../../src/features/shared/access-refused.tsx';
-import { Fingerprint, SharedPage } from '../../../../src/features/shared/shared-parts.tsx';
 import {
   FORGET_NOTE,
   REFUSED_JOIN_AGAIN,
@@ -9,8 +8,9 @@ import {
   REFUSED_TITLE,
   STILL_REFUSED_SENTENCE,
 } from '../../../../src/features/shared/shared-model.ts';
-import { click, settle } from '../../../support/dom-form.ts';
+import { Fingerprint, SharedPage } from '../../../../src/features/shared/shared-parts.tsx';
 import { mount } from '../../../support/dom.ts';
+import { click, settle } from '../../../support/dom-form.ts';
 import { failedAttempt } from '../../../support/shared-screens.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
@@ -34,6 +34,26 @@ describe('SharedPage', () => {
     expect(pages.map(page => page.querySelector('h1')?.textContent)).toEqual(['Framed', 'Flush']);
     expect(pages[0]?.className).toContain('px-3');
     expect(pages[1]?.className).not.toContain('px-3');
+    await view.unmount();
+  });
+});
+
+describe('SharedPage with a richer heading', () => {
+  it('sets the heading it is given in the one h1, and keeps the plain title as the text', async () => {
+    const view = await mount(
+      <SharedPage
+        title="Signing in as Alice"
+        heading={
+          <>
+            Signing in as <strong>Alice</strong>
+          </>
+        }
+      >
+        body
+      </SharedPage>,
+    );
+    expect(q('h1')?.textContent).toBe('Signing in as Alice');
+    expect(q('h1 strong')?.textContent).toBe('Alice');
     await view.unmount();
   });
 });

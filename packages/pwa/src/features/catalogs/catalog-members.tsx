@@ -7,8 +7,9 @@
  */
 
 import type { CatalogMemberView, CatalogShareView, OwnedCatalog } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { CircleCheck, X } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -18,14 +19,21 @@ import {
   listMembers,
   listShares,
   removeMemberBrowser,
+  renameMember,
   revokeMember,
   takeAwayCatalog,
 } from './catalog-shares-api.ts';
 import {
   browserLine,
   browserRemovedNote,
+  CHANGE_USER_ID_CANCEL,
+  CHANGE_USER_ID_INPUT_LABEL,
+  CHANGE_USER_ID_LABEL,
+  CHANGE_USER_ID_SAVE,
   type ConfirmWords,
   catalogTakenNote,
+  changeUserIdProblem,
+  changeUserIdSentence,
   liveShareCount,
   MEMBERS_EMPTY,
   MEMBERS_NOTE,
@@ -33,6 +41,7 @@ import {
   multiShareOf,
   multiSummary,
   orderedShares,
+  personFacts,
   removeBrowserConfirm,
   revokeConfirm,
   revokedNote,
@@ -43,6 +52,9 @@ import {
   sharingRefusal,
   takeAwayChoices,
   takeAwayConfirm,
+  takenUserIdLine,
+  USER_ID_FIELD_LABEL,
+  userIdChangedNote,
 } from './catalog-sharing-model.ts';
 import type { CatalogClientFactory } from './catalogs-api.ts';
 import type { OwnerRefusal } from './catalogs-model.ts';
@@ -73,7 +85,8 @@ type Read =
 export type Confirm =
   | { readonly kind: 'revoke'; readonly memberId: string }
   | { readonly kind: 'browser'; readonly memberId: string; readonly keyId: string }
-  | { readonly kind: 'catalog'; readonly memberId: string; readonly catalogId: string };
+  | { readonly kind: 'catalog'; readonly memberId: string; readonly catalogId: string }
+  | { readonly kind: 'rename'; readonly memberId: string };
 
 export function CatalogMembersPanel({
   connection,
@@ -92,6 +105,7 @@ export function CatalogMembersPanel({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<OwnerRefusal | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [taken, setTaken] = useState<string | null>(null);
   const reload = useCallback(() => setTick(previous => previous + 1), []);
 
   useEffect(() => {
@@ -124,6 +138,27 @@ export function CatalogMembersPanel({
     } finally {
       setBusy(false);
       setConfirm(null);
+    }
+  };
+
+  const rename = async (member: CatalogMemberView, typed: string): Promise<void> => {
+    setBusy(true);
+    setFailure(null);
+    setNote(null);
+    setTaken(null);
+    try {
+      const done = await renameMember(await createClient(connection), member.memberId, typed.trim());
+      setNote(userIdChangedNote(member.label, done.label));
+      setConfirm(null);
+      reload();
+    } catch (error) {
+      if (error instanceof FyHttpError && error.code === 'member_exists') setTaken(takenUserIdLine(typed.trim()));
+      else {
+        setFailure(sharingRefusal(error));
+        setConfirm(null);
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -186,8 +221,14 @@ export function CatalogMembersPanel({
                     timeZone={timeZone}
                     busy={busy}
                     confirm={confirm}
-                    onAsk={setConfirm}
+                    members={members}
+                    taken={taken}
+                    onAsk={next => {
+                      setTaken(null);
+                      setConfirm(next);
+                    }}
                     onCancel={() => setConfirm(null)}
+                    onRename={typed => void rename(member, typed)}
                     onRevoke={() =>
                       void act(async () => {
                         const done = await revokeMember(await createClient(connection), member.memberId);
@@ -289,8 +330,11 @@ function MemberCard({
   timeZone,
   busy,
   confirm,
+  members,
+  taken,
   onAsk,
   onCancel,
+  onRename,
   onRevoke,
   onRemoveBrowser,
   onTakeAway,
@@ -302,8 +346,11 @@ function MemberCard({
   readonly timeZone: string | undefined;
   readonly busy: boolean;
   readonly confirm: Confirm | null;
+  readonly members: readonly CatalogMemberView[];
+  readonly taken: string | null;
   readonly onAsk: (next: Confirm) => void;
   readonly onCancel: () => void;
+  readonly onRename: (typed: string) => void;
   readonly onRevoke: () => void;
   readonly onRemoveBrowser: (keyId: string) => void;
   readonly onTakeAway: (catalogId: string) => void;
@@ -349,7 +396,32 @@ function MemberCard({
   const taking = mine?.kind === 'catalog' ? readable.find(catalog => catalog.id === mine.catalogId) : undefined;
   return (
     <li className="kt-panel flex min-w-0 flex-col gap-xs p-control-x py-2" data-members-person={member.label}>
-      <span className="break-words text-ui font-semibold text-fg">{member.label}</span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-meta font-semibold text-muted">{USER_ID_FIELD_LABEL}</span>
+        <span className="break-words text-ui font-semibold text-fg" data-members-user-id="">
+          {member.label}
+        </span>
+        <span className="break-words text-meta text-muted" data-members-facts="">
+          {personFacts(member, timeZone)}
+        </span>
+      </div>
+      {mine?.kind === 'rename' ? (
+        <RenameForm member={member} members={members} busy={busy} taken={taken} onSave={onRename} onCancel={onCancel} />
+      ) : (
+        <div>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="kt-btn--flush-start"
+            disabled={busy}
+            onClick={() => onAsk({ kind: 'rename', memberId: member.memberId })}
+            data-members-rename={member.label}
+          >
+            {CHANGE_USER_ID_LABEL}
+          </Button>
+        </div>
+      )}
       <div className="flex min-w-0 flex-wrap items-center gap-xs" data-members-catalogs="">
         <span className="text-meta text-muted">Can read</span>
         {readable.length === 0 ? <span className="text-meta text-muted">No catalogs</span> : null}
@@ -417,6 +489,64 @@ function MemberCard({
         </div>
       )}
     </li>
+  );
+}
+
+function RenameForm({
+  member,
+  members,
+  busy,
+  taken,
+  onSave,
+  onCancel,
+}: {
+  readonly member: CatalogMemberView;
+  readonly members: readonly CatalogMemberView[];
+  readonly busy: boolean;
+  readonly taken: string | null;
+  readonly onSave: (typed: string) => void;
+  readonly onCancel: () => void;
+}) {
+  const field = useId();
+  const [typed, setTyped] = useState('');
+  const problem = changeUserIdProblem(typed, member, members);
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    if (problem === null && !busy) onSave(typed);
+  };
+  return (
+    <form className="flex min-w-0 flex-col gap-xs" onSubmit={submit} data-members-rename-form="">
+      <label htmlFor={field} className="text-meta font-semibold text-muted">
+        {CHANGE_USER_ID_INPUT_LABEL}
+      </label>
+      <input
+        id={field}
+        className="kt-input"
+        value={typed}
+        autoComplete="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        aria-describedby={`${field}-says`}
+        onChange={event => setTyped(event.target.value)}
+        data-members-rename-input=""
+      />
+      <p id={`${field}-says`} className="m-0 break-words text-meta text-muted" data-members-rename-says="">
+        {changeUserIdSentence(member.label, typed.trim() === '' ? 'the new ID' : typed.trim())}
+      </p>
+      {taken === null && (typed.trim() === '' || problem === null) ? null : (
+        <p className="m-0 break-words text-meta text-err" role="alert" data-members-rename-problem="">
+          {taken ?? problem}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-xs">
+        <Button type="submit" variant="primary" disabled={busy || problem !== null} data-members-rename-save="">
+          {CHANGE_USER_ID_SAVE}
+        </Button>
+        <Button type="button" onClick={onCancel} data-members-rename-cancel="">
+          {CHANGE_USER_ID_CANCEL}
+        </Button>
+      </div>
+    </form>
   );
 }
 

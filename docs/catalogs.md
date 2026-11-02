@@ -1086,8 +1086,11 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   (`members.before-unique-names.2.json`). The upgrade runs in the same queue as every other write, and only
   after its write succeeded is each rename audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs
   only) and the owner told once; if it cannot write, the members file is refused as unreadable, with nothing
-  half-done and nothing audited, and the next boot tries again. The notice: "Two people here had the same name, so one is now ‹id› (2). Rename or remove whichever is wrong in
-  Sharing › People." (the plural names how many).
+  half-done and nothing audited, and the next boot tries again. The notice: "2 people had the same user ID, so the later one was renamed: alice → alice (2). Each still signs in with
+  their passkeys. Rename or remove whichever is wrong in Sharing › People." (for several people: "Several people had the
+  same user ID, so the later ones were renamed: …"). **GAP:** the notice has no path to the app yet. The daemon
+  holds it for its own log (`bootNotices`, stderr), and no route or event carries it to the owner's browser, so the app
+  cannot show it once. The sentence is final so that the day a channel exists nothing about the words changes.
 - **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
   (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
   is unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id` stays per browser on
@@ -1129,8 +1132,26 @@ browser is no longer on the list, so it cannot prove either, and another person'
 cross-member refusal is unchanged.
 
 **The app shows the sentence, the wire does not.** The daemon answers `join-refused` and nothing more. The app, which
-knows from `join-challenge` whose passkey it asked for, says: "Use ‹Alice›'s passkey, or ask ‹owner› to let you set up
-a new one."
+knows from `join-challenge` whose passkey it asked for, says it (&B131 B3, `join-screen.tsx`). Every name is the
+person's user ID with hidden characters spelled out (`revealHidden`); ‹machine› is the machine's name once it has
+told us, and the address of the link before that.
+
+- **The heading** is "You're signing in as **alice** on ‹machine›." on every screen after the Join tap.
+- **A first invite** (`join-open`, or an older daemon): once joined, "Create a passkey for **alice**. You'll use it to
+  sign in here." The join answer is what names the person, so this line is shown after the join, not before.
+- **A later invite** (`join-challenge`): "Sign in with your **alice** passkey to add this browser." and a **Sign in
+  with passkey** button. The challenge is asked for on the **Join tap**, never on page load, and the passkey on the
+  tap after it, because a browser only opens its passkey sheet from a tap. Nothing is filed until then.
+- **No passkey here:** "This invite is for **alice**. Use alice's passkey (on another device: choose "use a phone or
+  tablet"), or ask the person who sent you this link to let you set up a new one." with **Try again** (asks for a
+  fresh challenge) and **Back to start**. It is shown when this browser has no passkey the daemon listed, when the
+  person dismisses or times out the browser's sheet (a browser says all three the same way on purpose), and when the
+  daemon refuses the proof: a wrong passkey and an expired challenge look the same as a dead code on the wire. ‹owner›
+  is "the person who sent you this link", because the owner's own name is not known before joining.
+- **On a relay** the same screens appear: `join-options` and `join` are each their own session, over the same carrier
+  walk as a plain join (direct first, then the rendezvous), and only a transport failure moves the walk on. The two
+  sessions carry the same browser key, because the challenge is per (share, browser key). An older daemon's `4400` on
+  `join-options` makes the app send a plain `join`, but only once the options record has actually been sent.
 
 #### Lost devices: "They need a new passkey"
 
@@ -1264,13 +1285,36 @@ now has `join` and `member` ([relay-protocol.md](relay-protocol.md) §14 "Member
 **Owner, in Sharing › My catalogs.** A catalog's **Publish skills** (&B131 A3) lists every skill on this
 machine once, by its SKILL.md path, with where it lives ("account claude-work", "project app", "Ferretry"), says which
 ones the catalog already holds and their version, and publishes the rest through the same Add to catalog sheet, aimed
-at that catalog; it reads `GET /v1/skills`. Its **Share…** sheet makes a code for a new person (by name) or an
-existing member (with the warning "whoever opens this can read everything they can read" shown before anything is
-made), for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
+at that catalog; it reads `GET /v1/skills`. Its **Invite people…** sheet (&B131 B3) has one field, **Their user ID** (help: "Unique on this machine. They'll
+create a passkey under it and sign in with it. The same ID always means the same person."; placeholder "e.g. alice"),
+and no new/existing choice. As the owner types it lists up to five people already here whose ID holds the text
+(those that start with it first); nothing is listed once the text is exactly someone's ID. Under the field one line says what the ID
+means: for someone already here "**alice** already has access here (2 browsers · Team skills). This invite reaches
+the same person: they sign in with their alice passkey."; for an ID nobody holds "New user ID. The person who opens
+this invite creates a passkey for **alice**."; for an ID with a hidden character the daemon's refusal ("A user ID
+can't contain hidden or invisible characters. Type it again.") and no invite. The app sends the typed ID as the
+member name and the daemon decides whether it is a new, an existing or a reserved person. A multi-use invite for an ID
+somebody holds or has reserved shows the daemon's 409 `member_exists` sentence ("Someone here already has the user
+ID **sam**.") plainly. **GAP:** an ID reserved by an invite nobody has used is not in the people list, so the
+sheet calls it "New user ID" and the daemon's 409 is the only thing that stops a multi-use invite for it.
+The warning "whoever opens this can read everything they can read" is shown before anything is made, for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
 (act `share-catalog`) and shows the link **once**: a QR drawn in the page, Copy link, a countdown and **End this code
-now**. The app keeps and logs nothing about the code. **People and codes** lists each member with their catalogs and
-browsers (remove one browser, take away a catalog, revoke the member with the plain sentence of what stops) and the
-shares (live, used, expired).
+now**. The app keeps and logs nothing about the code. **People and codes** lists each person, titled by their
+**User ID** (the field label is "User ID"), with their catalogs and browsers (remove one browser, take away a catalog,
+revoke the member with the plain sentence of what stops) and the shares (live, used, expired).
+
+**They need a new passkey (D8).** For a person who is already here, on a **single-use** invite only, the sheet offers
+the checkbox "They need a new passkey (lost or new device)" with the line "Only tick this if alice can't use their
+passkey any more. Whoever opens this invite can then sign in as alice." It is **never automatic**: it is
+unticked unless the person has no passkey on any browser, in which case it is pre-ticked with "alice has no passkey
+left, so this invite lets them create one." and the owner can untick it. The app works that out from the people list,
+because the daemon only reports `noPasskeyLeft` on the mint answer, after the choice. A many-use invite never offers it (the daemon answers 400 `new_passkey_multi`).
+
+**Change user ID.** Each person's card has **Change user ID**. The form says "Change user ID · alice becomes
+alicia. They keep their browsers, passkeys and installs. Passkeys they already made keep the old name in their
+password manager, and still sign them in." It calls `PATCH /v1/catalog-members/:memberId` with `{ "label" }`. An ID
+someone holds answers 409 `member_exists` and the form stays open with "Someone here already has the user ID **sam**.
+Pick another." Any other failure closes the form with the plain failure line.
 
 **Subscribing is by link.** **Subscribe with a link** is a paste field at the top of Sharing › Subscriptions, and only
 there: My catalogs is the publisher's page and has neither it nor Install from a file. Subscribing installs nothing.

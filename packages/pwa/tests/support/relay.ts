@@ -41,6 +41,7 @@ import {
   type MemberJoinOutcomeContent,
   memberAuthMessage,
   memberJoinMessage,
+  memberJoinOptionsMessage,
   memberRenewMessage,
   NONCE_BYTES,
   openChannel,
@@ -229,20 +230,22 @@ export class ScriptedDaemon {
     const message =
       record.t === 'join'
         ? memberJoinMessage(transcript, String(record.memberKey), String(record.boxKey))
-        : record.t === 'member'
-          ? memberAuthMessage(transcript, String(record.keyId), String(record.appSession))
-          : record.t === 'pair'
-            ? devicePairMessage(transcript, String(record.deviceKey))
-            : record.t === 'renewed'
-              ? act === 'member'
-                ? memberRenewMessage(transcript, String(nonce))
-                : deviceRenewMessage(transcript, String(nonce))
-              : deviceAuthMessage(
-                  transcript,
-                  record.t === 'stream' ? 'stream' : 'auth',
-                  String(record.deviceId),
-                  String(record.appSession),
-                );
+        : record.t === 'join-options'
+          ? memberJoinOptionsMessage(transcript, String(record.memberKey), String(record.origin))
+          : record.t === 'member'
+            ? memberAuthMessage(transcript, String(record.keyId), String(record.appSession))
+            : record.t === 'pair'
+              ? devicePairMessage(transcript, String(record.deviceKey))
+              : record.t === 'renewed'
+                ? act === 'member'
+                  ? memberRenewMessage(transcript, String(nonce))
+                  : deviceRenewMessage(transcript, String(nonce))
+                : deviceAuthMessage(
+                    transcript,
+                    record.t === 'stream' ? 'stream' : 'auth',
+                    String(record.deviceId),
+                    String(record.appSession),
+                  );
     return await verifyDeviceProof(relayCrypto, publicKey, proof, message);
   }
 
@@ -316,6 +319,16 @@ export interface AutoDaemonAnswer {
   readonly joinRefused?: boolean;
   /** Take a `join` record and never answer it: the share may have been spent, unheard. */
   readonly joinSilently?: boolean;
+  /** Answer a `join-options` record with `join-open`: no proof is needed. */
+  readonly joinOpen?: 'first-browser' | 'owner-approved';
+  /** Answer a `join-options` record with `join-challenge` for this person. */
+  readonly joinChallenge?: { readonly memberLabel: string; readonly options: unknown };
+  /** Answer a `join-options` record with the one generic sealed refusal. */
+  readonly joinOptionsRefused?: boolean;
+  /** Close on a `join-options` record with 4400, the way a daemon that does not know the record does. */
+  readonly joinOptionsUnknown?: boolean;
+  /** Take a `join-options` record and never answer it. */
+  readonly joinOptionsSilently?: boolean;
   /** When set, every `member` record's proof is checked against this public key and refused if wrong. */
   readonly memberPublicKey?: string;
   /** Refuse a member key with `4403`, as a daemon refuses a key it does not hold. */
@@ -420,6 +433,46 @@ export const autoDial = (
           // is a fixture the shipped one cannot match: a client proved against it would be proved
           // against a frame no rendezvous will ever forward, and reading this file would suggest a
           // per-outcome reason is legal. Both constants come from the one module that owns them.
+          socket.onBinary?.(
+            controlFrame(sessionId, {
+              t: 'closed',
+              code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+              reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+            }),
+          );
+          return;
+        }
+        if (message.t === 'join-options') {
+          requests.push(message);
+          const forged = !(await daemon.proves(message, String((message as { memberKey?: unknown }).memberKey)));
+          if (forged || answer.joinOptionsUnknown === true) {
+            socket.onBinary?.(
+              controlFrame(sessionId, {
+                t: 'closed',
+                code: forged ? RELAY_CLOSE_CODES.authRejected : RELAY_CLOSE_CODES.protocolError,
+                reason: forged ? 'unknown device credential' : 'unexpected record',
+              }),
+            );
+            return;
+          }
+          if (answer.joinOptionsSilently === true) return;
+          const outcome =
+            answer.joinOptionsRefused === true
+              ? ({ t: 'join-refused', protocol: SESSION_PROTOCOL_ID, reason: 'join_refused' } as const)
+              : answer.joinChallenge === undefined
+                ? ({
+                    t: 'join-open',
+                    protocol: SESSION_PROTOCOL_ID,
+                    why: answer.joinOpen ?? 'first-browser',
+                  } as const)
+                : ({
+                    t: 'join-challenge',
+                    protocol: SESSION_PROTOCOL_ID,
+                    memberLabel: answer.joinChallenge.memberLabel,
+                    options: answer.joinChallenge.options,
+                  } as const);
+          const padded = padJoinOutcome(outcome as unknown as MemberJoinOutcomeContent);
+          socket.onBinary?.(await daemon.record(outcome, padded ?? undefined));
           socket.onBinary?.(
             controlFrame(sessionId, {
               t: 'closed',
