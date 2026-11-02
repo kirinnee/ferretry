@@ -182,8 +182,8 @@ about **how a missing runner is read**, never about spending: every macOS job as
 
 | Where                       | A macOS job that ran and failed                                                    | A macOS job that never got a runner                                                            |
 | --------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Pull request**            | red for `Smoke darwin-arm64`; a warning for the realworld macOS proofs             | **advisory**: a warning and the job-summary line `macOS runner not available; advisory on PRs` |
-| **`main` push**             | red; `Smoke darwin-arm64` holds `Release` back, the realworld proofs file an issue | re-queued up to 3 times, then red, saying the runner was unavailable                           |
+| **Pull request**            | red for `Smoke darwin-arm64`; the realworld macOS proofs are masked (never gating) | **advisory**: a warning and the job-summary line `macOS runner not available; advisory on PRs` |
+| **`main` push**             | red; `Smoke darwin-arm64` holds `Release` back, the realworld proofs file an issue | smoke: re-queued up to 3 times, then red; realworld proofs: one attempt, not reported          |
 | **Release tag** (`cd.yaml`) | red; nothing is published                                                          | re-queued up to 3 times, then red, saying the runner was unavailable                           |
 
 The Linux jobs are never softened: `Smoke linux-x64-baseline`, `Smoke linux-arm64`, `Unit`/`Integration`
@@ -203,10 +203,13 @@ Tests, SIT and the Linux leg of `Harness Contract` stay required on every event.
   It writes the same line to the job summary.
 - **The realworld macOS proofs** (`Containment (macOS)`, `Sandbox Shell (Safari)`, `Harness Contract
 (macos-15)` and the nightly `Harness Contract (latest) (macos-15)`) carry a pull-request-only
-  `continue-on-error`, so a failure or a lost runner on a PR never reddens the workflow; the Linux legs are
-  not masked. `macOS Advisory` (`scripts/ci/macos-advisory.sh`) writes the summary line when one was
-  cancelled. These are the realworld tier, which never gated a PR or a release ([Release gating](#release-gating));
-  on `main` they run unmasked and `report` files the issue.
+  `continue-on-error`, so on a PR neither a lost runner nor a failed proof reddens the workflow; the Linux legs
+  are not masked. The mask cannot tell the two apart (GitHub reports a masked failure as a success), so a real
+  macOS failure on a PR is visible only in that job's log. That is accepted: these are the realworld tier, which
+  never gated a PR or a release ([Release gating](#release-gating)). `macOS Advisory`
+  (`scripts/ci/macos-advisory.sh`) writes the summary line when a job was cancelled. On `main` and the nightly
+  they run unmasked, **once** (no re-queue), and `report` files an issue when one fails; a job that never got a
+  runner there is cancelled and is not reported, and the next push or nightly runs it again.
 - **The raw macOS check can still read "cancelled".** A check run GitHub cancelled stays cancelled whatever the
   workflow does. What the policy changes is every verdict built on it: `Smoke darwin-arm64 / Verdict`
   is green on a PR whose macOS smoke never started, and no required Linux check depends on a macOS job. Merge on the

@@ -260,6 +260,13 @@ for file in "${mac_runner_files[@]}"; do
   *) fail "${file}: a workflow outside the macOS policy mentions macOS; route it through smoke-darwin.yaml or declare it here" ;;
   esac
 done
+unexpected_macos="$(rg -N --no-filename -v '^[[:space:]]*#' .github/workflows scripts/ci/macos-relevance.sh | rg -o 'macos-[0-9]+[A-Za-z0-9-]*' | rg -v '^macos-15$' || true)"
+[ -z "${unexpected_macos}" ] || fail "a macOS runner other than the free standard macos-15 is named: ${unexpected_macos}"
+macos_jobs="$(rg -c '^    runs-on: macos-15$' .github/workflows/smoke-darwin.yaml .github/workflows/realworld.yaml | sort | tr '\n' ' ')"
+[ "${macos_jobs}" = '.github/workflows/realworld.yaml:2 .github/workflows/smoke-darwin.yaml:3 ' ] ||
+  fail "the macOS job inventory changed (smoke-darwin.yaml 3 attempts, realworld.yaml 2 jobs); update this validator and docs/standards/ci-cd together: ${macos_jobs}"
+[ "$(rg -c 'os: \[ubuntu-latest, macos-15\]' .github/workflows/harness-contract-latest.yaml)" = 1 ] ||
+  fail 'harness-contract-latest.yaml: the macos-15 matrix leg is the only macOS job allowed there'
 if rg -n -i 'runs-on:.*(macos-[0-9]+-(large|xlarge|intel)|nscloud-mac|macos-latest-(large|xlarge))|runs-on:.*self-hosted' .github/workflows >/dev/null; then
   fail 'a workflow asks for a paid or self-hosted macOS runner; the macOS pool is the free standard macos-15 only (docs/standards/ci-cd, "macOS runner shortage")'
 fi
