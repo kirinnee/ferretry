@@ -126,7 +126,7 @@ export const revealHidden = (text: string): string =>
 const CONTROLS = String.raw`\u0000-\u0008\u000B-\u001F\u007F-\u009F`;
 
 /** Anything hidden, any control, a tab or a line break: for one-line text a person reads as a name. */
-const HIDDEN_IN_LINE = new RegExp(String.raw`[${CONTROLS}\u0009\u000A${HIDDEN_CHARACTER_SOURCE}]`, 'u');
+export const HIDDEN_IN_LINE = new RegExp(String.raw`[${CONTROLS}\u0009\u000A${HIDDEN_CHARACTER_SOURCE}]`, 'u');
 /** Anything hidden or any control, but tabs and line breaks are fine: for longer text. */
 const HIDDEN_IN_TEXT = new RegExp(`[${CONTROLS}${HIDDEN_CHARACTER_SOURCE}]`, 'u');
 

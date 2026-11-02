@@ -1174,6 +1174,7 @@ describe('auditedRoutes', () => {
         link: LINK,
       },
       'DELETE /v1/catalog-shares/:shareId': { shareId: SHARE },
+      'PATCH /v1/catalog-members/:memberId': { memberId: MEMBER, label: 'A Name The Owner Typed', keys: [] },
       'DELETE /v1/catalog-members/:memberId': { memberId: MEMBER, keysRemoved: 2, sharesEnded: 1 },
       'DELETE /v1/catalog-members/:memberId/keys/:keyId': { memberId: MEMBER, keyId: KEY },
       'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId': { memberId: MEMBER, catalogId: CAT },
@@ -1187,6 +1188,7 @@ describe('auditedRoutes', () => {
     for (const [method, path] of [
       ['POST', '/v1/catalog-shares'],
       ['DELETE', `/v1/catalog-shares/${SHARE}`],
+      ['PATCH', `/v1/catalog-members/${MEMBER}`],
       ['DELETE', `/v1/catalog-members/${MEMBER}`],
       ['DELETE', `/v1/catalog-members/${MEMBER}/keys/${KEY}`],
       ['DELETE', `/v1/catalog-members/${MEMBER}/catalogs/${CAT}`],
@@ -1198,6 +1200,7 @@ describe('auditedRoutes', () => {
     should(logged.map(record => record.event)).deepEqual([
       'catalog.share.minted',
       'catalog.share.ended',
+      'catalog.member.renamed',
       'catalog.member.revoked',
       'catalog.member.key-removed',
       'catalog.member.catalog-removed',
@@ -1211,10 +1214,13 @@ describe('auditedRoutes', () => {
     });
     should(logged[1]?.subject).equal(SHARE);
     should(logged[2]?.subject).equal(MEMBER);
-    should(logged[2]?.detail).containEql({ keysRemoved: 2, sharesEnded: 1 });
-    should(logged[3]?.detail).containEql({ keyId: KEY });
-    should(logged[4]?.detail).containEql({ catalogId: CAT });
-    should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(/fy_share_|Some Person|app\.example|share=/u);
+    should(logged[3]?.subject).equal(MEMBER);
+    should(logged[3]?.detail).containEql({ keysRemoved: 2, sharesEnded: 1 });
+    should(logged[4]?.detail).containEql({ keyId: KEY });
+    should(logged[5]?.detail).containEql({ catalogId: CAT });
+    should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(
+      /fy_share_|Some Person|A Name The Owner|app\.example|share=/u,
+    );
   });
 
   it('should record which KIND of configuration file a Settings confirmation put into effect, never its name or path', async () => {

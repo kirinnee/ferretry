@@ -701,6 +701,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'memberId',
     responseFields: { keysRemoved: ['keysRemoved'], sharesEnded: ['sharesEnded'] },
   },
+  { method: 'PATCH', path: '/v1/catalog-members/:memberId', event: 'catalog.member.renamed', subject: 'memberId' },
   {
     method: 'DELETE',
     path: '/v1/catalog-members/:memberId/keys/:keyId',

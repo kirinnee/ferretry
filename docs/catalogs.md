@@ -867,6 +867,44 @@ and redeems an hour per share, 10 failed joins a minute per peer on the direct c
 join and leaves the code live. A member key unused for 90 days is removed; the member stays. Until the sweep reaches it, such a key is already
 refused (`4403`) and opening a session never refreshes it: one predicate decides both.
 
+### A member's name is their user ID
+
+A member's name is the **user ID** the owner knows them by, and it is unique on this machine. On the wire it is
+still the `label` of a member and the `name` of a person in a mint, so nothing already built has to change.
+
+- **One name, one person.** Two names are the same ID when `memberNameKey` (protocol) gives the same text: Unicode
+  NFKC, trimmed, inner whitespace collapsed, case-folded. "Alice", " ALICE " and "Ａｌｉｃｅ" are one ID. Hidden or
+  format characters are refused by the schema ("A user ID can't contain hidden characters. Type it again."), so
+  two IDs cannot look alike and differ. The members file refuses two members with the same key: a damaged file
+  on read (`store_damaged`), a refusal on a write.
+- **Mint names a person by ID.** `member` takes `{ "name": "Alice" }`: whoever holds that ID is reached
+  (`existing`), and an ID nobody holds makes a new person. The older arms stay accepted. `{ "kind": "new",
+"label" }` for an ID that is taken is refused `409 member_exists` with the `memberId` that holds it ("Someone
+  here already has the user ID ‹id›. Pick another."), so a mint never makes a second person of the same ID. A
+  code for many people may name someone already in: every browser then joins that one person.
+- **A new ID is reserved.** An invite for an ID nobody holds yet holds it, as the shares themselves do (nothing
+  is stored apart): the ID is held while any live share that names the person has not been used, and while a join
+  with it is in flight, and lets go by itself when every invite naming them is used up, ended or expired and they
+  have no browser. Removing a person who never joined frees the ID too. Once someone joins, the ID is theirs.
+- **Rename keeps the person.** `PATCH /v1/catalog-members/:memberId` needs an ID nobody else holds or has
+  reserved (`409 member_exists`); a person may change the case or spacing of their own. The `memberId` keeps
+  every browser, catalog and passkey, and codes already minted still reach them. The rename is audited as
+  `catalog.member.renamed` (member id only; the old and new names are the owner's own text).
+- **Asking first.** `GET /v1/catalog-members?name=Alice` also answers `match`, the `memberId` that holds or
+  has reserved that ID (nothing else, no name), so a share sheet can say "Alice is already in" before it mints.
+  The same capability as the list; any other query parameter is a `400`.
+- **Upgrading a machine that already has twins.** A `members.json` written before names were IDs may hold two
+  people of one name. It is not damaged: the first read keeps the **oldest** member's name and makes the later
+  ones "‹name› (2)", "(3)", … (within 80 characters). Nobody is merged, and no browser, catalog or passkey moves.
+  The original file is kept as `state/catalogs/members.before-unique-names.json`, then the new one is written
+  atomically, once; a crash before that leaves the old file and the next boot does it again. Each rename is
+  audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs only) and the owner is told once, as a boot
+  notice: "Two people here had the same name, so one is now ‹id› (2). Rename or remove whichever is wrong in
+  Sharing › People." (the plural names how many).
+- **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
+  (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
+  and the join flow are unchanged: a passkey belongs to a browser's member key, not to the person.
+
 ### Built in 2b-1: shares and members on the publisher
 
 The publisher daemon keeps two files, `state/catalogs/members.json` and `shares.json` (directory 0700, files

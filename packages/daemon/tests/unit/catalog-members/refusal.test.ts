@@ -53,6 +53,7 @@ describe('CATALOG_MEMBER_STATUS', () => {
       share_refused: 409,
       share_other_member: 409,
       share_new_member: 409,
+      member_exists: 409,
       members_full: 409,
       member_unknown: 404,
       member_key_unknown: 404,

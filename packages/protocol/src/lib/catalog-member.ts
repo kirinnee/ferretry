@@ -24,7 +24,7 @@ import { isLoopbackLinkAddress } from './address.ts';
 import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './pairing.ts';
-import { CatalogLabelSchema, SharedCatalogIdSchema } from './shared-catalog.ts';
+import { CatalogLabelSchema, HIDDEN_IN_LINE, SharedCatalogIdSchema } from './shared-catalog.ts';
 
 export const CATALOG_SHARES_PATH = '/v1/catalog-shares' as const;
 export const CATALOG_MEMBERS_PATH = '/v1/catalog-members' as const;
@@ -116,16 +116,45 @@ export const CatalogShareCodeSchema = z
   .brand<'CatalogShareCode'>();
 export type CatalogShareCode = z.infer<typeof CatalogShareCodeSchema>;
 
-/** A member's name, as the owner wrote it ("Alice", "Workshop Oct 31"). The catalog label's rules. */
-export const CatalogMemberLabelSchema = CatalogLabelSchema;
+/** What a person is told when a user ID holds a character they cannot see. */
+export const MEMBER_NAME_HIDDEN_MESSAGE = "A user ID can't contain hidden characters. Type it again.";
+
+/**
+ * A member's name, as the owner wrote it ("Alice", "Workshop Oct 31"): their user ID on this machine. The catalog
+ * label's rules, which refuse every hidden, format and control character, because an invisible character would
+ * make two look-alike IDs.
+ */
+export const CatalogMemberLabelSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .refine(text => text.trim() === text, 'no spaces at the start or the end')
+  .refine(text => !HIDDEN_IN_LINE.test(text), MEMBER_NAME_HIDDEN_MESSAGE);
+
+/**
+ * What makes two names the SAME person: NFKC (so a full-width or ligature look-alike is the same name), trimmed,
+ * every run of whitespace collapsed to one space, and case-folded. A name is a member's ID on this machine, so
+ * "Alice", "alice", "ＡＬＩＣＥ" and "Alice  " are one person. Pure and total; the stored name keeps the owner's own
+ * spelling, only comparison uses this.
+ */
+export function memberNameKey(name: string): string {
+  const folded = name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toUpperCase().toLowerCase();
+  return folded.normalize('NFKC');
+}
 
 /** What the joining browser calls itself ("Firefox on a Mac"). Shown to the owner; never trusted. */
 export const MemberClientNameSchema = CatalogLabelSchema;
 
 // ── The owner's side (routes on A, `sharing.use`) ────────────────────────────────────────────────
 
-/** Who a share is for: a new person the owner names, or a member who already exists. */
-export const CatalogShareMemberSchema = z.discriminatedUnion('kind', [
+/**
+ * Who a share is for. `{ name }` is the person's ID on this machine and the daemon resolves it: a name that
+ * is already somebody's (compared by {@link memberNameKey}) reaches that same person, an unknown name makes
+ * (and reserves) a new one. The two `kind` arms are what older apps send: `new` is refused with
+ * `member_exists` when the name is taken, so it can never make a second person of the same name.
+ */
+export const CatalogShareMemberSchema = z.union([
+  z.strictObject({ name: CatalogMemberLabelSchema }),
   z.strictObject({ kind: z.literal('new'), label: CatalogMemberLabelSchema }),
   z.strictObject({ kind: z.literal('existing'), memberId: CatalogMemberIdSchema }),
 ]);
@@ -133,7 +162,8 @@ export type CatalogShareMember = z.infer<typeof CatalogShareMemberSchema>;
 
 /**
  * Single use: the code burns on its first redemption. Multi use: it ends at its expiry, at its cap, or
- * when the owner ends it, and every browser joins the ONE member the share names (owner decision Q3).
+ * when the owner ends it, and every browser joins the ONE member the share names (owner decision Q3) — a
+ * new person or one who is already in.
  */
 export const CatalogShareUsesSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('single') }),
@@ -154,17 +184,12 @@ const distinctCatalogs = z
  * `POST /v1/catalog-shares`: mint one share. A governed caller confirms with a passkey proved for this
  * act alone (`share-catalog`), as minting a pairing code does: it adds access.
  */
-export const CatalogShareMintRequestSchema = z
-  .strictObject({
-    catalogIds: distinctCatalogs,
-    member: CatalogShareMemberSchema,
-    expiresIn: CatalogShareExpirySchema,
-    uses: CatalogShareUsesSchema,
-  })
-  .refine(
-    request => request.uses.kind === 'single' || request.member.kind === 'new',
-    'a code for many people makes its own member: name it',
-  );
+export const CatalogShareMintRequestSchema = z.strictObject({
+  catalogIds: distinctCatalogs,
+  member: CatalogShareMemberSchema,
+  expiresIn: CatalogShareExpirySchema,
+  uses: CatalogShareUsesSchema,
+});
 export type CatalogShareMintRequest = z.infer<typeof CatalogShareMintRequestSchema>;
 
 export const CatalogShareStateSchema = z.enum(['live', 'spent', 'expired', 'ended']);
@@ -232,6 +257,8 @@ export type CatalogMemberView = z.infer<typeof CatalogMemberViewSchema>;
 
 export const CatalogMemberListSchema = z.strictObject({
   members: z.array(CatalogMemberViewSchema).max(CATALOG_MAX_MEMBERS),
+  /** Only for `GET /v1/catalog-members?name=…`: the id of the person that name already is, so a share sheet can say so. */
+  match: CatalogMemberIdSchema.optional(),
 });
 export type CatalogMemberList = z.infer<typeof CatalogMemberListSchema>;
 
@@ -338,6 +365,8 @@ export type SharedRedeemResponse = z.infer<typeof SharedRedeemResponseSchema>;
  * - `members_full`: the publisher holds its most members or keys; the code is left live.
  * - `member_unknown`, `member_key_unknown`, `catalog_unknown`, `share_unknown`: the owner named an id this
  *   publisher does not have.
+ * - `member_exists`: a name is somebody's already (a person is their name on this machine). The refusal carries
+ *   that person's `memberId`; a mint by `{ name }` never raises it, it reaches that person instead.
  */
 export const CATALOG_SHARE_REFUSALS = [
   'share_refused',
@@ -348,6 +377,7 @@ export const CATALOG_SHARE_REFUSALS = [
   'member_key_unknown',
   'catalog_unknown',
   'share_unknown',
+  'member_exists',
 ] as const;
 export const CatalogShareRefusalSchema = z.enum(CATALOG_SHARE_REFUSALS);
 export type CatalogShareRefusal = z.infer<typeof CatalogShareRefusalSchema>;

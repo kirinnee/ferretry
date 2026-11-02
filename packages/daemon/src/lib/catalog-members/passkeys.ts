@@ -72,6 +72,8 @@ export interface MemberPasskeyDeps {
     passkeyAdded(keyId: string): Promise<number>;
     /** The key as it stands now; nothing when it was removed or time ended it. */
     access(keyId: string): Promise<MemberAccess | undefined>;
+    /** The ids of every browser one person holds; none for a person who is not here. */
+    keyIdsOf(memberId: string): Promise<readonly string[]>;
   };
   /** The names of the catalogs by id, for the passkey's account name. Read per call. */
   readonly catalogNames: () => Promise<ReadonlyMap<string, string>>;
@@ -133,6 +135,16 @@ export class MemberPasskeyService {
     if (at === undefined) return undefined;
     const ends = at + this.deps.unlockDays() * DAY_MS;
     return ends > this.deps.clock.nowMs() ? ends : undefined;
+  }
+
+  /**
+   * Every passkey one person has made, across all of their browsers. Passkeys stay filed per browser (the user
+   * handle is the key id), so a person's passkeys are the union of their browsers'. Read-only: a join that proves
+   * an existing person checks an assertion against these.
+   */
+  async passkeysOf(memberId: string): Promise<readonly StoredPasskey[]> {
+    const keyIds = await this.deps.members.keyIdsOf(memberId);
+    return (await Promise.all(keyIds.map(async keyId => await this.deps.store.list(keyId)))).flat();
   }
 
   async passkeyCount(keyId: string): Promise<number> {

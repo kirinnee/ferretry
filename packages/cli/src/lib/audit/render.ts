@@ -32,6 +32,7 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'catalog.member.revoked': 'A person who reads shared catalogs was removed',
   'catalog.member.key-removed': 'One browser of a person who reads shared catalogs was removed',
   'catalog.member.catalog-removed': 'A shared catalog was taken away from a person',
+  'catalog.member.renamed': 'A person who reads shared catalogs was given a different name',
   'catalog.share.cross-member': "A share code made for one person was used by another person's browser",
   'security.changed': 'A security setting was changed',
   'push.changed': 'Notifications were turned on or off for a device',

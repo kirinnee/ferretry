@@ -15,6 +15,7 @@
  */
 import {
   CatalogMemberIdSchema,
+  CatalogMemberLabelSchema,
   CatalogMemberKeyIdSchema,
   CatalogMemberRenameRequestSchema,
   CatalogShareIdSchema,
@@ -52,7 +53,13 @@ async function answer(work: () => Promise<unknown>, success = 200): Promise<ApiR
     return jsonResponse(await work(), success);
   } catch (error) {
     if (error instanceof CatalogMemberRefusal)
-      throw new ApiError(CATALOG_MEMBER_STATUS[error.refusal], error.message, error.refusal);
+      throw new ApiError(
+        CATALOG_MEMBER_STATUS[error.refusal],
+        error.message,
+        error.refusal,
+        undefined,
+        error.memberId === undefined ? undefined : { memberId: error.memberId },
+      );
     throw error;
   }
 }
@@ -105,6 +112,21 @@ const keyId = (context: RouteContext): string =>
 const catalogId = (context: RouteContext): string =>
   pathId(context, 'catalogId', text => SharedCatalogIdSchema.safeParse(text), 'catalog', 'catalog_unknown');
 
+/**
+ * `?name=` on the people list: which person, if any, holds that user ID, so the share sheet can say so before a
+ * code is made. Any other parameter, or a name that could never be one, is refused rather than ignored.
+ */
+function lookupName(context: RouteContext): string | undefined {
+  for (const [name] of context.request.query) {
+    if (name !== 'name') throw new ApiError(400, `unknown parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = context.request.query.get('name')?.[0];
+  if (raw === undefined) return undefined;
+  const parsed = CatalogMemberLabelSchema.safeParse(raw);
+  if (!parsed.success) throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a user ID', 'invalid_name');
+  return parsed.data;
+}
+
 /** This subsystem's route table. Every path is a literal, so the route-agreement pass can hold each one to a client. */
 export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly ApiRoute[] {
   const { members } = subsystem;
@@ -153,7 +175,10 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       caller: 'any',
       capability: SHARING_USE,
       noStore: true,
-      handle: async () => await answer(() => members.listMembers()),
+      handle: async context => {
+        const name = lookupName(context);
+        return await answer(() => members.listMembers(name));
+      },
     },
     {
       method: 'PATCH',
