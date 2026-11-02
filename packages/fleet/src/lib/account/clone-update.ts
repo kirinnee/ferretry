@@ -30,6 +30,11 @@
  * secret entries, `${secret:NAME}` values, defaults or factors (§14.4). So this module never reads or
  * writes a credential entry that exists, and a link to one is recorded in the base record, not on it.
  *
+ * **A path another item here uses is never written.** A taken item whose document, folder or skill item is
+ * shared with another item here (kept, changed here or hidden as the same) moves to a free path, which the
+ * review lists, or leaves the shared skill item as it is. What it removes is only what the review listed as
+ * removed inside a folder it alone owns.
+ *
  * Pure: a model, a bundle, a record and the documents on both sides in; an analysis, a review and a plan
  * out. Reading and writing is the setup service's.
  */
@@ -46,7 +51,9 @@ import {
   type CloneReviewKind,
   type CloneReviewLogin,
   type CloneRunnable,
+  cloneBundleProblem,
   cloneItemDigest,
+  cloneLoginRunnable,
   cloneRunnables,
   type FleetCloneBundle,
   type FleetCloneFile,
@@ -73,6 +80,7 @@ import {
   movedFile,
   movedFolder,
   movedUnderFolder,
+  pathsOverlap,
   referencedFiles,
 } from './clone-parts.ts';
 import { freeName } from './import.ts';
@@ -148,6 +156,11 @@ export interface CloneUpdateInput {
 export interface CloneUpdateChoices {
   readonly decisions: CloneDecisions;
   readonly logins?: CloneLoginChoices;
+  /**
+   * Items the person left out, as the SOURCE names them (`clone.import`'s `skip`): each becomes the
+   * choice that writes nothing. One naming nothing in the review, or contradicting a decision, is refused.
+   */
+  readonly skip?: readonly string[];
 }
 
 // ── The analysis ─────────────────────────────────────────────────────────────────────────────────
@@ -171,6 +184,16 @@ interface Analysed {
   /** Anything here that uses a `gone` item and so stops it being removed. */
   readonly usedBy: readonly string[];
   readonly ambiguous: boolean;
+  /**
+   * A document or folder the item shares here with another item, moved off that path when it is taken:
+   * the source's path → where it lands here. Writing the shared path would change the other item too,
+   * whether it is kept, changed here or hidden as the same.
+   */
+  readonly relocated?: ReadonlyMap<string, string>;
+  /** Skill items another item here lists too: left as they are, never written by this one. */
+  readonly sharedItems?: readonly string[];
+  /** Documents here the source no longer carries, which this item alone owns: removed when it is taken. */
+  readonly removals: readonly string[];
 }
 
 export interface CloneAnalysis {
@@ -358,6 +381,22 @@ const ownedOf = (source: Entry, target: Entry | undefined): Owned[] => {
   return owned;
 };
 
+/** Every path an item here owns: its document, its folder, and each skill item's folder in the store. */
+const ownedHere = (entry: Entry): { readonly path: string }[] => {
+  const owned: { path: string }[] = [];
+  for (const field of ['file', 'directory'] as const) {
+    const path = entry.value[field];
+    if (typeof path === 'string' && isAssetRelative(path)) owned.push({ path: plain(path) });
+  }
+  if (entry.kind === 'skills') {
+    for (const item of strings(entry.value.items)) owned.push({ path: `${CLONE_SKILLS_DIRECTORY}/${item}` });
+  }
+  return owned;
+};
+
+/** The skill item a skills component's owned path names: a skills component owns nothing but `skills/<item>`. */
+const skillItemOf = (path: string): string => path.slice(CLONE_SKILLS_DIRECTORY.length + 1);
+
 /** A side's documents as a map by plain path. */
 const mapOf = (files: readonly FleetCloneFile[]): Map<string, string> => {
   const map = new Map<string, string>();
@@ -455,7 +494,9 @@ function usersOf(target: AccountModel, entry: Entry): string[] {
 export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   const { target, bundle, source, base } = input;
   const sourceName = input.sourceName ?? bundle.machine;
-  // The bundle must read as a setup of its own before anything is compared against it.
+  // The bundle must be one the review can list whole, and read as a setup of its own, before anything is compared.
+  const problem = cloneBundleProblem(bundle);
+  if (problem !== null) throw new CloneRefusal(problem);
   const theirModel = bundleModel(bundle, sourceName);
   const keys = cloneOriginKeys(bundle);
   const sources = itemsOfBundle(bundle);
@@ -489,7 +530,49 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
 
   const theirFiles = mapOf(bundle.files);
   const myFiles = mapOf(input.targetFiles);
-  const notCarried = bundle.notCopied.map(entry => plain(entry.path));
+  // A carried file is compared by its bytes, always: an omission marker never stands in for one (the bundle
+  // boundary refuses a file marked both, and this holds even for a bundle that never crossed it).
+  const notCarried = bundle.notCopied.map(entry => plain(entry.path)).filter(path => !theirFiles.has(path));
+
+  // Who owns which path here: every document, folder and skill item of every item here. A path two items
+  // share is never written for one of them, since that would change the other one as well.
+  const ownership = targets.flatMap(entry => ownedHere(entry).map(owned => ({ ref: entry.ref, ...owned })));
+  const othersOn = (ref: string, path: string): string[] => [
+    ...new Set(ownership.filter(owned => owned.ref !== ref && pathsOverlap(owned.path, path)).map(owned => owned.ref)),
+  ];
+  const allocated = new Set(ownership.map(owned => owned.path));
+
+  /** Where a taken item's shared documents land instead, which skill items it leaves alone, and why. */
+  const destinations = (
+    entry: Entry,
+    found: Entry,
+  ): { relocated: Map<string, string>; sharedItems: string[]; note: string | undefined } => {
+    const relocated = new Map<string, string>();
+    const sharedItems: string[] = [];
+    const sentences: string[] = [];
+    for (const owned of ownedOf(entry, found)) {
+      const item = entry.kind === 'skills' ? skillItemOf(owned.source) : undefined;
+      if (item !== undefined) {
+        const others = othersOn(found.ref, owned.source);
+        if (others.length === 0) continue;
+        sharedItems.push(item);
+        sentences.push(`Skill ${item} is also used by ${others.join(', ')} here, so it stays as it is.`);
+        continue;
+      }
+      if (owned.target === undefined) continue;
+      const others = othersOn(found.ref, owned.target);
+      if (others.length === 0) continue;
+      const moved = owned.directory
+        ? movedFolder(owned.source, entry.name, found.name, allocated)
+        : movedFile(owned.source, entry.name, found.name, allocated);
+      allocated.add(moved);
+      relocated.set(owned.source, moved);
+      sentences.push(
+        `${owned.target} is also used by ${others.join(', ')} here, so taking this writes it to ${moved} and leaves ${others.length === 1 ? 'that one' : 'those'} as ${others.length === 1 ? 'it is' : 'they are'}.`,
+      );
+    }
+    return { relocated, sharedItems, note: sentences.length === 0 ? undefined : sentences.join(' ') };
+  };
 
   /** Documents as each side compares them: what the bundle could not carry stands for itself on both. */
   const comparable = (
@@ -521,18 +604,36 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     };
   };
 
-  const files = (entry: Entry, found: Entry | undefined): CloneReviewItem['files'][number][] => {
+  /**
+   * Every document a take would change, at the path it lands on here, and the ones it would remove. A
+   * relocated document is written whole at its new path; a shared skill item is not written at all; a
+   * document the source could not carry is neither listed nor removed.
+   */
+  const files = (
+    entry: Entry,
+    found: Entry | undefined,
+    moved: { readonly relocated: ReadonlyMap<string, string>; readonly sharedItems: readonly string[] } = {
+      relocated: new Map(),
+      sharedItems: [],
+    },
+  ): { changes: CloneReviewItem['files'][number][]; removals: string[] } => {
     const changes: CloneReviewItem['files'][number][] = [];
+    const removals: string[] = [];
     for (const owned of ownedOf(entry, found)) {
+      const item = entry.kind === 'skills' ? skillItemOf(owned.source) : undefined;
+      if (item !== undefined && moved.sharedItems.includes(item)) continue;
+      const relocated = moved.relocated.get(owned.source);
       const theirs = under(theirFiles, owned.source, owned.directory);
       const mine =
-        owned.target === undefined ? new Map<string, string>() : under(myFiles, owned.target, owned.directory);
+        owned.target === undefined || relocated !== undefined
+          ? new Map<string, string>()
+          : under(myFiles, owned.target, owned.directory);
       const hidden = new Set(
         notCarried
           .filter(path => path === owned.source || path.startsWith(`${owned.source}/`))
           .map(path => path.slice(owned.source.length + 1)),
       );
-      const where = owned.target ?? owned.source;
+      const where = relocated ?? owned.target ?? owned.source;
       for (const rest of new Set([...theirs.keys(), ...mine.keys()])) {
         if (hidden.has(rest)) continue;
         const path = rest === '' ? where : `${where}/${rest}`;
@@ -542,12 +643,19 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
           changes.push({ path, change: 'added', lines: { added: next.split('\n').length, removed: 0 } });
         } else if (next === undefined && previous !== undefined) {
           changes.push({ path, change: 'removed', lines: { added: 0, removed: previous.split('\n').length } });
+          // Only a file inside a folder this item owns alone goes: a lone document the source stopped naming stays.
+          if (owned.directory && rest !== '' && found !== undefined && othersOn(found.ref, path).length === 0) {
+            removals.push(path);
+          }
         } else if (next !== undefined && previous !== undefined && next !== previous) {
           changes.push({ path, change: 'changed', lines: lineDelta(previous, next) });
         }
       }
     }
-    return changes.toSorted((left, right) => (left.path < right.path ? -1 : 1));
+    return {
+      changes: changes.toSorted((left, right) => (left.path < right.path ? -1 : 1)),
+      removals: removals.toSorted(),
+    };
   };
 
   const taken: Record<string, Set<string>> = {};
@@ -588,11 +696,12 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
               ? 'Not here: it was left out when last copied, or removed here since. It stays out unless you add it.'
               : 'Not here: it was left out when last copied, or removed here since, and it has changed on the source too. It stays out unless you add it.',
           fields: [],
-          files: files(entry, undefined),
+          files: files(entry, undefined).changes,
           stamp: false,
           digests: [theirDigest, '', baseDigest],
           usedBy: [],
           ambiguous: false,
+          removals: [],
         });
         continue;
       }
@@ -612,11 +721,12 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
                 : `You may already have this as ${names.join(' or ')}.`,
             }),
         fields: [],
-        files: files(entry, undefined),
+        files: files(entry, undefined).changes,
         stamp: false,
         digests: [theirDigest, '', baseDigest ?? ''],
         usedBy: [],
         ambiguous: maybe !== undefined,
+        removals: [],
       });
       continue;
     }
@@ -645,6 +755,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
         digests: [theirDigest, '', baseDigest ?? ''],
         usedBy: [],
         ambiguous: true,
+        removals: [],
       });
       continue;
     }
@@ -659,6 +770,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
       digests: [theirDigest, mineDigest, baseDigest ?? ''] as const,
       usedBy: [] as string[],
       ambiguous: false,
+      removals: [] as string[],
     };
     if (mineDigest === theirDigest) {
       sameCount += 1;
@@ -690,14 +802,21 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
       outcome = 'both';
       note = 'Changed on both sides since the last copy.';
     }
+    // Only a write can touch another item's path, so only what may be taken is moved off a shared one.
+    const moved = outcome === 'theirs' || outcome === 'both' ? destinations(entry, found.target) : undefined;
+    const listed = files(entry, found.target, moved);
+    const said = [note, moved?.note].filter(sentence => sentence !== undefined).join(' ');
     analysed.push({
       ...common,
       ref: found.target.ref,
       outcome,
-      ...(note === undefined && partial === '' ? {} : { note: `${note ?? ''}${partial}`.trim() }),
+      ...(said === '' && partial === '' ? {} : { note: `${said}${partial}`.trim() }),
       fields: differingFields(entry, found.target, identity),
-      files: files(entry, found.target),
+      files: listed.changes,
       stamp: false,
+      ...(moved === undefined || moved.relocated.size === 0 ? {} : { relocated: moved.relocated }),
+      ...(moved === undefined || moved.sharedItems.length === 0 ? {} : { sharedItems: moved.sharedItems }),
+      removals: listed.removals,
     });
   }
 
@@ -724,6 +843,7 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
         digests: ['', '', base?.items[key]?.digest ?? ''],
         usedBy: users,
         ambiguous: false,
+        removals: [],
       });
     }
   }
@@ -733,10 +853,13 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
     const matched = input.logins.matched.get(credential.id);
     if (matched !== undefined) return { sourceId: credential.id, outcome: 'matched', target: matched };
     const candidates = input.logins.ask.get(credential.id);
+    // An environment login is copied as a new login of its own, so everything it runs with is listed.
+    const entries = cloneLoginRunnable(credential);
+    const runnable = entries === undefined ? {} : { runnable: { entries: [...entries] } };
     if (candidates !== undefined && candidates.length > 1) {
-      return { sourceId: credential.id, outcome: 'ask', candidates: [...candidates] };
+      return { sourceId: credential.id, outcome: 'ask', candidates: [...candidates], ...runnable };
     }
-    return { sourceId: credential.id, outcome: 'slot' };
+    return { sourceId: credential.id, outcome: 'slot', ...runnable };
   });
 
   // What each item needs written beside it, and what it does when the person decides nothing.
@@ -778,10 +901,18 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   }
 
   const shown = analysed.filter(item => item.outcome !== 'same');
+  // The semantic digests pair and compare items; they deliberately ignore paths and provenance, so they
+  // cannot be all a review names. The fingerprint also binds the RAW state an apply acts on: every byte
+  // and declaration the bundle carries (its omissions and login descriptors included), this machine's
+  // declarations as they stand (destination paths, gone items and what uses them), the revision of every
+  // document its items own, the record, and where each taken item lands and what it removes. Anything
+  // that moves between the review and the apply asks for the review again.
   const fingerprint = sha256Hex(
     JSON.stringify({
-      version: 1,
+      version: 2,
       source: source?.id ?? '',
+      verified: source?.verified ?? '',
+      sourceDaemon: input.sourceDaemon ?? '',
       items: analysed.map(item => [
         item.ref,
         item.source?.ref ?? '',
@@ -789,9 +920,24 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
         item.match,
         item.stamp,
         ...item.digests,
+        [...(item.relocated ?? [])],
+        item.sharedItems ?? [],
+        item.removals,
+        item.usedBy,
       ]),
-      logins: logins.map(login => [login.sourceId, login.outcome, login.target ?? '', login.candidates ?? []]),
+      logins: logins.map(login => [
+        login.sourceId,
+        login.outcome,
+        login.target ?? '',
+        login.candidates ?? [],
+        login.runnable ?? null,
+      ]),
       shown: shown.length,
+      bundle: sha256Hex(JSON.stringify(bundle)),
+      target: sha256Hex(JSON.stringify(target)),
+      documents: [...myFiles].map(([path, content]) => [path, sha256Hex(content)]).toSorted(),
+      base: base === undefined ? '' : sha256Hex(JSON.stringify(base)),
+      skillItems: [...input.existingSkillItems].toSorted(),
     }),
   );
   void theirModel;
@@ -866,10 +1012,19 @@ export interface CloneUpdatePlan {
   readonly model: AccountModel;
   /** Documents to write, relative to the asset tree: only what differs from what is there. */
   readonly files: readonly FleetCloneFile[];
+  /**
+   * Documents to remove, relative to the asset tree: the files the review listed as removed inside a folder
+   * a taken item alone owns. Applied in the same batch as the writes and the record, or not at all.
+   */
+  readonly removals: readonly string[];
+  /** Taken items moved off a path another item here shares, and where each landed. */
+  readonly relocations: readonly { readonly reference: string; readonly from: string; readonly to: string }[];
   readonly slots: readonly {
     readonly id: string;
     readonly harness: HarnessKind;
     readonly runtimes: readonly string[];
+    /** A copy of an environment login's configuration, as the review listed it, rather than an empty sign-in. */
+    readonly environment?: true;
   }[];
   readonly checkPaths: readonly { readonly reference: string; readonly path: string }[];
   readonly missingHarnesses: readonly HarnessKind[];
@@ -908,9 +1063,11 @@ export function cloneBaseFor(record: CloneBase, source: CloneSourceIdentity | un
  */
 export function resolveCloneDecisions(
   analysis: CloneAnalysis,
-  decisions: CloneDecisions,
+  given: CloneDecisions,
+  skip: readonly string[] = [],
 ): ReadonlyMap<string, CloneChoice> {
   const byRef = new Map(analysis.items.filter(item => item.outcome !== 'same').map(item => [item.ref, item]));
+  const decisions = withSkipped(analysis, given, skip);
   for (const [ref, choice] of Object.entries(decisions)) {
     const item = byRef.get(ref);
     if (item === undefined) throw new CloneRefusal(`There is nothing called ${ref} in this review.`);
@@ -954,6 +1111,38 @@ export function resolveCloneDecisions(
 }
 
 /**
+ * The decisions with every left-out item turned into the choice that writes nothing for it: `skip` for a
+ * new item, `keep` for anything else. `skip` names items as the source does, so each is found by its source
+ * ref; one naming nothing the source holds, or contradicting the person's own decision, is refused rather
+ * than dropped. An item already the same needs nothing: it is never written.
+ */
+function withSkipped(analysis: CloneAnalysis, decisions: CloneDecisions, skip: readonly string[]): CloneDecisions {
+  if (skip.length === 0) return decisions;
+  const sourceName = analysis.input.sourceName ?? analysis.input.bundle.machine;
+  const bySource = new Map(
+    analysis.items.flatMap(item => (item.source === undefined ? [] : [[item.source.ref, item] as const])),
+  );
+  const merged: Record<string, CloneChoice> = { ...decisions };
+  for (const reference of new Set(skip)) {
+    const item = bySource.get(reference);
+    if (item === undefined) {
+      throw new CloneRefusal(`The setup from ${sourceName} has no ${reference} to leave out. Review it again.`);
+    }
+    if (item.outcome === 'same') continue;
+    const allowed = CLONE_OUTCOME_CHOICES[item.outcome] as readonly CloneChoice[];
+    const choice: CloneChoice = allowed.includes('skip') ? 'skip' : 'keep';
+    const decided = merged[item.ref];
+    if (decided !== undefined && decided !== choice) {
+      throw new CloneRefusal(
+        `${reference} is left out, but ${item.ref} is also set to "${decided}". Leave it out or choose "${decided}", not both.`,
+      );
+    }
+    merged[item.ref] = choice;
+  }
+  return merged;
+}
+
+/**
  * The next setup and the documents to write. Throws {@link CloneRefusal} when the decisions leave a
  * `both` item unchosen, ask for what an item cannot do, or would leave a setup this machine cannot read.
  */
@@ -961,7 +1150,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const { input } = analysis;
   const { target, bundle } = input;
   const sourceName = input.sourceName ?? bundle.machine;
-  const chosen = resolveCloneDecisions(analysis, choices.decisions);
+  const chosen = resolveCloneDecisions(analysis, choices.decisions, choices.skip);
   const source = bundleModel(bundle, sourceName);
   const origin = {
     clonedFrom: bundle.machine,
@@ -979,6 +1168,8 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const runtimes: Record<string, Runtime> = { ...target.runtimes };
   const credentials: Record<string, Credential> = { ...target.credentials };
   const usedFiles = referencedFiles(target);
+  // Where the review moved a taken item off a shared path is spoken for before anything new is placed.
+  for (const item of analysis.items) for (const moved of item.relocated?.values() ?? []) usedFiles.add(moved);
   const theirContents = new Map(bundle.files.map(file => [plain(file.path), file.content]));
   const myContents = mapOf(input.targetFiles);
   const fileMoves = new Map<string, string>();
@@ -991,6 +1182,8 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const linked: string[] = [];
   const settled: string[] = [];
   const keptSkillItems = new Set<string>();
+  const removals: string[] = [];
+  const relocations: { reference: string; from: string; to: string }[] = [];
   const existingItems = new Set(input.existingSkillItems);
   const writtenSources = new Set<string>();
   const slotRuntimes = new Map<string, string[]>();
@@ -1010,7 +1203,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   // Logins first: a runtime's slot has to exist before the runtime points at it.
   const loginChoices = choices.logins ?? {};
   const loginFor = new Map<string, string>();
-  const slots = new Map<string, { id: string; harness: HarnessKind }>();
+  const slots = new Map<string, { id: string; harness: HarnessKind; environment?: true }>();
   const writtenRuntimes = analysis.items.filter(
     item =>
       item.kind === 'runtime' && item.source !== undefined && ['take', 'add'].includes(chosen.get(item.ref) ?? ''),
@@ -1057,11 +1250,23 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
           }
     ) as Credential;
     loginFor.set(credential, id);
-    slots.set(id, { id, harness: descriptor.harness });
+    slots.set(id, {
+      id,
+      harness: descriptor.harness,
+      ...(descriptor.store === 'environment' ? { environment: true as const } : {}),
+    });
   }
 
-  /** One component as it is written here, under `name`: its document and folder follow the name. */
-  const writeComponent = (entry: Entry, name: string, here: Entry | undefined, existing: boolean): void => {
+  /**
+   * One component as it is written here, under `name`: its document and folder follow the name. A path it
+   * shares with another item here is never reused: the review moved it, and it lands where the review said.
+   */
+  const writeComponent = (
+    entry: Entry,
+    name: string,
+    here: Entry | undefined,
+    relocated: ReadonlyMap<string, string>,
+  ): void => {
     const kind = entry.kind as ComponentKind;
     const { clonedFrom: _from, clonedFromDaemon: _daemon, clonedFromKey: _key, ...own } = entry.value;
     const copy: Record<string, unknown> = { ...own, ...origin, ...keyed(entry.ref) };
@@ -1069,6 +1274,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (typeof file === 'string' && isAssetRelative(file)) {
       const theirs = here?.value.file;
       const moved =
+        relocated.get(plain(file)) ??
         fileMoves.get(file) ??
         (typeof theirs === 'string' && isAssetRelative(theirs) ? theirs : movedFile(file, entry.name, name, usedFiles));
       fileMoves.set(file, moved);
@@ -1079,6 +1285,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (typeof directory === 'string' && isAssetRelative(directory)) {
       const theirs = here?.value.directory;
       const moved =
+        relocated.get(plain(directory)) ??
         folderMoves.get(directory) ??
         (typeof theirs === 'string' && isAssetRelative(theirs)
           ? theirs
@@ -1096,7 +1303,6 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       .join('\n');
     const path = HOME_PATH.exec(text)?.[0];
     if (path !== undefined) checkPaths.push({ reference: `${kind}/${name}`, path });
-    void existing;
   };
 
   // Components first, then profiles, then runtimes: each one's references follow what was written.
@@ -1157,7 +1363,11 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       const harness = runtimeHarness(source, theirRuntime) as HarnessKind;
       if (!input.installed.includes(harness)) missingHarnesses.add(harness);
     } else {
-      writeComponent(entry, name, item.target, choice === 'take');
+      writeComponent(entry, name, item.target, item.relocated ?? new Map());
+      for (const [from, to] of item.relocated ?? []) relocations.push({ reference: item.ref, from, to });
+      // What the review listed as removed goes with the take, in the same batch: only files inside a folder
+      // this item alone owns, never one the source could not carry.
+      if (choice === 'take') removals.push(...item.removals);
     }
   }
 
@@ -1179,6 +1389,11 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (owner === undefined) continue;
     const moved = fileMoves.get(file.path) ?? movedUnderFolder(file.path, folderMoves) ?? file.path;
     const skillItem = /^skills\/([^/]+)\//u.exec(file.path)?.[1];
+    // A skill item another item here lists too stays as it is: writing it would change that one as well.
+    if (skillItem !== undefined && owner.sharedItems?.includes(skillItem) === true) {
+      keptSkillItems.add(skillItem);
+      continue;
+    }
     if (
       skillItem !== undefined &&
       owner.outcome !== 'theirs' &&
@@ -1229,6 +1444,8 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   return {
     model,
     files,
+    removals: [...new Set(removals)].toSorted(),
+    relocations,
     slots: [...slots.values()].map(slot => ({ ...slot, runtimes: slotRuntimes.get(slot.id) ?? [] })),
     checkPaths,
     missingHarnesses: [...missingHarnesses].toSorted(),
@@ -1272,7 +1489,21 @@ export function describeCloneUpdate(plan: CloneUpdatePlan, machine: string, sour
     );
   }
   for (const slot of plan.slots) {
-    lines.push(`Adds an empty login ${slot.id} on ${machine} that needs sign-in; no existing login is changed.`);
+    lines.push(
+      slot.environment === true
+        ? `Adds login ${slot.id} on ${machine} with the environment configuration the review listed; no existing login is changed.`
+        : `Adds an empty login ${slot.id} on ${machine} that needs sign-in; no existing login is changed.`,
+    );
+  }
+  for (const moved of plan.relocations) {
+    lines.push(
+      `Writes ${moved.reference} to ${moved.to}: its old path is shared with another item here, which stays as it is.`,
+    );
+  }
+  if (plan.removals.length > 0) {
+    lines.push(
+      `Removes ${plural(plan.removals.length, 'file')} the source no longer has: ${plan.removals.join(', ')}.`,
+    );
   }
   for (const check of plan.checkPaths) lines.push(`Check after copying: ${check.reference} names ${check.path}.`);
   for (const harness of plan.missingHarnesses) {
@@ -1289,32 +1520,51 @@ export function describeCloneUpdate(plan: CloneUpdatePlan, machine: string, sour
 /**
  * Which login here each login of the source is: the record's link (the login this source's login was
  * last paired with), then a login here that carries the source login's origin key. Two logins here
- * claiming one key is a question for the person, never a guess. A login with no pairing is an empty slot —
- * an existing login is only ever pointed at, never rewritten (design §14.4).
+ * claiming one key is a question for the person, never a guess. Only then is `fallback` asked — the seam
+ * for the shared same-harness email/label matcher (https://github.com/kirinnee/ferretry/pull/1369), which
+ * answers the logins here a source login could be. A login with no pairing is an empty slot — an existing
+ * login is only ever pointed at, never rewritten (design §14.4).
  */
 export function resolveCloneLogins(
   bundle: FleetCloneBundle,
   target: AccountModel,
   base: CloneBaseSource | undefined,
+  fallback?: CloneLoginFallback,
 ): CloneLoginResolution {
   const keys = cloneOriginKeys(bundle);
   const matched = new Map<string, string>();
   const ask = new Map<string, readonly string[]>();
+  const settle = (credential: FleetCloneBundle['credentials'][number], found: readonly string[]): boolean => {
+    if (found.length === 1 && found[0] !== undefined) matched.set(credential.id, found[0]);
+    else if (found.length > 1) ask.set(credential.id, found);
+    return found.length > 0;
+  };
   for (const credential of bundle.credentials) {
     const key = keys.get(`login/${credential.id}`);
-    if (key === undefined) continue;
-    const linked = base?.items[key]?.login;
-    const known = linked === undefined ? undefined : target.credentials[linked];
-    if (linked !== undefined && known?.harness === credential.harness) {
-      matched.set(credential.id, linked);
-      continue;
+    if (key !== undefined) {
+      const linked = base?.items[key]?.login;
+      const known = linked === undefined ? undefined : target.credentials[linked];
+      if (linked !== undefined && known?.harness === credential.harness) {
+        matched.set(credential.id, linked);
+        continue;
+      }
+      const claimants = Object.entries(target.credentials)
+        .filter(([, held]) => held.clonedFromKey === key && held.harness === credential.harness)
+        .map(([id]) => id)
+        .toSorted();
+      if (settle(credential, claimants)) continue;
     }
-    const claimants = Object.entries(target.credentials)
-      .filter(([, held]) => held.clonedFromKey === key && held.harness === credential.harness)
-      .map(([id]) => id)
-      .toSorted();
-    if (claimants.length === 1 && claimants[0] !== undefined) matched.set(credential.id, claimants[0]);
-    else if (claimants.length > 1) ask.set(credential.id, claimants);
+    // The record and the key said nothing: the fallback matcher, when one is given, is next.
+    if (fallback !== undefined) settle(credential, [...new Set(fallback(credential, target))].toSorted());
   }
   return { matched, ask };
 }
+
+/**
+ * The logins here a source login could be when neither the record nor an origin key says (same harness,
+ * then email, then label). Supplied by the shared matcher once it lands in `@ferretry/protocol`.
+ */
+export type CloneLoginFallback = (
+  credential: FleetCloneBundle['credentials'][number],
+  target: AccountModel,
+) => readonly string[];

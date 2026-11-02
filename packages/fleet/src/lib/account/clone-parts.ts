@@ -65,7 +65,7 @@ export function movedFile(file: string, from: string, to: string, used: Readonly
 }
 
 /** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
-function pathsOverlap(a: string, b: string): boolean {
+export function pathsOverlap(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
