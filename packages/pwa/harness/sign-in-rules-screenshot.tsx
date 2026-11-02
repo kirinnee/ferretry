@@ -83,7 +83,7 @@ const rulesFor = () => {
   switch (view) {
     case 'settings': return { rules: [pageRule(), codeRule(), terminalRule(), suspendedRule2()], stages: [machineStage()] };
     case 'rule-card': case 'revoke-all': return { rules: [pageRule(), pageRule({ id: 'sr_' + 'e'.repeat(24), signIn: 'si_0000000000000009' })], stages: [] };
-    case 'widen': return { rules: [pageRule({ uses: 5, remaining: 2 })], stages: [] };
+    case 'widen': return { rules: [pageRule({ uses: 5, remaining: 2, usage: { count: 3, lastUsedAt: '2026-10-31T09:00:00.000Z' } })], stages: [] };
     case 'site-panel': case 'edit-warning': case 'device-revoke': return { rules: [pageRule(), terminalRule()], stages: [] };
     default: return { rules: [], stages: [] };
   }
