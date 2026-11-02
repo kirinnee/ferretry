@@ -88,7 +88,11 @@ summary is [security.md](security.md).
   by **origin key**, falling back to a probable match by name and content; a key two items claim is unlinked,
   and a part the bundle did not carry is compared by its literal path so it can never hide a change. The apply
   names the review's fingerprint and the target re-plans, so a person cannot apply a review other than the
-  one they saw. Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
+  one they saw: the fingerprint binds every byte and declaration the bundle carries (its not-copied list and
+  environment login descriptors included) and this machine's raw declarations, owned documents and record,
+  not just the semantic digests. A bundle that marks a carried file as not copied is refused. A taken item
+  is moved off any path another item here shares, so writing it can never change an item hidden as the same,
+  and the files the review lists as removed go in the same batch (account-model.md L14–L15). Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the
