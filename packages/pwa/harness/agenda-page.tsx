@@ -14,6 +14,7 @@
  *   &v6=1                 adds the v6 card items: A90 (the spend-limit decision with terms, two versions and a
  *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
  *   ?shapes=1             only one item of each answer shape (A101 choice … A108 info), for `agenda-shapes-screenshot.ts`
+ *   ?headings=1           only the A110 card: a long ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
@@ -24,6 +25,7 @@ import { agendaReMessage } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
+import { HEADING_ASK_ID, HEADING_ASK_PATCH } from './agenda-heading-ask.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -840,6 +842,7 @@ const parked = params.get('parked') === '1';
 const v5 = params.get('v5') === '1';
 const v6 = params.get('v6') === '1';
 const shapes = params.get('shapes') === '1';
+const headings = params.get('headings') === '1';
 
 const items = [
   ...AGENDA,
@@ -873,7 +876,9 @@ const board: AgendaSnapshot =
           ? snapshot([A3])
           : shapes
             ? snapshot([...SHAPES_ITEMS])
-            : snapshot(items);
+            : headings
+              ? snapshot([item(HEADING_ASK_ID, 5, { ...SHAPE_BRIEF, ...HEADING_ASK_PATCH })])
+              : snapshot(items);
 
 const live =
   params.get('live') === '1' ? (

@@ -44,7 +44,7 @@ import {
 } from './agenda-swipe-gesture.ts';
 import { CardHead, type CardHeadPager } from './card-head.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
-import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
+import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { SwipeCompass } from './swipe-reveal.tsx';
 
@@ -448,13 +448,14 @@ function ToTestRow({
               hooks={{ 'data-to-test-who': '' }}
             >
               <CardKindChip kind={TASK_CARD_KIND} />
-              {row.taskName === null || sameWords(row.taskName, title) ? null : (
-                <span className="fy-meta-line__ferret" data-to-test-ferret="">
-                  {row.taskName}
-                </span>
+              {joinMeta(
+                hasWords(row.taskName) && !sameWords(row.taskName, title) ? (
+                  <span className="fy-meta-line__ferret" data-to-test-ferret="">
+                    {row.taskName}
+                  </span>
+                ) : null,
+                hasWords(row.projectName) ? <span data-to-test-project="">{row.projectName}</span> : null,
               )}
-              {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
-              {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
             </CardMetaLine>
           </div>
           {empty ? null : (

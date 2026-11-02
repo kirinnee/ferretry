@@ -10,6 +10,20 @@ import { useReferenceSurface } from './reference-surface.tsx';
  * are the two callers; both read references through the same proof-before-link surface.
  * `tests/unit/fy-render-opt-in.test.ts` holds the count at one. See `docs/fy-render.md`.
  */
-export function ChatProse({ text, className, copyable }: Pick<MarkdownProps, 'text' | 'className' | 'copyable'>) {
-  return <Markdown enableFyRender text={text} className={className} copyable={copyable} {...useReferenceSurface()} />;
+export function ChatProse({
+  text,
+  className,
+  copyable,
+  demoteHeadings,
+}: Pick<MarkdownProps, 'text' | 'className' | 'copyable' | 'demoteHeadings'>) {
+  return (
+    <Markdown
+      enableFyRender
+      text={text}
+      className={className}
+      copyable={copyable}
+      demoteHeadings={demoteHeadings}
+      {...useReferenceSurface()}
+    />
+  );
 }

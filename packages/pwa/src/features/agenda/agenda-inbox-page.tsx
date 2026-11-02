@@ -134,7 +134,7 @@ import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
-import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
+import { CardMetaLine, hasWords, joinMeta, MetaDot } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
 import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
@@ -338,25 +338,20 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       hooks={{ 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(card.item)} />
-      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-        {who.ferret}
-      </span>
-      {who.task === null ? null : (
-        <>
-          <MetaDot />
-          <span data-inbox-who-task="">{who.task}</span>
-        </>
-      )}
-      {who.card === null ? null : (
-        <>
-          <MetaDot />
+      {joinMeta(
+        hasWords(who.ferret) ? (
+          <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+            {who.ferret}
+          </span>
+        ) : null,
+        hasWords(who.task) ? <span data-inbox-who-task="">{who.task}</span> : null,
+        hasWords(who.card) ? (
           <span className="fy-meta-line__card" data-inbox-who-card="">
             {who.card}
           </span>
-        </>
+        ) : null,
+        hasWords(who.machine) ? <span>{who.machine}</span> : null,
       )}
-      <MetaDot />
-      <span>{who.machine}</span>
     </CardMetaLine>
   );
 }
@@ -415,7 +410,6 @@ function OpenItem({
           formKey={card.key}
           history={history}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
-          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}
@@ -528,16 +522,14 @@ function GateMeta({
       hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(item)} />
-      {gate.projectName === undefined ? null : (
-        <>
-          <MetaDot />
-          <span data-inbox-gate-project="">{gate.projectName}</span>
-        </>
+      {joinMeta(
+        hasWords(gate.projectName) ? <span data-inbox-gate-project="">{gate.projectName}</span> : null,
+        hasWords(inboxWho(card).ferret) ? (
+          <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+            {inboxWho(card).ferret}
+          </span>
+        ) : null,
       )}
-      <MetaDot />
-      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-        {inboxWho(card).ferret}
-      </span>
     </CardMetaLine>
   );
 }

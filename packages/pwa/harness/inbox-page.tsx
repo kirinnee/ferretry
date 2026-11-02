@@ -13,7 +13,10 @@
  *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
+ *   ?view=gate-noproject  a gate item with NO project open: its header opens on the ferret, no stray dot
+ *   ?view=open-longtitle  an item with a LONG title open: it folds onto two lines, never cut mid-word
  *   ?view=input           an INPUT item open (a short typed value: the Type in chip)
+ *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
@@ -44,6 +47,7 @@ import {
   OTHER_PROJECT,
   PROJECT,
 } from '../tests/unit/board-support.ts';
+import { HEADING_ASK_ID, HEADING_ASK_PATCH } from './agenda-heading-ask.ts';
 import { RICH_HOW_TO_TEST, richRequested } from './rich-how-to-test.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
@@ -204,6 +208,9 @@ const LONG = item('A40', 6, 'ottilie', {
   ],
   body: 'How the read time grew as the ledger did:\n\n![Read time by ledger size](/fleet-grid.svg)\n\nThe move is a one-off copy; the old files stay as a backup for a month.',
 } as Partial<AgendaItem>);
+const HEADINGS = item(HEADING_ASK_ID, 6, 'ottilie', {
+  ...HEADING_ASK_PATCH,
+});
 const FIVE = item('A41', 8, 'hadi', {
   title: 'Which region for the relay?',
   subject: 'Which region should the second relay run in?',
@@ -282,6 +289,17 @@ const GATE = item('G61', 3, 'daemon', {
   },
 } as Partial<AgendaItem>);
 const GATE_CARD = card(GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const GATE_NO_PROJECT = item('G63', 3, 'daemon', {
+  ...GATE,
+  gate: { ...GATE.gate, cardId: 'F63', projectName: '' },
+} as Partial<AgendaItem>);
+const GATE_NO_PROJECT_CARD = card(GATE_NO_PROJECT, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
+const LONG_TITLE = item('A111', 6, 'ottilie', {
+  title: 'Three answers for the catalog before I can finish the relay setup tonight',
+  subject: 'Which of the three catalog layouts should I keep?',
+  ask: options(['Grid', 'List', 'Compact']),
+  premise: '- The catalog is drawn three ways today',
+} as Partial<AgendaItem>);
 const GATE_PLAN = item('G62', 3, 'daemon', {
   ...GATE,
   title: 'Pairing a second phone',
@@ -311,11 +329,14 @@ const INPUT = item('A44', 5, 'ottilie', {
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
+  'open-headings': card(HEADINGS, LEDGER, 'studio'),
   'open-5': card(FIVE, RELAY, 'studio'),
   'open-7': card(SEVEN, RELEASE, 'studio'),
   form: card(FORM, RELAY, 'studio'),
   gate: GATE_CARD,
   'gate-plan': GATE_PLAN_CARD,
+  'gate-noproject': GATE_NO_PROJECT_CARD,
+  'open-longtitle': card(LONG_TITLE, LEDGER, 'studio'),
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
 };

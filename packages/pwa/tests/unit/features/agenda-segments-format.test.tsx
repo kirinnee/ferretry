@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AgendaItem } from '@ferretry/protocol';
 import { AgendaItemCard } from '../../../src/features/agenda/agenda-item-card.tsx';
 import { agendaProse } from '../../../src/features/agenda/agenda-prose.tsx';
@@ -122,5 +124,73 @@ describe('every agenda segment draws the same inline Markdown, lists and line br
   test('a long single paragraph is still drawn whole (the writing lint is what warns about it)', async () => {
     const answer = segment(await draw({ questionAnswer: WALL }), '[data-agenda-question-answer]');
     expect(answer.textContent).toContain('one owner-only wall.');
+  });
+});
+
+const HEADINGS = '# Big\n## Plan\n### Steps\n#### Four\n##### Five\n###### Six\nthen the rest';
+const ASK =
+  'What should change in &B131? You said: its working now, but I want more features I do not want the catalog to be a back sheet or something, and it does not tell me which catalog the skills are from';
+
+describe('a heading in a segment is drawn as bold body text, never an h1–h6', () => {
+  test('every segment demotes # … ###### to a bold line and keeps the text', async () => {
+    const root = await draw({
+      premise: HEADINGS,
+      context: HEADINGS,
+      decided: HEADINGS,
+      stillOpen: HEADINGS,
+      questionAnswer: HEADINGS,
+      body: HEADINGS,
+    });
+    for (const selector of [
+      '[data-agenda-question-answer]',
+      '[data-agenda-section="premise"]',
+      '[data-agenda-section="context"]',
+      '[data-agenda-section="decided"]',
+      '[data-agenda-section="still-open"]',
+      '[data-agenda-section="more"]',
+    ]) {
+      const each = segment(root, selector);
+      expect(
+        each.querySelector('.fy-seg h1, .fy-seg h2, .fy-seg h3, .fy-seg h4, .fy-seg h5, .fy-seg h6'),
+        selector,
+      ).toBeNull();
+      const demoted = [...each.querySelectorAll('[data-demoted-heading]')];
+      expect(
+        demoted.map(line => line.textContent),
+        selector,
+      ).toEqual(['Big', 'Plan', 'Steps', 'Four', 'Five', 'Six']);
+      for (const line of demoted) expect(line.querySelector('strong')?.textContent).toBe(line.textContent);
+      expect(each.textContent, selector).toContain('then the rest');
+    }
+  });
+
+  test('a heading inside the ask is demoted too, and the card keeps only its own labels as headings', async () => {
+    const root = await draw({ subject: `## ${ASK}` });
+    const ask = segment(root, '[data-agenda-question-line]');
+    expect(ask.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+    expect(ask.querySelector('[data-demoted-heading] strong')?.textContent).toBe(ASK);
+  });
+});
+
+describe('the ask is a short bold line at body size', () => {
+  const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
+  const rule = /(?:^|\n)\.fy-card__question \{([^}]*)\}/u.exec(css)?.[1] ?? '';
+
+  test('its rule sets body size and strong weight, and no heading size', () => {
+    expect(rule).toContain('font-size: var(--text-base)');
+    expect(rule).toContain('font-weight: var(--weight-strong)');
+    expect(rule).not.toContain('--text-lg');
+    expect(rule).toContain('overflow-wrap: anywhere');
+  });
+
+  test('a long ask is one block of text in the need segment, not a heading element', async () => {
+    const root = await draw({ subject: ASK });
+    const need = segment(root, '[data-agenda-need]');
+    const ask = segment(need, '[data-agenda-question-line]');
+    expect(ask.className).toBe('fy-card__question');
+    expect(ask.tagName).toBe('DIV');
+    expect(ask.textContent).toContain('which catalog the skills are from');
+    expect(ask.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
+    expect(need.querySelectorAll('h1, h2, h3')).toHaveLength(0);
   });
 });

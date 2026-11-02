@@ -545,6 +545,15 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **A bunch of bugs or asks heard at once gets ONE info item.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret raises one `-k info` item that lists each in a short line and where it is tracked (its card, or "answered here"), so the owner knows every one was heard. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule is one line of the Agenda-mode instruction (`AGENDA_INSTRUCTION`).
 
+**A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
+as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
+you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
+(`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
+
+**A card's title folds, never cuts.** An item's title wraps onto at most two lines (`data-wrap`, a two-line clamp
+that breaks at words) instead of being cut mid-word, and its who/where line ("ferret · task · card · machine")
+puts a dot only between parts that have words (`joinMeta`): a missing part leaves no leading, trailing or doubled dot.
+
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
 the facts around it — so every NEW item a ferret raises must carry both:
 
@@ -583,7 +592,8 @@ go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message
 
 **Every card has one answer shape, and it says it in one place.** Under the premise and the context, before any
 optional section, every open card draws a segment headed **What I need from you**. It holds exactly the ask and
-ends with one plain instruction, so the owner always knows what to do:
+ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
+and the card stays the card:
 
 | Kind (`--kind`)                     | The segment shows                                   | The buttons                                            |
 | ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |

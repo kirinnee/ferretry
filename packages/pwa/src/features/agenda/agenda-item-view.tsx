@@ -86,8 +86,6 @@ export interface AgendaItemViewProps {
   readonly planForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
-  /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
-  readonly wrapTitle?: boolean;
   /** Quiet buttons kept under ⓘ (the Inbox's Skip and Not needed), so the card body keeps the room. */
   readonly tools?: ReactNode;
 }
@@ -150,7 +148,6 @@ export function AgendaItemView({
   formKey,
   daemonId,
   tools,
-  wrapTitle = false,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -230,7 +227,7 @@ export function AgendaItemView({
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} twoLines={wrapTitle || item.gate !== undefined} />}
+              title={<MarqueeTitle title={head.title} twoLines />}
               {...(hasInfo
                 ? { info: { controls: infoId, open: infoOpen, onToggle: () => setInfoFor(infoOpen ? null : item.id) } }
                 : {})}

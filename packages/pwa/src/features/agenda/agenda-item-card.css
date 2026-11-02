@@ -485,8 +485,11 @@
   font-size: var(--text-sm);
 }
 
+/* The ask is a short bold line at body size — never a heading's size, however long it is: it wraps and the card stays
+   the card. */
 .fy-card__question {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
   font-weight: var(--weight-strong);
   overflow-wrap: anywhere;
 }
@@ -1030,8 +1033,13 @@
 .md.fy-seg strong {
   font-weight: var(--weight-strong);
 }
+/* A heading the ferret wrote in a segment is demoted to this: a bold line at the segment's own size. */
+.md.fy-seg [data-demoted-heading] {
+  font-size: inherit;
+  line-height: inherit;
+}
 
-/* A GATE ITEM's title wraps to two lines instead of scrolling: the head row's chevrons already take the width. */
+/* An item's title wraps to at most two lines (words break, never mid-word unless one is wider than the row) instead of scrolling: the head row's chevrons already take the width. */
 .fy-item-view__title[data-wrap] {
   display: -webkit-box;
   overflow: hidden;

@@ -93,6 +93,7 @@
         "harness/agenda-v6-screenshot.ts",
         "harness/agenda-chip-screenshot.ts",
         "harness/agenda-shapes-screenshot.ts",
+        "harness/agenda-ask-screenshot.ts",
         "harness/doneclose-screenshot.ts",
         "harness/doneclose-page.tsx",
         "harness/inbox-v2-screenshot.ts",

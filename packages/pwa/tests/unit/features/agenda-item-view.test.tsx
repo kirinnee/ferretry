@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AgendaItem } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaItemView, type AgendaItemViewProps } from '../../../src/features/agenda/agenda-item-view.tsx';
@@ -1094,5 +1096,23 @@ describe('a form card', () => {
     expect(root().textContent).toContain('Open this in the Inbox');
     expect(root().querySelector('[data-agenda-form-foot]')).toBeNull();
     expect(root().querySelector('[data-agenda-form-needed]')).toBeNull();
+  });
+});
+
+describe('the item title wraps instead of being cut', () => {
+  test('marks every item title as wrapping, not just a gate or machine one', async () => {
+    await draw(
+      agendaItem('A60', { title: 'Three answers for the board’s catalog, one per catalog the skills come from' }),
+    );
+    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(true);
+  });
+
+  test('clamps it to two lines and breaks at words', () => {
+    const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
+    const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    expect(body).toContain('-webkit-line-clamp: 2');
+    expect(body).toContain('white-space: normal');
+    expect(body).not.toContain('word-break: break-all');
   });
 });
