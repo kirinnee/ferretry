@@ -85,6 +85,7 @@ export async function answerGate(
     readonly response: AgendaResponse;
     readonly note?: string | undefined;
     readonly actor: AgendaActor;
+    readonly gate?: true | undefined;
   },
 ): Promise<AgendaMutation | undefined> {
   const outcome = await gates.answer({

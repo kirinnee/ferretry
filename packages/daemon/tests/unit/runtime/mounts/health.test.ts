@@ -323,4 +323,52 @@ describe('the daemon health mount and the session-worker pool', () => {
     // Assert
     should(body).not.have.property('legacyWire');
   });
+
+  it('should report the possible duplicate asks the sweep left open, and leave the field out where it runs none', async () => {
+    // Arrange
+    const left = [
+      {
+        kind: 'title' as const,
+        members: [
+          { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'lead', id: 'A2' },
+        ],
+        why: 'not closed: the owner has begun talking about it',
+      },
+    ];
+
+    // Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ duplicateAsks: left }))).body));
+    const body = JSON.parse((await ask(healthSubsystem())).body) as Record<string, unknown>;
+
+    // Assert
+    should(view.duplicateAsks).deepEqual(left);
+    should(view.duplicateAskCount).equal(1);
+    should(body).not.have.property('duplicateAsks');
+    should(body).not.have.property('duplicateAskCount');
+  });
+
+  it('should tell a caller that did not arrive on this host only HOW MANY asks are left, never which', async () => {
+    // Arrange
+    const left = [
+      {
+        kind: 'card' as const,
+        members: [
+          { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'peer', id: 'A2' },
+        ],
+        why: 'not closed: raised by different sessions',
+      },
+    ];
+
+    // Act
+    const body = JSON.parse((await ask(healthSubsystem({ duplicateAsks: left }), {}, false)).body) as Record<
+      string,
+      unknown
+    >;
+
+    // Assert
+    should(body.duplicateAskCount).equal(1);
+    should(body).not.have.property('duplicateAsks');
+  });
 });

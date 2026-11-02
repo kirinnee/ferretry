@@ -76,6 +76,7 @@ import type {
   BoardDiagnostics,
   BoardOptIn,
   BoardSnapshot,
+  BoardThreads,
   BoardStore,
   LaneSetSource,
   OwnerWords,
@@ -123,6 +124,8 @@ export interface BoardServiceDependencies {
    * board reads as on, as it did before the switch.
    */
   readonly optIn?: BoardOptIn;
+  /** The caller's open agenda threads a card may be made for (`--thread`). Absent, a card naming one is refused. */
+  readonly threads?: BoardThreads;
   /**
    * Told after every committed write of a card, by any path (docs/board.md § Gates ask the owner): the gate items
    * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
@@ -382,7 +385,9 @@ export class BoardService {
       named: request.approval,
       cards: snapshot.cards,
     });
+    const thread = await this.requireThread(caller, request.thread);
     const id = await this.ports.store.allocateId(request.kind);
+    await this.linkThread(thread, { id, machineId });
     const card = await this.insert(id, request, {
       machineId,
       caller,
@@ -907,6 +912,39 @@ export class BoardService {
     if (licence !== null) return undefined;
     const board = await optIn.nameOf(projectId).catch(() => projectId);
     throw new BoardError('forbidden', offBoardRefusal(board, problem));
+  }
+
+  /**
+   * The thread a new card is made to carry out, when it names one: an OPEN item on the CALLER's own agenda that the
+   * caller raised, neither a gate item nor a notice, and not linked to a card already. Throws the refusal.
+   */
+  private async requireThread(caller: BoardCaller, named: AgendaId | undefined): Promise<AgendaRef | undefined> {
+    if (named === undefined) return undefined;
+    const ref = `!${named}`;
+    if (caller.kind !== 'ferret') {
+      throw new BoardError('invalid', `--thread names a thread on a ferret's own agenda; ${ref} is not yours to name`);
+    }
+    const item = await this.ports.threads?.open(caller.sessionId, named).catch(() => undefined);
+    if (item === undefined) throw new BoardError('invalid', `${ref} is not an open item on your agenda`);
+    if (item.raisedBy !== 'agent' || item.raisedBySession !== caller.sessionId) {
+      throw new BoardError('invalid', `${ref} is not an item you raised`);
+    }
+    if (item.gate !== undefined || item.notice === true) {
+      throw new BoardError('invalid', `${ref} is not a thread: a gate item or a notice carries no card`);
+    }
+    if (item.task !== undefined && item.task !== null) {
+      throw new BoardError('invalid', `${ref} is already linked to ${formatTaskRef(item.task)}: one thread, one card`);
+    }
+    return { sessionId: caller.sessionId, id: named };
+  }
+
+  /** The thread becomes the new card's own: linked, nothing else (the card stays as external as any other). */
+  private async linkThread(thread: AgendaRef | undefined, card: TaskRef): Promise<void> {
+    if (thread === undefined || this.ports.threads === undefined) return;
+    const linked = await this.ports.threads.link(thread.sessionId, thread.id, card).catch(() => undefined);
+    if (linked !== undefined && linked.ok) return;
+    const why = linked === undefined ? 'its agenda could not be read' : linked.message;
+    throw new BoardError('invalid', `!${thread.id} was not linked to the new card: ${why}`);
   }
 
   /**

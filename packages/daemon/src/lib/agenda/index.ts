@@ -4,6 +4,7 @@ export * from './clear-agents.ts';
 export * from './rollup.ts';
 export * from './config-confirms.ts';
 export * from './conversation.ts';
+export * from './duplicates.ts';
 export * from './harness-prompt.ts';
 export * from './home.ts';
 export * from './home-migration.ts';

@@ -3,6 +3,7 @@ import {
   daemonFeatureList,
   type HealthView,
   type IoPressureView,
+  type DuplicateAsk,
   type LegacyWireUse,
   type SessionWorkerPool,
 } from '@ferretry/protocol';
@@ -75,6 +76,8 @@ export interface DaemonHealthSubsystem {
   readonly io?: () => IoPressureView | undefined;
   /** The older wire names clients still used, by route; absent where this daemon counts none. */
   readonly legacyWire?: () => readonly LegacyWireUse[];
+  /** The possible duplicate asks the last sweep left open; absent where this daemon runs none. */
+  readonly duplicateAsks?: () => readonly DuplicateAsk[];
 }
 
 /**
@@ -94,6 +97,7 @@ function view(
   sessionWorkers: SessionWorkerPool | undefined,
   io: IoPressureView | undefined,
   legacyWire: readonly LegacyWireUse[] | undefined,
+  duplicateAsks: readonly DuplicateAsk[] | undefined,
   sessionBearerResolves: boolean,
 ): HealthView {
   return {
@@ -124,6 +128,9 @@ function view(
     ...(sessionWorkers === undefined ? {} : { sessionWorkers }),
     ...(io === undefined ? {} : { io }),
     ...(legacyWire === undefined ? {} : { legacyWire: [...legacyWire] }),
+    // WHO may read which: an unauthenticated caller learns HOW MANY, never which asks or whose sessions.
+    ...(duplicateAsks === undefined ? {} : { duplicateAskCount: duplicateAsks.length }),
+    ...(duplicateAsks === undefined || !sessionBearerResolves ? {} : { duplicateAsks: [...duplicateAsks] }),
     // Stated by the protocol, which owns the names, so the app and this daemon cannot disagree about one.
     // EXCEPT the ferret session credential, which is offered only to a request that arrived where a session
     // bearer could resolve (this machine's privileged loopback carrier). A client that sees it presents the
@@ -145,6 +152,7 @@ async function health(subsystem: DaemonHealthSubsystem, request: ApiRequest): Pr
       subsystem.sessionWorkers?.(),
       subsystem.io?.(),
       subsystem.legacyWire?.(),
+      subsystem.duplicateAsks?.(),
       // The very test the boundary uses before it looks a session bearer up (`presentedSession`).
       request.privilegedLoopback === true,
     ),

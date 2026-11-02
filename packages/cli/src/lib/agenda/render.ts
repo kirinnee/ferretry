@@ -265,9 +265,12 @@ export function renderAgendaMutation(
 ): string {
   const subject = reference === undefined ? verb : `${verb} ${reference}`;
   const line = `${subject} — ${pluralItems(snapshot.count)} in ${snapshot.sessionId}`;
-  return [line, ...enrolmentWarning(snapshot.enrolled), ...writingAdvice(snapshot.warnings, raised ?? undefined)].join(
-    '\n',
-  );
+  return [
+    line,
+    ...(snapshot.notes ?? []).map(note => `Note: ${note}`),
+    ...enrolmentWarning(snapshot.enrolled),
+    ...writingAdvice(snapshot.warnings, raised ?? undefined),
+  ].join('\n');
 }
 
 /**

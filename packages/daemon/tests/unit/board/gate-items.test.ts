@@ -100,6 +100,8 @@ interface Faults {
   readonly swept?: boolean;
   /** The agenda home of these sessions; every other session is its own. */
   readonly homes?: Readonly<Record<string, string>>;
+  /** The instant the gates read as now; the agenda's own clock stays at NOW. */
+  readonly gatesNow?: string;
 }
 
 /** The duplicates sweep's marker, in memory. */
@@ -163,6 +165,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
         return await agenda.resolve(sessionId, id, actor, note);
       },
       answer: async (sessionId, id, response, actor, note) => await agenda.answer(sessionId, id, response, actor, note),
+      attachGate: async (sessionId, id, gate, answered) => await agenda.attachGate(sessionId, id, gate, answered),
     },
     board: {
       card: async id => await cards_.card(id),
@@ -185,7 +188,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       },
     },
     marker,
-    now: () => NOW,
+    now: () => faults.gatesNow ?? NOW,
     words: {
       told: async (task, message, key) => {
         if (faults.tellThrows === true) throw new Error('nobody to tell');
@@ -1783,5 +1786,330 @@ describe('gates ask at the agenda home of the card’s ferrets', () => {
 
     // Assert
     should(world.open('grandchild')).have.length(1);
+  });
+});
+
+describe('one owner ask per thing: a gate attaches to the card’s thread', () => {
+  const AGENT: AgendaActor = { kind: 'agent', sessionId: 'lead', name: 'Ada' };
+  const thread = {
+    source: 'agent-raised' as const,
+    sourceRef: null,
+    subject: 'Can you look at the badge?',
+    why: 'It changed.',
+    premise: 'The badge changed.',
+    context: 'It is on the card.',
+    howToResolve: 'Say what you think.',
+    ask: { kind: 'permission' as const },
+    task: { id: 'F1' },
+  };
+  const atGateWithThread = async (laneId = 'tested', faults: Faults = {}) => {
+    const world = fixture(
+      [
+        external({
+          laneId,
+          owner: 'lead',
+          assignee: null,
+          createdBy: { kind: 'ferret', sessionId: 'lead' },
+          askedBy: 'agent',
+        }),
+      ],
+      faults,
+    );
+    const raised = await world.agenda.raise('lead', thread, AGENT);
+    if (!raised.ok) throw new Error(`expected a thread: ${raised.error.message}`);
+    await world.gates.written('F1');
+    return { world, id: (raised.item as AgendaItem).id };
+  };
+  const patchItem = (world: ReturnType<typeof fixture>, id: string, patch: Record<string, unknown>) => {
+    const ledger = world.ledgers.ledgers.get('lead') as AgendaLedger;
+    world.ledgers.ledgers.set('lead', {
+      ...ledger,
+      entries: ledger.entries.map(entry =>
+        entry.item.id === id ? { ...entry, item: { ...entry.item, ...patch } } : entry,
+      ) as AgendaLedger['entries'],
+    });
+  };
+  const ferretTurn = (world: ReturnType<typeof fixture>, _sessionId: string, id: string, askedAt: string) =>
+    patchItem(world, id, { waitingOn: 'ferret', askedAt, waitingFor: 'discussion' });
+  const older = (world: ReturnType<typeof fixture>, id: string) =>
+    patchItem(world, id, { waitingSince: '2020-01-01T00:00:00.000Z' });
+  const gateOn = (world: ReturnType<typeof fixture>, id: string) =>
+    world.open('lead').find(each => each.id === id)?.gateAttached;
+
+  it('raises no gate item, and puts the gate on the thread', async () => {
+    const { world, id } = await atGateWithThread();
+
+    should(world.open('lead').filter(each => each.gate !== undefined)).be.empty();
+    should(gateOn(world, id)).match({ cardId: 'F1', laneId: 'tested' });
+    should(await world.gates.asking('F1')).eql({ sessionId: 'lead', id });
+  });
+
+  it('resolves a gate item already open when a thread appears, and says where the gate is asked now', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    await world.gates.backfill();
+    const item = world.open('lead')[0] as AgendaItem;
+
+    const raised = await world.agenda.raise('lead', thread, AGENT);
+    await world.gates.written('F1');
+
+    should(world.open('lead').map(each => each.id)).eql([(raised as { item: AgendaItem }).item.id]);
+    should(world.closed('lead').find(each => each.id === item.id)?.resolutionNote).match(/asked on !A2/);
+  });
+
+  it('takes the gate off the thread when the card leaves the gate, and asks nothing', async () => {
+    const { world, id } = await atGateWithThread();
+
+    world.store.cards.set('F1', { ...world.stored(), laneId: 'implement' });
+    await world.gates.written('F1');
+
+    should(gateOn(world, id)).be.undefined();
+    should(await world.gates.asking('F1')).be.undefined();
+  });
+
+  it('attaches to the thread on the owner’s turn rather than a newer one on the ferret’s', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    const first = await world.agenda.raise('lead', thread, AGENT);
+    const second = await world.agenda.raise('lead', { ...thread, subject: 'And the colour?' }, AGENT);
+    ferretTurn(world, 'lead', (second as { item: AgendaItem }).item.id, NOW);
+
+    await world.gates.written('F1');
+
+    should(gateOn(world, (first as { item: AgendaItem }).item.id)).be.ok();
+    should(gateOn(world, (second as { item: AgendaItem }).item.id)).be.undefined();
+  });
+
+  it('attaches to the newest thread when none is on the owner’s turn, and moves to the other as they change', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    const first = (await world.agenda.raise('lead', thread, AGENT)) as { item: AgendaItem };
+    const second = (await world.agenda.raise('lead', { ...thread, subject: 'And the colour?' }, AGENT)) as {
+      item: AgendaItem;
+    };
+    ferretTurn(world, 'lead', first.item.id, NOW);
+    ferretTurn(world, 'lead', second.item.id, NOW);
+    older(world, first.item.id);
+    await world.gates.written('F1');
+    should(await world.gates.asking('F1')).match({ id: second.item.id });
+    ferretTurn(world, 'lead', second.item.id, '2020-01-01T00:00:00.000Z');
+    patchItem(world, first.item.id, { waitingOn: undefined, askedAt: undefined, waitingFor: undefined });
+    await world.gates.written('F1');
+    should(gateOn(world, first.item.id)).be.ok();
+    should(gateOn(world, second.item.id)).be.undefined();
+  });
+
+  it('stops counting a thread that has sat on the ferret’s turn for over a day, and raises the gate item', async () => {
+    const day = Date.parse(NOW) + 25 * 60 * 60 * 1000;
+    const { world, id } = await atGateWithThread('tested', { gatesNow: new Date(day).toISOString() });
+    should(gateOn(world, id)).be.ok();
+    ferretTurn(world, 'lead', id, NOW);
+
+    const raised = await world.gates.sweep();
+
+    should(raised).equal(1);
+    should(gateOn(world, id)).be.undefined();
+    should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+  });
+
+  it('a sweep looks only at cards waiting at a gate', async () => {
+    const world = fixture([external({ laneId: 'implement' })]);
+
+    should(await world.gates.sweep()).equal(0);
+    should(world.open('lead')).be.empty();
+  });
+
+  it('answers the gate from the thread as the owner: the card moves, and the gate leaves the thread', async () => {
+    const { world, id } = await atGateWithThread();
+
+    const outcome = await world.answer(id, choose('Done'), { sessionId: 'lead', gate: true });
+
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored().laneId).equal('closed');
+    should(world.open('lead').find(each => each.id === id)).be.ok();
+    should(gateOn(world, id)).be.undefined();
+  });
+
+  it('keeps the gate on the thread when the owner says Not yet', async () => {
+    const { world, id } = await atGateWithThread('plan');
+
+    const outcome = await world.answer(id, choose('Not yet'), {
+      sessionId: 'lead',
+      gate: true,
+      note: 'after the review',
+    });
+
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored().laneId).equal('plan');
+    should(gateOn(world, id)).be.ok();
+  });
+
+  it('refuses an answer from a ferret, and leaves the card and the thread alone', async () => {
+    const { world, id } = await atGateWithThread();
+
+    const outcome = await world.answer(id, choose('Done'), { sessionId: 'lead', gate: true, actor: AGENT });
+
+    should(outcome).match({ handled: true, refused: { code: 'forbidden' } });
+    should(world.stored().laneId).equal('tested');
+    should(gateOn(world, id)).be.ok();
+  });
+
+  it('is not an answer to the gate when it does not say it is one: the thread takes it as its own', async () => {
+    const { world, id } = await atGateWithThread();
+
+    should(await world.answer(id, choose('Done'))).eql({ handled: false });
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('refuses a gate answer on a thread that carries no gate (the card moved on)', async () => {
+    const { world, id } = await atGateWithThread();
+    world.store.cards.set('F1', { ...world.stored(), laneId: 'implement' });
+    await world.gates.written('F1');
+
+    const outcome = await world.answer(id, choose('Done'), { sessionId: 'lead', gate: true });
+
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should(world.stored().laneId).equal('implement');
+  });
+
+  it('refuses, and clears the gate, when the card moved before the answer was read', async () => {
+    const { world, id } = await atGateWithThread();
+    world.store.cards.set('F1', { ...world.stored(), laneId: 'implement' });
+
+    const outcome = await world.answer(id, choose('Done'), { sessionId: 'lead', gate: true });
+
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should(gateOn(world, id)).be.undefined();
+  });
+
+  it('raises exactly one gate item when the owner closes the thread without answering its gate', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.resolve('lead', id as never, HUMAN, 'seen');
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+  });
+
+  it('does not raise the gate again once the owner answered it on the thread, whatever became of the thread', async () => {
+    const { world, id } = await atGateWithThread('plan');
+
+    await world.answer(id, choose('Not yet'), { sessionId: 'lead', gate: true, note: 'after the review' });
+    await world.agenda.resolve('lead', id as never, HUMAN, 'seen');
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(world.open('lead')).be.empty();
+  });
+
+  it('keeps carrying the gate on an open thread the owner answered Not yet on, and raises nothing', async () => {
+    const { world, id } = await atGateWithThread('plan');
+
+    await world.answer(id, choose('Not yet'), { sessionId: 'lead', gate: true, note: 'after the review' });
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(gateOn(world, id)).be.ok();
+    should(world.open('lead').filter(each => each.gate !== undefined)).be.empty();
+  });
+
+  it('raises the gate item for a thread the ferret closed', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.resolve('lead', id as never, AGENT, 'done');
+    await world.gates.written('F1');
+
+    should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+  });
+
+  it('raises the gate item when a reply parks the thread', async () => {
+    const { world, id } = await atGateWithThread();
+    should(gateOn(world, id)).be.ok();
+
+    patchItem(world, id, { parked: { reason: 'replied', at: NOW } });
+    await world.gates.written('F1');
+
+    should(gateOn(world, id)).be.undefined();
+    should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+  });
+
+  it('leaves a gate item the owner is mid-discussion on when a thread appears, and does not attach to the thread', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    await world.gates.written('F1');
+    const gateItem = world.open('lead').find(each => each.gate !== undefined)!;
+    patchItem(world, gateItem.id, { history: [{ at: NOW, kind: 'discuss' }] });
+    const raised = (await world.agenda.raise('lead', thread, AGENT)) as { item: AgendaItem };
+    await world.gates.written('F1');
+
+    should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+    should(gateOn(world, raised.item.id)).be.undefined();
+  });
+
+  it('closes an untouched gate item when a thread appears', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    await world.gates.written('F1');
+    const raised = (await world.agenda.raise('lead', thread, AGENT)) as { item: AgendaItem };
+    await world.gates.written('F1');
+
+    should(world.open('lead').filter(each => each.gate !== undefined)).be.empty();
+    should(gateOn(world, raised.item.id)).be.ok();
+  });
+
+  it('warns when the gate cannot be put on a thread', async () => {
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+    await world.agenda.raise('lead', thread, AGENT);
+    const original = world.agenda.attachGate.bind(world.agenda);
+    world.agenda.attachGate = async () => ({ ok: false, error: { code: 'not-found', message: 'gone' } }) as never;
+
+    await world.gates.written('F1');
+    world.agenda.attachGate = original;
+
+    should(world.warnings.join('\n')).match(/could not attach the gate/);
   });
 });

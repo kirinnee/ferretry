@@ -2154,3 +2154,81 @@ describe('listing the card ids', () => {
     should(listed).eql({ ids: ['F1', 'F2', 'F3'] });
   });
 });
+
+describe('creating a card for a thread (--thread)', () => {
+  const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
+    ({ id: 'A12', raisedBy: 'agent', raisedBySession: 'lead', ...extra }) as AgendaItem;
+  const linked: { sessionId: string; id: string; card: unknown }[] = [];
+  const withThread = (item: AgendaItem | undefined | 'throws', refusing?: string) =>
+    serviceWith([], {
+      threads: {
+        open: async () => {
+          if (item === 'throws') throw new Error('unreadable');
+          return item;
+        },
+        link: async (sessionId, id, card) => {
+          if (refusing !== undefined) return { ok: false, message: refusing };
+          linked.push({ sessionId, id, card });
+          return { ok: true };
+        },
+      },
+    });
+  const forThread = create({ thread: 'A12', ask: { text: 'look at the badge', source: 'session:lead' } });
+
+  it('only LINKS the thread to the new card, which stays as external as any other', async () => {
+    linked.length = 0;
+    const { ports, service } = withThread(thread());
+
+    const response = await service.create(forThread, lead);
+
+    should(linked).eql([{ sessionId: 'lead', id: 'A12', card: { id: response.task.id, machineId: MACHINE } }]);
+    should(stored(ports)).not.have.property('thread');
+    should(await service.audienceOf(stored(ports))).equal('external');
+  });
+
+  it('refuses a thread already linked to another card, and a link the agenda refuses', async () => {
+    const taken = thread({ task: { id: 'F9' } });
+    should((await refusal(withThread(taken).service.create(forThread, lead))).message).match(
+      /already linked to .*F9.*one thread, one card/,
+    );
+    should((await refusal(withThread(thread(), 'already linked to F9').service.create(forThread, lead))).message).match(
+      /was not linked to the new card: already linked to F9/,
+    );
+  });
+
+  it('refuses a caller who is not a ferret', async () => {
+    const { service } = withThread(thread());
+
+    should(
+      (await refusal(service.create({ ...forThread, assignee: 'worker', projectId: PROJECT }, owner))).message,
+    ).match(/not yours to name/);
+  });
+
+  it('refuses a thread that is not open on the caller’s agenda, or cannot be read', async () => {
+    should((await refusal(withThread(undefined).service.create(forThread, lead))).message).match(
+      /not an open item on your agenda/,
+    );
+    should((await refusal(withThread('throws').service.create(forThread, lead))).message).match(
+      /not an open item on your agenda/,
+    );
+    should((await refusal(serviceWith([]).service.create(forThread, lead))).message).match(
+      /not an open item on your agenda/,
+    );
+  });
+
+  it('refuses an item the caller did not raise, a gate item and a notice', async () => {
+    should((await refusal(withThread(thread({ raisedBy: 'daemon' })).service.create(forThread, lead))).message).match(
+      /not an item you raised/,
+    );
+    should(
+      (await refusal(withThread(thread({ raisedBySession: 'other' } as never)).service.create(forThread, lead)))
+        .message,
+    ).match(/not an item you raised/);
+    should((await refusal(withThread(thread({ notice: true })).service.create(forThread, lead))).message).match(
+      /not a thread/,
+    );
+    should((await refusal(withThread(thread({ gate: {} as never })).service.create(forThread, lead))).message).match(
+      /not a thread/,
+    );
+  });
+});

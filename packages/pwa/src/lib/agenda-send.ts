@@ -23,7 +23,7 @@ export const sendAgendaAction = async (
   id: AgendaId,
   action: InboxAction,
 ): Promise<void> => {
-  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note);
+  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note, action.gate);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
   else if (action.kind === 'discuss') await client.discuss(connection, scope, id, action.note);

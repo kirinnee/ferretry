@@ -1,5 +1,6 @@
 import type {
   AgendaConfirms,
+  AgendaGate,
   AgendaId,
   AgendaItem,
   AgendaKind,
@@ -9,7 +10,7 @@ import type {
   ResolvedAgendaItem,
   TaskRef,
 } from '@ferretry/protocol';
-import { agendaCardKind, clipAtWord, MAX_AGENDA_TITLE_LENGTH } from '@ferretry/protocol';
+import { agendaCardKind, clipAtWord, formatTaskRef, MAX_AGENDA_TITLE_LENGTH } from '@ferretry/protocol';
 import { type AgendaHomeResolver, handsOnRaise, handsOnSource, SELF_AGENDA_HOME } from './home.ts';
 import {
   isAncestorOf,
@@ -133,6 +134,35 @@ export interface AgendaCardLanes {
 /** No card is known to be in the to-test lane: nothing is offered to close by default. */
 export const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
 
+/**
+ * Whether a card's gate is asking the owner already (docs/agenda.md § One ask per thing): where, as the item and the
+ * agenda it is on. A second ask about the same card is refused, or raised without the card.
+ */
+export interface AgendaGateAsking {
+  asking(task: TaskRef): Promise<{ readonly sessionId: string; readonly id: AgendaId } | undefined>;
+}
+
+/** A gate whose state could not be read: treated as asking, so a second ask is not let through. */
+const UNREADABLE = 'unreadable' as const;
+
+/**
+ * An agent's ask that NAMES a card whose gate is asking the owner already is refused: two asks about one card are
+ * two things in the owner's Inbox. What it has to say goes on the card.
+ */
+const refusedForGate = (
+  task: TaskRef,
+  asking: { readonly sessionId: string; readonly id: AgendaId },
+): AgendaMutation => ({
+  ok: false,
+  error: {
+    code: 'invalid',
+    message: `${formatTaskRef(task)} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda); add what you need to it instead: fy task note ${task.id} "<text>"`,
+  },
+});
+
+/** No card is known to be asking: every ask keeps the card it names. */
+export const NO_AGENDA_GATE_ASKING: AgendaGateAsking = { asking: async () => undefined };
+
 /** The kinds of item whose card the owner is most likely to close with the answer: a to-do or a review. */
 const CLOSE_OFFERED_KINDS: ReadonlySet<AgendaKind> = new Set<AgendaKind>(['task', 'review']);
 
@@ -150,6 +180,8 @@ export class AgendaService {
     private readonly cards: AgendaCardLanes = NO_AGENDA_CARD_LANES,
     /** Where the daemon asks the owner for a sub-ferret: its lineage's home (docs/agenda.md § Sub-ferret agenda). */
     private readonly homes: AgendaHomeResolver = SELF_AGENDA_HOME,
+    /** Which cards are asking the owner through their gate: a second ask about one is not raised (see {@link raise}). */
+    private readonly gates: AgendaGateAsking = NO_AGENDA_GATE_ASKING,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -188,9 +220,29 @@ export class AgendaService {
           }
         : titled;
     // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
-    const carded = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
+    const focused = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
+    const asking = await this.gateAsking(focused, actor);
+    if (asking !== undefined && asking !== UNREADABLE && named.task !== undefined)
+      return refusedForGate(named.task, asking);
+    const carded = asking === undefined ? focused : { ...focused, task: undefined };
     const offered = await this.withOfferClose(carded);
-    return this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
+    const mutation = await this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
+    if (asking === undefined || focused.task === undefined || !mutation.ok) return mutation;
+    const ref = formatTaskRef(focused.task);
+    const warning =
+      asking === UNREADABLE
+        ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`
+        : `${ref} is already asking the owner (!${asking.id} on ${asking.sessionId}'s agenda), so this was raised without the card; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`;
+    return { ...mutation, notes: [...(mutation.notes ?? []), warning] };
+  }
+
+  /**
+   * The gate item or thread through which the card an AGENT's ask would take is already asking, if any. A gate that
+   * cannot be read is not "not asking": that would let a second ask through, so it answers {@link UNREADABLE}.
+   */
+  private async gateAsking(request: RaiseAgendaRequest, actor: AgendaActor) {
+    if (actor.kind !== 'agent' || request.task === undefined || request.notice === true) return undefined;
+    return await this.gates.asking(request.task).catch(() => UNREADABLE);
   }
 
   /** The session a daemon act about `sessionId` belongs on: its home when it is a sub-ferret and the act is not hands-on. */
@@ -348,6 +400,37 @@ export class AgendaService {
       id,
       confirms,
       premise,
+      at: this.clock.now(),
+    });
+  }
+
+  /**
+   * A card's gate is asked on this thread, or no longer is (`gate: null`; docs/agenda.md § One ask per thing).
+   * Daemon-only: the card's lane is the witness.
+   */
+  async attachGate(
+    sessionId: string,
+    id: AgendaId,
+    gate: AgendaGate | null,
+    answered?: AgendaGate,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'attach-gate',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      gate,
+      ...(answered === undefined ? {} : { answered }),
+      at: this.clock.now(),
+    });
+  }
+
+  /** An open thread is linked to the card made to carry it out; daemon-only (docs/board.md § Thread cards). */
+  async linkTask(sessionId: string, id: AgendaId, task: TaskRef): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'link-task',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      task,
       at: this.clock.now(),
     });
   }

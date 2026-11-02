@@ -123,6 +123,7 @@ export const gateOf = (card: GateCard, lanes: GateLanes): AgendaGate | undefined
     entry,
     projectId: task.projectId,
     ...(card.projectName === undefined ? {} : { projectName: card.projectName }),
+    cardTitle: clipAtWord(task.title, MAX_AGENDA_TITLE_LENGTH),
     options: [...options],
   };
 };

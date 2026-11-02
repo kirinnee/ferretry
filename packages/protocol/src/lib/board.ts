@@ -771,6 +771,8 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
    * board?" item on the ferret's own agenda (docs/board.md § The board is opt-in). Ignored for the owner.
    */
   approval: AgendaIdSchema.optional(),
+  /** The caller's own open agenda thread this card carries out: only linked to it (the thread's `task`), nothing else. */
+  thread: AgendaIdSchema.optional(),
 });
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;

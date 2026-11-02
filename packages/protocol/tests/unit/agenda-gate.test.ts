@@ -5,6 +5,7 @@ import {
   type AgendaGate,
   AgendaItemSchema,
   agendaAnswerProblems,
+  gatesAnsweredOn,
 } from '../../src/lib/agenda.ts';
 import {
   GATE_NOT_YET_LABEL,
@@ -220,5 +221,22 @@ describe('gate items', () => {
       should(DAEMON_FEATURES.boardGateItems).equal('board.gate-items.1');
       should(daemonFeatureList()).containEql('board.gate-items.1');
     });
+  });
+});
+
+describe('gatesAnsweredOn', () => {
+  it('lists the gate references the owner answered on an item, and nothing else', () => {
+    const reference = gateReference(verify);
+
+    should(
+      gatesAnsweredOn({
+        history: [
+          { at: AT, kind: 'gate-answered', note: reference },
+          { at: AT, kind: 'gate-answered' },
+          { at: AT, kind: 'discuss', note: 'talk' },
+        ],
+      }),
+    ).deepEqual([reference]);
+    should(gatesAnsweredOn({})).deepEqual([]);
   });
 });

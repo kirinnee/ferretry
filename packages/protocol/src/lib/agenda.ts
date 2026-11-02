@@ -604,14 +604,22 @@ export const MAX_AGENDA_HISTORY = 20;
  * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
  * updated it (`updated`), the item left discussion for the queue (`surfaced`, the why as its note), or the
  * owner replied and it was PARKED as replied (`replied`, their words as its note; the ferret's `surface` or
- * `edit` brings it back, its `done` closes it).
+ * `edit` brings it back, its `done` closes it); or the owner answered the CARD GATE asked on this thread
+ * (`gate-answered`, the gate's `gate:` reference as its note, docs/agenda.md § One ask per thing), which keeps that
+ * gate asked for good, whichever way the thread is closed after.
  */
 export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied']),
+  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied', 'gate-answered']),
   note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
+
+/** The `gate:` references of the card gates the owner answered on this item, as its history records them. */
+export const gatesAnsweredOn = (item: { readonly history?: readonly AgendaHistoryEntry[] | undefined }): string[] =>
+  (item.history ?? []).flatMap(entry =>
+    entry.kind === 'gate-answered' && entry.note !== undefined ? [entry.note] : [],
+  );
 
 /**
  * WHY AN OPEN ITEM IS PARKED — off the owner's queue for now, with its way back (docs/agenda.md § Parked items):
@@ -919,6 +927,8 @@ export const AgendaGateSchema = z.strictObject({
   entry: PositiveIntegerSchema,
   projectId: z.string().min(1).max(128),
   projectName: z.string().min(1).max(120).optional(),
+  /** The card's title, so a thread carrying this gate can name the card: "Badge colour is ready to test". */
+  cardTitle: z.string().min(1).max(MAX_AGENDA_TITLE_LENGTH).optional(),
   options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;
@@ -1001,6 +1011,11 @@ const AgendaItemBaseShape = {
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
   /** The card gate this item asks about (`AgendaGate`); only the daemon raises one, and only the owner answers it. */
   gate: AgendaGateSchema.optional(),
+  /**
+   * The card gate this THREAD answers for (docs/agenda.md § One ask per thing): a ferret's open, owner-facing thread
+   * about a card whose gate is asking carries it instead of a gate item of its own. Only the daemon sets or clears it.
+   */
+  gateAttached: AgendaGateSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -1178,6 +1193,8 @@ export const AgendaSnapshotSchema = z
     updatedAt: InstantSchema,
     /** Writing advice for the item just raised or edited; present only on that response. */
     warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
+    /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
+    notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
     /**
      * How many devices this machine has enrolled for push, counted as an item was raised; present only on
      * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
@@ -1301,6 +1318,8 @@ export const AgendaActionRequestSchema = z
       id: AgendaIdSchema,
       note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
       response: AgendaResponseSchema.optional(),
+      /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
+      gate: z.literal(true).optional(),
     }),
     /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
     z.strictObject({

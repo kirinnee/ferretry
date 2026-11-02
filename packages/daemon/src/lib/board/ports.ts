@@ -10,6 +10,7 @@
  */
 import type {
   AgendaId,
+  AgendaItem,
   AgendaRef,
   BoardActor,
   BoardActorVia,
@@ -250,4 +251,16 @@ export interface BoardOptIn {
 export interface OwnerWords {
   /** The owner's messages to a session, first turn included; empty when it cannot tell. Never throws. */
   said(sessionId: string): Promise<readonly string[]>;
+}
+
+/** The agenda threads a card may be made to carry out (`fy task create --thread`): linked to the card, nothing more. */
+export interface BoardThreads {
+  /** The OPEN item `id` on `sessionId`'s agenda; `undefined` when there is none. A read that fails throws. */
+  open(sessionId: string, id: AgendaId): Promise<AgendaItem | undefined>;
+  /** Links the open thread `id` to `card` (its `task`), refusing one already linked to another card. */
+  link(
+    sessionId: string,
+    id: AgendaId,
+    card: TaskRef,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 }

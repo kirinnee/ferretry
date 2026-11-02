@@ -38,12 +38,19 @@ describe('sendAgendaAction', () => {
 
   it('sends each kind of action as exactly one request', async () => {
     expect(await sent({ kind: 'respond', label: 'Allow', response, note: 'n' })).toEqual([
-      ['respond', 'A1', response, 'n'],
+      ['respond', 'A1', response, 'n', undefined],
     ]);
     expect(await sent({ kind: 'dismiss', label: 'Dismiss', note: 'n' })).toEqual([['dismiss', 'A1', 'n']]);
     expect(await sent({ kind: 'needs-info', label: 'More', note: 'n' })).toEqual([['needsInfo', 'A1', 'n']]);
     expect(await sent({ kind: 'discuss', label: 'Discuss', note: 'n' })).toEqual([['discuss', 'A1', 'n']]);
     expect(await sent({ kind: 'resolve', label: 'Done', note: 'n' })).toEqual([['resolve', 'A1', 'n']]);
+  });
+
+  it('marks an answer to the gate attached to a thread', async () => {
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
+    expect(await sent({ kind: 'respond', label: 'Done', response: choice, gate: true })).toEqual([
+      ['respond', 'A1', choice, undefined, true],
+    ]);
   });
 
   it('snoozes until an instant, and unsnoozes with no instant', async () => {

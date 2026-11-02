@@ -202,6 +202,19 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('ready');
   });
 
+  it("sends the gate mark on an answer to a thread's attached gate", async () => {
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+      actions.push(JSON.parse(String(init?.body)));
+      return response(snapshot('same/session'));
+    });
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
+
+    await client.respond(daemonA, scopeA, 'A2', choice, 'ok', true);
+
+    should(actions).deepEqual([{ action: 'resolve', id: 'A2', response: choice, note: 'ok', gate: true }]);
+  });
+
   it('sends a snooze with its instant and an unsnooze alone', async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

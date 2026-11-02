@@ -23,3 +23,5 @@ export * from './turn-check.ts';
 export * from './gate-items.ts';
 export * from './gate-policy.ts';
 export * from './opt-in.ts';
+export * from './thread-gate-observer.ts';
+export * from './duplicate-sweep.ts';

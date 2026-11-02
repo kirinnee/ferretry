@@ -18,6 +18,18 @@ export const LegacyWireUseSchema = z.object({
   lastClientVersion: z.string().min(1).optional(),
 });
 export type LegacyWireUse = z.infer<typeof LegacyWireUseSchema>;
+
+/**
+ * Open agenda items that look like the same ask of the owner but were not provably so, so the daemon left them open
+ * (docs/agenda.md § One ask per thing). `fy doctor` lists them.
+ */
+export const DuplicateAskSchema = z.strictObject({
+  kind: z.enum(['card', 'source', 'title']),
+  /** The items, the one a sweep would keep first. */
+  members: z.array(z.strictObject({ sessionId: z.string().min(1), id: z.string().min(1) })).min(2),
+  why: z.string().min(1),
+});
+export type DuplicateAsk = z.infer<typeof DuplicateAskSchema>;
 export const HealthViewSchema = z.object({
   ok: z.boolean(),
   bootstrapping: z.boolean(),
@@ -51,6 +63,13 @@ export const HealthViewSchema = z.object({
   io: IoPressureViewSchema.optional(),
   /** The older wire names clients still used, by route; absent from an older daemon and empty when none was used. */
   legacyWire: z.array(LegacyWireUseSchema).optional(),
+  /**
+   * The possible duplicate asks the last sweep left open, with the sessions and items they name: sent only to a
+   * request that arrived on this machine's privileged loopback carrier. Absent from an older daemon.
+   */
+  duplicateAsks: z.array(DuplicateAskSchema).optional(),
+  /** How many possible duplicate asks there are: all an unauthenticated caller is told. Absent from an older daemon. */
+  duplicateAskCount: z.number().int().nonnegative().optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;

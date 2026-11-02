@@ -7,6 +7,7 @@ import {
   AgendaSnapshotSchema,
   agendaBadgeCount,
   gateReference,
+  gatesAnsweredOn,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_SUBJECT_LENGTH,
@@ -4284,5 +4285,158 @@ describe('Agenda state machine: one unreadable entry', () => {
     // Assert
     should(refused.error.code).equal('invalid');
     should(refused.error.message).match(/^agenda item A1 would not read back \(subject: Too big/u);
+  });
+});
+
+describe('attach-gate (docs/agenda.md § One ask per thing)', () => {
+  const GATE = {
+    cardId: 'F1',
+    laneId: 'tested',
+    laneName: 'Try it',
+    entry: 1,
+    projectId: 'p1',
+    options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+  };
+  const attach = (
+    ledger: AgendaLedger,
+    gate: typeof GATE | null,
+    actor: AgendaActor = { kind: 'daemon', cause: 'system' },
+    id: AgendaId = 'A1',
+  ): AgendaMutation => applyAgendaCommand(ledger, { action: 'attach-gate', actor, id, gate, at: SECOND });
+
+  it('sets the gate on an open thread, leaves everything else alone, and clears it again', () => {
+    const { ledger } = raised();
+
+    const set = succeeded(attach(ledger, GATE));
+    const again = succeeded(attach(set.ledger, GATE));
+    const cleared = succeeded(attach(set.ledger, null));
+
+    should(set.change).equal('refreshed');
+    should(set.item?.gateAttached).deepEqual(GATE);
+    should(set.item?.subject).equal('Approve the deployment?');
+    should(again.changed).be.false();
+    should(cleared.item?.gateAttached).be.undefined();
+    should(succeeded(attach(ledger, null)).changed).be.false();
+  });
+
+  it('is the daemon’s alone', () => {
+    const { ledger } = raised();
+    for (const actor of [AGENT, HUMAN, OTHER_AGENT])
+      should(failed(attach(ledger, GATE, actor)).error.code).equal('forbidden');
+  });
+
+  it('records the owner’s answer in the history, every time, even when the gate is unchanged', () => {
+    const { ledger } = raised();
+    const set = succeeded(attach(ledger, GATE));
+    const answer = (from: AgendaLedger, left: typeof GATE | null) =>
+      succeeded(
+        applyAgendaCommand(from, {
+          action: 'attach-gate',
+          actor: { kind: 'daemon', cause: 'system' },
+          id: 'A1',
+          gate: left,
+          answered: GATE,
+          at: SECOND,
+        }),
+      );
+
+    const notYet = answer(set.ledger, GATE);
+    const again = answer(notYet.ledger, GATE);
+    const left = answer(again.ledger, null);
+
+    should(notYet.changed).be.true();
+    should(notYet.item?.gateAttached).deepEqual(GATE);
+    should(gatesAnsweredOn(notYet.item!)).deepEqual([gateReference(GATE)]);
+    should(gatesAnsweredOn(again.item!)).have.length(2);
+    should(left.item?.gateAttached).be.undefined();
+    should(gatesAnsweredOn(left.item!)).have.length(3);
+  });
+
+  it('refuses an item that is not there, a gate item and a notice', () => {
+    const { ledger } = raised();
+    should(failed(attach(ledger, GATE, undefined, 'A9')).error.code).equal('not-found');
+
+    const gateItem = succeeded(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(DAEMON, {
+          source: 'task',
+          sourceRef: gateReference({ cardId: 'F1', laneId: 'tested', entry: 1 }),
+          gate: GATE,
+          task: { id: 'F1' },
+        } as never),
+      ),
+    );
+    should(failed(attach(gateItem.ledger, GATE)).error.code).equal('invalid');
+
+    const notice = raised(AGENT, { notice: true, ask: undefined, kind: 'info' } as never);
+    should(failed(attach(notice.ledger, GATE)).error.code).equal('invalid');
+  });
+});
+
+describe('link-task (docs/board.md § One ask per thing)', () => {
+  const DAEMON_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const link = (
+    ledger: AgendaLedger,
+    task: { id: string; machineId?: string },
+    actor: AgendaActor = DAEMON_ACTOR,
+    id: AgendaId = 'A1',
+  ): AgendaMutation => applyAgendaCommand(ledger, { action: 'link-task', actor, id, task, at: SECOND });
+
+  it('sets the card on an open thread that names none, and leaves everything else alone', () => {
+    const { ledger } = raised(AGENT, { task: undefined } as never);
+
+    const linked = succeeded(link(ledger, { id: 'F5' }));
+
+    should(linked.change).equal('refreshed');
+    should(linked.item?.task).deepEqual({ id: 'F5' });
+    should(linked.item?.subject).equal('Approve the deployment?');
+  });
+
+  it('is nothing when the thread is on that card already, and refuses another card', () => {
+    const { ledger } = raised();
+    const once = succeeded(link(ledger, { id: 'F5' }));
+
+    should(succeeded(link(once.ledger, { id: 'F5' })).changed).be.false();
+    const refused = failed(link(once.ledger, { id: 'F6' }));
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).equal('A1 is already linked to &F5');
+    should(failed(link(once.ledger, { id: 'F5', machineId: 'other' })).error.code).equal('invalid');
+  });
+
+  it('is the daemon’s alone', () => {
+    const { ledger } = raised();
+    for (const actor of [AGENT, HUMAN, OTHER_AGENT])
+      should(failed(link(ledger, { id: 'F5' }, actor)).error.code).equal('forbidden');
+  });
+
+  it('refuses an item that is not there, a gate item and a notice', () => {
+    const { ledger } = raised();
+    should(failed(link(ledger, { id: 'F5' }, undefined, 'A9')).error.code).equal('not-found');
+
+    const gateItem = succeeded(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(DAEMON, {
+          source: 'task',
+          sourceRef: gateReference({ cardId: 'F1', laneId: 'tested', entry: 1 }),
+          gate: {
+            cardId: 'F1',
+            laneId: 'tested',
+            laneName: 'Try it',
+            entry: 1,
+            projectId: 'p1',
+            options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+          },
+          task: { id: 'F1' },
+        } as never),
+      ),
+    );
+    should(failed(link(gateItem.ledger, { id: 'F5' })).error.code).equal('invalid');
+
+    const notice = raised(AGENT, { notice: true, ask: undefined, kind: 'info' } as never);
+    should(failed(link(notice.ledger, { id: 'F5' })).error.code).equal('invalid');
   });
 });

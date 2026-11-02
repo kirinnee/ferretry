@@ -230,6 +230,7 @@
         "tests/integration/fixtures/one-machine-down-scene.tsx",
         "tests/integration/fixtures/machine-reorder-scene.tsx",
         "tests/integration/fixtures/nav-cache-scene.tsx",
+        "tests/integration/fixtures/attached-gate-scene.tsx",
         "tests/integration/fixtures/sessions-list-scene.tsx",
         "tests/integration/fixtures/settings-typing-scene.tsx",
         "tests/integration/fixtures/routing-idea-scene.tsx",

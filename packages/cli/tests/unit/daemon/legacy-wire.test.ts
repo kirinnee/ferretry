@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { HealthView, LegacyWireUse } from '@ferretry/protocol';
 import should from 'should';
-import { legacyWireLines, legacyWireReport } from '../../../src/lib/daemon/legacy-wire';
+import { legacyWireLines, legacyWireReport, duplicateAskLines } from '../../../src/lib/daemon/legacy-wire';
 
 const NOW = Date.parse('2026-10-30T12:00:00Z');
 const at = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -99,5 +99,37 @@ describe('legacy wire report', () => {
   it('should print nothing when the daemon does not answer', async () => {
     // Act + Assert
     should(await legacyWireReport({ probe: () => Promise.resolve(undefined) }, NOW)).deepEqual([]);
+  });
+});
+
+describe('duplicate ask lines', () => {
+  const pair = {
+    kind: 'card' as const,
+    members: [
+      { sessionId: 'lead', id: 'A1' },
+      { sessionId: 'peer', id: 'A2' },
+    ],
+    why: 'not closed: a gate the owner answered',
+  };
+
+  it('should say nothing for an older daemon, and say so when there are none', () => {
+    should(duplicateAskLines(undefined)).deepEqual([]);
+    should(duplicateAskLines([])).deepEqual(['no duplicate asks on the agendas']);
+  });
+
+  it('should say how many, and no more, when the daemon sent only the count', () => {
+    should(duplicateAskLines(undefined, 0)).deepEqual([]);
+    should(duplicateAskLines(undefined, 2)).deepEqual([
+      "2 possible duplicate asks left open (the details are for the daemon's host)",
+    ]);
+  });
+
+  it('should name each possible duplicate and where it is open', async () => {
+    should(duplicateAskLines([pair])).deepEqual([
+      '1 possible duplicate ask left open (the daemon closes only the ones it can prove):',
+      '  !A1 on lead and !A2 on peer: card — not closed: a gate the owner answered',
+    ]);
+    const report = await legacyWireReport({ probe: () => Promise.resolve({ duplicateAsks: [pair] } as HealthView) }, 0);
+    should(report).have.length(2);
   });
 });

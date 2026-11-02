@@ -77,6 +77,10 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       '--approval <id>',
       'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',
     )
+    .option(
+      '--thread <id>',
+      'the open thread on your agenda (!A12) this card carries out; the owner is already asked there, so the card is your own errand',
+    )
     .option('--assignee <who>', 'the ferret doing it: a callsign or a session id')
     .option('--project <name>', 'the board to create it on; default: the board of the calling session')
     .option('--lane <lane>', "the lane to start in; default: the workflow's first")

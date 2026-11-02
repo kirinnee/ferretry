@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { gateReference, gatesAnsweredOn } from '@ferretry/protocol';
 import type {
   AgendaLedger,
   AgendaLedgerRepository,
@@ -571,5 +572,144 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
 
     // Assert
     for (const attempt of tries) should(attempt).match({ ok: false, error: { code: 'forbidden' } });
+  });
+});
+
+describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => {
+  const ASKING = { sessionId: 'lead', id: 'A3' as const };
+  const withGates = (
+    asking: (task: { id: string }) => Promise<typeof ASKING | undefined>,
+    focus: AgendaFocusSource = NO_AGENDA_FOCUS,
+  ) => {
+    const repository = new MemoryRepository();
+    const service = new AgendaService(
+      repository,
+      { now: () => NOW },
+      { has: async sessionId => sessionId === SESSION },
+      new Observer(),
+      undefined,
+      focus,
+      undefined,
+      undefined,
+      undefined,
+      { asking: asking as never },
+    );
+    return { repository, service };
+  };
+  const raisedOn = (repository: MemoryRepository) => repository.ledgers.get(SESSION)?.entries.length ?? 0;
+
+  it('refuses an agent add that names a card which is already asking, and says what to do instead', async () => {
+    const { repository, service } = withGates(async () => ASKING);
+
+    const refused = await service.raise(SESSION, { ...request, task: { id: 'F12' } }, AGENT);
+
+    should(refused).match({
+      ok: false,
+      error: {
+        code: 'invalid',
+        message: `&F12 is already asking the owner (!A3 on lead's agenda); add what you need to it instead: fy task note F12 "<text>"`,
+      },
+    });
+    should(raisedOn(repository)).equal(0);
+  });
+
+  it('does not refuse the daemon, the owner, a notice, or a card that is not asking', async () => {
+    const { service } = withGates(async task => (task.id === 'F12' ? ASKING : undefined));
+    const named = { ...request, task: { id: 'F12' } };
+
+    const daemon = await service.raise(SESSION, named, { kind: 'daemon', cause: 'system' });
+    const human = await service.raise(SESSION, { ...named, subject: 'Owner note' }, { kind: 'human' });
+    const notice = await service.raise(SESSION, { ...named, subject: 'Heads up', notice: true, ask: undefined }, AGENT);
+    const quiet = await service.raise(SESSION, { ...named, subject: 'Other', task: { id: 'F13' } }, AGENT);
+
+    for (const mutation of [daemon, human, notice, quiet]) should(mutation.ok).equal(true);
+  });
+
+  it('raises an add that would take the focus card WITHOUT it while that card is asking, and says so', async () => {
+    const { service } = withGates(async () => ASKING, { focusOf: async () => ({ id: 'F18' }) });
+
+    const crowded = await service.raise(SESSION, request, AGENT);
+
+    should(crowded.ok).equal(true);
+    if (!crowded.ok) return;
+    should(crowded.item?.task).be.undefined();
+    should(crowded.notes).deepEqual([
+      `&F18 is already asking the owner (!A3 on lead's agenda), so this was raised without the card; add what the card needs to it instead: fy task note F18 "<text>"`,
+    ]);
+  });
+
+  it('takes the focus card as before when it is not asking', async () => {
+    const quiet = withGates(async () => undefined, { focusOf: async () => ({ id: 'F18' }) });
+    const first = await quiet.service.raise(SESSION, request, AGENT);
+    should(first.ok && first.item?.task).deepEqual({ id: 'F18' });
+    should(first.ok && first.notes).be.undefined();
+  });
+
+  it('fails closed when the gate cannot be read: raised WITHOUT the card, with a warning, for either kind of add', async () => {
+    const down = () => Promise.reject(new Error('down'));
+    const focus = withGates(down, { focusOf: async () => ({ id: 'F18' }) });
+    const byFocus = await focus.service.raise(SESSION, request, AGENT);
+    should(byFocus.ok).equal(true);
+    if (!byFocus.ok) return;
+    should(byFocus.item?.task).be.undefined();
+    should(byFocus.notes).deepEqual([
+      `&F18's gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note F18 "<text>"`,
+    ]);
+
+    const named = withGates(down);
+    const byName = await named.service.raise(SESSION, { ...request, task: { id: 'F12' } }, AGENT);
+    should(byName.ok && byName.item?.task).be.undefined();
+    should(byName.ok && byName.notes?.[0]).match(/&F12's gate could not be read/);
+  });
+
+  it('attaches a gate to a thread, and clears it, as the daemon', async () => {
+    const { service } = withGates(async () => undefined);
+    const gate = {
+      cardId: 'F1',
+      laneId: 'tested',
+      laneName: 'Try it',
+      entry: 1,
+      projectId: 'p1',
+      options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+    };
+    await service.raise(SESSION, request, AGENT);
+
+    const attached = await service.attachGate(SESSION, 'A1', gate);
+    const cleared = await service.attachGate(SESSION, 'A1', null);
+
+    should(attached.ok && attached.item?.gateAttached).deepEqual(gate);
+    should(cleared.ok && cleared.item?.gateAttached).be.undefined();
+  });
+
+  it('records the owner answering a gate on a thread, as history the thread keeps', async () => {
+    const { service } = withGates(async () => undefined);
+    const gate = {
+      cardId: 'F1',
+      laneId: 'tested',
+      laneName: 'Try it',
+      entry: 1,
+      projectId: 'p1',
+      options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+    };
+    await service.raise(SESSION, request, AGENT);
+    await service.attachGate(SESSION, 'A1', gate);
+
+    const answered = await service.attachGate(SESSION, 'A1', gate, gate);
+
+    should(answered.ok && answered.item?.gateAttached).deepEqual(gate);
+    should(answered.ok && gatesAnsweredOn(answered.item!)).deepEqual([gateReference(gate)]);
+  });
+
+  it('links a thread to a card as the daemon, and refuses a thread another card already holds', async () => {
+    const { service } = withGates(async () => undefined);
+    await service.raise(SESSION, request, AGENT);
+
+    const linked = await service.linkTask(SESSION, 'A1', { id: 'F5' });
+    const again = await service.linkTask(SESSION, 'A1', { id: 'F5' });
+    const other = await service.linkTask(SESSION, 'A1', { id: 'F6' });
+
+    should(linked.ok && linked.item?.task).deepEqual({ id: 'F5' });
+    should(again.ok).equal(true);
+    should(other).match({ ok: false, error: { code: 'invalid', message: 'A1 is already linked to &F5' } });
   });
 });

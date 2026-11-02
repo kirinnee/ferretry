@@ -283,8 +283,15 @@ export class DaemonAgendaClient {
     id: string,
     response: AgendaResponse,
     note?: string,
+    gate?: true,
   ): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'resolve', id, response, ...(note === undefined ? {} : { note }) });
+    return this.#mutate(daemon, scope, {
+      action: 'resolve',
+      id,
+      response,
+      ...(note === undefined ? {} : { note }),
+      ...(gate === undefined ? {} : { gate }),
+    });
   }
 
   dismiss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {

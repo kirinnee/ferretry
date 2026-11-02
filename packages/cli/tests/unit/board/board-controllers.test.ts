@@ -475,6 +475,23 @@ describe('fy task create', () => {
     should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
   });
 
+  it('should send the thread a card carries out, and refuse one that is not an agenda item', async () => {
+    // Arrange
+    const { controller, gateway } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    await controller.create([], { ...base, thread: '!A12' });
+    const error = await controller.create([], { ...base, thread: 'F12' }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(gateway.createCalls[0]?.request).containEql({ thread: 'A12' });
+    should((error as Error).message).startWith('--thread: "F12" is not an agenda reference');
+    should(gateway.createCalls).have.length(1);
+  });
+
   it('should refuse an approval that is not an agenda item before asking the daemon', async () => {
     // Arrange
     const { controller, gateway } = harness(new FakeGateway(), DENISHA);

@@ -179,6 +179,7 @@ async function apply(
           response: request.response,
           note: request.note,
           actor,
+          gate: request.gate,
         })
       : undefined;
   // Not needed on a gate item asks the same grant an answer does.
@@ -229,10 +230,12 @@ async function apply(
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAgendaWriting(mutation.item) : [];
+  const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
     ...(await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
+    ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),
   });
 }
