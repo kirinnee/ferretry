@@ -2890,9 +2890,8 @@ try {
               fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 4`);
 
             /**
-             * One of the machine's connection and security panels — what the Daemons section used to hold —
-             * opened from its Machine tab. The list is one card of rows; a row opens its panel as a page of
-             * its own with "‹ Machine" back.
+             * One of the machine's panels, opened from the tab that lists it (Machine, Agents or Sign-ins).
+             * A row opens its panel as a page of its own with a back link to that tab.
              */
             const openDaemonPanel = async (frame: Locator, slug: string): Promise<void> => {
               await frame.locator(`[data-daemon-panel="${slug}"]`).click();
@@ -2902,9 +2901,11 @@ try {
               await frame.locator('[data-daemon-panel-back]').click();
               await frame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
             };
-            const openMachineTab = async (surface: Locator): Promise<void> => {
-              await surface.locator('[data-machine-tab="machine"]').click();
-              await surface.locator('[data-machine-tab-panel="machine"]').waitFor({ state: 'visible' });
+            type PanelTab = 'machine' | 'agents' | 'sign-ins';
+            const MACHINE_TAB_PANELS = 12;
+            const openMachineTab = async (surface: Locator, tab: PanelTab = 'machine'): Promise<void> => {
+              await surface.locator(`[data-machine-tab="${tab}"]`).click();
+              await surface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
             };
 
             const studioMachine = await openMachine('harness-daemon');
@@ -2913,54 +2914,69 @@ try {
             await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
             // The fixture is only evidence about the real frame if it carries the panels the composition
             // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
+            // The Machine tab lists exactly the panels that belong to it; Warden, Accounts, Secrets and Secure
+            // copy moved to the Agents and Sign-ins tabs, where each is counted below.
             const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-            if (daemonPanels !== 17)
+            if (daemonPanels !== MACHINE_TAB_PANELS)
               fail(
-                `settings fixture listed ${daemonPanels} connection and security panels instead of the 17 it mounts`,
+                `settings fixture listed ${daemonPanels} panels on the Machine tab instead of the ${MACHINE_TAB_PANELS} it mounts`,
               );
-            await wardenFrame.scrollIntoViewIfNeeded();
-            // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
-            await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
+            await wardenFrame.first().scrollIntoViewIfNeeded();
+            // The Machine tab's rows are the longest list in Settings; if one row widens a phone, it is here.
+            await assertNoSidewaysScroll(page, `the Machine tab's panel list at ${viewport.name}`);
             const panelListTarget = join(outDir, `settings-machine-panels-${viewport.name}.png`);
             await page.screenshot({ path: panelListTarget, animations: 'disabled' });
             process.stdout.write(`📸 Settings connection and security ${viewport.name} -> ${panelListTarget}\n`);
 
-            // Every panel the daemon owns, in the order the list shows them.
-            for (const [label, slug, ready] of [
+            await openMachineTab(studioMachine, 'agents');
+            for (const slug of ['warden']) {
+              const rows = await wardenFrame.locator(`[data-daemon-panel="${slug}"]`).count();
+              if (rows !== 1) fail(`the Agents tab listed ${rows} "${slug}" rows instead of 1`);
+            }
+            await openMachineTab(studioMachine, 'sign-ins');
+            for (const slug of ['accounts', 'secrets', 'secure-copy']) {
+              const rows = await wardenFrame.locator(`[data-daemon-panel="${slug}"]`).count();
+              if (rows !== 1) fail(`the Sign-ins tab listed ${rows} "${slug}" rows instead of 1`);
+            }
+
+            // Every panel the daemon owns, each opened from the tab that lists it.
+            for (const [label, slug, ready, tab] of [
               // Each waits for SETTLED content, not for a spinner or a refusal:
               // the harness daemon answers `/v1/secrets` in the page, so a capture
               // that still showed "Reading…" or "Failed to fetch" would be a
               // regression to review, not a state to accept.
-              // Warden first: it is the first panel the list offers, and its widest content (supervision status,
-              // account failover and policy) is exactly what could widen a phone.
-              ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *'],
-              ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
-              ['Accounts', 'accounts', '[data-testid="logins-card"]'],
-              ['Secure copy', 'secure-copy', '[data-testid="copy-rules-card"]'],
+              // Warden, on the Agents tab: its widest content (supervision status, account failover and
+              // policy) is exactly what could widen a phone.
+              ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *', 'agents'],
+              // Sign-ins: the site accounts, secrets and secure-copy rules.
+              ['Secrets', 'secrets', '[data-testid="secrets-card"]', 'sign-ins'],
+              ['Accounts', 'accounts', '[data-testid="logins-card"]', 'sign-ins'],
+              ['Secure copy', 'secure-copy', '[data-testid="copy-rules-card"]', 'sign-ins'],
               // The live panel, inside the frame, because that is where a reader meets it. The gallery
               // cards prove the individual states; this proves it is reachable and fits both widths.
-              ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],
+              ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]', 'machine'],
               // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
               // individual states; this proves it is reachable, daemon-scoped and fits both widths.
-              ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
+              ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]', 'machine'],
               // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
               // frozen entries, so the capture shows a real list and the Add control, never a prompt.
-              ['Security', 'security', '[data-security-card]'],
-              ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
-              ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+              ['Security', 'security', '[data-security-card]', 'machine'],
+              ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]', 'machine'],
+              ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]', 'machine'],
               // The performance report, recorded: the broken budget first, then both reports as text.
-              ['Performance', 'performance', '[data-performance]'],
+              ['Performance', 'performance', '[data-performance]', 'machine'],
               // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
-              ['Security log', 'security-log', '[data-security-log-panel]'],
+              ['Security log', 'security-log', '[data-security-log-panel]', 'machine'],
               // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
-              ['Files', 'files', '[data-config-files-panel]'],
+              ['Files', 'files', '[data-config-files-panel]', 'machine'],
               // About & updates: the version pair, the install method, the Update button and its changelog.
-              ['About & updates', 'about', '#about-machine-heading'],
+              ['About & updates', 'about', '#about-machine-heading', 'machine'],
               // Agent CLIs: each harness's path, install method, verification badge and Update buttons.
-              ['Agent CLIs', 'agent-clis', '#agent-clis-heading'],
-              ['Carrier', 'carrier', '[data-active-carrier]'],
-              ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
+              ['Agent CLIs', 'agent-clis', '#agent-clis-heading', 'machine'],
+              ['Carrier', 'carrier', '[data-active-carrier]', 'machine'],
+              ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]', 'machine'],
             ] as const) {
+              await openMachineTab(studioMachine, tab);
               await openDaemonPanel(wardenFrame, slug);
               const readySurface = wardenFrame.locator(ready).first();
               await readySurface.waitFor({ state: 'visible' });
@@ -3071,7 +3087,7 @@ try {
             }
 
             const unreachableMachine = await openMachine('unreachable-daemon');
-            await openMachineTab(unreachableMachine);
+            await openMachineTab(unreachableMachine, 'agents');
             const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
             await openDaemonPanel(unavailableWardenFrame, 'warden');
             await unavailableWardenFrame.getByLabel('Warden settings unavailable').waitFor({ state: 'visible' });
@@ -3091,6 +3107,7 @@ try {
             // The unavailable pairing must not borrow the healthy daemon's
             // measured relay. Capture its own failed direct + relay evidence so
             // that daemon scoping is reviewable in pixels, not only in fixture code.
+            await openMachineTab(unreachableMachine);
             await openDaemonPanel(unavailableWardenFrame, 'carrier');
             await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
             await assertNoSidewaysScroll(page, `the unavailable daemon's Carrier panel at ${viewport.name}`);
@@ -3127,7 +3144,7 @@ try {
             const machinesSurface = await openMachine('harness-daemon');
             await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
             await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
-            for (const tab of ['sign-ins', 'profiles', 'browser', 'machine'] as const) {
+            for (const tab of ['agents', 'sign-ins', 'profiles', 'browser', 'machine'] as const) {
               await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
               await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
               if (tab === 'browser') {
