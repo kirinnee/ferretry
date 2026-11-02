@@ -47,6 +47,25 @@ const bare = (word: string): string => trimmed(word, VALUE_START, VALUE_END);
 
 const nameOf = (word: string): string => trimmed(word, NAME_START, NAME_END);
 
+/**
+ * Where a secret NAME that begins at `start` really starts when the text is lines joined with nothing between
+ * them: a name glued to the end of the line before it ("one" + "API_KEY" = "oneAPI_KEY") begins at the latest line
+ * start inside it that still names a secret. `start` itself when no line starts inside it.
+ */
+function nameBeginning(name: string, start: number, lineStarts: ReadonlySet<number>): number {
+  for (let index = name.length - 1; index > 0; index -= 1) {
+    if (lineStarts.has(start + index) && announcesSecret(name.slice(index))) return start + index;
+  }
+  return start;
+}
+
+/** How many opening marks (`"`, `{`, …) stand before the name in `word`. */
+function leadingLength(word: string): number {
+  let length = 0;
+  while (length < word.length && NAME_START.has(word.charAt(length))) length += 1;
+  return length;
+}
+
 /** Where in `text` an address with a password in it starts, or -1. */
 function addressWithPassword(text: string): number {
   let from = text.indexOf('://');
@@ -112,23 +131,52 @@ function curlUser(words: readonly string[], index: number, curlAt: number): bool
   return login.includes(':') && password !== '' && !isReference(password);
 }
 
-/** A credential in an address's query: `https://host/path?token=…`, `…&access_token=…`, `…?api_key=…`. */
-function queryCredential(word: string): boolean {
+/** Where in `word` a credential in an address's query starts (the parameter name): `?token=…`, `&api_key=…`; or -1. */
+function queryCredential(word: string, wordStart: number, lineStarts: ReadonlySet<number>): number {
   const query = word.indexOf('?');
-  if (query === -1) return false;
-  return word
-    .slice(query + 1)
-    .split('&')
-    .some(parameter => {
-      const equals = parameter.indexOf('=');
-      return (
-        equals > 0 && announcesSecret(parameter.slice(0, equals)) && isLongValue(bare(parameter.slice(equals + 1)))
-      );
-    });
+  if (query === -1) return -1;
+  let start = query + 1;
+  for (const parameter of word.slice(start).split('&')) {
+    const equals = parameter.indexOf('=');
+    if (equals > 0 && announcesSecret(parameter.slice(0, equals)) && isLongValue(bare(parameter.slice(equals + 1)))) {
+      return nameBeginning(parameter.slice(0, equals), wordStart + start, lineStarts);
+    }
+    start += parameter.length + 1;
+  }
+  return -1;
 }
 
-/** A well-known token standing in the word, alone or after `=`, `:`, a quote or a slash. */
-const holdsToken = (word: string): boolean => word.split(TOKEN_SPLIT).some(isKnownTokenShape);
+/** Where in `word` a well-known token starts, alone or after `=`, `:`, a quote or a slash; or -1. */
+function holdsToken(word: string): number {
+  let start = 0;
+  for (const part of word.split(TOKEN_SPLIT)) {
+    if (isKnownTokenShape(part)) return start;
+    start += part.length + 1;
+  }
+  return -1;
+}
+
+/** Where in the text the credential the word at `index` holds STARTS (its name, its token, its flag), or -1. */
+function wordCredential(
+  words: readonly string[],
+  index: number,
+  curlAt: number,
+  wordStart: number,
+  lineStarts: ReadonlySet<number>,
+): number {
+  const word = words[index] ?? '';
+  if (assignsSecret(words, index)) {
+    const opening = leadingLength(word);
+    const at = word.search(/[:=]/u);
+    const name = nameOf(at < 1 ? word : word.slice(0, at));
+    return nameBeginning(name, wordStart + opening, lineStarts);
+  }
+  if (curlUser(words, index, curlAt)) return wordStart;
+  const inQuery = queryCredential(word, wordStart, lineStarts);
+  if (inQuery !== -1) return inQuery;
+  const inToken = holdsToken(word);
+  return inToken === -1 ? -1 : wordStart + inToken;
+}
 
 function earliest(offsets: readonly number[]): number {
   const found = offsets.filter(at => at !== -1);
@@ -136,15 +184,15 @@ function earliest(offsets: readonly number[]): number {
 }
 
 /** Where in `text` the first credential starts, or -1. */
-function credentialOffset(text: string): number {
+function credentialOffset(text: string, lineStarts: ReadonlySet<number> = new Set()): number {
   const found = [...text.matchAll(WORD)];
   const words = found.map(match => match[0]);
   const curlAt = words.findIndex(word => bare(word).toLowerCase().endsWith('curl'));
-  const hit = words.findIndex(
-    (word, index) =>
-      assignsSecret(words, index) || curlUser(words, index, curlAt) || queryCredential(word) || holdsToken(word),
-  );
-  return earliest([found[hit]?.index ?? -1, addressWithPassword(text), text.search(PEM_HEADER)]);
+  let hit = -1;
+  for (let index = 0; index < words.length && hit === -1; index += 1) {
+    hit = wordCredential(words, index, curlAt, found[index]?.index ?? 0, lineStarts);
+  }
+  return earliest([hit, addressWithPassword(text), text.search(PEM_HEADER)]);
 }
 
 /** The 1-based line that holds offset `at` of the lines joined with one space between them. */
@@ -158,39 +206,27 @@ function lineAt(lines: readonly string[], at: number): number {
   );
 }
 
-/** The smallest index in `[low, high]` where `test` holds, given that it holds at `high`. */
-function firstWhere(low: number, high: number, test: (index: number) => boolean): number {
-  let from = low;
-  let to = high;
-  while (from < to) {
-    const middle = Math.floor((from + to) / 2);
-    if (test(middle)) to = middle;
-    else from = middle + 1;
+/** Where each line begins in the lines joined with nothing between them (never decreasing: a blank line shares its successor's). */
+function startsOf(lines: readonly string[]): number[] {
+  const starts: number[] = [];
+  let end = 0;
+  for (const line of lines) {
+    starts.push(end);
+    end += line.length;
   }
-  return from;
+  return starts;
 }
 
-/** The largest index in `[low, high]` where `test` holds, given that it holds at `low`. */
-function lastWhere(low: number, high: number, test: (index: number) => boolean): number {
-  let from = low;
-  let to = high;
+/** The 1-based line holding offset `at`: the last line that starts at or before it. */
+function lineHolding(starts: readonly number[], at: number): number {
+  let from = 0;
+  let to = starts.length - 1;
   while (from < to) {
     const middle = Math.ceil((from + to) / 2);
-    if (test(middle)) from = middle;
+    if ((starts[middle] ?? 0) <= at) from = middle;
     else to = middle - 1;
   }
-  return from;
-}
-
-/**
- * The 1-based line a credential that only the lines joined with nothing between them holds STARTS on. In the whole
- * joined text the word it sits in also holds the end of the line before it, so the offset names the wrong line:
- * the span is the fewest lines from the top that hold it, then the fewest from the bottom of those.
- */
-function joinedLine(lines: readonly string[]): number {
-  const holds = (from: number, to: number): boolean => credentialOffset(lines.slice(from, to + 1).join('')) !== -1;
-  const last = firstWhere(0, lines.length - 1, to => holds(0, to));
-  return lastWhere(0, last, from => holds(from, last)) + 1;
+  return from + 1;
 }
 
 /** The 1-based line of the first password or key in `text`, or undefined when there is none. */
@@ -201,5 +237,7 @@ export function firstCredentialLine(text: string): number | undefined {
   // A value on the next line (YAML), then a name or value a line break split: the line the credential STARTS on.
   const spaced = credentialOffset(lines.join(' '));
   if (spaced !== -1) return lineAt(lines, spaced);
-  return credentialOffset(lines.join('')) === -1 ? undefined : joinedLine(lines);
+  const starts = startsOf(lines);
+  const glued = credentialOffset(lines.join(''), new Set(starts));
+  return glued === -1 ? undefined : lineHolding(starts, glued);
 }
