@@ -8,6 +8,7 @@ import {
   LoginObserver,
   maskedAt,
   placeOf,
+  siteOf,
 } from '../../../src/lib/input-requests/login-observer.ts';
 
 const PASSWORD = 'hunter2-UNIQUE-pw';
@@ -447,7 +448,7 @@ describe("whether the ferret could have steered this one page, for a page card's
     to(DELIVERED);
 
     // Act
-    observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['docs.other.test'] });
     observer.acted('s1', 'browser').placed({ id: 'page-3', incognito: true, hosts: ['accounts.google.com'] });
     observer.acted('s1', 'terminal').placed(undefined);
 
@@ -469,7 +470,7 @@ describe("whether the ferret could have steered this one page, for a page card's
     should(observer.pageSteer('s1', CARD, DELIVERED)).equal('acted');
     // A profile tab that was at this host, a popup anywhere, and a tab whose hosts are unknown.
     for (const tab of [
-      { id: 'page-2', hosts: ['docs.example.test', 'accounts.google.com'] },
+      { id: 'page-2', hosts: ['docs.other.test', 'accounts.google.com'] },
       { id: 'page-4', openerId: 'page-9', incognito: true as const, hosts: ['accounts.google.com'] },
       { id: 'page-5' },
     ]) {
@@ -488,7 +489,7 @@ describe("whether the ferret could have steered this one page, for a page card's
     // Act / Assert
     const running = observer.acted('s1', 'browser');
     should(observer.pageSteer('s1', CARD, RAISED)).equal('acted');
-    running.placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    running.placed({ id: 'page-2', hosts: ['docs.other.test'] });
     should(observer.pageSteer('s1', CARD, RAISED)).be.undefined();
     should(observer.pageSteer('s1', CARD, Number.NaN)).equal('acted');
     observer.acted('s1', 'browser').placed(undefined);
@@ -499,7 +500,7 @@ describe("whether the ferret could have steered this one page, for a page card's
   it('should count a script on this page or at this host for good, and one on another site not at all', () => {
     // Arrange
     const { observer, to } = at();
-    observer.acted('s1', 'browser', true).placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    observer.acted('s1', 'browser', true).placed({ id: 'page-2', hosts: ['docs.other.test'] });
     to(DELIVERED);
 
     // Act / Assert — scripts are asked about whatever the time (+∞: scripts only).
@@ -520,6 +521,48 @@ describe("whether the ferret could have steered this one page, for a page card's
     should(running.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
     // Another session's script is not this session's (the machine-wide taint covers it, in the input service).
     should(atHost.observer.pageSteer('s2', CARD, Number.POSITIVE_INFINITY)).be.undefined();
+  });
+
+  it('should treat a card page it never saw an act on as sharing storage with any page (secrev-1333 L3)', () => {
+    // Arrange — the card's page had no act placed (a page handed over, or acted on before a restart).
+    const { observer, to } = at();
+    to(DELIVERED);
+
+    // Act — another profile page, on the card's site, after the card was raised.
+    observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['accounts.google.com'] });
+
+    // Assert
+    should(observer.pageSteer('s1', CARD, DELIVERED)).equal('acted');
+  });
+
+  it('should group acts and scripts by site: a sibling subdomain counts, another site does not (secrev-1333 L2)', () => {
+    // Arrange
+    const sibling = at();
+    sibling.observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com'] });
+    sibling.to(DELIVERED);
+    sibling.observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['mail.google.com'] });
+    const other = at();
+    other.observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com'] });
+    other.to(DELIVERED);
+    other.observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['google.example.test'] });
+    const scripted = at();
+    scripted.observer.acted('s1', 'browser', true).placed({ id: 'page-3', hosts: ['myaccount.google.com:443'] });
+
+    // Act / Assert
+    should(sibling.observer.pageSteer('s1', CARD, DELIVERED)).equal('acted');
+    should(other.observer.pageSteer('s1', CARD, DELIVERED)).be.undefined();
+    should(scripted.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
+  });
+
+  it('should name a site by the last two labels: never narrower than the registrable domain', () => {
+    should(siteOf('accounts.google.com')).equal('google.com');
+    should(siteOf('Accounts.Google.com:8443')).equal('google.com');
+    should(siteOf('google.com')).equal('google.com');
+    // Wider than the registrable domain is safe: it only counts more acts.
+    should(siteOf('shop.example.co.uk')).equal('co.uk');
+    should(siteOf('localhost:3000')).equal('localhost');
+    should(siteOf('192.168.1.10:8080')).equal('192.168.1.10');
+    should(siteOf('[::1]:8080')).equal('[::1]');
   });
 
   it('should forget a session', () => {

@@ -159,31 +159,32 @@ describe('a page field', () => {
     });
   });
 
-  it("should prove a delivery Ferretry does not submit only by the owner's own tap that moved the page on", () => {
-    // Arrange — the same field's facts, once with an owner's device tap on record and once without.
+  it('should never shorten a value Ferretry does not submit by the facts, only hold it until the page moves on', () => {
+    // Arrange — the facts say what the page does AFTER a submit, even with the owner's own tap on record (secrev-1333 M1).
     const facts = page();
-    const tapped = proven(facts, { tapped: flag() });
     const unsubmitted = { ...QUIET, submitted: false };
 
     // Act / Assert
-    should(lockFor(facts, SECRET, { ...unsubmitted, observed: [tapped] })).deepEqual({
+    for (const observed of [[proven(facts)], [proven(facts, { tapped: flag() })]])
+      should(lockFor(facts, SECRET, { ...unsubmitted, observed })).deepEqual({
+        seconds: 120,
+        reason: 'until-moved-on',
+      });
+    should(pageHistory(facts, [proven(facts, { tapped: flag() })], false)).equal('unsubmitted');
+    should(provenByFacts(facts, [proven(facts, { tapped: flag() })], false)).be.false();
+    // A clean probe read the unsubmitted document itself, so it still earns 10 s.
+    should(lockFor(facts, SECRET, { ...unsubmitted, observed: [proven(facts)], probed: true })).deepEqual({
       seconds: 10,
-      reason: 'proven-field',
+      reason: 'probed-field',
     });
-    should(lockFor(facts, SECRET, { ...unsubmitted, observed: [proven(facts)] })).deepEqual({
-      seconds: 120,
-      reason: 'not-submitted',
-    });
-    should(pageHistory(facts, [proven(facts, { tapped: flag(false) })], false)).equal('unsubmitted');
-    // A tap on record never outweighs a record that says the page showed the value or stayed.
+    // A record that says the page showed the value or stayed wins.
     should(
       lockFor(facts, SECRET, {
         ...unsubmitted,
-        observed: [tapped, proven(facts, { navigatedAway: flag(false) })],
+        observed: [proven(facts), proven(facts, { navigatedAway: flag(false) })],
       }),
     ).deepEqual({ seconds: 120, reason: 'did-not-move-on' });
-    // Nor does a tap at another field or place.
-    should(pageHistory(facts, [proven(facts, { tapped: flag(), at: 'other.example.test' })], false)).equal('none');
+    should(pageHistory(facts, [proven(facts, { at: 'other.example.test' })], false)).equal('none');
   });
 
   it('should say why it is long in a sentence of its own for every cause, never "not proven"', () => {
@@ -194,7 +195,7 @@ describe('a page field', () => {
       [{ ...QUIET, steered: 'acted' }, 'steered'],
       [QUIET, 'first-time'],
       [{ ...QUIET, observed: [proven(facts, { noEchoAfterSubmit: flag(false) })] }, 'did-not-move-on'],
-      [{ ...QUIET, submitted: false, observed: [proven(facts)] }, 'not-submitted'],
+      [{ ...QUIET, submitted: false, observed: [proven(facts)] }, 'until-moved-on'],
       [{ ...QUIET, probe: 'shown' }, 'probe-shown'],
       [{ ...QUIET, probe: 'aborted' }, 'probe-stopped'],
     ];
@@ -211,6 +212,9 @@ describe('a page field', () => {
     );
     should(INPUT_LOCK_WORDS['did-not-move-on']).equal(
       "Last time here, the page didn't move on or it showed the value.",
+    );
+    should(INPUT_LOCK_WORDS['until-moved-on']).equal(
+      "It ends sooner once the page moves on, because the value hasn't been submitted yet.",
     );
     const sentences = new Set(causes.map(([, reason]) => INPUT_LOCK_WORDS[reason as keyof typeof INPUT_LOCK_WORDS]));
     should(sentences.size).equal(causes.length);

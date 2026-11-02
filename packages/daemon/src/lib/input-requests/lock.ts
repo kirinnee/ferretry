@@ -21,10 +21,11 @@ import { identityOf, placeOf } from './login-observer.ts';
  * - A PAGE is proven only when every secret field is a password input on a secure page with no human check showing,
  *   in its own frame's origin, visible and uncovered, AND either a saved login's observed facts for that very field
  *   identity say it hid the value after submit and the page moved on, or the daemon's own dummy probe at raise found
- *   a throwaway value in no read of the page. The facts prove a delivery Ferretry does not submit only when one of
- *   them was the owner's own tap that moved the page on ({@link pageHistory}).
+ *   a throwaway value in no read of the page. The facts prove only a delivery Ferretry SUBMITS: one it does not
+ *   submit sits on the page, which they never looked at, so it is held while the page shows that document instead,
+ *   at most the full window (`until-moved-on`, {@link pageHistory}).
  * - What the ferret did is judged PER PAGE ({@link PageSteer}, login-observer.ts `pageSteer`): a script on this page
- *   or this site, or an act on this page (or on a tab sharing its storage at its site) since the card was raised.
+ *   or this site, or an act on this page (or on a tab sharing its storage on its site) since the card was raised.
  * - Every long lock says its own cause (`InputLockReason`), so the owner reads why.
  * - A `private` value shows as it is typed: never short.
  * - A `plain` value and a one-time `code` are not held at all ({@link heldFromView}): the ferret may see both, so a
@@ -70,11 +71,10 @@ export function pageFieldsQualify(facts: InputTargetFacts, fields: readonly Inpu
  *
  * - `contrary`: some record says it was not masked, showed the value after a submit, or did not move on.
  * - `none`: no record says all three (masked, no echo after submit, moved on).
- * - `proven`: one does and none says otherwise, for a delivery Ferretry SUBMITS; or, for one it does not, a record
- *   that also holds the OWNER'S OWN TAP that moved this page on (`tapped`, written only for a paired device's tap on
- *   a page nobody steered, login-observer.ts). The value then sits in a password box the write saw, exactly as after a
- *   clean probe, and the site has been seen to hide it once the owner's own sign-in went through.
- * - `unsubmitted`: the facts hold, but the delivery is not submitted and no such tap is on record.
+ * - `proven`: one does and none says otherwise, for a delivery Ferretry SUBMITS.
+ * - `unsubmitted`: the facts hold, but Ferretry does not submit this one. They say what the page does AFTER a submit,
+ *   never how it shows a value that sits in the field (secrev-1333 M1): only the dummy probe reads that, so the value
+ *   is held while the page shows that document (`until-moved-on`).
  */
 export function pageHistory(
   facts: InputTargetFacts,
@@ -93,8 +93,7 @@ export function pageHistory(
   if (here.some(seen => says(seen).includes(false))) return 'contrary';
   const held = here.filter(seen => says(seen).every(value => value === true));
   if (held.length === 0) return 'none';
-  if (submitted || held.some(seen => seen.tapped?.value === true)) return 'proven';
-  return 'unsubmitted';
+  return submitted ? 'proven' : 'unsubmitted';
 }
 
 /** A saved login's facts prove this very field ({@link pageHistory}). */
@@ -281,7 +280,7 @@ export function lockFor(
   if (context.probed) return SHORT('probed-field');
   if (context.unread === true) return FULL('not-proven');
   if (history === 'contrary') return FULL('did-not-move-on');
-  if (history === 'unsubmitted') return FULL('not-submitted');
+  if (history === 'unsubmitted') return FULL('until-moved-on');
   if (context.probe === 'shown') return FULL('probe-shown');
   if (context.probe === 'aborted') return FULL('probe-stopped');
   return FULL('first-time');

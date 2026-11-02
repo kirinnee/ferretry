@@ -47,10 +47,10 @@ class FakeInput implements AgentInputPort {
     return await work();
   }
   /** A page hold the case set: its end and the documents the value went into. */
-  held: { until: number; documents: string[] } | undefined;
+  held: { until: number; documents: string[]; documentsOnly?: true } | undefined;
   /** The document the page shows now. */
   document: string | undefined = 'loader-1';
-  pageHeld(): { until: number; documents: string[] } | undefined {
+  pageHeld(): { until: number; documents: string[]; documentsOnly?: true } | undefined {
     return this.held;
   }
   async pageDocument(): Promise<string | undefined> {
@@ -805,5 +805,50 @@ describe('AgentToolService — browser.request_input', () => {
     // Assert
     should(input.raised[0]?.raise.fields).deepEqual([{ id: 'value', label: 'Passphrase', sensitivity: 'secret' }]);
     should(input.raised[0]?.raise.sensitivity).be.undefined();
+  });
+});
+
+describe('AgentToolService — a page hold that follows its document (secrev-1333 M1)', () => {
+  const UNTIL = Date.parse('2026-10-31T12:02:00.000Z');
+  const shoot = async (world: Awaited<ReturnType<typeof pageWorld>>) =>
+    await world.service.call(agent, { tool: 'browser.screenshot', name: 'app' }).then(
+      () => 'pictured',
+      (failure: unknown) => (failure as AgentToolError).code,
+    );
+  const pageWorld = async (input: FakeInput) => {
+    const world = agentToolWorld({ input });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.example.test/' });
+    return world;
+  };
+
+  it('should keep pictures out while the page shows the value, and let them back once it moved on', async () => {
+    // Arrange — an unsubmitted value: every hold on the page follows its document.
+    const input = new FakeInput();
+    input.held = { until: UNTIL, documents: ['loader-1'], documentsOnly: true };
+    const world = await pageWorld(input);
+
+    // Act / Assert — still on the value's document (also when the page comes back to it), then moved on.
+    world.browser.document = 'loader-1';
+    input.document = 'loader-1';
+    should(await shoot(world)).equal('conflict');
+    world.browser.document = 'loader-2';
+    input.document = 'loader-2';
+    should(await shoot(world)).equal('pictured');
+    world.browser.document = 'loader-1';
+    input.document = 'loader-1';
+    should(await shoot(world)).equal('conflict');
+  });
+
+  it('should keep pictures out for the whole window for any other hold, or a page whose document cannot be told', async () => {
+    const input = new FakeInput();
+    input.held = { until: UNTIL, documents: ['loader-1'] };
+    const world = await pageWorld(input);
+    world.browser.document = 'loader-2';
+    input.document = 'loader-2';
+    should(await shoot(world)).equal('conflict');
+    input.held = { until: UNTIL, documents: ['loader-1'], documentsOnly: true };
+    world.browser.document = undefined;
+    input.document = undefined;
+    should(await shoot(world)).equal('conflict');
   });
 });
