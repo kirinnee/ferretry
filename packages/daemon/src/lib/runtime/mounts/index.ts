@@ -130,6 +130,7 @@ import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
+import { type SessionPinSubsystem, sessionPinRoutes } from './session-pin.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './session-restart.ts';
@@ -339,6 +340,8 @@ export interface MountedSubsystems {
   /** Renaming an agent: a new first name, claimed through the same allocator a start uses, and a new
    *  task title. */
   readonly sessionRename: SessionRenameSubsystem;
+  /** Pinning an agent to the top of the owner's sidebar, and unpinning it. */
+  readonly sessionPin: SessionPinSubsystem;
   /** Whether a ferret keeps an agenda, from its next launch (docs/agenda.md). */
   readonly sessionAgendaMode: SessionAgendaModeSubsystem;
   /** Whether a ferret is told it may explain with hypermedia, from its next launch (docs/hypermedia.md). */
@@ -703,6 +706,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
         // route uses, so it can neither shadow nor be shadowed.
         ...sessionRenameRoutes(subsystems.sessionRename),
+        // Same shape and depth: the final literals `pin` and `unpin` belong to no other session route.
+        ...sessionPinRoutes(subsystems.sessionPin),
         // Same shape and depth as the rename: a one-segment pattern whose final literal (`hypermedia`) no
         // other route uses, so it can neither shadow nor be shadowed.
         ...sessionHypermediaRoutes(subsystems.sessionHypermedia),

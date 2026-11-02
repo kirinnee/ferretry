@@ -272,6 +272,36 @@ describe('renderSessionTable', () => {
     should(first?.endsWith('batch')).be.true();
   });
 
+  it('should mark the pinned ferrets in a leading PIN column, and only while one is listed', () => {
+    // Arrange
+    const pinned = {
+      ...sessionView({ id: 'ses-1', teammate: 'Hayden', name: 'Short' }),
+      pinnedAt: '2026-11-01T10:00:00.000Z',
+    };
+    const plain = sessionView({ id: 'ses-2', name: 'Other' });
+
+    // Act
+    const withPin = renderSessionTable([pinned, plain], laneNames([]), markerColour);
+    const withoutPin = renderSessionTable([plain], laneNames([]), markerColour);
+
+    // Assert
+    should(withPin[0]).startWith('PIN  TEAMMATE  ID');
+    should(withPin[1]).startWith('*    Hayden    ses-1');
+    should(withPin[2]).startWith('     -         ses-2');
+    should(withoutPin[0]).startWith('TEAMMATE  ID');
+  });
+
+  it('should still paint the amber CARD cell when the PIN column shifts it right', () => {
+    // Arrange
+    const pinned = { ...sessionView({ id: 'ses-1', name: 'Short' }), pinnedAt: '2026-11-01T10:00:00.000Z' };
+
+    // Act
+    const [, row] = renderSessionTable([pinned], laneNames([]), markerColour);
+
+    // Assert
+    should(row).containEql('<amber>—');
+  });
+
   it('should render a header-only table when there is nothing to list', () => {
     // Arrange / Act
     const lines = renderSessionTable([], laneNames([]), markerColour);

@@ -2,6 +2,7 @@
 export const packageRole = 'daemon' as const;
 
 export * from './agenda/index.ts';
+export * from './agent-pins/index.ts';
 export * from './agent-files/index.ts';
 export * from './agent-tools/index.ts';
 export * from './analytics/ingest.ts';

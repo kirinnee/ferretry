@@ -1179,3 +1179,58 @@
 [data-sbar-density='compact'].fy-sbar--drawer .fy-sbar__fold {
   min-height: max(28px, var(--target-floor));
 }
+
+/* ── PINNED ──────────────────────────────────────────────────────────────────────────────────────
+   The owner's pinned ferrets, above Needs you. The heading takes the accent so the two lifted groups
+   read apart (Needs you is warn). A pinned ferret that is over is dimmed, not dropped. */
+.fy-sbar__pinned .fy-sbar__project {
+  color: var(--accent);
+}
+.fy-sbar__pinned + .fy-sbar__needs,
+.fy-sbar__pinned + .fy-sbar__machine-group {
+  margin-top: var(--gap-sm);
+  border-top: var(--divider-width) solid var(--border);
+}
+.fy-sbar__session[data-sbar-pinned][data-sbar-stopped] {
+  opacity: 0.6;
+}
+[data-sbar-pinnable] {
+  position: relative;
+}
+.fy-sbar__pin {
+  display: none;
+}
+/* A pointer that hovers: the pin shows over the row's trailing end on hover or focus, opacity only so a
+   keyboard still reaches it. A finger has the row menu instead. */
+@media (hover: hover) and (pointer: fine) {
+  .fy-sbar__pin {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    translate: 0 -50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-2);
+    color: var(--muted);
+    opacity: 0;
+    transition: opacity 100ms ease;
+  }
+  [data-sbar-pinnable]:hover .fy-sbar__pin,
+  .fy-sbar__pin:focus-visible {
+    opacity: 1;
+  }
+  .fy-sbar__pin:hover {
+    color: var(--fg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-sbar__pin {
+    transition: none;
+  }
+}

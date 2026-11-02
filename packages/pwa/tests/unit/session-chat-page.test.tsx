@@ -498,6 +498,7 @@ describe('SessionChatPage', () => {
     // DO is Actions ▾, grouped; the old ⋯ menu is gone.
     expect(page.root.findAllByProps({ 'data-session-more': '' })).toHaveLength(0);
     expect(actionLabels(page.root)).toEqual([
+      'Pin to top',
       'Rename…',
       'Fork into a new ferret…',
       'Copy session id',

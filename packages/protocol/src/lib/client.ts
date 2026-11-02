@@ -286,6 +286,10 @@ export interface IFyApiClient {
    */
   fork(id: string, input: ForkSessionRequest, requestId?: string): Promise<ForkSessionOutcome>;
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
+  /** Pins a ferret to the top of the owner's sidebar; pinning a pinned ferret changes nothing. Answers the view with `pinnedAt`. */
+  pinSession(id: string): Promise<SessionView>;
+  /** Unpins a ferret; unpinning one that is not pinned changes nothing. */
+  unpinSession(id: string): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
   attachTarget(id: string): Promise<SessionAttachTarget>;

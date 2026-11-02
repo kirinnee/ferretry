@@ -15,6 +15,11 @@
  * A NEEDS-YOU ROW MOVES UP; IT IS NOT REPEATED BELOW. Pinned means "this is where it is now": the same
  * agent twice in one column reads as two agents. The machine heading still counts it.
  *
+ * PINNED, WHEN ASKED (`pinnedFirst`), COMES BEFORE NEEDS YOU. The owner's pinned ferrets from every machine
+ * that answered are lifted into one group, oldest pin first, each naming its machine, and are not repeated
+ * below or in Needs you. A pinned ferret on a machine that is down stays among that machine's own greyed
+ * rows, as a Needs-you one does. Only the sessions bar asks; the dashboard keeps its own grouping.
+ *
  * AN OFFLINE MACHINE'S ROWS ARE WHAT IT LAST SAID, and are shown as exactly that: greyed under a
  * heading that says when. They never enter Needs you, which is a list of things the reader can act on
  * now, and a question on a machine nobody can reach is not one — its row keeps its badge in place.
@@ -27,6 +32,8 @@
 import type { SessionView } from '@ferretry/protocol';
 import { agendaFirst } from './agenda-inbox.ts';
 import {
+  byPinOrder,
+  isPinned,
   listedBeforeMode,
   listTallies,
   matchesMode,
@@ -106,6 +113,8 @@ export interface MachineSection {
   readonly total: number;
   /** How many of them moved up into Needs you. */
   readonly needsYou: number;
+  /** How many of them moved up into Pinned. */
+  readonly pinned: number;
   readonly groups: readonly SessionGroup[];
   /** Everything the machine listed, so a row's parent can be named though the filter hid it. */
   readonly sessions: readonly SessionView[];
@@ -120,6 +129,8 @@ export interface MachineSection {
 }
 
 export interface AllMachinesView {
+  /** The owner's pinned sessions across machines, oldest pin first. Empty unless `pinnedFirst` was asked for. */
+  readonly pinned: readonly NeedsYouEntry[];
   readonly needsYou: readonly NeedsYouEntry[];
   readonly machines: readonly MachineSection[];
   /** What each mode segment would show, across every machine, under the stopped rule. */
@@ -143,6 +154,8 @@ export interface AllMachinesOptions {
   readonly sortRows?: boolean;
   /** Lift sessions with open Attention into the pinned Needs you group. Default on. */
   readonly groupNeedsYou?: boolean;
+  /** Lift the owner's pinned sessions into a Pinned group above Needs you. Default off. */
+  readonly pinnedFirst?: boolean;
 }
 
 const SHOW_EVERYTHING: SessionsListFilter = { mode: 'all', showStopped: true };
@@ -174,8 +187,10 @@ export const allMachinesView = (
     keep,
     sortRows = false,
     groupNeedsYou = true,
+    pinnedFirst = false,
   }: AllMachinesOptions = {},
 ): AllMachinesView => {
+  const pins: (NeedsYouEntry & { readonly order: number })[] = [];
   const pinned: (NeedsYouEntry & { readonly order: number })[] = [];
   const sections: MachineSection[] = [];
   let counts: ModeCounts = { all: 0, auto: 0, interactive: 0 };
@@ -195,10 +210,13 @@ export const allMachinesView = (
     };
     hiddenStopped += tallies.hiddenStopped;
     const shown = pool.filter(view => listedBeforeMode(view, filter, kept) && matchesMode(view, filter.mode));
+    const lifted = pinnedFirst && actionable(machine.reach) ? shown.filter(isPinned) : [];
+    for (const view of lifted) pins.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
+    const unpinned = lifted.length === 0 ? shown : shown.filter(view => !isPinned(view));
     const wantsYou = (view: SessionView): boolean => hasAgenda(view);
-    const moves = groupNeedsYou && actionable(machine.reach) ? shown.filter(wantsYou) : [];
+    const moves = groupNeedsYou && actionable(machine.reach) ? unpinned.filter(wantsYou) : [];
     for (const view of moves) pinned.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
-    const stays = moves.length === 0 ? shown : shown.filter(view => !wantsYou(view));
+    const stays = moves.length === 0 ? unpinned : unpinned.filter(view => !wantsYou(view));
     sections.push({
       daemonId: machine.daemonId,
       name: machine.name,
@@ -206,6 +224,7 @@ export const allMachinesView = (
       readAt: machine.slice.readAt ?? null,
       total: shown.length,
       needsYou: moves.length,
+      pinned: lifted.length,
       groups: groupByProject(stays, machine.projects, sortRows),
       sessions: pool,
       outage: machine.reach === 'offline' ? sectionOutage(machine) : null,
@@ -222,7 +241,9 @@ export const allMachinesView = (
   // Attention is the primary signal: its sessions lead, newest first (a stable sort, so equal instants
   // keep the status order above), and the status-based ones follow in the order they always had.
   const ordered = agendaFirst(pinned, entry => entry.view);
+  pins.sort((left, right) => byPinOrder(left.view, right.view) || left.order - right.order);
   return {
+    pinned: pins.map(({ order: _order, ...entry }) => entry),
     needsYou: ordered.map(({ order: _order, ...entry }) => entry),
     // A kind other than All shows only the machines it found something on; All shows every machine,
     // so an offline one is still said to be offline.

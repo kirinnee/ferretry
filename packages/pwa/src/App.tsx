@@ -1146,6 +1146,15 @@ function ShellSessionsBar({
       onOpenPalette={onOpenPalette}
       presentation={shape}
       renderSessionMenu={rowMenuRenderer}
+      onTogglePin={({ view, daemonId }) => {
+        const target = connections.find(candidate => candidate.daemonId === daemonId);
+        if (target === undefined) return;
+        const id = view.config.id;
+        clientFor(target)
+          .then(daemon => (view.pinnedAt === undefined ? daemon.pinSession(id) : daemon.unpinSession(id)))
+          .then(next => store.fleet.upsertSession(daemonId, next))
+          .catch(() => undefined);
+      }}
       onRestartOutdated={request => restartFerrets(connection, daemonFetch, request)}
       learningPassive={machineLearners.get(connection.daemonId) ?? NO_LEARNERS}
       {...(allMachines === undefined ? {} : { machineLearners })}

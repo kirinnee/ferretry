@@ -59,6 +59,7 @@ export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
 export * from './session/turn/index.ts';
 export * from './shared-catalogs/index.ts';
+export * from './agent-pins/index.ts';
 export * from './shared-drafts/index.ts';
 export * from './skills/index.ts';
 export * from './speedups/index.ts';

@@ -1170,6 +1170,10 @@ export function SessionChatPage({
         ),
       );
     },
+    setPinned: async pinned => {
+      const daemon = await routedClient(connection);
+      publish(await (pinned ? daemon.pinSession(session.config.id) : daemon.unpinSession(session.config.id)));
+    },
     stop: async () => {
       publish(await client.stop(session.config.id, 'stopped from the PWA session workspace'));
     },

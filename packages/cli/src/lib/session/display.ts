@@ -137,7 +137,10 @@ export function renderSessionView(view: SessionView, nowMs: number): string[] {
 }
 
 const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATUS', 'MODEL', 'AGENT', 'MODE', 'QUOTA', 'CARD', 'TASK', 'LABEL'] as const;
-const CARD_COLUMN = 7;
+const CARD_COLUMN = TABLE_HEADER.indexOf('CARD');
+
+/** The PIN column's mark: this ferret is pinned to the top of the sidebar. */
+const PINNED_MARK = '*';
 
 /** The CARD cell: the focus card with its lane, or the dash that says there is none. */
 export interface CardCell {
@@ -165,7 +168,8 @@ export function cardCell(view: SessionView, laneName: string | undefined): CardC
  * Column widths are measured from the data — fixed widths misalign the moment a value outgrows
  * them — and the variable-length columns sit last, where the final one is never padded. The one
  * cell that carries colour is the amber CARD dash, painted after padding so the widths stay
- * measured on plain text.
+ * measured on plain text. A leading PIN column marks the pinned ferrets and appears only while one is
+ * listed, so a fleet with no pins reads exactly as it always has.
  */
 export function renderSessionTable(
   views: readonly SessionView[],
@@ -176,7 +180,11 @@ export function renderSessionTable(
     const focus = view.config.focusTask;
     return cardCell(view, focus === undefined ? undefined : lanes.get(focus.id));
   });
+  const showPins = views.some(view => view.pinnedAt !== undefined);
+  const header: readonly string[] = showPins ? ['PIN', ...TABLE_HEADER] : TABLE_HEADER;
+  const cardColumn = CARD_COLUMN + (showPins ? 1 : 0);
   const rows = views.map((view, index) => [
+    ...(showPins ? [view.pinnedAt === undefined ? '' : PINNED_MARK] : []),
     view.config.teammate ?? '-',
     view.config.id,
     statusLabel(view.state),
@@ -188,15 +196,15 @@ export function renderSessionTable(
     view.config.name,
     view.config.label ?? '-',
   ]);
-  const widths = TABLE_HEADER.map((title, column) =>
+  const widths = header.map((title, column) =>
     Math.max(title.length, ...rows.map(cells => (cells[column] ?? '').length)),
   );
   const render = (cells: readonly string[], amber: boolean): string =>
     cells
       .map((cell, column) => {
         const padded = column === cells.length - 1 ? cell : cell.padEnd(widths[column] ?? 0);
-        return column === CARD_COLUMN && amber ? colour.amber(padded) : padded;
+        return column === cardColumn && amber ? colour.amber(padded) : padded;
       })
       .join('  ');
-  return [render(TABLE_HEADER, false), ...rows.map((cells, index) => render(cells, cards[index]?.amber === true))];
+  return [render(header, false), ...rows.map((cells, index) => render(cells, cards[index]?.amber === true))];
 }

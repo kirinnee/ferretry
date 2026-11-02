@@ -15,6 +15,7 @@ export interface SessionFixtureOverrides {
   readonly directory?: string;
   readonly journalSequence?: number;
   readonly revive?: SessionView['revive'];
+  readonly pinnedAt?: string;
 }
 
 /** A running `auto` session, overridable field by field. */
@@ -42,4 +43,5 @@ export const sessionView = (id: string, overrides: SessionFixtureOverrides = {})
     directory: overrides.directory ?? `/work/${id}`,
     ...(overrides.journalSequence === undefined ? {} : { journalSequence: overrides.journalSequence }),
     ...(overrides.revive === undefined ? {} : { revive: overrides.revive }),
+    ...(overrides.pinnedAt === undefined ? {} : { pinnedAt: overrides.pinnedAt }),
   }) as unknown as SessionView;
