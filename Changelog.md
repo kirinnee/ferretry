@@ -1,3 +1,11 @@
+## [4.241.1](https://github.com/kirinnee/ferretry/compare/v4.241.0...v4.241.1) (2026-11-02)
+
+### Fixes
+
+* **agenda:** one-ask follow-ups — asking() throws on unreadable, link after insert, gate row order ([#1366](https://github.com/kirinnee/ferretry/issues/1366)) ([54ee033](https://github.com/kirinnee/ferretry/commit/54ee033dd720cedd55b7f05f8e9045e9c987e143))
+* **daemon:** a session's parent can't be claimed outside the caller's own lineage ([#1364](https://github.com/kirinnee/ferretry/issues/1364)) ([e3cb67b](https://github.com/kirinnee/ferretry/commit/e3cb67bc32f85f88031f89f6392611d36ce9cb14))
+* **pwa:** tidy Snoozed and Replied rows (small Unsnooze, no stuck underline) ([#1365](https://github.com/kirinnee/ferretry/issues/1365)) ([2a0ab73](https://github.com/kirinnee/ferretry/commit/2a0ab73d0ea37fee0aa54b4ec49e9ac057708511))
+
 ## [4.241.0](https://github.com/kirinnee/ferretry/compare/v4.240.0...v4.241.0) (2026-11-02)
 
 ### Features

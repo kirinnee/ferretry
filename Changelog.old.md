@@ -1,3 +1,9 @@
+## [4.241.0](https://github.com/kirinnee/ferretry/compare/v4.240.0...v4.241.0) (2026-11-02)
+
+### Features
+
+* **agenda:** ask the owner once per thing (stacks on [#1351](https://github.com/kirinnee/ferretry/issues/1351)) ([#1357](https://github.com/kirinnee/ferretry/issues/1357)) ([86df44f](https://github.com/kirinnee/ferretry/commit/86df44fe0f84a276b06c4326a9b2c4778174a88f))
+
 ## [4.240.0](https://github.com/kirinnee/ferretry/compare/v4.239.1...v4.240.0) (2026-11-02)
 
 ### Features
