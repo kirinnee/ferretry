@@ -4,7 +4,7 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,logins, and the account-choice cards
+ * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,steered,logins, and the account-choice cards
  * `choice-<ferret|project|folder|site|only|pick>-<terminal|browser>` and `always-<terminal|browser>`) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
@@ -14,7 +14,9 @@
  * fields (Email plain, Password secret) with the email typed, each plain field flagged red; "chain" is the second
  * step of that login, a one-time `code` typed and visible; "codeterm" is a one-time code at a terminal. Settings is shown with a 2FA seed form open on one row, so the warning and
  * its tick are on screen. "unverified" is a secret
- * card whose reader the kernel did not prove (a shell that calls itself sudo): amber, "unverified", the full lock. Every width asserts no sideways scroll and the touch floor on every button of the phone.
+ * card whose reader the kernel did not prove (a shell that calls itself sudo): amber, "unverified", the full lock. "steered"
+ * is the Google password card after the ferret used that same page: the full lock and the sentence that says why
+ * (lock.ts, per page). Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -155,7 +157,7 @@ const signin = fakeRequest({
   }),
 });
 // A ferret's shell that wrote sudo into its own name: ps says sudo, the kernel proves nothing (no program fact). The
-// daemon's own sentence (service.ts UNVERIFIED_FLAG) and the full lock (lock.ts, not-proven).
+// daemon's own sentence (service.ts UNVERIFIED_FLAG) and the full lock (lock.ts, terminal-shows).
 const UNVERIFIED_RISK = {
   level: 'amber',
   reason:
@@ -164,7 +166,7 @@ const UNVERIFIED_RISK = {
 const unverified = fakeRequest({
   fields: [field('secret', { risk: UNVERIFIED_RISK })],
   risk: UNVERIFIED_RISK,
-  lock: { seconds: 120, reason: 'not-proven' },
+  lock: { seconds: 120, reason: 'terminal-shows' },
   observed: {
     kind: 'terminal',
     paneProof: { paneId: '%1', pid: 4242 },
@@ -224,14 +226,16 @@ const choiceBrowser = fakeRequest({
   ),
   saved: choiceSaved,
 });
+// The Google password card once the ferret used that very page after asking: the full lock, and why (lock.ts).
+const steered = { ...google, lock: { seconds: 120, reason: 'steered' } };
 const choiceRequest = choiceKind === 'browser' ? choiceBrowser : choiceTerminal;
-const request = ACCOUNT_CHOICE !== null ? choiceRequest : ({ first, next, google, chain, codeterm, signin, unverified }[view] ?? first);
+const request = ACCOUNT_CHOICE !== null ? choiceRequest : ({ first, next, google, chain, codeterm, signin, unverified, steered }[view] ?? first);
 const subject =
   ACCOUNT_CHOICE !== null
     ? choiceKind === 'browser'
       ? 'Sign in to ClickUp'
       : 'Type it into sudo'
-    : view === 'google' || view === 'chain'
+    : view === 'google' || view === 'chain' || view === 'steered'
     ? 'Sign in to Google'
     : view === 'signin'
       ? 'Sign in to Vercel'
@@ -249,7 +253,7 @@ const item = {
   sourceRef: request.id,
   sourceSeq: 1,
   kind: 'input',
-  title: view === 'google' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
+  title: view === 'google' || view === 'steered' ? 'Needs a login' : view === 'chain' || view === 'codeterm' ? 'Needs a code' : 'Needs a secret',
   subject,
   why: subject,
   context: 'The rebuild you asked for in &F131',
@@ -341,6 +345,7 @@ const STATES = (
     'codeterm',
     'signin',
     'unverified',
+    'steered',
     'logins',
     ...CHOICE_STATES,
   ] as readonly string[]
@@ -400,7 +405,7 @@ try {
             await page.locator('[data-input-value]').fill('correct-horse-battery');
             await page.locator('[data-input-save-tick]').check();
           }
-          if (state === 'google')
+          if (state === 'google' || state === 'steered')
             await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
           // A made-up code, typed so the shot shows it is visible as it is typed.
           if (state === 'chain' || state === 'codeterm') await page.locator('[data-input-value]').fill('481516');

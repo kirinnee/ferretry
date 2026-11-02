@@ -21,7 +21,11 @@ import { identityOf, placeOf } from './login-observer.ts';
  * - A PAGE is proven only when every secret field is a password input on a secure page with no human check showing,
  *   in its own frame's origin, visible and uncovered, AND either a saved login's observed facts for that very field
  *   identity say it hid the value after submit and the page moved on, or the daemon's own dummy probe at raise found
- *   a throwaway value in no read of the page.
+ *   a throwaway value in no read of the page. The facts prove a delivery Ferretry does not submit only when one of
+ *   them was the owner's own tap that moved the page on ({@link pageHistory}).
+ * - What the ferret did is judged PER PAGE ({@link PageSteer}, login-observer.ts `pageSteer`): a script on this page
+ *   or this site, or an act on this page (or on a tab sharing its storage at its site) since the card was raised.
+ * - Every long lock says its own cause (`InputLockReason`), so the owner reads why.
  * - A `private` value shows as it is typed: never short.
  * - A `plain` value and a one-time `code` are not held at all ({@link heldFromView}): the ferret may see both, so a
  *   lock would hide nothing it is not allowed to read. A card with a `code` beside a `secret` is locked for the
@@ -62,18 +66,23 @@ export function pageFieldsQualify(facts: InputTargetFacts, fields: readonly Inpu
 }
 
 /**
- * A saved login's facts prove this very field hid the value after a submit and the page moved on: at least one record
- * for this place and field identity says all three, and NONE says the other way. Only for a delivery that is
- * submitted: the facts are about what happens after a submit.
+ * What the saved logins' facts say about this very field (its place and identity):
+ *
+ * - `contrary`: some record says it was not masked, showed the value after a submit, or did not move on.
+ * - `none`: no record says all three (masked, no echo after submit, moved on).
+ * - `proven`: one does and none says otherwise, for a delivery Ferretry SUBMITS; or, for one it does not, a record
+ *   that also holds the OWNER'S OWN TAP that moved this page on (`tapped`, written only for a paired device's tap on
+ *   a page nobody steered, login-observer.ts). The value then sits in a password box the write saw, exactly as after a
+ *   clean probe, and the site has been seen to hide it once the owner's own sign-in went through.
+ * - `unsubmitted`: the facts hold, but the delivery is not submitted and no such tap is on record.
  */
-export function provenByFacts(
+export function pageHistory(
   facts: InputTargetFacts,
   observed: readonly LoginObserved[],
   submitted: boolean,
-): boolean {
-  if (!submitted) return false;
+): 'proven' | 'contrary' | 'none' | 'unsubmitted' {
   const place = placeOf(facts, undefined);
-  if (place === undefined) return false;
+  if (place === undefined) return 'none';
   const identity = identityOf(facts, place);
   const here = observed.filter(seen => seen.at === place && seen.surface === 'page' && seen.identity === identity);
   const says = (seen: LoginObserved): readonly (boolean | undefined)[] => [
@@ -81,7 +90,20 @@ export function provenByFacts(
     seen.noEchoAfterSubmit?.value,
     seen.navigatedAway?.value,
   ];
-  return here.some(seen => says(seen).every(value => value === true)) && !here.some(seen => says(seen).includes(false));
+  if (here.some(seen => says(seen).includes(false))) return 'contrary';
+  const held = here.filter(seen => says(seen).every(value => value === true));
+  if (held.length === 0) return 'none';
+  if (submitted || held.some(seen => seen.tapped?.value === true)) return 'proven';
+  return 'unsubmitted';
+}
+
+/** A saved login's facts prove this very field ({@link pageHistory}). */
+export function provenByFacts(
+  facts: InputTargetFacts,
+  observed: readonly LoginObserved[],
+  submitted: boolean,
+): boolean {
+  return pageHistory(facts, observed, submitted) === 'proven';
 }
 
 /**
@@ -215,16 +237,32 @@ export function terminalHides(facts: InputTargetFacts): boolean {
   );
 }
 
+/**
+ * Why the ferret could have steered what a page shows (login-observer.ts `pageSteer`): a page script ran on this page
+ * or its site (`scripted`), it acted on this page, or on a tab sharing its storage at its site, in the window asked
+ * about (`acted`), or nothing can tell (`unknown`: no observer is wired).
+ */
+export type PageSteer = 'scripted' | 'acted' | 'unknown';
+
+/** The full lock a steered page gets, with the reason the card says. */
+export function steeredLock(steer: PageSteer): InputLock {
+  return FULL(steer === 'scripted' ? 'scripted' : steer === 'acted' ? 'steered' : 'not-proven');
+}
+
 /** What else the decision needs: whether the value is submitted, and whether the ferret could have steered the page. */
 export interface LockContext {
   /** Every saved login's observed facts. */
   readonly observed: readonly LoginObserved[];
+  /** The saved logins could not be read: no facts are known, which is not the same as none. */
+  readonly unread?: boolean;
   /** The daemon's dummy probe of this page found the throwaway value nowhere. */
   readonly probed: boolean;
+  /** How the probe came out when it ran and did not find the value hidden: only what the card says. */
+  readonly probe?: 'shown' | 'aborted';
   /** Enter is pressed after the value (or may be, on the card). */
   readonly submitted: boolean;
-  /** The ferret ran a page script in this session, or acted on a page since the card was raised. */
-  readonly steered: boolean;
+  /** Why the ferret could have steered this page ({@link PageSteer}); absent: it could not have. */
+  readonly steered?: PageSteer;
 }
 
 /** The lock a delivery earns from what the daemon saw. Asked only of a card {@link heldFromView}. */
@@ -234,10 +272,19 @@ export function lockFor(
   context: LockContext,
 ): InputLock {
   if (fields.some(field => field.sensitivity === 'private')) return FULL('code');
-  if (facts.kind === 'terminal') return terminalHides(facts) ? SHORT('hidden-terminal') : FULL('not-proven');
-  if (context.steered || !pageFieldsQualify(facts, fields)) return FULL('not-proven');
-  if (provenByFacts(facts, context.observed, context.submitted)) return SHORT('proven-field');
-  return context.probed ? SHORT('probed-field') : FULL('not-proven');
+  if (facts.kind === 'terminal') return terminalHides(facts) ? SHORT('hidden-terminal') : FULL('terminal-shows');
+  if (facts.kind !== 'browser') return FULL('not-proven');
+  if (context.steered !== undefined) return steeredLock(context.steered);
+  if (!pageFieldsQualify(facts, fields)) return FULL('not-password-field');
+  const history = pageHistory(facts, context.observed, context.submitted);
+  if (history === 'proven') return SHORT('proven-field');
+  if (context.probed) return SHORT('probed-field');
+  if (context.unread === true) return FULL('not-proven');
+  if (history === 'contrary') return FULL('did-not-move-on');
+  if (history === 'unsubmitted') return FULL('not-submitted');
+  if (context.probe === 'shown') return FULL('probe-shown');
+  if (context.probe === 'aborted') return FULL('probe-stopped');
+  return FULL('first-time');
 }
 
 /**
@@ -258,7 +305,7 @@ const CODE_LIKE = (field: {
  * Whether the daemon may run its dummy probe on a page card: exactly ONE secret field (typing into a second would blur
  * the first while it holds the test value), qualifying, not already proven, no `private` value or one-time `code` on
  * the card (a code field beside the password is typed in the same write, and a wrong code can count), nothing that
- * looks like a code or a PIN, and a session whose ferret never ran a page script. A terminal is never probed.
+ * looks like a code or a PIN, and a page no script ran on, nor on its site (`steered`). A terminal is never probed.
  */
 export function probeable(
   facts: InputTargetFacts,
@@ -267,7 +314,7 @@ export function probeable(
 ): boolean {
   if (
     facts.kind !== 'browser' ||
-    context.steered ||
+    context.steered !== undefined ||
     fields.some(field => field.sensitivity === 'private' || field.sensitivity === 'code')
   )
     return false;
@@ -277,7 +324,10 @@ export function probeable(
   return facts.fields.filter(field => secret.includes(field.fieldId)).every(field => !CODE_LIKE(field.field));
 }
 
-/** The longer of two locks: a card that said two minutes is never shortened at the write. */
+/**
+ * The longer of two locks: a card that said two minutes is never shortened at the write. Of two as long, the later
+ * (`right`) is kept, so the reason is the one seen at the write.
+ */
 export function longerLock(left: InputLock, right: InputLock): InputLock {
-  return right.seconds > left.seconds ? right : left;
+  return right.seconds >= left.seconds ? right : left;
 }
