@@ -18,10 +18,16 @@ export const agendaCardsActions = (
 ): AgendaCardsActions => {
   const target = (id: BoardTaskId) => ({ daemonId, id });
   const refused = (message: string): AgendaCardOutcome => ({ ok: false, message });
+  // One key per Start click: kept while the request got no answer (the next click is a retry of it, and the daemon
+  // answers a repeat with the first result), dropped once the daemon has answered, so a later click is new work.
+  const pending = new Map<BoardTaskId, string>();
   return {
     open: id => onNavigate(daemonBoardCardPath(daemonId, id)),
     start: async id => {
-      const started = await board.start(target(id));
+      const key = pending.get(id) ?? crypto.randomUUID();
+      pending.set(id, key);
+      const started = await board.start(target(id), key);
+      if (started.ok || started.error.status !== 0) pending.delete(id);
       return started.ok
         ? started.value.started
           ? { ok: true, note: 'Started: a new ferret is working on this card.' }

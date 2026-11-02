@@ -245,6 +245,34 @@ describe('the buttons as the board’s own writes', () => {
     expect(opened[0]).toContain('worker');
   });
 
+  it('keeps one action key across a Start that got no answer, and renews it after any answer', async () => {
+    const keys: (string | undefined)[] = [];
+    const answers = [
+      boardErr({ status: 0, message: 'offline', boardCode: undefined }),
+      boardErr({ status: 403, message: 'only the owner may do that', boardCode: 'forbidden' as const }),
+      boardOk({ task: 'B1' as BoardTaskId, sessionId: 'worker', started: true }),
+    ];
+    const actions = agendaCardsActions(
+      {
+        start: async (_target: { daemonId: string; id: string }, key?: string) => {
+          keys.push(key);
+          return answers.shift() as never;
+        },
+        drop: async () => boardOk({} as never),
+      },
+      LAPTOP,
+      () => undefined,
+    );
+
+    await actions.start('B1' as BoardTaskId);
+    await actions.start('B1' as BoardTaskId);
+    await actions.start('B1' as BoardTaskId);
+
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
   it('carries the daemon’s refusal back in its own words', async () => {
     const { board: wired } = board(true);
     const actions = agendaCardsActions(wired, LAPTOP, () => undefined);

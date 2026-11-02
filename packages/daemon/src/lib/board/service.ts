@@ -30,6 +30,7 @@ import {
   type BoardTaskResponse,
   BoardTaskSchema,
   type BoardTaskView,
+  categoryOf,
   formatTaskRef,
   type Lane,
   type LaneSet,
@@ -545,6 +546,9 @@ export class BoardService {
       const card = this.requireCard(current, id);
       if (card.dropped !== null)
         throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing}`);
+      const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
+      if (category.ok && category.value === 'closed')
+        throw new BoardError('invalid', `${formatTaskRef(card)} is closed; reopen it before you ${doing}`);
       const applied = applyAction(
         card,
         { action: 'assign', assignee: session },

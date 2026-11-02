@@ -335,7 +335,8 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
       confirms first; the drop underneath keeps the board's existing rules (`caller: any`, the planner ACL), which are
       unchanged, so a card's owner ferret or an ancestor may still drop it as before. **Start a ferret** is
       `POST /v1/board/tasks/:taskId/start` ([board.md](board.md#start-a-ferret-on-a-card)): it starts a NEW ferret on
-      the card, and is the person's act only (operator minimum, `fleet` use).
+      the card, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
+      (kept across a retry when no answer came back), so a lost response cannot start a second ferret.
     - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
       (`started: false`) and the row swaps **Start a ferret** for **Open its chat**.
     - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.

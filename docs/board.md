@@ -993,12 +993,23 @@ The owner can start work on a card that has nobody working on it, from the Warde
   - **the brief** is built from the card: its ask, summary, why it exists, context, how to test it, links and last
     events (`startOnCardBrief`, over `focusCardBrief`).
 - **A closed or dropped card is refused** — "This card was closed; reopen it first." — checked inside the same
-  per-card step that starts the ferret, and again after: a close that raced the start stops the new ferret.
+  per-card step that starts the ferret, and again after the launch. The recheck reads the WHOLE card, not only the
+  assignee: `cards.open` assigns the new ferret before it launches, and a close in between drops the card but keeps
+  that assignee, so the recheck also stops the new ferret when the card is dropped or sits in a closed lane. A move
+  into a closed lane is refused by `assignTo` as well ("reopen it before you …").
+- **A launch that failed is refused in words.** The session service returns a failed view, not an error, once the
+  session record exists; the start reads that view and answers `invalid` with "No ferret was started on &X:
+  <reason>", never `started: true`.
 - **A card a live ferret holds is not started again.** Its assignee, its owner (unless the card is unclaimed in the
   backlog), or any live ferret whose focus it is, counts. The answer is `200` with that ferret and `started: false`,
   and the notice swaps its button for **Open its chat**.
-- **Idempotent and alone per card.** The check and the start run one at a time per card, so a retry after a lost
-  response, or a second client, gets the first start's ferret back (`started: false`) instead of a second ferret.
+- **One action key per click.** The PWA sends a key with each Start click as `x-fy-request-id`, and sends the SAME
+  key on a retry of a click that got no answer. The daemon remembers the result per card and key (a bounded
+  in-memory map, separate from liveness) and returns it: a retry after a lost response gets the first start's answer
+  even when that ferret has already finished, and starts no second ferret. A new click carries a new key, so it may
+  start new work. A request without the header is its own click.
+- **Alone per card.** The check and the start run one at a time per card, so a second client racing a start gets
+  the first start's ferret back (`started: false`) instead of a second ferret.
 - **The person's act only.** A ferret, even a lead, is refused (`forbidden`); the route spine also needs the
   `fleet` capability at operator minimum for a caller who is not on this host. Closing the card is the other way
   out (`drop`, with a reason, as `fy task drop --reason` does).

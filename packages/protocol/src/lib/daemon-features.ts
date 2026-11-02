@@ -79,7 +79,7 @@ export const DAEMON_FEATURES = {
   agendaOfferClose: 'agenda.offer-close.1',
   /**
    * A machine notice may list board cards (`AgendaItem.cards`), each with Open, Start a ferret on it and Close card:
-   * `POST /v1/board/tasks/:taskId/start` resumes the card's own ferret with the card's brief. A daemon without this
+   * `POST /v1/board/tasks/:taskId/start` starts a new ferret on the card with the card's brief. A daemon without this
    * name has neither the field nor the route, so the app draws its Got it alone.
    */
   agendaCards: 'agenda.cards.1',

@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { BoardTask, BoardTaskId, BoardTaskResponse, BoardTaskView } from '@ferretry/protocol';
+import type {
+  BoardTask,
+  BoardTaskId,
+  BoardTaskResponse,
+  BoardTaskStartResponse,
+  BoardTaskView,
+} from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import {
@@ -26,6 +32,7 @@ const world = (initial: Partial<BoardTask> = {}, overrides: Partial<StartOnCardP
   const started: NewFerretOnCard[] = [];
   const keyed = new KeyedSerialExecutor();
   const stopped: { sessionId: string; reason: string }[] = [];
+  const kept = new Map<string, BoardTaskStartResponse>();
   const ports: StartOnCardPorts = {
     task: async () => ({ task: current, laneSet: lanes(current.projectId) }) as unknown as BoardTaskResponse,
     folderOf: async row => FOLDERS[row.projectId],
@@ -37,7 +44,11 @@ const world = (initial: Partial<BoardTask> = {}, overrides: Partial<StartOnCardP
       const sessionId = `new-${started.length}`;
       current = { ...current, assignee: sessionId, laneId: 'plan' };
       alive.set(sessionId, request.card.id);
-      return sessionId;
+      return { sessionId, status: 'running' };
+    },
+    recall: key => kept.get(key),
+    remember: (key, result) => {
+      kept.set(key, result);
     },
     stop: async (sessionId, reason) => {
       stopped.push({ sessionId, reason });
@@ -237,6 +248,48 @@ describe('starting a ferret on a card', () => {
     should(started).have.length(1);
   });
 
+  it("should hand a retry with the same key the first start's result even after that ferret finished", async () => {
+    // Arrange
+    const { ports, started, alive } = world();
+    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    alive.delete(first.sessionId);
+
+    // Act
+    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+
+    // Assert
+    should(retry).eql(first);
+    should(started).have.length(1);
+  });
+
+  it('should start new work for a new click once the first ferret has finished', async () => {
+    // Arrange
+    const { ports, started, alive } = world();
+    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    alive.delete(first.sessionId);
+
+    // Act
+    const second = await startOnCard(ports, ID, OWNER, 'click-2');
+
+    // Assert
+    should(second).eql({ task: 'F1', sessionId: 'new-2', started: true });
+    should(started).have.length(2);
+  });
+
+  it('should keep a key to its own card, and remember nothing for a start without a key', async () => {
+    // Arrange
+    const { ports, started, alive } = world();
+    const first = await startOnCard(ports, ID, OWNER);
+    alive.delete(first.sessionId);
+
+    // Act
+    const again = await startOnCard(ports, ID, OWNER);
+
+    // Assert
+    should(again.sessionId).equal('new-2');
+    should(started).have.length(2);
+  });
+
   it('should stop the new ferret and say the card was closed when a close raced the start', async () => {
     // Arrange
     const { ports, stopped, edit } = world(
@@ -244,7 +297,7 @@ describe('starting a ferret on a card', () => {
       {
         start: async () => {
           edit({ dropped: { at: '2026-10-30T10:00:00.000Z', reason: 'no' } });
-          return 'late';
+          return { sessionId: 'late', status: 'running' };
         },
       },
     );
@@ -256,6 +309,93 @@ describe('starting a ferret on a card', () => {
     should((failure as BoardError).message).equal('This card was closed; reopen it first.');
     should(stopped).have.length(1);
     should(stopped[0]?.sessionId).equal('late');
+  });
+
+  it('should stop the new ferret when the card was assigned to it and THEN dropped, which keeps the assignee', async () => {
+    // Arrange
+    const { ports, stopped, edit } = world(
+      {},
+      {
+        start: async () => {
+          edit({ assignee: 'late', laneId: 'plan' });
+          edit({ dropped: { at: '2026-10-30T10:00:00.000Z', reason: 'no' } });
+          return { sessionId: 'late', status: 'running' };
+        },
+      },
+    );
+
+    // Act
+    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as BoardError).message).equal('This card was closed; reopen it first.');
+    should(stopped.map(entry => entry.sessionId)).eql(['late']);
+  });
+
+  it('should stop the new ferret when the card was assigned to it and THEN moved into a closed lane', async () => {
+    // Arrange
+    const { ports, stopped, edit } = world(
+      {},
+      {
+        start: async () => {
+          edit({ assignee: 'late', laneId: 'closed' });
+          return { sessionId: 'late', status: 'running' };
+        },
+      },
+    );
+
+    // Act
+    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as BoardError).message).equal('This card was closed; reopen it first.');
+    should(stopped.map(entry => entry.sessionId)).eql(['late']);
+  });
+
+  it('should say why, and not report a start, when the launch failed after the session existed', async () => {
+    // Arrange
+    const { ports, stopped } = world(
+      {},
+      { start: async () => ({ sessionId: 'dead', status: 'failed', reason: 'tmux could not open a window' }) },
+    );
+
+    // Act
+    const failure = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const unreasoned = await startOnCard(
+      world({}, { start: async () => ({ sessionId: 'dead', status: 'failed' }) }).ports,
+      ID,
+      OWNER,
+    ).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as BoardError).code).equal('invalid');
+    should((failure as BoardError).message).equal('No ferret was started on &F1: tmux could not open a window');
+    should((unreasoned as BoardError).message).equal('No ferret was started on &F1: it did not launch');
+    should(stopped).eql([]);
+  });
+
+  it('should not remember a failed start, so the same click may try again', async () => {
+    // Arrange
+    let attempts = 0;
+    const { ports, edit } = world(
+      {},
+      {
+        start: async () => {
+          attempts += 1;
+          if (attempts === 1) return { sessionId: 'dead', status: 'failed', reason: 'no window' };
+          edit({ assignee: 'ok', laneId: 'plan' });
+          return { sessionId: 'ok', status: 'running' };
+        },
+      },
+    );
+    const first = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+
+    // Act
+    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+
+    // Assert
+    should(first).be.instanceOf(BoardError);
+    should(retry).eql({ task: 'F1', sessionId: 'ok', started: true });
   });
 
   it('should say so, and start nothing, when the card is filed under no project folder', async () => {

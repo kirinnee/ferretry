@@ -65,6 +65,7 @@ import {
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
+  type BoardTaskStartResponse,
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
   daemonFeatureList,
@@ -650,6 +651,9 @@ import {
 import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
+
+/** How many owner-start keys the daemon remembers (see `cardStartResults`). */
+const CARD_START_KEYS_KEPT = 256;
 
 /** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
 const WORK_SEARCH_WARM_DELAY_MS = 5_000;
@@ -10231,6 +10235,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
       // One owner's start at a time per card (board/start-on-card.ts): the check and the start are one step.
       const cardStarts = new KeyedSerialExecutor();
+      // What each click's start came to, by the key the click carried, apart from whether its ferret is still alive: a
+      // retry after a lost response gets the same answer even once that ferret has finished. Bounded, oldest first.
+      const cardStartResults = new Map<string, BoardTaskStartResponse>();
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
@@ -13094,7 +13101,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           skip: async (request, caller) => await boardWorld.board.skip(request, caller),
           // The owner's start puts a NEW ferret on the card, in the card's own project's folder, on the machine's
           // default runtime (board/start-on-card.ts). One at a time per card, so a retry finds the first start.
-          start: async (id, caller) =>
+          start: async (id, caller, key) =>
             await startOnCard(
               {
                 task: async taskId => await boardWorld.board.task(taskId),
@@ -13121,7 +13128,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                       ownerDelegation(card),
                       DAEMON_START,
                     );
-                    return started.config.id;
+                    return { sessionId: started.config.id, status: started.state.status, reason: started.state.reason };
                   } catch (error) {
                     if (error instanceof SessionControlError) throw new CardStartRefused(error.message);
                     throw error;
@@ -13130,10 +13137,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 stop: async (sessionId, reason) => {
                   await sessionControl.stop(sessionId, reason);
                 },
+                recall: key => cardStartResults.get(key),
+                remember: (key, result) => {
+                  cardStartResults.set(key, result);
+                  if (cardStartResults.size > CARD_START_KEYS_KEPT)
+                    cardStartResults.delete(cardStartResults.keys().next().value as string);
+                },
                 bin: CLIENT_NAME,
               },
               id,
               caller,
+              key,
             ),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },

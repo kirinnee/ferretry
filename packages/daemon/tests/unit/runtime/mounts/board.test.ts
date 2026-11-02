@@ -87,8 +87,8 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
       calls.push({ route: 'skip', value, caller });
       return await service.skip(value, caller);
     },
-    start: async (id, caller) => {
-      calls.push({ route: 'start', value: id, caller });
+    start: async (id, caller, key) => {
+      calls.push({ route: 'start', value: id, caller, ...(key === undefined ? {} : { key }) });
       if (caller.kind !== 'owner') throw new BoardError('forbidden', 'only the owner may start a ferret on a card');
       return { task: id, sessionId: 'worker', started: true };
     },
@@ -503,6 +503,27 @@ describe('the board mount', () => {
     should(response.status).equal(200);
     should(jsonBody(response)).eql({ task: 'F1', sessionId: 'worker', started: true });
     should(calls).eql([{ route: 'start', value: 'F1', caller: { kind: 'owner', via: 'admin-token' } }]);
+  });
+
+  it("should hand the click's request id to the start as its key, and none when the id is blank", async () => {
+    // Arrange
+    const { calls, board } = recording();
+    const live = await dispatcher(board);
+
+    // Act
+    await live.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/board/tasks/F1/start',
+        headers: { ...human, 'x-fy-request-id': ' click-7 ' },
+      }),
+    );
+    await live.dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1/start', headers: { ...human, 'x-fy-request-id': '  ' } }),
+    );
+
+    // Assert
+    should(calls.map(call => (call as { key?: string }).key)).eql(['click-7', undefined]);
   });
 
   it('should start a ferret on the card for a paired device the fleet grant lets in, as the owner', async () => {

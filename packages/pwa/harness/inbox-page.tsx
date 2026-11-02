@@ -19,6 +19,8 @@
  *   ?view=orphan-one      the Warden's "A card has nobody working on it" notice open, one card (Open / Start / Close)
  *   ?view=orphan-three    the same notice for three cards, each line with its own three buttons
  *   ?view=orphan-list     `/inbox?from=warden` with that notice (one card) in the list
+ *   &held=1              (with orphan-*) the board answers Start with "a live ferret already holds it": a click swaps
+ *                         the button for "Open its chat"
  *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
@@ -32,8 +34,10 @@ import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-compose
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
+import { IDLE_STORE } from '../src/hooks/use-chat-card.ts';
 import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
+import type { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -641,6 +645,9 @@ function Inbox({
 }
 
 const view = new URLSearchParams(location.search).get('view') ?? 'sections';
+if (new URLSearchParams(location.search).get('held') === '1')
+  (IDLE_STORE as { start: DaemonBoardStore['start'] }).start = async (_machine, id) =>
+    boardOk({ task: id, sessionId: 'worker', started: false });
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(

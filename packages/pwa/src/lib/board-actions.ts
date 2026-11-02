@@ -102,8 +102,8 @@ export interface BoardActions {
   note(target: BoardCardTarget, text: string): Promise<BoardMutation>;
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
-  /** Brings the card's own ferret back onto it; the answer names the ferret. */
-  start(target: BoardCardTarget): Promise<BoardStart>;
+  /** Starts a new ferret on the card (or names the live one that holds it); `key` makes a retry of one click safe. */
+  start(target: BoardCardTarget, key?: string): Promise<BoardStart>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
   /** Puts a card aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the card. */
   snoozeTask(target: BoardCardTarget, until: string | null): Promise<BoardMutation>;
@@ -218,10 +218,10 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     note: (target, text) => send(target, { action: 'note', text }),
     link: (target, link) => send(target, { action: 'link', ...link }),
     drop: (target, reason) => send(target, { action: 'drop', reason }),
-    start: async target => {
+    start: async (target, key) => {
       const machine = deps.connection(target.daemonId);
       if (machine === undefined) return boardErr(unpaired(target.daemonId));
-      return await deps.store.start(machine, target.id);
+      return await deps.store.start(machine, target.id, key);
     },
     editField: (target, edit) => send(target, { action: 'edit', ...edit }),
     snoozeTask: (target, until) => send(target, { action: 'snooze', until }),

@@ -18,7 +18,7 @@ const harness = (paired = [laptop]) => {
   const lanesSent: { daemonId: string; projectId: string; request: LaneSetActionRequestInput }[] = [];
   const responses: unknown[][] = [];
   const created: { daemonId: string; request: BoardTaskCreateRequestInput }[] = [];
-  const started: { daemonId: string; id: string }[] = [];
+  const started: { daemonId: string; id: string; key: string | undefined }[] = [];
   let refuse = false;
   const actions = createBoardActions({
     store: {
@@ -35,8 +35,8 @@ const harness = (paired = [laptop]) => {
         sent.push({ daemonId: machine.daemonId, id, request });
         return refuse ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }) : boardOk(card(id));
       },
-      start: async (machine, id) => {
-        started.push({ daemonId: machine.daemonId, id });
+      start: async (machine, id, key) => {
+        started.push({ daemonId: machine.daemonId, id, key });
         return refuse
           ? boardErr({ status: 404, message: 'the card was closed', boardCode: 'not-found' as const })
           : boardOk({ task: id, sessionId: 'worker', started: true });
@@ -200,9 +200,9 @@ describe('start', () => {
 
   it('starts a new ferret on the card, on the machine it names', async () => {
     const { actions, started } = harness();
-    const answer = await actions.start(card1);
+    const answer = await actions.start(card1, 'click-1');
     expect(answer.ok && answer.value).toEqual({ task: 'F1', sessionId: 'worker', started: true });
-    expect(started).toEqual([{ daemonId: laptop.daemonId, id: 'F1' }]);
+    expect(started).toEqual([{ daemonId: laptop.daemonId, id: 'F1', key: 'click-1' }]);
   });
 
   it('hands the daemon’s refusal back as a value, and an unpaired machine as such', async () => {

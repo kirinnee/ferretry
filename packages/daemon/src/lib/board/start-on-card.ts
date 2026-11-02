@@ -15,7 +15,9 @@
  *
  * Idempotent and alone per card: the check and the start run as one {@link StartOnCardPorts.exclusive} step, so a
  * retry after a lost response, or a second client, finds the first start's ferret and gets it back instead of
- * starting another. A card a live ferret already holds is never started a second time.
+ * starting another. A card a live ferret already holds is never started a second time. A click's own key
+ * ({@link StartOnCardPorts.recall}) also answers a retry once that ferret has finished, when no liveness is left to
+ * find it by; a new click carries a new key and may start new work.
  *
  * Pure: the card, the lock, the roster and the start arrive through the ports; authority is the caller's.
  */
@@ -27,6 +29,7 @@ import {
   categoryOf,
   formatTaskRef,
   type LaneSet,
+  type SessionStatus,
 } from '@ferretry/protocol';
 import { focusCardBrief } from '../warden/focus-card.ts';
 import type { BoardCaller } from './authority.ts';
@@ -51,12 +54,23 @@ export interface StartOnCardPorts {
   live(): Promise<ReadonlyMap<string, BoardTaskId | null>>;
   /** Runs `work` alone for this card: a second start of the same card waits for the first to finish. */
   exclusive<T>(id: BoardTaskId, work: () => Promise<T>): Promise<T>;
-  /** Starts the new ferret, with the card assigned to it; returns its session id. Throws {@link CardStartRefused}. */
-  start(start: NewFerretOnCard): Promise<string>;
+  /** Starts the new ferret, with the card assigned to it. Throws {@link CardStartRefused}. */
+  start(start: NewFerretOnCard): Promise<StartedFerret>;
+  /** What an earlier start with this key came to, kept apart from liveness; `undefined` for a key never seen. */
+  recall(key: string): BoardTaskStartResponse | undefined;
+  /** Keeps what a start came to, under the key its click carried. */
+  remember(key: string, result: BoardTaskStartResponse): void;
   /** Stops a ferret whose card was taken from it by a close that raced the start. */
   stop(sessionId: string, reason: string): Promise<void>;
   /** The shipped command name, so every command the brief prints exists after a rename. */
   readonly bin: string;
+}
+
+/** The ferret a start made: the launch can fail after the session exists, and then `status` is `failed` with its `reason`. */
+interface StartedFerret {
+  readonly sessionId: string;
+  readonly status: SessionStatus;
+  readonly reason?: string | undefined;
 }
 
 /** Why the new ferret would not start: the words are the start's own, for the person to read. */
@@ -118,11 +132,19 @@ export function startOnCardBrief(card: BoardTaskView, laneSet: LaneSet | null, b
   ].join('\n');
 }
 
-export async function startOnCard(ports: StartOnCardPorts, id: BoardTaskId, caller: BoardCaller): Promise<CardStarted> {
+export async function startOnCard(
+  ports: StartOnCardPorts,
+  id: BoardTaskId,
+  caller: BoardCaller,
+  key?: string,
+): Promise<CardStarted> {
   if (caller.kind !== 'owner') {
     throw new BoardError('forbidden', 'only the owner may start a ferret on a card from here', ['owner-human']);
   }
+  const kept = key === undefined ? undefined : `${id}:${key}`;
   return await ports.exclusive(id, async () => {
+    const remembered = kept === undefined ? undefined : ports.recall(kept);
+    if (remembered !== undefined) return remembered;
     const { task, laneSet } = await ports.task(id);
     const ref = formatTaskRef(task);
     if (closed(task, laneSet)) throw new BoardError('invalid', GONE);
@@ -135,9 +157,9 @@ export async function startOnCard(ports: StartOnCardPorts, id: BoardTaskId, call
         `${ref} is not filed under a project folder on this machine, so there is nowhere to start a ferret on it. File it under a project first.`,
       );
     }
-    let sessionId: string;
+    let ferret: StartedFerret;
     try {
-      sessionId = await ports.start({
+      ferret = await ports.start({
         card: task,
         folder,
         name: task.title,
@@ -148,12 +170,20 @@ export async function startOnCard(ports: StartOnCardPorts, id: BoardTaskId, call
         throw new BoardError('invalid', `No ferret was started on ${ref}: ${error.message}`);
       throw error;
     }
-    // A close that raced the start wins: the assignment refuses a dropped card, the new ferret is left with no card.
-    const after = (await ports.task(id)).task;
-    if (after.assignee !== sessionId) {
+    const { sessionId } = ferret;
+    // The launch failed once the session existed: say why, and start nothing. The card stays as the start left it,
+    // assigned to a ferret that is not running, so the Warden names it again.
+    if (ferret.status === 'failed')
+      throw new BoardError('invalid', `No ferret was started on ${ref}: ${ferret.reason ?? 'it did not launch'}`);
+    // A close that raced the start wins, wherever in the start it landed: before the assignment it refuses the card,
+    // after it the drop or the move to a closed lane leaves the assignee in place, so the card is read again whole.
+    const after = await ports.task(id);
+    if (after.task.assignee !== sessionId || closed(after.task, after.laneSet)) {
       await ports.stop(sessionId, `${ref} was closed while the ferret started on it`);
       throw new BoardError('invalid', GONE);
     }
-    return { task: task.id, sessionId, started: true };
+    const result = { task: task.id, sessionId, started: true };
+    if (kept !== undefined) ports.remember(kept, result);
+    return result;
   });
 }

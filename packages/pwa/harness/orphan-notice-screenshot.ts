@@ -101,6 +101,8 @@ interface State {
   readonly view: string;
   readonly cards: number;
   readonly confirm?: true;
+  /** How many cards to press Start on first; the board answers that a live ferret already holds them. */
+  readonly held?: number;
   /** The list row: a notice is only a line there, its buttons are on the open item. */
   readonly list?: true;
 }
@@ -109,6 +111,8 @@ const STATES: readonly State[] = [
   { name: 'one-card-open', view: 'orphan-one', cards: 1 },
   { name: 'three-cards-open', view: 'orphan-three', cards: 3 },
   { name: 'inbox-list', view: 'orphan-list', cards: 0, list: true },
+  { name: 'one-card-held', view: 'orphan-one', cards: 1, held: 1 },
+  { name: 'three-cards-one-held', view: 'orphan-three', cards: 3, held: 1 },
   { name: 'close-confirm', view: 'orphan-one', cards: 1, confirm: true },
   { name: 'three-cards-close-confirm', view: 'orphan-three', cards: 3, confirm: true },
 ];
@@ -127,19 +131,26 @@ const scene = async (width: Width, theme: (typeof THEMES)[number], state: State)
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
   await page.clock.setFixedTime(NOW);
-  await page.goto(`${server.url}?theme=studio-${theme}&view=${state.view}`);
+  await page.goto(`${server.url}?theme=studio-${theme}&view=${state.view}${state.held === undefined ? '' : '&held=1'}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible', timeout: 8_000 });
   await page.evaluate(async () => document.fonts.ready.then(() => undefined));
   await page.waitForTimeout(400);
   const loaded = await page.evaluate(() => [...document.fonts].filter(face => face.status === 'loaded').length);
   check(loaded > 0, `${label}: the app's own font did not load`);
 
+  const held = state.held ?? 0;
+  for (let pressed = 0; pressed < held; pressed++) await page.locator('[data-agenda-card-start]').first().click();
+  if (held > 0) await page.locator('[data-agenda-card-chat]').first().waitFor({ state: 'visible', timeout: 4_000 });
   check((await count(page, '[data-agenda-card-row]')) === state.cards, `${label}: expected ${state.cards} card rows`);
   check(
+    (await count(page, '[data-agenda-card-chat]')) === held,
+    `${label}: expected ${held} "Open its chat" button(s)`,
+  );
+  check(
     (await count(page, '[data-agenda-card-open]')) === state.cards &&
-      (await count(page, '[data-agenda-card-start]')) === state.cards &&
+      (await count(page, '[data-agenda-card-start]')) === state.cards - held &&
       (await count(page, '[data-agenda-card-close]')) === state.cards,
-    `${label}: every card line needs Open, Start a ferret and Close`,
+    `${label}: every card line needs Open, Start a ferret (or Open its chat) and Close`,
   );
   const rows = await page.evaluate(() =>
     [...document.querySelectorAll('[data-agenda-card-buttons]')].map(row => {

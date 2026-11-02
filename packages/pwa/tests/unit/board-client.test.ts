@@ -190,6 +190,19 @@ describe('postBoardStart', () => {
     expect(answer).toEqual({ ok: true, value: { task: 'F1', sessionId: 'worker', started: true } });
   });
 
+  it('sends the click’s action key as the request id, and a fresh one when none is given', async () => {
+    const ids: (string | null)[] = [];
+    const fetcher = async (_asked: RequestInfo | URL, init?: RequestInit) => {
+      ids.push(new Headers(init?.headers).get('x-fy-request-id'));
+      return json({ task: 'F1', sessionId: 'worker', started: true });
+    };
+    await postBoardStart(laptop, 'F1', fetcher, 'click-1');
+    await postBoardStart(laptop, 'F1', fetcher);
+    expect(ids[0]).toBe('click-1');
+    expect(ids[1]).toBeTruthy();
+    expect(ids[1]).not.toBe('click-1');
+  });
+
   it('hands a refusal back as a value, with the daemon’s words and code', async () => {
     const gone = await postBoardStart(laptop, 'F1', async () =>
       json({ error: 'This card was closed; reopen it first.', code: 'not-found' }, 404),
