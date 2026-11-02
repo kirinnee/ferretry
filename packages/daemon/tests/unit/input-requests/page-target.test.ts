@@ -44,7 +44,7 @@ function host(
     clearless?: boolean;
     /** This browser can't arm the pagehide clear (an older worker), or refuses to now. */
     armless?: boolean;
-    arm?: 'armed' | 'refused';
+    arm?: 'armed' | 'refused' | Error;
     cleared?: 'cleared' | 'moved' | 'unknown' | Error;
   } = {},
 ) {
@@ -89,6 +89,7 @@ function host(
       : {
           inputArm: async (pageId: string, _expected: unknown, fieldIds: readonly string[]) => {
             calls.push(`arm:${pageId}:${fieldIds.join(',')}`);
+            if (options.arm instanceof Error) throw options.arm;
             return options.arm ?? 'armed';
           },
         }),
@@ -404,5 +405,41 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
     );
     should(await router.clear('s1', APP, JOB)).equal('moved');
     should(await router.clear('s1', { kind: 'terminal', key: 'dev' }, JOB)).equal('unknown');
+  });
+});
+
+describe("PageInputTarget: an owner's value Ferretry does not submit (secrev-1333 M1)", () => {
+  const VALUES = [{ field: 'password', text: 'hunter2-hunter2' }];
+  const typed = async (options: Parameters<typeof host>[0], values = VALUES) => {
+    const said: boolean[] = [];
+    const world = host(options);
+    const outcome = await world.target.type('s1', APP, values, false, FACTS_PAGE, {
+      armClear: 'try',
+      armed: armed => void said.push(armed),
+    });
+    return { outcome, said, calls: world.calls };
+  };
+
+  it('should arm the pagehide clear when it can, say so, and type in the same page turn', async () => {
+    const { outcome, said, calls } = await typed({});
+    should(outcome).equal('typed');
+    should(said).eql([true]);
+    should(calls).eql(['page:s1:app', 'arm:page-1:password', 'type:page-1:password:false']);
+  });
+
+  it('should still type, and say it is not armed, when the browser refuses, cannot arm or throws', async () => {
+    for (const options of [{ arm: 'refused' as const }, { armless: true }, { arm: new Error('worker fell over') }]) {
+      const { outcome, said, calls } = await typed(options);
+      should(outcome).equal('typed');
+      should(said).eql([false]);
+      should(calls.at(-1)).equal('type:page-1:password:false');
+    }
+  });
+
+  it('should not arm, and say so, when no value goes into a password field', async () => {
+    const { outcome, said, calls } = await typed({}, [{ field: 'email', text: 'kirin@example.test' }]);
+    should(outcome).equal('typed');
+    should(said).eql([false]);
+    should(calls.some(call => call.startsWith('arm:'))).be.false();
   });
 });

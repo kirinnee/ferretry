@@ -2,7 +2,9 @@ import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } fr
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
-import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { InputRequestService, type InputRequestServiceDependencies } from '../../../src/lib/input-requests/service.ts';
+import type { ScriptedOriginsView } from '../../../src/lib/sign-in-grants/matcher.ts';
+import type { SignInGrantSource } from '../../../src/lib/sign-in-grants/plans.ts';
 
 export const SESSION = 'mvv6b4qw-49d0158d';
 
@@ -44,8 +46,16 @@ export function inputRequestService(
     readonly logins?: InputLoginPort;
     /** Whether the ferret steered a page (the login observer); absent: no observer, so every page counts as steered. */
     readonly steered?: (since: number) => boolean;
+    /** A whole login observer (the real one, say), in place of `steered`. */
+    readonly observer?: InputRequestServiceDependencies['observer'];
+    /** Where page scripts ran across the machine, as the standing rules keep it; with no grant that ever fills. */
+    readonly scriptedOrigins?: () => ScriptedOriginsView;
     /** The agenda the cards are raised on; absent: a board that takes every card and says nothing. */
     readonly agenda?: InputAgendaPort;
+    /** Whether the page target arms a pagehide clear it is asked to try (`armClear: 'try'`); absent: it never can. */
+    readonly arms?: boolean;
+    /** Called each time the journal is written (a request or a hold), before it answers. */
+    readonly journalled?: (event: unknown) => void;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -73,7 +83,8 @@ export function inputRequestService(
             probe: async (_session, _target, _facts, fieldIds) =>
               await (options.probe as NonNullable<typeof options.probe>)(fieldIds),
           }),
-      type: async (_session, _target, values) => {
+      type: async (_session, _target, values, _submit, _expected, typeOptions) => {
+        if (typeOptions?.armClear === 'try') typeOptions.armed?.(options.arms === true);
         writes.push(...values.map(value => value.text));
         return 'typed';
       },
@@ -85,9 +96,12 @@ export function inputRequestService(
     },
     notifier: { tell: async () => undefined },
     journal: {
-      publish: async (_session, event) => void events.push(event),
+      publish: async (_session, event) => {
+        events.push(event);
+        options.journalled?.(event);
+      },
       history: async () => [],
-      quarantine: async () => undefined,
+      quarantine: async (_session, event) => void options.journalled?.(event),
       quarantines: async () => [],
     },
     audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },
@@ -99,15 +113,26 @@ export function inputRequestService(
     quarantine,
     redact: async text => values.scrubAll(text),
     ...(options.logins === undefined ? {} : { logins: options.logins }),
-    ...(options.steered === undefined
+    ...(options.scriptedOrigins === undefined
       ? {}
       : {
-          observer: {
-            delivered: async () => undefined,
-            tainted: (_session: string, _kind: string, since: number) =>
-              (options.steered as NonNullable<typeof options.steered>)(since),
-          },
+          grants: {
+            enabled: () => false,
+            of: () => [],
+            scriptedOrigins: options.scriptedOrigins,
+          } as unknown as SignInGrantSource,
         }),
+    ...(options.observer !== undefined
+      ? { observer: options.observer }
+      : options.steered === undefined
+        ? {}
+        : {
+            observer: {
+              delivered: async () => undefined,
+              tainted: (_session: string, _kind: string, since: number) =>
+                (options.steered as NonNullable<typeof options.steered>)(since),
+            },
+          }),
   });
   return { service, writes, events, quarantine };
 }
