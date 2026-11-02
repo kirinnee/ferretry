@@ -12,20 +12,7 @@
  * characters out, look-alike forms folded (NFKC), the secret NAMES that file owns, and a second pass over the
  * lines joined so a name or a value a line break split is still found. It reports the LINE, never the value.
  * Pure and linear: plain scans (the text is cut into words once, the first `curl` is found once), and no pattern
- * that can backtrack: a run of quote marks is trimmed by a loop, not by `["']+/**
- * The narrow test that refuses a copy (docs/catalogs.md § Copying a skill from this machine). A skill file may
- * quote a password the person typed once: copied into another account or project it would become a credential
- * somewhere it was never meant to be, and the review must never draw it. These shapes are certain enough to
- * refuse on — an address with a password in it (`scheme://user:pass@host`), a long value assigned to a name that
- * announces a secret (`API_KEY=…`, `api_key = "…"`, `token: …`, `"token": "…"`), an `Authorization: Bearer …`
- * header, `curl -u user:pass`, a long credential in an address's query (`?token=…`, `&api_key=…`), a PEM private
- * key block, and a well-known token (`ghp_…`, `sk-…`, `xoxb-…`, `AKIA…`: the prefixes See changes owns). Anything
- * vaguer only WARNS (`mayHoldSecret`).
- *
- * The text is read the way "See changes" reads it (catalog-installs/conservative-changes.ts): invisible
- * characters out, look-alike forms folded (NFKC), the secret NAMES that file owns, and a second pass over the
- * lines joined so a name or a value a line break split is still found. It reports the LINE, never the value.
-, which is quadratic on `"""…x`.
+ * that can backtrack: a run of quote marks is trimmed by a loop, not by `["']+$`, which is quadratic on `"""…x`.
  */
 import {
   foldedForScan,
@@ -44,8 +31,8 @@ const VALUE_START = new Set(['"', "'", '`']);
 const VALUE_END = new Set(['"', "'", '`', ',', ';', '}', ')', ']']);
 const NAME_START = new Set(['"', "'", '`', '{', '[', '(']);
 const NAME_END = new Set(['"', "'", '`']);
-const TOKEN_SPLIT = /[=:"'`,;(){}[\]<>@/&?]/u;
-const PEM_HEADER = /-----BEGIN (?:[A-Z0-9]{1,16} ){0,4}PRIVATE KEY-----/iu;
+const TOKEN_SPLIT = /[=:"'`,;(){}[\]<>@/&?.]/u;
+const PEM_HEADER = /-----BEGIN (?:[A-Z0-9]{1,16} ){0,4}PRIVATE KEY(?: BLOCK)?-----/iu;
 
 /** A value that points at a secret rather than holding one: `$VAR`, `${VAR}`, `<your key>`, `%VAR%`, `[…]`. */
 const isReference = (value: string): boolean => /^[$<{[%]/u.test(value);

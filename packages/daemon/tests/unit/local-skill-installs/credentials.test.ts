@@ -118,6 +118,8 @@ describe('the credential test that refuses a copy', () => {
     should(firstCredentialLine('-----BEGIN PRIVATE KEY-----')).equal(1);
     should(firstCredentialLine('-----BEGIN OPENSSH PRIVATE KEY-----')).equal(1);
     should(firstCredentialLine('-----begin encrypted private key-----')).equal(1);
+    should(firstCredentialLine('x\n-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQfake')).equal(2);
+    should(firstCredentialLine('-----BEGIN PGP PUBLIC KEY BLOCK-----')).be.undefined();
     should(firstCredentialLine('x\n-----BEGIN PUBLIC KEY-----\n-----BEGIN CERTIFICATE-----')).be.undefined();
     should(firstCredentialLine('Generate a private key with openssl genrsa')).be.undefined();
   });
@@ -134,6 +136,8 @@ describe('the credential test that refuses a copy', () => {
       should(firstCredentialLine(token)).equal(1);
       should(firstCredentialLine(`one\nuse it: "${token}" now`)).equal(2);
       should(firstCredentialLine(`env FOO=${token}`)).equal(1);
+      should(firstCredentialLine(`Use ${token}.`)).equal(1);
+      should(firstCredentialLine(`one\nUse ${token}. Then stop.`)).equal(2);
     }
   });
 
@@ -169,6 +173,9 @@ describe('the credential test on a hostile file', () => {
     ['addresses with no end', repeated('http://a:b')],
     ['question marks and ampersands', repeated('x?token=&')],
     ['PEM openings that never close', repeated('-----BEGIN ABC DEF ')],
+    ['PGP openings that never close', repeated('-----BEGIN PGP PRIVATE KEY ')],
+    ['a word made of full stops', `ghp_${'.'.repeat(SIZE)}`],
+    ['full stops one to a word', repeated('. ')],
     ['token prefixes that never reach the length', repeated('ghp_1 ')],
     ['lines', repeated('a\n')],
     ['joined lines', repeated('api_\nkey\n')],
