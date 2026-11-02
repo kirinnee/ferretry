@@ -283,6 +283,17 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
+  { name: 'agenda query', schema: agenda.AgendaOpenQuerySchema, value: { after: 'session-1', limit: 50 } },
+  {
+    name: 'agenda roll-up session',
+    schema: agenda.AgendaOpenSessionSchema,
+    value: { sessionId: 'session-1', items: [agendaItem] },
+  },
+  {
+    name: 'agenda roll-up page',
+    schema: agenda.AgendaOpenPageSchema,
+    value: { sessions: [{ sessionId: 'session-1', items: [agendaItem] }], next: 'session-1' },
+  },
   { name: 'attention input pointer', schema: agenda.AgendaInputRefSchema, value: { requestId: 'a'.repeat(32) } },
   { name: 'gate outcome', schema: agenda.AgendaGateOutcomeSchema, value: 'reopen-with-agenda' },
   {
