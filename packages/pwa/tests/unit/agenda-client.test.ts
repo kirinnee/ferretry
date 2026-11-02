@@ -88,6 +88,23 @@ describe('attention transport', () => {
     should(JSON.parse(String(calls[2]?.init.body))).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
+  it('dials the machine agenda for the @machine scope', async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(input), method: init?.method });
+      return response(snapshot('@machine'));
+    };
+    const machine = daemonSessionScope(daemonA, '@machine');
+
+    await fetchAgendaSnapshot(daemonA, machine, fetcher);
+    await applyAgendaAction(daemonA, machine, { action: 'dismiss', id: 'A1' }, fetcher);
+
+    should(calls).deepEqual([
+      { url: 'https://a.example.test/v1/machine/agenda', method: 'GET' },
+      { url: 'https://a.example.test/v1/machine/agenda', method: 'POST' },
+    ]);
+  });
+
   it('rejects mismatched scopes, malformed responses, and daemon failures', async () => {
     await should(fetchAgendaSnapshot(daemonA, scopeB, async () => response(snapshot('same/session')))).be.rejectedWith(
       'attention scope must belong to the requested daemon',

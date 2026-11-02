@@ -89,6 +89,20 @@ describe('an orphaned card', () => {
     should(journalTypes(subject)).containEql('fleet.warden_orphan_cleared');
   });
 
+  it('should say nothing cleared, and keep the card remembered, when the machine agenda refuses to take it off', async () => {
+    // Arrange
+    const board = boardPort(boardOf(orphanView()));
+    const subject = harness({ config: enabled(), fleet: [worker], board, removeFails: true });
+
+    // Act
+    await subject.service.run({ force: false });
+    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_cleared');
+  });
+
   it('should be shown but told to nobody while the Warden is off', async () => {
     // Arrange
     const subject = harness({

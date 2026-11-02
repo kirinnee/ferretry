@@ -189,6 +189,8 @@ export function harness(
     readonly exchanges?: WardenExchangeReader;
     /** Force every card notice to one outcome. */
     readonly noticeWrite?: WardenAgendaWrite;
+    /** Make the machine agenda refuse to take a card off its orphan list. */
+    readonly removeFails?: boolean;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
     readonly raiseWrite?: WardenAgendaWrite;
     /** The Jev guard's answer to each question set, in order; the last one repeats. */
@@ -352,6 +354,7 @@ export function harness(
           notices.push({ sessionId: 'machine', notice });
       },
       remove: async taskId => {
+        if (options.removeFails === true) throw new Error('the machine agenda refused');
         resolved.push({ sessionId: 'machine', sourceRef: `warden-orphan:${taskId}`, note: 'orphan cleared' });
       },
     },
