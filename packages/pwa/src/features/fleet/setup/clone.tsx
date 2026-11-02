@@ -595,7 +595,7 @@ export function CloneMachine(props: CloneMachineProps) {
                 status="needs_sign_in"
                 statusLabel="Doesn’t copy"
                 title={countWords(preview.signIns, 'sign-in')}
-                detail={`Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. Each becomes an empty slot on ${machineName}; sign in there. Runtimes keep pointing at their slot.`}
+                detail={`Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. A sign-in ${machineName} already has (same account) is reused, not added again; each other becomes an empty slot on ${machineName}; sign in there. Runtimes keep pointing at their login.`}
               />
             ) : null}
             <SetupRow

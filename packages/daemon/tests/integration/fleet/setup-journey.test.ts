@@ -65,7 +65,10 @@ interface Machine {
   readonly secrets: Map<string, string>;
 }
 
-async function machine(name: string, options: { readonly claude: boolean }): Promise<Machine> {
+async function machine(
+  name: string,
+  options: { readonly claude: boolean; readonly emails?: Readonly<Record<string, string>> },
+): Promise<Machine> {
   const root = await temporary();
   const home = await configHome(path.join(root, 'state'));
   const fleet = home.paths.fleet;
@@ -81,7 +84,11 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
   }
   const secrets = new Map<string, string>();
   const credentials = {
-    list: async () => ({ format: 2 as const, machine: name, credentials: [] }),
+    list: async () => ({
+      format: 2 as const,
+      machine: name,
+      credentials: Object.entries(options.emails ?? {}).map(([id, email]) => ({ id, email })) as never,
+    }),
     signOut: async () => {
       throw new Error('not exercised');
     },
@@ -690,4 +697,76 @@ describe('the export writes its origin keys into state over real files', () => {
     if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
     should(Object.keys(bundle.keys).length).be.above(0);
   });
+});
+
+/** A machine whose person is already signed in to Claude Code as `kirin@example.test`, with a runtime on that login. */
+async function reusedLoginTarget(name: string): Promise<Machine> {
+  const target = await machine(name, { claude: false, emails: { 'claude-kirin': 'kirin@example.test' } });
+  const steps = [
+    { kind: 'credential.add', id: 'claude-kirin', harness: 'claude' },
+    { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
+    { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
+    { kind: 'runtime.put', name: 'mine', credential: 'claude-kirin', profile: 'plain', agent: true, create: true },
+  ];
+  for (const step of steps) {
+    const staged = await target.catalog.propose(step as never);
+    await target.catalog.apply(staged.id, { governed: false } as never);
+  }
+  const claude = path.join(target.userHome, '.claude');
+  await mkdir(claude, { recursive: true });
+  await writeFile(path.join(claude, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
+  target.secrets.set('KEEP_ME', 'placeholder-secret-one');
+  target.secrets.set('JEV_API_KEY', 'placeholder-secret-two');
+  return target;
+}
+
+/** Everything that is a sign-in or a secret on a machine, as bytes, so a copy can be compared before and after. */
+async function signInState(on: Machine): Promise<Record<string, string>> {
+  const state: Record<string, string> = {};
+  const read = async (root: string, keep: (file: string) => boolean, label: string): Promise<void> => {
+    const files = await filesUnder(root).catch(() => [] as string[]);
+    for (const file of files.filter(keep)) state[`${label}/${file}`] = await readFile(path.join(root, file), 'utf8');
+  };
+  await read(on.home.paths.config, file => file.startsWith('logins/'), 'config');
+  await read(on.fleet, file => file.startsWith('credentials/'), 'fleet');
+  await read(path.join(on.userHome, '.claude'), file => file === '.credentials.json', 'claude');
+  for (const [name, value] of on.secrets) state[`secret/${name}`] = value;
+  return state;
+}
+
+describe('Clone reuses a login the target already has, and never touches it (design §14.4)', () => {
+  /** The source machine, signed in under an email that differs from the target's only by case. */
+  async function source(): Promise<ReturnType<typeof FleetCloneBundleSchema.parse>> {
+    const studio = await machine('studio', { claude: true, emails: { 'claude-you': 'Kirin@Example.TEST' } });
+    await importHost(studio);
+    return FleetCloneBundleSchema.parse(await studio.setup.exportBundle());
+  }
+
+  for (const mode of ['alongside', 'replace'] as const) {
+    it(`should point the copied runtime at the existing login in ${mode} mode and leave its sign-in and secrets byte-identical`, async () => {
+      // Arrange
+      const bundle = await source();
+      should(bundle.credentials.map(credential => credential.email)).deepEqual(['Kirin@Example.TEST']);
+      const target = await reusedLoginTarget('work-linux');
+      const before = await signInState(target);
+      should(Object.keys(before)).containEql('claude/.credentials.json');
+      should(Object.keys(before)).containEql('secret/KEEP_ME');
+
+      // Act
+      const staged = await target.catalog.propose({ kind: 'clone.import', mode, bundle });
+      const outcome = await target.catalog.apply(staged.id, { governed: false } as never);
+
+      // Assert: no new slot, the copied runtime uses the login that was already here, nothing about it changed.
+      should(outcome).deepEqual({
+        outcome: 'executed',
+        executor: 'clone',
+        summary: 'Copied 1 runtime from studio. Already signed in here, no new sign-in: kirin@example.test.',
+      });
+      should(JSON.stringify(staged.preview)).containEql('kirin@example.test — already here, no new sign-in');
+      const model = await declared(target);
+      should(Object.keys(model.credentials)).deepEqual(['claude-kirin']);
+      should(model.runtimes['claude-default']?.credential).equal('claude-kirin');
+      should(await signInState(target)).deepEqual(before);
+    });
+  }
 });

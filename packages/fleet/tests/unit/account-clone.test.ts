@@ -1649,3 +1649,256 @@ describe('planClone default runtime for new agents', () => {
     should(refusal.message).not.containEql('studio-mac');
   });
 });
+
+describe('planClone reuses a login the target already has (L2)', () => {
+  const signedIn = (): AccountModel =>
+    parseAccountModel({
+      version: 2,
+      credentials: {
+        'claude-kirin': { harness: 'claude', store: 'host', label: 'kirin' },
+        'codex-kirin': { harness: 'codex', store: 'ferretry', label: 'kirin' },
+      },
+    });
+  const emails = { 'claude-kirin': 'kirin@example.test', 'codex-kirin': 'kirin@example.test' };
+  const claudeBundle = (credential: Record<string, unknown>): FleetCloneBundle =>
+    bundleWith({ credentials: [{ id: 'claude-you', harness: 'claude', ...credential }] });
+
+  it('should match by email, case-insensitively, create no slot and point the runtimes at the login here', () => {
+    // Arrange
+    const bundle = claudeBundle({ label: 'you', email: 'Kirin@Example.TEST' });
+
+    // Act
+    const plan = planClone(signedIn(), bundle, options({ targetEmails: emails }));
+
+    // Assert
+    should(plan.slots).deepEqual([]);
+    should(plan.renamed).deepEqual([]);
+    should(plan.model.credentials).deepEqual(signedIn().credentials);
+    should(plan.model.runtimes['claude-default']).deepEqual({
+      credential: 'claude-kirin',
+      profile: 'default',
+      agent: false,
+    });
+    should(plan.logins).deepEqual([
+      {
+        sourceId: 'claude-you',
+        outcome: 'matched',
+        harness: 'claude',
+        target: 'claude-kirin',
+        name: 'kirin@example.test',
+        runtimes: ['claude-default'],
+      },
+    ]);
+  });
+
+  it('should fall back to the label, exactly, when neither side has an email', () => {
+    // Act
+    const matched = planClone(signedIn(), claudeBundle({ label: 'kirin' }), options());
+    const other = planClone(signedIn(), claudeBundle({ label: 'Kirin' }), options());
+
+    // Assert
+    should(matched.logins.map(login => [login.outcome, login.target, login.name])).deepEqual([
+      ['matched', 'claude-kirin', 'kirin'],
+    ]);
+    should(matched.slots).deepEqual([]);
+    should(other.logins.map(login => login.outcome)).deepEqual(['slot']);
+  });
+
+  it('should not match by label when only one side has an email, nor by email when the label differs', () => {
+    // Act
+    const sourceHasEmail = planClone(
+      signedIn(),
+      claudeBundle({ label: 'kirin', email: 'other@example.test' }),
+      options(),
+    );
+    const targetHasEmail = planClone(signedIn(), claudeBundle({ label: 'kirin' }), options({ targetEmails: emails }));
+    const emailWins = planClone(
+      signedIn(),
+      claudeBundle({ label: 'different', email: 'kirin@example.test' }),
+      options({ targetEmails: emails }),
+    );
+
+    // Assert
+    should(sourceHasEmail.logins.map(login => login.outcome)).deepEqual(['slot']);
+    should(targetHasEmail.logins.map(login => login.outcome)).deepEqual(['slot']);
+    should(emailWins.logins.map(login => [login.outcome, login.target])).deepEqual([['matched', 'claude-kirin']]);
+  });
+
+  it('should never match a login of another harness, even with the same email', () => {
+    // Arrange
+    const bundle = bundleWith({
+      credentials: [{ id: 'codex-you', harness: 'codex', email: 'kirin@example.test' }],
+      runtimes: { 'codex-default': { credential: 'codex-you', profile: 'default', agent: false } },
+    });
+    const target = parseAccountModel({
+      version: 2,
+      credentials: { 'claude-kirin': { harness: 'claude', store: 'host' } },
+    });
+
+    // Act
+    const plan = planClone(target, bundle, options({ targetEmails: { 'claude-kirin': 'kirin@example.test' } }));
+
+    // Assert
+    should(plan.logins.map(login => [login.outcome, login.harness, login.target])).deepEqual([
+      ['slot', 'codex', 'codex-you'],
+    ]);
+    should(plan.slots.map(slot => slot.id)).deepEqual(['codex-you']);
+  });
+
+  it('should ask, and add an empty slot for now, when two logins here fit', () => {
+    // Arrange
+    const target = parseAccountModel({
+      version: 2,
+      credentials: {
+        'claude-a': { harness: 'claude', store: 'host', label: 'a' },
+        'claude-b': { harness: 'claude', store: 'ferretry', label: 'b' },
+      },
+    });
+    const bundle = claudeBundle({ email: 'kirin@example.test' });
+
+    // Act
+    const plan = planClone(
+      target,
+      bundle,
+      options({ targetEmails: { 'claude-a': 'kirin@example.test', 'claude-b': 'KIRIN@example.test' } }),
+    );
+    const lines = describeClone(plan, bundle, 'work-linux');
+
+    // Assert
+    should(plan.logins).deepEqual([
+      {
+        sourceId: 'claude-you',
+        outcome: 'ask',
+        harness: 'claude',
+        target: 'claude-you',
+        name: 'kirin@example.test',
+        candidates: ['claude-a', 'claude-b'],
+        runtimes: ['claude-default'],
+      },
+    ]);
+    should(plan.slots.map(slot => slot.id)).deepEqual(['claude-you']);
+    should(lines).containEql(
+      'Login kirin@example.test could be any of claude-a, claude-b on work-linux, so it is not matched to one: it is added as an empty slot that needs sign-in.',
+    );
+  });
+
+  it('should reuse the login in Replace too, and leave every login of the target exactly as it was', () => {
+    // Arrange
+    const target = parseAccountModel({
+      version: 2,
+      credentials: {
+        'claude-kirin': { harness: 'claude', store: 'host', label: 'kirin', clonedFrom: 'older-mac' },
+        'codex-kirin': { harness: 'codex', store: 'ferretry', label: 'kirin' },
+      },
+      components: { instructions: { main: { file: 'components/instructions/main.md' } } },
+      profiles: { default: { layers: ['instructions/main'] } },
+      runtimes: { 'claude-default': { credential: 'claude-kirin', profile: 'default' } },
+    });
+
+    // Act
+    const plan = planClone(
+      target,
+      claudeBundle({ email: 'kirin@example.test' }),
+      options({ mode: 'replace', targetEmails: emails }),
+    );
+
+    // Assert
+    should(plan.model.credentials).deepEqual(target.credentials);
+    should(plan.slots).deepEqual([]);
+    should(plan.renamed).deepEqual([]);
+    should(plan.removed.runtimes).equal(1);
+    should(plan.model.runtimes['claude-default']?.credential).equal('claude-kirin');
+  });
+
+  it('should not sign-in match an environment login: it is config and copies as it always did', () => {
+    // Arrange
+    const bundle = bundleWith({
+      credentials: [
+        {
+          id: 'claude-you',
+          harness: 'claude',
+          label: 'kirin',
+          email: 'kirin@example.test',
+          store: 'environment',
+          env: { ANTHROPIC_BASE_URL: 'https://gateway.example.test' },
+        },
+      ],
+    });
+
+    // Act
+    const plan = planClone(signedIn(), bundle, options({ targetEmails: emails }));
+
+    // Assert
+    should(plan.logins).deepEqual([]);
+    should(plan.model.credentials['claude-you']?.store).equal('environment');
+    should(plan.model.runtimes['claude-default']?.credential).equal('claude-you');
+  });
+
+  it('should never match an environment login on the target', () => {
+    // Arrange
+    const target = parseAccountModel({
+      version: 2,
+      credentials: {
+        'claude-keys': {
+          harness: 'claude',
+          store: 'environment',
+          label: 'kirin',
+          env: { ANTHROPIC_BASE_URL: 'https://gateway.example.test' },
+        },
+      },
+    });
+
+    // Act
+    const plan = planClone(target, claudeBundle({ label: 'kirin' }), options());
+
+    // Assert
+    should(plan.logins.map(login => login.outcome)).deepEqual(['slot']);
+  });
+
+  it('should say a reused login is already here, with no new sign-in, and keep the slot sentence to the others', () => {
+    // Arrange
+    const bundle = bundleWith({
+      credentials: [
+        { id: 'claude-you', harness: 'claude', email: 'kirin@example.test' },
+        { id: 'claude-spare', harness: 'claude', label: 'spare' },
+      ],
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
+        'claude-spare': { credential: 'claude-spare', profile: 'default', agent: false },
+      },
+    });
+    const plan = planClone(signedIn(), bundle, options({ targetEmails: emails }));
+
+    // Act
+    const lines = describeClone(plan, bundle, 'work-linux');
+
+    // Assert
+    should(lines).containEql('Login kirin@example.test — already here, no new sign-in (used by 1 runtime).');
+    should(lines.find(line => line.startsWith("Doesn't copy"))).startWith("Doesn't copy 1 login:");
+    should(plan.slots.map(slot => slot.id)).deepEqual(['claude-spare']);
+  });
+
+  it('should send two source logins of one account to the one login here', () => {
+    // Arrange
+    const bundle = bundleWith({
+      credentials: [
+        { id: 'claude-you', harness: 'claude', label: 'one', email: 'kirin@example.test' },
+        { id: 'claude-two', harness: 'claude', label: 'two', email: 'kirin@example.test' },
+      ],
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
+        'claude-other': { credential: 'claude-two', profile: 'default', agent: false },
+      },
+    });
+
+    // Act
+    const plan = planClone(signedIn(), bundle, options({ targetEmails: emails }));
+
+    // Assert
+    should(plan.logins.map(login => [login.sourceId, login.target, login.runtimes])).deepEqual([
+      ['claude-you', 'claude-kirin', ['claude-default']],
+      ['claude-two', 'claude-kirin', ['claude-other']],
+    ]);
+    should(plan.slots).deepEqual([]);
+  });
+});

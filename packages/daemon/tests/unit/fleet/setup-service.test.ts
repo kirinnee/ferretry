@@ -1151,6 +1151,55 @@ describe('the clone.import executor', () => {
     );
   });
 
+  it('should reuse a login this machine already has, by email, and say there is no new sign-in', async () => {
+    // Arrange
+    const { service, applied, state } = world();
+    state.reading = configReading(
+      parseAccountModel({ version: 2, credentials: { 'claude-mine': { harness: 'claude', store: 'ferretry' } } }),
+      'r',
+    );
+    state.emails = async () => [credentialRow('claude-mine', 'YOU@example.com')];
+    const change = { kind: 'clone.import', mode: 'alongside', bundle: BUNDLE() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+    // Act
+    const description = await service.executors.clone.describe(change);
+    const summary = await service.executors.clone.execute(change);
+
+    // Assert
+    should(description).containEql('Login YOU@example.com — already here, no new sign-in (used by 1 runtime).');
+    should(description).not.containEql('needs sign-in');
+    should(summary).equal('Copied 1 runtime from work-mac. Already signed in here, no new sign-in: YOU@example.com.');
+    const config = configTextOf(applied[0]?.documents ?? []);
+    should(config).containEql('credential: claude-mine');
+    should(config).not.containEql('claude-you');
+  });
+
+  it('should add an empty slot, as before, when this machine cannot tell which account its logins are', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = configReading(
+      parseAccountModel({ version: 2, credentials: { 'claude-mine': { harness: 'claude', store: 'ferretry' } } }),
+      'r',
+    );
+    state.emails = async () => {
+      throw new Error('down');
+    };
+    const change = { kind: 'clone.import', mode: 'alongside', bundle: BUNDLE() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+    // Act
+    await service.executors.clone.describe(change);
+    const summary = await service.executors.clone.execute(change);
+
+    // Assert
+    should(summary).equal('Copied 1 runtime from work-mac. Sign in once for 1 runtime: you@example.com.');
+  });
+
   it('should leave out what the person skipped and record the source daemon the browser verified', async () => {
     // Arrange
     const { service, applied } = world();

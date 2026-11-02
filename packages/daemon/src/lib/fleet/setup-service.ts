@@ -680,6 +680,7 @@ export class FleetSetupService {
         installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
         existingSkillItems: await this.deps.skillItems(),
         existingSecrets: await this.deps.secrets.names().catch(() => []),
+        targetEmails: await this.#emails(),
         ...(change.skip === undefined ? {} : { skip: change.skip }),
         ...(change.source === undefined ? {} : { sourceDaemon: change.source.daemonId }),
         ...(change.names === undefined ? {} : { sourceName: change.names.source }),
@@ -695,6 +696,7 @@ export class FleetSetupService {
     const record = await this.#cloneBaseDocument(change, plan, source);
     const documents = await this.#documents(reading, plan.model, plan.files, record === undefined ? [] : [record]);
     const busiest = plan.slots.toSorted((left, right) => right.runtimes.length - left.runtimes.length)[0];
+    const reused = plan.logins.filter(login => login.outcome === 'matched').map(login => login.name);
     return {
       model: plan.model,
       documents,
@@ -702,6 +704,7 @@ export class FleetSetupService {
       lines: describeClone(plan, bundle, machine, change.names?.source),
       summary: [
         `Copied ${plural(plan.copied.runtimes, 'runtime')} from ${change.names?.source ?? bundle.machine}.`,
+        ...(reused.length === 0 ? [] : [`Already signed in here, no new sign-in: ${reused.join(', ')}.`]),
         ...(busiest === undefined || busiest.runtimes.length === 0
           ? []
           : [

@@ -386,7 +386,7 @@ describe('CloneMachine · Preview', () => {
       const notCopied = screen.text('[data-setup-section="not-copied"]');
       expect(notCopied).toContain('2 sign-ins');
       expect(notCopied).toContain(
-        'Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. Each becomes an empty slot on studio-mac; sign in there. Runtimes keep pointing at their slot.',
+        'Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. A sign-in studio-mac already has (same account) is reused, not added again; each other becomes an empty slot on studio-mac; sign in there. Runtimes keep pointing at their login.',
       );
       expect(notCopied).toContain('History and device settings');
       expect(notCopied).toContain(
