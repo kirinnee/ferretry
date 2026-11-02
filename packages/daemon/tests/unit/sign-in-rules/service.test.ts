@@ -1,7 +1,5 @@
 import { describe, it } from 'bun:test';
 import {
-  DAEMON_FEATURES,
-  daemonFeatureList,
   SIGN_IN_RULE_CLOCK_SKEW_SECONDS,
   SIGN_IN_RULE_DEFAULT_SECONDS,
   SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
@@ -826,59 +824,12 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
   });
 });
 
-// Owner decision !A226: this build reports `sign-in-rules-terminal.1`, so sudo, su and doas can have a rule.
-describe('terminal rules as this build reports them', () => {
-  const built = daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal);
-
-  it('should stage sudo, su and doas as root rules, and still refuse ssh, with this build’s features', async () => {
-    // Arrange — sudo, su and doas on this machine and ssh to another, each with the owner's terminal taps
-    const base = listing();
-    const tool = (id: string, place: { tool: string; host: string; dest?: string }) =>
-      signIn({
-        id: id as never,
-        account: 'SUDO' as never,
-        place: { kind: 'terminal', ...place },
-        observed: [{ ...tappedFact(`${place.tool}@${place.dest ?? place.host}`), surface: 'terminal' }],
-      } as never);
-    const SU = 'si_00000000000000c1';
-    const DOAS = 'si_00000000000000c2';
-    const SSH = 'si_00000000000000c3';
-    const w = await world({
-      terminalRules: built,
-      listing: {
-        ...base,
-        signIns: [
-          ...base.signIns,
-          tool(SU, { tool: 'su', host: 'kirin-box' }),
-          tool(DOAS, { tool: 'doas', host: 'kirin-box' }),
-          tool(SSH, { tool: 'ssh', host: 'kirin-box', dest: 'prod.example.com' }),
-        ],
-      } as never,
-    });
-
-    // Act
-    const staged = [];
-    for (const each of [SUDO, SU, DOAS])
-      staged.push(await w.service.stage(deviceOwner(), { signIn: each as never, fields: ['password'] }));
-    const ssh = await refusal(w.service.stage(deviceOwner(), { signIn: SSH as never, fields: ['password'] }));
-
-    // Assert
-    should(built).be.true();
-    should(staged.map(each => [each.root, each.fields, each.place.kind])).eql([
-      [true, ['password'], 'terminal'],
-      [true, ['password'], 'terminal'],
-      [true, ['password'], 'terminal'],
-    ]);
-    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({ signIn: SUDO, eligible: true });
-    should([ssh.status, ssh.code]).eql([409, 'tool_not_covered']);
-    should(await w.service.eligibility(deviceOwner(), SSH as never)).eql({
-      signIn: SSH,
-      eligible: false,
-      because: 'tool-not-covered',
-    });
-  });
-
-  for (const [name, terminalRules] of [['no gate wired at all', 'absent']] as const)
+// secrev-1301 / lizzette (b): with `sign-in-rules-terminal.1` off, no terminal rule can be made.
+describe('terminal rules stay off until sign-in-rules-terminal.1 is reported', () => {
+  for (const [name, terminalRules] of [
+    ['the gate off', false],
+    ['no gate wired at all', 'absent'],
+  ] as const)
     it(`should refuse to stage sudo and say it is not covered, with ${name}, before any passkey`, async () => {
       // Arrange
       const w = await world({ terminalRules });

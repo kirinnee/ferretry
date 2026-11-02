@@ -658,12 +658,11 @@ kernel, not by its name**: what reads the password is a setuid program root inst
 it starts as `sudo` (`passwd` started under that name would get it). With full sudo that gives nothing beyond the rule
 itself; under a restricted sudoers it could set a password the ferret then knows.
 
-**Its own feature, now reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time
-name in the protocol's daemon features. Nothing reads it from config, the environment, a route or a file. This build
-reports it (owner decision !A226, with the risk below accepted), and a terminal rule still fills only beside
-`sign-in-rules.1`: while that is not reported, every sign-in is a plain card. A build that does not report it refuses
-to stage a sudo, su or doas rule (`409 tool_not_covered`), says the same in the eligibility, and offers no terminal
-rule to the matcher, so a terminal rule already in the file never fills there.
+**Off until it is reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time name in
+the protocol's daemon features that this build does not report, even once `sign-in-rules.1` is. Nothing reads it from
+config, the environment, a route or a file. Until a build reports it, staging a sudo, su or doas rule answers `409
+tool_not_covered`, the eligibility says the same, and the fills offer no terminal rule to the matcher, so a terminal rule
+already in the file never fills.
 
 **The race that remains, said exactly** (secrev-1301 M1). Between the daemon's last kernel look and tmux's guarded
 write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
@@ -679,12 +678,6 @@ before anything is checked again. What a rule adds is that the swap is SEEN and 
 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
 audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
-
-**Accepted risk (owner, 2026-11-01).** The owner switched sudo rules on knowing this: in the split second between
-Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
-and that program could read the password once. Ferretry then notices, stops the rule and tells the owner, so the same
-approval can never be used to try again. A sudo rule also means every ferret can get root on this machine while the rule
-lasts, which is why it is red, lasts one day unless the owner picks longer, and never more than seven.
 
 ### Strict, and fails closed
 
