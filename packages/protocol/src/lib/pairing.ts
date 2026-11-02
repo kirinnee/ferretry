@@ -224,11 +224,13 @@ export function isDialableLinkAddress(address: string): boolean {
  * the same string. An unrecognised field name — `relay=` included — is IGNORED rather than honoured: the
  * writer emits none, and a reader that dialled one would be trusting an address the daemon never authored.
  * One name is refused rather than ignored: `share`, which only a catalog share link carries, so a link
- * holding both a pairing code and a share code is read by neither reader.
+ * holding both a pairing code and a share code is read by neither reader. `k`, which only a download link carries, is
+ * refused the same way.
  */
 export function parsePairingFragment(fragment: string): PairingLinkSeed {
   const fields = readLinkFragmentFields(fragment, 'pairing link');
   if (fields.has('share')) throw new Error('this is a share link, not a pairing link');
+  if (fields.has('k')) throw new Error('this is a download link, not a pairing link');
   const daemonUrl = fields.get('url');
   const code = fields.get('code');
   const fingerprint = fields.get('fp');

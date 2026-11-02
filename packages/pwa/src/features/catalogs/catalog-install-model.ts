@@ -49,6 +49,8 @@ const VERIFICATION_SENTENCES: Readonly<Record<CatalogVerificationRefusal, string
     'An item in this file is not the one its signed list describes, so it was not opened. Nothing was installed.',
   not_canonical: 'An item in this file cannot be checked, so it was not opened. Nothing was installed.',
   manifest_invalid: 'The signed list in this file is not valid, so it was not opened. Nothing was installed.',
+  link_mismatch: 'This file is not the link it says it is, so it was not opened. Nothing was installed.',
+  link_stale: 'This link has ended, so it was not opened. Nothing was installed.',
 };
 
 export interface OpenedCatalogFile {

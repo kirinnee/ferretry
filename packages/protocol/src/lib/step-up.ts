@@ -74,6 +74,7 @@ export const StepUpActSchema = z.enum([
   'loosen-security',
   'catalog-install',
   'share-catalog',
+  'share-link',
   'add-2fa-key',
   'allow-profile-targets',
   'approve-task-plan',
@@ -389,6 +390,13 @@ export const STEP_UP_ACTS = {
    * what the catalog holds, so every code wants a passkey proved for it alone, like a pairing code.
    */
   shareCatalog: 'share-catalog',
+  /**
+   * Publishing one item as a link anyone holding it can install; a copy cannot be recalled. Making a link, moving a
+   * public one to another version and lengthening or uncapping it each want a passkey proved for this act alone: a
+   * `share-catalog` proof never buys a link and the reverse. Copying a link needs only the unlock; turning one off
+   * never asks (catalogs 3f; the act is confirmed).
+   */
+  shareLink: 'share-link',
   /**
    * Saving a 2FA seed, so Ferretry makes that account's codes (docs/input-requests.md, "Accounts and sign-ins"). Then the
    * password and the code come from one machine, and the admin token every ferret holds could otherwise add a seed to

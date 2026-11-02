@@ -1,9 +1,11 @@
 import { describe, it } from 'bun:test';
+import { LINK_ITEM_CATALOG_ID } from '@ferretry/protocol';
 import should from 'should';
 import {
   defaultMcpSummary,
   fingerprint,
   freezeItem,
+  NORMALISED_CATALOG_ID,
   NORMALISED_ITEM_ID,
   readItem,
   skillOf,
@@ -100,5 +102,11 @@ describe('summaries', () => {
     should(typeof skillOf([{ path: 'a.md', content: 'x' }])).equal('string');
     should(skillOf([])).be.a.String();
     should(defaultMcpSummary('files')).equal('MCP server files');
+  });
+});
+
+describe('the placeholder catalog id', () => {
+  it('should be the one a link item names, so a link item and a kept copy hash alike', () => {
+    should(NORMALISED_CATALOG_ID).equal(LINK_ITEM_CATALOG_ID);
   });
 });
