@@ -22,6 +22,7 @@ import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from 
 import { referencesOf } from '../lib/answer-chip.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
 import { formatAttachmentSize } from '../lib/attachments.ts';
+import { useComposerDockLayout } from '../lib/composer-dock-layout.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
@@ -234,11 +235,11 @@ export interface ComposerProps {
  * Growth is capped for the opposite reason — a pasted essay must not swallow
  * the conversation it is about.
  *
- * THE PHONE COMPOSER IS ONE LINE WHEN EMPTY (owner, 2026-10-30: an empty one took
- * about 260px of the screen) and A WRITING SURFACE ONCE THERE IS A DRAFT (owner: "make
- * buttons vertical so there's more space for typing"): empty, its controls sit inline
- * (`.fy-composer-dock`); with a draft they stack in a column on each side, so the field
- * takes the width between — `[data-composer-layout='phone']` in session-screens.css.
+ * THE PHONE COMPOSER'S BUTTONS ARE LAID OUT AS THE READER CHOSE (Settings › Composer › Button
+ * layout, `lib/composer-dock-layout.ts`): stacked in a column on each side by default, so nothing
+ * moves on focus or as typing starts (owner, 2026-11-02, !A237); one row on each side; or auto,
+ * a row while empty and stacked once there is a draft. The field takes the width between —
+ * `[data-composer-layout='phone']` in session-screens.css.
  * It grows as the owner types, to ten lines at rest, and while the keyboard is up its
  * ceiling drops to six: with ~430px of visible viewport the turn being answered has to stay
  * readable above the box (the status line also steps aside then; see
@@ -468,6 +469,8 @@ export function Composer({
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
   const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
+  /** A press that ended a composition, waiting for the render that holds the word it read (`submit`). */
+  const [resubmit, setResubmit] = useState<{ readonly interrupt: boolean } | null>(null);
   const [error, setError] = useState<SendFailure | null>(null);
   /** The person's own unsent text the agent's box held when this send was refused, and the last tap's fate. */
   const [occupied, setOccupied] = useState<{
@@ -492,6 +495,8 @@ export function Composer({
   // A reader preference, not daemon data: it changes only how this browser
   // edits a draft, so a daemon switch must not change the editor chrome.
   const editorStyle = useMdComposePref();
+  /** How the phone composer lays out its buttons (Settings › Composer › Button layout). */
+  const dockLayout = useComposerDockLayout();
   /** Markdown (Notion-style) and Rich text both edit through the live editor; Plain is a textarea. */
   const formatting = editorStyle !== 'off';
   const rich = editorStyle === 'rich';
@@ -852,6 +857,12 @@ export function Composer({
 
   const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
+    // The word a phone keyboard is still composing is part of the message: the composition ends here,
+    // and when that changed the text this press goes once the composer holds it (the effect below).
+    if (inputRef.current?.endComposition?.() === true) {
+      setResubmit({ interrupt });
+      return;
+    }
     submitLock.current = true;
     // What this press sends, remembered against everything typed before it lands.
     const mark = shared.markSend();
@@ -935,6 +946,14 @@ export function Composer({
       setSending(false);
     }
   };
+
+  // The press again, now that the draft (and the shared draft's copy of it) holds the composed word.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `submit` is this render's, which is the point
+  useEffect(() => {
+    if (resubmit === null) return;
+    setResubmit(null);
+    void submit(resubmit.interrupt);
+  }, [resubmit]);
 
   const resolvingLock = useRef(false);
   /**
@@ -1335,6 +1354,7 @@ export function Composer({
       data-composer-dropping={dropping ? '' : undefined}
       data-composer-empty={draft.trim() === '' ? '' : undefined}
       data-composer-layout={compact ? 'phone' : undefined}
+      data-composer-dock-layout={compact ? dockLayout : undefined}
       data-composer-style={editorStyle}
       onDragLeave={() => setDropping(false)}
       onDragOver={event => {
@@ -1431,7 +1451,7 @@ export function Composer({
       ) : null}
       <div className="fy-composer-row">
         {/* THE PHONE ROW: attach and the mic on the LEFT, Interrupt & send and Send on the RIGHT, the field
-            between them — inline while the field is empty, stacked in two columns once there is a draft.
+            between them — laid out as Settings › Composer › Button layout says (`data-composer-dock-layout`).
             The interrupt's slot is held empty while the agent is idle, so the field never resizes when a
             turn starts or ends. A desktop keeps its one inline row. */}
         {compact ? (

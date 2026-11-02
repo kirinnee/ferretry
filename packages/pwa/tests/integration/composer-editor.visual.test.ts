@@ -359,6 +359,65 @@ describe('the composer in a real browser', () => {
     expect(idle.send.left).toBeGreaterThanOrEqual(idle.field.left + idle.field.width - 0.5);
   }, 60_000);
 
+  test('a phone composer lays its buttons out as Settings › Composer › Button layout says (B135)', async () => {
+    for (const theme of ['studio-light', 'studio-dark'])
+      for (const dock of ['stacked', 'row', 'auto'] as const) {
+        const scene = await open({ editor: 'on', theme, mic: '1', dock }, { phone: true });
+        try {
+          const { page } = scene;
+          const boxes = () =>
+            page.evaluate(() => {
+              const box = (selector: string) => {
+                const rect = (document.querySelector(selector) as Element).getBoundingClientRect();
+                return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+              };
+              return {
+                attach: box('[data-composer-attach]'),
+                mic: box('[data-composer-dock="start"] button:not([data-composer-attach])'),
+                send: box('[data-composer-send]'),
+                row: box('.fy-composer-row'),
+              };
+            });
+          const blurred = await boxes();
+          await page.locator(EDITOR).tap();
+          const focused = await boxes();
+          await page.keyboard.type('hello world');
+          const writing = await boxes();
+          await page.locator('[data-composer-send]').tap();
+          await page.waitForFunction(() => (window as unknown as { __sent: unknown[] }).__sent.length === 1);
+          const sent = await boxes();
+          const where = `${theme} ${dock}`;
+          expect(await draftOf(page)).toBe('');
+          // Focusing moves nothing in any layout, and Send puts the empty layout back exactly.
+          expect(focused, `${where}: focused against blurred`).toEqual(blurred);
+          expect(sent, `${where}: after Send against blurred`).toEqual(blurred);
+          const stacked = (measured: typeof blurred) =>
+            Math.abs(measured.mic.left - measured.attach.left) < 0.5 &&
+            measured.mic.top >= measured.attach.top + measured.attach.height - 0.5;
+          const inline = (measured: typeof blurred) =>
+            Math.abs(measured.mic.top - measured.attach.top) < 0.5 &&
+            measured.mic.left >= measured.attach.left + measured.attach.width - 0.5;
+          // Send sits on the bottom line with the mic in every layout.
+          for (const measured of [blurred, writing])
+            expect(
+              Math.abs(measured.send.top + measured.send.height - (measured.mic.top + measured.mic.height)),
+              `${where}: Send and the mic share the bottom line`,
+            ).toBeLessThan(0.5);
+          if (dock === 'auto') {
+            // The old switch, kept on purpose: inline while empty, stacked once there is a draft.
+            expect(inline(blurred), `${where}: inline while empty`).toBe(true);
+            expect(stacked(writing), `${where}: stacked while writing`).toBe(true);
+          } else {
+            // Stacked and One row never move as writing starts.
+            expect(writing, `${where}: writing against blurred`).toEqual(blurred);
+            expect((dock === 'stacked' ? stacked : inline)(blurred), `${where}: the chosen layout`).toBe(true);
+          }
+        } finally {
+          await scene.close();
+        }
+      }
+  }, 120_000);
+
   test("the composer takes the theme's own input and button tokens, so Neo's frame is not Studio's", async () => {
     const scene = await open({ editor: 'on', theme: 'studio-light', busy: '1' }, { phone: true });
     const read = async (theme: string) => {
