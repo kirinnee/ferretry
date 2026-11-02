@@ -1669,3 +1669,11 @@
   --chip-bg: var(--pend-bg);
   --chip-border: var(--pend-border);
 }
+.fy-filter-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-filter-menu__trigger {
+  max-width: 8.5rem;
+}

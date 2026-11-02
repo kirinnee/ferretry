@@ -31,7 +31,18 @@
  */
 
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, CloudOff, SkipForward, Users, X, Zap } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCheck,
+  ChevronRight,
+  CloudOff,
+  Laptop,
+  SkipForward,
+  Users,
+  X,
+  Zap,
+} from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
@@ -1444,20 +1455,35 @@ export function AgendaInboxPage({
           <KindFilterBar kind={kind} onChange={setKind} />
         )}
         {machines.length > 1 ? (
-          <select
-            aria-label="Machine"
-            className="fy-attn-inbox__machine"
-            data-agenda-machine=""
-            onChange={event => setMachine(event.target.value === '' ? null : (event.target.value as DaemonId))}
-            value={machineFilter ?? ''}
-          >
-            <option value="">All machines</option>
-            {machines.map(entry => (
-              <option key={entry.daemonId} value={entry.daemonId}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
+          phone ? (
+            <FilterMenu
+              choiceHook="data-agenda-machine-option"
+              choices={[
+                { value: '', label: 'All' },
+                ...machines.map(entry => ({ value: entry.daemonId as string, label: entry.name })),
+              ]}
+              hook="data-agenda-machine"
+              icon={<Laptop aria-hidden="true" size={14} />}
+              name="Machine"
+              onChange={next => setMachine(next === '' ? null : (next as DaemonId))}
+              value={machineFilter ?? ''}
+            />
+          ) : (
+            <select
+              aria-label="Machine"
+              className="fy-attn-inbox__machine"
+              data-agenda-machine=""
+              onChange={event => setMachine(event.target.value === '' ? null : (event.target.value as DaemonId))}
+              value={machineFilter ?? ''}
+            >
+              <option value="">All machines</option>
+              {machines.map(entry => (
+                <option key={entry.daemonId} value={entry.daemonId}>
+                  {entry.name}
+                </option>
+              ))}
+            </select>
+          )
         ) : null}
         {phone ? <FindToggle onChange={setQuery} query={query} /> : <FindBox onChange={setQuery} query={query} />}
         <PageThemeSwitch />

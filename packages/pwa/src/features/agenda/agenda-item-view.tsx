@@ -258,6 +258,7 @@ export function AgendaItemView({
             renderProse={renderProse}
             swipeable={swipeable}
             dismissAside={tools !== undefined}
+            typeShown={tools !== undefined}
             answerDock={dock}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}

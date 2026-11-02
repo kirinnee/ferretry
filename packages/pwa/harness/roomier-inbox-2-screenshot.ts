@@ -162,6 +162,12 @@ for (const form of ['phone', 'desktop'] as const) {
         head !== null && head.height <= 64,
         `${theme}: the phone's filter chrome is ${head?.height}px, more than one row`,
       );
+      const machineLabel = list.locator('[data-agenda-machine] .fy-filter-menu__label');
+      check((await machineLabel.textContent()) === 'All', `${theme}: the phone's machine menu does not say "All"`);
+      check(
+        await machineLabel.evaluate(element => element.scrollWidth <= element.clientWidth + 1),
+        `${theme}: the phone's machine menu label is cut`,
+      );
       await list.locator('[data-agenda-filter] button').click();
       const words = (await list.locator('[data-agenda-filter-option]').allTextContents()).join('|');
       check(
@@ -185,6 +191,10 @@ for (const form of ['phone', 'desktop'] as const) {
     check(
       (await agenda.locator('[data-card-kind="agenda"]:visible').count()) > 0,
       `${form} ${theme}: the agenda card has no AGENDA chip`,
+    );
+    check(
+      (await agenda.locator('[data-agenda-type]:visible').count()) === 0,
+      `${form} ${theme}: the agenda card says its kind twice`,
     );
     await snap(agenda, 'agenda-card-kind-chip');
     if (form === 'phone') await middleSwipes(agenda, 'agenda-card', '[data-agenda-frame]:visible');

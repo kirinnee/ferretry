@@ -234,6 +234,11 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(text).not.toMatch(/why now|what’s going on|what's going on|why it matters/iu);
   });
 
+  test('says the kind once: a host that draws the kind chip (the Inbox) gets no pill in the card', async () => {
+    await draw(richItem, { tools: <span data-test-tool="">tools</span> });
+    expect(root().querySelector('[data-agenda-type]')).toBeNull();
+  });
+
   test('teaches nothing: no hint line under the type, no ⋯ menu', async () => {
     await draw(richItem);
     expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');

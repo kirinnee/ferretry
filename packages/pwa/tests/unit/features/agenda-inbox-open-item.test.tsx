@@ -80,8 +80,11 @@ const topView = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
 const head = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-top]'), 'the item head');
-const cardTop = (mounted: Mounted): HTMLElement =>
-  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-card-top]'), 'the card top bar');
+const answerRow = (mounted: Mounted): HTMLElement =>
+  must(
+    mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-quick-replies]'),
+    'the answer row',
+  );
 /** The deck's own handle on a phone: the who-and-what line (the view's head and row swipe on their own there). */
 const whoLine = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'the who line');
@@ -178,9 +181,9 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
-  it('leaves a drag on a phone’s card top bar to the view: the deck neither stamps it nor moves the card', async () => {
+  it('leaves a drag on a phone’s answer row to the view: the deck neither stamps it nor moves the card', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(cardTop(mounted), 0, -200, false);
+    await swipeFrom(answerRow(mounted), 0, -200, false);
     expect(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]')).toBeNull();
     expect(mounted.container.querySelector('.fy-attn-deck__top')?.hasAttribute('data-dragging')).toBe(false);
     await mounted.unmount();

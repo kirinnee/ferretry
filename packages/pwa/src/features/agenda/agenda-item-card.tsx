@@ -55,6 +55,8 @@ export interface AgendaItemCardProps {
   readonly onSkip?: (() => void) | undefined;
   /** The host offers Not needed itself (under the head's ⓘ), so the card does not draw its own pill. */
   readonly dismissAside?: boolean | undefined;
+  /** The host already draws the kind chip (the Inbox's who line), so the card does not say the kind twice. */
+  readonly typeShown?: boolean | undefined;
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
@@ -267,6 +269,7 @@ export function AgendaItemCard({
   swipeable,
   onSkip,
   dismissAside = false,
+  typeShown = false,
   renderProse,
   onAct,
   onProgress,
@@ -383,9 +386,9 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      {gated && count <= 1 ? null : (
+      {(gated || typeShown) && count <= 1 && !canDismiss ? null : (
         <div className="fy-card__top" data-agenda-card-top="" {...pull}>
-          {gated ? null : (
+          {gated || typeShown ? null : (
             <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
               {meta.label}
             </span>

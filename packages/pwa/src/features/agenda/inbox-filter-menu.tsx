@@ -20,8 +20,8 @@ interface FilterMenuProps<T extends string> {
   readonly choices: readonly FilterChoice<T>[];
   readonly onChange: (next: T) => void;
   /** The data attribute each choice carries, so a test or a harness finds it by value. */
-  readonly choiceHook: 'data-agenda-filter-option' | 'data-agenda-kind-option';
-  readonly hook: 'data-agenda-filter' | 'data-agenda-kind';
+  readonly choiceHook: 'data-agenda-filter-option' | 'data-agenda-kind-option' | 'data-agenda-machine-option';
+  readonly hook: 'data-agenda-filter' | 'data-agenda-kind' | 'data-agenda-machine';
   readonly icon?: ReactNode;
 }
 
@@ -87,7 +87,7 @@ export function FilterMenu<T extends string>({
         type="button"
       >
         {icon}
-        {current?.label}
+        <span className="fy-filter-menu__label">{current?.label}</span>
         <ChevronDown aria-hidden="true" size={14} />
       </button>
       {open ? (

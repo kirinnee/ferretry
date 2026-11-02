@@ -468,6 +468,28 @@ describe('AgendaInboxPage rows', () => {
     await mounted.unmount();
   });
 
+  it("picks the phone's machine from a compact menu with a machine icon", async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true }));
+    expect(mounted.container.querySelector('select[data-agenda-machine]')).toBeNull();
+    const trigger = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-agenda-machine] [aria-haspopup="menu"]'),
+      'machine menu',
+    );
+    expect(trigger.textContent).toBe('All');
+    await interact(() => trigger.click());
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-machine-option="laptop"]'), 'laptop').click(),
+    );
+    expect(rows(mounted)).toHaveLength(1);
+    expect(trigger.textContent).not.toBe('All');
+    await interact(() => trigger.click());
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-machine-option=""]'), 'all machines').click(),
+    );
+    expect(rows(mounted)).toHaveLength(2);
+    await mounted.unmount();
+  });
+
   it('draws no machine filter while every item is on one machine', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, bare]));
     expect(mounted.container.querySelector('[data-agenda-machine]')).toBeNull();
