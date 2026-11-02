@@ -38,6 +38,7 @@
 
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
 import {
+  AlarmClockOff,
   ArrowLeft,
   ArrowRight,
   CheckCheck,
@@ -45,6 +46,7 @@ import {
   CloudOff,
   Laptop,
   SkipForward,
+  Undo2,
   Users,
   X,
   Zap,
@@ -817,12 +819,14 @@ function ParkedRow({
         </span>
       </RouteLink>
       <button
-        className="kt-btn fy-parked-row__back"
+        aria-label={`${filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}: ${inboxRowTitle(card.item)}`}
+        className="kt-btn kt-btn--sm fy-parked-row__back"
         data-agenda-unsnooze={filter}
+        title={filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}
         onClick={() => inbox.deferred.schedule(card, UNSNOOZE_ACTION)}
         type="button"
       >
-        {filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}
+        {filter === 'snoozed' ? <AlarmClockOff aria-hidden="true" size={18} /> : <Undo2 aria-hidden="true" size={18} />}
       </button>
     </li>
   );
@@ -868,12 +872,13 @@ function SnoozedToTestRow({
       </RouteLink>
       <button
         aria-label={`Unsnooze: ${row.card.task.title}`}
-        className="kt-btn fy-parked-row__back"
+        className="kt-btn kt-btn--sm fy-parked-row__back"
         data-to-test-unsnooze=""
+        title="Unsnooze"
         onClick={() => answers.snooze(row, null)}
         type="button"
       >
-        Unsnooze
+        <AlarmClockOff aria-hidden="true" size={18} />
       </button>
     </li>
   );

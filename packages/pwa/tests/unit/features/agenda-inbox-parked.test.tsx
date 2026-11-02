@@ -106,7 +106,7 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
     expect(status).toStartWith('Snoozed until');
     expect(view.container.querySelector('.fy-parked-row')?.textContent).toContain('Kai');
     const buttons = [...view.container.querySelectorAll<HTMLElement>('[data-agenda-unsnooze]')];
-    expect(buttons.map(button => [button.getAttribute('data-agenda-unsnooze'), button.textContent])).toEqual([
+    expect(buttons.map(button => [button.getAttribute('data-agenda-unsnooze'), button.getAttribute('title')])).toEqual([
       ['snoozed', 'Unsnooze'],
       ['snoozed', 'Unsnooze'],
     ]);
@@ -126,7 +126,7 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
       view.container.querySelector<HTMLButtonElement>('[data-agenda-unsnooze="replied"]'),
       'Back to my list',
     );
-    expect(back.textContent).toBe('Back to my list');
+    expect(back.getAttribute('title')).toBe('Back to my list');
     expect(view.container.querySelector('.fy-parked-row')?.textContent?.match(/Moe/gu)).toHaveLength(1);
     await view.unmount();
   });
@@ -318,5 +318,36 @@ describe('AgendaInboxPage snooze from the open item', () => {
     });
     expect(fake.commits.map(commit => commit.action.kind)).toEqual(['snooze']);
     await view.unmount();
+  });
+
+  it('draws the way back as a small labelled action beside each row, never a full-width button', async () => {
+    const { view, choose } = await mountPage({ parked: [snoozed('A2', LATER), replied('A4')] });
+    for (const which of ['snoozed', 'replied'] as const) {
+      await choose(which);
+      const rows = [...view.container.querySelectorAll<HTMLElement>('.fy-parked-row')];
+      expect(rows).toHaveLength(1);
+      const row = must(rows[0], 'the row');
+      const back = must(row.querySelector<HTMLButtonElement>('[data-agenda-unsnooze]'), 'the action');
+      expect(row.children).toHaveLength(2);
+      expect(back.parentElement).toBe(row);
+      expect(back.classList.contains('kt-btn--sm')).toBe(true);
+      expect(back.textContent, 'an icon, not a wide text button').toBe('');
+      expect(back.getAttribute('title')).toBe(which === 'snoozed' ? 'Unsnooze' : 'Back to my list');
+      const words = which === 'snoozed' ? 'Unsnooze' : 'Back to my list';
+      expect(back.getAttribute('aria-label')).toStartWith(`${words}: `);
+      expect(back.getAttribute('aria-label')).toBe(
+        `${words}: ${which === 'snoozed' ? 'Waiting for approval A2' : 'Sent my answer A4'}`,
+      );
+    }
+    await view.unmount();
+  });
+
+  it('never underlines a row at rest and never lets a touch leave it hovered', async () => {
+    const css = await Bun.file(new URL('../../../src/features/agenda/agenda-inbox.css', import.meta.url)).text();
+    const flat = css.replace(/\s+/gu, ' ');
+    expect(flat).toContain('a.fy-inbox-row:hover, a.fy-inbox-row:focus-visible { text-decoration: none; }');
+    expect(flat).toContain('@media (hover: hover) { .fy-inbox-row:hover {');
+    expect(flat).not.toContain('.fy-parked-row__back { flex: 1 1 100%;');
+    expect(flat).not.toMatch(/\.fy-parked-row \{[^}]*flex-wrap: wrap/u);
   });
 });

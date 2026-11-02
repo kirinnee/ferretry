@@ -552,8 +552,16 @@
   text-decoration: none;
   cursor: pointer;
 }
-.fy-inbox-row:hover {
-  background: var(--surface-2, var(--accent-soft));
+/* A touch leaves :hover stuck on the last row it touched, so only a pointer that really hovers gets the fill. The
+   global `a:hover` underline is out-ranked here: a row is a card, not a text link. */
+@media (hover: hover) {
+  .fy-inbox-row:hover {
+    background: var(--surface-2, var(--accent-soft));
+  }
+}
+a.fy-inbox-row:hover,
+a.fy-inbox-row:focus-visible {
+  text-decoration: none;
 }
 .fy-inbox-row:active {
   background: var(--accent-soft);
@@ -1179,24 +1187,20 @@
 .fy-parked-row {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
   align-items: stretch;
   gap: var(--gap-sm);
 }
 .fy-parked-row__link {
   width: auto;
-  flex: 1 1 14rem;
+  flex: 1 1 0;
 }
-.fy-parked-row__back {
+.fy-parked-row .fy-parked-row__back {
+  min-width: 44px;
   min-height: 44px;
+  padding: 0;
   flex: 0 0 auto;
   align-self: center;
   justify-content: center;
-}
-@media (max-width: 767.98px) {
-  .fy-parked-row__back {
-    flex: 1 1 100%;
-  }
 }
 /* Under the Agents filter: one bulk action, left-aligned with the list below it. */
 .fy-attn-inbox__bulk {
