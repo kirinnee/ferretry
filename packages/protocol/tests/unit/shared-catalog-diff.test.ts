@@ -3,12 +3,14 @@ import { type SharedCatalogItem, SharedCatalogItemSchema } from '../../src/lib/s
 import {
   CATALOG_DIFF_MAX_EDITS,
   CATALOG_DIFF_MAX_LINES,
+  CATALOG_DIFF_MAX_STEPS,
   type CatalogChange,
   type CatalogChangeHunk,
   CatalogChangesSchema,
   catalogItemChanges,
   hunksOf,
   lineEdits,
+  newDiffBudget,
 } from '../../src/lib/shared-catalog-diff.ts';
 
 const head = {
@@ -392,5 +394,79 @@ describe('the hunks are the difference', () => {
       'Skill file SKILL.md',
     );
     expect(applyHunks(before.join('\n'), change.hunks ?? [])).toBe(after.join('\n'));
+  });
+});
+
+describe('the work one answer may spend', () => {
+  /** `count` files, each `size` lines whose every line differs between the two sides. */
+  const pathological = (count: number, size: number): [SharedCatalogItem, SharedCatalogItem] => [
+    skill(
+      Object.fromEntries(
+        Array.from({ length: count }, (_, index) => [index === 0 ? 'SKILL.md' : `f${index}.md`, lines(size, 'o')]),
+      ),
+    ),
+    skill(
+      Object.fromEntries(
+        Array.from({ length: count }, (_, index) => [index === 0 ? 'SKILL.md' : `f${index}.md`, lines(size, 'n')]),
+      ),
+    ),
+  ];
+
+  it('gives up at once when the two lengths differ by more than the limit, spending nothing', () => {
+    const budget = newDiffBudget();
+    const long = Array.from({ length: CATALOG_DIFF_MAX_EDITS + 1 }, (_, index) => `line ${index}`);
+    expect(lineEdits(long, [], CATALOG_DIFF_MAX_EDITS, budget)).toBeUndefined();
+    expect(lineEdits([], long, CATALOG_DIFF_MAX_EDITS, budget)).toBeUndefined();
+    expect(budget.remaining).toBe(CATALOG_DIFF_MAX_STEPS);
+    expect(lineEdits(long.slice(0, 3), [], CATALOG_DIFF_MAX_EDITS, budget)).toBeDefined();
+  });
+
+  it('spends the same budget across files, then leaves every later file undiffed and says so', () => {
+    // Each of these needs exactly the bound of edits: diffable alone, and about 8 million steps each.
+    const [before, after] = pathological(12, CATALOG_DIFF_MAX_EDITS / 2);
+    const budget = newDiffBudget();
+    const changes = catalogItemChanges(before, after, budget);
+    const diffed = changes.entries.filter(candidate => candidate.hunks !== undefined);
+    expect(diffed).toHaveLength(3);
+    expect(changes.entries.filter(candidate => candidate.tooLarge === true)).toHaveLength(9);
+    expect(changes.truncated).toBe(true);
+    expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeLessThanOrEqual(CATALOG_DIFF_MAX_STEPS + 1);
+    expect(CatalogChangesSchema.safeParse(changes).success).toBe(true);
+  });
+
+  it('bounds an item of many files that each need more than the limit, by steps and not by clock', () => {
+    const [before, after] = pathological(150, CATALOG_DIFF_MAX_EDITS / 2 + 1);
+    const budget = newDiffBudget();
+    const changes = catalogItemChanges(before, after, budget);
+    expect(changes.entries).toHaveLength(150);
+    expect(changes.entries.every(candidate => candidate.tooLarge === true)).toBe(true);
+    expect(changes.truncated).toBe(true);
+    expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeLessThanOrEqual(CATALOG_DIFF_MAX_STEPS + 1);
+  });
+
+  it('does not say truncated when the budget was not spent', () => {
+    const budget = newDiffBudget();
+    const changes = catalogItemChanges(skill({ 'SKILL.md': 'a\nb' }), skill({ 'SKILL.md': 'a\nc' }), budget);
+    expect(changes.truncated).toBeUndefined();
+    expect(budget.remaining).toBeGreaterThan(CATALOG_DIFF_MAX_STEPS - 100);
+  });
+});
+
+describe('a carriage return at the end of a line', () => {
+  it('is written out, so a CRLF file turned into an LF file is a change a reader can see', () => {
+    const changes = catalogItemChanges(skill({ 'SKILL.md': 'one\r\ntwo\r\n' }), skill({ 'SKILL.md': 'one\ntwo\n' }));
+    const hunks = entry(changes, 'Skill file SKILL.md').hunks ?? [];
+    const texts = hunks.flatMap(hunk => hunk.lines.map(line => `${line.kind}:${line.text}`));
+    expect(texts).toContain('remove:one⟨U+000D⟩');
+    expect(texts).toContain('add:one');
+    expect(texts).toContain('remove:two⟨U+000D⟩');
+  });
+
+  it('is marked once, not twice, when the review already marked one in the middle of a line', () => {
+    const changes = catalogItemChanges(skill({ 'SKILL.md': 'a\rb\nc' }), skill({ 'SKILL.md': 'a\rb\nd' }));
+    const texts = (entry(changes, 'Skill file SKILL.md').hunks ?? []).flatMap(hunk =>
+      hunk.lines.map(line => line.text),
+    );
+    expect(texts).toContain('a⟨U+000D⟩b');
   });
 });

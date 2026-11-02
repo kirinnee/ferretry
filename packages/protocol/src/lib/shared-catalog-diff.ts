@@ -33,6 +33,13 @@ export const CATALOG_DIFF_MAX_EDITS = 4_000;
 /** Most lines of diff one answer carries in all, hunks and whole added or removed files together. */
 export const CATALOG_DIFF_MAX_LINES = 20_000;
 
+/**
+ * Work one answer may spend finding differences, in Myers steps (one diagonal visited, plus every line a run of equal
+ * lines walks past), across ALL its files. About a fifth of a second of one core: a preview is open to a ferret over a
+ * folder it can write, so what a hostile skill can cost is a number, not "as long as it takes".
+ */
+export const CATALOG_DIFF_MAX_STEPS = 25_000_000;
+
 /** Unchanged lines shown either side of a change. */
 export const CATALOG_DIFF_CONTEXT = 3;
 
@@ -88,6 +95,13 @@ export type CatalogChanges = z.infer<typeof CatalogChangesSchema>;
 
 // ── Myers' shortest edit script, over lines ──────────────────────────────────────────────────────
 
+/** What is left of {@link CATALOG_DIFF_MAX_STEPS}; below zero means it ran out. */
+export interface DiffBudget {
+  remaining: number;
+}
+
+export const newDiffBudget = (): DiffBudget => ({ remaining: CATALOG_DIFF_MAX_STEPS });
+
 interface Edit {
   readonly kind: 'context' | 'add' | 'remove';
   readonly text: string;
@@ -97,6 +111,9 @@ interface Edit {
  * The lines edited to turn `before` into `after`, or `undefined` when that takes more than `limit` single-line
  * edits. Common leading and trailing lines are set aside first, so a small change in a big file is cheap.
  *
+ * Stops at once (`undefined`) when the two lengths differ by more than `limit` (the script is at least that long),
+ * and when `budget` runs out.
+ *
  * The trace keeps, for each step `d`, the furthest-reaching x for diagonals -d, -d+2 … d, so at the bound it
  * holds about `limit² / 2` numbers and no more.
  */
@@ -104,6 +121,7 @@ export function lineEdits(
   before: readonly string[],
   after: readonly string[],
   limit: number,
+  budget: DiffBudget = newDiffBudget(),
 ): readonly Edit[] | undefined {
   let head = 0;
   while (head < before.length && head < after.length && before[head] === after[head]) head += 1;
@@ -116,7 +134,7 @@ export function lineEdits(
     tail += 1;
   const a = before.slice(head, before.length - tail);
   const b = after.slice(head, after.length - tail);
-  const middle = middleEdits(a, b, limit);
+  const middle = middleEdits(a, b, limit, budget);
   if (middle === undefined) return undefined;
   return [
     ...before.slice(0, head).map((text): Edit => ({ kind: 'context', text })),
@@ -125,9 +143,15 @@ export function lineEdits(
   ];
 }
 
-function middleEdits(a: readonly string[], b: readonly string[], limit: number): readonly Edit[] | undefined {
+function middleEdits(
+  a: readonly string[],
+  b: readonly string[],
+  limit: number,
+  budget: DiffBudget,
+): readonly Edit[] | undefined {
   const n = a.length;
   const m = b.length;
+  if (Math.abs(n - m) > limit) return undefined;
   const max = Math.min(n + m, limit);
   const offset = max + 1;
   const furthest = new Int32Array(2 * max + 3);
@@ -141,10 +165,14 @@ function middleEdits(a: readonly string[], b: readonly string[], limit: number):
           ? (furthest[offset + k + 1] as number)
           : (furthest[offset + k - 1] as number) + 1;
       let y = x - k;
+      let walked = 1;
       while (x < n && y < m && a[x] === b[y]) {
         x += 1;
         y += 1;
+        walked += 1;
       }
+      budget.remaining -= walked;
+      if (budget.remaining < 0) return undefined;
       furthest[offset + k] = x;
       if (x >= n && y >= m) {
         found = d;
@@ -244,7 +272,11 @@ function flagOf(label: string, sides: readonly ReadonlyMap<string, string>[]): C
     : undefined;
 }
 
-const textLines = (text: string): readonly string[] => text.split('\n');
+const CARRIAGE_RETURN_MARK = '⟨U+000D⟩';
+
+/** A line's end is where a CRLF becomes an LF, so a carriage return there is written out like any hidden character. */
+const textLines = (text: string): readonly string[] =>
+  text.split('\n').map(line => (line.endsWith('\r') ? `${line.slice(0, -1)}${CARRIAGE_RETURN_MARK}` : line));
 
 const warningKey = (warning: CatalogInstallWarning): string => JSON.stringify([warning.code, warning.text]);
 
@@ -267,6 +299,7 @@ function compare(
   before: CatalogReviewEntry | undefined,
   after: CatalogReviewEntry | undefined,
   flag: CatalogChange['flag'],
+  budget: DiffBudget,
 ): Compared | undefined {
   const flagged = flag === undefined ? {} : { flag };
   if (before === undefined && after !== undefined)
@@ -285,7 +318,10 @@ function compare(
       change: { label, change: 'changed', document: false, before: before.text, after: after.text, ...flagged },
       lines: 0,
     };
-  const edits = lineEdits(textLines(before.text), textLines(after.text), CATALOG_DIFF_MAX_EDITS);
+  const edits =
+    budget.remaining < 0
+      ? undefined
+      : lineEdits(textLines(before.text), textLines(after.text), CATALOG_DIFF_MAX_EDITS, budget);
   if (edits === undefined)
     return { change: { label, change: 'changed', document: true, tooLarge: true, ...flagged }, lines: 0 };
   const hunks = hunksOf(edits);
@@ -309,8 +345,15 @@ function leftOut(change: CatalogChange): CatalogChange {
 /**
  * What a person would read differently in `after` than in `before`: entries added, removed and changed (the ones
  * that deserve a second look first), how many are the same, and the warnings that appeared or went away.
+ *
+ * ONE `budget` covers every file: once it runs out, each file still to be compared is `tooLarge` without being
+ * read, and the answer says `truncated`.
  */
-export function catalogItemChanges(before: SharedCatalogItem, after: SharedCatalogItem): CatalogChanges {
+export function catalogItemChanges(
+  before: SharedCatalogItem,
+  after: SharedCatalogItem,
+  budget: DiffBudget = newDiffBudget(),
+): CatalogChanges {
   const earlier = new Map(catalogItemReview(before).map(entry => [entry.label, entry]));
   const later = new Map(catalogItemReview(after).map(entry => [entry.label, entry]));
   const sides = [filesOf(before), filesOf(after)];
@@ -319,7 +362,7 @@ export function catalogItemChanges(before: SharedCatalogItem, after: SharedCatal
   const compared: Compared[] = [];
   let unchanged = 0;
   for (const label of labels) {
-    const found = compare(label, earlier.get(label), later.get(label), flagOf(label, sides));
+    const found = compare(label, earlier.get(label), later.get(label), flagOf(label, sides), budget);
     if (found === undefined) unchanged += 1;
     else compared.push(found);
   }
@@ -329,7 +372,7 @@ export function catalogItemChanges(before: SharedCatalogItem, after: SharedCatal
   ];
 
   let remaining = CATALOG_DIFF_MAX_LINES;
-  let truncated = false;
+  let truncated = budget.remaining < 0;
   const entries = ordered.map(found => {
     if (found.lines <= remaining) {
       remaining -= found.lines;

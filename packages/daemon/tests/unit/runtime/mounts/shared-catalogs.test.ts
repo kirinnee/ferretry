@@ -37,6 +37,10 @@ function stubbed(failWith?: CatalogRefusalCode) {
     addItem: act('addItem'),
     publishVersion: act('publishVersion'),
     getItem: act('getItem'),
+    currentOf: async (item: string) => {
+      calls.push(`currentOf ["${item}"]`);
+      return 2;
+    },
     itemVersion: act('itemVersion'),
     itemChanges: act('itemChanges'),
     previewItemVersion: act('previewItemVersion'),
@@ -105,6 +109,16 @@ describe('the shared catalogs routes', () => {
       'POST /v1/catalogs/:id/export',
     ]);
     for (const route of routes) should(route.capability).deepEqual({ capability: 'sharing', axis: 'use' });
+  });
+
+  it('should never let a cache keep what an item publish or a version read answered', () => {
+    const routes = sharedCatalogRoutes(stubbed().dispatch as never as SharedCatalogSubsystem);
+    const itemRoutes = routes.filter(route => route.path.startsWith('/v1/catalog-items/:itemId'));
+    should(itemRoutes).have.length(5);
+    for (const route of itemRoutes) should(route.noStore).equal(true);
+    should(
+      routes.find(route => route.method === 'POST' && route.path === '/v1/catalog-items/:itemId/versions')?.noStore,
+    ).equal(true);
   });
 
   it('should let the owner do every one, with 201 for what makes something', async () => {
@@ -253,8 +267,8 @@ describe('the shared catalogs routes', () => {
           (
             await dispatch.dispatch(
               call('GET', `/v1/catalog-items/${ITEM}/changes`, undefined, headers, [
-                ['from', '1'],
-                ['to', '3'],
+                ['from', '2'],
+                ['to', '2'],
               ]),
             )
           ).status,
@@ -265,9 +279,37 @@ describe('the shared catalogs routes', () => {
       should(calls.slice(0, 4)).deepEqual([
         `getItem ["${ITEM}",{"sourceState":false}]`,
         `itemVersion ["${ITEM}",2]`,
-        `itemChanges ["${ITEM}",1,3]`,
+        `itemChanges ["${ITEM}",2,2]`,
         `previewItemVersion ["${ITEM}"]`,
       ]);
+    });
+
+    it('should let a ferret read only the current version, and the owner read any', async () => {
+      const { dispatch, calls } = stubbed();
+      const changes = (headers: Readonly<Record<string, string>>, from: string, to: string) =>
+        call('GET', `/v1/catalog-items/${ITEM}/changes`, undefined, headers, [
+          ['from', from],
+          ['to', to],
+        ]);
+      should((await dispatch.dispatch(call('GET', `${VERSIONS}/2`, undefined, ferret))).status).equal(200);
+      should((await dispatch.dispatch(changes(ferret, '2', '2'))).status).equal(200);
+      calls.length = 0;
+      for (const asked of [
+        call('GET', `${VERSIONS}/1`, undefined, ferret),
+        call('GET', `${VERSIONS}/3`, undefined, ferret),
+        changes(ferret, '1', '2'),
+        changes(ferret, '2', '3'),
+        fromFerret(call('GET', `${VERSIONS}/1`)),
+      ]) {
+        const refused = await dispatch.dispatch(asked);
+        should(refused.status).equal(403);
+        should(jsonBody(refused)).containEql({ code: 'forbidden' });
+      }
+      should(calls.every(entry => entry.startsWith('currentOf'))).be.true();
+      calls.length = 0;
+      should((await dispatch.dispatch(call('GET', `${VERSIONS}/1`))).status).equal(200);
+      should((await dispatch.dispatch(changes(human, '1', '3'))).status).equal(200);
+      should(calls).deepEqual([`itemVersion ["${ITEM}",1]`, `itemChanges ["${ITEM}",1,3]`]);
     });
 
     it('should check the source of one item only with sourceState=1', async () => {

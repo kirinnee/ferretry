@@ -50,6 +50,7 @@ export interface SharedCatalogSubsystem {
     | 'addItem'
     | 'publishVersion'
     | 'getItem'
+    | 'currentOf'
     | 'itemVersion'
     | 'itemChanges'
     | 'previewItemVersion'
@@ -109,6 +110,26 @@ function ownerOnly(context: RouteContext, act: string): void {
   throw new ApiError(
     403,
     `a ferret cannot ${act}; the owner does. A catalog hands skills and MCP setups to other machines, so the owner makes, changes and exports it.`,
+    'forbidden',
+  );
+}
+
+/**
+ * A ferret keeps only today's view of an item: the current version, the one every catalog serves. An older or
+ * not-yet-current version is the owner's to read, because it can hold what the owner took out on purpose.
+ */
+async function currentOnlyForAFerret(
+  context: RouteContext,
+  catalogs: SharedCatalogSubsystem['catalogs'],
+  item: string,
+  versions: readonly number[],
+): Promise<void> {
+  if (!isAgentCaller(context)) return;
+  const current = await catalogs.currentOf(item);
+  if (versions.every(version => version === current)) return;
+  throw new ApiError(
+    403,
+    'a ferret reads only the current version of an item; the owner reads the others.',
     'forbidden',
   );
 }
@@ -186,7 +207,10 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       handle: async context => {
         const item = itemId(context);
         const version = versionNumber(decodeParameter(context.params.get('version') ?? ''));
-        return await answer(() => catalogs.itemVersion(item, version));
+        return await answer(async () => {
+          await currentOnlyForAFerret(context, catalogs, item, [version]);
+          return await catalogs.itemVersion(item, version);
+        });
       },
     },
     {
@@ -200,7 +224,10 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
         const item = itemId(context);
         const from = versionNumber(queryValue(context.request, 'from'));
         const to = versionNumber(queryValue(context.request, 'to'));
-        return await answer(() => catalogs.itemChanges(item, from, to));
+        return await answer(async () => {
+          await currentOnlyForAFerret(context, catalogs, item, [from, to]);
+          return await catalogs.itemChanges(item, from, to);
+        });
       },
     },
     {

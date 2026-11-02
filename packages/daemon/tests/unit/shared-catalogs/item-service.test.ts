@@ -153,6 +153,14 @@ describe('SharedCatalogService at the item', () => {
     ).equal('item_unknown');
   });
 
+  it('should say which version every catalog serves, and refuse an unknown item', async () => {
+    const { r, itemId } = await sharedTwice();
+    should(await r.service.currentOf(itemId)).equal(1);
+    should((await refusal(async () => await r.service.currentOf('itm_unknown000000000000000'))).refusal).equal(
+      'item_unknown',
+    );
+  });
+
   it('should hand back one version in full and what changed between two', async () => {
     const { r, itemId } = await sharedTwice();
     r.tree.set(SKILL_PATH, CHANGED);
@@ -185,5 +193,63 @@ describe('SharedCatalogService at the item', () => {
     const [digest] = [...r.blobs.blobs.keys()];
     r.blobs.blobs.delete(digest as string);
     should((await refusal(async () => await r.service.itemVersion(itemId, 1))).message).match(/is missing/u);
+  });
+
+  describe('when the current version is not the latest', () => {
+    const MORE = { ...CHANGED, 'more.txt': 'more' };
+
+    /** Versions 1..3 kept; version 1 is the one every catalog serves, and version 3 remembers a source that is gone. */
+    async function currentIsOne() {
+      const shared = await sharedTwice();
+      const { r, itemId } = shared;
+      for (const files of [CHANGED, MORE]) {
+        r.tree.set(SKILL_PATH, files);
+        const preview = await r.service.previewItemVersion(itemId);
+        await r.service.publishItemVersion(itemId, { digest: preview.digest });
+      }
+      const document = r.documents.document;
+      r.documents.document = {
+        ...document,
+        items: document.items.map(item =>
+          item.itemId === itemId
+            ? {
+                ...item,
+                current: 1,
+                versions: item.versions.map(version =>
+                  version.version === 3
+                    ? { ...version, source: { kind: 'skill' as const, path: '/gone/SKILL.md' } }
+                    : version,
+                ),
+              }
+            : item,
+        ),
+      };
+      return shared;
+    }
+
+    it("should call a source that is the current version nothing to publish, and read the current version's source", async () => {
+      const { r, itemId } = await currentIsOne();
+      r.tree.set(SKILL_PATH, ORIGINAL);
+      const preview = await r.service.previewItemVersion(itemId);
+      should(preview.sameAsVersion).equal(1);
+      should(preview.changes?.entries).deepEqual([]);
+      should(
+        (await refusal(async () => await r.service.publishItemVersion(itemId, { digest: preview.digest }))).refusal,
+      ).equal('nothing_to_publish');
+    });
+
+    it('should name an older version a source matches, and show the changes against the current one', async () => {
+      const { r, itemId } = await currentIsOne();
+      r.tree.set(SKILL_PATH, MORE);
+      const preview = await r.service.previewItemVersion(itemId);
+      should(preview.sameAsVersion).equal(3);
+      should(preview.changes?.entries.map(entry => entry.label).toSorted()).deepEqual([
+        'Skill file extra.txt',
+        'Skill file more.txt',
+      ]);
+      const error = await refusal(async () => await r.service.publishItemVersion(itemId, { digest: preview.digest }));
+      should(error.refusal).equal('same_as_version');
+      should(error.message).match(/exactly version 3 again/u);
+    });
   });
 });

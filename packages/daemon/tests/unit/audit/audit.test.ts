@@ -857,6 +857,7 @@ describe('auditedRoutes', () => {
       itemId: ITEM,
       itemVersion: 2,
       catalogIds: `${CAT},${OTHER}`,
+      revisions: '4,7',
     });
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
   });

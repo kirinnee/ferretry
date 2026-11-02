@@ -271,6 +271,11 @@ export class SharedCatalogService {
     return await this.#sharedItem(document, identity, findItem(document, itemId), options.sourceState);
   }
 
+  /** The version every catalog that lists this item serves. */
+  async currentOf(itemId: string): Promise<number> {
+    return findItem(await this.#document(), itemId).current;
+  }
+
   /** One frozen version in full: what an installer of exactly that version is shown, read from the kept copy. */
   async itemVersion(itemId: string, version: number): Promise<SharedItemVersionDetail> {
     const item = findItem(await this.#document(), itemId);

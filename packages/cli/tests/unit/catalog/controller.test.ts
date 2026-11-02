@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { CatalogController } from '../../../src/lib/catalog/controller';
 import {
+  AT,
   CATALOG_ID,
   CapturingOutput,
   CWD,
@@ -169,6 +170,22 @@ describe('fy catalog publish', () => {
     const { controller, out } = build({ gateway });
     await controller.publish('Team tools', SKILL_ID, { yes: true });
     should(out.text).equal('pdf-tools has not changed since version 1; there is nothing to publish.');
+    should(writes(gateway)).have.length(0);
+  });
+
+  it('should refuse, writing nothing, a copy that is exactly an older version again', async () => {
+    const older = skillItem({
+      current: 3,
+      versions: [1, 2, 3].map(number => ({ version: number, digest: DIGEST, size: 120, publishedAt: AT })),
+    });
+    const gateway = new FakeGateway({
+      catalogs: [catalog({ items: [older] })],
+      preview: preview({ sameAsVersion: 1 }),
+    });
+    const { controller } = build({ gateway });
+    await should(controller.publish('Team tools', SKILL_ID, { yes: true })).rejectedWith(
+      /exactly version 1 again; making an older version current is not built yet/,
+    );
     should(writes(gateway)).have.length(0);
   });
 

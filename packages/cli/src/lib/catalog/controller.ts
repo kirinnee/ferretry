@@ -142,6 +142,11 @@ export class CatalogController {
     if (target.withdrawnAt !== undefined) throw new Error(`${target.name} was withdrawn and cannot get a new version`);
     const preview = await this.gateway.preview(found.id, { itemId: target.itemId });
     if (preview.sameAsVersion !== undefined) {
+      const current = target.current ?? Math.max(...target.versions.map(version => version.version));
+      if (preview.sameAsVersion !== current)
+        throw new Error(
+          `${target.name} is exactly version ${preview.sameAsVersion} again; making an older version current is not built yet — nothing was changed`,
+        );
       this.out.success(
         `${target.name} has not changed since version ${preview.sameAsVersion}; there is nothing to publish.`,
       );

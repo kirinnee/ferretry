@@ -599,6 +599,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
       itemId: ['itemId'],
       itemVersion: ['itemVersion'],
       catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
     },
   },
   {
@@ -1035,6 +1036,8 @@ function fieldsIn(
       const texts = found.filter((entry): entry is string => typeof entry === 'string' && IDENTIFIER.test(entry));
       const numbers = found.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
       if (numbers.length === 1 && found.length === 1) detail[key] = numbers[0] as number;
+      else if (numbers.length > 1 && numbers.length === found.length)
+        detail[key] = joinedWithin(numbers.map(String), AUDIT_TEXT_MAX);
       else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
     }
     return Object.keys(detail).length === 0 ? undefined : detail;
