@@ -70,6 +70,47 @@ const BLOCKS = ['', '', '', '', '|', '>-', '|+', '>2'];
 const PARENTS = ['db', 'auth', 'env', 'mcp.servers', 'x'];
 const QUOTES = ['', '"', "'"];
 const BREAKS = ['\n', '\r\n', '\r', '\n  ', '\n\n', ' ', '\n\t', '\n    '];
+/** What can stick one value to the next without a space (the review that found them cut a secret behind each). */
+const GLUES = ['<', '>', '{', '&', '?', '&amp;', '=', ':', '/', '|', '$', '@', ';', '"', "'"];
+/** The widest alphabet of the review's own unstructured fuzz: names, separators, quotes, breaks, indicators, glue. */
+const SOUP = [
+  ...NAMES,
+  ...SECRET_VALUES,
+  ...SECRET_VALUES,
+  ':',
+  '=',
+  ':=',
+  ' ',
+  '  ',
+  '\t',
+  '"',
+  "'",
+  '`',
+  '\n',
+  '\r\n',
+  '\r',
+  '(',
+  ')',
+  '[',
+  '{',
+  '}',
+  ',',
+  ';',
+  '/',
+  '$',
+  '#',
+  '|',
+  '>-',
+  '|+',
+  '>2',
+  '-',
+  '?',
+  '&',
+  '@',
+  '<',
+  '>',
+  '&amp;',
+];
 
 /** mulberry32: a small seeded generator, so a run is the same run everywhere and nothing flakes. */
 function seeded(seed: number): () => number {
@@ -92,8 +133,19 @@ function generate(next: () => number): string {
     const separator = `${pick(GAPS)}${pick(MARKS)}${pick(GAPS)}${pick(BLOCKS)}${pick(GAPS)}`;
     text += pick(LEADS) + pick(NAMES) + pick(QUOTES) + separator + quote + pick(SECRET_VALUES) + quote;
     if (next() < 0.3) text += pick(NAMES);
+    if (next() < 0.3) text += pick(GLUES) + pick(SECRET_VALUES);
     text += pick(BREAKS);
+    if (next() < 0.15)
+      text += `${pick(LEADS)}${pick(SECRET_VALUES)}${pick(BREAKS)}${pick(GLUES)}${pick(SECRET_VALUES)}${pick(BREAKS)}`;
   }
+  return text;
+}
+
+/** No structure at all: pieces of the alphabet, in any order. */
+function soup(next: () => number): string {
+  const length = 3 + Math.floor(next() * 18);
+  let text = '';
+  for (let at = 0; at < length; at += 1) text += SOUP[Math.floor(next() * SOUP.length)] ?? '';
   return text;
 }
 
@@ -140,20 +192,28 @@ function minimal(text: string, why: string): string {
   return smallest;
 }
 
+/** The first few texts of `cases` that leak, each cut down to what leaks. */
+function leaks(shape: (next: () => number) => string, seed: number, cases: number): string[] {
+  const next = seeded(seed);
+  const failures: string[] = [];
+  for (let count = 0; count < cases && failures.length < 5; count += 1) {
+    const text = shape(next);
+    const why = leak(text);
+    if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why))}`);
+  }
+  return failures;
+}
+
+// A review can re-run either with another seed and a larger count: `REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000`.
+const SEED = Number(process.env.REDACT_FUZZ_SEED ?? 0x5eed);
+const CASES = Number(process.env.REDACT_FUZZ_CASES ?? 20_000);
+
 describe('redactText and See changes never hide less than the text rules of main', () => {
-  it('should hide every secret value the reference hid, over 20000 generated texts', () => {
-    // Arrange
-    const next = seeded(0x5eed);
-    const failures: string[] = [];
+  it('should hide every secret value the reference hid, over generated structured texts', () => {
+    should(leaks(generate, SEED, CASES)).deepEqual([]);
+  });
 
-    // Act
-    for (let count = 0; count < 20_000 && failures.length < 5; count += 1) {
-      const text = generate(next);
-      const why = leak(text);
-      if (why !== undefined) failures.push(`${why}: ${JSON.stringify(minimal(text, why))}`);
-    }
-
-    // Assert
-    should(failures).deepEqual([]);
+  it('should hide every secret value the reference hid, over generated texts with no structure', () => {
+    should(leaks(soup, SEED ^ 0x50f7, CASES)).deepEqual([]);
   });
 });

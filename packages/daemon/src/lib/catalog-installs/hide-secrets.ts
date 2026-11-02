@@ -63,14 +63,11 @@ function oversized(text: string): boolean {
 const redacted = (text: string): string =>
   oversized(text)
     ? HIDDEN
-    : redactText(
-        text
-          .replace(USER_INFO, `//${HIDDEN}@`)
-          .replace(QUERY_PARAMETER, (whole, mark: string, name: string, value: string) =>
-            isSecretValue(name, value) ? `${mark}${name}=${HIDDEN}` : whole,
-          ),
-        isSecretValue,
-      ).text;
+    : redactText(text.replace(USER_INFO, `//${HIDDEN}@`), isSecretValue).text.replace(
+        QUERY_PARAMETER,
+        (whole, mark: string, name: string, value: string) =>
+          isSecretValue(name, value) ? `${mark}${name}=${HIDDEN}` : whole,
+      );
 
 /**
  * `shown` (the cut text of `raw`), told apart from the other side when the raw texts differ but what is shown does
