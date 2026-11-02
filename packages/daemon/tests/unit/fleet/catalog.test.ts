@@ -1824,6 +1824,53 @@ describe('redactText: where a name and its value are', () => {
     should(redactText(text)).deepEqual({ text: expected, redacted: true });
   });
 
+  it.each([
+    ['a base64 value ending in =', 'password:\n  c2VjcmV0cGFzc3dvcmQ=', 'password:\n  ‹hidden›'],
+    ['a base64 value ending in ==', 'api_token:\n  aHVudGVyMmh1bnRlcjI==', 'api_token:\n  ‹hidden›'],
+    ['a separator that starts the next line', 'PASSWORD\n= hunter2hunter2xyz', 'PASSWORD\n= ‹hidden›'],
+    ['a separator after a carriage return', 'TOKEN\r:hunter2hunter2xyz', 'TOKEN\r:‹hidden›'],
+    ['a separator alone on its line', 'PASSWORD\n=\nhunter2hunter2xyz', 'PASSWORD\n=\n‹hidden›'],
+    ['a name after a slash', 'see /PASSWORD:\nhunter2hunter2xyz', 'see /PASSWORD:\n‹hidden›'],
+    ['a name after a dollar sign', 'export $PASSWORD=\nhunter2hunter2xyz', 'export $PASSWORD=\n‹hidden›'],
+    ['a name after a bar', '|api_key:\nhunter2hunter2xyz', '|api_key:\n‹hidden›'],
+    [
+      'a token that starts with the separator of the line before',
+      'ghp_abcdefghijklmnop\n=ghp_abcdefghijklmnop',
+      '‹hidden›\n=‹hidden›',
+    ],
+    ['a token that starts with a colon', 'x\n:ghp_abcdefghijklmnop', 'x\n:‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it.each([
+    ['a pointer on the same line', 'Set the token=${secret:TOKEN}'],
+    ['a pointer on the next line', 'Set the token=\n${secret:TOKEN}'],
+    ['a variable on the next line', 'password:\n$DATABASE_PASSWORD'],
+  ])('should leave %s whole', (_label, text) => {
+    should(redactText(text)).deepEqual({ text, redacted: false });
+  });
+
+  it('should count the work on nested block openers, not square it', () => {
+    const lines = 4000;
+    const stair = Array.from({ length: lines }, (_, depth) => `${' '.repeat(depth)}k: |`).join('\n');
+    let asked = 0;
+    redactText(stair, () => {
+      asked += 1;
+      return false;
+    });
+    should(asked).be.belowOrEqual(lines);
+    let wide = 0;
+    redactText(
+      Array.from({ length: (256 * 1024) / 8 }, (_, depth) => `${' '.repeat(depth % 64)}k: |`).join('\n'),
+      () => {
+        wide += 1;
+        return false;
+      },
+    );
+    should(wide).be.belowOrEqual((256 * 1024) / 8);
+  });
+
   it('should leave a block or a next line alone when the name says nothing or the next line is a key', () => {
     should(redactText('mode: |\n  hunter2hunter2xyz').redacted).equal(false);
     should(redactText('password:\nuser_name: hunter2hunter2xyz').text).not.match(/^password:\n‹hidden›/u);

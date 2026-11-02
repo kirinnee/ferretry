@@ -807,10 +807,19 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   bounded**: text with a line over 4 KiB or a word over 1 KiB, or a file of more than 20 000 lines, is hidden whole
   before any pattern runs on it (the text is a publisher's, or whoever typed it here), and the fleet's own
   `redactText` reads a name only where a run of name characters starts, so it is linear. A name and its value are on
-  ONE line in the assignment pass (`db:⏎  pass: x` reads `pass: x`); a second pass over the lines reads a name that
-  ends its line (`password =⏎x`, spaces allowed) as owning the next non-blank line's first word, and `password: |` /
-  `>-` as owning the more-indented lines after it, for every caller of `redactText`, the fleet's component view
-  included. The rest of the answer
+  ONE line in the assignment pass (`db:⏎  pass: x` reads `pass: x`), and a value that is no secret is searched for a
+  name of its own (`Q= apikey:x`); a second pass over the lines reads a name that ends its line (`password =⏎x`,
+  spaces allowed, after any character that is not part of a name: `/PASSWORD:`, `$PASSWORD=`, `|api_key:`), or that
+  stands alone with its separator starting the next line (`PASSWORD⏎= x`), as owning the next non-blank line's first
+  word, unless that line is a key of its own (`name:` then a space or the end; a word that ends in `=` is a value,
+  because base64 does), and `password: |` / `>-` as owning the more-indented lines after it (the block of a name that
+  says nothing is not read, and a block inside a read one is not read again), for every caller of `redactText`, the
+  fleet's component view included. A word that starts with a separator (`ghp_…⏎=ghp_…`) is tried without it, and a
+  pointer (`$VAR`, `${secret:NAME}`) is never cut. **The floor is tested**: `redact-differential.test.ts` keeps
+  main's own `redactText` (`tests/support/redact-reference.ts`, frozen) and generates 20 000 texts from a seeded
+  alphabet of secret names, `:` `=` `|` `>-`, tabs, CR, CRLF and LF, base64 padding, `ghp_` / `sk-` prefixes, quotes,
+  lead characters and nesting; every secret value that function hid must also be hidden by the current
+  `redactText` and by See changes, and a failure prints the smallest text that leaks. The rest of the answer
   (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
   is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are
