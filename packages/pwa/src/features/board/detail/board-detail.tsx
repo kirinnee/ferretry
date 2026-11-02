@@ -563,9 +563,9 @@ function DetailBody({
             </span>
           </div>
           {task.dropped === null ? null : (
-            <p className="fy-board-detail__quiet" data-state="dropped">
-              Dropped: {task.dropped.reason}
-            </p>
+            <div className="fy-board-detail__quiet" data-state="dropped">
+              Dropped: {cardProse(task.dropped.reason)}
+            </div>
           )}
         </header>
 

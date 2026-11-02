@@ -15,9 +15,9 @@ import {
   buildMoveAction,
   buildNoteAction,
   buildOrderAction,
-  buildReparentAction,
   buildRefileAction,
   buildReopenAction,
+  buildReparentAction,
   buildTriggerAction,
   buildUnblockAction,
   buildUndependAction,
@@ -419,9 +419,9 @@ describe('the action builders', () => {
 
   it('should edit How to test alone, and premise and context as bullets or cleared', () => {
     // Act + Assert
-    should(buildEditAction({}, { howToTest: ' 1. Open it\n2. See it ' })).eql({
+    should(buildEditAction({}, { howToTest: ' 1. Open it\n\n\n2FA codes\n4. See it\n' })).eql({
       action: 'edit',
-      howToTest: '1. Open it\n2. See it',
+      howToTest: ' 1. Open it\n\n\n2FA codes\n4. See it\n',
     });
     should(buildEditAction({ premise: ['one', 'two'], context: [' only '] })).eql({
       action: 'edit',

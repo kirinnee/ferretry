@@ -17,14 +17,15 @@ import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import type { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import {
   boardAnswer,
-  card,
   COUNTS,
+  card,
   fakeEnvironment,
   fakePort,
   laneSetFor,
   laptop,
   PROJECT,
 } from '../tests/unit/board-support.ts';
+import { RICH_BRIEF, RICH_HOW_TO_TEST, richRequested } from './rich-how-to-test.ts';
 
 const NOW = Date.parse('2026-10-23T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -230,9 +231,10 @@ const TESTED_CARD = card('F10', {
   premise: nest('- A paired phone holds a device grant\n- Settings used to print the token after pairing'),
   context: nest('- The daemon keeps only a hash of each token\n- Shipped in 4.109.0'),
   terms: [{ term: 'device grant', meaning: 'What a paired phone holds instead of a token: it can be revoked.' }],
-  howToTest:
-    'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',
-  brief: `The device grant replaces the token on every route.\n\n${PAIRING_DIAGRAM}`,
+  howToTest: richRequested()
+    ? RICH_HOW_TO_TEST
+    : 'On your phone, once the Mac runs 4.109.0:\n\n1. Open **Settings › Devices** and pair this phone.\n2. Open the new device row.\n3. You should see its name and when it paired, and no token anywhere.',
+  brief: richRequested() ? RICH_BRIEF : `The device grant replaces the token on every route.\n\n${PAIRING_DIAGRAM}`,
   links: links([
     pr(918, {
       state: 'merged',

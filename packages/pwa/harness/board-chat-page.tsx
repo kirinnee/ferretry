@@ -14,8 +14,8 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
 import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
-import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
+import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
 import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
 import type { ChatTasksView } from '../src/lib/board-chat-url.ts';
@@ -23,8 +23,8 @@ import { boardSideView } from '../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import {
   boardAnswer,
-  card,
   COUNTS,
+  card,
   fakeEnvironment,
   fakePort,
   laneSetFor,
@@ -32,6 +32,7 @@ import {
   originCard,
   PROJECT,
 } from '../tests/unit/board-support.ts';
+import { RICH_HOW_TO_TEST, richRequested } from './rich-how-to-test.ts';
 
 const NOW = Date.parse('2026-10-23T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -147,8 +148,9 @@ const TO_TEST =
           laneId: 'tested',
           owner: LEAD,
           shippedIn: SHIPPED,
-          howToTest:
-            '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+          howToTest: richRequested()
+            ? RICH_HOW_TO_TEST
+            : '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
           lastTouchedAt: ago(55),
         }),
         card('F31', {

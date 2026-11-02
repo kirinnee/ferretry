@@ -566,7 +566,7 @@ describe('fy task create', () => {
     const { controller, gateway, files } = harness(
       new FakeGateway(),
       undefined,
-      new FakeFiles({ '/test.md': '1. Open the Board\n2. See the steps\n' }),
+      new FakeFiles({ '/test.md': '## Setup\n1. Open the Board\n\n\n2FA codes\n4. See the steps\n' }),
     );
 
     // Act
@@ -576,8 +576,8 @@ describe('fy task create', () => {
     // Assert
     should(files.reads).eql(['/test.md']);
     should(gateway.createCalls.map(call => call.request.howToTest)).eql([
-      '1. Open the Board\n2. See the steps',
-      '1. Inline',
+      '## Setup\n1. Open the Board\n\n\n2FA codes\n4. See the steps\n',
+      ' 1. Inline ',
     ]);
     should(await refusal(() => controller.create([], { ...base, howToTest: 'x', howToTestFile: '/test.md' }))).match(
       /pass --how-to-test or --how-to-test-file, not both/u,

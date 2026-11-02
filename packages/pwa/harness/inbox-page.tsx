@@ -27,8 +27,8 @@ import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
-import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { toTestCards, withProjectName, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -42,6 +42,7 @@ import {
   OTHER_PROJECT,
   PROJECT,
 } from '../tests/unit/board-support.ts';
+import { RICH_HOW_TO_TEST, richRequested } from './rich-how-to-test.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -385,8 +386,9 @@ const TO_TEST = TO_TEST_VIEW
           owner: 'mvuc7tsf-0c3d50df',
           title: 'Pairing a second phone',
           shippedIn: { version: '5.4.0', tag: 'v5.4.0', at: ago(90) },
-          howToTest:
-            '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+          howToTest: richRequested()
+            ? RICH_HOW_TO_TEST
+            : '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
         }),
         boardCard('F58', {
           laneId: 'tested',

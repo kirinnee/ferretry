@@ -242,26 +242,33 @@
   font-size: var(--text-sm);
 }
 .fy-board-detail__detail {
-  margin: 0;
+  min-width: 0;
   color: var(--muted);
   font-size: var(--text-sm);
-  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  --md-font-size: var(--text-sm);
+}
+.fy-board-detail__detail :is(p, .md),
+.fy-board-detail__clarified :is(p, .md),
+.fy-board-detail__ask :is(p, .md),
+[data-state='dropped'] :is(p, .md) {
+  margin: 0;
+}
+.fy-board-detail__clarified {
+  min-width: 0;
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
 }
 .fy-board-detail__ask {
+  min-width: 0;
   margin: 0;
+  padding-inline-start: var(--gap-md);
+  border-inline-start: var(--stroke-heavy) solid var(--faint);
   color: var(--fg);
   font-size: var(--text-lg);
   line-height: var(--leading-tight);
-  white-space: pre-wrap;
-  quotes: '\201C' '\201D';
-}
-.fy-board-detail__ask::before {
-  content: open-quote;
-  color: var(--faint);
-}
-.fy-board-detail__ask::after {
-  content: close-quote;
-  color: var(--faint);
+  overflow-wrap: anywhere;
+  --md-font-size: var(--text-lg);
 }
 .fy-board-detail__list,
 .fy-board-detail__running {
@@ -572,4 +579,30 @@ fieldset.fy-board-detail__verdict {
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+/* A label or heading between How-to-test steps: a sub-heading above the steps it introduces. */
+.fy-board-test__section {
+  min-width: 0;
+  margin-block-start: var(--gap-xs);
+  color: var(--muted);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+.fy-board-test__section :is(p, .md, h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+  color: inherit;
+  font-size: var(--text-sm);
+  font-weight: inherit;
+}
+/* The reason a card was dropped reads on the line of its label. */
+.fy-board-detail__quiet[data-state='dropped'] > :is(.md, p) {
+  display: inline;
+}
+/* A heading in the lead above the steps is the same sub-heading as one between them, not a page title. */
+.fy-board-test__lead .md :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--gap-xs) 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
 }

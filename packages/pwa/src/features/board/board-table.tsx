@@ -23,6 +23,7 @@ import {
   summarySections,
 } from '../../lib/board-summary.ts';
 import { type BoardCardOf, type BoardListRow, listRows } from '../../lib/board-view.ts';
+import { plainPreview } from '../../lib/plain-label.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ToTestActions } from './board-card.tsx';
 import { BoardDoneAction } from './board-done-action.tsx';
@@ -82,6 +83,7 @@ function AnswerError({ answer }: { readonly answer: BoardAnswerState }) {
 function TableRow({ row, env }: RowProps) {
   const { card } = row;
   const { task } = card;
+  const preview = plainPreview(task.summary);
   const place = env.places.get(card.key);
   const done = place === undefined ? undefined : env.doneFor?.(card, place);
   const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
@@ -136,7 +138,7 @@ function TableRow({ row, env }: RowProps) {
             </span>
           )}
         </div>
-        {task.summary === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={task.summary} />}
+        {preview === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={preview} />}
       </div>
       <div className="fy-board-table__cell" data-col="people">
         {cell('people')}
@@ -217,6 +219,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
   const place = env.places.get(card.key);
   const done = action && place !== undefined ? env.doneFor?.(card, place) : undefined;
   const moves = action && place !== undefined ? env.movesFor(card, place) : undefined;
+  const preview = plainPreview(task.summary);
   const answerRow = answerRowOf({ category: row.category, movable: moves !== undefined, done: done?.done ?? null });
   const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
   const href = env.hrefFor(card);
@@ -260,7 +263,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
             </span>
           )}
         </div>
-        {task.summary === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={task.summary} />}
+        {preview === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={preview} />}
       </div>
       <div className="fy-board-summary__meta">
         {action ? null : (
