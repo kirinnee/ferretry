@@ -517,8 +517,8 @@ ignores it.
 
 ## Rules the writing keeps
 
-The card is read cold, so it must stand alone: a title of about 40 characters, an ask in one sentence
-(120 at most), the premise, context and what is decided or still open as short bullets, every term of art
+The card is read cold, so it must stand alone: a title of about 40 characters, an ask that is a short
+title-like line (about 80 characters at most, `AGENDA_ASK_TARGET_LENGTH`; the detail goes in `--body`), the premise, context and what is decided or still open as short bullets, every term of art
 defined with `--term`, never a secret value. The daemon lints for this and answers with advice, never a
 refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
 whose blocker has cleared is a bug.
@@ -530,6 +530,10 @@ answer, body, option details, ask, revision notes and terms all read as the same
 idea per line. `fy agenda add` and `agenda edit` warn, never block, when a segment is a single paragraph over
 280 characters (`AGENDA_SEGMENT_PARAGRAPH_LENGTH` in `@ferretry/protocol`), saying to split it into short points
 or bold the answer first. Lists, tables, headings and fenced code are not counted as paragraphs.
+
+**No Markdown headings in the ask or a segment.** A `#` heading draws as a huge title inside a card (the "What I need from you" card read as one wall of H1s), so the ask and every segment — premise, context, decided, still-open, question answer, impact, recommendation and option details — are short points or a bold lead, never `# …` to `###### …`. `fy agenda add` and `agenda edit` warn, never block, when the ask is over about 80 characters (saying to move the detail to `--body` or `--context`) and when the ask or any of those segments holds a heading line (outside fenced code; `#812` is a reference, not a heading). `--body` is left alone: it is where longer instructions go.
+
+**A bunch of bugs or asks heard at once gets ONE info item.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret raises one `-k info` item that lists each in a short line and where it is tracked (its card, or "answered here"), so the owner knows every one was heard. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule is one line of the Agenda-mode instruction (`AGENDA_INSTRUCTION`).
 
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
 the facts around it — so every NEW item a ferret raises must carry both:

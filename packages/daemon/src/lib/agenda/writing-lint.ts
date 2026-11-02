@@ -143,6 +143,8 @@ function vagueOptions(item: AgendaWriting): string[] {
 const LIST_LINE = /^\s*(?:[-*•]|\d+[.)])\s/u;
 const FENCE_LINE = /^\s*(?:```|~~~)/u;
 const TABLE_OR_HEADING_LINE = /^\s*(?:\||#)/u;
+/** A Markdown heading line (`# Title`): up to three spaces in, one to six `#`, then a space — `#812` is a reference. */
+const HEADING_LINE = /^ {0,3}#{1,6}(?:\s|$)/u;
 
 /** Whether a segment holds a paragraph (a line of prose, not a bullet, table or fenced code) past the target length. */
 function hasWallOfText(text: string): boolean {
@@ -151,6 +153,16 @@ function hasWallOfText(text: string): boolean {
     if (FENCE_LINE.test(line)) fenced = !fenced;
     else if (fenced || LIST_LINE.test(line) || TABLE_OR_HEADING_LINE.test(line)) continue;
     else if (line.trim().length > AGENDA_SEGMENT_PARAGRAPH_LENGTH) return true;
+  }
+  return false;
+}
+
+/** Whether the text holds a heading line outside fenced code, which the card would draw as a huge title. */
+function hasHeading(text: string): boolean {
+  let fenced = false;
+  for (const line of text.split(/\r?\n/u)) {
+    if (FENCE_LINE.test(line)) fenced = !fenced;
+    else if (!fenced && HEADING_LINE.test(line)) return true;
   }
   return false;
 }
@@ -210,7 +222,7 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
 
   if (ask.length > AGENDA_ASK_TARGET_LENGTH) {
     warnings.push(
-      `ask is ${ask.length} characters; keep it under ${AGENDA_ASK_TARGET_LENGTH}: the one question or action, answer first; move the rest to --context`,
+      `ask is ${ask.length} characters; keep it to about ${AGENDA_ASK_TARGET_LENGTH}: a short title of the one question or action, answer first; move the detail to --body (or --context)`,
     );
   }
 
@@ -285,6 +297,18 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   if (walls.length > 0) {
     warnings.push(
       `${walls.join(', ')} ${walls.length === 1 ? 'is' : 'are'} one paragraph over ${AGENDA_SEGMENT_PARAGRAPH_LENGTH} characters: split this into short points (- …) or bold the answer first — the owner reads it on a phone`,
+    );
+  }
+  const headed = [
+    ...new Set(
+      [{ name: 'ask', text: item.subject }, ...segmentsOf(item).filter(segment => segment.name !== 'body')]
+        .filter(field => hasHeading(field.text))
+        .map(field => field.name),
+    ),
+  ];
+  if (headed.length > 0) {
+    warnings.push(
+      `markdown headings (# …) in ${headed.join(', ')}: the card draws them as huge titles; write short points (- …) or a bold lead instead`,
     );
   }
   return warnings;
