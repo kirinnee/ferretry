@@ -1,12 +1,10 @@
 import {
-  type BoardProjectId,
   BoardProjectsResponseSchema,
   type BoardQueryInput,
   BoardResponseSchema,
   type BoardSkipRequest,
   BoardSkipRequestSchema,
   BoardSkipResponseSchema,
-  BoardSwitchSchema,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
@@ -87,10 +85,6 @@ export class FyBoardGateway implements IBoardGateway {
     return await this.client.request('/v1/board/projects', BoardProjectsResponseSchema, {
       headers: actingAs(as),
     });
-  }
-
-  async switchOf(projectId: BoardProjectId) {
-    return await this.client.request(`/v1/board/projects/${encodeURIComponent(projectId)}/switch`, BoardSwitchSchema);
   }
 
   async sessions(): Promise<readonly SessionDirectoryEntry[]> {

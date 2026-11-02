@@ -9,6 +9,7 @@
  * - {@link LaneProposer} — U3 (lane proposals; U7 calls it for a start in a project with no lanes)
  */
 import type {
+  AgendaId,
   AgendaRef,
   BoardActor,
   BoardActorVia,
@@ -22,6 +23,7 @@ import type {
   BoardTaskActivity,
   BoardTaskId,
   LaneSet,
+  ResolvedAgendaItem,
   TaskKind,
   TaskRef,
 } from '@ferretry/protocol';
@@ -229,6 +231,19 @@ export interface BoardDiagnostics {
 export interface BoardClock {
   /** The instant to stamp on what is about to be written. */
   now(): string;
+}
+
+/**
+ * What the opt-in rule reads to decide whether a ferret may make a card (`opt-in.ts`, docs/board.md § The board is
+ * opt-in): each board's switch, its name, and the caller's own answered agenda items.
+ */
+export interface BoardOptIn {
+  /** Whether the project's board is switched on. A switch that cannot be read throws; the rule reads that as off. */
+  isOn(projectId: BoardProjectId): Promise<boolean>;
+  /** The board's name, as a refusal says it. */
+  nameOf(projectId: BoardProjectId): Promise<string>;
+  /** The answered item `id` on `sessionId`'s agenda; `undefined` when there is none. */
+  answered(sessionId: string, id: AgendaId): Promise<ResolvedAgendaItem | undefined>;
 }
 
 /** What the owner said to a session, for deciding whether a card's ask is theirs. */
