@@ -16,6 +16,7 @@ import { useKnownProjects } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useAppStore, useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
+import { Fingerprint } from '../shared/shared-parts.tsx';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
 import { listSecrets } from '../secrets/secrets-api.ts';
 import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
@@ -73,6 +74,8 @@ interface InstallSource {
 
 export interface InstallFromFileSheetProps {
   readonly source?: InstallSource;
+  /** Where to install unless the person picks another place: seeds the first choice, nothing more. */
+  readonly preferredTarget?: TargetDraft;
   readonly connection: DaemonConnection;
   readonly onClose: () => void;
   readonly host?: InstallHost;
@@ -100,6 +103,7 @@ function InstallSheetBody({
   host,
   projects,
   source,
+  preferredTarget,
 }: InstallFromFileSheetProps & { readonly projects: readonly Project[] }) {
   const routed = useDaemonClient();
   const createClient: CatalogClientFactory = host?.createClient ?? routed;
@@ -110,7 +114,7 @@ function InstallSheetBody({
   const [opened, setOpened] = useState<OpenedCatalogFile | null>(source?.opened ?? null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(source?.itemId ?? null);
-  const [draft, setDraft] = useState<TargetDraft>({});
+  const [draft, setDraft] = useState<TargetDraft>(preferredTarget ?? {});
   const [runtimes, setRuntimes] = useState<TargetOptions['runtimes']>([]);
   const [allowOlder, setAllowOlder] = useState(false);
   const [preview, setPreview] = useState<CatalogInstallPreview | null>(null);
@@ -400,14 +404,11 @@ function OpenedFile({
         <p className="m-0 break-words text-cell font-semibold text-fg" data-catalog-file-summary="">
           {revealHidden(fileSummary(opened))}
         </p>
-        <p className="m-0 break-words text-meta text-muted">
-          From {revealHidden(opened.manifest.publisherName)} ·{' '}
-          <TapToExpand
-            label="Publisher fingerprint"
-            short={fingerprintStart(opened.manifest.publisher)}
-            full={opened.manifest.publisher}
-          />
-        </p>
+        <p className="m-0 break-words text-meta text-muted">From {revealHidden(opened.manifest.publisherName)}</p>
+        <Fingerprint
+          head={fingerprintStart(opened.manifest.publisher).replace(/…$/u, '')}
+          full={opened.manifest.publisher}
+        />
         {sharedBy === undefined ? null : (
           <p className="m-0 break-words text-meta text-muted" data-catalog-shared-by="">
             You call this publisher: {revealHidden(sharedBy)}

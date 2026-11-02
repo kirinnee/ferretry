@@ -49,7 +49,7 @@ import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
-import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
+import { daemonSessionPath, daemonSharingPath } from '../../src/lib/pages/routes.ts';
 import {
   type SessionAgendaModel,
   type SessionChatClient,
@@ -4168,6 +4168,8 @@ describe('SessionChatPage Info and Actions', () => {
     try {
       await flush();
       expect(bare.root.findByType(SessionInfo).props.about.switches).toBeUndefined();
+      // With nowhere to navigate, Skills draws no "+ Add skills".
+      expect(bare.root.findByType(SessionInfo).props.ports.folder.addSkills).toBeUndefined();
     } finally {
       run(() => bare.unmount());
     }
@@ -4228,6 +4230,13 @@ describe('SessionChatPage Info and Actions', () => {
       // Folder › MCP's "Add…" opens the Add MCP server form.
       run(() => ports.folder.onAddMcp());
       expect(page.root.findByType(ActionsMenu).props.form).toBe('add-mcp');
+
+      // Skills › "+ Add skills" knows the machine and the session's folder, and Subscribe opens Sharing.
+      expect(ports.folder.addSkills.machineName).toBe('alpha box');
+      expect(ports.folder.addSkills.connection.daemonId).toBe(alpha.daemonId);
+      expect(ports.folder.addSkills.cwd).toBe('/work/shared');
+      run(() => ports.folder.addSkills.onSubscribe());
+      expect(navigated.at(-1)).toBe(daemonSharingPath(alpha.daemonId, 'shared'));
 
       // Info › Runtime carries the host's model and effort pickers.
       run(() => info().props.placement.setTab('runtime'));

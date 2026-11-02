@@ -18,6 +18,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { OpenedItemValue } from './shared-controller.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { CatalogSheet } from '../catalogs/catalog-parts.tsx';
+import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
 import { MarkedText, ReviewBody, WarningList } from '../catalogs/catalog-review-view.tsx';
 import { InstallFromFileSheet, type InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { INSTALL_ON_LABEL, INSTALL_ON_MACHINE, kindLabel, NOT_PAIRED_NOTE } from './shared-screens-model.ts';
@@ -35,6 +36,7 @@ export function SharedItemSheet({
   publisherLabel,
   machines,
   installHost,
+  preferredTarget,
   onClose,
 }: {
   readonly shown: OpenedSharedItem;
@@ -42,6 +44,8 @@ export function SharedItemSheet({
   readonly publisherLabel: string;
   readonly machines: readonly InstallMachine[];
   readonly installHost?: InstallHost;
+  /** Passed to the install sheet as its first choice of place. */
+  readonly preferredTarget?: TargetDraft;
   readonly onClose: () => void;
 }) {
   const { item, opened, entry } = shown;
@@ -58,6 +62,7 @@ export function SharedItemSheet({
         connection={target.connection}
         source={{ opened, itemId: entry.itemId, publisherLabel }}
         {...(installHost === undefined ? {} : { host: installHost })}
+        {...(preferredTarget === undefined ? {} : { preferredTarget })}
         onClose={() => setInstalling(false)}
       />
     );
