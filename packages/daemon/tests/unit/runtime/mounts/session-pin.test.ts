@@ -77,6 +77,23 @@ describe('the session pin mount', () => {
     should((JSON.parse(full.body) as { code: string }).code).equal('pin_limit');
   });
 
+  it('should not dress an unexpected failure up as a domain refusal', async () => {
+    // Arrange
+    const broken: SessionPinSubsystem = {
+      pin: async () => {
+        throw new Error('disk gone');
+      },
+      unpin: async () => sessionView('s1'),
+    };
+    const subject = dispatcherFor(broken);
+
+    // Act
+    const answer = await subject.dispatch(post('/v1/sessions/s1/pin'));
+
+    // Assert
+    should(answer.status).equal(500);
+  });
+
   it('should be the owner’s preference: operator scope, person-only, no capability, no-store', () => {
     // Act
     const routes = sessionPinRoutes(new FakePins());

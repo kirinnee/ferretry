@@ -13,6 +13,7 @@ import {
 import type { SerialExecutor } from '../../../src/lib/ports.ts';
 import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
+import { byPinOrder } from '../../../src/lib/agent-pins/service.ts';
 
 class MemoryPins implements AgentPinRepository {
   saved: readonly AgentPin[] = [];
@@ -176,5 +177,22 @@ describe('AgentPinSubsystem', () => {
     // Assert
     should((refusal as AgentPinError).code).equal('not-found');
     should(repository.saves).equal(0);
+  });
+});
+
+describe('byPinOrder', () => {
+  it('should put the earlier pin first and break an equal instant by session id', () => {
+    // Arrange
+    const early = { sessionId: 'z', pinnedAt: '2026-11-01T10:00:00.000Z' };
+    const late = { sessionId: 'a', pinnedAt: '2026-11-01T11:00:00.000Z' };
+    const tied = { sessionId: 'b', pinnedAt: '2026-11-01T10:00:00.000Z' };
+
+    // Act
+    const sorted = [late, tied, early].sort(byPinOrder).map(pin => pin.sessionId);
+
+    // Assert
+    should(byPinOrder(early, late)).equal(-1);
+    should(byPinOrder(late, early)).equal(1);
+    should(sorted).deepEqual(['b', 'z', 'a']);
   });
 });

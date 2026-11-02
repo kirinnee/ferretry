@@ -350,6 +350,14 @@ const fakeDaemon = (options: { readonly migrate?: Error | readonly (Error | unde
     [];
   let migrations = 0;
   const api = {
+    pinSession: async (id: string) => {
+      calls.push(`pin:${id}`);
+      return sessionView(id, { pinnedAt: '2026-11-01T10:00:00.000Z' });
+    },
+    unpinSession: async (id: string) => {
+      calls.push(`unpin:${id}`);
+      return sessionView(id);
+    },
     rename: async (id: string, name?: string, teammate?: string, clearParent?: boolean) => {
       calls.push(`rename:${id}:${name}:${teammate}:${clearParent}`);
       return sessionView(id, { config: { label: name ?? 'renamed' } });
@@ -3802,6 +3810,25 @@ describe('SessionChatPage Info and Actions', () => {
       expect(published.at(-1)?.config.id).toBe('shared');
     } finally {
       run(() => page.unmount());
+    }
+  });
+
+  test('Pin to top and Unpin reach the daemon and publish the session it answers', async () => {
+    const daemon = fakeDaemon();
+    const published: SessionView[] = [];
+    const pinnedView = sessionView('shared', { pinnedAt: '2026-11-01T10:00:00.000Z' });
+    const page = renderSessionChatPage(chatPage({ onSessionChange: view => published.push(view) }), daemon.factory);
+    const pinned = renderSessionChatPage(chatPage({ session: pinnedView }), daemon.factory);
+    try {
+      chooseAction(page.root, 'pin');
+      await flush();
+      chooseAction(pinned.root, 'pin');
+      await flush();
+      expect(daemon.calls).toEqual(['pin:shared', 'unpin:shared']);
+      expect(published.at(-1)?.pinnedAt).toBe('2026-11-01T10:00:00.000Z');
+    } finally {
+      run(() => page.unmount());
+      run(() => pinned.unmount());
     }
   });
 

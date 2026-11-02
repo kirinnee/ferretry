@@ -114,4 +114,18 @@ describe('fy session pin and unpin', () => {
     should(io.exitCode).equal(1);
     should(program.commands.filter(command => command.name() === 'session')).have.length(1);
   });
+
+  it('should create the `session` command itself when nothing registered it first', async () => {
+    // Arrange
+    const { asked, subject, presenter } = controller();
+    const program = new Command().exitOverride();
+    registerSessionPinCommands(program, subject, presenter);
+
+    // Act
+    await program.parseAsync(['session', 'unpin', 'ses-1'], { from: 'user' });
+
+    // Assert
+    should(asked).deepEqual(['unpin ses-1']);
+    should(program.commands.map(command => command.name())).deepEqual(['session']);
+  });
 });

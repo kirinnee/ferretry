@@ -63,6 +63,14 @@ const bar = (props: Partial<BarProps> = {}) => (
 const ids = (root: Element): (string | null)[] =>
   [...root.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session'));
 
+const source = (daemonId: DaemonId, name: string, sessions: (typeof live)[]): MachineSource => ({
+  daemonId,
+  name,
+  slice: { sessions, byId: new Map(), status: 'ready', error: null },
+  projects: [],
+  reach: 'online',
+});
+
 describe('the Pinned group in the sessions bar', () => {
   test('sits above Needs you, lists pins oldest first, and shows each ferret only once', async () => {
     view = await mount(bar());
@@ -94,13 +102,6 @@ describe('the Pinned group in the sessions bar', () => {
   });
 
   test('spans machines, naming each ferret’s machine', async () => {
-    const source = (daemonId: DaemonId, name: string, sessions: (typeof live)[]): MachineSource => ({
-      daemonId,
-      name,
-      slice: { sessions, byId: new Map(), status: 'ready', error: null },
-      projects: [],
-      reach: 'online',
-    });
     view = await mount(
       bar({
         machineSources: [source(ALPHA, 'work-mac', [live, plain]), source(BETA, 'kirin-box', [finished])],
@@ -119,5 +120,46 @@ describe('the Pinned group in the sessions bar', () => {
     expect(ids(view.container)).toEqual([]);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')].map(dot => dot.getAttribute('aria-label') ?? '');
     expect(dots.slice(0, 2).map(label => label.split(' — ')[0])).toEqual(['Finished work', 'Live work']);
+  });
+
+  test('says what moved when a machine’s ferrets are all pinned or waiting', async () => {
+    view = await mount(
+      bar({
+        machineSources: [
+          source(ALPHA, 'work-mac', [plain]),
+          source(BETA, 'kirin-box', [finished]),
+          source('gamma' as DaemonId, 'third-box', [
+            sessionView('gamma-pin', {
+              config: { teammate: 'gus', name: 'Gamma pin', cwd: '/work/g', mode: 'interactive' },
+              pinnedAt: pinnedAt(9),
+            }),
+            sessionView('gamma-ask', {
+              config: { teammate: 'gil', name: 'Gamma ask', cwd: '/work/g', mode: 'interactive' },
+              state: { attention: asking as never },
+            }),
+          ]),
+        ],
+      }),
+    );
+    const empty = (id: string): string | undefined =>
+      view?.container.querySelector(`[data-sbar-machine-group="${id}"] .fy-sbar__empty`)?.textContent ?? undefined;
+    expect([empty('beta'), empty('gamma')]).toEqual([
+      'Everything here is pinned.',
+      'Everything here is pinned or in Needs you.',
+    ]);
+  });
+
+  test('leads the collapsed rail across machines', async () => {
+    view = await mount(
+      bar({
+        presentation: 'rail',
+        machineSources: [source(ALPHA, 'work-mac', [plain, live]), source(BETA, 'kirin-box', [finished])],
+      }),
+    );
+    const dots = [...view.container.querySelectorAll('.fy-sbar__dot')].map(dot => dot.getAttribute('aria-label') ?? '');
+    expect(dots.slice(0, 2).map(label => label.split(' — ')[0])).toEqual([
+      'Finished work on kirin-box',
+      'Live work on work-mac',
+    ]);
   });
 });
