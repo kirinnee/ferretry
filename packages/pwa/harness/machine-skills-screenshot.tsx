@@ -64,7 +64,7 @@ const withItems = (view, items, change = {}) => ({ ...view, ...change, manifest:
 const view = fixture.view;
 
 const BROWSE = {
-  [KIRIN.daemonId]: { kind: 'ok', value: { ...fixture.browse, catalogs: [withItems(view, [skillEntry, FLOOP, mcpEntry])] } },
+  [KIRIN.daemonId]: { kind: 'ok', value: { ...fixture.browse, catalogs: [withItems(view, [skillEntry, FLOOP, mcpEntry], { name: 'Kirin’s catalog' })] } },
   [INES.daemonId]: {
     kind: 'ok',
     value: {

@@ -74,6 +74,19 @@ describe('the credential test that refuses a copy', () => {
     should(firstCredentialLine(`API_KEY=abcdef01234\n56789abcdef`)).equal(1);
   });
 
+  it('should name the exact line, whatever the line breaks and whichever pass finds it', () => {
+    const KEY = `API_KEY=${LONG}`;
+    should(firstCredentialLine(KEY)).equal(1);
+    should(firstCredentialLine(`#!/bin/sh\n${KEY}\necho filled\n`)).equal(2);
+    should(firstCredentialLine(`a\nb\nc\n${KEY}\nd`)).equal(4);
+    should(firstCredentialLine(`a\r\nb\r\n${KEY}\r\nd\r\n`)).equal(3);
+    should(firstCredentialLine(`a\r\n\r\nb\r\n${KEY}`)).equal(4);
+    should(firstCredentialLine(`#!/bin/sh\nAPI_\u202EKEY=${LONG}\necho filled\n`)).equal(2);
+    should(firstCredentialLine(`one\ntwo\nAPI_KEY=abcdef01234\n56789abcdef\nfive`)).equal(3);
+    should(firstCredentialLine(`one\r\n\r\ntwo\r\nAPI_KEY=abcdef01234\r\n\r\n56789abcdef\r\nsix`)).equal(4);
+    should(firstCredentialLine(`one\ntwo\nAPI_\nKEY=${LONG}\nfive`)).equal(4);
+  });
+
   it('should leave alone what is short, referenced, a place, or not a secret by name', () => {
     should(firstCredentialLine('API_KEY=short')).be.undefined();
     should(firstCredentialLine('API_KEY=$OTHER_VARIABLE_NAME_HERE')).be.undefined();

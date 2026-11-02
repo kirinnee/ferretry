@@ -30,6 +30,7 @@ export const NO_MACHINE_SKILLS = 'No other account or project on this machine ha
 export const NO_MACHINE_MATCH = 'No skill on this machine matches that.';
 export const MACHINE_TRUNCATED = 'This machine has more skills than the list holds, so some are not shown.';
 export const REVIEW_BEFORE_INSTALLING = 'Review before installing';
+export const CHECK_AGAIN = 'Check again';
 export const COPY_NOTE = 'It is copied, not linked: the original stays where it is, and the two stay separate.';
 export const NOT_COPIED_HEADING = 'Not copied';
 

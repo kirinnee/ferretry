@@ -56,8 +56,8 @@ export interface InstallPlan {
   readonly runtimeId?: string;
 }
 
-export const PROJECT_SENTENCE = 'This project (every session in this folder)';
-export const accountSentence = (runtime: string): string => `This account (every session on ${runtime})`;
+export const PROJECT_SENTENCE = 'this project (every session in this folder)';
+export const accountSentence = (runtime: string): string => `this account (every session on ${runtime})`;
 
 /** The registered project that holds `cwd`, the longest path winning, so a nested folder finds its own. */
 export function projectHolding(cwd: string, projects: readonly FleetProject[]): FleetProject | undefined {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 import { CLAUDE_LIVE, CODEX_NEXT, NOT_HERE } from '../../../../src/features/context-rail/add-skills-model.ts';
 import { type AddSkillsHost, AddSkillsSheet } from '../../../../src/features/context-rail/add-skills-sheet.tsx';
 import {
+  CHECK_AGAIN,
   MACHINE_TRUNCATED,
   MACHINE_UNREADABLE,
   NO_MACHINE_MATCH,
@@ -204,6 +205,12 @@ describe('Install from this machine', () => {
     await click(q('[data-local-preview]'));
     await settle();
     expect(q('[data-local-preview]')?.textContent).toBe(REVIEW_BEFORE_INSTALLING);
+    expect(q('[data-local-preview]')?.getAttribute('data-variant')).toBeNull();
+    expect(
+      [...document.querySelectorAll('[data-catalog-sheet="local-skill"] [data-variant="primary"]')].map(button =>
+        button.hasAttribute('data-local-install'),
+      ),
+    ).toEqual([true]);
     expect(calls.find(call => call.path.endsWith('/preview'))?.body).toEqual({
       source: { path: PDF_PATH },
       target: { scope: 'project', projectRoot: '/work/app', harness: 'claude' },
@@ -229,7 +236,7 @@ describe('Install from this machine', () => {
     await settle();
     expect(q('[data-catalog-sheet="add-skills"]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
-      `Installed pdf-tools in This project (every session in this folder). ${CLAUDE_LIVE}`,
+      `Installed pdf-tools in this project (every session in this folder). ${CLAUDE_LIVE}`,
     );
     expect(events).toEqual(['installed']);
     expect(machineRows()[0]?.querySelector('[data-add-skills-machine-installed]')).not.toBeNull();
@@ -267,9 +274,12 @@ describe('Install from this machine', () => {
     });
     const { view } = await open(host);
     await installRow('pdf-tools');
+    expect(q('[data-local-preview]')?.textContent).toBe(REVIEW_BEFORE_INSTALLING);
     await click(q('[data-local-preview]'));
     await settle();
     expect(q('[data-catalog-failure]')?.textContent).toBe(CREDENTIAL_SENTENCE);
+    expect(q('[data-local-preview]')?.textContent).toBe(CHECK_AGAIN);
+    expect(q('[data-local-preview]')?.getAttribute('data-variant')).toBe('primary');
     expect(q('[data-local-install]')).toBeNull();
     expect(q('[data-local-confirm]')).toBeNull();
     expect(q('[data-catalog-preview-again]')).toBeNull();
@@ -404,7 +414,7 @@ describe('Install from this machine', () => {
     await click(q('button[aria-label="Close Installed"]'));
     await settle();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
-      `Installed pdf-tools in This account (every session on claude-work). ${CLAUDE_LIVE}`,
+      `Installed pdf-tools in this account (every session on claude-work). ${CLAUDE_LIVE}`,
     );
     expect(events).toEqual(['installed']);
     await view.unmount();

@@ -337,6 +337,7 @@ function AddSkillsBody({
         <input
           id={searchId}
           type="search"
+          placeholder={ADD_SKILLS_SEARCH_LABEL}
           className="kt-input"
           value={query}
           onChange={event => setQuery(event.target.value)}

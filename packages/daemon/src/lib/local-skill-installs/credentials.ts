@@ -14,12 +14,7 @@
  * Pure and linear: plain scans (the text is cut into words once, the first `curl` is found once), and no pattern
  * that can backtrack: a run of quote marks is trimmed by a loop, not by `["']+$`, which is quadratic on `"""…x`.
  */
-import {
-  foldedForScan,
-  isKnownTokenShape,
-  joinedLines,
-  namesSecret,
-} from '../catalog-installs/conservative-changes.ts';
+import { foldedForScan, isKnownTokenShape, namesSecret } from '../catalog-installs/conservative-changes.ts';
 
 const ASSIGNED_NAME = /^-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,127}$/u;
 const MIN_VALUE_LENGTH = 16;
@@ -152,32 +147,59 @@ function credentialOffset(text: string): number {
   return earliest([found[hit]?.index ?? -1, addressWithPassword(text), text.search(PEM_HEADER)]);
 }
 
-/** The 1-based line that holds offset `at` of the lines joined with `glue` characters between them. */
-function lineAt(lines: readonly string[], at: number, glue: number): number {
+/** The 1-based line that holds offset `at` of the lines joined with one space between them. */
+function lineAt(lines: readonly string[], at: number): number {
   let end = 0;
   return (
     lines.findIndex(line => {
-      end += line.length + glue;
+      end += line.length + 1;
       return end > at;
     }) + 1
   );
 }
 
+/** The smallest index in `[low, high]` where `test` holds, given that it holds at `high`. */
+function firstWhere(low: number, high: number, test: (index: number) => boolean): number {
+  let from = low;
+  let to = high;
+  while (from < to) {
+    const middle = Math.floor((from + to) / 2);
+    if (test(middle)) to = middle;
+    else from = middle + 1;
+  }
+  return from;
+}
+
+/** The largest index in `[low, high]` where `test` holds, given that it holds at `low`. */
+function lastWhere(low: number, high: number, test: (index: number) => boolean): number {
+  let from = low;
+  let to = high;
+  while (from < to) {
+    const middle = Math.ceil((from + to) / 2);
+    if (test(middle)) from = middle;
+    else to = middle - 1;
+  }
+  return from;
+}
+
+/**
+ * The 1-based line a credential that only the lines joined with nothing between them holds STARTS on. In the whole
+ * joined text the word it sits in also holds the end of the line before it, so the offset names the wrong line:
+ * the span is the fewest lines from the top that hold it, then the fewest from the bottom of those.
+ */
+function joinedLine(lines: readonly string[]): number {
+  const holds = (from: number, to: number): boolean => credentialOffset(lines.slice(from, to + 1).join('')) !== -1;
+  const last = firstWhere(0, lines.length - 1, to => holds(0, to));
+  return lastWhere(0, last, from => holds(from, last)) + 1;
+}
+
 /** The 1-based line of the first password or key in `text`, or undefined when there is none. */
 export function firstCredentialLine(text: string): number | undefined {
-  const folded = foldedForScan(text);
-  const lines = folded.split(LINE_END);
+  const lines = foldedForScan(text).split(LINE_END);
   const own = lines.findIndex(line => credentialOffset(line) !== -1);
   if (own !== -1) return own + 1;
   // A value on the next line (YAML), then a name or value a line break split: the line the credential STARTS on.
-  const joinings: readonly (readonly [string, number])[] = [
-    [lines.join(' '), 1],
-    [joinedLines(folded), 0],
-  ];
-  for (const [joined, glue] of joinings) {
-    const at = credentialOffset(joined);
-    if (at === -1) continue;
-    return lineAt(lines, at, glue);
-  }
-  return undefined;
+  const spaced = credentialOffset(lines.join(' '));
+  if (spaced !== -1) return lineAt(lines, spaced);
+  return credentialOffset(lines.join('')) === -1 ? undefined : joinedLine(lines);
 }

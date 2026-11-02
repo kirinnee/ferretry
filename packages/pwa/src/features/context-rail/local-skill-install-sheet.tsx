@@ -35,6 +35,7 @@ import {
   originLine,
   previewRequest,
   REPLACES_NOTE,
+  CHECK_AGAIN,
   REVIEW_BEFORE_INSTALLING,
   rowFromLine,
   skippedLines,
@@ -153,7 +154,7 @@ export function LocalSkillInstallSheet({
           <p className="m-0 break-words text-cell font-semibold text-fg">{name}</p>
           <p className="m-0 break-words text-meta text-muted">{rowFromLine(row)}</p>
           <p className="m-0 break-words text-meta text-muted">{row.description}</p>
-          <p className="m-0 text-meta text-faint">{COPY_NOTE}</p>
+          <p className="m-0 text-meta text-muted">{COPY_NOTE}</p>
         </div>
         <TargetPicker draft={draft} onDraft={change} options={options} busy={busy} />
         {problem === null ? null : (
@@ -163,12 +164,16 @@ export function LocalSkillInstallSheet({
         )}
         <Button
           type="button"
-          variant="primary"
+          variant={preview === null ? 'primary' : 'outline'}
           disabled={busy || problem !== null}
           onClick={() => void runPreview()}
           data-local-preview=""
         >
-          {busy && preview === null ? 'Reading…' : REVIEW_BEFORE_INSTALLING}
+          {busy && preview === null
+            ? 'Reading…'
+            : failure !== null && preview === null
+              ? CHECK_AGAIN
+              : REVIEW_BEFORE_INSTALLING}
         </Button>
       </section>
       {failure === null ? null : (
@@ -211,7 +216,7 @@ function Review({
         </section>
       )}
       <ReviewBody entries={preview.review} warnings={preview.warnings} audience="installer" />
-      <p className="m-0 text-meta text-faint">{EXPIRY_NOTE}</p>
+      <p className="m-0 text-meta text-muted">{EXPIRY_NOTE}</p>
       <Button type="button" variant="primary" disabled={busy} onClick={onInstall} data-local-install="">
         {busy ? 'Installing…' : INSTALL_BUTTON}
       </Button>
