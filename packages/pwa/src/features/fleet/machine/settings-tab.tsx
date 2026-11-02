@@ -5,11 +5,14 @@
  * The Machine tab holds what is about the computer itself, in sections a person looks for:
  * - **Devices & access**, **Health**, **Tools** (the agent CLIs' panel) and **Advanced** — the paired daemon's
  *   own panels, one titled list each (`machine-panels.ts` says which panel is where).
- * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
+ * - **Tools** — Claude Code and Codex, installed or not, with **Install**, then the agent tools panel: one
+ *   section, the panel's row at the end of the same list.
  * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Copy settings
  *   from another machine**; **Export settings**.
- * - **This machine** — its name, whether it answers, how many runtimes it has and its format; **About** opens
- *   the version and updates panel.
+ * - **About** — this machine's name, whether it answers, how many runtimes it has and its format, then the
+ *   version and updates panel's row.
+ *
+ * Every row on the tab starts with an icon, the same size and spacing, so the lists read as one.
  *
  * The agent settings — permissions, what agents may control, auto-resume, agenda mode and conversations —
  * are written here and drawn by the Agents tab. Two choices become an inline segmented pick; on/off
@@ -22,14 +25,13 @@
  */
 
 import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Code, Copy, FolderInput, Rocket, Sparkles, Upload } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
-import { Toggle } from '../../settings/notification-settings.tsx';
 import { Segmented } from '../conversations/conversation-picker.tsx';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
@@ -39,10 +41,11 @@ import type { SetupAccess } from '../setup/setup-access.ts';
 import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
-import type { PanelGroupId } from '../shell/machine-panels.ts';
+import { type PanelGroupId, panelGroup } from '../shell/machine-panels.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { machineSettings } from './machine-settings.ts';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
+import { machineSettings } from './machine-settings.ts';
+import { SwitchList, SwitchRow } from './switch-row.tsx';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
 type AgentControlKind = keyof FleetAgentControl;
@@ -55,18 +58,20 @@ export const AGENT_PERMISSION_WORDS: Readonly<Record<AgentPermissions, string>> 
 /** "What agents may control" (T): each switch's label and what it covers — the fourth, Ferretry settings,
  *  is the `config.*` tools (docs/config-files.md); the fifth, Page scripts, is `browser.eval`. */
 export const AGENT_CONTROL_WORDS: Readonly<
-  Record<AgentControlKind, { readonly title: string; readonly detail: string }>
+  Record<AgentControlKind, { readonly title: string; readonly hint?: string; readonly detail: string }>
 > = {
   terminals: { title: 'Terminals', detail: 'Open, read and type into session terminals.' },
   browsers: { title: 'Browsers', detail: 'Open, navigate and read the session browser.' },
   files: { title: 'Files', detail: "Read and change files in the session's project." },
   ferretrySettings: {
     title: 'Ferretry settings',
+    hint: 'Lets agents use config tools',
     detail:
       "Read and edit this machine's configuration files (the config tools). Off by default; an agent's edit that loosens anything still waits for you.",
   },
   pageScripts: {
     title: 'Page scripts',
+    hint: 'Can read site sign-ins',
     detail:
       'Let agents run their own JavaScript in pages they drive. A script can read what a page holds — on the shared agent profile, that includes your sign-ins to every site you signed it in to. Off by default; turn it on only if you need it.',
   },
@@ -90,13 +95,29 @@ export interface MachineSettingsTabProps extends MachineTabProps {
   readonly browser?: Window;
 }
 
+/** The icon slot every row on the tab starts with: the panel frame's own size and width, so the lists line up. */
+function RowIcon({ children }: { readonly children: ReactNode }) {
+  return (
+    <span className="flex w-5 shrink-0 justify-center text-muted" data-row-icon="" aria-hidden="true">
+      {children}
+    </span>
+  );
+}
+
+const TOOL_ICONS: Readonly<Record<FleetMachineView['tools'][number]['harness'], ReactNode>> = {
+  claude: <Sparkles size={16} aria-hidden="true" />,
+  codex: <Code size={16} aria-hidden="true" />,
+};
+
 /** One compact row in a list of ways in: its name, a chevron, and the longer explanation on hover. */
 function NavRow({
+  icon,
   title,
   detail,
   onClick,
   name,
 }: {
+  readonly icon: ReactNode;
   readonly title: string;
   readonly detail: string;
   readonly onClick: () => void;
@@ -111,6 +132,7 @@ function NavRow({
         onClick={onClick}
         className="kt-grouprow min-h-11 items-center"
       >
+        <RowIcon>{icon}</RowIcon>
         <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{title}</span>
         <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
       </button>
@@ -227,21 +249,21 @@ export function AgentControlSection({
   };
   return (
     <SetupSection title="What agents may control" name="agent-control">
-      <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-agent-control="">
-        <legend className="sr-only">What agents may control</legend>
+      <ul className="kt-groupcard m-0 list-none p-0" aria-label="What agents may control" data-agent-control="">
         {AGENT_CONTROL_KINDS.map(kind => (
-          <Toggle
+          <SwitchRow
             key={kind}
             checked={draft[kind]}
             label={AGENT_CONTROL_WORDS[kind].title}
-            description={AGENT_CONTROL_WORDS[kind].detail}
+            {...(AGENT_CONTROL_WORDS[kind].hint === undefined ? {} : { hint: AGENT_CONTROL_WORDS[kind].hint })}
+            explanation={AGENT_CONTROL_WORDS[kind].detail}
             onChange={on => {
               setDraft({ ...draft, [kind]: on });
               changes.clear();
             }}
           />
         ))}
-      </fieldset>
+      </ul>
       <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
         Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
       </p>
@@ -314,13 +336,15 @@ export function ConversationsSection({
 
   return (
     <SetupSection title="Conversations" name="conversations">
-      <Toggle
-        checked={on}
-        label="Keep in sync"
-        description={KEEP_IN_SYNC_EXPLANATION}
-        disabled={busy}
-        onChange={toggle}
-      />
+      <SwitchList label="Conversations">
+        <SwitchRow
+          checked={on}
+          label="Keep in sync"
+          explanation={KEEP_IN_SYNC_EXPLANATION}
+          disabled={busy}
+          onChange={toggle}
+        />
+      </SwitchList>
       {note === null ? null : (
         <p
           role="status"
@@ -377,15 +401,17 @@ export function AutoResumeSection({
   if (machine.autoResume === undefined) return null;
   return (
     <SetupSection title="Auto-resume after restart" name="auto-resume">
-      <Toggle
-        checked={draft === 'on'}
-        label="Resume ferrets after a restart"
-        description={AUTO_RESUME_WORDS[draft].detail}
-        onChange={on => {
-          setDraft(on ? 'on' : 'off');
-          changes.clear();
-        }}
-      />
+      <SwitchList label="Auto-resume after restart">
+        <SwitchRow
+          checked={draft === 'on'}
+          label="Resume ferrets after a restart"
+          explanation={AUTO_RESUME_WORDS[draft].detail}
+          onChange={on => {
+            setDraft(on ? 'on' : 'off');
+            changes.clear();
+          }}
+        />
+      </SwitchList>
       {last === null ? null : (
         <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
           <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
@@ -453,15 +479,17 @@ export function AgendaModeSection({
   if (machine.agendaMode === undefined) return null;
   return (
     <SetupSection title="Agenda mode" name="agenda-mode">
-      <Toggle
-        checked={draft === 'on'}
-        label="Agenda mode for new ferrets"
-        description={AGENDA_MODE_WORDS[draft].detail}
-        onChange={on => {
-          setDraft(on ? 'on' : 'off');
-          changes.clear();
-        }}
-      />
+      <SwitchList label="Agenda mode">
+        <SwitchRow
+          checked={draft === 'on'}
+          label="Agenda mode for new ferrets"
+          explanation={AGENDA_MODE_WORDS[draft].detail}
+          onChange={on => {
+            setDraft(on ? 'on' : 'off');
+            changes.clear();
+          }}
+        />
+      </SwitchList>
       {pending ? (
         <ChangeApplyPanel
           machineName={machineName}
@@ -483,6 +511,48 @@ export function AgendaModeSection({
 /** Sections side by side from the desktop width, one column on a phone. */
 const MACHINE_COLUMNS = 'grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-5 lg:grid-cols-2';
 
+/** The tool rows: Claude Code and Codex, whether each is installed, and Install for one that is missing. */
+function toolRows(machine: FleetMachineView, online: boolean, open: (flow: SettingsFlow) => void): ReactNode {
+  return machine.tools.map(tool => (
+    <li key={tool.harness} data-setup-row={`tool-${tool.harness}`}>
+      <div className="kt-grouprow min-h-11 items-center">
+        <RowIcon>{TOOL_ICONS[tool.harness]}</RowIcon>
+        <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{tool.label}</span>
+        <span className="shrink-0 text-meta text-muted">{tool.installed ? 'Installed' : 'Not installed'}</span>
+        {tool.installed ? null : (
+          <Button
+            type="button"
+            size="sm"
+            data-tool-install={tool.harness}
+            disabled={!online}
+            onClick={() => open(tool.harness === 'claude' ? 'install-claude' : 'install-codex')}
+          >
+            Install
+          </Button>
+        )}
+      </div>
+    </li>
+  ));
+}
+
+/** This machine's name, whether it answers, how many runtimes it has and its format: the head of About's list. */
+function factsRow(machine: FleetMachineView, online: boolean): ReactNode {
+  return (
+    <li data-about-facts="">
+      <dl className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-panel py-3 text-cell">
+        <dt className="text-muted">Name</dt>
+        <dd className="m-0 min-w-0 break-all font-mono text-fg">{machine.name}</dd>
+        <dt className="text-muted">Status</dt>
+        <dd className="m-0 text-fg">{online ? 'Online' : 'Offline'}</dd>
+        <dt className="text-muted">Runtimes</dt>
+        <dd className="m-0 text-fg">{machine.setUp ? String(machine.runtimeCount) : 'Not set up yet'}</dd>
+        <dt className="text-muted">Format</dt>
+        <dd className="m-0 text-fg">{FORMAT_WORDS[machine.format]}</dd>
+      </dl>
+    </li>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, sources, browser } = props;
   const route = useSettingsFlow(machineName, browser);
@@ -490,7 +560,24 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const toRuntimes = (): void => route.goTo('runtimes');
   const flow: SettingsFlow | null = route.flow;
   const { daemonPanels } = props;
-  const group = (id: PanelGroupId): ReactNode => daemonPanels?.(undefined, route.openPanel, id);
+  const group = (id: PanelGroupId, lead?: ReactNode): ReactNode => daemonPanels?.(undefined, route.openPanel, id, lead);
+
+  // Tools and About are the panel frame's groups with this tab's rows at their head; with no frame (a test, a
+  // harness) the tab draws the same one section itself, so the facts and the tools are never missing.
+  const inGroup = (id: PanelGroupId, lead: ReactNode): ReactNode =>
+    daemonPanels === undefined ? (
+      <section className="flex min-w-0 flex-col gap-2" data-setup-section={id}>
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">{panelGroup(id).label}</h4>
+        <ul
+          className="kt-groupcard m-0 list-none p-0"
+          aria-label={`${machineName} ${panelGroup(id).label.toLowerCase()}`}
+        >
+          {lead}
+        </ul>
+      </section>
+    ) : (
+      group(id, lead)
+    );
 
   // New machine setup is a full screen of its own; an old in-tab address points there.
   if (flow === 'setup' || flow === 'import')
@@ -548,31 +635,8 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
       {group('devices-access')}
       {group('health')}
 
-      <section className="flex min-w-0 flex-col gap-2" data-setup-section="tools">
-        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Tools on {machineName}</h4>
-        <ul className="kt-groupcard m-0 list-none p-0" aria-label={`Tools on ${machineName}`}>
-          {machine.tools.map(tool => (
-            <li key={tool.harness} data-setup-row={`tool-${tool.harness}`}>
-              <div className="kt-grouprow min-h-11 items-center">
-                <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{tool.label}</span>
-                <span className="shrink-0 text-meta text-muted">{tool.installed ? 'Installed' : 'Not installed'}</span>
-                {tool.installed ? null : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    data-tool-install={tool.harness}
-                    disabled={!online}
-                    onClick={() => route.open(tool.harness === 'claude' ? 'install-claude' : 'install-codex')}
-                  >
-                    Install
-                  </Button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-3">{group('tools')}</div>
-      </section>
+      {/* One Tools list: Claude Code and Codex first, then the agent tools panel's own row. */}
+      {inGroup('tools', toolRows(machine, online, route.open))}
 
       <section className="flex min-w-0 flex-col gap-2" data-setup-section="setup">
         <h4 className="m-0 text-meta font-semibold uppercase text-muted">Setup</h4>
@@ -580,6 +644,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
           {/* New machine setup is revisitable: every step skipped the first time is one tap away here. */}
           <NavRow
             name="setup"
+            icon={<Rocket size={16} aria-hidden="true" />}
             title={machine.setUp ? 'New machine setup' : `Set up ${machineName}`}
             detail={
               machine.setUp
@@ -592,6 +657,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
           {machine.setUp ? (
             <NavRow
               name="import"
+              icon={<FolderInput size={16} aria-hidden="true" />}
               title="Import again"
               detail={`Read Claude Code and Codex on ${machineName} again and add anything new.`}
               onClick={() => (props.onSetUp === undefined ? route.open('import') : props.onSetUp('claude'))}
@@ -599,12 +665,14 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
           ) : null}
           <NavRow
             name="clone"
+            icon={<Copy size={16} aria-hidden="true" />}
             title="Copy settings from another machine…"
             detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets come only when you pick them; logins never travel."
             onClick={() => route.open('clone')}
           />
           <NavRow
             name="export"
+            icon={<Upload size={16} aria-hidden="true" />}
             title="Export settings"
             detail="A zip of this machine’s configuration files, without secrets."
             onClick={() => route.open('export')}
@@ -614,21 +682,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
       {group('advanced')}
 
-      <section className="flex min-w-0 flex-col gap-2" data-setup-section="facts">
-        <h4 className="m-0 text-meta font-semibold uppercase text-muted">This machine</h4>
-        <dl className="kt-panel m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-1 p-panel text-cell">
-          <dt className="text-muted">Name</dt>
-          <dd className="m-0 min-w-0 break-all font-mono text-fg">{machine.name}</dd>
-          <dt className="text-muted">Status</dt>
-          <dd className="m-0 text-fg">{online ? 'Online' : 'Offline'}</dd>
-          <dt className="text-muted">Runtimes</dt>
-          <dd className="m-0 text-fg">{machine.setUp ? String(machine.runtimeCount) : 'Not set up yet'}</dd>
-          <dt className="text-muted">Format</dt>
-          <dd className="m-0 text-fg">{FORMAT_WORDS[machine.format]}</dd>
-        </dl>
-      </section>
-
-      {group('about')}
+      {inGroup('about', factsRow(machine, online))}
     </div>
   );
 }

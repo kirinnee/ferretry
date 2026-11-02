@@ -412,6 +412,7 @@ function RuntimeRow({
     runtime.agent &&
     runtime.disabled === undefined &&
     !isDefaultRuntime(machine, runtime);
+  const detailsLine = `${loginLine(runtime, data)} · ${runtime.profile} profile · ${runtimeDefaultModel(runtime)}`;
   return (
     <div className="flex flex-col gap-1">
       <div
@@ -439,8 +440,14 @@ function RuntimeRow({
                     word={runtimeWord(runtime)}
                     className="min-h-[calc(var(--control-h)-0.5rem)] w-4 shrink-0 justify-center"
                   />
-                  <span className="flex min-w-0 flex-1 flex-wrap content-center items-center gap-x-2 gap-y-1 min-h-[calc(var(--control-h)-0.5rem)]">
-                    <span className="min-w-0 break-all font-mono text-row font-semibold text-fg" data-runtime-name="">
+                  <span
+                    className="flex min-h-[calc(var(--control-h)-0.5rem)] min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1"
+                    data-runtime-name-row=""
+                  >
+                    <span
+                      className="max-w-full shrink-0 break-words font-mono text-row font-semibold text-fg"
+                      data-runtime-name=""
+                    >
                       {runtime.name}
                     </span>
                     {isDefaultRuntime(machine, runtime) ? (
@@ -448,14 +455,9 @@ function RuntimeRow({
                         Default
                       </Badge>
                     ) : null}
-                    {runtime.disabled === undefined ? null : (
-                      <Badge tone="warn" className="shrink-0" data-runtime-disabled-badge="">
-                        Disabled
-                      </Badge>
-                    )}
                     {runtime.agent ? null : (
                       <Badge className="shrink-0" data-runtime-kind-badge="">
-                        Not an agent
+                        Not agent
                       </Badge>
                     )}
                   </span>
@@ -469,7 +471,11 @@ function RuntimeRow({
                   {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
                 />
               </div>
-              <span className={`${ROW_INDENT} break-words text-cell text-muted`} data-runtime-details="">
+              <span
+                className={`${ROW_INDENT} truncate text-cell text-muted`}
+                title={detailsLine}
+                data-runtime-details=""
+              >
                 <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
                 {runtimeDefaultModel(runtime)}
               </span>
