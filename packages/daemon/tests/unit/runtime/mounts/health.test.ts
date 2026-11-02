@@ -323,4 +323,26 @@ describe('the daemon health mount and the session-worker pool', () => {
     // Assert
     should(body).not.have.property('legacyWire');
   });
+
+  it('should report the possible duplicate asks the sweep left open, and leave the field out where it runs none', async () => {
+    // Arrange
+    const left = [
+      {
+        kind: 'title' as const,
+        members: [
+          { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'lead', id: 'A2' },
+        ],
+        why: 'not closed: the owner has begun talking about it',
+      },
+    ];
+
+    // Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ duplicateAsks: left }))).body));
+    const body = JSON.parse((await ask(healthSubsystem())).body) as Record<string, unknown>;
+
+    // Assert
+    should(view.duplicateAsks).deepEqual(left);
+    should(body).not.have.property('duplicateAsks');
+  });
 });

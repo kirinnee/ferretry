@@ -1764,7 +1764,15 @@ export function AgendaInboxPage({
                   onSend={reason => {
                     const label = choiceLabel(gateWhy.action);
                     if (label === null || deck[0] === undefined) return;
-                    answerCard(host, deck[0], gateAnswerAction(label, reason));
+                    answerCard(
+                      host,
+                      deck[0],
+                      gateAnswerAction(
+                        label,
+                        reason,
+                        gateWhy.action.kind === 'respond' && gateWhy.action.gate === true,
+                      ),
+                    );
                     setGateWhy(null);
                   }}
                 />

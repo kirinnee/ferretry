@@ -109,6 +109,42 @@ predates gates answers it by label, plus:
   surfaces and closes it as its own, and the owner's answer reaches it as on its own item.
 - **It buzzes once**, at its raise, and is never part of a stop's push ([notifications.md](notifications.md)).
 
+## One ask per thing
+
+The owner is asked about one thing **once**. A card that waits at a gate while a ferret already has an open question
+about that same card on the owner's agenda would otherwise ask twice, so the daemon keeps the two apart
+([board.md](board.md#one-ask-per-thing) owns the rules):
+
+- **A gate attaches to a thread.** A card at a gate that has an open, owner-facing **thread** — an agent-raised item
+  whose `task` is the card, not a gate item and not a notice — raises **no gate item**. The daemon puts the gate on the
+  thread instead: `gateAttached` (an `AgendaGate`, written only by the daemon; an add or edit that carries one is
+  refused). With several threads it attaches to the one on the owner's turn, else the newest. A gate item already open
+  when a thread appears is resolved by the daemon, its note naming the thread that now asks.
+- **Answering it.** The thread shows the gate's options as a second answer row, the same labels and swipes as a gate
+  item ("&F12 is at To test. Answer it here too."). `resolve` with `gate: true` answers the **gate**, not the thread:
+  it goes through the same path as a gate item (owner only, the card moves first, the same refusals). The thread stays
+  open for its own question; the gate leaves it once the card moves on. A `resolve` without `gate: true` is the thread's
+  own answer, as ever.
+- **It stops counting** when the thread is closed, the card leaves the gate, or the thread sits on the **ferret's** turn
+  for more than 24 hours: a ferret cannot mute a gate by opening a thread and leaving it. The daemon looks again every
+  Warden sweep and the gate item is raised if no thread stands in for it. A gate the **owner** closed a thread on is
+  counted as asked, and is not raised again for that entry.
+- **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card that is already asking the owner,
+  answers `invalid`: `&F12 is already asking the owner (!A3 on <home>'s agenda); add what you need to it instead: fy
+task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is raised
+  **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). Notices are never
+  refused.
+- **Thread cards are internal.** `fy task create --thread !A12` records the caller's own open thread on the card
+  (`thread`). A card with a `thread`, no `approval` and no person asking is **internal**: it has no gate item and
+  reaches the owner only through the thread.
+- **The duplicate sweep.** At boot and on every Warden sweep the daemon reads every agenda (pure `findDuplicates`) and
+  closes only what is provably the same ask — one card with more than one open owner item; one `source` + `sourceRef`
+  open on two agendas; identical normalized titles in one lineage, both agent-raised. It keeps the item on the owner's
+  turn, else the home agenda's, else the newest, and closes the rest with the note `duplicate of !A<n>`. It never closes
+  an item the owner has begun to talk about, a hands-on card, or a gate the owner answered, and closes nothing while any
+  agenda is unreadable. What it leaves is listed by `fy doctor` ("N possible duplicate asks left open") from
+  `duplicateAsks` on `GET /v1/health`.
+
 ## Turns
 
 Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:
@@ -341,18 +377,19 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 `fy agenda add | edit | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                    | Does                                                                            |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.           |
-| `add --offer-close`     | With `--task`: the owner may close the card with the same tap that resolves it. |
-| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.         |
-| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).     |
-| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.    |
-| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.              |
-| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)         |
-| `dismiss <id>`          | Close without answering; agents only their own.                                 |
-| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                    |
-| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.         |
+| Verb                    | Does                                                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.                                     |
+| `add --offer-close`     | With `--task`: the owner may close the card with the same tap that resolves it.                           |
+| `add --task <card>`     | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)). |
+| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.                                   |
+| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).                               |
+| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                              |
+| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.                                        |
+| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)                                   |
+| `dismiss <id>`          | Close without answering; agents only their own.                                                           |
+| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                                              |
+| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.                                   |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 

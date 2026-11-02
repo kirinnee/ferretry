@@ -500,6 +500,11 @@ const BoardTaskShape = {
    * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
    */
   approval: AgendaRefSchema.optional(),
+  /**
+   * The open agenda thread this card was made to carry out (docs/board.md § Thread cards are internal): an item on
+   * the creating ferret's agenda. A card with one, no `approval` and no person asking is the ferret's own errand.
+   */
+  thread: AgendaRefSchema.optional(),
 };
 
 type BoardTaskCoherence = Pick<
@@ -771,6 +776,8 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
    * board?" item on the ferret's own agenda (docs/board.md § The board is opt-in). Ignored for the owner.
    */
   approval: AgendaIdSchema.optional(),
+  /** The caller's own open agenda item this card carries out; the card is then the ferret's own errand. */
+  thread: AgendaIdSchema.optional(),
 });
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;

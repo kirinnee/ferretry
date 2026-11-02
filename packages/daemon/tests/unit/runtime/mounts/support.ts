@@ -12,6 +12,7 @@ import {
   DAEMON_CAPABILITIES,
   type IoPressureView,
   type LearningConfig,
+  type DuplicateAsk,
   type LegacyWireUse,
   PIN_SCHEMA_VERSION,
   type Pin,
@@ -1188,6 +1189,8 @@ export interface HealthWorld {
   readonly io?: IoPressureView;
   /** The older wire names clients used, where the daemon counts them. */
   readonly legacyWire?: readonly LegacyWireUse[];
+  /** The possible duplicate asks the last sweep left open, where the daemon runs one. */
+  readonly duplicateAsks?: readonly DuplicateAsk[];
 }
 
 /**
@@ -1269,6 +1272,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
     scratch: world.scratch ?? { enabled: false, reclaimedSessions: 0, reclaimedBytes: 0 },
     ...(world.io === undefined ? {} : { io: () => world.io }),
     ...(world.legacyWire === undefined ? {} : { legacyWire: () => world.legacyWire ?? [] }),
+    ...(world.duplicateAsks === undefined ? {} : { duplicateAsks: () => world.duplicateAsks ?? [] }),
   };
 }
 

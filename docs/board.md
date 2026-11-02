@@ -852,6 +852,22 @@ creator is read as the owner's.
 through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
 (`MAX_AGENDA_RESOLUTIONS`): a card left at a gate the owner dismissed long ago may ask again once its record is gone.
 
+### One ask per thing
+
+A gate does not ask the owner a second time about a card the owner is already being asked about
+([agenda.md](agenda.md#one-ask-per-thing) has the wire):
+
+- **Attach, not wait.** A card at a gate with an open, owner-facing agent thread linked to it (`task` = the card) raises
+  no gate item. The daemon puts the gate on the thread (`gateAttached`) and the owner answers its options there through
+  `GateItems.answer`, owner only, the card moving first; the attachment clears only if the move went through, or when
+  the card leaves the gate. An attachment counts as asked once the **owner** closes the thread.
+- **The abuse guard.** A thread suppresses a gate item only while it is open and owner-facing. One left on the ferret's
+  turn for more than 24 hours no longer counts, and the next sweep raises the gate item.
+- **Thread cards are internal.** A card made with `fy task create --thread !A12` (the caller's own open thread) and no
+  `approval`, with no person asking, is a ferret's own errand (`cardAudience`): no gate item, not in the Inbox.
+- **Duplicates.** One daemon sweep, at boot and each Warden sweep, closes the asks that are provably the same ask and
+  reports the rest in `fy doctor`; see agenda.md.
+
 ## Activity and staleness
 
 Activity is attributed to a session's focus card (`config.focusTask`, set by `fy task focus` and by creating a

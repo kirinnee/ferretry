@@ -26,6 +26,7 @@ import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
+import { attachedGateView, toGateAction } from '../../lib/gate-items.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
@@ -353,21 +354,45 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
       : undefined;
+  const attached = attachedGateView(item);
+  const gateRow =
+    attached === undefined ? null : (
+      <div className="fy-card__gate-row" data-agenda-attached-gate={attached.gate.cardId}>
+        <p className="fy-card__gate-lead">
+          <strong>&amp;{attached.gate.cardId}</strong> is at {attached.gate.laneName}. Answer it here too.
+        </p>
+        <AgendaQuickReplies
+          busy={busy}
+          error={null}
+          map={Object.fromEntries(
+            Object.entries(swipeMap(attached)).map(([direction, action]) => [direction, toGateAction(action)]),
+          )}
+          model={cardModel(attached)}
+          onAct={action => onAct(toGateAction(action))}
+          options={attached.ask?.kind === 'multiple-choice' ? attached.ask.options : []}
+          plainLabels
+          swipeable={false}
+        />
+      </div>
+    );
   const replies = (
-    <AgendaQuickReplies
-      busy={busy}
-      error={error}
-      map={swipeMap(item)}
-      model={model}
-      onAct={onAct}
-      options={options}
-      plainLabels={item.gate !== undefined}
-      swipeable={swipeable}
-      {...(onSkip === undefined ? {} : { onSkip })}
-      {...(doneClose === undefined ? {} : { doneClose })}
-      {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-      {...(requestChanges === undefined ? {} : { requestChanges })}
-    />
+    <>
+      <AgendaQuickReplies
+        busy={busy}
+        error={error}
+        map={swipeMap(item)}
+        model={model}
+        onAct={onAct}
+        options={options}
+        plainLabels={item.gate !== undefined}
+        swipeable={swipeable}
+        {...(onSkip === undefined ? {} : { onSkip })}
+        {...(doneClose === undefined ? {} : { doneClose })}
+        {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
+        {...(requestChanges === undefined ? {} : { requestChanges })}
+      />
+      {gateRow}
+    </>
   );
   // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
   const docked =
@@ -376,7 +401,7 @@ export function AgendaItemCard({
     settled === undefined &&
     !isInput &&
     planForm === undefined &&
-    (model.notice || model.answers.length > 0 || requestChanges !== undefined);
+    (model.notice || model.answers.length > 0 || requestChanges !== undefined || attached !== undefined);
 
   return (
     <article

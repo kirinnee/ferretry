@@ -1001,6 +1001,11 @@ const AgendaItemBaseShape = {
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
   /** The card gate this item asks about (`AgendaGate`); only the daemon raises one, and only the owner answers it. */
   gate: AgendaGateSchema.optional(),
+  /**
+   * The card gate this THREAD answers for (docs/agenda.md § One ask per thing): a ferret's open, owner-facing thread
+   * about a card whose gate is asking carries it instead of a gate item of its own. Only the daemon sets or clears it.
+   */
+  gateAttached: AgendaGateSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -1178,6 +1183,8 @@ export const AgendaSnapshotSchema = z
     updatedAt: InstantSchema,
     /** Writing advice for the item just raised or edited; present only on that response. */
     warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
+    /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
+    notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
     /**
      * How many devices this machine has enrolled for push, counted as an item was raised; present only on
      * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
@@ -1301,6 +1308,8 @@ export const AgendaActionRequestSchema = z
       id: AgendaIdSchema,
       note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
       response: AgendaResponseSchema.optional(),
+      /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
+      gate: z.literal(true).optional(),
     }),
     /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
     z.strictObject({

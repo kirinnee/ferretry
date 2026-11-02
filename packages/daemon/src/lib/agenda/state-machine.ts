@@ -343,6 +343,17 @@ export type AgendaCommand =
       readonly at: string;
     }
   | {
+      /**
+       * A card's gate is asked ON this thread (docs/agenda.md § One ask per thing): the thread carries `gateAttached`
+       * and the card raises no gate item of its own; `gate: null` clears it. Daemon-only: the card is the witness.
+       */
+      readonly action: 'attach-gate';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly gate: AgendaGate | null;
+      readonly at: string;
+    }
+  | {
       readonly action: 'resolve-source';
       readonly actor: AgendaActor;
       readonly source: AgendaSource;
@@ -386,6 +397,8 @@ export type AgendaMutation =
       readonly item?: AgendaItem;
       /** The item as it was closed, on answered, resolved and dismissed mutations; absent otherwise. */
       readonly addressed?: ResolvedAgendaItem;
+      /** What the daemon changed about the request the caller should be told, as the route prints it. */
+      readonly notes?: readonly string[];
     };
 
 export function emptyAgendaLedger(sessionId: string, at: string): AgendaLedger {
@@ -742,6 +755,8 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return undelivered(ledger, command);
     case 'restate-confirms':
       return restateConfirms(ledger, command);
+    case 'attach-gate':
+      return attachGate(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -778,6 +793,7 @@ type WakeCommand = Extract<AgendaCommand, { action: 'wake' }>;
 type ResolveSourceCommand = Extract<AgendaCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AgendaCommand, { action: 'undelivered' }>;
 type RestateConfirmsCommand = Extract<AgendaCommand, { action: 'restate-confirms' }>;
+type AttachGateCommand = Extract<AgendaCommand, { action: 'attach-gate' }>;
 
 function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   const { actor, request } = command;
@@ -1913,6 +1929,25 @@ function restateConfirms(ledger: AgendaLedger, command: RestateConfirmsCommand):
     premise: command.premise,
     ...(premiseChanged ? { revisions: [...(target.item.revisions ?? []), revision].slice(-MAX_AGENDA_REVISIONS) } : {}),
   };
+  return replaceItem(ledger, item, command.at, 'refreshed');
+}
+
+/**
+ * A card's gate is asked on an open thread of the card's ferret (docs/agenda.md § One ask per thing), or no longer is.
+ * Only the daemon says so, and only of an open thread: not a gate item (it IS the ask) and not a notice (it asks
+ * nothing). The thread is otherwise left exactly as it was.
+ */
+function attachGate(ledger: AgendaLedger, command: AttachGateCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon')
+    return failure('forbidden', 'only the daemon may attach a card gate to a thread');
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (isGateItem(target.item) || target.item.notice === true) {
+    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no attached gate`);
+  }
+  if (sameField(command.gate ?? undefined, target.item.gateAttached)) return unchanged(ledger);
+  const { gateAttached: _gone, ...rest } = target.item;
+  const item: AgendaItem = command.gate === null ? rest : { ...rest, gateAttached: command.gate };
   return replaceItem(ledger, item, command.at, 'refreshed');
 }
 

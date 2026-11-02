@@ -108,6 +108,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
   type WardenGuardConfig,
+  type DuplicateAsk,
 } from '@ferretry/protocol';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
@@ -610,6 +611,7 @@ import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
+  ThreadGateObserver,
   BOARD_SWEEP_INTERVAL_MS,
   BoardGateCheck,
   BoardService,
@@ -617,6 +619,7 @@ import {
   BoardTurnCheck,
   type CardWriteObserver,
   DoneDeliveryLadder,
+  DuplicateSweep,
   GateItems,
   LivenessActivityDeriver,
   type OwnerWords,
@@ -2272,6 +2275,8 @@ function createBoardWorld(
       nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId,
       answered: async (sessionId, id) => (await agendaResolved(sessionId)).find(item => item.id === id),
     },
+    // `fy task create --thread !A12`: the item must be the caller's own, open.
+    threads: { open: async (sessionId, id) => (await agendaItems(sessionId)).find(item => item.id === id) },
   });
   const cards = new SessionCards({
     board,
@@ -4423,6 +4428,8 @@ interface WardenParts {
   /** The named work in flight, so the sweep and the liveness tick are attributed in a profile. */
   readonly activities?: ActivityLedger;
   readonly sessions: SessionDirectorySubsystem;
+  /** Work the daemon does after every sweep, the periodic and the manual alike (the gate and duplicate-ask checks). */
+  readonly afterSweep?: () => Promise<void>;
   readonly control: SessionControlSubsystem;
   /**
    * The session documents as written, no transcript projected first: the liveness monitor's 30 s roster.
@@ -4916,6 +4923,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       run: async options => {
         const view = await service.run(options);
         parts.supervision.lastSweepAt = view.sweptAt;
+        await parts.afterSweep?.().catch(() => undefined);
         return view;
       },
       intervalMs: async () => await service.intervalMs(),
@@ -7095,8 +7103,10 @@ function createHealthSubsystem(
   scratch: ScratchReclamation,
   sessionWorkers: () => SessionWorkerPool,
   ioPressure: IoPressurePort,
+  duplicateAsks: () => readonly DuplicateAsk[],
 ): DaemonHealthSubsystem {
   return {
+    duplicateAsks,
     report: async () => await health.report(),
     pid: process.pid,
     scratch,
@@ -10782,6 +10792,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agendaProjection,
           // The work search re-reads this session's ledger before its next answer.
           { changed: async sessionId => await workSearch.changed(sessionId) },
+          // A thread on a card's gate stands in for the gate's own item: the gates look again when one changes.
+          new ThreadGateObserver({ written: async id => await gateItems?.written(id) }),
           // The owner's Accept on a lane proposal confirms those lanes; any other answer is ignored.
           new LaneProposalAcceptance(laneSets),
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
@@ -10812,6 +10824,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           () => attachmentDaemonId,
         ),
         agendaHomes,
+        // Whether a card's gate is already asking the owner (a gate item, or a thread it is attached to).
+        {
+          asking: async ref =>
+            ref.machineId !== undefined && ref.machineId !== attachmentDaemonId
+              ? undefined
+              : await gateItems?.asking(ref.id),
+        },
       );
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
@@ -10832,6 +10851,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await walkLadder(gateWordsMessenger, boardDiagnostics, rungsOf(task), message, key);
           },
         },
+        diagnostics: boardDiagnostics,
+      });
+      // The same ask twice is closed ("duplicate of !A3") when it is provably the same; a doubtful pair is left for `fy doctor`.
+      const duplicateSweep = new DuplicateSweep({
+        agenda,
+        sessions: { all: agendaSessionIds },
+        homes: agendaHomes,
         diagnostics: boardDiagnostics,
       });
       // Open items already on a sub-ferret's agenda move to its home first, once; the gates then find them there.
@@ -10857,6 +10883,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         .then(raised => {
           if ((raised ?? 0) > 0)
             process.stderr.write(`board: raised ${String(raised)} gate item(s) for cards already waiting\n`);
+        })
+        .then(() => duplicateSweep.run())
+        .then(closed => {
+          if (closed > 0) process.stderr.write(`agenda: closed ${String(closed)} duplicate ask(s)\n`);
         })
         .catch((error: unknown) => boardDiagnostics.warn(`the gate items' boot pass failed: ${String(error)}`));
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
@@ -12454,7 +12484,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clock,
           ),
         },
-        health: createHealthSubsystem(health, scratch, sessionWorkerPool, ioPressure),
+        health: createHealthSubsystem(health, scratch, sessionWorkerPool, ioPressure, () => duplicateSweep.possible()),
         performance: {
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
@@ -13091,6 +13121,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           documents: createSessionDirectorySubsystem(paths, storage),
           control: sessionControl,
           attention: agenda,
+          afterSweep: async () => {
+            await gateItems?.sweep();
+            await duplicateSweep.run();
+          },
           usage,
           accounts,
           defaultRuntime: async () => {

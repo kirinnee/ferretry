@@ -4286,3 +4286,63 @@ describe('Agenda state machine: one unreadable entry', () => {
     should(refused.error.message).match(/^agenda item A1 would not read back \(subject: Too big/u);
   });
 });
+
+describe('attach-gate (docs/agenda.md § One ask per thing)', () => {
+  const GATE = {
+    cardId: 'F1',
+    laneId: 'tested',
+    laneName: 'Try it',
+    entry: 1,
+    projectId: 'p1',
+    options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+  };
+  const attach = (
+    ledger: AgendaLedger,
+    gate: typeof GATE | null,
+    actor: AgendaActor = { kind: 'daemon', cause: 'system' },
+    id: AgendaId = 'A1',
+  ): AgendaMutation => applyAgendaCommand(ledger, { action: 'attach-gate', actor, id, gate, at: SECOND });
+
+  it('sets the gate on an open thread, leaves everything else alone, and clears it again', () => {
+    const { ledger } = raised();
+
+    const set = succeeded(attach(ledger, GATE));
+    const again = succeeded(attach(set.ledger, GATE));
+    const cleared = succeeded(attach(set.ledger, null));
+
+    should(set.change).equal('refreshed');
+    should(set.item?.gateAttached).deepEqual(GATE);
+    should(set.item?.subject).equal('Approve the deployment?');
+    should(again.changed).be.false();
+    should(cleared.item?.gateAttached).be.undefined();
+    should(succeeded(attach(ledger, null)).changed).be.false();
+  });
+
+  it('is the daemon’s alone', () => {
+    const { ledger } = raised();
+    for (const actor of [AGENT, HUMAN, OTHER_AGENT])
+      should(failed(attach(ledger, GATE, actor)).error.code).equal('forbidden');
+  });
+
+  it('refuses an item that is not there, a gate item and a notice', () => {
+    const { ledger } = raised();
+    should(failed(attach(ledger, GATE, undefined, 'A9')).error.code).equal('not-found');
+
+    const gateItem = succeeded(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(DAEMON, {
+          source: 'task',
+          sourceRef: gateReference({ cardId: 'F1', laneId: 'tested', entry: 1 }),
+          gate: GATE,
+          task: { id: 'F1' },
+        } as never),
+      ),
+    );
+    should(failed(attach(gateItem.ledger, GATE)).error.code).equal('invalid');
+
+    const notice = raised(AGENT, { notice: true, ask: undefined, kind: 'info' } as never);
+    should(failed(attach(notice.ledger, GATE)).error.code).equal('invalid');
+  });
+});

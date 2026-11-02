@@ -465,6 +465,20 @@ describe('attention confirmations', () => {
     should(actual).equal(`attention recorded — 0 open items in ${SESSION}`);
   });
 
+  it('should print what the daemon noted about the raise, line by line', () => {
+    // Act
+    const actual = renderAgendaMutation('attention !A2 recorded', undefined, {
+      ...snapshot([humanItem('A2', 'x')]),
+      notes: ['&F12 is asking already; this was raised without the card'],
+    });
+
+    // Assert
+    should(actual.split('\n')).deepEqual([
+      `attention !A2 recorded — 1 open item in ${SESSION}`,
+      'Note: &F12 is asking already; this was raised without the card',
+    ]);
+  });
+
   it('should warn when the raise reached no device, and say nothing when one was enrolled', () => {
     // Arrange
     const nobody = { ...snapshot([humanItem('A1', 'x')]), enrolled: 0 };

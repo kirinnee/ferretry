@@ -91,6 +91,8 @@ export interface BoardCreateOptions {
   readonly parent?: string;
   /** The owner's Yes a card rests on where the board is off: an agenda item (`!A12`). */
   readonly approval?: string;
+  /** The caller's own open agenda thread this card carries out (`!A12`): the card is then the ferret's own errand. */
+  readonly thread?: string;
   readonly assignee?: string;
   readonly pr?: readonly string[];
   readonly branch?: string;
@@ -136,11 +138,11 @@ export function createPrLinks(options: BoardCreateOptions): string[] {
 }
 
 /** The agenda item `--approval` names, in any spelling `fy agenda` takes (`!A12`, `A12`). */
-const requireApproval = (value: string): string => {
+const requireAgendaFlag = (flag: string, value: string): string => {
   try {
     return parseAgendaReference(value);
   } catch (error) {
-    return refuse(`--approval: ${error instanceof Error ? error.message : String(error)}`);
+    return refuse(`${flag}: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
 
@@ -166,6 +168,7 @@ export function buildBoardCreateRequest(
   const workflow = requireChoice(present(options.workflow) ?? 'quick', TaskWorkflowSchema.options, '--workflow');
   const parent = present(options.parent);
   const approval = present(options.approval);
+  const thread = present(options.thread);
   const branch = present(options.branch);
   const lane = present(options.lane);
 
@@ -183,7 +186,8 @@ export function buildBoardCreateRequest(
     ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
     ...(lane === undefined ? {} : { laneId: lane }),
     parent: parent === undefined ? null : requireCardRef(parent, '--parent id'),
-    ...(approval === undefined ? {} : { approval: requireApproval(approval) }),
+    ...(approval === undefined ? {} : { approval: requireAgendaFlag('--approval', approval) }),
+    ...(thread === undefined ? {} : { thread: requireAgendaFlag('--thread', thread) }),
     assignee: resolved.assignee,
     dependsOn: trimmedAll(options.dependsOn).map(value => ({ task: requireCardRef(value, '--depends-on id') })),
     files: trimmedAll(options.file),

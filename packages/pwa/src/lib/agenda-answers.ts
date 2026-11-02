@@ -47,6 +47,8 @@ export type InboxAction =
       readonly label: string;
       readonly response: AgendaResponse;
       readonly note?: string;
+      /** The answer is to the gate attached to this thread (`gateAttached`), not to the thread: the daemon moves the card. */
+      readonly gate?: true;
     }
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
   | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }

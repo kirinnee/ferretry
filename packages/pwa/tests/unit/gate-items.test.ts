@@ -3,12 +3,14 @@ import type { AgendaItem } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  attachedGateView,
   gateAnswerAction,
   gateAsksWords,
   gateHeld,
   gateReopenOption,
   gateWordsFor,
   isGateItem,
+  toGateAction,
   toTestBesideGates,
 } from '../../src/lib/gate-items.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
@@ -123,6 +125,50 @@ describe('which answers wait for words', () => {
 
   test('finds the reopen option', () => {
     expect(gateReopenOption(item as never)?.label).toBe('Not good');
+  });
+});
+
+describe('a gate attached to a thread', () => {
+  const thread = agendaItem('A2', {
+    subject: 'Which colour?',
+    waitingOn: 'ferret',
+    gateAttached: twoOptions,
+  } as Partial<AgendaItem>);
+
+  test('is drawn as the gate item it would be, answers in the gate directions', () => {
+    const view = attachedGateView(thread);
+    expect(view?.gate).toEqual(twoOptions);
+    expect(view?.waitingOn).toBeUndefined();
+    expect(view?.ask).toEqual({
+      kind: 'multiple-choice',
+      options: [{ label: 'Not good' }, { label: 'Done' }],
+    });
+    const labels = Object.values(swipeTargets(view as AgendaItem)).map(target => target.label);
+    expect(labels.sort()).toEqual(['Done', 'Not good']);
+  });
+
+  test('is nothing for an item with no attachment, a gate item or a notice', () => {
+    expect(attachedGateView(agendaItem('A1'))).toBeUndefined();
+    expect(attachedGateView(gateItem(twoOptions, { gateAttached: twoOptions } as Partial<AgendaItem>))).toBeUndefined();
+    expect(attachedGateView({ ...thread, notice: true })).toBeUndefined();
+  });
+
+  test('marks a choice for the gate and leaves every other answer alone', () => {
+    expect(toGateAction(gateAnswerAction('Done', ''))).toEqual({
+      ...gateAnswerAction('Done', ''),
+      gate: true,
+    } as never);
+    expect(toGateAction({ kind: 'dismiss', label: 'Not needed' })).toEqual({ kind: 'dismiss', label: 'Not needed' });
+  });
+
+  test('Not good on the attached gate waits for words; the same label on the thread does not', () => {
+    const marked = gateAnswerAction('Not good', '', true);
+    expect(marked).toMatchObject({ gate: true });
+    expect(gateWordsFor(thread, marked)).toBe('required');
+    expect(gateHeld(thread, marked)).toBe(true);
+    expect(gateAsksWords(thread, marked)).toBe(true);
+    expect(gateWordsFor(thread, gateAnswerAction('Not good', ''))).toBe('none');
+    expect(gateWordsFor(thread, gateAnswerAction('Done', '', true))).toBe('none');
   });
 });
 
