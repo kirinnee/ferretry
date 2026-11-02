@@ -816,6 +816,52 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
   });
 
+  it('should record a publish at the item by ids only', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const OTHER = `cat_${'E'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const DIGEST = `sha256:${'c'.repeat(64)}`;
+    const { journal, routes } = decorated({
+      'POST /v1/catalog-items/:itemId/versions': async () =>
+        jsonResponse({
+          itemId: ITEM,
+          itemVersion: 2,
+          current: 2,
+          catalogs: [
+            { catalogId: CAT, revision: 4, digest: DIGEST },
+            { catalogId: OTHER, revision: 7, digest: DIGEST },
+          ],
+          item: { name: 'secret name text with spaces', files: 'x' },
+        }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'POST',
+        path: `/v1/catalog-items/${ITEM}/versions`,
+        headers: ADMIN,
+        loopback: true,
+        body: JSON.stringify({ digest: DIGEST }),
+      }),
+    );
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual(['catalog.changed']);
+    should(logged[0]?.subject).equal(ITEM);
+    should(logged[0]?.detail).containEql({
+      action: 'publish',
+      itemId: ITEM,
+      itemVersion: 2,
+      catalogIds: `${CAT},${OTHER}`,
+      revisions: '4,7',
+    });
+    should(JSON.stringify(logged)).not.match(/secret name|files/u);
+  });
+
   it('should record a one-tap Add and its Undo by id, and nothing for an answer that changed nothing', async () => {
     // Arrange
     const CAT = `cat_${'A'.repeat(22)}`;

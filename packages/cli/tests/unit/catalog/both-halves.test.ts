@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerCatalogInstallCommands } from '../../../src/lib/catalog-install/commands';
-import { CatalogInstallController } from '../../../src/lib/catalog-install/controller';
 import { registerCatalogCommands } from '../../../src/lib/catalog/commands';
 import { CatalogController } from '../../../src/lib/catalog/controller';
+import { registerCatalogInstallCommands } from '../../../src/lib/catalog-install/commands';
+import { CatalogInstallController } from '../../../src/lib/catalog-install/controller';
 import {
   catalogFileText,
   FakeFiles,
-  FakeGateway as InstallGateway,
   FakeOutput,
   FakePrompt,
+  FakeGateway as InstallGateway,
   skillItem,
 } from '../catalog-install/support';
 import { CapturingOutput, CWD, FakeGateway, MemoryFiles, ScriptedPrompt } from './fixtures';
@@ -71,6 +71,7 @@ describe.each<Order>(['publisher first', 'installer first'])('both halves of fy 
         'rename',
         'rm',
         'uninstall',
+        'versions',
         'withdraw',
       ].sort(),
     );

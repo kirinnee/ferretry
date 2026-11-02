@@ -590,6 +590,19 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseFields: { itemId: ['itemId'], itemVersion: ['itemVersion'], digest: ['digest'], revision: ['revision'] },
   },
   {
+    method: 'POST',
+    path: '/v1/catalog-items/:itemId/versions',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'publish' },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['itemVersion'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
+    },
+  },
+  {
     method: 'DELETE',
     path: '/v1/catalogs/:id/items/:itemId',
     event: 'catalog.changed',
@@ -1023,6 +1036,8 @@ function fieldsIn(
       const texts = found.filter((entry): entry is string => typeof entry === 'string' && IDENTIFIER.test(entry));
       const numbers = found.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
       if (numbers.length === 1 && found.length === 1) detail[key] = numbers[0] as number;
+      else if (numbers.length > 1 && numbers.length === found.length)
+        detail[key] = joinedWithin(numbers.map(String), AUDIT_TEXT_MAX);
       else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
     }
     return Object.keys(detail).length === 0 ? undefined : detail;

@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerCatalogCommands } from '../../../src/lib/catalog/commands';
 import { CatalogController } from '../../../src/lib/catalog/controller';
-import { CapturingOutput, CATALOG_ID, CWD, FakeGateway, MemoryFiles, SKILL_ID, ScriptedPrompt } from './fixtures';
+import { CATALOG_ID, CapturingOutput, CWD, FakeGateway, MemoryFiles, ScriptedPrompt, SKILL_ID } from './fixtures';
 
 function run(argv: string[]) {
   const gateway = new FakeGateway();
@@ -73,6 +73,16 @@ describe('catalog command surface', () => {
     const withdrawn = run(['catalog', 'withdraw', 'Team tools', 'pdf-tools', '--yes']);
     await withdrawn.parsed;
     should(withdrawn.gateway.calls.at(-1)).match({ call: 'withdraw', itemId: SKILL_ID });
+  });
+
+  it('should list the versions of an item, by name, also as JSON', async () => {
+    const versions = run(['catalog', 'versions', 'Team tools', 'pdf-tools']);
+    await versions.parsed;
+    should(versions.gateway.calls.at(-1)).eql({ call: 'getItem', itemId: SKILL_ID });
+    should(versions.out.text).containEql('v1');
+    const json = run(['catalog', 'versions', 'Team tools', 'pdf-tools', '--json']);
+    await json.parsed;
+    should(JSON.parse(json.out.text).itemId).equal(SKILL_ID);
   });
 
   it('should export with repeated --item, --out and --force', async () => {

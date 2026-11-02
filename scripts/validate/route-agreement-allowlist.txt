@@ -122,6 +122,10 @@ unreached GET /v1/sessions/:sessionId/task-plans/:planId # TEMPORARY (&F291 R3a-
 unreached GET /v1/sign-in-rules/eligibility # TEMPORARY (&F291 R3c-3): the create sheet (R3c-6) asks it before it offers "Don't ask again"
 unreached POST /v1/sign-in-rules/stages/:stage/bind # TEMPORARY (&F291 R3c-3): the app takes a machine stage (`fy rules add`) before its passkey (R3c-6)
 unreached POST /v1/sign-in-rules/stages/:stage/commit # TEMPORARY (&F291 R3c-3): the app's passkey sheet (R3c-6) commits; the CLI never does
+unreached GET /v1/catalog-items/:itemId/versions/:version # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached GET /v1/catalog-items/:itemId/changes # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached POST /v1/catalog-items/:itemId/versions/preview # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached POST /v1/catalog-items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
 unreached POST /v1/accounts/:id/sign-in-rules/revoke # TEMPORARY (&F291 R3c-3): `fy rules rm --account` and the site panel (R3c-6) end every rule of an account; R3c-5 ends one rule at a time
 unreached GET /v1/sign-in-rules/suggestions # TEMPORARY (&F291 R3c-5): the create sheet (R3c-6) reads the ferrets' suggestions; this PR adds the daemon side only
 unreached DELETE /v1/sign-in-rules/suggestions/:sid # TEMPORARY (&F291 R3c-5): the sheet's Dismiss (R3c-6)

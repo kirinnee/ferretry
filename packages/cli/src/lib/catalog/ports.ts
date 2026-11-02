@@ -8,6 +8,7 @@ import type {
   IFyApiClient,
   OwnedCatalog,
   OwnedCatalogList,
+  OwnedSharedItem,
   OwnedSharedItemList,
   PublishCatalogVersionRequest,
   PublishedCatalogItem,
@@ -35,6 +36,8 @@ export interface ICatalogGateway {
   list(options?: { readonly sourceState: boolean }): Promise<OwnedCatalogList>;
   /** Every item this machine keeps, whichever catalogs list it. */
   listItems(): Promise<OwnedSharedItemList>;
+  /** One kept item, with every version it has. */
+  getItem(itemId: string): Promise<OwnedSharedItem>;
   create(request: CreateCatalogRequest): Promise<OwnedCatalog>;
   update(catalogId: string, request: UpdateCatalogRequest): Promise<OwnedCatalog>;
   remove(catalogId: string): Promise<DeletedCatalog>;

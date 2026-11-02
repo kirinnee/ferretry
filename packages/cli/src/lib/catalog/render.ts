@@ -1,8 +1,11 @@
 import type {
+  CatalogChange,
+  CatalogChanges,
   CatalogItemPreview,
   OwnedCatalog,
   OwnedCatalogItem,
   OwnedCatalogList,
+  OwnedSharedItem,
   PublishedCatalogItem,
   WithdrawnCatalogItem,
 } from '@ferretry/protocol';
@@ -81,8 +84,9 @@ export function renderPreview(preview: CatalogItemPreview): string {
     `Summary: ${preview.summary}`,
     `Read from: ${preview.location}`,
     '',
-    'What an installer would get:',
   ];
+  if (preview.changes !== undefined) lines.push(renderChanges(preview.changes), '');
+  lines.push('What an installer would get:');
   for (const entry of preview.review) {
     if (entry.document) {
       lines.push(`${INDENT}${entry.label}:`, block(entry.text, `${INDENT}${INDENT}`));
@@ -100,6 +104,56 @@ export function renderPreview(preview: CatalogItemPreview): string {
   }
   lines.push('', `Digest: ${preview.digest}`);
   return lines.join('\n');
+}
+
+const DIFF_MARK = { context: ' ', add: '+', remove: '-' } as const;
+const CHANGE_MARK = { added: '+', removed: '-', changed: '~' } as const;
+
+function renderChange(change: CatalogChange): string {
+  const flag = change.flag === undefined ? '' : ` [${change.flag}]`;
+  const deep = `${INDENT}${INDENT}`;
+  const head = `${INDENT}${CHANGE_MARK[change.change]} ${change.label}${flag}`;
+  if (!change.document) {
+    const lines = [
+      ...(change.before === undefined ? [] : [`${deep}was: ${change.before}`]),
+      ...(change.after === undefined ? [] : [`${deep}now: ${change.after}`]),
+    ];
+    return [head, ...lines].join('\n');
+  }
+  if (change.tooLarge === true)
+    return `${head}\n${deep}too large to show line by line: read the whole file in the full review`;
+  const hunks = (change.hunks ?? []).flatMap(hunk => [
+    `${deep}@@ -${hunk.beforeStart},${hunk.beforeLines} +${hunk.afterStart},${hunk.afterLines} @@`,
+    ...hunk.lines.map(line => `${deep}${DIFF_MARK[line.kind]} ${line.text}`),
+  ]);
+  const whole = change.change === 'removed' ? change.before : change.change === 'added' ? change.after : undefined;
+  return [head, ...hunks, ...(whole === undefined ? [] : [block(whole, deep)])].join('\n');
+}
+
+/** What a person would read differently in the next version than in the one every installer gets now. */
+export function renderChanges(changes: CatalogChanges): string {
+  const lines: string[] = ['What changed since the version installers get now:'];
+  if (changes.entries.length === 0) lines.push(`${INDENT}nothing a reader would see differently`);
+  for (const entry of changes.entries) lines.push(renderChange(entry));
+  if (changes.unchanged > 0) lines.push(`${INDENT}${plural(changes.unchanged, 'part')} the same`);
+  for (const warning of changes.newWarnings) lines.push(`${INDENT}new warning: ${warning.text}`);
+  for (const warning of changes.goneWarnings) lines.push(`${INDENT}no longer warned: ${warning.text}`);
+  if (changes.truncated === true) lines.push(`${INDENT}(this list was cut short: it is longer than can be shown)`);
+  return lines.join('\n');
+}
+
+/** Every version an item has, oldest first, with the one every catalog serves marked. */
+export function renderVersions(item: OwnedSharedItem): string {
+  return [
+    `${item.name} (${item.itemId}) · ${plural(item.versions.length, 'version')}`,
+    ...item.versions.map(version => {
+      const marks = [
+        version.version === item.current ? 'current' : '',
+        version.retiredAt === undefined ? '' : `retired ${version.retiredAt}`,
+      ].filter(mark => mark !== '');
+      return `${INDENT}v${version.version} · ${version.publishedAt} · ${version.size} bytes${marks.length === 0 ? '' : ` · ${marks.join(' · ')}`}\n${INDENT}${INDENT}${version.summary}`;
+    }),
+  ].join('\n');
 }
 
 export function renderPublished(published: PublishedCatalogItem): string {

@@ -2,19 +2,20 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { CatalogController } from '../../../src/lib/catalog/controller';
 import {
-  CapturingOutput,
+  AT,
   CATALOG_ID,
+  CapturingOutput,
   CWD,
   catalog,
   DIGEST,
   FakeGateway,
-  MemoryFiles,
   MCP_ID,
+  MemoryFiles,
+  mcpItem,
   NEW_DIGEST,
   preview,
-  SKILL_ID,
   ScriptedPrompt,
-  mcpItem,
+  SKILL_ID,
   sharedItem,
   skillItem,
 } from './fixtures';
@@ -172,11 +173,82 @@ describe('fy catalog publish', () => {
     should(writes(gateway)).have.length(0);
   });
 
+  it('should refuse, writing nothing, a copy that is exactly an older version again', async () => {
+    const older = skillItem({
+      current: 3,
+      versions: [1, 2, 3].map(number => ({ version: number, digest: DIGEST, size: 120, publishedAt: AT })),
+    });
+    const gateway = new FakeGateway({
+      catalogs: [catalog({ items: [older] })],
+      preview: preview({ sameAsVersion: 1 }),
+    });
+    const { controller } = build({ gateway });
+    await should(controller.publish('Team tools', SKILL_ID, { yes: true })).rejectedWith(
+      /exactly version 1 again; making an older version current is not built yet/,
+    );
+    should(writes(gateway)).have.length(0);
+  });
+
   it('should refuse a withdrawn item', async () => {
     const withdrawnItem = skillItem({ withdrawnAt: '2026-10-31T10:00:00.000Z', sourceState: 'withdrawn' });
     const gateway = new FakeGateway({ catalogs: [catalog({ items: [withdrawnItem] })], preview: preview() });
     const { controller } = build({ gateway });
     await should(controller.publish('Team tools', SKILL_ID, { yes: true })).rejectedWith(/was withdrawn/);
+  });
+});
+
+describe('fy catalog publish — what changed', () => {
+  const changes = {
+    entries: [
+      {
+        label: 'Starts',
+        change: 'changed' as const,
+        document: false,
+        before: 'a',
+        after: 'b',
+        flag: 'command' as const,
+      },
+    ],
+    unchanged: 1,
+    newWarnings: [],
+    goneWarnings: [],
+  };
+
+  it('should print what changed before it asks, and ask only after', async () => {
+    const gateway = new FakeGateway({
+      catalogs: [catalog()],
+      preview: preview({ version: 2, itemId: SKILL_ID, changes }),
+    });
+    const { controller, out, prompt } = build({ gateway, answers: ['y'] });
+    await controller.publish('Team tools', 'pdf-tools', {});
+    should(out.lines[0]).containEql('What changed since the version installers get now:');
+    should(out.lines[0]).containEql('~ Starts [command]');
+    should(prompt.asked).have.length(1);
+  });
+
+  it('should keep the changes in the JSON preview on stderr', async () => {
+    const gateway = new FakeGateway({
+      catalogs: [catalog()],
+      preview: preview({ version: 2, itemId: SKILL_ID, changes }),
+    });
+    const { controller, out } = build({ gateway });
+    await controller.publish('Team tools', 'pdf-tools', { yes: true, json: true });
+    should(JSON.parse(out.diagnostics[0] as string).preview.changes.entries[0].label).equal('Starts');
+  });
+});
+
+describe('fy catalog versions', () => {
+  it('should list the versions of one item and write nothing', async () => {
+    const { controller, gateway, out } = build();
+    await controller.versions('Team tools', 'pdf-tools', {});
+    should(gateway.calls.map(call => call.call)).eql(['list', 'getItem']);
+    should(out.text).containEql('pdf-tools (' + SKILL_ID + ') · 1 version');
+  });
+
+  it('should refuse an item the catalog does not list', async () => {
+    const { controller, gateway } = build();
+    await should(controller.versions('Team tools', 'nope', {})).rejectedWith(/nope/);
+    should(gateway.calls.some(call => call.call === 'getItem')).equal(false);
   });
 });
 

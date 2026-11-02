@@ -9,6 +9,7 @@ import {
   catalogItemVersionsPath,
   catalogPath,
   ProtocolCatalogGateway,
+  sharedItemPath,
 } from '../../../src/lib/catalog/gateway';
 import type { CatalogApiClient } from '../../../src/lib/catalog/ports';
 import {
@@ -16,11 +17,12 @@ import {
   catalog,
   catalogFile,
   catalogList,
-  DIGEST,
+  type DIGEST,
   NEW_DIGEST,
   preview,
   published,
   SKILL_ID,
+  sharedItem,
   withdrawn,
 } from './fixtures';
 
@@ -152,6 +154,15 @@ describe('protocol catalog gateway', () => {
     });
     should(calls[0]?.path).equal(`/v1/catalogs/${CATALOG_ID}/items/${SKILL_ID}/versions`);
     should(bodyOf(calls[0])).eql({ digest: NEW_DIGEST });
+  });
+
+  it('should GET one kept item, by its encoded id', async () => {
+    const calls: Call[] = [];
+    const item = await new ProtocolCatalogGateway(fakeClient(sharedItem(), calls)).getItem(SKILL_ID);
+    should(item.itemId).equal(SKILL_ID);
+    should(calls[0]?.path).equal(`/v1/catalog-items/${SKILL_ID}`);
+    should(calls[0]?.init).be.undefined();
+    should(sharedItemPath('a/b')).equal('/v1/catalog-items/a%2Fb');
   });
 
   it('should DELETE an item to withdraw it', async () => {
