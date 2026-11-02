@@ -37,6 +37,8 @@ export interface FerretGroup {
   readonly task: string | null;
   /** The board card the conversation works on, as it is written (`&F12`); `null` when it has none. */
   readonly card: string | null;
+  /** The sub-ferret's own name when the group's session is not the owner's thread it is named for; `null` when it is. */
+  readonly via: string | null;
   readonly machineName: string;
   /** The ferret is idle until the owner answers. */
   readonly stopped: boolean;
@@ -89,6 +91,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
   const groups = [...grouped.entries()].map(([key, members]): FerretGroup => {
     const head = members[0] as InboxCard;
     const names = sessionsBarNames(head.root ?? head.view);
+    const ownNames = sessionsBarNames(head.view);
     const ordered = sortAgenda(members.filter(card => !isNoticeCard(card)).map(card => card.item));
     const byItem = new Map(members.map(card => [card.item, card] as const));
     return {
@@ -98,6 +101,10 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
       ferret: names.ferret ?? names.title,
       task: names.ferret === null ? null : names.title,
       card: cardOf(head.view),
+      via:
+        head.root === undefined || head.root.config.id === head.view.config.id
+          ? null
+          : (ownNames.ferret ?? ownNames.title),
       machineName: head.machineName,
       stopped: sessionAgendaSummary(head.view.state)?.stopped === true,
       items: ordered.flatMap(item => byItem.get(item) ?? []),

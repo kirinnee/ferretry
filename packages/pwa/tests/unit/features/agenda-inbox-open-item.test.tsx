@@ -442,4 +442,16 @@ describe('the open Inbox item’s History', () => {
     expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
     await mounted.unmount();
   });
+
+  it('names a sub-ferret on a line under its owner’s thread, and a conversation that is its own thread says nothing', async () => {
+    const root = sessionView('sess-root', { config: { teammate: 'ada', name: 'Billing rewrite' } as never });
+    const kid = sessionView('sess-kid', {
+      config: { teammate: 'vena', name: 'Revive Button Flaky', parent: 'sess-root' } as never,
+    });
+    const underRoot = { ...inboxCard(agendaItem('A7', { subject: 'Ship it?' }), kid), root };
+    const mounted = await mount(page(fakeInbox(), [underRoot, shipIt], { phone: false }));
+    const vias = [...mounted.container.querySelectorAll('[data-agenda-group-via]')].map(node => node.textContent);
+    expect(vias).toEqual(['via Vena']);
+    await mounted.unmount();
+  });
 });

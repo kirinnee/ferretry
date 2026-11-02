@@ -48,8 +48,11 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // The app's own self-hosted fonts: `theme-fonts.css` names them `../assets/fonts/…`, which lands on `/assets/fonts/…` here.
     const built = Bun.file(join(buildDir, url.pathname));
-    return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
+    if (await built.exists()) return new Response(built);
+    const font = Bun.file(join(packageDir, 'src', url.pathname));
+    return new Response((await font.exists()) ? font : Bun.file(join(packageDir, 'public', url.pathname)));
   },
 });
 
@@ -86,6 +89,17 @@ for (const form of ['phone', 'desktop'] as const) {
     await page.goto(`${server.url}?theme=${theme}`);
     await page.locator('[data-fixture]').waitFor({ state: 'visible' });
     const where = `${form} ${theme}`;
+    // The shot is in the app's font or it is not a shot: wait for the faces to load and fail if the body's did not.
+    await page.evaluate(async () => document.fonts.ready.then(() => undefined));
+    const loadedFaces = await page.evaluate(() =>
+      [...document.fonts].filter(face => face.status === 'loaded').map(face => face.family),
+    );
+    const bodyFamily = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
+    const stack = bodyFamily.split(',').map(name => name.replaceAll(/["']/gu, '').trim());
+    if (!loadedFaces.some(family => stack.includes(family.replaceAll(/["']/gu, ''))))
+      problems.push(
+        `${where}: none of the app's fonts (${stack.join(', ')}) loaded (loaded: ${loadedFaces.join(', ') || 'none'})`,
+      );
     const trigger = page.locator('[data-agenda-filter] [aria-haspopup="menu"]');
     // The menu first: every badge is a length.
     await trigger.click();

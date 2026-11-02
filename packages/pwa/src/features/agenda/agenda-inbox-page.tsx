@@ -1133,6 +1133,11 @@ function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: 
           ·
         </span>
         <span className="fy-inbox-group__machine">{group.machineName}</span>
+        {group.via === null ? null : (
+          <span className="fy-inbox-group__via" data-agenda-group-via="">
+            via {group.via}
+          </span>
+        )}
       </RouteLink>
       <ul aria-label={`${group.ferret}'s items`} className="fy-inbox-group__rows">
         {group.items.map(card => (
