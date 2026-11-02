@@ -95,14 +95,14 @@ afterEach(async () => {
   view = null;
 });
 
-const mountPage = async () => {
+const mountPage = async (cards: readonly InboxCard[] = [open]) => {
   const fake = fakeInbox();
   const all = await sources();
   const navigated: string[] = [];
   const loads = { count: 0 };
   view = await mount(
     <InboxHarness
-      cards={[open]}
+      cards={cards}
       fake={fake}
       loadResolved={() => {
         loads.count += 1;
@@ -174,6 +174,20 @@ describe('Inbox Find across every tab', () => {
       must(root.querySelector<HTMLButtonElement>('.fy-attn-inbox__clear'), 'the clear button').click(),
     );
     expect(root.querySelector('[data-inbox-find]')).toBeNull();
+  });
+
+  it('shows an open item here when it is tapped, and an item on a ferret with the ferret named', async () => {
+    const onFerret = inboxCard(
+      agendaItem('F1', { subject: 'Relay plan draft', waitingOn: 'ferret', waitingFor: 'info' } as never),
+      sessionView('sess-F1', { config: { teammate: 'hadi', name: 'Docs sweep' } }),
+    );
+    const { root, navigated } = await mountPage([open, onFerret]);
+    const find = await openFind(root);
+    await fill(find, 'relay plan');
+    expect(results(root).map(row => [row.chip, row.label])).toEqual([['with-ferret', 'With Hadi']]);
+    await fill(find, 'rebase');
+    await interact(() => must(root.querySelector<HTMLAnchorElement>('[data-find-row] a'), 'the open row').click());
+    expect(navigated).toEqual([]);
   });
 
   it('opens a parked item in its conversation', async () => {
