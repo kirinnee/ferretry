@@ -18,7 +18,6 @@ import { NO_HELD_REPLIES } from '../runtime/mounts/support.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
 import { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import { type AttachmentOriginalsPort, SessionAttachmentStore } from '../../../src/lib/attachments/index.ts';
-import { keepLatest } from '../../../src/lib/board/gate-items.ts';
 import {
   type AgendaActor,
   AgendaAgentClearer,
@@ -27,6 +26,7 @@ import {
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
+  parseAgendaLedger,
 } from '../../../src/lib/agenda/index.ts';
 import {
   type BoardCaller,
@@ -175,67 +175,80 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     homes,
   );
   const cards_ = new BoardGateCards(board, { project: async () => ({ name: 'Ferretry' }) });
-  gates = new GateItems({
-    agenda: {
-      list: async sessionId => {
-        if (faults.unreadable?.includes(sessionId) === true) throw new Error('the agenda is unreadable');
-        return await agenda.list(sessionId);
+  const buildGates = (): GateItems =>
+    new GateItems({
+      agenda: {
+        list: async sessionId => {
+          if (faults.unreadable?.includes(sessionId) === true) throw new Error('the agenda is unreadable');
+          return await agenda.list(sessionId);
+        },
+        raise: async (sessionId, request, actor) => {
+          if (faults.raiseThrows === true) throw new Error('the agenda is unwritable');
+          return await agenda.raise(sessionId, request, actor);
+        },
+        resolve: async (sessionId, id, actor, note) => {
+          if (faults.resolveThrows?.includes(sessionId) === true) throw new Error('the agenda is unwritable');
+          return await agenda.resolve(sessionId, id, actor, note);
+        },
+        answer: async (sessionId, id, response, actor, note, via, receipt) =>
+          await agenda.answer(sessionId, id, response, actor, note, via, receipt),
+        attachGate: async (sessionId, id, gate, answered) => await agenda.attachGate(sessionId, id, gate, answered),
       },
-      raise: async (sessionId, request, actor) => {
-        if (faults.raiseThrows === true) throw new Error('the agenda is unwritable');
-        return await agenda.raise(sessionId, request, actor);
+      board: {
+        card: async id => {
+          if (faults.boardThrows === true) throw new Error('the board is unreadable');
+          return await cards_.card(id);
+        },
+        cards: async () => await cards_.cards(),
+        act: async (id, request, caller, expect) => {
+          if (faults.refuses?.includes(request.action) === true)
+            throw new Error(`the board refused the ${request.action}`);
+          await cards_.act(id, request, caller, expect);
+        },
       },
-      resolve: async (sessionId, id, actor, note) => {
-        if (faults.resolveThrows?.includes(sessionId) === true) throw new Error('the agenda is unwritable');
-        return await agenda.resolve(sessionId, id, actor, note);
+      lanes: stageGateLanes,
+      homes,
+      sessions: {
+        all: async () => {
+          if (listAllThrows > 0) {
+            listAllThrows -= 1;
+            throw new Error('the sessions cannot be listed');
+          }
+          return [...new Set([...SESSIONS, ...ledgers.ledgers.keys()])];
+        },
       },
-      answer: async (sessionId, id, response, actor, note) => await agenda.answer(sessionId, id, response, actor, note),
-      attachGate: async (sessionId, id, gate, answered) => await agenda.attachGate(sessionId, id, gate, answered),
-    },
-    board: {
-      card: async id => {
-        if (faults.boardThrows === true) throw new Error('the board is unreadable');
-        return await cards_.card(id);
-      },
-      cards: async () => await cards_.cards(),
-      act: async (id, request, caller, expect) => {
-        if (faults.refuses?.includes(request.action) === true)
-          throw new Error(`the board refused the ${request.action}`);
-        await cards_.act(id, request, caller, expect);
-      },
-    },
-    lanes: stageGateLanes,
-    homes,
-    sessions: {
-      all: async () => {
-        if (listAllThrows > 0) {
-          listAllThrows -= 1;
-          throw new Error('the sessions cannot be listed');
-        }
-        return [...new Set([...SESSIONS, ...ledgers.ledgers.keys()])];
-      },
-    },
-    ...(faults.noCarrier === true
-      ? {}
-      : {
-          files: faults.attachmentStore ?? {
-            carry: async (from: string, to: string, ids: readonly string[]) => {
-              if (faults.carryThrows === true) throw new Error('the copy failed');
-              carried.push([from, to, ids]);
-              return ids;
+      ...(faults.noCarrier === true
+        ? {}
+        : {
+            files: faults.attachmentStore ?? {
+              carry: async (from: string, to: string, ids: readonly string[]) => {
+                if (faults.carryThrows === true) throw new Error('the copy failed');
+                carried.push([from, to, ids]);
+                return ids;
+              },
             },
-          },
-        }),
-    marker,
-    now: () => faults.gatesNow ?? NOW,
-    words: {
-      told: async (task, message, key) => {
-        if (faults.tellThrows === true) throw new Error('nobody to tell');
-        told.push({ task: task.id, message, key });
+          }),
+      marker,
+      now: () => faults.gatesNow ?? NOW,
+      words: {
+        told: async (task, message, key) => {
+          if (faults.tellThrows === true) throw new Error('nobody to tell');
+          told.push({ task: task.id, message, key });
+        },
       },
-    },
-    diagnostics: { warn: message => warnings.push(message) },
-  });
+      diagnostics: { warn: message => warnings.push(message) },
+    });
+  gates = buildGates();
+  /** A daemon that stopped and started: every ledger read back from its stored form, and a GateItems built anew. */
+  const restart = (): GateItems => {
+    for (const [sessionId, ledger] of ledgers.ledgers) {
+      const reloaded = parseAgendaLedger(JSON.parse(JSON.stringify(ledger)), sessionId);
+      if (reloaded === null) throw new Error(`the ledger of ${sessionId} did not read back`);
+      ledgers.ledgers.set(sessionId, reloaded);
+    }
+    gates = buildGates();
+    return gates;
+  };
   const open = (sessionId = 'grandchild'): AgendaItem[] => {
     const ledger = ledgers.ledgers.get(sessionId);
     return ledger === undefined
@@ -272,7 +285,10 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     ledgers,
     board,
     marker,
-    gates: gates as GateItems,
+    get gates(): GateItems {
+      return gates as GateItems;
+    },
+    restart,
     store,
     reopen,
     done,
@@ -1477,8 +1493,25 @@ describe('a Not good with files, against the real attachment store', () => {
         await staleAfter(({ session }) => ({ attachments: { from: session, ids: [`att_${'e'.repeat(64)}`] } }));
       });
 
-      it('refuses files brought where the first brought none, and none where it brought some', async () => {
+      it('refuses no files where the first brought some', async () => {
         await staleAfter(() => ({ attachments: undefined }));
+      });
+
+      it('refuses files brought where the first brought none', async () => {
+        // Arrange
+        const { world, upload, session, item } = await atGate();
+        const bare = { action: 'resolve', id: item.id, response: choose('Not good'), note: 'still flickers' };
+        should((await send(world, session, bare)).status).equal(200);
+
+        // Act
+        const response = await send(world, session, {
+          ...bare,
+          attachments: { from: session, ids: [await upload(session)] },
+        });
+
+        // Assert
+        should(response).match({ status: 409, body: { code: 'gate_moved_on' } });
+        should(world.reopen.notices).have.length(1);
       });
 
       it('refuses files from another session', async () => {
@@ -1545,16 +1578,100 @@ describe('a Not good with files, against the real attachment store', () => {
         should(world.reopen.notices).have.length(1);
       });
 
-      it('after a restart, takes a repeat with the same words and no files, and refuses files it cannot vouch for', async () => {
-        const done = await answered();
-        (done.world.gates as unknown as { receipts: Map<string, string> }).receipts.clear();
+      describe('after a restart', () => {
+        it('answers the exact repeat of words and files with success, and reopens once', async () => {
+          const done = await answered();
+          done.world.restart();
 
-        const bare = await send(done.world, done.session, { ...done.body, attachments: undefined });
-        const files = await send(done.world, done.session, done.body);
-        const words = await send(done.world, done.session, { ...done.body, attachments: undefined, note: 'other' });
+          const again = await send(done.world, done.session, done.body);
+          const third = await send(done.world, done.session, done.body);
 
-        should([bare.status, files.status, words.status]).eql([200, 409, 409]);
-        should(done.world.reopen.notices).have.length(1);
+          should([again.status, third.status]).eql([200, 200]);
+          should(done.world.reopen.notices).have.length(1);
+          should(done.world.stored().laneId).equal('implement');
+        });
+
+        it('keeps the receipt on the stored item', async () => {
+          const done = await answered();
+          done.world.restart();
+
+          const [item] = done.world.closed(done.session);
+
+          should(item?.answerReceipt).match(/^[0-9a-f]{64}$/);
+        });
+
+        it('refuses other words', async () => {
+          const done = await answered();
+          done.world.restart();
+
+          const response = await send(done.world, done.session, { ...done.body, note: 'the header is gone too' });
+
+          should(response).match({ status: 409, body: { code: 'gate_moved_on' } });
+          should(done.world.reopen.notices).have.length(1);
+        });
+
+        it('refuses other files, and files from another session', async () => {
+          const done = await answered();
+          done.world.restart();
+          const other = await done.upload(done.session, OTHER_PNG);
+
+          const files = await send(done.world, done.session, {
+            ...done.body,
+            attachments: { from: done.session, ids: [other] },
+          });
+          const from = await send(done.world, done.session, {
+            ...done.body,
+            attachments: { from: 'stranger', ids: [done.id] },
+          });
+
+          should(files).match({ status: 409, body: { code: 'gate_moved_on' } });
+          should(from).match({ status: 400, body: { code: 'invalid' } });
+          should(done.world.reopen.notices).have.length(1);
+        });
+
+        it('refuses no files where the first brought some', async () => {
+          const done = await answered();
+          done.world.restart();
+
+          const response = await send(done.world, done.session, { ...done.body, attachments: undefined });
+
+          should(response).match({ status: 409, body: { code: 'gate_moved_on' } });
+          should(done.world.reopen.notices).have.length(1);
+        });
+
+        it('refuses files where the first brought none, and takes the exact repeat of that', async () => {
+          const { world, upload, session, item } = await atGate();
+          const bare = { action: 'resolve', id: item.id, response: choose('Not good'), note: 'still flickers' };
+          should((await send(world, session, bare)).status).equal(200);
+          world.restart();
+
+          const files = await send(world, session, {
+            ...bare,
+            attachments: { from: session, ids: [await upload(session)] },
+          });
+          const again = await send(world, session, bare);
+
+          should([files.status, again.status]).eql([409, 200]);
+          should(world.reopen.notices).have.length(1);
+        });
+
+        it('still loads an item answered before the receipt was kept, and takes a repeat that brings no files', async () => {
+          const done = await answered();
+          for (const ledger of done.world.ledgers.ledgers.values()) {
+            for (const entry of ledger.entries) {
+              if (entry.lifecycle === 'addressed') delete (entry.item as { answerReceipt?: string }).answerReceipt;
+            }
+          }
+          done.world.restart();
+
+          const bare = await send(done.world, done.session, { ...done.body, attachments: undefined });
+          const files = await send(done.world, done.session, done.body);
+          const words = await send(done.world, done.session, { ...done.body, attachments: undefined, note: 'other' });
+
+          should([bare.status, files.status, words.status]).eql([200, 409, 409]);
+          should(done.world.closed(done.session)[0]?.answerReceipt).be.undefined();
+          should(done.world.reopen.notices).have.length(1);
+        });
       });
     });
 
@@ -2841,21 +2958,5 @@ describe('one owner ask per thing: a gate attaches to the card’s thread', () =
     world.agenda.attachGate = original;
 
     should(world.warnings.join('\n')).match(/could not attach the gate/);
-  });
-});
-
-describe('the receipts of answered gate items', () => {
-  it('keeps the latest few, forgetting the oldest first, and a key set again counts as latest', () => {
-    const kept = new Map<string, string>();
-    for (const key of ['a', 'b', 'c']) keepLatest(kept, key, key, 2);
-    should([...kept.keys()]).eql(['b', 'c']);
-
-    keepLatest(kept, 'b', 'again', 2);
-    keepLatest(kept, 'd', 'd', 2);
-
-    should([...kept]).eql([
-      ['b', 'again'],
-      ['d', 'd'],
-    ]);
   });
 });

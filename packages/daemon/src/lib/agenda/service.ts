@@ -308,8 +308,14 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
     via: AgendaVia = 'board',
+    receipt?: string,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
+    const at = this.clock.now();
+    return this.apply(
+      sessionId,
+      { action: 'answer', actor, id, response, note, at, ...(receipt === undefined ? {} : { receipt }) },
+      via,
+    );
   }
 
   /**

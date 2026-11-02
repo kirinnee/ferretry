@@ -1116,6 +1116,11 @@ const ResolvedAgendaBaseShape = {
   resolvedAt: InstantSchema,
   resolutionNote: z.string().max(MAX_AGENDA_DETAIL_LENGTH).nullable(),
   response: AgendaResponseSchema.optional(),
+  /** A SHA-256 of everything a gate answer said, kept with the answered item so an exact repeat reads as one. */
+  answerReceipt: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   disposition: AgendaDispositionSchema,
 };
 

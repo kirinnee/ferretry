@@ -228,6 +228,7 @@ export type AgendaCommand =
       readonly id: AgendaId;
       readonly response: AgendaResponse;
       readonly note?: string | null;
+      readonly receipt?: string;
       readonly at: string;
     }
   | {
@@ -1129,7 +1130,19 @@ function addressById(
   // THE EXCEPTION IS AN INPUT CARD: the owner's field next to it may hold a password, and the app sends
   // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
   const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
-  const closed = addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
+  const receipt = command.action === 'answer' ? command.receipt : undefined;
+  const closed = addressed(
+    ledger,
+    target,
+    command.actor,
+    note,
+    command.at,
+    disposition,
+    change,
+    response,
+    undefined,
+    receipt,
+  );
   // A ferret closing an item the owner already replied to tells nobody: it was off their list, so nothing on it moves.
   // The ferret reads that in the command's own result.
   if (closed.ok && command.actor.kind === 'agent' && target.item.parked?.reason === 'replied') {
@@ -1228,6 +1241,7 @@ function addressed(
   change: Extract<AgendaChange, 'answered' | 'resolved' | 'dismissed' | 'replied'>,
   response?: AgendaResponse,
   entry?: AgendaHistoryEntry,
+  receipt?: string,
 ): AgendaMutation {
   const {
     waitingOn: _waitingOn,
@@ -1244,6 +1258,7 @@ function addressed(
       resolutionNote: note,
       disposition,
       ...(response === undefined ? {} : { response }),
+      ...(receipt === undefined ? {} : { answerReceipt: receipt }),
     },
     actor,
   );
