@@ -387,7 +387,6 @@ export class BoardService {
     });
     const thread = await this.requireThread(caller, request.thread);
     const id = await this.ports.store.allocateId(request.kind);
-    await this.linkThread(thread, { id, machineId });
     const card = await this.insert(id, request, {
       machineId,
       caller,
@@ -397,7 +396,13 @@ export class BoardService {
       index,
       approval,
     });
+    // After the insert: a failed create never leaves a thread linked to a card that does not exist.
+    const unlinked = await this.linkThread(thread, { id, machineId }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
     await this.afterWrite(caller, card, [card.projectId], true);
+    if (unlinked !== undefined) throw unlinked;
     return await this.view(await this.ports.store.read(), id);
   }
 
@@ -944,7 +949,10 @@ export class BoardService {
     const linked = await this.ports.threads.link(thread.sessionId, thread.id, card).catch(() => undefined);
     if (linked !== undefined && linked.ok) return;
     const why = linked === undefined ? 'its agenda could not be read' : linked.message;
-    throw new BoardError('invalid', `!${thread.id} was not linked to the new card: ${why}`);
+    throw new BoardError(
+      'invalid',
+      `!${thread.id} was not linked to the new card, which was created without it: ${why}`,
+    );
   }
 
   /**

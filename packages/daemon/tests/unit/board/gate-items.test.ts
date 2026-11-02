@@ -92,6 +92,8 @@ interface Faults {
   readonly tellThrows?: boolean;
   /** Listing every session throws this many times, then answers. */
   readonly listAllThrows?: number;
+  /** The board cannot be read: asking for a card throws. */
+  readonly boardThrows?: boolean;
   /** These sessions' agendas cannot be read. */
   readonly unreadable?: readonly string[];
   /** Resolving an item on these sessions' agendas throws. */
@@ -168,7 +170,10 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       attachGate: async (sessionId, id, gate, answered) => await agenda.attachGate(sessionId, id, gate, answered),
     },
     board: {
-      card: async id => await cards_.card(id),
+      card: async id => {
+        if (faults.boardThrows === true) throw new Error('the board is unreadable');
+        return await cards_.card(id);
+      },
       cards: async () => await cards_.cards(),
       act: async (id, request, caller, expect) => {
         if (faults.refuses?.includes(request.action) === true)
@@ -2011,6 +2016,61 @@ describe('one owner ask per thing: a gate attaches to the card’s thread', () =
     await world.gates.sweep();
 
     should(world.open('lead').filter(each => each.gate !== undefined)).have.length(1);
+  });
+
+  const gateItemCount = (world: ReturnType<typeof fixture>) =>
+    world.open('lead').filter(each => each.gate !== undefined).length;
+
+  it('raises exactly one gate item when the owner answers the thread’s own question', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.answer('lead', id as never, { kind: 'permission', decision: 'approve' }, HUMAN);
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(gateItemCount(world)).equal(1);
+  });
+
+  it('raises exactly one gate item when the owner dismisses the thread', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.dismiss('lead', id as never, HUMAN);
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(gateItemCount(world)).equal(1);
+  });
+
+  it('raises exactly one gate item when a real reply parks the thread', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.reply('lead', id as never, HUMAN, 'looking now');
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(gateItemCount(world)).equal(1);
+  });
+
+  it('raises exactly one gate item when the owner snoozes the thread', async () => {
+    const { world, id } = await atGateWithThread();
+
+    await world.agenda.snooze('lead', id as never, '2099-01-01T00:00:00.000Z', HUMAN);
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    should(gateItemCount(world)).equal(1);
+  });
+
+  it('throws, rather than answering "not asking", when the board or an agenda cannot be read', async () => {
+    const blind = await atGateWithThread('tested', { boardThrows: true });
+    await should(blind.world.gates.asking('F1')).be.rejectedWith(/board is unreadable/);
+
+    const { world } = await atGateWithThread();
+    const unreadable = fixture([external({ laneId: 'tested', owner: 'lead', assignee: null })], {
+      unreadable: ['lead'],
+    });
+    await should(unreadable.gates.asking('F1')).be.rejectedWith(/unreadable/);
+    should(await world.gates.asking('F1')).be.ok();
   });
 
   it('does not raise the gate again once the owner answered it on the thread, whatever became of the thread', async () => {

@@ -122,9 +122,9 @@ about that same card on the owner's agenda would otherwise ask twice, so the dae
   refused). With several threads it attaches to the one on the owner's turn, else the newest. A gate item already open
   when a thread appears is resolved by the daemon, its note naming the thread that now asks — unless the owner has
   begun to talk about it (needs-info, discuss, reply): then it stays, and the thread raises unlinked.
-- **Answering it.** The thread shows the gate's options as a second answer row, the same labels and swipes as a gate
+- **Answering it.** The thread shows the gate's options as a second answer row, the same labels as a gate
   item, naming the card by its title ("&F12 Badge colour is ready to test. Answer it here too."; `cardTitle` on the gate).
-  Only the thread's **own** options carry the ←/→ arrows and the swipe; the gate's buttons are tap only. `resolve` with `gate: true` answers the **gate**, not the thread:
+  Only the thread's **own** options carry the ←/→ arrows and the swipe; the gate's row is tap only (no swipes, no arrows), Not good on the left and Done on the right like every swipe surface. `resolve` with `gate: true` answers the **gate**, not the thread:
   it goes through the same path as a gate item (owner only, the card moves first, the same refusals). The thread stays
   open for its own question; the gate leaves it once the card moves on. A `resolve` without `gate: true` is the thread's
   own answer, as ever.

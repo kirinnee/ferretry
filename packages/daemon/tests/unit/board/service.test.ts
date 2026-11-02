@@ -2192,8 +2192,36 @@ describe('creating a card for a thread (--thread)', () => {
       /already linked to .*F9.*one thread, one card/,
     );
     should((await refusal(withThread(thread(), 'already linked to F9').service.create(forThread, lead))).message).match(
-      /was not linked to the new card: already linked to F9/,
+      /was not linked to the new card, which was created without it: already linked to F9/,
     );
+  });
+
+  it('links nothing when the create fails, so no thread points at a card that was never made', async () => {
+    linked.length = 0;
+    const store = new MemoryBoardStore();
+    store.write = async () => {
+      throw new Error('the board is unwritable');
+    };
+    const { service } = serviceWith([], {
+      store,
+      threads: {
+        open: async () => thread(),
+        link: async (sessionId, id, card) => {
+          linked.push({ sessionId, id, card });
+          return { ok: true };
+        },
+      },
+    });
+
+    await should(service.create(forThread, lead)).be.rejectedWith(/unwritable/);
+    should(linked).be.empty();
+  });
+
+  it('says the card was made when the link is refused after the insert', async () => {
+    const { ports, service } = withThread(thread(), 'a race');
+
+    should((await refusal(service.create(forThread, lead))).message).match(/created without it: a race/);
+    should(ports.store.cards.size).equal(1);
   });
 
   it('refuses a caller who is not a ferret', async () => {

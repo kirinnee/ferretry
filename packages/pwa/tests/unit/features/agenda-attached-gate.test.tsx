@@ -94,6 +94,15 @@ describe('a thread with a gate attached', () => {
     expect(own.length).toBeGreaterThan(0);
   });
 
+  test('reads Not good on the left and Done on the right, like every swipe surface', async () => {
+    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>));
+    const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
+    const order = [...row.querySelectorAll<HTMLElement>('[data-agenda-option]')].map(node =>
+      node.getAttribute('data-agenda-option'),
+    );
+    expect(order).toEqual(['Not good', 'Done']);
+  });
+
   test('a thread without an attachment draws no gate row', async () => {
     const root = await draw(thread());
     expect(root.querySelector('[data-agenda-attached-gate]')).toBeNull();
