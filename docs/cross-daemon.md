@@ -75,7 +75,8 @@ summary is [security.md](security.md).
   it, and the target keeps a **last-copied record** (`setup/clone-base.json`, mode 0600) of what the source
   looked like at each copy: digests, sizes and paths, never content or a secret. It is written in the same
   all-or-nothing batch as the copy, filed under the daemon id the browser verified (else the one the bundle
-  reports of itself, kept apart as `self:<id>` so it can never rewrite a verified entry — and a bundle that
+  reports of itself, kept apart as `self:<id>` so it can never rewrite a verified entry, and told apart from
+  another such source by the machine it names — and a bundle that
   names another machine than the one picked is refused), and garbage-collected on every copy from that
   source; a Replace rewrites it. A record file that cannot be read never blocks a copy: the copy is made
   without it, the review says so, and the file is left alone. Editing a copied item keeps its link. A copy
