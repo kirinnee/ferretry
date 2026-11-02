@@ -6,6 +6,7 @@ import {
   AgendaItemSchema,
   AgendaSnapshotSchema,
   agendaBadgeCount,
+  MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
 } from '@ferretry/protocol';
@@ -16,6 +17,7 @@ import {
   type AgendaEntry,
   type AgendaLedger,
   type AgendaMutation,
+  agendaLedgerDocument,
   agendaSnapshot,
   applyAgendaCommand,
   applyAgendaCommandToSession,
@@ -745,7 +747,7 @@ describe('Agenda state machine', () => {
     should(forbidden.error.message).match(/only the daemon may reconcile/u);
   });
 
-  it('should decode only durable ledgers whose lifecycle, provenance, and counters agree', () => {
+  it('should decode only durable ledgers whose counters agree, and set aside each entry that does not read', () => {
     // Arrange
     const agent = raised();
     const human = succeeded(
@@ -794,9 +796,11 @@ describe('Agenda state machine', () => {
     should(parseAgendaLedger({ ...valid, sessionId: OTHER_SESSION_ID }, SESSION_ID)).be.null();
     should(parseAgendaLedger(duplicate, SESSION_ID)).be.null();
     should(parseAgendaLedger(exhausted, SESSION_ID)).be.null();
-    should(parseAgendaLedger(malformedOrigin, SESSION_ID)).be.null();
-    should(parseAgendaLedger(mismatchedAddressedOrigin, SESSION_ID)).be.null();
-    should(parseAgendaLedger(unknownLifecycle, SESSION_ID)).be.null();
+    for (const damaged of [malformedOrigin, mismatchedAddressedOrigin, unknownLifecycle]) {
+      const read = parseAgendaLedger(damaged, SESSION_ID);
+      should(read?.entries).have.length(2);
+      should(read?.unreadable).have.length(1);
+    }
   });
 
   it.each([...DAEMON_AGENDA_CAUSES])(
@@ -814,14 +818,18 @@ describe('Agenda state machine', () => {
     },
   );
 
-  it('should refuse a stored item whose daemon cause is one this daemon does not know', () => {
+  it('should set aside a stored item whose daemon cause is one this daemon does not know', () => {
     // Arrange
     const stored = raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger;
     const unknownCause = JSON.parse(JSON.stringify(stored)) as { entries: { origin: { cause: string } }[] };
     unknownCause.entries[0]!.origin.cause = 'poltergeist';
 
-    // Act + Assert
-    should(parseAgendaLedger(unknownCause, SESSION_ID)).be.null();
+    // Act
+    const read = parseAgendaLedger(unknownCause, SESSION_ID);
+
+    // Assert
+    should(read?.entries).be.empty();
+    should(read?.unreadable).deepEqual([unknownCause.entries[0]]);
   });
 
   it('should bound newest-first resolution history without reusing ids', () => {
@@ -4043,5 +4051,132 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     should(info.addressed?.disposition).equal('done');
     should(notice.addressed?.disposition).equal('done');
     for (const refused of [todo, permission, reply]) should(refused.error.message).containEql('--reason');
+  });
+});
+
+describe('Agenda state machine: one unreadable entry', () => {
+  const LONG = `Not moved although codex-ernest hit its usage limit: no login could take it. ${'Tried codex-atomi (only 3% is left). '.repeat(12)}`;
+
+  /** A board with a ferret's open ask (A1), a Warden notice (A2) and a ferret's info (A3), as the file holds it. */
+  function stored(): { entries: { origin: AgendaActor; item: Record<string, unknown> }[]; nextId: number } {
+    const first = raised();
+    const second = succeeded(
+      applyAgendaCommand(
+        first.ledger,
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', ask: undefined, kind: 'info' }, SECOND),
+      ),
+    );
+    const third = succeeded(
+      applyAgendaCommand(
+        second.ledger,
+        raiseCommand(AGENT, { subject: 'A note', ask: undefined, kind: 'info' }, THIRD),
+      ),
+    );
+    return JSON.parse(agendaLedgerDocument(third.ledger)) as ReturnType<typeof stored>;
+  }
+
+  it('should read every other item on a board when one of them does not read, and count it as a parse error', () => {
+    // Arrange
+    const board = stored();
+    board.entries[2]!.item.subject = LONG;
+
+    // Act
+    const read = parseAgendaLedger(board, SESSION_ID);
+
+    // Assert
+    should(read?.entries.map(entry => entry.item.id)).deepEqual(['A1', 'A2']);
+    should(read?.unreadable).deepEqual([board.entries[2]]);
+    should(agendaSnapshot(read!)).containDeep({ count: 2, parseErrors: 1 });
+    should(AgendaSnapshotSchema.safeParse(agendaSnapshot(read!)).success).be.true();
+  });
+
+  it('should never change a ferret’s words to make them fit, and write the entry back exactly as it was read', () => {
+    // Arrange
+    const board = stored();
+    board.entries[2]!.item.subject = LONG;
+    const read = parseAgendaLedger(board, SESSION_ID)!;
+
+    // Act
+    const answered = succeeded(
+      applyAgendaCommand(read, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        at: LATER,
+      }),
+    );
+    const written = JSON.parse(agendaLedgerDocument(answered.ledger)) as ReturnType<typeof stored>;
+
+    // Assert
+    should(answered.ledger.unreadable).deepEqual([board.entries[2]]);
+    should(written.entries.find(entry => entry.item.id === 'A3')).deepEqual(board.entries[2]);
+    should(parseAgendaLedger(written, SESSION_ID)?.unreadable).have.length(1);
+    should(JSON.parse(agendaLedgerDocument(raised().ledger))).not.have.property('unreadable');
+  });
+
+  it('should fit the daemon’s own over-long text to its limit when a board is read', () => {
+    // Arrange
+    const board = stored();
+    board.entries[1]!.item.subject = LONG;
+
+    // Act
+    const read = parseAgendaLedger(board, SESSION_ID);
+
+    // Assert
+    const notice = read?.entries.find(entry => entry.item.id === 'A2')?.item;
+    should(read?.unreadable).be.undefined();
+    should(notice?.subject.length).be.belowOrEqual(MAX_AGENDA_SUBJECT_LENGTH);
+    should(notice?.subject).startWith('Not moved although codex-ernest hit its usage limit').endWith('…');
+  });
+
+  it.each([
+    ['no subject', (item: Record<string, unknown>) => ({ ...item, subject: undefined })],
+    [
+      'a long subject and a why that is not text',
+      (item: Record<string, unknown>) => ({ ...item, subject: LONG, why: ['x'] }),
+    ],
+    ['an item that is not an object', () => null],
+  ])('should set aside a daemon item with %s, which no cut can mend', (_label, damage) => {
+    // Arrange
+    const board = stored();
+    (board.entries[1] as { item: unknown }).item = damage(board.entries[1]!.item);
+
+    // Act + Assert
+    should(parseAgendaLedger(board, SESSION_ID)?.unreadable).have.length(1);
+  });
+
+  it('should keep the id of an unreadable entry from being used again', () => {
+    // Arrange
+    const board = stored();
+    board.entries[2]!.item.subject = LONG;
+    const reused = { ...board, nextId: 3 };
+    const odd = { ...board, entries: [...board.entries, null, { item: { id: 'not-an-id' } }, { item: 'A9' }] };
+
+    // Act
+    const read = parseAgendaLedger(board, SESSION_ID)!;
+    const next = succeeded(applyAgendaCommand(read, raiseCommand(AGENT, { subject: 'Next one' }, LATER)));
+
+    // Assert
+    should(parseAgendaLedger(reused, SESSION_ID)).be.null();
+    should(next.item?.id).equal('A4');
+    should(parseAgendaLedger(odd, SESSION_ID)?.unreadable).have.length(4);
+  });
+
+  it('should refuse a change whose item would not read back, instead of writing it', () => {
+    // Arrange
+    const ledger = emptyAgendaLedger(SESSION_ID, FIRST);
+
+    // Act
+    const refused = failed(
+      applyAgendaCommand(
+        ledger,
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', subject: LONG, ask: undefined, kind: 'info' }),
+      ),
+    );
+
+    // Assert
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).match(/^agenda item A1 would not read back \(subject: Too big/u);
   });
 });

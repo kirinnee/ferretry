@@ -519,6 +519,12 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
 
+- **A machine whose boards could not be read says so on its own line, and why** — "Couldn't read 3 items on Liftoff
+  EC2 — the machine hit an error. Trying again." The reason is the last failed read's: `the machine hit an error` (a
+  5xx), `refused` (401/403), `not found` (404), `unexpected answer` (another 4xx, or a board the app cannot read),
+  `timed out` or `no answer`. Boards on one machine that failed differently list each reason, the one covering the
+  most items first. A read that only ended (the machine was paired again meanwhile) adds none.
+
 ### The compass
 
 Every item — a question, a gate, a notice — has a second swipe layer. Pull **down** past the Skip threshold and **keep the
@@ -681,6 +687,22 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same
   way: `attention-…` and `agenda-…` name one send.
+
+### One bad entry
+
+A ledger is read **entry by entry**. One entry that does not read as an item no longer makes the whole board
+unreadable (that answered every board read with a 500, and the Inbox could only say "Couldn't read" for every item on
+it):
+
+- **It is set aside, never dropped.** The other items read as usual; the bad entry is written back exactly as it was
+  read on every later write, its id is never reused, and it is counted as the snapshot's `parseErrors`. The CLI, the
+  chat's agenda and the Warden already say a board has unreadable entries when that count is above zero.
+- **Only the daemon's own words are fitted.** An item the daemon raised (a Warden notice, for one) whose only fault is
+  text past a limit reads with that text cut at a word to the limit, and the next write keeps the cut. A person's or a
+  ferret's words are never changed: such an item is set aside as above.
+- **What is written reads back.** Every item a change makes or changes is checked against the schema the reader uses,
+  and a change that would not read back is refused (`invalid`) instead of written. The Warden's notices fit their
+  subject to the limit themselves, and carry the whole of it in their reason.
 
 ### How each end finds out
 

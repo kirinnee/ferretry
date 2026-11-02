@@ -189,6 +189,17 @@ describe('AgendaInboxPage states', () => {
     await mounted.unmount();
   });
 
+  it('says why a machine could not be read, in one short clause', async () => {
+    const refused = [
+      { daemonId: daemonId('laptop'), machineName: 'Laptop', items: 3, why: 'the machine hit an error' },
+    ];
+    const mounted = await mount(page(fakeInbox(), [], { unavailable: refused }));
+    expect(mounted.container.querySelector('[data-agenda-unreadable]')?.textContent).toBe(
+      'Couldn’t read 3 items on Laptop — the machine hit an error. Trying again.',
+    );
+    await mounted.unmount();
+  });
+
   it('draws the Inbox title with its count on a wide screen, and none on a phone, whose top bar carries both', async () => {
     const wide = await mount(page(fakeInbox(), [threeWay]));
     expect(wide.container.querySelector('h1 [data-unread-badge]')?.getAttribute('data-count')).toBe('1');

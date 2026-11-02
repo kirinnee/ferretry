@@ -44,6 +44,7 @@ import {
   withSession,
 } from './auto-migrate.ts';
 import type { WardenMigrateCandidates } from './prompt.ts';
+import { fitOwnerNotice } from './owner-notice.ts';
 import { isoFromMs } from './time.ts';
 import type { WardenSessionView } from './types.ts';
 
@@ -496,10 +497,12 @@ export class WardenAutoMigrateService {
     await this.ports.notifyOwner({
       sessionId: subject.id,
       title,
-      subject: detail,
-      why:
-        'The Warden moves a ferret whose login hit a limit to another login, as warden.yaml (autoMigrate) allows. ' +
-        `Move it yourself with: fy migrate ${subject.id} -a <runtime>.`,
+      ...fitOwnerNotice({
+        subject: detail,
+        why:
+          'The Warden moves a ferret whose login hit a limit to another login, as warden.yaml (autoMigrate) allows. ' +
+          `Move it yourself with: fy migrate ${subject.id} -a <runtime>.`,
+      }),
     });
   }
 }

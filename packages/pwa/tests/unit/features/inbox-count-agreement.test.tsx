@@ -13,6 +13,7 @@ import type { DeferredTimers } from '../../../src/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import type { DaemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { type ToTestCard, toTestCards } from '../../../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../../../src/shell/app-bar.tsx';
@@ -113,7 +114,8 @@ const fakeClient = (hold: Gate[] | null = null) => {
     if (hold !== null) await new Promise<void>(release => hold.push({ release }));
     if (daemon.daemonId === laptop.daemonId) {
       store.fail(scope);
-      throw new Error('did not answer within 20s');
+      // What Liftoff EC2's daemon answered for the boards it could not read (&F408).
+      throw new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error');
     }
     const value = BOARDS.get(`${daemon.daemonId}/${scope.sessionId}`);
     if (value !== undefined) store.applySnapshot(scope, value);
@@ -186,7 +188,9 @@ describe('the Inbox count across the shell', () => {
     // Nothing is in flight: no Updating, and the laptop says it could not be read instead of spinning.
     expect(view.container.querySelector('[data-agenda-updating]')).toBeNull();
     const unreadable = view.container.querySelector('[data-agenda-unreadable]');
-    expect(unreadable?.textContent).toContain('Couldn’t read 3 items on Laptop. Trying again.');
+    expect(unreadable?.textContent).toContain(
+      'Couldn’t read 3 items on Laptop — the machine hit an error. Trying again.',
+    );
   });
 
   it('says Updating only while a first read is in flight, and stops when the reads settle — the failed one too', async () => {

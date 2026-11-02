@@ -37,6 +37,7 @@ import {
   agendaShape,
   agendaShapeProblems,
   agendaWakeAt,
+  clipAtWord,
   formAnswerProblems,
   parseGateFollowupReference,
   parseGateReference,
@@ -49,6 +50,7 @@ import {
   ResolvedAgendaItemSchema,
   type TaskRef,
 } from '@ferretry/protocol';
+import type { z } from 'zod';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -101,6 +103,11 @@ export interface AgendaLedger {
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
   readonly updatedAt: string;
+  /**
+   * The entries on disk that do not read as an item, exactly as they were read: kept so a write never drops
+   * them, counted as the snapshot's `parseErrors`, and never handed to a transition. Absent when there are none.
+   */
+  readonly unreadable?: readonly unknown[];
 }
 
 /** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
@@ -410,7 +417,7 @@ export function agendaSnapshot(ledger: AgendaLedger): AgendaSnapshot {
     // EVERY open item, parked ones included: the wire's contract (and every older client's check) is
     // count === items.length. A badge leaves parked items out itself (`agendaBadgeCount`).
     count: items.length,
-    parseErrors: 0,
+    parseErrors: ledger.unreadable?.length ?? 0,
     updatedAt: ledger.updatedAt,
   };
 }
@@ -447,14 +454,23 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     return null;
   }
   const entries: AgendaEntry[] = [];
+  const unreadable: unknown[] = [];
   const ids = new Set<string>();
   let maxId = 0;
   let active = 0;
   let agentActive = 0;
   let addressed = 0;
+  // ONE BAD ENTRY IS ONE BAD ENTRY: it is set aside (and written back as it was) while the rest of the board
+  // reads. A board that refused to read over one item hid every other item on it, and the Inbox could only say
+  // "Couldn't read" for all of them. Its id still counts, so the next item never reuses it.
   for (const rawEntry of raw.entries) {
     const entry = parseAgendaEntry(rawEntry);
-    if (entry === null || ids.has(entry.item.id)) return null;
+    if (entry === null) {
+      unreadable.push(rawEntry);
+      maxId = Math.max(maxId, rawEntryIdNumber(rawEntry));
+      continue;
+    }
+    if (ids.has(entry.item.id)) return null;
     ids.add(entry.item.id);
     maxId = Math.max(maxId, idNumber(entry.item.id));
     if (entry.lifecycle === 'active') {
@@ -473,7 +489,30 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   ) {
     return null;
   }
-  return parkOwnerReplies({ sessionId, nextId: raw.nextId as number, entries, updatedAt: raw.updatedAt });
+  return parkOwnerReplies({
+    sessionId,
+    nextId: raw.nextId as number,
+    entries,
+    updatedAt: raw.updatedAt,
+    ...(unreadable.length === 0 ? {} : { unreadable }),
+  });
+}
+
+/** The id number an entry that does not read as an item still claims, or 0 when it claims none. */
+function rawEntryIdNumber(value: unknown): number {
+  const item = value !== null && typeof value === 'object' ? (value as { item?: unknown }).item : undefined;
+  const id = item !== null && typeof item === 'object' ? (item as { id?: unknown }).id : undefined;
+  return typeof id === 'string' && /^A[1-9]\d*$/u.test(id) ? Number(id.slice(1)) : 0;
+}
+
+/**
+ * The ledger as the file holds it: the entries that read, then the ones that did not, as they were read.
+ * Every writer of `agenda.json` goes through here, so a write never loses an entry it could not read.
+ */
+export function agendaLedgerDocument(ledger: AgendaLedger): string {
+  const { unreadable, ...document } = ledger;
+  const whole = unreadable === undefined ? document : { ...document, entries: [...document.entries, ...unreadable] };
+  return `${JSON.stringify(whole, null, 2)}\n`;
 }
 
 /** Whether an open item sits on the ferret's turn only because the owner wrote about it (not asked for more or to discuss). */
@@ -558,7 +597,34 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * WHAT IS WRITTEN READS BACK. A transition builds its items from what its caller handed it, and the daemon's own
+ * callers are typed but not parsed — a Warden notice once carried a 471-character subject. The reader refuses
+ * such an item, so writing it would set it aside on every read. Every entry a transition made or changed is
+ * held to the schema the reader holds it to, and a change that fails is refused instead of written.
+ */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
+  const mutation = transition(ledger, command);
+  if (!mutation.ok || !mutation.changed) return mutation;
+  const problem = unreadableWrite(ledger, mutation.ledger);
+  return problem === undefined ? mutation : failure('invalid', problem);
+}
+
+/** Why one of the entries `after` made or changed would not read back, or `undefined` when every one does. */
+function unreadableWrite(before: AgendaLedger, after: AgendaLedger): string | undefined {
+  const kept = new Set(before.entries);
+  for (const entry of after.entries) {
+    if (kept.has(entry)) continue;
+    const parsed = (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).safeParse(entry.item);
+    if (parsed.success) continue;
+    const issue = parsed.error.issues[0];
+    const where = issue === undefined || issue.path.length === 0 ? '' : `${issue.path.join('.')}: `;
+    return `agenda item ${entry.item.id} would not read back (${where}${issue?.message ?? 'invalid'})`;
+  }
+  return undefined;
+}
+
+function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
   // The board is part of the authorization decision, not just a storage key.
   // An agent's provenance proves authority only for that exact session. Keep
   // this check in the pure daemon-owned layer so a transport or future
@@ -940,16 +1006,39 @@ function parseAgendaEntry(value: unknown): AgendaEntry | null {
   const origin = parseAgendaActor(raw.origin);
   if (origin === null) return null;
   if (raw.lifecycle === 'active') {
-    const item = AgendaItemSchema.safeParse(raw.item);
-    return item.success && sameItemOrigin(item.data, origin) ? { lifecycle: 'active', origin, item: item.data } : null;
+    const item = parseEntryItem(AgendaItemSchema, raw.item, origin);
+    return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'active', origin, item } : null;
   }
   if (raw.lifecycle === 'addressed') {
-    const item = ResolvedAgendaItemSchema.safeParse(raw.item);
-    return item.success && sameItemOrigin(item.data, origin)
-      ? { lifecycle: 'addressed', origin, item: item.data }
-      : null;
+    const item = parseEntryItem(ResolvedAgendaItemSchema, raw.item, origin);
+    return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'addressed', origin, item } : null;
   }
   return null;
+}
+
+/**
+ * An entry's item, or `null` when it does not read as one.
+ *
+ * THE DAEMON'S OWN WORDS ARE FITTED, NOBODY ELSE'S: an item the daemon raised whose only fault is text past a
+ * limit — a daemon before writes were checked (`unreadableWrite`) wrote Warden notices with a subject that long
+ * — reads with that text cut to the limit, and the next write keeps the cut. A person's or a ferret's words are
+ * never changed to make them fit: such an item is set aside as unreadable instead, and the board says so.
+ */
+function parseEntryItem<Item>(schema: z.ZodType<Item>, value: unknown, origin: AgendaActor): Item | null {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (origin.kind !== 'daemon' || value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const fitted: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const issue of parsed.error.issues) {
+    const [field, ...deeper] = issue.path;
+    if (issue.code !== 'too_big' || issue.origin !== 'string' || typeof field !== 'string' || deeper.length > 0)
+      return null;
+    const text = fitted[field];
+    if (typeof text !== 'string') return null;
+    fitted[field] = clipAtWord(text, Number(issue.maximum));
+  }
+  const again = schema.safeParse(fitted);
+  return again.success ? again.data : null;
 }
 
 function parseAgendaActor(value: unknown): AgendaActor | null {

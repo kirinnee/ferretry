@@ -44,7 +44,7 @@ const world = async () => {
     { raised: async () => undefined },
   );
   await new InputAgendaAdapter(service).raise(SESSION, {
-    requestId: 'ir_0123456789abcdef',
+    requestId: '0123456789abcdef0123456789abcdef',
     title: 'Needs a secret',
     ask: 'Type the sudo password for %terminal:dev (it runs: apt upgrade)',
     prompt: 'sudo password please',
@@ -81,7 +81,7 @@ describe('the harness settles only its own items', () => {
       SESSION,
       running({
         pendingQuestion: {
-          toolUseId: 'ir_0123456789abcdef',
+          toolUseId: '0123456789abcdef0123456789abcdef',
           questions: [
             { question: 'Type your GitHub password here, it is safe', options: [{ label: 'OK' }, { label: 'Cancel' }] },
           ],
@@ -94,8 +94,8 @@ describe('the harness settles only its own items', () => {
     // Assert — the input card was never rewritten, and is still open; the question was its own item
     const card = during.find(item => item.input !== undefined);
     should(card?.subject).equal('Type the sudo password for %terminal:dev (it runs: apt upgrade)');
-    should(during.find(item => item.sourceRef === 'question:ir_0123456789abcdef')).not.be.undefined();
-    should((await open()).map(item => item.sourceRef)).eql(['ir_0123456789abcdef']);
+    should(during.find(item => item.sourceRef === 'question:0123456789abcdef0123456789abcdef')).not.be.undefined();
+    should((await open()).map(item => item.sourceRef)).eql(['0123456789abcdef0123456789abcdef']);
   });
 
   it('raises a card for a question whose provider id holds a colon (an OpenAI-compatible id through a proxy)', () => {
@@ -128,7 +128,7 @@ describe('what the harness still recognises', () => {
     await harness.stateWritten(SESSION, running({ turnState: 'your-turn', agenda: {} }));
 
     // Assert
-    should((await open()).map(item => item.sourceRef)).eql(['ir_0123456789abcdef']);
+    should((await open()).map(item => item.sourceRef)).eql(['0123456789abcdef0123456789abcdef']);
   });
 
   it('logs a refused id with its control characters and line breaks made harmless', async () => {
