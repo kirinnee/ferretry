@@ -107,7 +107,13 @@ export interface PairingSubsystem {
  */
 export interface DeviceGrantSubsystem {
   mayWiden(presentation: CapabilityPresentation): CapabilityGrants;
-  change(deviceId: string, patch: DeviceGrantsPatch, presentation: CapabilityPresentation): Promise<DeviceGrantOutcome>;
+  /** `claimFresh` takes the caller's passkey proved for a widen, in one step, right before it is written. */
+  change(
+    deviceId: string,
+    patch: DeviceGrantsPatch,
+    presentation: CapabilityPresentation,
+    claimFresh?: () => boolean,
+  ): Promise<DeviceGrantOutcome>;
 }
 
 /**
@@ -124,6 +130,11 @@ export interface DeviceGrantSubsystem {
  * `docs/grants.md`.
  */
 const PAIRING_DEMAND: CapabilityDemand = { capability: 'pairing', axis: 'use' };
+/**
+ * Revoking a device, or changing its grants: `pairing.use` and never a per-act passkey at the boundary, because a
+ * narrowing only takes away. A widen in the same route is judged inside, and wants a passkey proved for it.
+ */
+const PAIRING_NARROWING: CapabilityDemand = { ...PAIRING_DEMAND, narrowing: true };
 
 /**
  * The caller's OWN device grant, when the caller is a paired device.
@@ -286,7 +297,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       path: '/v1/pair/devices/:deviceId',
       minimum: 'operator',
       caller: 'person',
-      capability: PAIRING_DEMAND,
+      capability: PAIRING_NARROWING,
       noStore: true,
       handle: async context => {
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
@@ -302,15 +313,15 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
        * One device's own grants, changed (`docs/design/zero-trust.md` B5).
        *
        * `pairing.use` at the boundary, so every paired device can NARROW — its own grant included —
-       * with a step-up and nothing else. Widening is judged inside, field by field: at the machine
-       * anything; remotely only what the caller holds itself, with `pairing.configure` and a step-up.
+       * with nothing else: no per-act step-up. Widening is judged inside, field by field: at the machine
+       * anything; remotely only what the caller holds itself, with `pairing.configure` and a passkey proved for it.
        * A patch with any illegal widen is refused whole. Answers the whole list, as the revoke does.
        */
       method: 'PATCH',
       path: '/v1/pair/devices/:deviceId/grants',
       minimum: 'operator',
       caller: 'person',
-      capability: PAIRING_DEMAND,
+      capability: PAIRING_NARROWING,
       noStore: true,
       handle: async context => {
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
@@ -318,14 +329,18 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         const patch = await parseBody(context.request, DeviceGrantsPatchSchema);
         let outcome: DeviceGrantOutcome;
         try {
-          outcome = await grants.change(deviceId.data, patch, presentationIn(context));
+          outcome = await grants.change(
+            deviceId.data,
+            patch,
+            presentationIn(context),
+            () => context.claimFreshStepUp?.(STEP_UP_ACTS.widenDevice) === true,
+          );
         } catch (error) {
           // A WIDEN wants a passkey proved for it alone; say which act, so the prompt can name it.
           if (error instanceof GrantError && error.failure === 'widen-step-up-required')
             return addsAccessRefusal(error.message, STEP_UP_ACTS.widenDevice);
           return deviceGrantRefusal(error);
         }
-        if (outcome === 'widened') context.spendFreshStepUp?.();
         return outcome !== 'not-found'
           ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');

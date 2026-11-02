@@ -118,6 +118,7 @@ import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
+import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
 import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
@@ -183,6 +184,13 @@ const answerCard = (
   if (editor !== undefined) onNavigate(editor);
 };
 
+/**
+ * Whether the owner may snooze this card: the machine must take snoozes, and a ferret's rule suggestion never does (the
+ * ferret reads its own board, so a snooze would tell it the owner looked: C2).
+ */
+const snoozable = (inbox: AgendaInbox, card: InboxCard): boolean =>
+  card.item.signInRuleSuggestion === undefined && (inbox.canSnooze?.(card.daemonId) ?? true);
+
 /** One compact card (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
 const renderInboxCard = (
   { inbox, onNavigate, now }: CardHostProps,
@@ -195,7 +203,9 @@ const renderInboxCard = (
       item={card.item}
       key={card.key}
       onAct={act}
-      onSnooze={until => act(snoozeAction(until))}
+      {...(card.item.signInRuleSuggestion === undefined
+        ? { onSnooze: (until: string) => act(snoozeAction(until)) }
+        : {})}
       origin={inboxCardOrigin(card, onNavigate)}
       swipeHints={false}
       {...inputFormFor(inbox, card)}
@@ -382,7 +392,7 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
-          tools={<CardTools act={act} skip={skip} />}
+          tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
           item={card.item}
           onAct={act}
           onClose={place.onClose}
@@ -443,21 +453,32 @@ function GateMeta({
 }
 
 /** The compass's quiet moves as plain buttons, so nothing depends on a gesture: Skip and Not needed. Snooze is the head's clock. */
-function CardTools({ act, skip }: { readonly act: (action: InboxAction) => void; readonly skip: () => void }) {
+function CardTools({
+  act,
+  skip,
+  dismissable = true,
+}: {
+  readonly act: (action: InboxAction) => void;
+  readonly skip: () => void;
+  /** A ferret's rule suggestion has no Not needed: its card's own Dismiss says no (the agenda refuses a close). */
+  readonly dismissable?: boolean;
+}) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
     <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
       <button className="kt-btn kt-btn--sm" data-inbox-tool="skip" onClick={skip} type="button">
         Skip
       </button>
-      <button
-        className="kt-btn kt-btn--sm"
-        data-inbox-tool="not-needed"
-        onClick={() => act(DISMISS_ACTION)}
-        type="button"
-      >
-        Not needed
-      </button>
+      {dismissable ? (
+        <button
+          className="kt-btn kt-btn--sm"
+          data-inbox-tool="not-needed"
+          onClick={() => act(DISMISS_ACTION)}
+          type="button"
+        >
+          Not needed
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1259,6 +1280,7 @@ export function AgendaInboxPage({
   toTestHost,
 }: AgendaInboxPageProps) {
   const headingId = useId();
+  useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
@@ -1667,7 +1689,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
-              canSnooze={card => inbox.canSnooze?.(card.daemonId) ?? true}
+              canSnooze={card => snoozable(inbox, card)}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
               onHold={(card, action) => {
@@ -1687,7 +1709,7 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
-                    canSnooze={inbox.canSnooze?.(card.daemonId) ?? true}
+                    canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
                     key={card.key}
@@ -1717,7 +1739,11 @@ export function AgendaInboxPage({
                     setGateWhy(null);
                   }}
                 />
-              ) : deck[0] === undefined || renderComposer === undefined || isGateItem(deck[0].item) ? null : (
+              ) : deck[0] === undefined ||
+                renderComposer === undefined ||
+                isGateItem(deck[0].item) ||
+                // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
+                deck[0].item.signInRuleSuggestion !== undefined ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div
                   className="fy-inbox-composer"

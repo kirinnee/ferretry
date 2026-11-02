@@ -9,6 +9,7 @@ import {
   type TwoFactorId,
 } from '@ferretry/protocol';
 import should from 'should';
+import { namesOnCard } from '../../support/names-on-card.ts';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import type { CodeDelivery } from '../../../src/lib/input-requests/login-observer.ts';
@@ -245,12 +246,12 @@ const keyId = async (h: Harness, label: string, account = 'GITHUB'): Promise<Two
   (await keysOf(h, account)).find(key => key.label === label)?.id as TwoFactorId;
 
 describe('a code card is titled by the owner’s 2FA key, never by the ferret', () => {
-  it('should title a card "Code sent to ••42 (SMS)" from the matched account’s one code key', async () => {
+  it('should title a card by the place and its one code key’s kind, never the key’s digits or label', async () => {
     const h = harness();
     await github(h);
     await h.directory.accounts.addFactor('GITHUB', { kind: 'sms', label: 'Phone', endsWith: '42' });
     await raised(h);
-    should(h.cards[0]?.title).equal('Code sent to ••42 (SMS)');
+    should(h.cards[0]?.title).equal('One-time code for github.com, by SMS');
   });
 
   it('should list every code key, and name only the one the ferret’s factor picks', async () => {
@@ -259,12 +260,12 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
     await h.directory.accounts.addFactor('GITHUB', { kind: 'sms', label: 'Phone', endsWith: '42' });
     await h.directory.accounts.addFactor('GITHUB', { kind: 'totp', label: 'Authenticator app' });
     await raised(h);
-    should(h.cards[0]?.title).equal('One-time code: SMS ••42 or Authenticator app');
+    should(h.cards[0]?.title).equal('One-time code for github.com, by SMS or authenticator app');
 
     const sms = await keyId(h, 'Phone');
     await h.service.cancel(SESSION, (await h.service.list(HOST))[0]?.id as string, HOST);
     await raised(h, { ...PAGE_CODE, factor: sms });
-    should(h.cards[1]?.title).equal('Code sent to ••42 (SMS)');
+    should(h.cards[1]?.title).equal('One-time code for github.com, by SMS');
   });
 
   it('should ignore a factor of an account that does not sign in here, saying nothing about it', async () => {
@@ -277,7 +278,7 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
 
     const { view } = await raised(h, { ...PAGE_CODE, factor: other });
 
-    should(h.cards[0]?.title).equal('Code sent to ••42 (SMS)');
+    should(h.cards[0]?.title).equal('One-time code for github.com, by SMS');
     should(JSON.stringify(view)).not.containEql('k@corp.example');
   });
 
@@ -290,8 +291,49 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
     await github(own);
     await own.directory.accounts.addFactor('GITHUB', { kind: 'totp', label: 'Authenticator app' });
     await raised(own);
-    should(held.cards[0]?.title).equal('Code from Authenticator app');
+    should(held.cards[0]?.title).equal('One-time code for github.com, by authenticator app');
     should(own.cards[0]).deepEqual(held.cards[0]);
+  });
+
+  it('should title a card with no code key by the place, never the account’s label or username', async () => {
+    // The title is agenda text, which every ferret reads (secrev-1261 L4): the app names the account itself.
+    const h = harness();
+    await github(h);
+    await h.directory.accounts.addFactor('GITHUB', { kind: 'push', label: 'GitHub Mobile' });
+    await raised(h);
+    should(h.cards[0]?.title).equal('One-time code for github.com');
+    should(JSON.stringify(h.cards[0])).not.containEql('kirinnee');
+  });
+
+  it('should never put an email key’s address on the card, where it is the username (secrev-1329a L6)', async () => {
+    const h = harness();
+    await github(h);
+    await h.directory.accounts.addFactor('GITHUB', { kind: 'email', label: 'Mail', to: 'kirinnee@example.com' });
+    await raised(h);
+    should(h.cards[0]?.title).equal('One-time code for github.com, by email');
+    should(JSON.stringify(h.cards[0])).not.containEql('kirinnee');
+  });
+
+  it('should put no account label, username or handle anywhere on a code card, whatever its keys (L8)', async () => {
+    const shapes = [
+      [],
+      [{ kind: 'sms', label: 'kirinnee phone', endsWith: '42' }],
+      [{ kind: 'email', label: 'GitHub mail', to: 'kirinnee@example.com' }],
+      [
+        { kind: 'totp', label: 'GitHub · kirinnee' },
+        { kind: 'email', label: 'Mail', to: 'kirinnee@example.com' },
+      ],
+    ] as const;
+    for (const keys of shapes) {
+      const h = harness();
+      await github(h);
+      for (const key of keys) await h.directory.accounts.addFactor('GITHUB', key as never);
+      await raised(h);
+      should(h.cards).have.length(1);
+      // The ferret's own prompt is its words, not the daemon's: everything else on the card is checked.
+      const daemonWords = h.cards.map(({ prompt: _ferrets, ...card }) => card);
+      should(namesOnCard(daemonWords, ['GitHub', 'kirinnee', 'GITHUB'])).eql([]);
+    }
   });
 
   it('should keep the plain title where no sign-in matches, and cut a long one to what a card holds', async () => {
@@ -299,9 +341,11 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
     await raised(h);
     should(h.cards[0]?.title).equal('Needs a code');
 
-    const long = harness();
-    await github(long);
-    await long.directory.accounts.addFactor('GITHUB', { kind: 'totp', label: 'A'.repeat(60) });
+    // A long place (the title names the place and the keys' kinds, never a label).
+    const host = `${'a'.repeat(60)}.example`;
+    const long = harness({ facts: page(`https://${host}`) });
+    await github(long, [host]);
+    await long.directory.accounts.addFactor('GITHUB', { kind: 'totp', label: 'Authenticator app' });
     await raised(long);
     should(long.cards[0]?.title.length).equal(60);
     should(long.cards[0]?.title.endsWith('…')).be.true();

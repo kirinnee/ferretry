@@ -33,8 +33,8 @@ import {
  * has to decide what its absence meant.
  */
 export function resolveResumePolicy(actor: ResumeActor): ResumePolicy {
-  const explicit = actor === 'admin-cli' || actor === 'admin-ui' || actor === 'peer';
-  const humanOperator = actor === 'admin-cli' || actor === 'admin-ui';
+  const humanOperator = actor === 'admin-cli' || actor === 'admin-ui' || actor === 'device';
+  const explicit = humanOperator || actor === 'peer';
   return { automatic: !explicit, dedupeSharedRecoveryScope: !explicit, humanOperator };
 }
 
@@ -235,6 +235,7 @@ export function resumeTurnAuthor(actor: ResumeActor): QueueAuthor | undefined {
       return { kind: 'ferretry', feature: 'Restart' };
     case 'admin-cli':
     case 'admin-ui':
+    case 'device':
       return { kind: 'owner' };
     case 'peer':
       return { kind: 'ferret' };

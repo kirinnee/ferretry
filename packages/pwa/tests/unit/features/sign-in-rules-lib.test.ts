@@ -2,7 +2,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import {
+  SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_MAX_USES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
@@ -15,6 +18,7 @@ import {
   initialRuleTicks,
   passkeyWords,
   RULE_HONEST_LIMIT,
+  ruleFailureWords,
   ruleFlags,
   ruleWordsOf,
   runRuleApproval,
@@ -272,6 +276,30 @@ describe('the words the sheet and the card draw', () => {
     expect(words.rows.at(-1)).toEqual({ label: 'Approved with', value: 'Kirin’s phone' });
     expect(ruleWordsOf(terminalRule()).does).toBe(
       "Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.",
+    );
+  });
+});
+
+describe('each refusal its own sentence (C1)', () => {
+  const as = (code: string) => Object.assign(new Error('daemon words'), { status: 409, code });
+
+  it('says a rule that exists, a rule that changed and a clock that moved back apart from a changed sign-in', () => {
+    const words = ['rule_exists', 'not_this_rule', 'clock_moved_back', 'conflict'].map(code =>
+      ruleFailureWords(as(code)),
+    );
+    expect(words).toEqual([
+      SIGN_IN_RULE_REFUSAL_WORDS.rule_exists,
+      SIGN_IN_RULE_REFUSAL_WORDS.not_this_rule,
+      SIGN_IN_RULE_REFUSAL_WORDS.clock_moved_back,
+      SIGN_IN_RULE_REFUSAL_WORDS.conflict,
+    ]);
+    expect(new Set(words).size).toBe(4);
+    expect(words[0]).not.toContain('changed');
+  });
+
+  it('says sudo on a machine without terminal rules in its own words', () => {
+    expect(ruleFailureWords(as(SIGN_IN_RULE_ERROR_CODES.terminalOff))).toBe(
+      SIGN_IN_RULE_INELIGIBLE_WORDS['terminal-off'],
     );
   });
 });

@@ -60,6 +60,7 @@ import {
 } from './login-recipes.ts';
 import { sha256Hex } from './mcp-oauth.ts';
 import { SecretStoreHealthSchema } from './secrets.ts';
+import { PASSKEY_CHALLENGE_TTL_SECONDS } from './step-up.ts';
 
 /**
  * ACCOUNTS AND SIGN-INS: the saved login split in two (docs/input-requests.md, "Accounts and sign-ins").
@@ -509,7 +510,7 @@ export function accountIndexProblems(document: {
     if (seeds > MAX_SEEDS_PER_ACCOUNT)
       problems.push({
         path: ['accounts', handle, 'factors'],
-        message: `an account keeps at most ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA seeds`,
+        message: `an account keeps at most ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA keys that make codes`,
       });
   }
 
@@ -779,8 +780,8 @@ export const RemovedTwoFactorKeySchema = z.strictObject({
 });
 export type RemovedTwoFactorKey = z.infer<typeof RemovedTwoFactorKeySchema>;
 
-/** How long a staged seed waits for its passkey: one passkey challenge's life (`PASSKEY_CHALLENGE_TTL_SECONDS`). */
-export const TWO_FACTOR_STAGE_TTL_SECONDS = 120;
+/** How long a staged seed waits for its passkey: one passkey challenge's life. */
+export const TWO_FACTOR_STAGE_TTL_SECONDS = PASSKEY_CHALLENGE_TTL_SECONDS;
 /** Most seeds one daemon holds staged at once, so nobody can fill its memory by staging. */
 export const MAX_LIVE_TWO_FACTOR_STAGES = 4;
 
@@ -856,6 +857,13 @@ export const TwoFactorSeedStageViewSchema = z.strictObject({
    * a daemon from before it existed omits it, and the card then goes by the sentence the card's context carries.
    */
   mismatch: z.boolean().optional(),
+  /**
+   * What the pasted key says it is for (its `otpauth://` issuer and account name). Only here, on a route that reads
+   * the accounts: the agenda card never carries it, because the account name is often the username and every ferret
+   * reads agenda text. A daemon from before it existed puts it in the card's context instead.
+   */
+  issuer: totpShape.issuer,
+  accountName: totpShape.accountName,
 });
 export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema>;
 
@@ -913,9 +921,9 @@ export const TWO_FACTOR_ERROR_CODES = {
   unknownFactor: 'unknown_2fa_key',
 } as const;
 
-/** Where to add a 2FA seed now that the old path is closed: the sentence the 403 says. */
+/** Where to add a 2FA key now that the old path is closed: the sentence the 403 says. */
 export const ADD_TWO_FACTOR_KEY_WHERE =
-  'saving a 2FA seed needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
+  'saving a 2FA key needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
 
 // ── `config/account-defaults.yaml`───────────────────────────────────────────────────────────────
 
@@ -1431,11 +1439,19 @@ export const ACCOUNT_HINT_FACTOR_NEXT =
 export const ACCOUNT_HINT_NEXT =
   'Name the account when you request input (secretHint) if your brief says which; propose recipe fixes with account_propose and the sign-in id.';
 
+/**
+ * The phone-approval sentence every hint ends with, whether or not the account holds a push 2FA key: a sign-in page that
+ * says check your phone, tap Yes or tap the number is answered by a `push: true` request (docs/input-requests.md,
+ * "Approve on your phone"), which shows the owner the number at once, not by polling the page or `ask_owner`.
+ */
+export const ACCOUNT_HINT_PHONE =
+  'Phone prompt (check your phone, tap Yes, a number): request input with push: true, which raises "Approve on your phone" with the number at once, then input_wait; never poll the page or ask_owner.';
+
 /** What `account_hint` says: each sign-in's line, or that none is saved, and the passkey rule. */
 export function accountHintSummary(site: string, hints: readonly AccountHint[]): string {
   return hints.length === 0
-    ? `No account for ${site}; request the values as usual and the owner can save them. ${LOGIN_HINT_PASSKEYS_OFF}`
-    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')} ${ACCOUNT_HINT_NEXT} ${LOGIN_HINT_PASSKEYS_OFF}`;
+    ? `No account for ${site}; request the values as usual and the owner can save them. ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`
+    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')} ${ACCOUNT_HINT_NEXT} ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`;
 }
 
 // ── `account.propose` ───────────────────────────────────────────────────────────────────────────

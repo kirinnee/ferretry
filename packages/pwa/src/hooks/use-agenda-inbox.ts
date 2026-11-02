@@ -47,6 +47,7 @@ import {
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
+import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
@@ -291,14 +292,24 @@ export function useAgendaInboxModel(
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
   const boards = useSyncExternalStore(subscribeBoards, readBoards, readBoards);
+  // A ferret's rule suggestion the owner already answered stays open on the ferret's agenda until it expires (C2): it
+  // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card.
+  const answered = useSyncExternalStore(
+    answeredSuggestions.subscribe,
+    answeredSuggestions.getSnapshot,
+    answeredSuggestions.getSnapshot,
+  );
   const freshCards = useMemo(
     () =>
       inboxCards(
         unread,
         (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
         new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
-      ),
-    [unread, boards, deferredState],
+      ).filter(card => {
+        const suggestion = card.item.signInRuleSuggestion?.suggestion;
+        return suggestion === undefined || !answeredSuggestions.has(answered, card.daemonId, suggestion);
+      }),
+    [unread, boards, deferredState, answered],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
   // A gate item stands in for its card's to-test row, on a machine that raises them. What is still in the undo window

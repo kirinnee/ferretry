@@ -10,6 +10,7 @@ import {
   decideAdvertisement,
   declaredBind,
   FY_DEFAULT_DAEMON_PORT,
+  HOSTED_APP_ORIGIN,
   isLoopbackHost,
   isWildcardHost,
   LOOPBACK,
@@ -330,7 +331,7 @@ export const DaemonConfigDocumentSchema = z
      *  and optional: absent means "the same one", and absent is what a written document carries. */
     publicUrl: z.url().optional(),
     /** Exact browser origins allowed to call this daemon, including the public pairing exchange. */
-    corsOrigins: z.array(CorsOriginSchema).max(32).readonly().default(['https://ferretry.pages.dev']),
+    corsOrigins: z.array(CorsOriginSchema).max(32).readonly().default([HOSTED_APP_ORIGIN]),
     secretsFile: z.string().trim().min(1).optional(),
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),

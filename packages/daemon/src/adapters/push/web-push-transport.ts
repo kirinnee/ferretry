@@ -1,4 +1,4 @@
-import type { BrowserPushSubscription } from '@ferretry/protocol';
+import { type BrowserPushSubscription, HOSTED_APP_ORIGIN } from '@ferretry/protocol';
 import type { PushDelivery, PushDeliveryOutcome, WebPushTransport } from '../../lib/index.ts';
 import type { VapidSigner } from './webcrypto-vapid-keys.ts';
 
@@ -54,7 +54,7 @@ const TOKEN_LIFETIME_SECONDS = 12 * 60 * 60;
  * operator's: this value travels to a third party on every notification, and an operator's mail address
  * is personal data that nothing here asked them for.
  */
-const VAPID_SUBJECT = 'https://ferretry.pages.dev';
+const VAPID_SUBJECT = HOSTED_APP_ORIGIN;
 
 const TIMEOUT_MS = 10_000;
 

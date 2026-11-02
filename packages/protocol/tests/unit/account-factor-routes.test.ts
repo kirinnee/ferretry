@@ -56,7 +56,7 @@ describe('the 2FA key route shapes', () => {
       id: 'A7',
       source: 'question',
       sourceRef: `st_${'a'.repeat(24)}`,
-      subject: 'Save automatic codes to GitHub · kirinnee?',
+      subject: 'Save automatic codes to your account on github.com?',
       why: 'Asked by `fy` on kirin-box at 14:02 UTC.',
       howToResolve: 'Allow on this card in the Ferretry app.',
       waitingSince: '2026-10-31T12:00:00Z',

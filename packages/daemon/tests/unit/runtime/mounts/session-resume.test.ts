@@ -1,12 +1,15 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { SessionViewSchema } from '@ferretry/protocol';
+import { type GrantRefusal, STEP_UP_REQUIRED_CODE, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import { ApiError } from '../../../../src/lib/api/error.ts';
+import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
   resumeActorOf,
   SessionResumeError,
+  type SessionResumeSubsystem,
   sessionResumeRoutes,
 } from '../../../../src/lib/runtime/mounts/session-resume.ts';
 import { request } from '../../api/support.ts';
@@ -185,6 +188,8 @@ describe('the session resume mount', () => {
     // Arrange / Act / Assert
     should(resumeActorOf('admin-cli')).equal('admin-cli');
     should(resumeActorOf('admin-ui')).equal('admin-ui');
+    // The owner in the app on a paired device is a person, not an unknown reviver (C4).
+    should(resumeActorOf('device:d_1')).equal('device');
     should(resumeActorOf('peer:s9')).equal('peer');
     should(resumeActorOf('warden:s4')).equal('warden');
     should(resumeActorOf('cron:nightly')).equal('unknown');
@@ -208,5 +213,135 @@ describe('the session resume mount', () => {
     // Assert
     should(response.status).equal(500);
     should((JSON.parse(response.body) as { code: string }).code).not.equal('resume_refused');
+  });
+});
+
+describe('a paired device bringing back a ferret the owner cut off (secrev-1329b M2)', () => {
+  /** A resume subsystem that holds `cut` sessions as cut off, and asks the route before a device restores one. */
+  const cutOffReviver = (cut: ReadonlySet<string>) => {
+    const restored: string[] = [];
+    const subsystem: SessionResumeSubsystem = {
+      resume: async (sessionId, actor, _message, _policy, confirm) => {
+        if (cut.has(sessionId) && actor === 'device') {
+          if (confirm === undefined) throw new SessionResumeError('refused', 'no device restore here');
+          confirm();
+        }
+        if (cut.has(sessionId)) restored.push(sessionId);
+        return await new FakeSessionResume(['s1', 's2']).resume(sessionId, actor, undefined);
+      },
+    };
+    return { subsystem, restored };
+  };
+
+  const drive = async (
+    subsystem: SessionResumeSubsystem,
+    sessionId: string,
+    over: {
+      readonly fleet?: GrantRefusal | 'granted';
+      proofs?: { left: number };
+      readonly governed?: boolean;
+      readonly ferret?: boolean;
+      readonly undetermined?: boolean;
+    } = {},
+  ) => {
+    const found = new ApiRouter(sessionResumeRoutes(subsystem)).lookup('POST', `/v1/sessions/${sessionId}/resume`);
+    if (found.kind !== 'matched') throw new Error('no resume route');
+    const proofs = over.proofs ?? { left: 0 };
+    const claimed: string[] = [];
+    const fleet = over.fleet ?? 'granted';
+    const context = {
+      request: request({ method: 'POST', path: `/v1/sessions/${sessionId}/resume`, headers: human, body: '{}' }),
+      params: found.params,
+      actor: 'device:fy_device_id_AAAAAAAAAAAAAAAAAAAAAA',
+      credential: over.ferret === true ? { tokenClass: 'session', sessionId: 's9' } : { tokenClass: 'device' },
+      governance:
+        over.undetermined === true
+          ? undefined
+          : {
+              governed: over.governed ?? true,
+              decide: (demand: { capability: string; axis: string }) =>
+                demand.capability === 'fleet' && demand.axis === 'configure'
+                  ? { allowed: fleet === 'granted', refusal: fleet }
+                  : { allowed: false, refusal: 'not-granted' },
+            },
+      claimFreshStepUp: (act: string) => {
+        claimed.push(act);
+        if (act !== 'resume-cut-off' || proofs.left <= 0) return false;
+        proofs.left -= 1;
+        return true;
+      },
+    } as unknown as RouteContext;
+    try {
+      const response = await found.route.handle(context);
+      return { status: response.status, code: undefined as string | undefined, extra: undefined, claimed };
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      return { status: error.status, code: error.code, extra: error.extra, claimed };
+    }
+  };
+
+  it('should refuse a restore with no passkey proved for it, and name the act to prove', async () => {
+    const { subsystem, restored } = cutOffReviver(new Set(['s1']));
+
+    const answer = await drive(subsystem, 's1');
+
+    should([answer.status, answer.code]).eql([403, STEP_UP_REQUIRED_CODE]);
+    should(answer.extra).eql({ demand: { capability: 'fleet', axis: 'configure', act: 'resume-cut-off' } });
+    should(restored).eql([]);
+  });
+
+  it('should restore with a passkey proved for it, and spend it: one confirmation brings back one session', async () => {
+    const { subsystem, restored } = cutOffReviver(new Set(['s1', 's2']));
+    const proofs = { left: 1 };
+
+    const first = await drive(subsystem, 's1', { proofs });
+    const second = await drive(subsystem, 's2', { proofs });
+
+    should([first.status, second.status]).eql([200, 403]);
+    should(first.claimed).eql(['resume-cut-off']);
+    should(restored).eql(['s1']);
+  });
+
+  it('should refuse a device the grants do not let change the fleet, before any passkey is taken', async () => {
+    const { subsystem, restored } = cutOffReviver(new Set(['s1']));
+    const proofs = { left: 1 };
+
+    const answer = await drive(subsystem, 's1', { fleet: 'device-not-granted', proofs });
+
+    should([answer.status, answer.code]).eql([403, 'grant_device_not_granted']);
+    should(answer.claimed).eql([]);
+    should(proofs.left).equal(1);
+    should(restored).eql([]);
+  });
+
+  it('should refuse a restore it cannot judge, before any passkey is taken', async () => {
+    const { subsystem, restored } = cutOffReviver(new Set(['s1']));
+    const proofs = { left: 1 };
+
+    const answer = await drive(subsystem, 's1', { undetermined: true, proofs });
+
+    should([answer.status, answer.code]).eql([403, 'grant_undetermined']);
+    should(proofs.left).equal(1);
+    should(restored).eql([]);
+  });
+
+  it('should refuse a ferret’s own credential, which reads ungoverned, whatever it claims to be', async () => {
+    const { subsystem, restored } = cutOffReviver(new Set(['s1']));
+
+    const answer = await drive(subsystem, 's1', { ferret: true, governed: false, proofs: { left: 1 } });
+
+    should([answer.status, answer.code]).eql([403, 'owner_only']);
+    should(answer.claimed).eql([]);
+    should(restored).eql([]);
+  });
+
+  it('should ask nothing more of a session nobody cut off, nor of the app on the host', async () => {
+    const { subsystem } = cutOffReviver(new Set(['s1']));
+
+    const plain = await drive(subsystem, 's2');
+    const onHost = await drive(subsystem, 's1', { governed: false });
+
+    should([plain.status, onHost.status]).eql([200, 200]);
+    should([...plain.claimed, ...onHost.claimed]).eql([]);
   });
 });

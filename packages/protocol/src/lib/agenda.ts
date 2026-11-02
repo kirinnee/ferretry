@@ -834,7 +834,12 @@ export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema
  */
 export const AgendaTwoFactorSeedRefSchema = z.strictObject({
   stage: TwoFactorStageIdSchema,
-  account: AccountIdSchema,
+  /**
+   * The account, only on an item an older daemon raised. This daemon leaves it out: an account's handle is often its
+   * label and username, and agenda items are every ferret's to read. The app reads the stage, and its account, by the
+   * stage id (`GET /v1/accounts/seed-stages/:stage`, a secrets-gated route).
+   */
+  account: AccountIdSchema.optional(),
 });
 export type AgendaTwoFactorSeedRef = z.infer<typeof AgendaTwoFactorSeedRefSchema>;
 

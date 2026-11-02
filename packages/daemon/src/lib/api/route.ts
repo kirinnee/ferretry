@@ -217,6 +217,11 @@ export interface ScopedRoute extends RoutePattern {
    * the answer a reviewed diff. See {@link RouteCaller}.
    */
   readonly caller: RouteCaller;
+  /**
+   * For a `person` route a ferret has a door of its own for: the words that name it, added to the owner-only refusal
+   * so the ferret is told where to go instead of only "ask the owner".
+   */
+  readonly ferretDoor?: string;
   /** Whether the request must have arrived through a privileged carrier. */
   readonly privilegedOnly?: true;
   /**

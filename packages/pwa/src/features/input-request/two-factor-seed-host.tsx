@@ -3,10 +3,12 @@
  * and the account's name from the daemon (never from the item's text), and Allow is the same two steps as the
  * automatic-codes panel: the `add-2fa-key` passkey bound to THIS stage, then the commit. Deny drops the stage. A dismissed
  * passkey leaves the stage waiting (it expires on its own), so the owner can try again or Deny. A daemon that cannot be
- * read draws nothing, and the card still shows the daemon's words.
+ * read draws nothing, and the card still shows the daemon's words. Those name only where the account signs in (agenda
+ * text is every ferret's to read): the account's name and what the key says it is for come from the reads.
  */
 
 import {
+  type AccountId,
   type AccountList,
   type AgendaItem,
   TWO_FACTOR_ERROR_CODES,
@@ -24,7 +26,13 @@ import {
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { commitSeed, dropSeed, type InputClient, readAccounts, readSeedStage } from '../../lib/input-api.ts';
 import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
-import { SEED_DENIED_WORDS, SEED_GONE_WORDS, type SeedCheck, seedCardFacts } from '../../lib/two-factor-seed-card.ts';
+import {
+  SEED_DENIED_WORDS,
+  SEED_GONE_WORDS,
+  type SeedCardFacts,
+  type SeedCheck,
+  seedCardFacts,
+} from '../../lib/two-factor-seed-card.ts';
 import { type SeedCardPhase, TwoFactorSeedCard } from './two-factor-seed-card.tsx';
 
 export interface TwoFactorSeedHostProps {
@@ -42,6 +50,16 @@ const FINISHED: Readonly<Record<Exclude<TwoFactorSeedStageView['state'], 'waitin
   dropped: { kind: 'done', ok: false, words: SEED_DENIED_WORDS },
   expired: { kind: 'done', ok: false, words: SEED_GONE_WORDS },
 };
+
+/** "The key says it is for GitHub · kirinnee.", from the stage read (a route that reads the accounts), or nothing. */
+const keySaysLine = (stage: TwoFactorSeedStageView): string | undefined => {
+  const says = [stage.issuer, stage.accountName].filter(part => part !== undefined).join(' · ');
+  return says === '' ? undefined : `The key says it is for ${says}.`;
+};
+
+/** The stage's line first, unless an older daemon already put it in the card's context. */
+const withKeySays = (facts: SeedCardFacts, says: string | undefined): SeedCardFacts =>
+  says === undefined || facts.lines.includes(says) ? facts : { ...facts, lines: [says, ...facts.lines] };
 
 const isStageView = (read: unknown): read is TwoFactorSeedStageView =>
   typeof read === 'object' && read !== null && 'state' in read;
@@ -72,6 +90,9 @@ export function TwoFactorSeedHost({
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
   const [phase, setPhase] = useState<SeedCardPhase>({ kind: 'waiting' });
   const [flagged, setFlagged] = useState(false);
+  const [says, setSays] = useState<string | undefined>(undefined);
+  /** The account the stage is for, as the stage read says: the card itself names none. */
+  const [staged, setStaged] = useState<AccountId | undefined>(undefined);
   const [check, setCheck] = useState<SeedCheck>('checking');
   const [reads, setReads] = useState(0);
 
@@ -99,7 +120,9 @@ export function TwoFactorSeedHost({
           return;
         }
         setCheck('ok');
+        setStaged(stage.account);
         setFlagged(stage.mismatch === true);
+        setSays(keySaysLine(stage));
         if (stage.state !== 'waiting') setPhase(FINISHED[stage.state]);
       })
       .catch(() => {
@@ -110,11 +133,12 @@ export function TwoFactorSeedHost({
     };
   }, [connection, createClient, ref, reads]);
 
-  const account = accounts?.accounts.find(each => each.id === ref?.account);
+  const target = ref?.account ?? staged;
+  const account = accounts?.accounts.find(each => each.id === target);
   const named = account === undefined ? 'this account' : accountWords(account);
 
   const allow = useCallback(async (): Promise<void> => {
-    if (ref === undefined || client === null) return;
+    if (ref === undefined || client === null || target === undefined) return;
     if (askKey === undefined) {
       setPhase({ kind: 'failed', words: 'This device cannot confirm with a passkey, so it cannot save this key.' });
       return;
@@ -126,35 +150,39 @@ export function TwoFactorSeedHost({
         return;
       }
       setPhase({ kind: 'saving' });
-      const saved = await commitSeed(client, ref.account, ref.stage);
+      const saved = await commitSeed(client, target, ref.stage);
       setPhase({ kind: 'done', ok: true, words: savedSeedWords(saved, account?.label ?? named) });
       onDone?.();
     } catch (cause) {
       setPhase({ kind: 'failed', words: seedFailureWords(cause) });
     }
-  }, [account, askKey, client, named, onDone, ref]);
+  }, [account, askKey, client, named, onDone, ref, target]);
 
   const deny = useCallback(async (): Promise<void> => {
-    if (ref === undefined || client === null) return;
+    if (ref === undefined || client === null || target === undefined) return;
     try {
-      await dropSeed(client, ref.account, ref.stage);
+      await dropSeed(client, target, ref.stage);
       setPhase(FINISHED.dropped);
       onDone?.();
     } catch (cause) {
       setPhase({ kind: 'failed', words: seedFailureWords(cause) });
     }
-  }, [client, onDone, ref]);
+  }, [client, onDone, ref, target]);
 
   if (ref === undefined || client === null) return null;
   return (
     <TwoFactorSeedCard
       check={check}
-      facts={seedCardFacts(item.context ?? undefined, flagged)}
+      facts={withKeySays(seedCardFacts(item.context ?? undefined, flagged), says)}
       onRetry={() => setReads(count => count + 1)}
       onAllow={() => void allow()}
       onDeny={() => void deny()}
       phase={phase}
-      subject={item.subject ?? `Save automatic codes to ${named}?`}
+      subject={
+        account === undefined
+          ? (item.subject ?? `Save automatic codes to ${named}?`)
+          : `Save automatic codes to ${named}?`
+      }
     />
   );
 }

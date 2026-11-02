@@ -494,47 +494,35 @@ describe('the configuration files mount', () => {
       should(answer.spent).equal(0);
     });
 
-    it('should refuse an agent while "Ferretry settings" is off, and hold its loosening once it is on', async () => {
-      // Arrange
-      const subject = world({ 'warden.yaml': WARDEN_OFF });
-
+    it('should be a person’s route: a ferret writes through config.write, never here (secrev-1240, C30)', () => {
       // Act
-      const refused = await call(subject, AGENT, put('warden.yaml', WARDEN_ON));
-      subject.off.delete('settings');
-      const allowed = await call(subject, AGENT, put('warden.yaml', WARDEN_ON));
+      const route = routeFor(world().subsystem, 'PUT', '/v1/config/file');
 
-      // Assert
-      should(refused.status).equal(403);
-      should(refused.body).deepEqual({ error: controlRefusal('settings'), code: 'agent_control_off' });
-      should(subject.asked).deepEqual(['settings', 'settings']);
-      should(allowed.body.outcome).equal('pending');
-      should(await wardenInEffect(subject)).be.false();
+      // Assert — and the boundary's refusal names the ferret's own door
+      should(route.caller).equal('person');
+      should(route.ferretDoor).containEql('config_write');
     });
 
-    it('should hold a loosening a ferret makes on its own session credential, as any agent', async () => {
-      // Arrange — the class decides: no session header is involved at all.
+    it('should refuse every agent in the handler too, whatever its switch, credential or proof, writing nothing', async () => {
+      // Arrange — "Ferretry settings" on: the switch opens config.write, never this route.
       const subject = world({ 'warden.yaml': WARDEN_OFF });
       subject.off.delete('settings');
+      const owner =
+        'only a person may use PUT /v1/config/file; a ferret asks the owner instead; a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on';
 
       // Act
-      const answer = await call(subject, FERRET, put('warden.yaml', WARDEN_ON));
+      const answers = [
+        await call(subject, AGENT, put('warden.yaml', WARDEN_ON)),
+        await call(subject, FERRET, put('warden.yaml', WARDEN_ON)),
+        await call(subject, { ...AGENT, fresh: true }, put('warden.yaml', WARDEN_ON)),
+      ];
 
       // Assert
-      should(answer.body.outcome).equal('pending');
+      should(answers.map(answer => [answer.status, answer.body, answer.spent])).deepEqual(
+        answers.map(() => [403, { error: owner, code: 'owner_only' }, 0]),
+      );
+      should(subject.asked).deepEqual([]);
       should(await wardenInEffect(subject)).be.false();
-    });
-
-    it('should hold an agent loosening even on the host loopback with a fresh proof', async () => {
-      // Arrange
-      const subject = world({ 'warden.yaml': WARDEN_OFF });
-      subject.off.delete('settings');
-
-      // Act
-      const answer = await call(subject, { ...AGENT, fresh: true }, put('warden.yaml', WARDEN_ON));
-
-      // Assert
-      should(answer.body.outcome).equal('pending');
-      should(answer.spent).equal(0);
     });
 
     it('should refuse a file that does not check with 422 and every located issue, writing nothing', async () => {

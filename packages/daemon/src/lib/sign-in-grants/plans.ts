@@ -33,8 +33,8 @@ export type GrantVerdict = { readonly ok: true } | { readonly ok: false; readonl
 export interface SignInGrantSource {
   /**
    * Whether grant fills run at all. A grant fill closes the card itself, and an app that can't show that would refuse
-   * the request list, so fills wait until the daemon advertises the source's feature (`task-plan.1`,
-   * `sign-in-rules.1`): the app ships first.
+   * the request list, so a source fills only while the daemon reports its feature (`task-plan.1`, `sign-in-rules.1`;
+   * this build reports both).
    */
   enabled(): boolean;
   /** The grants that are about a sign-in in this session: in force, spent or stopped, the soonest to expire first. */

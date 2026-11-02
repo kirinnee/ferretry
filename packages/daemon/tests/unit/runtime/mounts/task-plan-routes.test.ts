@@ -13,6 +13,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiRoute } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
 import { PasteRuleService, TaskPlanService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
 import { taskPlanRoutes } from '../../../../src/lib/runtime/mounts/task-plans.ts';
@@ -340,6 +341,23 @@ describe('the task-plan routes: approving', () => {
 });
 
 describe('the task-plan routes: revoke, and the kept paste-plan route', () => {
+  it('should ask a governed device no per-act passkey to revoke, and still ask one for every other plan act (C31)', async () => {
+    const { routes } = await served();
+
+    const askedAgain = routes
+      .filter(route => route.path.includes('task-plans') && route.capability !== undefined)
+      .map(route => [
+        `${route.method} ${route.path}`,
+        route.capability === undefined ? false : demandNeedsStepUp(route.capability),
+      ]);
+
+    should(Object.fromEntries(askedAgain)).match({
+      'POST /v1/sessions/:sessionId/task-plans/:planId/revoke': false,
+      'POST /v1/sessions/:sessionId/task-plans/:planId/approval': true,
+      'GET /v1/sessions/:sessionId/task-plans/:planId': true,
+    });
+  });
+
   it('should revoke with no passkey, at once', async () => {
     const { dispatch, service, rules } = await served();
     const plan = await service.propose(SESSION, { lines: [PASTE] });

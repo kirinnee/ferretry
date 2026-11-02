@@ -27,6 +27,8 @@ import {
   type CopyMeta,
   copyHandle,
   copyPlanOf,
+  durationWords,
+  INPUT_QUARANTINE_SECONDS,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
   type LoginRecipeProposed,
@@ -625,7 +627,7 @@ export class AgentToolService {
         return {
           summary:
             view.state === 'delivered'
-              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for ${view.lockSeconds === undefined ? 'about two minutes' : `${String(view.lockSeconds)} seconds`}.`
+              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for ${view.lockSeconds === undefined ? `about ${durationWords(INPUT_QUARANTINE_SECONDS)}` : `${String(view.lockSeconds)} seconds`}.`
               : `Asked the owner to allow pasting ${copyHandle(name)} into ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
           input: view,
         };
@@ -642,7 +644,7 @@ export class AgentToolService {
       case 'task.plan': {
         const plan = await this.planPort(caller).propose(sessionId, call);
         return {
-          summary: `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). The plan is only recorded for now: Ferretry fills nothing from it yet, so keep raising browser_request_input / terminal_request_input and the owner is asked each time.`,
+          summary: `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). Keep raising browser_request_input / terminal_request_input as usual: covered sign-ins and pastes are filled for you once the owner approves; anything else still asks.`,
           taskPlan: taskPlanAgentView(plan),
         };
       }
@@ -1627,7 +1629,7 @@ export class AgentToolService {
     facts: CallFacts,
   ): Promise<AgentToolResult> {
     const accounts = this.ports.accounts;
-    if (accounts === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no saved logins.');
+    if (accounts === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no accounts.');
     let where = call.site;
     if (call.name !== undefined) {
       const pages = (await this.ports.browser.status(caller.sessionId)).pages;
@@ -1647,7 +1649,7 @@ export class AgentToolService {
     const listing = await accounts.list().catch(() => {
       throw new AgentToolError(
         'unavailable',
-        'The saved logins cannot be read right now; ask the owner to check Settings.',
+        'The accounts cannot be read right now; ask the owner to check Settings.',
       );
     });
     // A recipe is masked at READ time too: a value kept after it was written must reach the ferret as a mask. Where
@@ -1680,7 +1682,7 @@ export class AgentToolService {
   ): Promise<AgentToolResult> {
     const recipes = this.ports.recipes;
     if (call.recipe !== undefined && recipes === undefined)
-      throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
+      throw new AgentToolError('unavailable', 'This daemon keeps no recipes.');
     if (call.preapprove === true && this.ports.ruleSuggestions === undefined)
       throw new AgentToolError('unavailable', 'This daemon keeps no standing-rule suggestions.');
     const target: RecipeProposalTarget =

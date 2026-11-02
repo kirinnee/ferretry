@@ -4,6 +4,10 @@
  * only a way to open the owner's own sheet, with NOTHING ticked: it holds no stage, no proof and no fields. The names (the
  * account, the username) come from the secrets-gated accounts route, never from the item's text; the ferret's reason is
  * shown faint and quoted, as the ferret's.
+ *
+ * ANSWERED ON THE OWNER'S SIDE ONLY (R1, C2): a Dismiss or an approved rule never closes the card, which the ferret reads
+ * on its own agenda until it expires. It marks the suggestion answered in the app's set, which takes it out of the
+ * Inbox; so does a suggestion the daemon's owner list no longer holds.
  */
 
 import {
@@ -14,6 +18,7 @@ import {
   type SignInSummary,
 } from '@ferretry/protocol';
 import { useEffect, useMemo, useState } from 'react';
+import { type AnsweredSuggestions, answeredSuggestions } from '../../lib/answered-suggestions.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineOffers } from '../../lib/daemon-health.ts';
 import { readAccounts } from '../../lib/input-api.ts';
@@ -42,6 +47,8 @@ export interface SignInRuleSuggestionHostProps {
   /** Says the machine offers `sign-in-rules.1` without reading its health (the harness and tests). */
   readonly offered?: boolean;
   readonly onDone?: () => void;
+  /** The set an answer is marked in, in place of the app's (the tests). */
+  readonly answered?: AnsweredSuggestions;
 }
 
 interface Found {
@@ -59,6 +66,7 @@ export function SignInRuleSuggestionHost({
   askPasskey: injectedAsk,
   offered: injectedOffered,
   onDone,
+  answered = answeredSuggestions,
 }: SignInRuleSuggestionHostProps) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
@@ -86,7 +94,11 @@ export function SignInRuleSuggestionHost({
       .then(async client => {
         const { suggestions } = await listSuggestions(client);
         const suggestion = suggestions.find(each => each.id === suggestionId);
-        if (suggestion === undefined) return undefined;
+        // Not on the owner's list: answered (here or on another device) or expired. Either way, out of the Inbox.
+        if (suggestion === undefined) {
+          answered.mark(connection.daemonId, [suggestionId]);
+          return undefined;
+        }
         const accounts = await readAccounts(client);
         const signIn = accounts.signIns.find(each => each.id === suggestion.signIn);
         const account = signIn === undefined ? undefined : accounts.accounts.find(each => each.id === signIn.account);
@@ -106,7 +118,7 @@ export function SignInRuleSuggestionHost({
     return () => {
       current = false;
     };
-  }, [offered, connection, createClient, suggestionId]);
+  }, [offered, connection, createClient, suggestionId, answered]);
 
   if (suggestionId === undefined || !offered) return null;
   if (forbidden)
@@ -135,6 +147,7 @@ export function SignInRuleSuggestionHost({
         onCancel={() => setSheet(false)}
         onSettled={() => {
           setSheet(false);
+          answered.mark(connection.daemonId, [suggestion.id]);
           onDone?.();
         }}
         origin="suggestion"
@@ -175,7 +188,10 @@ export function SignInRuleSuggestionHost({
           onClick={() => {
             setBusy(true);
             void dismissSuggestion(client, suggestion.id).then(
-              () => onDone?.(),
+              () => {
+                answered.mark(connection.daemonId, [suggestion.id]);
+                onDone?.();
+              },
               cause => {
                 setBusy(false);
                 setFailure(failureWords(cause));

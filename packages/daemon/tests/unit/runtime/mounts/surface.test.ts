@@ -781,7 +781,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     agenda: {
       raise: async () => ({ ok: false, message: 'not exercised' }),
       close: async () => undefined,
-      isOpen: async () => true,
     },
     redact: async text => text,
     audit: { record: async () => undefined },
@@ -963,7 +962,7 @@ describe('the mounted daemon surface', () => {
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       13 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, a sign-in’s add, put, delete and recipe answer, and the owner’s default account for a place (docs/secrets.md)
-      8 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read, passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
+      9 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read (by account, or by the stage alone), passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
       8 + // task plans: the list, one plan, a selection's stage, read, passkey-bound commit, confirm-in-app and drop, and revoke (docs/secure-copy.md)
@@ -1153,6 +1152,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/accounts/:id/apart',
       // 2FA keys: a seed is staged, then saved only with a passkey bound to its stage; nothing answers one.
       'POST /v1/accounts/:id/factors/seed',
+      'GET /v1/accounts/seed-stages/:stage',
       'GET /v1/accounts/:id/factors/seed/:stage',
       'POST /v1/accounts/:id/factors/seed/:stage/commit',
       'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',
@@ -1469,8 +1469,13 @@ describe('the mounted daemon surface', () => {
       .filter(route => route.consultsGrants === true)
       .map(route => `${route.method} ${route.path}`);
 
-    // Assert — an answer to a card that confirms a held configuration change (docs/agenda.md).
-    should(consulting).eql(['POST /v1/sessions/:sessionId/agenda', 'POST /v1/sessions/:sessionId/attention']);
+    // Assert — an answer to a card that confirms a held configuration change (docs/agenda.md), and a paired device
+    // bringing back a cut-off ferret (fleet.configure, secrev-1329b M2; a ferret is refused before it is read).
+    should(consulting.toSorted()).eql([
+      'POST /v1/sessions/:sessionId/agenda',
+      'POST /v1/sessions/:sessionId/attention',
+      'POST /v1/sessions/:sessionId/resume',
+    ]);
     should(routes.filter(route => route.consultsGrants === true && route.capability !== undefined)).eql([]);
   });
 

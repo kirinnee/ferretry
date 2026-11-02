@@ -14,6 +14,7 @@ import {
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_MAX_USES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
@@ -137,9 +138,11 @@ export const RULE_DISMISSED_WORDS =
   'The passkey was dismissed, so nothing was approved. Tick what you want to try again.';
 export const RULE_NO_PASSKEY_DEVICE_WORDS =
   'This device cannot confirm with a passkey, so it cannot approve a standing rule.';
+/** A sign-in that has a rule, whose rule could not be read: it is not replaced unseen. */
+export const RULE_REPLACED_UNREADABLE_WORDS =
+  'This sign-in already has a standing rule, and it could not be read, so it can’t be replaced here. Look at it in Settings › Secure copy › Standing sign-in rules.';
 export const RULE_DAMAGED_WORDS =
   'The standing rules file could not be read, so no rule fills until you approve one again. Every sign-in asks you.';
-const RULE_STAGE_GONE_WORDS = 'That approval timed out or was already answered. Start it again.';
 /** A `#rules/<stage>` link whose stage the daemon no longer lists. */
 export const RULE_LINKED_STAGE_GONE_WORDS = 'That approval timed out or was already answered.';
 
@@ -166,13 +169,17 @@ const codeOf = (cause: unknown): string | undefined =>
     ? cause.code
     : undefined;
 
-/** The sentence for a refused route, by the code the daemon answered with. */
-function ruleFailureWords(cause: unknown): string {
-  switch (codeOf(cause)) {
+/**
+ * The sentence for a refused route, by the code the daemon answered with: each refusal its own protocol sentence, so a
+ * rule that already exists never reads as a sign-in that changed (C1).
+ */
+export function ruleFailureWords(cause: unknown): string {
+  const code = codeOf(cause);
+  if (code !== undefined && Object.hasOwn(SIGN_IN_RULE_REFUSAL_WORDS, code))
+    return SIGN_IN_RULE_REFUSAL_WORDS[code as keyof typeof SIGN_IN_RULE_REFUSAL_WORDS];
+  switch (code) {
     case SIGN_IN_RULE_ERROR_CODES.passkeyRequired:
       return INELIGIBLE_WORDS['no-passkey'];
-    case SIGN_IN_RULE_ERROR_CODES.stageNotFound:
-      return RULE_STAGE_GONE_WORDS;
     case SIGN_IN_RULE_ERROR_CODES.noHistory:
       return INELIGIBLE_WORDS['no-history'];
     case SIGN_IN_RULE_ERROR_CODES.viaProvider:
@@ -181,12 +188,8 @@ function ruleFailureWords(cause: unknown): string {
       return INELIGIBLE_WORDS['not-password'];
     case SIGN_IN_RULE_ERROR_CODES.toolNotCovered:
       return INELIGIBLE_WORDS['tool-not-covered'];
-    case SIGN_IN_RULE_ERROR_CODES.noCodeKey:
-      return 'This account has no 2FA key Ferretry makes codes for, so the code can’t be ticked.';
-    case SIGN_IN_RULE_ERROR_CODES.conflict:
-      return 'The sign-in changed while you were approving it, so nothing was approved. Start again.';
-    case SIGN_IN_RULE_ERROR_CODES.proofInvalid:
-      return 'The passkey did not match this rule, so nothing was approved.';
+    case SIGN_IN_RULE_ERROR_CODES.terminalOff:
+      return INELIGIBLE_WORDS['terminal-off'];
     default:
       return failureWords(cause);
   }
@@ -422,6 +425,17 @@ export function initialRuleTicks(input: {
       password: before.fields.includes('password'),
       totp: false,
       scope: before.scope,
+    };
+  // Replacing an active rule from elsewhere (a suggestion, the offer): it starts from what that rule allows now, never
+  // from wider defaults, and the code is ticked again as on a renewal.
+  if (before !== undefined)
+    return {
+      ...base,
+      username: before.fields.includes('username'),
+      password: before.fields.includes('password'),
+      totp: false,
+      scope: before.scope,
+      uses: before.uses,
     };
   if (origin === 'suggestion') return { ...base, username: false, password: false, totp: false };
   return {

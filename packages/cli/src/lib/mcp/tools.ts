@@ -70,7 +70,7 @@ const INPUT_PROMPT = {
 };
 const SENSITIVITY = { type: 'string', enum: ['secret', 'code', 'private', 'plain'] };
 /** A push approval: no prompt, nothing typed; the daemon reads the number, never the ferret. */
-const PUSH = { type: 'boolean', description: 'A push to approve on their phone: no prompt. Wait on its pa_ id.' };
+const PUSH = { type: 'boolean', description: 'Approve on your phone (tap Yes/number): no prompt. Wait: pa_ id.' };
 const INPUT_OPTIONS = {
   submit: {
     type: 'string',
@@ -773,12 +773,11 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
 const CONFIG_PATH = {
   type: 'string',
   description:
-    'A file in the config directory: machine.yaml, warden.yaml, learning.yaml, voice.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml.',
+    'A config file: machine.yaml, warden.yaml, learning.yaml, voice.yaml, account-defaults.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml.',
 };
 const CONFIG_TEXT = {
   type: 'string',
-  description:
-    'The whole file, as YAML. Never a secret value: write ${secret:NAME} and ask the owner to store the value.',
+  description: 'The whole file, as YAML. Never a secret value: write ${secret:NAME} and ask the owner to store it.',
 };
 
 /**
@@ -798,14 +797,14 @@ export const MCP_CONFIG_TOOLS: readonly (McpToolDefinition & { readonly configTo
     name: 'config_validate',
     configTool: 'config.validate',
     description:
-      'Check a configuration file’s text as if it were written, without writing it. Answers each problem with its line and the fix.',
+      'Check a config file’s text as if it were written, without writing it. Answers each problem with its line and the fix.',
     inputSchema: object({ path: CONFIG_PATH, text: CONFIG_TEXT }, ['path', 'text']),
   },
   {
     name: 'config_write',
     configTool: 'config.write',
     description:
-      'Write a configuration file. Refused unless it checks. A change that loosens spending or what agents may do waits for the owner to confirm; tell them.',
+      'Write a config file. Refused unless it checks. A change that loosens spending or what agents may do waits for the owner to confirm; tell them.',
     inputSchema: object(
       {
         path: CONFIG_PATH,

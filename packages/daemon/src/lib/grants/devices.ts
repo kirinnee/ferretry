@@ -50,8 +50,9 @@ export type DeviceGrantOutcome = 'changed' | 'widened' | 'not-found';
  *
  * ## WHO MAY NARROW
  *
- * Any governed caller with a live step-up, on any device, its own included — never harder than
- * widening. A remote warden has no device and can never step up, so it changes nothing here.
+ * Any governed caller on a proven device, on any device, its own included, with no step-up: a pure narrowing only
+ * takes away (docs/grants.md § Narrowing never asks again). A caller with no proven device (a remote warden, the admin
+ * token off loopback) is refused at the boundary (`decideCapability`).
  *
  * ## ALL OR NOTHING
  *
@@ -70,10 +71,16 @@ export class DeviceGrantService {
     return widenableBy(hostLocal, hostLocal ? undefined : this.holder(presentation));
   }
 
+  /**
+   * `claimFresh` TAKES the caller's passkey proved for this widen, in one step, right before the write (secrev-1329b
+   * L4): of two widens racing on one proof exactly one gets it, so one confirmation buys one widen. A pure narrowing
+   * never asks it.
+   */
   async change(
     deviceId: string,
     patch: DeviceGrantsPatch,
     presentation: CapabilityPresentation,
+    claimFresh: () => boolean = () => false,
   ): Promise<DeviceGrantOutcome> {
     const current = this.deps.devices.deviceGrants(deviceId);
     if (current === undefined) return 'not-found';
@@ -102,7 +109,12 @@ export class DeviceGrantService {
     if (verdict.kind === 'step-up-required')
       throw new GrantError(
         'step-up-required',
-        "changing a device's grants needs a passkey confirmation from this device.",
+        'giving a device more access needs a passkey confirmation from this device.',
+      );
+    if (!hostLocal && widenedBy(current, next).length > 0 && !claimFresh())
+      throw new GrantError(
+        'widen-step-up-required',
+        'giving another device more access needs a passkey confirmation for it, from this device.',
       );
     const changes = grantChanges(current, next).map(change => `${deviceId}/${change}`);
     if (changes.length === 0) return 'changed';

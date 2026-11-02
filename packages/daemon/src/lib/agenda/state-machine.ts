@@ -669,6 +669,8 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
   if (!agentConfinedTo(command.actor, ledger.sessionId)) {
     return failure('forbidden', 'an agent may change the agenda only in its own session');
   }
+  const frozen = frozenSuggestion(ledger, command);
+  if (frozen !== undefined) return frozen;
   switch (command.action) {
     case 'raise':
       return raise(ledger, command);
@@ -703,6 +705,23 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
+}
+
+/**
+ * A FERRET'S STANDING-RULE SUGGESTION IS FROZEN (R1, C2): it sits on the ferret's own board, which the ferret reads
+ * whole (`parked`, `history`, the resolution), so it stays exactly as raised until the DAEMON closes it at its expiry.
+ * Every other actor's move on it (a close, Not needed, a snooze, a reply, an edit, a surface, "needs info") is
+ * refused, so the ferret can never tell the owner's "no", or a glance, from silence. The owner says no with Dismiss on
+ * its card, which is kept on the owner's side only. A plain answer keeps its own refusal (`addressById`).
+ */
+function frozenSuggestion(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation | undefined {
+  if (command.actor.kind === 'daemon' || command.action === 'answer' || !('id' in command)) return undefined;
+  const target = ledger.entries.find(entry => entry.lifecycle === 'active' && entry.item.id === command.id);
+  if (target?.item.signInRuleSuggestion === undefined) return undefined;
+  return failure(
+    'use_input_form',
+    `${command.id} is a ferret's rule suggestion: Dismiss it on its card in the app. The ferret is not told; the card leaves its list when it expires`,
+  );
 }
 
 type RaiseCommand = Extract<AgendaCommand, { action: 'raise' }>;

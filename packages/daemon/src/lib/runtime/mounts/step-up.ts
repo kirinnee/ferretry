@@ -26,6 +26,7 @@ import {
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
   SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   STEP_UP_ACTS,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
@@ -213,7 +214,7 @@ export function stepUpRoutes(
           if (stage === undefined || challenge === undefined)
             return errorResponse(
               404,
-              'that standing sign-in rule is not waiting for a passkey: stage it again',
+              SIGN_IN_RULE_REFUSAL_WORDS.stage_not_found,
               SIGN_IN_RULE_ERROR_CODES.stageNotFound,
             );
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, stage, challenge), value =>

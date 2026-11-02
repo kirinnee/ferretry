@@ -775,6 +775,22 @@ describe('AgendaNeedsYou', () => {
     await mounted.unmount();
   });
 
+  it('offers no Snooze on a ferret’s rule suggestion, and Snooze on any other card (C2)', async () => {
+    const suggested = inboxCard(
+      agendaItem('A7', {
+        kind: 'permission',
+        subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+        signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'pip' } }),
+    );
+    const mounted = await mount(needsYou(fakeInbox(), [suggested, bare]));
+    const card = (id: string) => must(mounted.container.querySelector<HTMLElement>(`[data-agenda-card="${id}"]`), id);
+    expect(card('A7').querySelector('[data-agenda-snooze]')).toBeNull();
+    expect(card('A1').querySelector('[data-agenda-snooze]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
   it('keeps the answer bar on the card, with no reply box of its own', async () => {
     const long = inboxCard(agendaItem('A5', { subject: 'Point the sync at the new org' }));
     const mounted = await mount(needsYou(fakeInbox(), [long]));

@@ -144,10 +144,16 @@ tail -n 1 "${redirects}" | grep -qx '/\* /index.html 200'
 # The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages
 # project by hostname, and neither the daemon nor the CLI can read wrangler.jsonc at runtime. Pinned
 # because a renamed project would leave every minted pairing link addressing a site that no longer
-# exists, and nothing would fail until somebody scanned one.
+# exists, and nothing would fail until somebody scanned one. The hostname has ONE owner, the protocol's
+# HOSTED_APP_ORIGIN; the daemon's pairing link is built from it.
+origin_owner="packages/protocol/src/lib/pairing.ts"
+rg -qF "export const HOSTED_APP_ORIGIN = 'https://$(jq -r '.name' "${config}").pages.dev';" "${origin_owner}" || {
+  echo "❌ ${origin_owner} HOSTED_APP_ORIGIN does not address the Pages project named in ${config}" >&2
+  exit 1
+}
 pair_service="packages/daemon/src/lib/pairing/service.ts"
-rg -qF "https://$(jq -r '.name' "${config}").pages.dev/pair" "${pair_service}" || {
-  echo "❌ ${pair_service} does not address the Pages project named in ${config}" >&2
+rg -qF '`${HOSTED_APP_ORIGIN}/pair`' "${pair_service}" || {
+  echo "❌ ${pair_service} does not build its pairing link from HOSTED_APP_ORIGIN" >&2
   exit 1
 }
 

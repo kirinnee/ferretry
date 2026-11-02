@@ -8,6 +8,7 @@ import {
   DaemonNameSchema,
   DEVICE_IDLE_EXPIRY_DAYS,
   FULL_DEVICE_GRANTS,
+  HOSTED_APP_ORIGIN,
   LIMITED_DEVICE_GRANTS,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
@@ -34,7 +35,7 @@ import { secretsMatch } from '../api/authentication.ts';
 import type { GrantAuditPort } from '../grants/types.ts';
 import type { DeviceConnectionRevoker } from './live-connections.ts';
 
-const FERRETRY_PAIRING_APP_URL = 'https://ferretry.pages.dev/pair';
+const FERRETRY_PAIRING_APP_URL = `${HOSTED_APP_ORIGIN}/pair`;
 const PAIRING_RATE_LIMIT_ATTEMPTS = 10;
 const PAIRING_RATE_LIMIT_WINDOW_MS = 60_000;
 const PAIRING_RATE_LIMIT_MAX_KEYS = 4_096;

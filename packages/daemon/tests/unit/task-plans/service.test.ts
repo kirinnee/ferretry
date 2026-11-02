@@ -17,6 +17,7 @@ import {
   taskPlanApprovalSubject,
 } from '@ferretry/protocol';
 import should from 'should';
+import { namesOnCard } from '../../support/names-on-card.ts';
 import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
@@ -209,6 +210,26 @@ async function staged(w: ReturnType<typeof world>, plan: TaskPlan, approval: Tas
 }
 
 describe('TaskPlanService: the ferret asks', () => {
+  it('should put no account label, username or handle anywhere on the plan card (L8)', async () => {
+    const w = world();
+    await w.rules.load();
+
+    await w.service.propose(SESSION, { lines: [WORK_LINE, SITE_LINE, SUDO_LINE, PASTE] });
+
+    should(w.cards).have.length(1);
+    const names = [
+      'GITHUB_WORK',
+      'GitHub work',
+      'kirin-work',
+      'GITHUB_HOME',
+      'GitHub home',
+      'kirinnee',
+      'CLICKUP',
+      'ClickUp',
+    ];
+    should(namesOnCard(w.cards, names)).eql([]);
+  });
+
   it('should resolve every line against the accounts and raise ONE card in the daemon’s words', async () => {
     const w = world();
     await w.rules.load();
@@ -879,7 +900,7 @@ describe('TaskPlanService: the edges of each step', () => {
 
     should(stage.codes).eql([]);
     should(stage.summary).eql([
-      'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root there, 1 use',
+      'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root on kirin-box, 1 use',
     ]);
   });
 

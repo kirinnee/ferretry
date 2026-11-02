@@ -12,8 +12,8 @@ import type { GrantFillAt, GrantVerdict, SignInGrantSource } from './plans.ts';
  * - **One ledger.** Both sources must hold the very instance given here (refused at construction otherwise), so the
  *   hourly rate counts plan and rule fills of a sign-in together, and neither source's `retain` forgets the other's
  *   attempts or pins.
- * - **Each behind its own feature.** A source that is not enabled contributes no grant, so with `sign-in-rules.1`
- *   unadvertised every sign-in a rule would cover is a normal card.
+ * - **Each behind its own feature.** A source that is not enabled contributes no grant: on a daemon that does not
+ *   report `sign-in-rules.1` (this build does, since R3c-6) every sign-in a rule would cover is a normal card.
  * - **The soonest to expire first.** A plan line usually ends before a rule, so it spends before one.
  */
 export class CombinedSignInGrants implements SignInGrantSource {

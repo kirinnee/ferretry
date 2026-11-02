@@ -186,7 +186,7 @@ describe('a staged 2FA seed card in the Inbox', () => {
         kind: 'permission',
         ask: undefined,
         raisedBy: 'daemon',
-        subject: 'Save automatic codes to GitHub · kirinnee?',
+        subject: 'Save automatic codes to your account on github.com?',
         ...(ref ? { twoFactorSeed: REF } : {}),
       } as never),
     );

@@ -39,8 +39,9 @@ export const TERMINAL_RESUME_STATUSES: ReadonlySet<ResumableSessionStatus> = new
 /**
  * Who asked. An operator at a CLI and an automatic reviver reach the same method, and they must not
  * get the same policy: only the automated path may be suppressed by a duplicate-work heuristic.
+ * `device` is the owner in the app on a paired device (`device:<id>`): a person, like `admin-ui`.
  */
-export const ResumeActorSchema = z.enum(['admin-cli', 'admin-ui', 'peer', 'warden', 'daemon', 'unknown']);
+export const ResumeActorSchema = z.enum(['admin-cli', 'admin-ui', 'device', 'peer', 'warden', 'daemon', 'unknown']);
 export type ResumeActor = z.infer<typeof ResumeActorSchema>;
 
 export interface ResumePolicy {
@@ -60,7 +61,7 @@ export interface ResumePolicy {
    * `automatic` cannot answer this question, because `peer` is not automatic and is also not an
    * operator: another daemon relaying a request is a program, and the released structured-answer
    * advisory exists precisely to be dismissed by a human who looked at the terminal. Only
-   * `admin-cli` and `admin-ui` resolve to true; peer, warden, daemon and unknown never do, and an
+   * `admin-cli`, `admin-ui` and `device` resolve to true; peer, warden, daemon and unknown never do, and an
    * absent value is false — so a hand-built policy that forgets the field gets the safe answer
    * rather than operator standing.
    */

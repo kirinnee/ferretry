@@ -150,9 +150,14 @@ export async function stageSeed(
 /** Where one staged save stands (`waiting`, `saved`, `dropped`, `expired`): never the key. A paired device may read any stage. */
 export async function readSeedStage(
   client: InputClient,
-  account: AccountId,
+  account: AccountId | undefined,
   stage: TwoFactorStageId,
 ): Promise<TwoFactorSeedStageView> {
+  // A card from this daemon names no account (its handle is often the label and username): the stage says which.
+  if (account === undefined)
+    return await client.request(`/v1/accounts/seed-stages/${encodeURIComponent(stage)}`, TwoFactorSeedStageViewSchema, {
+      method: 'GET',
+    });
   return await client.request(`${seedPath(account)}/${encodeURIComponent(stage)}`, TwoFactorSeedStageViewSchema, {
     method: 'GET',
   });

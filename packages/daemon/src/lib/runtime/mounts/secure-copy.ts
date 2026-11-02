@@ -42,7 +42,10 @@ import { taskPlanAnswered } from './task-plans.ts';
  * `terminal.use`.
  */
 
-const ruleOwner = (context: RouteContext): PasteRuleCaller => ({ kind: 'owner', actor: ownerActorOf(context) });
+const ruleOwner = (context: RouteContext): PasteRuleCaller => ({
+  kind: 'owner',
+  actor: ownerActorOf(context, 'makes or changes a paste rule'),
+});
 
 const ID = /^[0-9a-f]{32}$/u;
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;

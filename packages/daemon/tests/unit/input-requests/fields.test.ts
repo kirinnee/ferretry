@@ -858,7 +858,7 @@ describe('Save as on a login card', () => {
       ),
     );
 
-    should(error.message).containEql('cannot be kept as one saved login');
+    should(error.message).containEql('cannot be kept as one account');
     should(request.saved?.saves).be.undefined();
     should(writes).eql([]);
   });

@@ -87,7 +87,7 @@ through the input tool; the generic add refuses it.
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the card flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
 | `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The card says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
-| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the card flags it amber ("This value will show on screen while the terminal is hidden from the ferret for 2 minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                     |
+| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the card flags it amber ("This value will show on screen while the terminal is hidden from the ferret for two minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                   |
 | `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                                         | Never refused: the card says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                |
 
 `secret`, `private` and `code` values containing a control character or a line break are refused
@@ -311,7 +311,7 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 | amber   | A proved program in raw or readline mode: it may be relaying keys (`ssh -t`, `docker exec -it`), not asking for a password itself.                                                         |
 | amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The card says "unverified".                  |
 | amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                                          |
-| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                                |
+| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for two minutes."                                                              |
 | neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                               |
 | amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen.                |
 | green   | A page's `secret` going into a password field on a secure page.                                                                                                                            |
@@ -728,10 +728,11 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 - **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`signIn`, the
   whole new `recipe`, `why`). It is keyed by the **sign-in**: the older `{ login }` (and `login.propose`) is
   accepted by the same one schema and resolved to that account's **only** sign-in before any check runs; an account
-  that signs in at several places is refused ("name the sign-in: … signs in at 2 places (si*…, si*…)"), and one that
-  signs in nowhere too. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
-  a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change for 'GitHub (kirinnee)'
-  on github.com", that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
+  that signs in at several places is refused ("That account signs in at 2 places; name one as signIn (si*…, si*…)."),
+  and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
+  codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
+  a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change on github.com" (the place only: agenda text is every ferret's to
+  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
   approves or declines in Settings › Accounts › the account › the place › Recipe, or with
   `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
@@ -840,8 +841,9 @@ accounts that may be picked by hand.
 A code card is titled by the owner's 2FA key and offers **"Use code from Ferretry"** once per key whose seed this
 machine holds. The tap is the permission, as for a password; what follows is where the daemon may type the code.
 
-- **The title** is `factorAskWords` over the keys of the account the daemon matched ("Code sent to ••42 (SMS)", "Code
-  from Authenticator app", "One-time code: SMS ••42 or Authenticator app"), cut to 60 characters. The account is the
+- **The title** is `factorAskWords` over the keys of the account the daemon matched, by the place and each code key's
+  kind ("One-time code for github.com, by SMS", "One-time code for github.com, by SMS or authenticator app"), cut to
+  60 characters: never a key's label, digits or address, which are the owner's words and often the username. The account is the
   one `chosenSignIn` picks among the sign-ins matched here, whatever fields they hold, so the title is the same
   whether a seed is held. A raise's `factor` names one of that account's keys; one of any other account, or no key
   at all, is ignored and the title is as if none was named. Two matched accounts and nothing to choose: "Needs a
@@ -903,8 +905,12 @@ text is masked from text reads for the redaction window (a code the owner typed 
 on screen. It is **off by default**, and adding one requires an
 explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app and the CLI:
 
-> Keeping the password and the 2FA seed in the same place means one compromise of this machine's vault
+> Keeping the password and the 2FA key in the same place means one compromise of this machine's vault
 > defeats both factors.
+
+That sentence is about **keeping** the key. A code ticked on a task-plan line or a standing rule says
+`AUTOMATED_CODE_WARNING` instead, the same sentence on both: "Ferretry types the password and the 2FA code, so a ferret
+it fills for has both factors."
 
 ### Managing them
 
@@ -1065,9 +1071,12 @@ into a guessed key. This is folded into the `v: 2` index directly; there is no `
   A ferret can still tell which accounts have a `totp` key, and right after the migration every such key holds a
   seed. The design allows that (a ferret may know which 2FA kinds an account has); it never learns more.
 
-**A code card's title** comes from the keys (`factorAskWords`), in the owner's words: "Code sent to ••42 (SMS)",
-"Code from Authenticator app", "One-time code: SMS ••42 or Authenticator app", or, with no key known, "One-time
-code for GitHub · kirinnee". A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
+**A code card's title** comes from the keys (`factorAskWords`). The daemon's is agenda text, which every ferret and a
+device without `secrets.use` reads, so it names the place and the keys' kinds alone ("One-time code for github.com, by
+SMS or authenticator app"; with no code key, "One-time code for github.com"): never the account's label, its username,
+a key's label, its digits or the address an email key goes to, which is often the username (secrev-1329a L6). The
+app's card names the keys in the owner's words ("Code sent to ••42 (SMS)", "Code from Authenticator app") and the
+account ("One-time code for GitHub · kirinnee") from the accounts it reads. A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
 only if it is a key of the matched account, and otherwise ignored ([Codes Ferretry makes](#codes-ferretry-makes)).
 
 **Saving a seed** takes one field: a base32 key (spaces fine) or an `otpauth://totp/…` link. `parseTotpInput` is
@@ -1110,6 +1119,12 @@ own challenge view (see below). It may also pass `secretHint`, `factor` and `wai
 waits with `input_wait` on that id and is told `waiting`, `moved-on` (with `secondFactor: 'push'` when the daemon
 kept that fact), `timed-out`, `refused` or `gone`. It is never told the number.
 
+**How a ferret knows to.** Three places say it, each in one sentence, so a ferret need not have a `push` 2FA key on the
+account to find it: the fixed-layer prompt ("Phone prompt (tap Yes, a number): request_input push: true"), the `push`
+flag's own MCP description ("Approve on your phone"), and `account_hint`'s result (`ACCOUNT_HINT_PHONE`, appended whether or
+not a sign-in is saved). Without it a ferret polled Google's own phone-number prompt with `browser_read` for about two
+minutes and the owner saw no number on a card; with it the card and its high-priority push are raised in seconds.
+
 **Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
 
 - where: a page or a terminal;
@@ -1125,10 +1140,13 @@ the agenda subject and the push from the approval's own fields, and from nothing
 
 - **Card:** "Approve on your phone" · "ClickUp · a@gmail.com" · "ClickUp via Okta on company.okta.com" · "Tap 42
   on your phone" (Duo: "Enter 123456 in Duo Mobile").
-- **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: ClickUp ·
-  a@gmail.com". With no number, it ends "— open for the number".
-- **Agenda subject:** never the number. It is a plain `info` item with a `phoneApproval` ref, so an older app
-  shows it as an info card.
+- **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: your account on
+  company.okta.com". It names the place, never the account: a push reaches every subscribed device, one without
+  `secrets.use` included (secrev-1329a L7). With no number, it ends "— open for the number".
+- **Agenda subject and why:** never the number, and never the account's label, its provider or the username: the
+  place alone ("Approve on your phone: your account on company.okta.com"), because agenda text is every ferret's to
+  read. The card names the account from the approval, read on a person's route. It is a plain `info` item with a
+  `phoneApproval` ref, so an older app shows it as an info card.
 - **Asked:** "Asked 14:02 by lizzette", from the approval's own `raisedAt` and `agentName`.
 - **A number is the daemon's read, nothing else:** a number marked as pointed at by a ferret draws as no number, and
   the number is dropped when the approval can no longer be read, after it expires, and the moment the card shows a
@@ -1300,8 +1318,8 @@ or nothing is typed:
   the same words whatever the reason, because a ferret can read its own session's agenda: a reason like
   `account-lacks-field` would say which secret fields an account holds.
 - **The input card says so.** The owner's card carries the miss line above its fields (`data-input-plan-miss`), and
-  `not-here` has none. A card a line filled shows "Filled under your task plan (line 2)." from the same `preapproval`
-  note.
+  `not-here` has none. A card a line filled shows "Filled under your task plan (line 2) on github.com." from the same
+  `preapproval` note, in the words `grantFilledLineFor` gives the agenda history.
 - **A filled card closes at once**, so the agenda history shows "Filled under your task plan (line 2) on
   github.com." It is raised **quiet**: it does not buzz the owner's phone ([notifications](notifications.md)).
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
@@ -1379,15 +1397,25 @@ in the table above holds for a rule too, plus these:
   byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states
   it can read while the rule is tried: until the request really ends it reads the card as it stood when the fill began
   (never `delivering`, never a longer lock), so a late refusal looks the same as a card nobody answered yet. A card a
-  plan line was also tried on says the plan's words, as it would without the rule. **Timing is not equal:** a raise a
+  plan line was also tried on says the plan's words, as it would without the rule, even when the rule missed only at
+  the write. **Timing is not equal:** a raise a
   rule was tried on, and missed, does more work before it answers (the accounts are read, the miss is audited, the card
   is made to buzz), so a ferret that measures how long its raises take could tell that some rule is about that sign-in.
-  It learns nothing more (not which account, not why), and it is accepted. A suspension raises no card in the ferret's session: the owner sees it in Settings, on the input card's reason
+  It learns nothing more (not which account, not why), and it is accepted. A grant fill that finds the target changed
+  is a miss: it neither redraws the card nor counts a failed check, because nobody tapped anything. **Declared (R4):**
+  the session's event log (`GET /v1/sessions/:sid/events`, readable by any ferret) is not frozen like the view. A rule
+  attempt that reaches the write takes the page hold and journals `surface.input_delivering` and the quarantine start
+  before its last `held()` check, because nothing may be awaited between that check and the write; a miss there
+  journals the request pending again and the quarantine's end. So a ferret that reads the event log could tell that a
+  fill was tried, as it could from the timing, and nothing more. A suspension raises no card in the ferret's session: the owner sees it in Settings, on the input card's reason
   line and in the audit.
 - **What the owner reads.** The request carries `preapproval: { by: 'rule', rule, revision, outcome, reason }`, and the
   card's line comes from `grantMissLineFor` ("Your standing rule for this sign-in didn't apply: … The rule is suspended
-  until you approve it again." for a miss that suspends). A filled card closes as "Filled under your standing rule on
-  github.com."; it is raised quiet, and a miss buzzes once, with no edit to the card ([notifications](notifications.md)).
+  until you approve it again." for a miss that suspends), and a fill's from `grantFilledLineFor` ("Filled under your
+  standing sign-in rule on github.com."). The agenda card a rule filled closes in the words a tap fill closes with
+  ("Input request delivered."): every ferret can read every session's agenda, so naming the rule there would let ferrets
+  list which places have one. It is raised quiet, and a miss buzzes once, with no edit to the card
+  ([notifications](notifications.md)).
 - **Terminal rules: sudo, su or doas only** (owner decision !A197). A rule's signed `surface` is `page` or `terminal`.
   A terminal rule is pinned to exactly one `sudo@host`, `su@host` or `doas@host`, types the password alone, lasts a
   day unless the owner says otherwise and a week at most, and is drawn red as root. It fills only where every terminal

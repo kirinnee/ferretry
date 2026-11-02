@@ -4,6 +4,8 @@ import {
   daemonFeatureList,
   SIGN_IN_RULE_CLOCK_SKEW_SECONDS,
   SIGN_IN_RULE_DEFAULT_SECONDS,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
   SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
   type SignInRuleDraft,
@@ -77,7 +79,13 @@ describe('only the owner makes, reads or changes a rule (invariant 2)', () => {
     ];
 
     // Assert
-    should(refused.map(error => [error.status, error.code])).eql(refused.map(() => [403, 'forbidden']));
+    should(refused.map(error => [error.status, error.code, error.message])).eql(
+      refused.map(() => [
+        403,
+        'owner_only',
+        'only a person makes, changes or reads standing rules; a ferret asks the owner instead',
+      ]),
+    );
     should(w.store.writes).equal(writes);
     should(rules(w)).have.length(1);
   });
@@ -409,7 +417,11 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     );
 
     // Assert
-    should([refused.status, refused.code]).eql([409, 'conflict']);
+    should([refused.status, refused.code, refused.message]).eql([
+      409,
+      'clock_moved_back',
+      SIGN_IN_RULE_REFUSAL_WORDS.clock_moved_back,
+    ]);
     should(claimed).equal(0);
     should(rules(w)).eql([]);
   });
@@ -419,7 +431,12 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     const { view } = await approved(w);
     const again = await refusal(w.service.stage(deviceOwner(), DRAFT));
     const wrong = await refusal(w.service.stage(deviceOwner(), { ...DRAFT, replaces: `sr_${'f'.repeat(24)}` }));
-    should([again.code, wrong.code]).eql(['conflict', 'conflict']);
+    // Each in its own code and words (C1): neither reads as "the sign-in changed".
+    should([again.code, wrong.code]).eql(['rule_exists', 'not_this_rule']);
+    should([again.message, wrong.message]).eql([
+      SIGN_IN_RULE_REFUSAL_WORDS.rule_exists,
+      SIGN_IN_RULE_REFUSAL_WORDS.not_this_rule,
+    ]);
     should((await w.service.stage(deviceOwner(), { ...DRAFT, replaces: view.id })).revision).equal(2);
   });
 });
@@ -904,7 +921,7 @@ describe('terminal rules as this build reports them', () => {
   });
 
   for (const [name, terminalRules] of [['no gate wired at all', 'absent']] as const)
-    it(`should refuse to stage sudo and say it is not covered, with ${name}, before any passkey`, async () => {
+    it(`should refuse to stage sudo and say this machine does not offer it, with ${name}, before any passkey`, async () => {
       // Arrange
       const w = await world({ terminalRules });
 
@@ -914,8 +931,13 @@ describe('terminal rules as this build reports them', () => {
       const page = await w.service.stage(deviceOwner(), DRAFT);
 
       // Assert
-      should([refused.status, refused.code]).eql([409, 'tool_not_covered']);
-      should(eligible).eql({ signIn: SUDO, eligible: false, because: 'tool-not-covered' });
+      // Its own reason (C29): sudo is not "not this program", the machine just does not offer terminal rules.
+      should([refused.status, refused.code, refused.message]).eql([
+        409,
+        'terminal_off',
+        SIGN_IN_RULE_INELIGIBLE_WORDS['terminal-off'],
+      ]);
+      should(eligible).eql({ signIn: SUDO, eligible: false, because: 'terminal-off' });
       should(page.root).be.false();
       should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();
     });

@@ -246,9 +246,10 @@ describe('pairing routes', () => {
     should(fromProxiedPhone.status).equal(403);
   });
 
-  it('should hold the rest of the pairing surface behind the same step-up for a remote caller', async () => {
-    // Listing and revoking are `pairing.use` too: a stolen, unconfirmed phone can neither mint nor read
-    // who else holds a key, and the host still lists and revokes with nothing asked.
+  it('should hold the device list behind the same step-up for a remote caller, and never a revocation (C31)', async () => {
+    // Listing is `pairing.use` too: a stolen, unconfirmed phone can neither mint nor read who else holds a
+    // key. REVOKING only takes away, so with "ask again for each act" on it asks no passkey of its own: taking
+    // access away is never harder than having it. The host still lists and revokes with nothing asked.
     // Arrange
     const subject = new FakePairing();
     const surface = await mount(subject);
@@ -262,8 +263,8 @@ describe('pairing routes', () => {
     const host = await surface.dispatch(request({ path: '/v1/pair/devices', loopback: true, headers: admin }));
 
     // Assert
-    should([listed.status, revoked.status, host.status]).deepEqual([403, 403, 200]);
-    should(subject.revokedDevices).deepEqual([]);
+    should([listed.status, revoked.status, host.status]).deepEqual([403, 200, 200]);
+    should(subject.revokedDevices).deepEqual([deviceTwoId]);
   });
 
   it('should let a REMOTE browser mint once confirmed, and explain it when the operator switched pairing off', async () => {

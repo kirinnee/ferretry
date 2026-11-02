@@ -469,6 +469,6 @@ describe('the paste plans, read by the owner', () => {
     // Assert
     should(listed.status).equal(200);
     should((jsonBody(listed).plans as readonly { id: string }[]).map(entry => entry.id)).containEql(plan.id);
-    should([direct.status, direct.code]).deepEqual([403, 'forbidden']);
+    should([direct.status, direct.code]).deepEqual([403, 'owner_only']);
   });
 });
