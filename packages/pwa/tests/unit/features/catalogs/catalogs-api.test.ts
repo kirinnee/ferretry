@@ -17,6 +17,7 @@ import {
   listCatalogInstalls,
   previewCatalogInstall,
   removeCatalogInstall,
+  setCatalogInstallPrefs,
 } from '../../../../src/features/catalogs/catalog-installs-api.ts';
 import { newIdentity, signedFile, skillItem } from '../../../support/catalog-files.ts';
 import {
@@ -128,6 +129,7 @@ describe('install routes', () => {
     const preview = recorder(installPreview());
     await previewCatalogInstall(preview.client, 'runtime', {
       signedManifest: file.signedManifest,
+      // biome-ignore lint/style/noNonNullAssertion: the fixture file always carries one item
       item: file.items[0]!,
       target: { scope: 'runtime', runtime: 'box', profile: 'default' },
     });
@@ -145,5 +147,13 @@ describe('install routes', () => {
     await removeCatalogInstall(removed.client, 'project', INSTALL_ID);
     should(removed.calls[0]?.path).equal(`/v1/catalog-installs/project/${INSTALL_ID}`);
     should(removed.calls[0]?.init?.method).equal('DELETE');
+  });
+
+  it('should patch the stay and skip choices of one install, and nothing else', async () => {
+    const patched = recorder(installRecord());
+    await setCatalogInstallPrefs(patched.client, 'runtime', INSTALL_ID, { hold: true });
+    should(patched.calls[0]?.path).equal(`/v1/catalog-installs/runtime/${INSTALL_ID}`);
+    should(patched.calls[0]?.init?.method).equal('PATCH');
+    should(JSON.parse(String(patched.calls[0]?.init?.body))).deepEqual({ hold: true });
   });
 });

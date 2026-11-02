@@ -17,7 +17,6 @@ import { AccessRefused } from './access-refused.tsx';
 import type { Attempt, SharedCatalogView, SharedController } from './shared-controller.ts';
 import {
   INSTALL,
-  INSTALLED,
   LEAVE,
   LEAVE_NOTE,
   LEFT_SENTENCE,
@@ -51,13 +50,20 @@ import {
   withdrawnSummary,
   WORKING,
 } from './shared-screens-model.ts';
-import { useInstalledFromPublisher } from './shared-installs.ts';
+import {
+  type InstalledFromPublisher,
+  type InstalledItem,
+  itemNames,
+  useInstalledFromPublisher,
+} from './shared-installs.ts';
+import { InstalledControls } from './store-row-actions.tsx';
+import { offeredText } from './store-row-model.ts';
 import { Fingerprint, SharedPage } from './shared-parts.tsx';
 import { type InstallMachine, type OpenedSharedItem, SharedItemSheet } from './shared-item-sheet.tsx';
 
 type SharedPort = Pick<
   SharedController,
-  'list' | 'browse' | 'unlock' | 'openItem' | 'leave' | 'forget' | 'rename' | 'tryAgain'
+  'list' | 'browse' | 'unlock' | 'openItem' | 'versions' | 'openVersion' | 'leave' | 'forget' | 'rename' | 'tryAgain'
 >;
 
 interface SharedWithMeProps {
@@ -347,7 +353,7 @@ function CardBody({
   readonly machines: readonly InstallMachine[];
   readonly installHost?: InstallHost;
   readonly busy: boolean;
-  readonly installed: ReadonlyMap<string, string>;
+  readonly installed: InstalledFromPublisher;
   readonly label: string;
   readonly onUnlock: () => void;
   readonly onAgain: () => void;
@@ -417,7 +423,7 @@ function CardBody({
                     <li key={item.entry.itemId} className="min-w-0">
                       <StoreItemRow
                         sub={sub}
-                        installed={installed.has(item.entry.itemId)}
+                        installed={installed.items.get(item.entry.itemId)}
                         view={block.view}
                         entry={item.entry}
                         title={item.title}
@@ -426,11 +432,12 @@ function CardBody({
                         machines={machines}
                         {...(installHost === undefined ? {} : { installHost })}
                         onRefused={onRefused}
+                        onChanged={installed.refresh}
                       />
                     </li>
                   ))}
                 </ul>
-                <WithdrawnNote withdrawn={block.withdrawn} installed={installed} />
+                <WithdrawnNote withdrawn={block.withdrawn} installed={itemNames(installed.items)} />
               </section>
             ),
           )}
@@ -468,11 +475,9 @@ function WithdrawnNote({
  * ONE ITEM ON A STORE PAGE (&B131 A3): its name and version (the title says both), one line of what it is, and what you can do with it.
  *
  * Subscribing installs nothing: the right side is **Install** (or nothing, with no machine paired to install on) until
- * this browser's machines hold it, and then **Installed**. Opening the name or Install shows the item's full review
- * and the install hand-off, as before.
- *
- * B4 SLOT (braelynn): the installed version, "Update available" and Update / Stay / Skip / Move to version replace
- * the status on the right of THIS row, and nowhere else. Nothing updates by itself (owner-approved).
+ * this browser's machines hold it, and then the installed version (&B131 B4): "Installed v2", or "Installed v2 · Update
+ * available" with See changes, Update, Stay, Skip and Move to version. Opening the name or Install shows the item's
+ * full review and the install hand-off. Nothing updates by itself (owner-approved).
  */
 function StoreItemRow({
   sub,
@@ -485,10 +490,11 @@ function StoreItemRow({
   machines,
   installHost,
   onRefused,
+  onChanged,
 }: {
   readonly sub: MemberSubscription;
-  /** Whether one of this browser's machines already holds this item. */
-  readonly installed: boolean;
+  /** What one of this browser's machines holds of this item, or nothing. */
+  readonly installed: InstalledItem | undefined;
   readonly view: SharedCatalogView;
   readonly entry: SharedCatalogManifestEntry;
   readonly title: string;
@@ -497,6 +503,8 @@ function StoreItemRow({
   readonly machines: readonly InstallMachine[];
   readonly installHost?: InstallHost;
   readonly onRefused: () => void;
+  /** The machines' install records changed: read them again. */
+  readonly onChanged: () => void;
 }) {
   const [opening, setOpening] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -526,22 +534,36 @@ function StoreItemRow({
           <span className="break-words text-cell font-semibold text-fg">{title}</span>
           <span className="break-words text-meta text-muted">{opening ? OPENING_ITEM : summary}</span>
         </button>
-        {installed ? (
-          <span className="fy-info-chip shrink-0" data-tone="accent" data-shared-item-installed="">
-            {INSTALLED}
-          </span>
-        ) : machines.length === 0 ? null : (
-          <Button
-            type="button"
-            size="sm"
-            className="min-h-[44px] shrink-0"
-            disabled={opening}
-            onClick={() => void open()}
-            aria-label={` `}
-            data-shared-item-install=""
-          >
-            {INSTALL}
-          </Button>
+        {installed !== undefined ? (
+          <InstalledControls
+            members={members}
+            sub={sub}
+            view={view}
+            entry={entry}
+            installed={installed}
+            {...(installHost === undefined ? {} : { installHost })}
+            onRefused={onRefused}
+            onChanged={onChanged}
+          />
+        ) : (
+          <>
+            <span className="shrink-0 text-meta text-muted" data-shared-item-version="">
+              {offeredText(entry.version)}
+            </span>
+            {machines.length === 0 ? null : (
+              <Button
+                type="button"
+                size="sm"
+                className="min-h-[44px] shrink-0"
+                disabled={opening}
+                onClick={() => void open()}
+                aria-label={` `}
+                data-shared-item-install=""
+              >
+                {INSTALL}
+              </Button>
+            )}
+          </>
         )}
       </div>
       {failure === null ? null : <FailureLine sentence={failure} />}

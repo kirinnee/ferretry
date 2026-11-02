@@ -310,3 +310,6 @@ packages/pwa/src/features/catalogs/catalog-shares-api.ts # the owner's share and
 packages/pwa/src/features/catalogs/catalog-sharing-model.ts # the share sheet's and People's sentences and rules, used by share-sheet.tsx and catalog-members.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 # My catalogs' Publish skills picker (&B131 A3), reached only from the .tsx app tree.
 packages/pwa/src/features/catalogs/publish-skills-model.ts # which skills the Publish skills picker lists and whether the catalog holds each, used by publish-skills-sheet.tsx ← catalogs-surface.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+
+# The store row's installed version and its acts (&B131 B4), reached only from the .tsx app tree.
+packages/pwa/src/features/shared/store-row-model.ts # the store row status, Update/Move requests and wording, used by store-row-actions.tsx and update-install-sheet.tsx ← shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

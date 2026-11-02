@@ -9,6 +9,9 @@ import {
   formatShareFragment,
   type MemberJoinedResponse,
   type SharedCatalogItem,
+  SharedCatalogItemSchema,
+  type SharedCatalogManifest,
+  type SignedCatalogItemVersions,
   type ShareLinkSeed,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
@@ -20,6 +23,8 @@ import {
   type SharedBrowse,
   SharedController,
   type SharedControllerPorts,
+  type UpdateSource,
+  VERSIONS_NOT_THE_LISTED_ONES,
 } from '../../../../src/features/shared/shared-controller.ts';
 import {
   JOIN_REFUSED_SENTENCE,
@@ -30,7 +35,15 @@ import { MemberRefusedError, MemberUnreachableError, type MemberClient } from '.
 import { MemberKeyUnsupportedError, type MemberSubscription } from '../../../../src/lib/member-keys.ts';
 import type { CredentialsPort } from '../../../../src/lib/passkeys.ts';
 import type { JoinResult } from '../../../../src/lib/relay-join.ts';
-import { crypto, mcpItem, newIdentity, SKILL_ITEM_ID, signedFile, skillItem } from '../../../support/catalog-files.ts';
+import {
+  crypto,
+  mcpItem,
+  newIdentity,
+  SKILL_ITEM_ID,
+  signedFile,
+  signedVersionsOf,
+  skillItem,
+} from '../../../support/catalog-files.ts';
 import { MemoryMemberKeyStore, testMemberKeys, testSubscription } from '../../../support/member-keys.ts';
 
 const NOW = new Date('2026-10-31T10:00:00.000Z');
@@ -551,6 +564,115 @@ describe('browse and openItem', () => {
     const { opened, controller, subscription } = await browsed(() => undefined);
     await controller.browse(subscription);
     should(opened).have.length(1);
+  });
+});
+
+describe('versions and openVersion', () => {
+  let v2: SharedCatalogItem;
+  let signedVersions: SignedCatalogItemVersions;
+  beforeAll(async () => {
+    v2 = SharedCatalogItemSchema.parse({ ...item, itemVersion: 2 });
+  });
+
+  const shown = async (offer: (manifest: SharedCatalogManifest) => Promise<SignedCatalogItemVersions>) => {
+    const file = await signedFile(publisher, [v2]);
+    const subscription = await testSubscription(publisher.daemonId);
+    const probe = rig({
+      'GET /v1/shared/me': () => me(item.catalogId),
+      [`GET /v1/shared/catalogs/${item.catalogId}/manifest`]: () => file.signedManifest,
+    });
+    const view = ((await probe.controller.browse(subscription)) as { value: SharedBrowse }).value.catalogs[0];
+    const manifest = view?.manifest;
+    const entry = manifest?.items[0];
+    if (view === undefined || manifest === undefined || entry === undefined) throw new Error('catalog was not shown');
+    signedVersions = await offer(manifest);
+    const served: Record<string, Handler> = {
+      'GET /v1/shared/me': () => me(item.catalogId),
+      [`GET /v1/shared/catalogs/${item.catalogId}/manifest`]: () => file.signedManifest,
+      [`GET /v1/shared/catalogs/${item.catalogId}/items/${SKILL_ITEM_ID}/versions`]: () => signedVersions,
+      [`GET /v1/shared/catalogs/${item.catalogId}/items/${SKILL_ITEM_ID}/1`]: () => item,
+      [`GET /v1/shared/catalogs/${item.catalogId}/items/${SKILL_ITEM_ID}/2`]: () => v2,
+    };
+    return { view, manifest, entry, subscription, file, ...rig(served) };
+  };
+  const offerBoth = (manifest: SharedCatalogManifest) => signedVersionsOf(publisher, manifest, [item, v2], 2);
+
+  it('should hand back the signed list only when it is the publisher’s, for this catalog, item and revision', async () => {
+    const { controller, view, subscription } = await shown(offerBoth);
+    const result = await controller.versions(subscription, view, SKILL_ITEM_ID);
+    should(result.kind).equal('ok');
+    should((result as { value: SignedCatalogItemVersions }).value.versions.offered).have.length(2);
+  });
+
+  it('should not use a list signed by someone else, or for another revision or item', async () => {
+    const other = await newIdentity();
+    const foreign = await shown(manifest =>
+      signedVersionsOf(other, { ...manifest, publisher: other.daemonId }, [item, v2], 2),
+    );
+    should(await foreign.controller.versions(foreign.subscription, foreign.view, SKILL_ITEM_ID)).match({
+      kind: 'failed',
+      problem: { kind: 'gone', sentence: VERSIONS_NOT_THE_LISTED_ONES },
+    });
+    const stale = await shown(manifest =>
+      signedVersionsOf(publisher, { ...manifest, revision: manifest.revision + 1 }, [item, v2], 2),
+    );
+    should(await stale.controller.versions(stale.subscription, stale.view, SKILL_ITEM_ID)).match({
+      kind: 'failed',
+      problem: { sentence: VERSIONS_NOT_THE_LISTED_ONES },
+    });
+  });
+
+  it('should not use a list the signature of which does not hold', async () => {
+    const { controller, view, subscription } = await shown(async manifest => {
+      const real = await signedVersionsOf(publisher, manifest, [item, v2], 2);
+      return { ...real, versions: { ...real.versions, current: 1 } };
+    });
+    should((await controller.versions(subscription, view, SKILL_ITEM_ID)).kind).equal('failed');
+  });
+
+  it('should not open or list versions of a catalog that was not shown', async () => {
+    const { controller, entry, subscription } = await shown(offerBoth);
+    const unshown = { catalogId: item.catalogId, name: 'x', revision: 1, problem: NOT_SHOWN_SENTENCE };
+    const gone = { kind: 'failed', problem: { kind: 'gone', sentence: NOT_SHOWN_SENTENCE } };
+    should(await controller.versions(subscription, unshown, SKILL_ITEM_ID)).match(gone);
+    should(await controller.openVersion(subscription, unshown, entry, 2)).match(gone);
+  });
+
+  it('should open the listed version as a store row opens it, with the digest the manifest lists', async () => {
+    const { controller, view, entry, manifest, subscription } = await shown(offerBoth);
+    const result = await controller.openVersion(subscription, view, entry, 2);
+    const value = (result as { value: UpdateSource }).value;
+    should(value.item).deepEqual(v2);
+    should(value.expectedDigest).equal(entry.digest);
+    should(value.signedManifest).deepEqual(view.signed);
+    should(value.manifest).deepEqual(manifest);
+    should(value.signedVersions).be.undefined();
+  });
+
+  it('should open another offered version only against the signed list, with the digest the list gives', async () => {
+    const { controller, view, entry, subscription } = await shown(offerBoth);
+    const result = await controller.openVersion(subscription, view, entry, 1, signedVersions);
+    const value = (result as { value: UpdateSource }).value;
+    should(value.item).deepEqual(item);
+    should(value.signedVersions).deepEqual(signedVersions);
+    should(value.expectedDigest).equal(signedVersions.versions.offered.find(line => line.version === 1)?.digest);
+  });
+
+  it('should refuse another version without the list, or one the list does not offer or the publisher served wrongly', async () => {
+    const { controller, view, entry, subscription } = await shown(offerBoth);
+    should(await controller.openVersion(subscription, view, entry, 1)).match({
+      kind: 'failed',
+      problem: { sentence: VERSIONS_NOT_THE_LISTED_ONES },
+    });
+    should((await controller.openVersion(subscription, view, entry, 3, signedVersions)).kind).equal('failed');
+    const wrong = await shown(offerBoth);
+    const swapped = rig({
+      'GET /v1/shared/me': () => me(item.catalogId),
+      [`GET /v1/shared/catalogs/${item.catalogId}/items/${SKILL_ITEM_ID}/1`]: () => v2,
+    });
+    should(
+      (await swapped.controller.openVersion(wrong.subscription, wrong.view, wrong.entry, 1, signedVersions)).kind,
+    ).equal('failed');
   });
 });
 

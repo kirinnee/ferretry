@@ -1,11 +1,14 @@
 import {
+  SHARED_CATALOG_VERSIONS_FORMAT,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
   type SharedCatalogItem,
   SharedCatalogItemSchema,
+  type SharedCatalogManifest,
   SharedCatalogManifestSchema,
+  type SignedCatalogItemVersions,
 } from '@ferretry/protocol';
-import { catalogItemDigest, type DaemonIdentity, signCatalogManifest } from '@ferretry/relay';
+import { catalogItemDigest, type DaemonIdentity, signCatalogItemVersions, signCatalogManifest } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 
 export const crypto = new WebCryptoRelayCrypto();
@@ -55,6 +58,7 @@ export const mcpItem = (publisher: string): SharedCatalogItem =>
     name: 'acme-mcp',
     summary: 'Talk to Acme',
     kind: 'mcp',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret placeholder, not a template
     mcp: { transport: 'command', command: 'acme-mcp', args: ['--stdio'], env: { ACME_TOKEN: '${secret:ACME_TOKEN}' } },
   });
 
@@ -103,4 +107,40 @@ export async function signedFile(
     signedManifest: signed.value,
     items: carried.filter(item => !withdrawn.includes(item.itemId)),
   });
+}
+
+/** The publisher's signed list of the versions it offers of one item, as the manifest's revision sees them. */
+export async function signedVersionsOf(
+  identity: DaemonIdentity,
+  manifest: SharedCatalogManifest,
+  versions: readonly SharedCatalogItem[],
+  current: number,
+): Promise<SignedCatalogItemVersions> {
+  const offered = [];
+  for (const item of versions) {
+    const measured = await catalogItemDigest(crypto, item);
+    if (measured === null) throw new Error('item has no canonical form');
+    offered.push({
+      version: item.itemVersion,
+      digest: measured.digest,
+      size: measured.size,
+      publishedAt: AT,
+      summary: item.summary,
+    });
+  }
+  const [first] = versions;
+  if (first === undefined) throw new Error('no versions');
+  const signed = await signCatalogItemVersions(crypto, identity, {
+    format: SHARED_CATALOG_VERSIONS_FORMAT,
+    version: 1,
+    publisher: manifest.publisher,
+    catalogId: manifest.catalogId,
+    itemId: first.itemId,
+    revision: manifest.revision,
+    issuedAt: manifest.issuedAt,
+    current,
+    offered,
+  });
+  if (!signed.ok) throw new Error(signed.reason);
+  return signed.value;
 }

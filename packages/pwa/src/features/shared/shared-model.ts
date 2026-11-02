@@ -31,7 +31,6 @@ export const NOTHING_SHARED =
 export const PINNED_NOTE =
   'Nothing installs or updates by itself. Install what you want; each install stays on its version until you update it.';
 export const INSTALL = 'Install';
-export const INSTALLED = 'Installed';
 export const ONLINE_ONLY = 'You need to be online to see these.';
 export const NOT_SHOWN_SENTENCE = 'This catalog was not shown: it was not signed by the publisher it names.';
 

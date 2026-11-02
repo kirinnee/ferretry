@@ -16,6 +16,8 @@ import {
   type SharedRedeemResponse,
   SharedRedeemRequestSchema,
   SharedRedeemResponseSchema,
+  type SignedCatalogItemVersions,
+  SignedCatalogItemVersionsSchema,
   type SignedCatalogManifest,
   SignedCatalogManifestSchema,
   type SharedCatalogItem,
@@ -97,4 +99,16 @@ export async function redeemShare(client: SharedClient, code: string): Promise<S
 /** Leaves this publisher. The answer is a `200`; the session closes `4440` right after it. */
 export async function leavePublisher(client: SharedClient): Promise<void> {
   await client.request(`${SHARED_PATH}/me/keys/self`, LeftSchema, { method: 'DELETE' });
+}
+
+/** The versions of one item the publisher still offers, signed by it. Checked by the caller before it is believed. */
+export async function readSharedVersions(
+  client: SharedClient,
+  catalogId: string,
+  itemId: string,
+): Promise<SignedCatalogItemVersions> {
+  return await client.request(
+    `${SHARED_PATH}/catalogs/${encodeURIComponent(catalogId)}/items/${encodeURIComponent(itemId)}/versions`,
+    SignedCatalogItemVersionsSchema,
+  );
 }

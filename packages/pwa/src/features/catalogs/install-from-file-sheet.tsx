@@ -200,7 +200,7 @@ function InstallSheetBody({
         const disagreement = previewDisagreement(opened, itemId, read);
         if (disagreement !== null) {
           setPreview(null);
-          setFailure({ sentence: disagreement, previewAgain: false, olderOffered: false });
+          setFailure({ sentence: disagreement, previewAgain: false, olderOffered: false, editedOffered: false });
           return;
         }
         setPreview(read);
@@ -642,7 +642,8 @@ function Fact({ label, children }: { readonly label: string; readonly children: 
   );
 }
 
-function Confirm({
+/** The review, the secrets and the one button that writes. `label` and `busyLabel` say what that button does. */
+export function Confirm({
   preview,
   picks,
   secrets,
@@ -650,6 +651,8 @@ function Confirm({
   state,
   busy,
   onInstall,
+  label = INSTALL_BUTTON,
+  busyLabel = 'Installing…',
 }: {
   readonly preview: CatalogInstallPreview;
   readonly picks: BindingPicks;
@@ -658,6 +661,8 @@ function Confirm({
   readonly state: ReturnType<typeof installState>;
   readonly busy: boolean;
   readonly onInstall: () => void;
+  readonly label?: string;
+  readonly busyLabel?: string;
 }) {
   const names = bindableSecretNames(secrets ?? null);
   return (
@@ -715,7 +720,7 @@ function Confirm({
         </p>
       )}
       <Button type="button" variant="primary" disabled={!state.enabled} onClick={onInstall} data-catalog-install="">
-        {busy ? 'Installing…' : INSTALL_BUTTON}
+        {busy ? busyLabel : label}
       </Button>
     </section>
   );
