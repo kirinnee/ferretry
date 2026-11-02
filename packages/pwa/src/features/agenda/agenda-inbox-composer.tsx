@@ -21,7 +21,7 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Composer, type ComposerProps, type ComposerSent } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
