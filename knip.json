@@ -248,6 +248,7 @@
         "tests/integration/fixtures/inbox-layout-scene.tsx",
         "tests/integration/fixtures/inbox-card-once-scene.tsx",
         "tests/integration/fixtures/inbox-find-scene.tsx",
+        "tests/integration/fixtures/snoozed-tidy-scene.tsx",
         "tests/integration/fixtures/gate-swipe-scene.tsx",
         "tests/integration/fixtures/jump-latest-scene.tsx",
         "tests/integration/fixtures/browser-pane-jumpy-scene.tsx",

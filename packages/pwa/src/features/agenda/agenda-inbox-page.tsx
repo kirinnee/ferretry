@@ -817,7 +817,8 @@ function ParkedRow({
         </span>
       </RouteLink>
       <button
-        className="kt-btn fy-parked-row__back"
+        aria-label={`${filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}: ${inboxRowTitle(card.item)}`}
+        className="kt-btn kt-btn--sm fy-parked-row__back"
         data-agenda-unsnooze={filter}
         onClick={() => inbox.deferred.schedule(card, UNSNOOZE_ACTION)}
         type="button"
@@ -868,7 +869,7 @@ function SnoozedToTestRow({
       </RouteLink>
       <button
         aria-label={`Unsnooze: ${row.card.task.title}`}
-        className="kt-btn fy-parked-row__back"
+        className="kt-btn kt-btn--sm fy-parked-row__back"
         data-to-test-unsnooze=""
         onClick={() => answers.snooze(row, null)}
         type="button"
