@@ -1,4 +1,5 @@
 import { agentSessionOf } from './agent-caller.ts';
+import { tryParseSessionId } from '../session-id.ts';
 import { ApiError } from './error.ts';
 import type { RouteContext } from './route.ts';
 
@@ -23,10 +24,12 @@ const PARENT_MISMATCH_CODE = 'parent_mismatch';
 export function lineageOf<T extends { readonly parent?: string | undefined }>(context: RouteContext, request: T): T {
   const sessionId = agentSessionOf(context);
   if (sessionId === undefined) return request;
+  if (tryParseSessionId(sessionId) === undefined)
+    throw new ApiError(400, 'the session id this request carries is not a session id', 'invalid_session_id');
   if (request.parent !== undefined && request.parent !== sessionId)
     throw new ApiError(
       403,
-      'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your credential',
+      'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your session',
       PARENT_MISMATCH_CODE,
     );
   return { ...request, parent: sessionId };

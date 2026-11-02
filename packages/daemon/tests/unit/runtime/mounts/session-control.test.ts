@@ -494,6 +494,65 @@ describe("a start on a ferret's own credential", () => {
     should([foreign.status, jsonBody(foreign).code]).deepEqual([403, 'parent_mismatch']);
     should(control.parents).deepEqual([FERRET_SESSION, FERRET_SESSION]);
   });
+
+  it('should refuse a parent that does not exist, named in the body or carried by the session header', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const instance = new ApiDispatcher(
+      new ApiRouter(
+        sessionControlRoutes(control, {
+          guard: NO_GOVERNED_ROUTES_GUARD,
+          knownRoots: async () => [],
+          sessionExists: async sessionId => sessionId === FERRET_SESSION,
+        }),
+      ),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    const headed = (body: ReturnType<typeof startBody>, id: string, session: string) =>
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn(session), [FY_REQUEST_ID_HEADER]: id },
+        body,
+      });
+
+    // Act — a stale FY_SESSION_ID names a session that has since been removed.
+    const stale = await instance.dispatch(headed(startBody(), 'req-1', 'gone-session'));
+    const live = await instance.dispatch(headed(startBody(), 'req-2', FERRET_SESSION));
+    const owner = await instance.dispatch(
+      startRequest(startBody({ parent: 'nobody' }), { [FY_REQUEST_ID_HEADER]: 'req-3' }),
+    );
+    const ownerKnown = await instance.dispatch(
+      startRequest(startBody({ parent: FERRET_SESSION }), { [FY_REQUEST_ID_HEADER]: 'req-4' }),
+    );
+
+    // Assert
+    should([stale.status, jsonBody(stale).code]).deepEqual([404, 'unknown_parent']);
+    should([owner.status, jsonBody(owner).code]).deepEqual([404, 'unknown_parent']);
+    should([live.status, ownerKnown.status]).deepEqual([201, 201]);
+    should(control.parents).deepEqual([FERRET_SESSION, FERRET_SESSION]);
+  });
+
+  it('should answer a malformed session header 400 invalid_session_id and start nothing', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const answer = await subject.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn('Foo Bar'), [FY_REQUEST_ID_HEADER]: 'req-m' },
+        body: startBody(),
+      }),
+    );
+
+    // Assert
+    should([answer.status, jsonBody(answer).code]).deepEqual([400, 'invalid_session_id']);
+    should(control.parents).be.empty();
+  });
 });
 
 describe('a ferret starting a session in the state home', () => {
