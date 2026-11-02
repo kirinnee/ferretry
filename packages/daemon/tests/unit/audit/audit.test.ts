@@ -2216,6 +2216,65 @@ describe('auditedSocketRoutes', () => {
   });
 });
 
+describe('auditing a skill copied from this machine', () => {
+  const LOCAL_ID = `lsi_${'i'.repeat(22)}`;
+  const send = async (api: ApiDispatcher, method: string, path: string) =>
+    await api.dispatch(request({ method, path, headers: ADMIN, loopback: true }));
+
+  for (const scope of ['project', 'runtime'] as const) {
+    it(`should record a copy on the ${scope} route by the skill's NAME, never a file`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`POST /v1/skill-installs/local/${scope}`]: async () =>
+          jsonResponse({
+            install: { name: 'pdf-tools', files: [{ path: 'SKILL.md', sha256: 'a'.repeat(64) }] },
+            notes: [],
+          }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'POST', `/v1/skill-installs/local/${scope}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          outcome: 'succeeded',
+          detail: { action: 'local-skill-install', scope, name: 'pdf-tools', status: 200 },
+        },
+      ]);
+      should(journal.lines.join('\n')).not.match(/SKILL\.md/u);
+    });
+
+    it(`should record a removal on the ${scope} route against the install id`, async () => {
+      // Arrange
+      const { journal, routes } = decorated({
+        [`DELETE /v1/skill-installs/local/${scope}/:installId`]: async () =>
+          jsonResponse({ installId: LOCAL_ID, name: 'pdf-tools', destination: '/srv/app' }),
+      });
+      const api = await dispatcher(routes);
+
+      // Act
+      await send(api, 'DELETE', `/v1/skill-installs/local/${scope}/${LOCAL_ID}`);
+
+      // Assert
+      should(records(journal)).deepEqual([
+        {
+          at: AT,
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          subject: LOCAL_ID,
+          outcome: 'succeeded',
+          detail: { action: 'local-skill-remove', scope, name: 'pdf-tools', status: 200 },
+        },
+      ]);
+    });
+  }
+});
+
 describe('auditing an install from a catalog', () => {
   const INSTALL_ID = `cin_${'i'.repeat(22)}`;
   const send = async (api: ApiDispatcher, method: string, path: string) =>

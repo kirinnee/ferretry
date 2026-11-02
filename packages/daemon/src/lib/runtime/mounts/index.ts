@@ -120,6 +120,7 @@ import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts'
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
 import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-installs.ts';
+import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
@@ -340,6 +341,8 @@ export interface MountedSubsystems {
   /** Installing a skill or MCP setup from a signed catalog file: verified here, reviewed, then written
    *  only through the existing project and fleet write paths (docs/catalogs.md § The installer). */
   readonly catalogInstalls: CatalogInstallSubsystem;
+  /** Copying one skill from another account or project on this machine, reviewed first (docs/catalogs.md § Copying a skill from this machine). */
+  readonly localSkillInstalls: LocalSkillInstallSubsystem;
   /** The declared-wait watcher: the tick that makes `signal waiting` end. It serves no route — a park
    *  is ended by a timer, not by a request — and it is a mounted subsystem for exactly that reason.
    *  A background loop nothing constructs is the same absent capability as an unserved route, and
@@ -693,6 +696,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
         ...sessionMcpRoutes(subsystems.sessionMcp),
         ...catalogInstallRoutes(subsystems.catalogInstalls),
+        // Every path is under `/v1/skill-installs/local`, which no other route uses.
+        ...localSkillInstallRoutes(subsystems.localSkillInstalls),
         // The send and the interrupt register with the rest of the write surface, for the reason the
         // revive, the migration and the signal all do: each is a one-segment pattern under
         // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be

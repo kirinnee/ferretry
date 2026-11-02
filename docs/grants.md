@@ -837,6 +837,17 @@ apply from a governed caller demands a fresh step-up proved for the act `catalog
 only the capability. A ferret may preview and list but is refused an install or a remove, whatever its
 grants say.
 
+## Copying a skill from this machine
+
+The same split as a catalog install, with its own seven routes
+([catalogs.md](catalogs.md#copying-a-skill-from-this-machine)): `filesystem` governs a write into a project
+and `fleet` a runtime write, each with a preview (`use`) and an apply (`configure`). Every route is
+`caller: 'person'`, so **a ferret is refused on all of them** whatever its grants say. An apply from a
+governed caller demands a fresh step-up for the existing act `catalog-install`, claimed at admission and
+not given back: copying a skill is the same decision (instructions that will run), so no second act exists
+to loosen or forget. Removing needs only the capability. The source is never trusted from the request: it
+must be a skill the machine's inventory lists, found again by its `SKILL.md` path.
+
 ## Adding an MCP server for one ferret
 
 Actions › Add MCP server… writes in one of two places, and each is governed by the capability that

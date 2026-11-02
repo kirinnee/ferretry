@@ -554,6 +554,20 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  localSkillInstalls: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    preview: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    apply: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    remove: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionMcp: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');

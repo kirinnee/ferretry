@@ -117,6 +117,8 @@ import { CatalogController } from '../src/lib/catalog/controller';
 import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
 import { registerCatalogInstallCommands } from '../src/lib/catalog-install/commands';
 import { CatalogInstallController } from '../src/lib/catalog-install/controller';
+import { registerLocalSkillInstallCommands } from '../src/lib/local-skill-install/commands';
+import { LocalSkillInstallController } from '../src/lib/local-skill-install/controller';
 import { registerShareCommands } from '../src/lib/catalog-share/commands';
 import { ShareController } from '../src/lib/catalog-share/controller';
 import { ProtocolSharingGateway } from '../src/lib/catalog-share/gateway';
@@ -597,6 +599,10 @@ type SharedDaemonClient = Pick<
   | 'applyCatalogInstall'
   | 'catalogInstalls'
   | 'removeCatalogInstall'
+  | 'previewLocalSkillInstall'
+  | 'applyLocalSkillInstall'
+  | 'localSkillInstalls'
+  | 'removeLocalSkillInstall'
   | 'snapshot'
   | 'logs'
   | 'events'
@@ -619,6 +625,10 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     applyCatalogInstall: async (scope, request) => (await client()).applyCatalogInstall(scope, request),
     catalogInstalls: async () => (await client()).catalogInstalls(),
     removeCatalogInstall: async (scope, installId) => (await client()).removeCatalogInstall(scope, installId),
+    previewLocalSkillInstall: async (scope, request) => (await client()).previewLocalSkillInstall(scope, request),
+    applyLocalSkillInstall: async (scope, request) => (await client()).applyLocalSkillInstall(scope, request),
+    localSkillInstalls: async () => (await client()).localSkillInstalls(),
+    removeLocalSkillInstall: async (scope, installId) => (await client()).removeLocalSkillInstall(scope, installId),
     list: async (): Promise<readonly SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
@@ -1181,6 +1191,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new CatalogInstallController({
         gateway: client,
         files: new FsCatalogFileReader(),
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        cwd: world.cwd,
+        binaryName: BINARY_NAME,
+      }),
+    ),
+  ({ program, world, client }) =>
+    registerLocalSkillInstallCommands(
+      program,
+      new LocalSkillInstallController({
+        gateway: client,
         out: world.io,
         prompt: world.prompt,
         interactive: world.interactive,
