@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { daemonSessionKey, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   DaemonDraftStore,
   DRAFTS_KEY,
@@ -79,6 +79,16 @@ describe('daemon-scoped drafts', () => {
 
     should(Object.values(cleared.drafts).map(entry => entry.text)).deepEqual(['b', 'unknown']);
     should(removeDaemonDrafts(cleared, daemonA.daemonId)).equal(cleared);
+  });
+
+  it('should keep an item slot’s draft apart from its session’s chat draft, and remove both with the daemon', () => {
+    const card = daemonSessionScope(daemonA, 'sess', 'A5');
+    let store = upsertDraft(emptyDraftStore(), daemonSessionScope(daemonA, 'sess'), 'chat', 1);
+    store = upsertDraft(store, card, 'card', 2);
+
+    should(Object.keys(store.drafts)).have.length(2);
+    should(removeDraft(store, card).drafts[daemonSessionKey(daemonSessionScope(daemonA, 'sess'))]?.text).equal('chat');
+    should(removeDaemonDrafts(store, daemonA.daemonId).drafts).deepEqual({});
   });
 
   it('should drop blank and oversized drafts and keep the newest entries within the LRU cap', () => {

@@ -15,10 +15,17 @@
  * POSITIONS ARE UTF-16 CODE UNITS — exactly what a JavaScript string index and a textarea's
  * `selectionStart` count — so a browser can turn a keystroke into an operation with no conversion.
  *
+ * ONE DRAFT PER SLOT. A session has a CHAT draft — the box under its conversation — and one draft for each
+ * Inbox item the owner is replying to (`SharedDraftSlot`). They are separate drafts that never read each
+ * other's words: typing a reply under `!A5` in the Inbox must not show up in the ferret's chat box, and the
+ * chat box must not leak into the card. A draft is addressed by (machine, session, slot); the slot is
+ * `chat` when it is not named, which is what every draft on disk and every client before slots meant.
+ *
  * Everything here is pure: the daemon uses it to sequence, and the app uses the same functions to
  * keep its own pending edits in step, so the two ends cannot disagree about what an edit means.
  */
 import { z } from 'zod';
+import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 
 export const SHARED_DRAFT_SCHEMA_VERSION = 1 as const;
@@ -34,6 +41,28 @@ export const SHARED_DRAFT_HISTORY_LIMIT = 200;
 const SHARED_DRAFT_ID_MAX = 128;
 const SHARED_DRAFT_LABEL_MAX = 255;
 const SHARED_DRAFT_GENERATION_MAX = 64;
+
+// ── Slots: which of a session's drafts ───────────────────────────────────────────────────────────
+
+/** The slot of a session's own chat box — what a draft meant before slots, and what an omitted slot means. */
+export const SHARED_DRAFT_CHAT_SLOT = 'chat' as const;
+
+/**
+ * Which of a session's drafts: its chat box (`chat`) or the reply under one agenda item (that item's id,
+ * `A5`). An item's id is session-local, so (session, slot) names exactly one draft. On the wire the chat
+ * slot is simply left out (`SharedDraftSnapshot.slot`, `SharedDraftSent.slot`, no `?item=`), so a record
+ * written before slots, and a client that does not know them, mean the chat draft unchanged.
+ */
+export const SharedDraftSlotSchema = z.union([z.literal(SHARED_DRAFT_CHAT_SLOT), AgendaIdSchema]);
+export type SharedDraftSlot = z.infer<typeof SharedDraftSlotSchema>;
+
+/** The slot a request or snapshot names, `chat` when it names none. */
+export const sharedDraftSlotOf = (carrier: { readonly slot?: SharedDraftSlot | undefined }): SharedDraftSlot =>
+  carrier.slot ?? SHARED_DRAFT_CHAT_SLOT;
+
+/** Whether this slot is an agenda item's reply rather than the chat box. */
+export const isSharedDraftItemSlot = (slot: SharedDraftSlot | undefined): slot is z.infer<typeof AgendaIdSchema> =>
+  slot !== undefined && slot !== SHARED_DRAFT_CHAT_SLOT;
 
 // ── Text operations ──────────────────────────────────────────────────────────────────────────────
 
@@ -392,6 +421,8 @@ const SharedDraftGenerationSchema = z.string().min(1).max(SHARED_DRAFT_GENERATIO
 export const SharedDraftSnapshotSchema = z.strictObject({
   v: z.literal(SHARED_DRAFT_SCHEMA_VERSION),
   sessionId: z.string().min(1),
+  /** Which of the session's drafts this is: left out for the chat draft, the item's id for an Inbox reply. */
+  slot: AgendaIdSchema.optional(),
   generation: SharedDraftGenerationSchema,
   /**
    * Bumped each time a send empties the draft. An edit from an older epoch was typed into a message
@@ -433,6 +464,11 @@ export type SharedDraftEdit = z.infer<typeof SharedDraftEditSchema>;
  * closed, the outbox sent it later, or the person moved to another session meanwhile.
  */
 export const SharedDraftSentSchema = z.strictObject({
+  /**
+   * The draft the send takes its words out of: left out for the chat draft, the item's id for a reply sent
+   * from under an Inbox item. A send names its own slot so it can never empty another box's words.
+   */
+  slot: AgendaIdSchema.optional(),
   generation: SharedDraftGenerationSchema,
   epoch: NonNegativeIntegerSchema,
   base: NonNegativeIntegerSchema,
@@ -478,7 +514,12 @@ export const SHARED_DRAFT_ERROR_CODES = {
   rateLimited: 'shared_draft_rate_limited',
   /** Only the owner's own paired devices and own shell may read or edit a draft — never an agent. */
   ownerOnly: 'shared_draft_owner_only',
+  /** The session already holds as many item drafts as one session may; close an item or send its reply. */
+  tooManyDrafts: 'shared_draft_too_many_drafts',
 } as const;
+
+/** Item drafts one session holds at once (each Inbox item's reply box has its own); more is refused. */
+export const SHARED_DRAFT_MAX_ITEM_DRAFTS = 100;
 
 // ── The live stream: every open composer for one session, kept in step ───────────────────────────
 

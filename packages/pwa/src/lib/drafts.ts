@@ -97,7 +97,7 @@ export const removeDaemonDrafts = (store: DraftStore, daemonId: DaemonId): Draft
   for (const key of Object.keys(drafts)) {
     try {
       const scope = JSON.parse(key) as unknown;
-      if (!Array.isArray(scope) || scope.length !== 2 || scope[0] !== daemonId) continue;
+      if (!Array.isArray(scope) || (scope.length !== 2 && scope.length !== 3) || scope[0] !== daemonId) continue;
       delete drafts[key];
       changed = true;
     } catch {

@@ -21,6 +21,12 @@
  * the meantime takes it back, and a failed write is retried rather than dropped: otherwise the older
  * file would come back — and if a send had just emptied the draft, the sent words with it.
  *
+ * ONE DRAFT PER SLOT. A session's chat box and each agenda item's reply box are separate drafts, addressed by
+ * (session, slot): each has its own revisions, history, epoch, file, listeners and write timer, and nothing
+ * in one ever reaches another. The chat slot is the one an omitted slot means, so every caller and every
+ * file from before slots is unchanged. An item draft exists only while its item is open; closing the item
+ * deletes it ({@link SharedDraftService.discard}).
+ *
  * NEVER IN THE JOURNAL. Nothing here touches session events, the transcript, search or the send queue:
  * a draft is the owner's unsent words, and no agent sees them until they are sent. Who may call this at
  * all is decided at the route (`runtime/mounts/shared-drafts.ts`).
@@ -30,11 +36,14 @@
  * while it is in flight.
  */
 import {
+  type AgendaId,
   applyTextOp,
+  isSharedDraftItemSlot,
   normalizeTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
   SHARED_DRAFT_ITEMS_BUDGET,
   SHARED_DRAFT_MAX_CHARS,
+  SHARED_DRAFT_MAX_ITEM_DRAFTS,
   SHARED_DRAFT_MAX_ITEMS,
   SHARED_DRAFT_SCHEMA_VERSION,
   type SharedDraftEdit,
@@ -54,6 +63,7 @@ import {
   type SharedDraftRepository,
   type SharedDraftScheduler,
   type SharedDraftSessionDirectory,
+  type SharedDraftSlotName,
 } from './types.ts';
 
 /** How long after its last change a draft is written down, and how long before a failed write is first tried again. */
@@ -93,6 +103,26 @@ export type SharedDraftEditOutcome = SharedDraftEditResult & { readonly repeatOf
 const ORIGIN_SEPARATOR = '\u0000';
 
 /**
+ * The key one draft is held under in memory: the session alone for its chat draft (what it always was), the
+ * session and the item for an item's. A NUL cannot occur in a session id or an agenda id, so no two drafts
+ * share a key.
+ */
+export const sharedDraftKey = (sessionId: string, slot: SharedDraftSlotName): string =>
+  isSharedDraftItemSlot(slot) ? `${sessionId}${ORIGIN_SEPARATOR}${slot}` : sessionId;
+
+interface Address {
+  readonly key: string;
+  readonly sessionId: string;
+  readonly slot: AgendaId | undefined;
+}
+
+const addressOf = (sessionId: string, slot: SharedDraftSlotName): Address => ({
+  key: sharedDraftKey(sessionId, slot),
+  sessionId,
+  slot: isSharedDraftItemSlot(slot) ? slot : undefined,
+});
+
+/**
  * The origin a stream's edit travels under: WHO sent it (the caller the boundary authenticated — a device,
  * or the owner's shell), which stream, and the id its composer gave it. A repeated edit is recognised by
  * author and id together, so an id another device happens to choose can never stand in for this one's.
@@ -128,6 +158,8 @@ interface LiveDraft {
   /** Edits taken in the current one-second window, per author: one device's flood never refuses another's. */
   windows: Map<string, { startedAt: number; count: number }>;
   timer?: { cancel(): void };
+  /** The draft was deleted with its item: it is never written again, and a late timer or retry does nothing. */
+  discarded?: boolean;
 }
 
 const identity = (text: string): TextOp => (text.length === 0 ? [] : [text.length]);
@@ -176,9 +208,9 @@ export class SharedDraftService {
     private readonly editsPerSecond: number = SHARED_DRAFT_EDITS_PER_SECOND,
   ) {}
 
-  /** The draft as it stands now; an empty one for a session nobody has typed into. */
-  async read(sessionId: string): Promise<SharedDraftSnapshot> {
-    return await this.#holding(sessionId, live => live.snapshot);
+  /** The draft as it stands now; an empty one for a session (or an item) nobody has typed into. */
+  async read(sessionId: string, slot?: SharedDraftSlotName): Promise<SharedDraftSnapshot> {
+    return await this.#holding(addressOf(sessionId, slot), live => live.snapshot);
   }
 
   /**
@@ -189,8 +221,9 @@ export class SharedDraftService {
   async since(
     sessionId: string,
     position: { readonly generation: string; readonly epoch: number; readonly rev: number },
+    slot?: SharedDraftSlotName,
   ): Promise<readonly SharedDraftChange[] | undefined> {
-    return await this.#holding(sessionId, live => {
+    return await this.#holding(addressOf(sessionId, slot), live => {
       const current = live.snapshot;
       if (position.generation !== current.generation || position.epoch !== current.epoch) return undefined;
       if (position.rev < live.historyStart || position.rev > current.rev) return undefined;
@@ -198,23 +231,48 @@ export class SharedDraftService {
     });
   }
 
-  /** Hears every edit sequenced for this session from now on. Answers the way to stop. */
-  subscribe(sessionId: string, listener: SharedDraftListener): () => void {
-    const listeners = this.#listeners.get(sessionId) ?? new Set<SharedDraftListener>();
+  /** Hears every edit sequenced for this draft (the session's chat draft, or one item's) from now on. Answers the way to stop. */
+  subscribe(sessionId: string, listener: SharedDraftListener, slot?: SharedDraftSlotName): () => void {
+    const { key } = addressOf(sessionId, slot);
+    const listeners = this.#listeners.get(key) ?? new Set<SharedDraftListener>();
     listeners.add(listener);
-    this.#listeners.set(sessionId, listeners);
+    this.#listeners.set(key, listeners);
     // An open composer holds its draft in memory: letting it go would mint a new generation under the
     // composer's feet, and its next keystroke would be refused for nothing.
-    this.#hold(sessionId);
+    this.#hold(key);
     let subscribed = true;
     return () => {
       if (!subscribed) return;
       subscribed = false;
       listeners.delete(listener);
-      if (listeners.size === 0 && this.#listeners.get(sessionId) === listeners) this.#listeners.delete(sessionId);
-      this.#release(sessionId);
+      if (listeners.size === 0 && this.#listeners.get(key) === listeners) this.#listeners.delete(key);
+      this.#release(key);
       this.#evict();
     };
+  }
+
+  /**
+   * Deletes an item's draft with the item: what was typed under a closed card is not kept, in memory or on disk,
+   * and a timer or retry already waiting on it does nothing. A later edit for the same key starts from nothing in a
+   * new generation, so a composer still open on it is refused as stale rather than resurrecting the words. Never
+   * the chat draft.
+   */
+  async discard(sessionId: string, item: AgendaId): Promise<void> {
+    const { key } = addressOf(sessionId, item);
+    // A load already in flight lands first, so the draft it makes is the one dropped.
+    await this.#loading.get(key)?.catch(() => undefined);
+    for (const held of [this.#live.get(key), this.#unwritten.get(key)]) {
+      held?.timer?.cancel();
+      if (held !== undefined) {
+        held.timer = undefined;
+        held.discarded = true;
+      }
+    }
+    this.#live.delete(key);
+    this.#unwritten.delete(key);
+    // A write that already left may still be on its way to disk; the file goes after it lands.
+    await Promise.all(this.#writes);
+    await this.repository.remove(sessionId, item);
   }
 
   /**
@@ -226,9 +284,10 @@ export class SharedDraftService {
     sessionId: string,
     edit: SharedDraftEdit,
     origin?: string,
-    options: { readonly metered?: boolean; readonly author?: string } = {},
+    options: { readonly metered?: boolean; readonly author?: string; readonly slot?: SharedDraftSlotName } = {},
   ): Promise<SharedDraftEditOutcome> {
-    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin, options));
+    const address = addressOf(sessionId, options.slot);
+    return await this.#holding(address, live => this.#apply(address, live, edit, origin, options));
   }
 
   /** Counts one edit against its author's budget for this second; refuses it past the budget. */
@@ -250,7 +309,7 @@ export class SharedDraftService {
   }
 
   #apply(
-    sessionId: string,
+    address: Address,
     live: LiveDraft,
     edit: SharedDraftEdit,
     origin: string | undefined,
@@ -319,7 +378,8 @@ export class SharedDraftService {
     const finished = edit.sent === true && nextText === '' && items.length === 0;
     live.snapshot = {
       v: SHARED_DRAFT_SCHEMA_VERSION,
-      sessionId,
+      sessionId: address.sessionId,
+      ...(address.slot === undefined ? {} : { slot: address.slot }),
       generation: current.generation,
       epoch: finished ? current.epoch + 1 : current.epoch,
       rev: finished ? 0 : applied.rev,
@@ -350,7 +410,7 @@ export class SharedDraftService {
       live.historyStart = applied.rev - live.history.length;
     }
     this.#schedule(live);
-    for (const listener of [...(this.#listeners.get(sessionId) ?? [])]) {
+    for (const listener of [...(this.#listeners.get(address.key) ?? [])]) {
       try {
         listener(change);
       } catch {
@@ -361,12 +421,12 @@ export class SharedDraftService {
   }
 
   /** Loads the draft and runs `work` on it while eviction is kept off it. */
-  async #holding<T>(sessionId: string, work: (live: LiveDraft) => T): Promise<T> {
-    this.#hold(sessionId);
+  async #holding<T>(address: Address, work: (live: LiveDraft) => T): Promise<T> {
+    this.#hold(address.key);
     try {
-      return work(await this.#draft(sessionId));
+      return work(await this.#draft(address));
     } finally {
-      this.#release(sessionId);
+      this.#release(address.key);
       this.#evict();
     }
   }
@@ -416,38 +476,53 @@ export class SharedDraftService {
     return normalizeTextOp(op);
   }
 
-  async #draft(sessionId: string): Promise<LiveDraft> {
-    const live = this.#live.get(sessionId);
+  async #draft(address: Address): Promise<LiveDraft> {
+    const { key } = address;
+    const live = this.#live.get(key);
     if (live !== undefined) {
       // Most recently used goes to the back, so eviction takes the front.
-      this.#live.delete(sessionId);
-      this.#live.set(sessionId, live);
+      this.#live.delete(key);
+      this.#live.set(key, live);
       return live;
     }
     // Let go of but not yet on disk: the memory copy is the newest there is, so it is taken back as it
     // stands — same generation, same history — rather than read from a file that is behind it.
-    const unwritten = this.#unwritten.get(sessionId);
+    const unwritten = this.#unwritten.get(key);
     if (unwritten !== undefined) {
-      this.#unwritten.delete(sessionId);
-      this.#live.set(sessionId, unwritten);
+      this.#unwritten.delete(key);
+      this.#live.set(key, unwritten);
       this.#evict();
       return unwritten;
     }
-    const pending = this.#loading.get(sessionId);
+    const pending = this.#loading.get(key);
     if (pending !== undefined) return await pending;
-    const loading = this.#load(sessionId).finally(() => this.#loading.delete(sessionId));
-    this.#loading.set(sessionId, loading);
+    const loading = this.#load(address).finally(() => this.#loading.delete(key));
+    this.#loading.set(key, loading);
     return await loading;
   }
 
-  async #load(sessionId: string): Promise<LiveDraft> {
+  async #load({ key, sessionId, slot }: Address): Promise<LiveDraft> {
     if (!(await this.sessions.has(sessionId))) throw new SharedDraftError('not-found', `no session ${sessionId}`);
+    // An item's reply box exists while the item is open; a closed or unknown one is not somewhere to type.
+    if (slot !== undefined && !(await this.sessions.hasOpenItem(sessionId, slot)))
+      throw new SharedDraftError('not-found', `no open item ${slot} on session ${sessionId}`);
     // A write that already left may still be on its way to disk; read after it lands.
     await Promise.all(this.#writes);
-    const stored = await this.repository.load(sessionId);
+    const stored = await this.repository.load(sessionId, slot);
+    // A session's item drafts are bounded: a first draft for one more item than that is refused.
+    if (
+      stored === undefined &&
+      slot !== undefined &&
+      (await this.repository.items(sessionId)).length >= SHARED_DRAFT_MAX_ITEM_DRAFTS
+    )
+      throw new SharedDraftError(
+        'too-many-drafts',
+        `a session holds at most ${SHARED_DRAFT_MAX_ITEM_DRAFTS} item drafts; close an item or send its reply first`,
+      );
     const base = stored ?? {
       v: SHARED_DRAFT_SCHEMA_VERSION,
       sessionId,
+      ...(slot === undefined ? {} : { slot }),
       epoch: 0,
       rev: 0,
       text: '',
@@ -472,7 +547,7 @@ export class SharedDraftService {
       failures: 0,
       windows: new Map(),
     };
-    this.#live.set(sessionId, live);
+    this.#live.set(key, live);
     // Trimmed: the file shrinks too, so the next load has nothing to trim.
     if (snapshot.items.length !== base.items.length) this.#schedule(live);
     this.#evict();
@@ -481,14 +556,14 @@ export class SharedDraftService {
 
   #evict(): void {
     // Least recently used first, passing over any draft a read or an edit is still holding.
-    for (const [sessionId, live] of [...this.#live]) {
+    for (const [key, live] of [...this.#live]) {
       if (this.#live.size <= this.memoryLimit) return;
-      if (this.#holds.has(sessionId)) continue;
-      this.#live.delete(sessionId);
+      if (this.#holds.has(key)) continue;
+      this.#live.delete(key);
       if (!live.dirty && live.timer === undefined) continue;
       live.timer?.cancel();
       live.timer = undefined;
-      this.#unwritten.set(sessionId, live);
+      this.#unwritten.set(key, live);
       this.#write(live);
     }
   }
@@ -503,6 +578,7 @@ export class SharedDraftService {
   }
 
   #write(live: LiveDraft): void {
+    if (live.discarded === true) return;
     live.dirty = false;
     const snapshot = live.snapshot;
     const write = this.repository.save(snapshot).then(
@@ -510,15 +586,15 @@ export class SharedDraftService {
         live.failures = 0;
         // Written, and nothing newer since: a draft that was let go of may now really go. A newer
         // state keeps it, and that state's own write decides.
-        const sessionId = snapshot.sessionId;
-        if (live.snapshot === snapshot && this.#unwritten.get(sessionId) === live) this.#unwritten.delete(sessionId);
+        const key = sharedDraftKey(snapshot.sessionId, snapshot.slot);
+        if (live.snapshot === snapshot && this.#unwritten.get(key) === live) this.#unwritten.delete(key);
       },
       () => {
         // Still in memory — in `#live` or `#unwritten` — so nothing is lost. Try again, waiting longer
         // each time a disk keeps refusing; a daemon that is stopping does not schedule anything new.
         live.failures += 1;
         live.dirty = true;
-        if (this.#stopping) return;
+        if (this.#stopping || live.discarded === true) return;
         this.#schedule(
           live,
           Math.min(SHARED_DRAFT_WRITE_DELAY_MS * 2 ** live.failures, SHARED_DRAFT_WRITE_RETRY_MAX_MS),

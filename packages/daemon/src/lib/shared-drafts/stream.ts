@@ -14,19 +14,21 @@
  * is gone when it closes; nothing about who typed where reaches the disk or the journal.
  */
 import {
+  type AgendaId,
   SHARED_DRAFT_ERROR_CODES,
   SHARED_DRAFT_STREAM_FRAME_BUDGET,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
-  type SharedDraftSnapshot,
-  sharedDraftFrameBytes,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
   type SharedDraftServerFrame,
+  type SharedDraftSnapshot,
+  sharedDraftFrameBytes,
 } from '@ferretry/protocol';
 import type { SocketDownstream, SocketFrame, SocketHandler } from '../api/socket.ts';
 import {
   type SharedDraftChange,
   type SharedDraftService,
+  sharedDraftKey,
   sharedDraftOrigin,
   splitSharedDraftOrigin,
 } from './service.ts';
@@ -95,6 +97,7 @@ const ERROR_CODES: Readonly<Record<SharedDraftErrorCode, string>> = {
   'too-many-items': SHARED_DRAFT_ERROR_CODES.tooManyItems,
   invalid: SHARED_DRAFT_ERROR_CODES.invalid,
   'rate-limited': SHARED_DRAFT_ERROR_CODES.rateLimited,
+  'too-many-drafts': SHARED_DRAFT_ERROR_CODES.tooManyDrafts,
 };
 
 /** What one composer last said about its caret, kept so a composer that opens later sees it at once. */
@@ -112,7 +115,11 @@ interface PresenceMember {
   state?: PresenceState;
 }
 
-/** Who has which session's composer open, and where their caret is. Memory only. */
+/**
+ * Who has which draft's composer open, and where their caret is. Memory only. Keyed by the draft (see
+ * {@link sharedDraftKey}), not the session: a composer on one agenda item never sees the carets of the chat
+ * composer or of another item's.
+ */
 export class SharedDraftPresence {
   readonly #sessions = new Map<string, Map<string, PresenceMember>>();
 
@@ -157,6 +164,8 @@ export class SharedDraftPresence {
 
 export interface SharedDraftStreamTarget {
   readonly sessionId: string;
+  /** The agenda item whose reply box this stream is on; left out for the session's chat draft. */
+  readonly slot?: AgendaId | undefined;
   /** This stream's own id among the session's open composers. */
   readonly peer: string;
   /** The device this composer runs on, as the owner named it when pairing. */
@@ -202,16 +211,21 @@ export class SharedDraftStreamHandler implements SocketHandler {
     // edit falls between the two and none arrives out of order.
     const early: SharedDraftChange[] = [];
     let caughtUp = false;
-    this.#unsubscribe = this.drafts.subscribe(sessionId, change => {
-      if (!caughtUp) early.push(change);
-      else this.#deliver(change);
-    });
+    const { slot } = this.target;
+    this.#unsubscribe = this.drafts.subscribe(
+      sessionId,
+      change => {
+        if (!caughtUp) early.push(change);
+        else this.#deliver(change);
+      },
+      slot,
+    );
     try {
       const missed =
-        this.target.position === undefined ? undefined : await this.drafts.since(sessionId, this.target.position);
+        this.target.position === undefined ? undefined : await this.drafts.since(sessionId, this.target.position, slot);
       let reached: Position;
       if (missed === undefined) {
-        const snapshot = await this.drafts.read(sessionId);
+        const snapshot = await this.drafts.read(sessionId, slot);
         for (const frame of snapshotFrames(snapshot)) this.#send(frame);
         reached = snapshot;
       } else {
@@ -229,7 +243,9 @@ export class SharedDraftStreamHandler implements SocketHandler {
       return;
     }
     if (this.#closed) return;
-    this.#leave = this.presence.join(sessionId, peer, this.target.device, frame => this.#send(frame));
+    this.#leave = this.presence.join(sharedDraftKey(sessionId, slot), peer, this.target.device, frame =>
+      this.#send(frame),
+    );
     // Joining hands over the others' presence at once; a send that failed there closed this stream
     // before `#leave` existed, so it leaves now rather than staying a member nobody removes.
     if (this.#closed) this.#leave();
@@ -247,7 +263,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
       return;
     }
     const origin = sharedDraftOrigin(this.target.author, this.target.peer, parsed.id);
-    this.drafts.edit(this.target.sessionId, parsed.edit, origin).then(
+    this.drafts.edit(this.target.sessionId, parsed.edit, origin, { slot: this.target.slot }).then(
       outcome => {
         // A repeat applies nothing and notifies nobody, so it is answered here: with the edit it repeats,
         // where that edit left the draft. A composer that already heard it ignores an answer it is not
@@ -276,7 +292,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
     if (now - this.#presenceWindow.startedAt >= 1_000) this.#presenceWindow = { startedAt: now, count: 0 };
     this.#presenceWindow.count += 1;
     if (this.#presenceWindow.count > SHARED_DRAFT_PRESENCE_PER_SECOND) return;
-    this.presence.publish(this.target.sessionId, this.target.peer, {
+    this.presence.publish(sharedDraftKey(this.target.sessionId, this.target.slot), this.target.peer, {
       typing: frame.typing,
       ...(frame.selection === undefined ? {} : { selection: frame.selection }),
       ...(frame.uploading === undefined ? {} : { uploading: frame.uploading }),

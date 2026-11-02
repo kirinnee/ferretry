@@ -220,6 +220,14 @@ describe('shared draft schemas', () => {
       value: { generation: 'gen-1', epoch: 0, base: 3, text: [-5, 2], remove: ['att-1'] },
     },
     {
+      name: 'what a send from an agenda item takes out of its draft',
+      schema: draft.SharedDraftSentSchema,
+      value: { slot: 'A5', generation: 'gen-1', epoch: 0, base: 3, text: [-5] },
+    },
+    { name: 'the chat slot', schema: draft.SharedDraftSlotSchema, value: 'chat' },
+    { name: 'an item slot', schema: draft.SharedDraftSlotSchema, value: 'A12' },
+    { name: 'an item draft snapshot', schema: draft.SharedDraftSnapshotSchema, value: { ...snapshot, slot: 'A5' } },
+    {
       name: 'client edit frame',
       schema: draft.SharedDraftClientFrameSchema,
       value: { kind: 'edit', id: 'e1', edit: { generation: 'gen-1', epoch: 0, base: 3, text: [5, '!'] } },
@@ -304,6 +312,14 @@ describe('shared draft schemas', () => {
     assertCoversEverySchema(draft, cases);
   });
 
+  it('reads an omitted slot as the chat draft, and names the slot of a draft', () => {
+    should(draft.sharedDraftSlotOf({})).equal('chat');
+    should(draft.sharedDraftSlotOf({ slot: 'A5' })).equal('A5');
+    should(draft.isSharedDraftItemSlot(undefined)).be.false();
+    should(draft.isSharedDraftItemSlot('chat')).be.false();
+    should(draft.isSharedDraftItemSlot('A5')).be.true();
+  });
+
   it('measures a frame as the wire carries it: escaped twice, in UTF-8 bytes', () => {
     should(draft.sharedDraftFrameBytes('a')).equal(7);
     should(draft.sharedDraftFrameBytes('"')).equal(10);
@@ -340,6 +356,18 @@ describe('shared draft schemas', () => {
         name: 'inserts more than a draft holds, spread over many steps',
         schema: draft.TextOpSchema,
         value: Array.from({ length: 3 }, () => 'x'.repeat(SHARED_DRAFT_MAX_CHARS / 2)),
+      },
+      { name: 'a slot that is no agenda item', schema: draft.SharedDraftSlotSchema, value: 'A0' },
+      { name: 'a slot that is a path', schema: draft.SharedDraftSlotSchema, value: '../chat' },
+      {
+        name: 'a snapshot slot of chat (the chat draft names none)',
+        schema: draft.SharedDraftSnapshotSchema,
+        value: { ...snapshot, slot: 'chat' },
+      },
+      {
+        name: 'a send naming a bad slot',
+        schema: draft.SharedDraftSentSchema,
+        value: { slot: 'X1', generation: 'g', epoch: 0, base: 0, text: [] },
       },
       { name: 'bad latitude', schema: draft.SharedDraftLocationSchema, value: { ...location, latitude: 91 } },
     ]);

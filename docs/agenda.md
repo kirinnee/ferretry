@@ -676,6 +676,14 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
   `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
+- **Each card has its own draft.** The composer under an item is **not** the chat's composer: its unsent text is a
+  synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly
+  today's draft) or the item's id (`A5`). Typing in a card never shows in the ferret's chat, typing in the chat never
+  shows in a card, and two cards of one ferret hold two drafts, each in step across the owner's devices (route
+  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`; a daemon without it gives the
+  card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
+  replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
+  (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
 - **The open items are a deck**, on a phone and a wide screen alike. Swipe with a finger — from the item's head or its
   who-and-what line; the body scrolls — or press the arrow keys. **Only touch swipes, on every screen size** (decided by
   the gesture's `pointerType`, never by width): a mouse or trackpad drag never swipes or pulls down anywhere — Inbox
