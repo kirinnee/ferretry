@@ -1,3 +1,9 @@
+## [4.235.0](https://github.com/kirinnee/ferretry/compare/v4.234.0...v4.235.0) (2026-11-02)
+
+### Features
+
+* **agenda:** only the owner's own ferret's agenda asks the owner ([#1351](https://github.com/kirinnee/ferretry/issues/1351)) ([c884e97](https://github.com/kirinnee/ferretry/commit/c884e9725f3500bdfba9e401aa9849893bbfac34))
+
 ## [4.234.0](https://github.com/kirinnee/ferretry/compare/v4.233.0...v4.234.0) (2026-11-02)
 
 ### Features

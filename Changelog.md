@@ -1,3 +1,9 @@
+## [4.235.1](https://github.com/kirinnee/ferretry/compare/v4.235.0...v4.235.1) (2026-11-02)
+
+### Fixes
+
+* **creds:** machine id in CLI links, owner Inbox card for factor add, removing a default needs no approval ([#1354](https://github.com/kirinnee/ferretry/issues/1354)) ([9515a3c](https://github.com/kirinnee/ferretry/commit/9515a3c31ee9193a66cb7921c2a9501ad977df74))
+
 ## [4.235.0](https://github.com/kirinnee/ferretry/compare/v4.234.0...v4.235.0) (2026-11-02)
 
 ### Features
