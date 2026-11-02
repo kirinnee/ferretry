@@ -48,7 +48,7 @@ describe('an orphaned card', () => {
     should(second.anomalies.map(anomaly => anomaly.kind)).eql(['orphaned_card']);
     should(subject.state().lastAnomalies?.map(anomaly => anomaly.kind)).eql(['orphaned_card']);
     should(subject.remedies.map(remedy => [remedy.action, remedy.sessionId])).eql([['nudge', 'lead']]);
-    should(subject.remedies[0]?.detail).containEql('Your card &F1 “Board store” has nobody on it');
+    should(subject.remedies[0]?.detail).containEql('Your card &F1 "Board store" has no ferret working on it');
     should(subject.state().orphans).eql({ F1: { assignee: 'worker', via: 'owner', to: 'lead', at: iso(NOW) } });
     should(journalTypes(subject).filter(type => type === 'fleet.warden_orphan_told')).have.length(1);
   });
@@ -228,7 +228,7 @@ describe('an orphaned card', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.notices[0]?.notice.premise).containEql(' on mac, in Implement');
+    should(subject.notices[0]?.notice.premise).containEql(' on mac, waiting in Implement');
   });
 });
 

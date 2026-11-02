@@ -436,7 +436,7 @@ export interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
-/** The machine item that lists every card with nobody on it (`orphan-list.ts`). Throws when the item cannot be written. */
+/** The machine item that lists every card with nobody working on it (`orphan-list.ts`). Throws when the item cannot be written. */
 export interface WardenOrphanList {
   add(notice: WardenCardNotice): Promise<void>;
   remove(taskId: string): Promise<void>;

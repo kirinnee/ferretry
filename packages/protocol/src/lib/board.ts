@@ -726,6 +726,10 @@ export type BoardResponse = z.infer<typeof BoardResponseSchema>;
 export const BoardTaskResponseSchema = z.object({ task: BoardTaskViewSchema, laneSet: LaneSetSchema.nullable() });
 export type BoardTaskResponse = z.infer<typeof BoardTaskResponseSchema>;
 
+/** The owner's start of a ferret on a card: the card, and the ferret that is on it again. */
+export const BoardTaskStartResponseSchema = z.strictObject({ task: BoardTaskIdSchema, sessionId: SessionIdSchema });
+export type BoardTaskStartResponse = z.infer<typeof BoardTaskStartResponseSchema>;
+
 /**
  * Every card id this machine holds, whatever its project, lane, state or assignee, and nothing else about
  * it: what `&F12` is proved against, so a reference to a card on another project still opens its card.

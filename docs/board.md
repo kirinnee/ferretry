@@ -936,6 +936,20 @@ and `openAsks` (every open item), and a card with open blocking items is `waitin
 in the agenda's schema, so an item raised with no focus card simply belongs to no card; the board import creates a
 card for the open items it finds that name none ([board-import.md](board-import.md)).
 
+## Start a ferret on a card
+
+The owner can start work on a card that has nobody working on it, from the Warden's notice or from the card
+(`POST /v1/board/tasks/:taskId/start`; [agenda.md](agenda.md#the-machine-agenda) draws the buttons).
+
+- **It resumes the card's own ferret, with the card as its brief** (`focusCardBrief`: the same turn the Warden
+  hands a ferret it starts again). It does not start a fresh ferret: a fresh start is a lead's act and needs a
+  parent ferret to delegate from, which an owner at a notice does not have.
+- **The owner's human actor only.** A ferret, even a lead, is refused (`forbidden`); the route spine also needs the
+  `fleet` capability at operator minimum for a caller who is not on this host.
+- **A gap, stated rather than hidden.** If the card's ferret is no longer on this machine, there is nothing to
+  resume: the answer says so (`not-found`) and points at `fy task assign <card> <ferret>`. Closing the card is the
+  other way out (`drop`, with a reason, as `fy task drop --reason` does).
+
 ## The turn-end check
 
 When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check.ts`) — **only on a board that is
@@ -1033,6 +1047,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | `POST /v1/board/tasks`                          | create a card                                                               |
 | `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                       |
 | `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                      |
+| `POST /v1/board/tasks/:taskId/start`            | the owner's start of the card's own ferret, with the card as its brief      |
 | `POST /v1/board/skip`                           | record `fy task skip`                                                       |
 | `POST /v1/board/import`                         | run the import                                                              |
 | `GET /v1/board/projects`                        | list projects                                                               |

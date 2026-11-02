@@ -84,6 +84,8 @@ export interface AgendaItemViewProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
   readonly planForm?: ReactNode;
+  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox); absent, a form is read, not filled in. */
   readonly formKey?: string;
   /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
@@ -147,6 +149,7 @@ export function AgendaItemView({
   parkedNote,
   inputForm,
   planForm,
+  cardsForm,
   formKey,
   daemonId,
   tools,
@@ -270,6 +273,7 @@ export function AgendaItemView({
             {...(parkedNote === undefined ? {} : { parkedNote })}
             {...(inputForm === undefined ? {} : { inputForm })}
             {...(planForm === undefined ? {} : { planForm })}
+            {...(cardsForm === undefined ? {} : { cardsForm })}
             {...(formKey === undefined ? {} : { formKey })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />

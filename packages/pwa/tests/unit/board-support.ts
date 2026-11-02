@@ -194,6 +194,9 @@ export const fakePort = (overrides: Partial<BoardPort> = {}): BoardPort & { read
     create: async () => {
       throw new Error('create was not expected');
     },
+    start: async () => {
+      throw new Error('start was not expected');
+    },
     ...overrides,
   };
   return Object.assign(port, { calls });

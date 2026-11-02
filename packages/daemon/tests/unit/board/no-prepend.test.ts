@@ -159,7 +159,7 @@ describe('what the board and the Warden still type into a chat', () => {
       '&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.',
     );
     should(messages['board sweep: go-ahead to the assignee']).equal('&F20 can go ahead: &F18 merged.');
-    should(messages['warden orphaned card']).startWith('Your card &F1 “Ship the thing” has nobody on it.');
+    should(messages['warden orphaned card']).startWith('Your card &F1 "Ship the thing" has no ferret working on it.');
   });
 });
 

@@ -169,10 +169,23 @@ describe('the orphaned cards item', () => {
   it('should list the cards in one item, oldest wait first, and name a single card', async () => {
     const { port, raised } = machine();
     const list = new OrphanList(new Members(), port);
-    await list.add(notice('F1', '&F1 has nobody on it'));
-    should(raised[0]).containDeep({ ref: ORPHANS_REF, members: ['F1'], request: { title: '&F1 has nobody on it' } });
-    await list.add(notice('F2', '&F2 has nobody on it'));
-    should(raised[1]?.request.title).equal('2 cards have nobody on them');
+    await list.add(notice('F1', 'A card has nobody working on it'));
+    should(raised[0]).containDeep({
+      ref: ORPHANS_REF,
+      members: ['F1'],
+      request: {
+        title: 'A card has nobody working on it',
+        cards: [{ task: { id: 'F1' }, line: 'A card has nobody working on it subject' }],
+      },
+    });
+    should(raised[0]?.request.premise).containEql('this card');
+    should(raised[0]?.request.why).containEql('This one was handed');
+    await list.add(notice('F2', 'A card has nobody working on it'));
+    should(raised[1]?.request.premise).containEql('these cards');
+    should(raised[1]?.request.title).equal('2 cards have nobody working on them');
+    should(raised[1]?.request.cards?.map(row => row.task.id)).eql(['F1', 'F2']);
+    should(raised[1]?.request.why).not.containEql('nothing under it is alive');
+    should(raised[1]?.request.howToResolve).containEql('Got it');
     should(raised[1]?.request.waitingSince).equal('2026-07-01T00:00:00Z');
   });
 

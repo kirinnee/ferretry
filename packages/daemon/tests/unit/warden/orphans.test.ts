@@ -144,10 +144,11 @@ describe('planOrphanEscalations', () => {
     if (tell?.kind !== 'message') throw new Error('expected a message');
     should(tell).containDeep({ taskId: 'F1', assignee: 'worker', sessionId: 'lead' });
     const text = tell.message;
-    should(text).startWith('Your card &F1 “Ship the thing” has nobody on it. It is in Implement');
+    should(text).startWith('Your card &F1 "Ship the thing" has no ferret working on it. It is waiting in Implement');
     should(text).not.containEql('[ferretry]');
     should(text).not.containEql('This notice is from Ferretry');
-    should(text).containEql('its ferret worker is stopped and nothing under it is alive');
+    should(text).containEql('its ferret worker has finished, so nothing will happen to it.');
+    should(text).not.containEql('nothing under it is alive');
     should(text).containEql('`fy resume worker`');
     should(text).containEql('`fy task assign F1 <ferret>`');
     should(text).containEql('`fy task drop F1 --reason "<why>"`');
@@ -167,15 +168,19 @@ describe('planOrphanEscalations', () => {
     should(tell.notice).containDeep({
       sourceRef: orphanNoticeSourceRef('F1'),
       task: { id: 'F1' },
-      title: '&F1 has nobody on it',
-      subject: '&F1 “Ship the thing” is in Implement, and no ferret is working it.',
+      title: 'A card has nobody working on it',
+      subject: '&F1 Ship the thing is waiting in Implement, but no ferret is assigned, so nothing will happen to it.',
       waitingSince: '2026-07-31T11:00:00.000Z',
     });
     should(tell.notice.why).equal(
-      'Its ferret worker is stopped and nothing under it is alive. Its owner ferret lead is completed as well.',
+      'The last ferret on it, worker, has finished. The ferret that owns the card, lead, has finished too. A card only moves when a ferret works on it, so this one will sit in Implement until you act.',
     );
-    should(tell.notice.premise).containEql('“Ship the thing” on mac, in Implement');
-    should(tell.notice.howToResolve).containEql('`fy task assign F1 <ferret>`');
+    should(tell.notice.premise).containEql('&F1 Ship the thing on mac, waiting in Implement');
+    should(tell.notice.howToResolve).containEql('start a ferret on it');
+    should(tell.notice.howToResolve).not.containEql('fy task');
+    const everything = Object.values(tell.notice).join('\n');
+    for (const jargon of ['active or review lane', 'nothing under it is alive', 'Left by', 'session '])
+      should(everything).not.containEql(jargon);
   });
 
   it('should notify the owner when the card’s ferret owns it itself', () => {
@@ -188,7 +193,7 @@ describe('planOrphanEscalations', () => {
     // Assert
     if (tell?.kind !== 'notice') throw new Error('expected a notice');
     should(tell.sessionId).equal('worker');
-    should(tell.notice.why).endWith('Its ferret owns it too, so no other ferret answers for it.');
+    should(tell.notice.why).containEql('It is the only ferret that answers for the card.');
   });
 
   it('should hold the notice on the finished ferret’s board when the owner is gone from this machine', () => {
@@ -220,7 +225,9 @@ describe('planOrphanEscalations', () => {
     // Assert
     if (tell?.kind !== 'notice') throw new Error('expected a notice');
     should(tell.notice.subject.length).be.belowOrEqual(120);
-    should(tell.notice.subject).endWith('…');
+    should(tell.notice.subject).startWith('&F1 A very long card');
+    should(tell.notice.subject).containEql('…');
+    should(tell.notice.subject).endWith(', but no ferret is assigned, so nothing will happen to it.');
   });
 
   it('should not tell anybody twice in one episode', () => {

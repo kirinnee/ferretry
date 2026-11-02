@@ -14,6 +14,9 @@
  *   ?view=gate-list       the list with that gate item first among the question items (one stream)
  *   ?view=gate-plan       a PLAN gate item open ("OK to build": the Approve chip)
  *   ?view=input           an INPUT item open (a short typed value: the Type in chip)
+ *   ?view=orphan-one      the Warden's "A card has nobody working on it" notice open, one card (Open / Start / Close)
+ *   ?view=orphan-three    the same notice for three cards, each line with its own three buttons
+ *   ?view=orphan-list     `/inbox?from=warden` with that notice (one card) in the list
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
@@ -308,6 +311,35 @@ const INPUT = item('A44', 5, 'ottilie', {
   ask: { kind: 'open-question' },
   premise: '- Alerts go to one inbox\n- It is only used for the relay alerts',
 } as Partial<AgendaItem>);
+/** The Warden's orphan notice (`warden:orphans`), as the daemon raises it: one item, a line and three buttons per card. */
+const orphanNotice = (lines: readonly string[]): AgendaItem =>
+  item('A60', 35, 'Warden', {
+    title: lines.length === 1 ? 'A card has nobody working on it' : `${lines.length} cards have nobody working on them`,
+    subject:
+      lines.length === 1
+        ? (lines[0] ?? '')
+        : 'These cards are waiting, but no ferret is assigned to any of them, so nothing will happen to them.',
+    why: 'A card only moves when a ferret works on it. These were handed to ferrets that have since finished, so they will sit where they are until you act.',
+    premise:
+      lines.length === 1
+        ? 'Ferretry saw this card on the board with no ferret working on it.'
+        : 'Ferretry saw these cards on the board with no ferret working on any of them.',
+    context: lines.map(line => `- ${line}`).join('\n'),
+    howToResolve:
+      'For each card: open it to see where it stands, start a ferret on it to carry on, or close it if it is no longer needed. A card leaves this list once a ferret is on it again. Tap Got it to dismiss the notice.',
+    raisedBy: 'daemon',
+    sourceRef: 'warden:orphans',
+    notice: true,
+    kind: 'info',
+    cards: lines.map((line, index) => ({ task: { id: ['B1', 'F61', 'F58'][index] ?? 'F1' }, line })),
+  } as Partial<AgendaItem>);
+const ORPHAN_LINES = [
+  '&B1 Fix simcha Loge 502 is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
+  '&F61 Pairing a second phone is waiting in Implement, but no ferret is assigned, so nothing will happen to it.',
+  '&F58 Faster board loading is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.',
+];
+const ORPHAN_ONE = card(orphanNotice(ORPHAN_LINES.slice(0, 1)), CARE, 'studio');
+const ORPHAN_THREE = card(orphanNotice(ORPHAN_LINES), CARE, 'studio');
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
@@ -318,6 +350,9 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'gate-plan': GATE_PLAN_CARD,
   input: card(INPUT, RELAY, 'studio'),
   'gate-list': GATE_CARD,
+  'orphan-one': ORPHAN_ONE,
+  'orphan-three': ORPHAN_THREE,
+  'orphan-list': ORPHAN_ONE,
 };
 
 /** `?only=A5,A2` keeps just those open items: a short run that can be finished from the keyboard. */
@@ -371,7 +406,7 @@ const MACHINE: DaemonConnection = daemonConnection({
 });
 /** What the conversation holds about the open item (a daemon-raised gate item is mentioned by nobody: none). */
 const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
-  open.item.gate !== undefined
+  open.item.gate !== undefined || open.item.cards !== undefined
     ? []
     : [
         {
@@ -588,7 +623,7 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <Inbox
-    from={view === 'warden' ? 'warden' : null}
+    from={view === 'warden' || view === 'orphan-list' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
     openAt={
@@ -598,7 +633,9 @@ createRoot(root).render(
           ? TO_TEST[0]?.key
           : view === 'gate-list'
             ? undefined
-            : OPENED[view]?.key
+            : view === 'orphan-list'
+              ? undefined
+              : OPENED[view]?.key
     }
     extra={OPENED[view]}
   />,

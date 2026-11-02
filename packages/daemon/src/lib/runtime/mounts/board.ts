@@ -16,6 +16,7 @@ import {
   BoardTaskCreateRequestSchema,
   type BoardTaskId,
   type BoardTaskResponse,
+  type BoardTaskStartResponse,
   parseTaskRef,
 } from '@ferretry/protocol';
 import { type ApiActor, parseActor } from '../../api/actor.ts';
@@ -43,6 +44,8 @@ export interface BoardSubsystem {
   create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
+  /** The owner's start of a ferret on a card: the card's own ferret, resumed with the card as its brief. */
+  start(id: BoardTaskId, caller: BoardCaller, actor: ApiActor | undefined): Promise<BoardTaskStartResponse>;
 }
 
 /** The HTTP status each refusal answers with. */
@@ -245,6 +248,20 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
         const id = pathTaskId(context);
         const request = await parseBody(context.request, BoardTaskActionRequestSchema);
         return await answer(async () => await board.act(id, request, caller));
+      },
+    },
+    {
+      // A person's act only: a ferret starts a card's ferret by handing it down (`fy task assign`), never here.
+      method: 'POST',
+      path: '/v1/board/tasks/:taskId/start',
+      minimum: 'operator',
+      caller: 'person',
+      capability: fleet,
+      noStore: true,
+      handle: async context => {
+        const caller = boardCaller(context.actor);
+        const id = pathTaskId(context);
+        return await answer(async () => await board.start(id, caller, context.actor));
       },
     },
   ];

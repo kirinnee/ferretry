@@ -246,7 +246,7 @@ went idle), which are what the list shows beside the badge.
 
 ## Machine notices
 
-Notices that belong to no ferret — a ferret the Warden could not move, a card with nobody on it, a login at its
+Notices that belong to no ferret — a ferret the Warden could not move, a card with nobody working on it, a login at its
 budget limit — are raised **once per cause** on the machine agenda ([agenda.md](agenda.md#the-machine-agenda)), not
 once per ferret. They notify and count like any item, an update in place does not buzz again, and nothing is raised
 on a stopped session.

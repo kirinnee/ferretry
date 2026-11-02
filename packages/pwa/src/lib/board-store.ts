@@ -35,6 +35,7 @@ import {
   type BoardTaskCreateRequestInput,
   type BoardTaskId,
   type BoardTaskResponse,
+  type BoardTaskStartResponse,
   type BoardTaskView,
   boardErr,
   boardOk,
@@ -671,6 +672,11 @@ export class DaemonBoardStore {
       }
     }
     return boardOk(answer.value.task);
+  }
+
+  /** Starts the card's ferret again on the machine that holds it; the card itself moves when the feed says so. */
+  start(machine: DaemonConnection, id: BoardTaskId): Promise<BoardResult<BoardTaskStartResponse, BoardWriteError>> {
+    return this.#port.start(machine, id);
   }
 
   /**

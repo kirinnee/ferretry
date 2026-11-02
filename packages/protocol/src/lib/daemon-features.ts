@@ -78,6 +78,12 @@ export const DAEMON_FEATURES = {
    */
   agendaOfferClose: 'agenda.offer-close.1',
   /**
+   * A machine notice may list board cards (`AgendaItem.cards`), each with Open, Start a ferret on it and Close card:
+   * `POST /v1/board/tasks/:taskId/start` resumes the card's own ferret with the card's brief. A daemon without this
+   * name has neither the field nor the route, so the app draws its Got it alone.
+   */
+  agendaCards: 'agenda.cards.1',
+  /**
    * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
    * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
    * machine that reports it, because there the gate item is the card's one ask.

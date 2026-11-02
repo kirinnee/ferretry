@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { agendaConversationPath, type InboxCard } from '../../../src/lib/agenda-inbox.ts';
-import { daemonId } from '../../../src/lib/daemon-connection.ts';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { machineSessionView } from '../../../src/lib/machine-agenda.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+const PAIRED = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't1' });
 
 const moved = agendaItem('M1', {
   notice: true,
@@ -27,7 +28,7 @@ afterEach(async () => {
   view = null;
 });
 
-const open = async (cards: readonly InboxCard[], initialOpen?: string) => {
+const open = async (cards: readonly InboxCard[], initialOpen?: string, paired = false) => {
   const fake = fakeInbox();
   const navigated: string[] = [];
   view = await mount(
@@ -37,7 +38,7 @@ const open = async (cards: readonly InboxCard[], initialOpen?: string) => {
       render={inbox => (
         <AgendaInboxPage
           clock={fake.clock.now}
-          inbox={inbox}
+          inbox={paired ? { ...inbox, connectionFor: () => PAIRED } : inbox}
           initialOpen={initialOpen}
           now={NOW}
           onNavigate={to => navigated.push(to)}
@@ -142,6 +143,38 @@ describe('the Machine group in the Inbox', () => {
     // Assert
     expect(view?.container.querySelector('[data-agenda-title][data-wrap]')).not.toBeNull();
     expect(view?.container.querySelector('[data-inbox-machine-moves]')).toBeNull();
+  });
+
+  test('draws an orphan notice with a row of buttons per card, keeps Got it, and says the lines once', async () => {
+    // Arrange
+    const line = (id: string) =>
+      `&${id} Fix it is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.`;
+    const orphans = agendaItem('M4', {
+      notice: true,
+      kind: 'info',
+      subject: '2 cards have nobody working on them',
+      context: `${line('B1')}\n${line('B2')}`,
+      sourceRef: 'warden:orphans',
+      cards: [
+        { task: { id: 'B1' }, line: line('B1') },
+        { task: { id: 'B2' }, line: line('B2') },
+      ],
+      waitingSince: '2026-08-01T10:00:00.000Z',
+    } as never);
+    const card = inboxCard(orphans, must(machineView, 'the machine view'));
+
+    // Act
+    await open([card], card.key, true);
+
+    // Assert
+    const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
+    expect(view?.container.querySelectorAll('[data-agenda-card-row]').length).toBe(2);
+    expect(view?.container.querySelectorAll('[data-agenda-card-open]').length).toBe(2);
+    expect(view?.container.querySelectorAll('[data-agenda-card-start]').length).toBe(2);
+    expect(view?.container.querySelectorAll('[data-agenda-card-close]').length).toBe(2);
+    expect(text).toContain('Tap Got it to dismiss this notice.');
+    expect(text.split(line('B1')).length).toBe(2);
+    expect(text).not.toContain('Nothing to decide');
   });
 
   test('links its item to the Inbox, not to a conversation', () => {

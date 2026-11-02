@@ -126,6 +126,7 @@ import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
+import { AgendaCardsHost } from './agenda-cards-host.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
@@ -212,7 +213,7 @@ const renderInboxCard = (
         : {})}
       origin={inboxCardOrigin(card, onNavigate)}
       swipeHints={false}
-      {...inputFormFor(inbox, card)}
+      {...inputFormFor(inbox, card, onNavigate)}
       {...(now === undefined ? {} : { now })}
     />
   </DaemonTaskReferences>
@@ -225,8 +226,11 @@ const renderInboxCard = (
 const inputFormFor = (
   inbox: AgendaInbox,
   card: InboxCard,
-): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode } => {
+  onNavigate: (to: string) => void,
+): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode; readonly cardsForm?: ReactNode } => {
   const connection = inbox.connectionFor(card.daemonId);
+  if (connection !== undefined && card.item.cards !== undefined)
+    return { cardsForm: <AgendaCardsHost cards={card.item.cards} connection={connection} onNavigate={onNavigate} /> };
   if (connection !== undefined && card.item.taskPlan !== undefined)
     return {
       planForm: (
@@ -419,7 +423,7 @@ function OpenItem({
           {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
           position={{ index: place.index, total: place.total }}
           quoteScope={scopeOf(card)}
-          {...inputFormFor(inbox, card)}
+          {...inputFormFor(inbox, card, onNavigate)}
           renderProse={agendaProse(copyWriter)}
           // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
           // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.

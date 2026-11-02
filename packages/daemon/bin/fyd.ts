@@ -639,6 +639,8 @@ import {
   stageGateLanes,
   SessionCards,
   type SessionLivenessSource,
+  CardStartRefused,
+  startOnCard,
   walkLadder,
 } from '../src/lib/board/index.ts';
 import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
@@ -1228,6 +1230,7 @@ import {
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
+  resumeActorOf,
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
@@ -4468,7 +4471,7 @@ interface WardenParts {
    */
   readonly attention: AgendaService;
   /**
-   * The machine items the Warden keeps: ferrets it could not move, cards with nobody on them. `folded` settles when
+   * The machine items the Warden keeps: ferrets it could not move, cards with nobody working on them. `folded` settles when
    * the boot folding of the old per-ferret notices has finished: the sweep waits for it, so a sweep and the folding
    * never write the same list at once.
    */
@@ -10874,7 +10877,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new FileMachineMembers(stateFiles, join(paths.state, 'machine-agenda-members.json')),
         clock,
       );
-      // The Warden's two list items: ferrets it could not move, and cards with nobody on them. Each is kept in a
+      // The Warden's two list items: ferrets it could not move, and cards with nobody working on them. Each is kept in a
       // small file so a restart still names them; a stopped or moved ferret leaves the first by itself.
       const candidateBox: { read?: (sessionId: string) => Promise<string | undefined> } = {};
       const wardenLists = {
@@ -13030,6 +13033,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           create: async (request, caller) => await boardWorld.board.create(request, caller),
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           skip: async (request, caller) => await boardWorld.board.skip(request, caller),
+          // The owner's start resumes the card's own ferret with the card as its brief (board/start-on-card.ts).
+          start: async (id, caller, actor) =>
+            await startOnCard(
+              {
+                task: async taskId => await boardWorld.board.task(taskId),
+                exists: async sessionId => storage.findSession(parseSessionId(sessionId)) !== undefined,
+                isSubFerret: async sessionId =>
+                  (await new StorageSubFerretDirectory(storage).leadOf(sessionId).catch(() => undefined)) !== undefined,
+                resume: async (sessionId, message) => {
+                  await sessionResumeSubsystem
+                    .resume(sessionId, resumeActorOf(actor), message)
+                    .catch((error: unknown) => {
+                      if (error instanceof SessionResumeError) throw new CardStartRefused(error.message);
+                      throw error;
+                    });
+                },
+              },
+              id,
+              caller,
+            ),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,

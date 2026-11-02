@@ -10,6 +10,7 @@ import {
   fetchDaemonVersion,
   postBoardAction,
   postBoardCreate,
+  postBoardStart,
   postLaneSetAction,
   readWholeBoard,
 } from '../../src/lib/board-client.ts';
@@ -175,6 +176,37 @@ describe('postBoardAction', () => {
       throw 'plain';
     });
     expect(!text.ok && text.error.message).toBe('plain');
+  });
+});
+
+describe('postBoardStart', () => {
+  it('posts to the card’s start route and returns the ferret that came back', async () => {
+    let sent: { url: string; method?: string } = { url: '' };
+    const answer = await postBoardStart(laptop, 'F1', async (asked, init) => {
+      sent = { url: String(asked), method: init?.method };
+      return json({ task: 'F1', sessionId: 'worker' });
+    });
+    expect(sent).toEqual({ url: 'https://laptop.example.test/v1/board/tasks/F1/start', method: 'POST' });
+    expect(answer).toEqual({ ok: true, value: { task: 'F1', sessionId: 'worker' } });
+  });
+
+  it('hands a refusal back as a value, with the daemon’s words and code', async () => {
+    const gone = await postBoardStart(laptop, 'F1', async () =>
+      json({ error: '&F1’s ferret is no longer on this machine', code: 'not-found' }, 404),
+    );
+    expect(gone).toEqual({
+      ok: false,
+      error: { status: 404, message: '&F1’s ferret is no longer on this machine', boardCode: 'not-found' },
+    });
+  });
+
+  it('says so when the daemon cannot be reached or answers something else', async () => {
+    const down = await postBoardStart(laptop, 'F1', async () => {
+      throw new Error('offline');
+    });
+    expect(!down.ok && down.error).toEqual({ status: 0, message: 'offline', boardCode: null });
+    const odd = await postBoardStart(laptop, 'F1', async () => json({ nope: true }));
+    expect(!odd.ok && odd.error.message).toBe('the daemon answered with a start this app cannot read');
   });
 });
 

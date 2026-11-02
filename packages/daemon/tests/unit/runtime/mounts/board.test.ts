@@ -44,7 +44,12 @@ async function dispatcher(board: BoardSubsystem, fleet = DEFAULT_CAPABILITY_GRAN
 
 /** A board that records what each route handed it. */
 const recording = (overrides: Partial<ServiceWorld> = {}) => {
-  const calls: { readonly route: string; readonly value: unknown; readonly caller?: BoardCaller }[] = [];
+  const calls: {
+    readonly route: string;
+    readonly value: unknown;
+    readonly caller?: BoardCaller;
+    readonly actor?: string | undefined;
+  }[] = [];
   const base = boardSubsystem();
   const service = new BoardService(
     world({ store: new MemoryBoardStore([card({ legacyRef: 'abc:F12' })]), ...overrides }),
@@ -81,6 +86,11 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
     skip: async (value: BoardSkipRequest, caller) => {
       calls.push({ route: 'skip', value, caller });
       return await service.skip(value, caller);
+    },
+    start: async (id, caller, actor) => {
+      calls.push({ route: 'start', value: id, caller, actor });
+      if (caller.kind !== 'owner') throw new BoardError('forbidden', 'only the owner may start a ferret on a card');
+      return { task: id, sessionId: 'worker' };
     },
   };
   return { calls, board };
@@ -478,6 +488,72 @@ describe('the board mount', () => {
     // Assert
     should(response.status).equal(400);
     should(calls).eql([]);
+  });
+
+  it('should start the card’s ferret for the owner at the machine, and say which ferret', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/%26F1/start', headers: human }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).eql({ task: 'F1', sessionId: 'worker' });
+    should(calls).eql([
+      { route: 'start', value: 'F1', caller: { kind: 'owner', via: 'admin-token' }, actor: 'admin-cli' },
+    ]);
+  });
+
+  it('should start the card’s ferret for a paired device the fleet grant lets in, as that device', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(calls[0]?.caller).eql({ kind: 'owner' });
+    should(calls[0]?.actor).startWith('device:');
+  });
+
+  it('should refuse a ferret’s own credential, and a remote device when the fleet grant is off', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const ferret = await (
+      await dispatcher(board)
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', headers: agentIn('lead') }));
+    const remote = await (
+      await dispatcher(board, { use: false, configure: false })
+    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }));
+
+    // Assert
+    should(ferret.status).equal(403);
+    should(remote.status).equal(403);
+    should(calls).eql([]);
+  });
+
+  it('should answer a card that is not there, and an unusable id, in the board’s own terms', async () => {
+    // Arrange
+    const { board } = recording();
+    const live = await dispatcher({ ...board, start: boardSubsystem().start });
+
+    // Act
+    const missing = await live.dispatch(request({ method: 'POST', path: '/v1/board/tasks/F9/start', headers: human }));
+    const garbled = await live.dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/not-a-card/start', headers: human }),
+    );
+
+    // Assert
+    should(missing.status).equal(404);
+    should(garbled.status).equal(400);
   });
 
   it('should take a paired device the fleet grant lets in as the owner', async () => {

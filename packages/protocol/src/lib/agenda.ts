@@ -834,6 +834,21 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 });
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
+/** The most cards one machine notice lists, each with its own buttons. */
+export const MAX_AGENDA_CARDS = 12;
+
+/**
+ * One board card a machine notice lists (the Warden's cards with nobody working on them): the card, and the one line that names
+ * it. The app draws Open, Start a ferret on it and Close card under each line; the daemon authorizes each of the
+ * three as the owner's own act on that card. An app from before these rows drops the field and shows the notice's
+ * own words with Got it.
+ */
+export const AgendaCardRowSchema = z.strictObject({
+  task: TaskRefSchema,
+  line: z.string().trim().min(1).max(MAX_AGENDA_SUBJECT_LENGTH),
+});
+export type AgendaCardRow = z.infer<typeof AgendaCardRowSchema>;
+
 /**
  * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
  * Allow runs the `add-2fa-key` ceremony bound to `stage` and saves it to `account`, and Deny drops it. The generic
@@ -1003,6 +1018,8 @@ const AgendaItemBaseShape = {
   taskPlan: AgendaTaskPlanRefSchema.optional(),
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
+  /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
+  cards: z.array(AgendaCardRowSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
@@ -1055,6 +1072,9 @@ export const AgendaItemSchema = z
         message: 'only an info card presents a phone approval',
         path: ['phoneApproval'],
       });
+    }
+    if (value.cards !== undefined && value.kind !== 'info') {
+      context.addIssue({ code: 'custom', message: 'only an info card lists cards', path: ['cards'] });
     }
     if (value.signInRuleSuspended !== undefined && value.kind !== 'info') {
       context.addIssue({

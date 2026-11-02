@@ -95,6 +95,8 @@ export interface AgendaCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer bar's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
+  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  readonly cardsForm?: ReactNode;
 }
 
 const markdownProse = defaultAgendaProse;
@@ -119,6 +121,7 @@ export function AgendaCard({
   onSnooze,
   inputForm,
   planForm,
+  cardsForm,
 }: AgendaCardProps) {
   const titleId = useId();
   const kind = agendaKindMeta(item);
@@ -221,6 +224,7 @@ export function AgendaCard({
             {history}
           </p>
         )}
+        {cardsForm}
         {detailEnd}
       </div>
       {error === null ? null : (

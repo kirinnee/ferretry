@@ -17,6 +17,7 @@ export * from './reopen-delivery.ts';
 export * from './service.ts';
 export * from './session-cards.ts';
 export * from './signal-done.ts';
+export * from './start-on-card.ts';
 export * from './sweep.ts';
 export * from './gate-check.ts';
 export * from './turn-check.ts';

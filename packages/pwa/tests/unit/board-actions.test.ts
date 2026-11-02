@@ -18,6 +18,7 @@ const harness = (paired = [laptop]) => {
   const lanesSent: { daemonId: string; projectId: string; request: LaneSetActionRequestInput }[] = [];
   const responses: unknown[][] = [];
   const created: { daemonId: string; request: BoardTaskCreateRequestInput }[] = [];
+  const started: { daemonId: string; id: string }[] = [];
   let refuse = false;
   const actions = createBoardActions({
     store: {
@@ -33,6 +34,12 @@ const harness = (paired = [laptop]) => {
       act: async (machine, id, request) => {
         sent.push({ daemonId: machine.daemonId, id, request });
         return refuse ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }) : boardOk(card(id));
+      },
+      start: async (machine, id) => {
+        started.push({ daemonId: machine.daemonId, id });
+        return refuse
+          ? boardErr({ status: 404, message: 'its ferret is gone', boardCode: 'not-found' as const })
+          : boardOk({ task: id, sessionId: 'worker' });
       },
       create: async (machine, request) => {
         created.push({ daemonId: machine.daemonId, request });
@@ -55,6 +62,7 @@ const harness = (paired = [laptop]) => {
     lanesSent,
     responses,
     created,
+    started,
     refuse: (value: boolean) => {
       refuse = value;
     },
@@ -187,6 +195,26 @@ describe('the other verbs', () => {
   });
 });
 
+describe('start', () => {
+  const card1 = { daemonId: laptop.daemonId, id: 'F1' };
+
+  it('starts the card’s ferret on the machine it names', async () => {
+    const { actions, started } = harness();
+    const answer = await actions.start(card1);
+    expect(answer.ok && answer.value).toEqual({ task: 'F1', sessionId: 'worker' });
+    expect(started).toEqual([{ daemonId: laptop.daemonId, id: 'F1' }]);
+  });
+
+  it('hands the daemon’s refusal back as a value, and an unpaired machine as such', async () => {
+    const { actions, refuse } = harness();
+    refuse(true);
+    const answer = await actions.start(card1);
+    expect(!answer.ok && answer.error).toEqual({ status: 404, message: 'its ferret is gone', boardCode: 'not-found' });
+    const gone = await actions.start({ daemonId: workstation.daemonId, id: 'F1' });
+    expect(!gone.ok && gone.error.boardCode).toBe('no-machine');
+  });
+});
+
 describe('create', () => {
   const request = { kind: 'feature', title: 'Try it', ask: { text: 'do it', source: 'owner (board)' } } as never;
 
@@ -235,6 +263,7 @@ describe('answer', () => {
       store: {
         act: async () => boardErr({ status: 0, message: '', boardCode: null }),
         create: async () => boardErr({ status: 0, message: '', boardCode: null }),
+        start: async () => boardErr({ status: 0, message: '', boardCode: null }),
         changeLanes: async () => boardErr({ status: 0, message: '', code: null }),
       },
       agenda: {
