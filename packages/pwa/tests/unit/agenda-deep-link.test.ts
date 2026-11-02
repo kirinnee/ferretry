@@ -14,6 +14,16 @@ describe('agendaDeepLinkFromHash', () => {
     expect(agendaDeepLinkFromHash('#agenda/A8?session=sess-1')).toEqual({ id: 'A8', sessionId: 'sess-1' });
   });
 
+  it('reads the machine a link names, and drops a link naming something that is not a daemon id', () => {
+    const named = `fy_daemon_${'a'.repeat(43)}`;
+    expect(agendaDeepLinkFromHash(`#agenda/A8?session=sess-1&machine=${named}`)).toEqual({
+      id: 'A8',
+      sessionId: 'sess-1',
+      machine: named as DaemonId,
+    });
+    expect(agendaDeepLinkFromHash('#agenda/A8?session=sess-1&machine=nope')).toBeNull();
+  });
+
   it('reads a card with no session', () => {
     expect(agendaDeepLinkFromHash('#agenda/A8')).toEqual({ id: 'A8' });
   });
@@ -27,11 +37,21 @@ describe('agendaDeepLinkFromHash', () => {
 });
 
 describe('machineForAgendaLink', () => {
-  const link = { id: 'A8', sessionId: 'sess-1' } as never;
+  const link = { id: 'A8', sessionId: 'sess-1' } as { id: never; sessionId: string };
 
   it('is the machine whose session list holds the session', () => {
     const holder = machine('b', ['sess-1']);
     expect(machineForAgendaLink(link, [machine('a', ['x']), holder])).toBe(holder.daemonId);
+  });
+
+  it('is the machine the link names when it is paired, without waiting for any session list', () => {
+    const named = machine('b', null);
+    expect(machineForAgendaLink({ ...link, machine: named.daemonId }, [machine('a', ['x']), named])).toBe(
+      named.daemonId,
+    );
+    expect(machineForAgendaLink({ ...link, machine: 'c' as DaemonId }, [machine('a', ['sess-1'])])).toBe(
+      'a' as DaemonId,
+    );
   });
 
   it('waits while a machine that might hold it has not been read', () => {

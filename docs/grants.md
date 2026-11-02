@@ -603,7 +603,9 @@ still wants a passkey proved for it. These must be instant in an emergency. **No
 data** (a 2FA key, a sign-in or an account: `DELETE /v1/accounts/:id/factors/:factor`,
 `DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`), which
 cannot be undone, so "ask again for each act" still asks for it. Removing a default through the configuration
-file itself (`PUT /v1/config/file`) is still an ordinary edit to that file and is judged as one.
+file itself (`PUT /v1/config/file`) follows the same decision: the daemon compares the version in effect with the new
+text, and a write that only removes lines needs no `loosen-config` approval, while one that adds a line or changes
+one's account (even beside a removal) is a loosening and still asks ([config-files.md](config-files.md#default-accounts)).
 
 ## A grant only ever narrows
 

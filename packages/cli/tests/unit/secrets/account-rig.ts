@@ -215,9 +215,9 @@ class FakeSeedGateway implements ITwoFactorSeedGateway {
       parsed: { params: { algorithm: 'SHA1', digits: 6, period: 30 } },
     } as Awaited<ReturnType<ITwoFactorSeedGateway['stage']>>;
   }
-  async confirmInApp(account: string, stage: string, body: { session: string }) {
+  async confirmInApp(account: string, stage: string, body: { session?: string }) {
     this.calls.push(`confirm ${account}`);
-    return { stage, session: body.session, agendaItemId: 'A7' } as Awaited<
+    return { stage, session: body.session ?? 'lead-1', agendaItemId: 'A7' } as Awaited<
       ReturnType<ITwoFactorSeedGateway['confirmInApp']>
     >;
   }

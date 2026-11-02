@@ -887,16 +887,16 @@ export type TwoFactorSeedSaved = z.infer<typeof TwoFactorSeedSavedSchema>;
 /**
  * `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app`: a save staged at the machine (`fy account factor add
  * --totp`), put on the owner's agenda so they confirm it with a passkey in the app. `session` is the board the card
- * goes on. The card's words are the daemon's: which account, who asked, where and when.
+ * goes on; left out, the daemon picks the owner's own most recently active session, so the owner at their own shell needs
+ * no `--session`. The card's words are the daemon's: which account, who asked, where and when.
  */
-export const ConfirmTwoFactorSeedRequestSchema = z.strictObject({
-  session: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'an agenda session id'),
-});
+const AgendaSessionIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'an agenda session id');
+export const ConfirmTwoFactorSeedRequestSchema = z.strictObject({ session: AgendaSessionIdSchema.optional() });
 export type ConfirmTwoFactorSeedRequest = z.infer<typeof ConfirmTwoFactorSeedRequestSchema>;
 
 export const TwoFactorSeedConfirmingSchema = z.strictObject({
   stage: TwoFactorStageIdSchema,
-  session: ConfirmTwoFactorSeedRequestSchema.shape.session,
+  session: AgendaSessionIdSchema,
   agendaItemId: AgendaIdSchema,
 });
 export type TwoFactorSeedConfirming = z.infer<typeof TwoFactorSeedConfirmingSchema>;

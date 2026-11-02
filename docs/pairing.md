@@ -44,6 +44,7 @@ DELETE /v1/pair/code/:pairingId (operator minimum, `pairing.use`) → the code's
 GET  /v1/pair/devices         (operator minimum, `pairing.use`)   → who may reach this machine
 DELETE /v1/pair/devices/:id   (operator minimum, `pairing.use`)   → the remaining list
 GET  /v1/carriers             (authenticated minimum, no-store)    → { carriers } — the set, asked again later
+GET  /v1/pair/identity        (operator minimum, `pairing.use`, person only, no-store) → { daemonId } — this daemon's id, which the CLI puts in the links it prints so the app opens on this machine; nothing secret
 ```
 
 **`operator` is the route's credential minimum, not an admin token.** Any credential but a warden's

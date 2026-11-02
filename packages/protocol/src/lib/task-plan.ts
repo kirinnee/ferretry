@@ -20,6 +20,7 @@ import {
 } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX, LoginObservedSecondFactorSchema } from './login-recipes.ts';
 import { sha256Hex } from './mcp-oauth.ts';
+import { type DaemonId, DaemonIdSchema } from './pairing.ts';
 import {
   COPY_PLAN_DEFAULT_LIFETIME_SECONDS,
   COPY_PLAN_MAX_ITEMS,
@@ -1071,17 +1072,31 @@ export const TASK_PLAN_ERROR_CODES = {
   needsPasskey: 'needs_passkey',
 } as const;
 
-/** The fragment that opens one agenda card in the app (`<app>/#agenda/<id>?session=<sessionId>`), printed by `fy plan approve`. */
-export const agendaDeepLinkFragment = (id: string, sessionId?: string): string =>
-  `#agenda/${encodeURIComponent(id)}${sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`}`;
+/**
+ * The fragment that opens one agenda card in the app (`<app>/#agenda/<id>?session=<sessionId>&machine=<daemon id>`),
+ * printed by `fy plan approve` and `fy account factor add`. Both parameters are optional: without `machine` the app
+ * opens its selected machine, without `session` it finds the card on the machine. It carries no secret.
+ */
+export const agendaDeepLinkFragment = (id: string, sessionId?: string, machine?: DaemonId): string => {
+  const query = new URLSearchParams();
+  if (sessionId !== undefined) query.set('session', sessionId);
+  if (machine !== undefined) query.set('machine', machine);
+  const text = query.toString();
+  return `#agenda/${encodeURIComponent(id)}${text === '' ? '' : `?${text}`}`;
+};
 
 /**
- * The card an `#agenda/<id>?session=<sessionId>` fragment names, the reader of {@link agendaDeepLinkFragment}: `null`
- * for any other fragment or an id that is not one. A fragment only picks which card the app opens.
+ * The card an `#agenda/<id>?session=<sessionId>&machine=<daemon id>` fragment names, the reader of
+ * {@link agendaDeepLinkFragment}: `null` for any other fragment, an id that is not one, or a machine that is not a
+ * daemon id. A fragment only picks which card the app opens.
  */
 export const agendaDeepLinkFromFragment = (
   fragment: string,
-): { readonly id: z.infer<typeof AgendaIdSchema>; readonly sessionId?: string } | null => {
+): {
+  readonly id: z.infer<typeof AgendaIdSchema>;
+  readonly sessionId?: string;
+  readonly machine?: DaemonId;
+} | null => {
   const match = /^#?agenda\/([^?]+)(?:\?(.*))?$/u.exec(fragment);
   if (match === null) return null;
   let raw: string;
@@ -1092,8 +1107,16 @@ export const agendaDeepLinkFromFragment = (
   }
   const id = AgendaIdSchema.safeParse(raw);
   if (!id.success) return null;
-  const session = new URLSearchParams(match[2] ?? '').get('session');
-  return session === null || session.trim() === '' ? { id: id.data } : { id: id.data, sessionId: session };
+  const query = new URLSearchParams(match[2] ?? '');
+  const session = query.get('session');
+  const named = query.get('machine');
+  const machine = named === null ? undefined : DaemonIdSchema.safeParse(named);
+  if (machine !== undefined && !machine.success) return null;
+  return {
+    id: id.data,
+    ...(session === null || session.trim() === '' ? {} : { sessionId: session }),
+    ...(machine === undefined ? {} : { machine: machine.data }),
+  };
 };
 
 /** `DELETE …/task-plans/:planId/approval/:stage`: the staged selection was dropped. */

@@ -1,7 +1,7 @@
 import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
 import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { describe, it } from 'bun:test';
-import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
+import { ANALYTICS_PRICING_RATE_APPLICABILITY, type DaemonId } from '@ferretry/protocol';
 import should from 'should';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
@@ -95,6 +95,7 @@ const base = {
 };
 
 const pairingSubsystem = (): PairingSubsystem => ({
+  daemonId: `fy_daemon_${'a'.repeat(43)}` as DaemonId,
   mint: () => {
     throw new Error('not exercised by the surface inventory');
   },
@@ -981,6 +982,7 @@ describe('the mounted daemon surface', () => {
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       8 + // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
+      1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3; // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
@@ -1011,8 +1013,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
       'DELETE /v1/pair/code/:pairingId',
-      // Who may reach this machine, and one entry's removal. NOTE WHAT IS ABSENT: there is no route
-      // that returns a device token or its digest — the list is a projection with no field for one.
+      // This daemon's own id (the owner's CLI puts it in a link), then who may reach this machine, and one entry's
+      // removal. NOTE WHAT IS ABSENT: there is no route that returns a device token or its digest — the list is a
+      // projection with no field for one.
+      'GET /v1/pair/identity',
       'GET /v1/pair/devices',
       'DELETE /v1/pair/devices/:deviceId',
       // One device's own grants (B5): widen at the machine, or from a device holding what it grants.

@@ -284,6 +284,28 @@ describe('fy plan approve: the link to the card of the plan', () => {
     const link = said.find(line => line.startsWith('Open the card: '));
     should(link).equal(`Open the card: ${LINK}`);
   });
+
+  it('should name this machine in the link so the app opens it (C7), and keep working when the id cannot be read', async () => {
+    const machine = `fy_daemon_${'a'.repeat(43)}` as never;
+    const opened: string[] = [];
+    const named = rig({
+      appOrigin: 'https://app.example',
+      machine: async () => machine,
+      openLink: async url => void opened.push(url) === undefined,
+    });
+    const unreadable = rig({
+      appOrigin: 'https://app.example',
+      machine: async () => {
+        throw new Error('daemon is busy');
+      },
+    });
+
+    await named.controller.approve('feed', ['3'], { open: true });
+    await unreadable.controller.approve('feed', ['3'], {});
+
+    should(opened).eql([`${LINK}&machine=${machine}`]);
+    should(unreadable.said).containEql(`Open the card: ${LINK}`);
+  });
 });
 
 describe('fy plan approve: what is checked before anything is staged', () => {

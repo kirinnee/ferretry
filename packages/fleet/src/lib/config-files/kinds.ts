@@ -446,17 +446,18 @@ export function runtimeLoosening(
 }
 
 /**
- * Every line of `account-defaults.yaml` that is added, removed or changed is a sentence: a default decides which
- * account a card offers first, and the card says "Default for ferretry" in the owner's name, so the words must be the
- * owner's and not a ferret's. Nothing here is an exemption — taking a default away is held too.
+ * Every line of `account-defaults.yaml` that is ADDED or CHANGED is a sentence: a default decides which account a card
+ * offers first, and the card says "Default for ferretry" in the owner's name, so the words must be the owner's and not
+ * a ferret's. A line that is only TAKEN AWAY is not (owner decision !A243): the card falls to the next rule and nothing
+ * is offered that was not before, the same as the route that removes a default. The daemon decides from the two
+ * versions alone, so an edit that removes one line and changes another still asks, for the one it changed.
  */
 function accountDefaultsLoosening(before: AccountDefaultsFile, after: AccountDefaultsFile): readonly string[] {
   const address = (line: AccountDefaultLine): string => JSON.stringify([line.scope, line.within ?? null, line.key]);
   const was = new Map(accountDefaultLines(before).map(line => [address(line), line]));
-  const now = new Map(accountDefaultLines(after).map(line => [address(line), line]));
   const sentences: string[] = [];
-  for (const [where, line] of [...now, ...was]) {
-    if (was.get(where)?.account === now.get(where)?.account) continue;
+  for (const line of accountDefaultLines(after)) {
+    if (was.get(address(line))?.account === line.account) continue;
     const sentence = `changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}`;
     if (!sentences.includes(sentence)) sentences.push(sentence);
   }

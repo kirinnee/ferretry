@@ -307,7 +307,7 @@ function mountAccountCommands(account: Command, controllers: AccountControllers)
     .option('--label <text>', 'what you call it, e.g. "Authy backup" (required, except with --totp)')
     .option(
       '-s, --session <id>',
-      "with --totp: the session whose card in the app's Inbox confirms it (defaults to the current session)",
+      "with --totp: the session whose card in the app's Inbox confirms it (defaults to the current session; at your own terminal, your most recently active one)",
     )
     .option('--i-understand-totp', 'with --totp: skip the typed "yes" after the 2FA warning')
     .action(

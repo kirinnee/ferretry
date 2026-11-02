@@ -423,7 +423,7 @@ const REFUSED = { kind: 'refused' } as const;
 
 /** The complete pairing state machine. One instance belongs to one daemon runtime. */
 export class PairingService {
-  private readonly daemonId: DaemonId;
+  readonly daemonId: DaemonId;
   private readonly daemonName: string;
   private readonly advertisement: Advertisement;
   private readonly pairingAppUrl: string;

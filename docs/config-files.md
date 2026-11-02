@@ -160,12 +160,12 @@ chooses among the sign-ins the daemon already matched; it never adds one.
 
 **Every change is the owner's.** (Honest-client until the ferret wall RF-2/RF-5: a ferret that calls the admin-token
 routes without its session id is treated as the owner at the machine, and could also write `state/config-accepted.json`
-directly. The held rule is a wall for the `config.write` door and the owner's route for a paired device.) Adding, changing or removing a line is a loosening in the sense of rule 2 — it
+directly. The held rule is a wall for the `config.write` door and the owner's route for a paired device.) Adding or changing a line is a loosening in the sense of rule 2 — it
 changes which account the owner is offered first, in the owner's name — so a ferret's `config.write` to this file
 is only ever a **held suggestion** ("changes which account a card offers first for `<key>` in <scope>"), and the
 version in effect stays as the owner last confirmed it. The owner sets one line with `PUT /v1/accounts/defaults`
 (`{ scope, within?, key, account }`; `account: null` clears it): at the machine it is direct, from a paired device
-it asks the passkey step-up that confirming a held edit asks. That one write goes through the comment-keeping
+it asks the passkey step-up that confirming a held edit asks. **Taking a default away needs no approval at all** (owner decision !A243): a write to the file by any door — `PUT /v1/config/file`, `config.write`, an editor on the disk, deleting the file — that only REMOVES lines is put into effect at once, because the daemon compares the version in effect with the new one and an edit that adds no line and changes no line's account loosens nothing. The comparison is the daemon's own, never a flag a client sends. An edit that removes one line and changes or adds another still asks, for the one it changed, and nothing of it is in effect until it is confirmed. That one write goes through the comment-keeping
 editor, is in effect at once, and **does not confirm anything else** — a ferret's other held lines stay held. A
 defaults file that does not check is never written over; fix it first (`409 defaults_file_invalid`). A line for an
 account that does not exist, or has no sign-in on that key, is refused (`409 no_sign_in_here`); clearing a line is

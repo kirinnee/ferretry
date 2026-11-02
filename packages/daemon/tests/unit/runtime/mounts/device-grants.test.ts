@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type CapabilityGrants,
+  type DaemonId,
   LIMITED_DEVICE_GRANTS,
   type PairedDevice,
   type PairedDevicesView,
@@ -80,6 +81,7 @@ async function mount(world: World = {}) {
     rechecks += 1;
   });
   const pairing: PairingSubsystem = {
+    daemonId: `fy_daemon_${'a'.repeat(43)}` as DaemonId,
     mint: () => {
       throw new Error('not under test');
     },

@@ -872,10 +872,22 @@ describe('configLoosening — account-defaults.yaml', () => {
       ['changes which account a card offers first for github.com in project ferretry'],
     ],
     [
-      'a removed folder line',
+      'a line moved to another place',
       { folders: { '/srv/app': { 'github.com': A } } },
-      {},
-      ['changes which account a card offers first for github.com in folder /srv/app'],
+      { folders: { '/srv/other': { 'github.com': A } } },
+      ['changes which account a card offers first for github.com in folder /srv/other'],
+    ],
+    [
+      'a line added next to a line that is removed',
+      { sites: { 'a.com': A } },
+      { sites: { 'b.com': B } },
+      ['changes which account a card offers first for b.com in every session on this machine'],
+    ],
+    [
+      'a line changed while another is removed',
+      { sites: { 'a.com': A, 'b.com': A } },
+      { sites: { 'b.com': B } },
+      ['changes which account a card offers first for b.com in every session on this machine'],
     ],
   ])('should hold %s', (_name, before, after, expected) => {
     // Act
@@ -883,6 +895,15 @@ describe('configLoosening — account-defaults.yaml', () => {
 
     // Assert
     should(actual).deepEqual(expected);
+  });
+
+  it.each([
+    ['one site line', { sites: { 'a.com': A, 'b.com': B } }, { sites: { 'b.com': B } }],
+    ['a folder line', { folders: { '/srv/app': { 'github.com': A } } }, {}],
+    ['every line', { sites: { 'a.com': A }, projects: { ferretry: { 'github.com': B } } }, {}],
+  ])('should hold nothing for a write that only removes %s (owner decision !A243)', (_name, before, after) => {
+    // Act + Assert
+    should(configLoosening('accountDefaults', before, after)).deepEqual([]);
   });
 
   it('should hold nothing when the lines are the same, however they are ordered', () => {

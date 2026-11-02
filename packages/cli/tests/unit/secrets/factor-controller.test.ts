@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   type ConfirmTwoFactorSeedRequest,
   DAEMON_FEATURES,
+  type DaemonId,
   LOGIN_TOTP_WARNING,
   type StageTwoFactorSeedRequest,
   type TwoFactorSeedConfirming,
@@ -87,7 +88,7 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   ): Promise<TwoFactorSeedConfirming> {
     this.calls.push(`confirm ${account} ${stage}`);
     this.confirms.push(body);
-    return { stage: STAGE, session: body.session, agendaItemId: 'A7' };
+    return { stage: STAGE, session: body.session ?? OWNER_BOARD, agendaItemId: 'A7' };
   }
   async features(): Promise<readonly string[]> {
     this.featureReads += 1;
@@ -107,6 +108,10 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   }
 }
 
+/** The session the fake daemon puts a card on when the request names none. */
+const OWNER_BOARD = 'owner-board';
+const MACHINE = `fy_daemon_${'a'.repeat(43)}` as DaemonId;
+
 function rig(
   options: {
     seeds?: FakeSeeds;
@@ -115,6 +120,7 @@ function rig(
     interactive?: boolean;
     accounts?: FakeAccountGateway;
     appOrigin?: string;
+    machine?: () => Promise<DaemonId | undefined>;
   } = {},
 ) {
   const seeds = options.seeds ?? new FakeSeeds();
@@ -134,6 +140,7 @@ function rig(
     },
     nowMs: () => now,
     ...(options.appOrigin === undefined ? {} : { appOrigin: options.appOrigin }),
+    ...(options.machine === undefined ? {} : { machine: options.machine }),
   });
   return { controller, seeds, prompt, messages, accounts };
 }
@@ -198,10 +205,9 @@ describe('fy account factor add --totp', () => {
     should(seeds.staged.map(body => body.mismatchAcknowledged)).deepEqual([undefined, true]);
   });
 
-  it('should refuse, before asking for the key, without --totp, a board, a terminal or the typed yes', async () => {
+  it('should refuse, before asking for the key, without --totp, a terminal or the typed yes', async () => {
     // Arrange + Act
     const noKind = await fails(() => rig({ session: 's' }).controller.add('GITHUB', {}));
-    const noBoard = await fails(() => rig().controller.add('GITHUB', { totp: true }));
     const piped = rig({ session: 's', interactive: false });
     const noTerminal = await fails(() => piped.controller.add('GITHUB', { totp: true }));
     const declined = rig({ session: 's', prompt: new FakePrompt([URI], ['no']) });
@@ -209,8 +215,6 @@ describe('fy account factor add --totp', () => {
 
     // Assert
     should(noKind).containEql('--totp');
-    should(noBoard).containEql('--session');
-    should(noBoard).containEql("the app's Inbox");
     should(noTerminal).containEql('terminal');
     should(no).containEql('nothing was changed');
     for (const prompt of [piped.prompt, declined.prompt]) should(prompt.hidden).have.length(0);
@@ -317,6 +321,41 @@ describe('fy account factor add --totp, before anything is typed', () => {
     should(linked.messages.join('\n')).containEql("on the card !A7 in the app's Inbox (session lead-1)");
     should(linked.messages.join('\n')).not.containEql('agenda of');
     should(unlinked.messages.some(message => message.startsWith('Open the card'))).be.false();
+  });
+
+  it('should need no --session at the owner’s own shell: the daemon picks the board, and the link names it', async () => {
+    // Arrange
+    const { controller, seeds, messages } = rig({ appOrigin: 'https://app.example/', machine: async () => MACHINE });
+
+    // Act
+    await controller.add('GITHUB', { totp: true });
+
+    // Assert
+    should(seeds.confirms).deepEqual([{}]);
+    should(messages.join('\n')).containEql(`(session ${OWNER_BOARD})`);
+    should(messages).containEql(
+      `Open the card: https://app.example/#agenda/A7?session=${OWNER_BOARD}&machine=${MACHINE}`,
+    );
+  });
+
+  it('should still send --session when one is named, and print a link without a machine if it cannot be read', async () => {
+    // Arrange
+    const named = rig({ appOrigin: 'https://app.example/', machine: async () => MACHINE });
+    const unreadable = rig({
+      session: 'lead-1',
+      appOrigin: 'https://app.example/',
+      machine: async () => {
+        throw new Error('daemon is busy');
+      },
+    });
+
+    // Act
+    await named.controller.add('GITHUB', { totp: true, session: 'other-1' });
+    await unreadable.controller.add('GITHUB', { totp: true });
+
+    // Assert
+    should(named.seeds.confirms).deepEqual([{ session: 'other-1' }]);
+    should(unreadable.messages).containEql('Open the card: https://app.example/#agenda/A7?session=lead-1');
   });
 
   it('should name an older daemon before asking for the key', async () => {

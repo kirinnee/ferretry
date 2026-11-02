@@ -2122,7 +2122,9 @@ export interface SecretWorld {
   readonly identity?: DaemonIdentity;
   readonly clock?: ClockPort;
   /** The staged 2FA seeds' world: whether a passkey exists (yes), the input cards, the agenda, and their clock. */
-  readonly seeds?: Partial<Pick<TwoFactorSeedStagesDeps, 'anyPasskey' | 'cards' | 'agenda' | 'clock' | 'newStageId'>>;
+  readonly seeds?: Partial<
+    Pick<TwoFactorSeedStagesDeps, 'anyPasskey' | 'cards' | 'agenda' | 'clock' | 'newStageId' | 'ownerSession'>
+  >;
 }
 
 /** A clock the vault fixtures stamp with, so every summary in a test is the same instant. */
@@ -2190,6 +2192,7 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
       hostName: 'kirin-box',
       ...(world.seeds?.cards === undefined ? {} : { cards: world.seeds.cards }),
       ...(world.seeds?.agenda === undefined ? {} : { agenda: world.seeds.agenda }),
+      ...(world.seeds?.ownerSession === undefined ? {} : { ownerSession: world.seeds.ownerSession }),
       ...(world.seeds?.newStageId === undefined ? {} : { newStageId: world.seeds.newStageId }),
     }),
   };

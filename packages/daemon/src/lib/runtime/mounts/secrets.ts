@@ -849,14 +849,14 @@ function factorRoutes(
                 const id = pathAccountId(context);
                 const stage = pathStageId(context);
                 const { session } = await parseBody(context.request, ConfirmTwoFactorSeedRequestSchema);
-                const { agendaItemId } = await seeds.confirmInApp(
+                const { agendaItemId, sessionId } = await seeds.confirmInApp(
                   id,
                   stage,
                   session,
                   askedByWords(context),
                   stageCaller(context),
                 );
-                return TwoFactorSeedConfirmingSchema.parse({ stage, session, agendaItemId });
+                return TwoFactorSeedConfirmingSchema.parse({ stage, session: sessionId, agendaItemId });
               },
               201,
             ),

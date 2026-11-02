@@ -46,6 +46,8 @@
 import {
   type CapabilityGrants,
   DAEMON_CAPABILITIES,
+  type DaemonId,
+  DaemonIdentityViewSchema,
   type DeviceGrantsPatch,
   DeviceGrantsPatchSchema,
   type PairedDevice,
@@ -83,6 +85,8 @@ import {
 import { type DeviceGrantOutcome, GrantError, isGovernedCaller } from '../../grants/index.ts';
 
 export interface PairingSubsystem {
+  /** This daemon's id: the fingerprint its pairing QR carries. */
+  readonly daemonId: DaemonId;
   /** A live code, replacing any code still outstanding, for a device that will hold `grants`. */
   mint(grants: PairingGrantSet): PairingCodeMintResponse;
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined;
@@ -274,6 +278,16 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
           ? errorResponse(404, 'pairing status not found', 'pairing_status_not_found')
           : jsonResponse(PairingCodeStatusResponseSchema.parse(status));
       },
+    },
+    {
+      // Which machine this is, so a link the command line prints opens the app on it (`fy rules add --open`).
+      method: 'GET',
+      path: '/v1/pair/identity',
+      minimum: 'operator',
+      caller: 'person',
+      capability: PAIRING_DEMAND,
+      noStore: true,
+      handle: async () => jsonResponse(DaemonIdentityViewSchema.parse({ daemonId: subsystem.daemonId })),
     },
     {
       method: 'GET',

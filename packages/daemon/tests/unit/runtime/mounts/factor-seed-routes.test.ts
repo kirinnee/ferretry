@@ -66,7 +66,7 @@ class CountingDocuments extends MemorySecretDocuments {
 
 /** A GitHub account (kirinnee, at github.com) and a Google one, over a real step-up registry as the witness. */
 async function rig(
-  seeds: Partial<Pick<TwoFactorSeedStagesDeps, 'anyPasskey' | 'cards' | 'agenda'>> = {},
+  seeds: Partial<Pick<TwoFactorSeedStagesDeps, 'anyPasskey' | 'cards' | 'agenda' | 'ownerSession'>> = {},
 ): Promise<Rig> {
   const clock = { now: NOW };
   const index = new MemoryLoginIndex();
@@ -478,6 +478,86 @@ describe('a staged seed', () => {
     const view = await r.call('GET', `/v1/accounts/seed-stages/${staged.stage}`, undefined, asDevice);
     should(view.body).match({ account: 'GITHUB', issuer: 'GitHub', accountName: 'kirinnee' });
     should(closed).match([{ sessionId: 'owner-board', id: 'A7', note: /^Saved/u }]);
+  });
+});
+
+describe('a confirm card for the owner at their own shell (C57)', () => {
+  const confirm = (stage: string, body: Record<string, unknown>) =>
+    ['POST', `/v1/accounts/GITHUB/factors/seed/${stage}/confirm-in-app`, body] as const;
+
+  it('should put the card on the owner’s most recently active session when none is named, and say which', async () => {
+    // Arrange
+    const raised: string[] = [];
+    const r = await rig({
+      agenda: {
+        raise: async sessionId => {
+          raised.push(sessionId);
+          return 'A9';
+        },
+        close: async () => undefined,
+      },
+      ownerSession: async () => 'live-board',
+    });
+    const staged = await stage(r);
+
+    // Act
+    const asked = await r.call(...confirm(staged.stage, {}));
+    const again = await r.call(...confirm(staged.stage, {}));
+
+    // Assert
+    should(asked.status).equal(201);
+    should(asked.body).deepEqual({ stage: staged.stage, session: 'live-board', agendaItemId: 'A9' });
+    should(again.body).deepEqual(asked.body);
+    should(raised).deepEqual(['live-board']);
+  });
+
+  it('should keep a session the caller names, and ask the daemon for none then', async () => {
+    // Arrange
+    const raised: string[] = [];
+    const r = await rig({
+      agenda: {
+        raise: async sessionId => {
+          raised.push(sessionId);
+          return 'A9';
+        },
+        close: async () => undefined,
+      },
+      ownerSession: async () => {
+        throw new Error('must not be asked when a session is named');
+      },
+    });
+    const staged = await stage(r);
+
+    // Act
+    const asked = await r.call(...confirm(staged.stage, { session: 'named-board' }));
+
+    // Assert
+    should(asked.status).equal(201);
+    should(raised).deepEqual(['named-board']);
+  });
+
+  it('should refuse with a next step when no session is running, and raise nothing', async () => {
+    // Arrange
+    const raised: string[] = [];
+    const r = await rig({
+      agenda: {
+        raise: async sessionId => {
+          raised.push(sessionId);
+          return 'A9';
+        },
+        close: async () => undefined,
+      },
+      ownerSession: async () => undefined,
+    });
+    const staged = await stage(r);
+
+    // Act
+    const asked = await r.call(...confirm(staged.stage, {}));
+
+    // Assert
+    should(asked.status).equal(409);
+    should(asked.body).match({ code: 'no_session', error: /--session/u });
+    should(raised).deepEqual([]);
   });
 });
 
