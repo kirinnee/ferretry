@@ -510,9 +510,11 @@ as an agenda card does, with nothing folded:
 1. the title, with the **summary** as one line under it;
 2. **premise** and **context** as two soft tinted blocks, each label above its points (the agenda card's own
    `Situation` and tokens); a repeated `--premise` / `--context` is one bullet each;
-3. the owner's **ask**, verbatim, with its clarifications;
+3. the owner's **ask**, verbatim, with its clarifications (the ask, clarifications, history notes and terms are Markdown too);
 4. **How to test**: a list is drawn as numbered steps, each with a box the owner ticks as they go (on that screen
-   only — a tick is a reminder, never a verdict); text that is not a list is drawn whole. On a card waiting to be
+   only — a tick is a reminder, never a verdict). Steps keep the number they were written with (a list that
+   starts at 4 reads 4, 5, 6); a heading or a paragraph set apart between steps is a sub-heading above the steps
+   that follow, and text before the first step is the lead. On a card waiting to be
    tested, **Not good** (left) and **Done** (right) sit right under it, and a swipe right is Done, left is Not good;
 5. the **brief**, then the **terms** — and each term is also a dotted tap tip where the card's text first uses it.
 

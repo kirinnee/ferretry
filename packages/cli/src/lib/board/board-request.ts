@@ -14,14 +14,14 @@ import {
   type BoardTerm,
   BoardTermsSchema,
   DependencyUntilSchema,
-  prUrlParts,
+  ExternalLaneTriggerSchema,
   parseTaskRef,
+  prUrlParts,
+  stripListMarker,
   type TaskKind,
   TaskKindSchema,
   type TaskRef,
-  ExternalLaneTriggerSchema,
   TaskWorkflowSchema,
-  stripListMarker,
   toBullets,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
@@ -361,7 +361,7 @@ export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts
     ...(context === undefined ? {} : { context }),
     ...(terms === undefined ? {} : { terms }),
     ...(texts.brief === undefined ? {} : { brief: texts.brief }),
-    ...(texts.howToTest === undefined ? {} : { howToTest: texts.howToTest.trim() }),
+    ...(texts.howToTest === undefined ? {} : { howToTest: texts.howToTest }),
   };
   if (Object.keys(fields).length === 0) {
     refuse(

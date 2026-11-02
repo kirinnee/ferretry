@@ -62,8 +62,10 @@ export function Prose({ text }: { readonly text: string }) {
 }
 
 /**
- * HOW TO TEST: the owner's checklist before Done. A list is drawn as numbered steps, each with a box the owner
- * ticks as they go (on this screen only: a tick is a reminder, never a verdict); anything else is drawn whole.
+ * HOW TO TEST: the owner's checklist before Done. A list is drawn as numbered steps (each keeps the number it was
+ * written with), each with a box the owner ticks as they go (on this screen only: a tick is a reminder, never a
+ * verdict); a heading or label between steps is drawn as a sub-heading above the steps it introduces; anything
+ * else is drawn whole.
  */
 export function HowToTest({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
   const parsed = testSteps(text);
@@ -75,32 +77,45 @@ export function HowToTest({ text, renderProse }: { readonly text: string; readon
       if (!next.delete(step)) next.add(step);
       return next;
     });
+  const { blocks } = parsed;
+  const total = blocks.reduce((count, block) => count + (block.kind === 'steps' ? block.steps.length : 0), 0);
+  let place = 0;
   return (
-    <div className="fy-board-test" data-test-steps={parsed.steps.length}>
+    <div className="fy-board-test" data-test-steps={total}>
       {parsed.lead === null ? null : <div className="fy-board-test__lead">{renderProse(parsed.lead)}</div>}
-      <ol className="fy-board-test__list">
-        {parsed.steps.map((step, index) => (
-          <li
-            className="fy-board-test__step"
-            data-done={ticked.has(index) ? '' : undefined}
-            // biome-ignore lint/suspicious/noArrayIndexKey: a step's place is its identity
-            key={index}
-          >
-            <input
-              aria-label={`Step ${index + 1} checked`}
-              checked={ticked.has(index)}
-              className="fy-attn-step__box"
-              data-test-tick={index}
-              onChange={() => toggle(index)}
-              type="checkbox"
-            />
-            <span aria-hidden="true" className="fy-board-test__n">
-              {index + 1}
-            </span>
-            <div className="fy-board-test__text">{renderProse(step)}</div>
-          </li>
-        ))}
-      </ol>
+      {blocks.map((block, at) => {
+        if (block.kind === 'section')
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a block's place is its identity
+            <div className="fy-board-test__section" data-test-section="" key={at}>
+              {renderProse(block.text)}
+            </div>
+          );
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: a block's place is its identity
+          <ol className="fy-board-test__list" key={at}>
+            {block.steps.map(step => {
+              const index = place++;
+              return (
+                <li className="fy-board-test__step" data-done={ticked.has(index) ? '' : undefined} key={index}>
+                  <input
+                    aria-label={`Step ${step.n} checked`}
+                    checked={ticked.has(index)}
+                    className="fy-attn-step__box"
+                    data-test-tick={index}
+                    onChange={() => toggle(index)}
+                    type="checkbox"
+                  />
+                  <span aria-hidden="true" className="fy-board-test__n">
+                    {step.n}
+                  </span>
+                  <div className="fy-board-test__text">{renderProse(step.text)}</div>
+                </li>
+              );
+            })}
+          </ol>
+        );
+      })}
     </div>
   );
 }
@@ -121,7 +136,7 @@ export function AskSection({
   const origin = askOrigin(task, names, ageLabel(task.createdAt, now));
   return (
     <>
-      <blockquote className="fy-board-detail__ask">{askWords(task.ask.text)}</blockquote>
+      <blockquote className="fy-board-detail__ask">{cardProse(askWords(task.ask.text))}</blockquote>
       <p className="fy-board-detail__quiet" data-kind="ask-origin">
         from {origin.who}
         {origin.via === null ? null : ` via ${origin.via}`}
@@ -140,7 +155,7 @@ export function AskSection({
         )}
       </p>
       {task.clarifications.length === 0 ? null : (
-        <ul className="fy-board-detail__list">
+        <ul className="fy-board-detail__list" data-kind="clarifications">
           {task.clarifications.map(clarification => (
             <li key={`${clarification.at}:${clarification.text}`}>
               <span className="fy-board-detail__quiet">
@@ -152,7 +167,7 @@ export function AskSection({
                     : 'you'}
                 {clarification.by.kind === 'ferret' ? ` (${names(clarification.by.sessionId)})` : ''}:{' '}
               </span>
-              {clarification.text}
+              <div className="fy-board-detail__clarified">{cardProse(clarification.text)}</div>
             </li>
           ))}
         </ul>
@@ -175,7 +190,7 @@ export function TermsTable({ terms }: { readonly terms: BoardTaskView['terms'] }
         {terms.map(entry => (
           <tr key={entry.term}>
             <th scope="row">{entry.term}</th>
-            <td>{entry.meaning}</td>
+            <td>{cardProse(entry.meaning)}</td>
           </tr>
         ))}
       </tbody>
@@ -482,7 +497,7 @@ export function HistorySection({
               {entry.text}
               <span className="fy-board-detail__quiet"> · {ageLabel(entry.at, now) ?? ''}</span>
             </p>
-            {entry.detail === null ? null : <p className="fy-board-detail__detail">{entry.detail}</p>}
+            {entry.detail === null ? null : <div className="fy-board-detail__detail">{cardProse(entry.detail)}</div>}
           </div>
         </li>
       ))}

@@ -45,6 +45,7 @@ import {
 import type { MoveChoice } from '../../lib/board-move.ts';
 import { cardSegments, type FerretNames } from '../../lib/board-present.ts';
 import type { BoardCardOf } from '../../lib/board-view.ts';
+import { plainPreview } from '../../lib/plain-label.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AnswerIcon, BoardDoneAction } from './board-done-action.tsx';
 import { BoardIcon } from './board-icons.tsx';
@@ -118,6 +119,7 @@ export function BoardCard({
   answer = ANSWER_AT_REST,
 }: BoardCardProps) {
   const { task } = card;
+  const preview = plainPreview(task.summary);
   const segments = cardSegments(task, {
     names,
     now,
@@ -158,13 +160,11 @@ export function BoardCard({
         className="fy-board-card__main"
         draggable={false}
         onNavigate={onNavigate}
-        title={task.summary === '' ? task.title : `${task.title} — ${task.summary}`}
+        title={preview === '' ? task.title : `${task.title} — ${preview}`}
         to={href}
       >
         <span className="fy-board-card__title">{task.title}</span>
-        {density === 'side' || task.summary.trim() === '' ? null : (
-          <span className="fy-board-card__summary">{task.summary}</span>
-        )}
+        {density === 'side' || preview === '' ? null : <span className="fy-board-card__summary">{preview}</span>}
         <span className="fy-board-card__meta">
           {lane === undefined ? null : (
             <span className="fy-board-seg" data-seg="lane" data-tone="quiet" title="Lane">

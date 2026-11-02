@@ -488,12 +488,20 @@ describe('written and hasLinks', () => {
 });
 
 describe('testSteps', () => {
+  const steps = (...entries: readonly (readonly [number, string])[]) => ({
+    kind: 'steps' as const,
+    steps: entries.map(([n, text]) => ({ n, text })),
+  });
+
   it('splits a numbered or bulleted list into steps, with the text before it as the lead', () => {
     expect(testSteps('On the Mac, v4.157:\n\n1. Open **Board**\n2) Tap &F1\n3. See it')).toEqual({
       lead: 'On the Mac, v4.157:',
-      steps: ['Open **Board**', 'Tap &F1', 'See it'],
+      blocks: [steps([1, 'Open **Board**'], [2, 'Tap &F1'], [3, 'See it'])],
     });
-    expect(testSteps('- one\n* two\n+ three')).toEqual({ lead: null, steps: ['one', 'two', 'three'] });
+    expect(testSteps('- one\n* two\n+ three')).toEqual({
+      lead: null,
+      blocks: [steps([1, 'one'], [2, 'two'], [3, 'three'])],
+    });
   });
 
   it('keeps a step’s own lines with it: a second paragraph, an indented diagram', () => {
@@ -508,16 +516,69 @@ describe('testSteps', () => {
       '     A-->B',
       `   ${fence}`,
     ].join('\n');
-    expect(testSteps(text)?.steps).toEqual([
-      'Open it\n\nthen wait',
-      `Compare\n${fence}mermaid\ngraph TB\n  A-->B\n${fence}`,
+    expect(testSteps(text)?.blocks).toEqual([
+      steps([1, 'Open it\n\nthen wait'], [2, `Compare\n${fence}mermaid\ngraph TB\n  A-->B\n${fence}`]),
     ]);
   });
 
-  it('is null for text that is not a list, or that carries on after the list', () => {
+  it('keeps the number a run starts at, and counts on from it', () => {
+    expect(testSteps('2FA codes\n4. Run it\n5. Enter it\n9. Done')?.blocks).toEqual([
+      steps([4, 'Run it'], [5, 'Enter it'], [6, 'Done']),
+    ]);
+  });
+
+  it('draws a heading or a paragraph set apart between steps as a section, and restarts the number after it', () => {
+    const text =
+      '## Setup\n1. Open it → see `fy`\n2. Look\n\n## 2FA codes\n4. Run **it**\n\nThen check:\n- tick\n\nLast';
+    expect(testSteps(text)).toEqual({
+      lead: '## Setup',
+      blocks: [
+        steps([1, 'Open it → see `fy`'], [2, 'Look']),
+        { kind: 'section', text: '## 2FA codes' },
+        steps([4, 'Run **it**']),
+        { kind: 'section', text: 'Then check:' },
+        steps([5, 'tick']),
+        { kind: 'section', text: 'Last' },
+      ],
+    });
+  });
+
+  it('starts a section at a heading even without a blank line, and keeps a multi-line label whole', () => {
+    expect(testSteps('1. a\n## Next\nmore label\n# Third\n2. b')?.blocks).toEqual([
+      steps([1, 'a']),
+      { kind: 'section', text: '## Next\nmore label' },
+      { kind: 'section', text: '# Third' },
+      steps([2, 'b']),
+    ]);
+  });
+
+  it('reads a line right under a step, with no blank line, as that step’s own next line', () => {
+    expect(testSteps('1. Open it\nthen look\n   and wait\n2. Go')?.blocks).toEqual([
+      steps([1, 'Open it\nthen look\nand wait'], [2, 'Go']),
+    ]);
+  });
+
+  it('never reads a list inside a fence as steps, in the lead, a step or a section', () => {
+    const fence = '`'.repeat(3);
+    const lead = `${fence}\n1. not a step\n${fence}\n1. real`;
+    expect(testSteps(lead)).toEqual({
+      lead: `${fence}\n1. not a step\n${fence}`,
+      blocks: [steps([1, 'real'])],
+    });
+    const inStep = `1. run\n   ${fence}\n   2. no\n\n   ${fence}\n2. real`;
+    expect(testSteps(inStep)?.blocks).toEqual([steps([1, `run\n${fence}\n2. no\n\n${fence}`], [2, 'real'])]);
+    const inSection = `1. a\n\nLabel\n${fence}\n- no\n\n## still\n${fence}\n- yes`;
+    expect(testSteps(inSection)?.blocks).toEqual([
+      steps([1, 'a']),
+      { kind: 'section', text: `Label\n${fence}\n- no\n\n## still\n${fence}` },
+      steps([2, 'yes']),
+    ]);
+  });
+
+  it('is null for text that is not a list', () => {
     expect(testSteps('Just open it and look.')).toBeNull();
     expect(testSteps('')).toBeNull();
-    expect(testSteps('1. Open it\n2. Look\nThen you are done.')).toBeNull();
+    expect(testSteps('## Heading\nOnly words')).toBeNull();
   });
 });
 

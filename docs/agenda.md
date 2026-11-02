@@ -386,7 +386,7 @@ whose blocker has cleared is a bug.
 **Every segment is short points, never a paragraph.** The premise, context, decided, still-open, question
 answer, body, option details, ask, revision notes and terms all read as the same Markdown on the card: bullets
 (`-` or `•`), numbered lists, **bold**, `code`, references, and a single line break kept as a line
-(`segmentMarkdown` in the app owns that, so no segment flattens its lines). Writing follows: answer first, one
+(`segmentMarkdown` in the app owns that, so no segment flattens its lines, and a label line directly above a list that starts at 4 still reads as a label and a list). Writing follows: answer first, one
 idea per line. `fy agenda add` and `agenda edit` warn, never block, when a segment is a single paragraph over
 280 characters (`AGENDA_SEGMENT_PARAGRAPH_LENGTH` in `@ferretry/protocol`), saying to split it into short points
 or bold the answer first. Lists, tables, headings and fenced code are not counted as paragraphs.

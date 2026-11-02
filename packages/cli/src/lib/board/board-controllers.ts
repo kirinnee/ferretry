@@ -290,7 +290,7 @@ export class BoardController {
       options.assignee === undefined ? null : resolveSessionRef(options.assignee, await this.gateway.sessions());
     const request = buildBoardCreateRequest(options, titleWords, {
       brief: texts.brief ?? '',
-      howToTest: texts.howToTest?.trim() ?? '',
+      howToTest: texts.howToTest ?? '',
       projectId: options.project === undefined ? undefined : target?.id,
       assignee,
     });
