@@ -63,6 +63,7 @@ const open = async (
     readonly snoozeTask?: (...args: never[]) => Promise<unknown>;
     readonly snoozed?: boolean;
     readonly noHost?: boolean;
+    readonly disconnected?: boolean;
     readonly page?: Partial<AgendaInboxPageProps>;
   } = {},
 ) => {
@@ -77,7 +78,7 @@ const open = async (
   const host: ToTestHost = {
     actions,
     ports: {},
-    connectionOf: () => laptop,
+    connectionOf: () => (options.disconnected === true ? undefined : laptop),
   };
   view = await mount(
     <InboxHarness
@@ -232,6 +233,18 @@ describe('Inbox — answering a card waiting for a try', () => {
     await sendBack(box, 'It crashes');
     expect(actions.calls).toEqual(['moveTask:["implement","It crashes"]']);
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('says so, and opens no box, when Not good is pressed for a machine that is not connected here', async () => {
+    const { root, actions } = await open({ disconnected: true });
+    await interact(() =>
+      must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click(),
+    );
+    expect(root.querySelector('[data-to-test-notice]')?.textContent).toBe(
+      'That machine is not connected here, so the card cannot be sent back from this page.',
+    );
+    expect(document.body.querySelector('[data-board-send-back]')).toBeNull();
+    expect(actions.calls).toEqual([]);
   });
 
   it('says a refusal on the row, as the Board does', async () => {
