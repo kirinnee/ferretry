@@ -41,6 +41,7 @@ const open = async (cards: readonly InboxCard[]) => {
           now={NOW}
           onNavigate={to => navigated.push(to)}
           phone={false}
+          renderComposer={() => <textarea data-composer="" />}
         />
       )}
     />,
