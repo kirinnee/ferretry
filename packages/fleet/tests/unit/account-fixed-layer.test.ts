@@ -769,10 +769,10 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // Assert
     should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
-    should(text).containEql('Search first (`zz search`, snoozed too).');
+    should(text).containEql('Search first (`zz search`).');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
-    should(text).containEql('Never track work ("please test/verify", status)');
-    should(text).containEql("the board's gates or `zz notify` cover it; after a Not good");
+    should(text).containEql('Never track work ("please test/verify")');
+    should(text).containEql('gates or `zz notify` cover it; after a Not good');
     should(text).containEql('after a Not good, open one only if you need input.');
     // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
     should(text).containEql("Owner's question: answer ON it, options stay");
@@ -841,9 +841,9 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Board: opt-in, daemon-enforced; overrides any rule to record tasks.');
+    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
     should(text).containEql(
-      'A card only if `zz board status` says on, under a card you hold (`--parent`), or on the owner\'s Yes to `zz agenda add -k yesno` "Track this on the board?" (`--approval !A<n>`).',
+      'Card only if `zz board status` is on, under your card (`--parent`), or the owner said Yes to `zz agenda add -k yesno` "Track this on the board?" (`--approval !A<n>`).',
     );
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
@@ -855,7 +855,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).containEql('A card (&F412; agenda !A48):');
-    should(text).containEql('First `zz search`; link a match, no duplicate.');
+    should(text).containEql('`zz search` first; link a match.');
     should(text).not.containEql('#F');
     should(text).containEql(
       'Make: `zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
@@ -865,7 +865,6 @@ describe('BOARD_INSTRUCTION', () => {
     );
     should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('`zz agenda add --task <id>` (owner)');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
@@ -879,7 +878,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(900);
+    should(BOARD_INSTRUCTION('fy').length).be.below(840);
   });
 });
 
