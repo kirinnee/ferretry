@@ -179,10 +179,19 @@
 }
 /* A phone: the tools take their own full line, Find stretching to fill it; 16px text so iOS never zooms. */
 @media (max-width: 767.98px) {
+  /* ONE ROW: the status menu, then the who menu, Find's icon and the theme switch beside it. */
+  .fy-attn-inbox__head {
+    flex-wrap: nowrap;
+  }
   .fy-attn-inbox__tools {
-    flex-basis: 100%;
-    flex-wrap: wrap;
+    flex: 1 1 0;
+    flex-wrap: nowrap;
     justify-content: flex-start;
+  }
+  /* An open Find box needs the whole line: the row folds, and the box takes the second line. */
+  .fy-attn-inbox__head:has(.fy-filter-menu__finding),
+  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools {
+    flex-wrap: wrap;
   }
   .fy-attn-inbox__find {
     width: auto;
@@ -209,8 +218,9 @@
   }
   .fy-attn-inbox__machine {
     min-height: 44px;
-    max-width: none;
-    flex-shrink: 0;
+    min-width: 0;
+    max-width: 7.5rem;
+    flex: 0 1 auto;
   }
 }
 .fy-attn-inbox__clear {
@@ -1277,6 +1287,13 @@
 .fy-totest__surface[data-dragging] {
   transition: none;
 }
+/* The head, its (i) panel and the quiet line under it are ONE block: the Inbox card and the side panel keep it in view. */
+.fy-totest__sticky {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
 /* The head does not scroll, so a drag down from it is the compass rather than the page moving. */
 .fy-totest__top {
   touch-action: none;
@@ -1395,11 +1412,14 @@
 .fy-inbox-step .fy-totest__surface {
   flex: 1 0 auto;
 }
-.fy-inbox-step .fy-totest__top {
+.fy-inbox-step .fy-totest__sticky {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--surface);
+  padding-bottom: var(--gap-xs);
+}
+.fy-inbox-step .fy-totest__top {
   padding-block: var(--gap-xs);
 }
 .fy-inbox-step .fy-totest__actions {
@@ -1523,7 +1543,7 @@
 }
 
 /* On the task card the line sits inside the card's padding, not as a full-bleed band. */
-.fy-totest__surface > .fy-meta-line {
+.fy-totest__sticky > .fy-meta-line {
   border-bottom: 0;
   background: none;
   padding: 0;
@@ -1551,4 +1571,109 @@
   color: var(--warn);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+}
+
+/* The phone's filter menus: a button that says the choice, a short radio list under it. */
+.fy-filter-menu {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.fy-filter-menu__trigger,
+.fy-filter-menu__find {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--gap-xs);
+  border: var(--stroke-control, 1px) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  padding: 0 var(--gap-md);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-filter-menu__find {
+  min-width: 44px;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+}
+.fy-filter-menu__finding {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-filter-menu__finding .fy-attn-inbox__find {
+  flex: 1 1 0;
+}
+.fy-filter-menu__list {
+  position: absolute;
+  top: calc(100% + var(--gap-xs));
+  left: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 11rem;
+  flex-direction: column;
+  border: var(--stroke-control, 1px) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: var(--gap-xs);
+  box-shadow: var(--shadow-panel);
+}
+.fy-filter-menu__item {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 0 var(--gap-md);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.fy-filter-menu__item[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+
+/* The kind chip: TASK (accent) or AGENDA (pending) at the start of every card's meta line, so a swipe is never a guess. */
+.fy-kind-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-right: var(--gap-sm);
+  border: var(--stroke) solid var(--chip-border);
+  border-radius: var(--radius-badge);
+  background: var(--chip-bg);
+  padding: 0 var(--gap-sm);
+  color: var(--chip-ink);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-base);
+  vertical-align: baseline;
+}
+.fy-kind-chip[data-card-kind='task'] {
+  --chip-ink: var(--accent);
+  --chip-bg: var(--accent-soft);
+  --chip-border: color-mix(in srgb, var(--accent) 38%, var(--surface));
+}
+.fy-kind-chip[data-card-kind='agenda'] {
+  --chip-ink: var(--pend);
+  --chip-bg: var(--pend-bg);
+  --chip-border: var(--pend-border);
+}
+.fy-filter-menu__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-filter-menu__trigger {
+  max-width: 8.5rem;
 }

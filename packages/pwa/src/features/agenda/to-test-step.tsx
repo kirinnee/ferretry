@@ -33,7 +33,7 @@ export function ToTestStep({
   const room = useDeckRoom(box, row.key, PAGE_FOOT_PX);
   return (
     <section
-      aria-label="Card to test"
+      aria-label={row.stage === 'approve' ? 'Plan to approve' : 'Card to test'}
       className="fy-inbox-step"
       data-inbox-open-to-test={row.key}
       ref={box}

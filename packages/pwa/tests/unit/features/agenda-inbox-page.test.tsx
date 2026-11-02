@@ -196,7 +196,34 @@ describe('AgendaInboxPage states', () => {
     const phone = await mount(page(fakeInbox(), [threeWay], { phone: true }));
     expect(phone.container.querySelector('h1')).toBeNull();
     expect(phone.container.querySelector('main')?.getAttribute('aria-label')).toBe('Inbox');
-    // The filters stay in the head row.
+    // The filters stay in ONE row: two menus and Find behind its icon.
+    expect(phone.container.querySelector('[data-agenda-filter] [aria-haspopup="menu"]')?.textContent).toBe('Open');
+    expect(phone.container.querySelector('[data-agenda-kind] [aria-haspopup="menu"]')?.textContent).toBe('All');
+    expect(phone.container.querySelector('[aria-label="Find in Inbox"]')).toBeNull();
+    expect(phone.container.querySelector('[data-agenda-find-open]')).not.toBeNull();
+    await phone.unmount();
+  });
+
+  it("changes the phone's list through its two menus, and finds through the search icon", async () => {
+    const phone = await mount(page(fakeInbox(), [threeWay], { phone: true }));
+    const trigger = (hook: string) =>
+      must(phone.container.querySelector<HTMLButtonElement>(`[${hook}] [aria-haspopup="menu"]`), hook);
+    await interact(() => trigger('data-agenda-filter').click());
+    expect(
+      [...phone.container.querySelectorAll('[data-agenda-filter-option]')].map(option => option.textContent),
+    ).toEqual(['Open', 'Snoozed (0)', 'Replied (0)', 'Resolved']);
+    await interact(() =>
+      must(phone.container.querySelector<HTMLElement>('[data-agenda-filter-option="resolved"]'), 'Resolved').click(),
+    );
+    expect(trigger('data-agenda-filter').textContent).toBe('Resolved');
+    await interact(() => trigger('data-agenda-kind').click());
+    await interact(() =>
+      must(phone.container.querySelector<HTMLElement>('[data-agenda-kind-option="auto"]'), 'Agents').click(),
+    );
+    expect(trigger('data-agenda-kind').textContent).toBe('Agents');
+    await interact(() =>
+      must(phone.container.querySelector<HTMLElement>('[data-agenda-find-open]'), 'search icon').click(),
+    );
     expect(phone.container.querySelector('[aria-label="Find in Inbox"]')).not.toBeNull();
     await phone.unmount();
   });
@@ -436,6 +463,28 @@ describe('AgendaInboxPage rows', () => {
     expect(rows(mounted)).toHaveLength(0);
     await interact(() =>
       must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-inbox__clear'), 'Show everything').click(),
+    );
+    expect(rows(mounted)).toHaveLength(2);
+    await mounted.unmount();
+  });
+
+  it("picks the phone's machine from a compact menu with a machine icon", async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true }));
+    expect(mounted.container.querySelector('select[data-agenda-machine]')).toBeNull();
+    const trigger = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-agenda-machine] [aria-haspopup="menu"]'),
+      'machine menu',
+    );
+    expect(trigger.textContent).toBe('All');
+    await interact(() => trigger.click());
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-machine-option="laptop"]'), 'laptop').click(),
+    );
+    expect(rows(mounted)).toHaveLength(1);
+    expect(trigger.textContent).not.toBe('All');
+    await interact(() => trigger.click());
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-machine-option=""]'), 'all machines').click(),
     );
     expect(rows(mounted)).toHaveLength(2);
     await mounted.unmount();

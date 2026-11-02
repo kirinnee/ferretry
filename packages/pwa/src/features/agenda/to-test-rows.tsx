@@ -23,6 +23,7 @@ import { Spinner } from '../../components/spinner.tsx';
 import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
 import { type SnoozePick, snoozePicks } from '../../lib/agenda-snooze.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
+import { TASK_CARD_KIND } from '../../lib/card-kind.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { releaseWords, type ToTestCard } from '../../lib/to-test-inbox.ts';
@@ -42,6 +43,7 @@ import {
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
 import { CardHead, type CardHeadPager } from './card-head.tsx';
+import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { SwipeCompass } from './swipe-reveal.tsx';
@@ -367,85 +369,88 @@ function ToTestRow({
               : `translate3d(${swipe.offsetX}px, ${swipe.offsetY}px, 0)`,
         }}
       >
-        <CardHead
-          className="fy-totest__top"
-          info={{ controls: infoId, open: infoOpen, onToggle: () => setInfoOpen(open => !open) }}
-          meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
-          snooze={{
-            onSnooze: until => snooze(row, until),
-            label: `Snooze: ${title}`,
-            disabled: busy,
-            ...(now === undefined ? {} : { now }),
-          }}
-          title={
-            <MarqueeTitle
-              title={title}
-              wrap={text => (
-                <RouteLink
-                  className="fy-totest__title"
-                  data-to-test-title=""
-                  onNavigate={onNavigate}
-                  to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
-                >
-                  {text}
-                </RouteLink>
-              )}
-            />
-          }
-          {...(pager === undefined ? {} : { pager })}
-          {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
-        />
-        {infoOpen ? (
-          <div className="fy-totest__info" data-to-test-info="" id={infoId}>
-            <p className="fy-totest__meta">
-              <span data-to-test-machine="">{row.card.machine}</span>
-              <span aria-hidden="true">·</span>
-              {release === null ? null : (
-                <>
-                  <span data-to-test-release="">{release}</span>
-                  <span aria-hidden="true">·</span>
-                </>
-              )}
-              <span>{words.what}</span>
-            </p>
-            {skipButton ? (
-              <div className="fy-totest__quiet">
-                <button
-                  aria-label={`Skip: ${title}`}
-                  className="kt-btn"
-                  data-to-test-skip=""
-                  data-variant="ghost"
-                  disabled={busy}
-                  onClick={() => onSkip(row)}
-                  type="button"
-                >
-                  <SkipForward aria-hidden="true" size={14} />
-                  Skip
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        <CardMetaLine
-          chat={
-            row.taskSession == null
-              ? undefined
-              : {
-                  to: daemonSessionPath(row.card.daemonId, row.taskSession),
-                  onNavigate,
-                  hooks: { 'data-to-test-open-chat': '' },
-                }
-          }
-          hooks={{ 'data-to-test-who': '' }}
-        >
-          {row.taskName === null || sameWords(row.taskName, title) ? null : (
-            <span className="fy-meta-line__ferret" data-to-test-ferret="">
-              {row.taskName}
-            </span>
-          )}
-          {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
-          {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
-        </CardMetaLine>
+        <div className="fy-totest__sticky">
+          <CardHead
+            className="fy-totest__top"
+            info={{ controls: infoId, open: infoOpen, onToggle: () => setInfoOpen(open => !open) }}
+            meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
+            snooze={{
+              onSnooze: until => snooze(row, until),
+              label: `Snooze: ${title}`,
+              disabled: busy,
+              ...(now === undefined ? {} : { now }),
+            }}
+            title={
+              <MarqueeTitle
+                title={title}
+                wrap={text => (
+                  <RouteLink
+                    className="fy-totest__title"
+                    data-to-test-title=""
+                    onNavigate={onNavigate}
+                    to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
+                  >
+                    {text}
+                  </RouteLink>
+                )}
+              />
+            }
+            {...(pager === undefined ? {} : { pager })}
+            {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
+          />
+          {infoOpen ? (
+            <div className="fy-totest__info" data-to-test-info="" id={infoId}>
+              <p className="fy-totest__meta">
+                <span data-to-test-machine="">{row.card.machine}</span>
+                <span aria-hidden="true">·</span>
+                {release === null ? null : (
+                  <>
+                    <span data-to-test-release="">{release}</span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
+                <span>{words.what}</span>
+              </p>
+              {skipButton ? (
+                <div className="fy-totest__quiet">
+                  <button
+                    aria-label={`Skip: ${title}`}
+                    className="kt-btn"
+                    data-to-test-skip=""
+                    data-variant="ghost"
+                    disabled={busy}
+                    onClick={() => onSkip(row)}
+                    type="button"
+                  >
+                    <SkipForward aria-hidden="true" size={14} />
+                    Skip
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <CardMetaLine
+            chat={
+              row.taskSession == null
+                ? undefined
+                : {
+                    to: daemonSessionPath(row.card.daemonId, row.taskSession),
+                    onNavigate,
+                    hooks: { 'data-to-test-open-chat': '' },
+                  }
+            }
+            hooks={{ 'data-to-test-who': '' }}
+          >
+            <CardKindChip kind={TASK_CARD_KIND} />
+            {row.taskName === null || sameWords(row.taskName, title) ? null : (
+              <span className="fy-meta-line__ferret" data-to-test-ferret="">
+                {row.taskName}
+              </span>
+            )}
+            {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
+            {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
+          </CardMetaLine>
+        </div>
         {empty ? null : (
           <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
             <h3 className="fy-totest__how-title">{words.section}</h3>

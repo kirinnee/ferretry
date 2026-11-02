@@ -3,7 +3,8 @@
  *
  * Only cards that need the owner are here (`awaitingOwner`): cards waiting for a try, then plans waiting for an OK.
  * Everything else — todo, in progress, in review, merged, closed — is on the Kanban and the List. A card waiting for a try
- * is the Inbox's own row (`ToTestList`), with the agenda card's head and gestures: Done and Not good as buttons, Skip under ⓘ, and on a
+ * is the Inbox's own box (`ToTestStep`, as in Answer quickly): the same head with its TASK chip, sticky at the top, and the same
+ * answer row, sticky at the bottom while the body scrolls, with the agenda card's gestures: Done and Not good as buttons, Skip under ⓘ, and on a
  * touch screen a swipe right (Done), left (Not good, with the same reason box) or the pull-down compass (Skip, the next card, Snooze) at once.
  * A plan to approve is the same row: swipe right or press Approve (the card moves to the lane after the gate), swipe left or press
  * Send back (the lane before it, with the owner's words); the card's brief is the plan. Only a plan whose gate has no lane on one
@@ -19,7 +20,8 @@ import type { ChatCards } from '../../lib/board-chat.ts';
 import type { BoardCardOf } from '../../lib/board-view.ts';
 import { withProjectName, withTaskName } from '../../lib/to-test-inbox.ts';
 import { StackPager } from '../agenda/stack-pager.tsx';
-import { type ToTestAnswers, ToTestList } from '../agenda/to-test-rows.tsx';
+import type { ToTestAnswers } from '../agenda/to-test-rows.tsx';
+import { ToTestStep } from '../agenda/to-test-step.tsx';
 
 const RANK_WORDS: Readonly<Record<StackRank, string>> = {
   'to-test': 'To test',
@@ -62,23 +64,20 @@ export function BoardCardsView({
   const entry = stack[index];
   if (entry === undefined) return null;
   const go = (to: number): void => setPlace({ key: stack[to]?.card.key ?? null, index: to });
-  const pager = {
-    index,
-    total: stack.length,
-    noun: 'card',
-    onPrevious: index > 0 ? () => go(index - 1) : undefined,
-    onNext: index < stack.length - 1 ? () => go(index + 1) : undefined,
-  };
+  const onPrevious = index > 0 ? () => go(index - 1) : undefined;
+  const onNext = index < stack.length - 1 ? () => go(index + 1) : undefined;
   return (
     <div className="fy-board-cards" data-board-cards="">
       {entry.toTest !== null && toTestAnswers !== undefined ? (
-        <ToTestList
+        <ToTestStep
           answers={toTestAnswers}
-          pager={pager}
+          index={index}
           now={now}
           onNavigate={() => onOpenCard(entry.card)}
-          onSkip={index < stack.length - 1 ? () => go(index + 1) : undefined}
-          rows={[withProjectName(withTaskName(entry.toTest, taskNames), projectNames)]}
+          onNext={onNext}
+          onPrevious={onPrevious}
+          row={withProjectName(withTaskName(entry.toTest, taskNames), projectNames)}
+          total={stack.length}
         />
       ) : (
         <>
@@ -87,13 +86,7 @@ export function BoardCardsView({
               {RANK_WORDS[entry.rank]}
             </span>
             <div className="fy-board-cards__pager">
-              <StackPager
-                index={index}
-                noun="card"
-                onNext={index < stack.length - 1 ? () => go(index + 1) : undefined}
-                onPrevious={index > 0 ? () => go(index - 1) : undefined}
-                total={stack.length}
-              />
+              <StackPager index={index} noun="card" onNext={onNext} onPrevious={onPrevious} total={stack.length} />
             </div>
           </div>
           {draw(entry.card)}

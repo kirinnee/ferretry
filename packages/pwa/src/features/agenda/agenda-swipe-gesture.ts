@@ -9,7 +9,7 @@
  *   {@link LONG_PRESS_MS} before it moves ({@link isLongPress}), is the reader highlighting, so it is not a swipe.
  * - NEVER INSIDE A SCROLLER THAT SCROLLS SIDEWAYS ({@link startsInSidewaysScroller}): a wide table or rendered box
  *   keeps the drag that began in it.
- * - THE DIRECTION IS DECIDED ONCE, AFTER {@link LOCK_PX} of travel ({@link lockOf}): sideways is a swipe; up or down
+ * - THE DIRECTION IS DECIDED ONCE, AFTER {@link LOCK_PX} of travel ({@link lockOf}): a mostly sideways drag is a swipe; up or down
  *   is the reader scrolling, handed to the browser — except from the card's head, which does not scroll and
  *   keeps its up and down answers ({@link startsInHead}), and a pull DOWN from a body that is already at its top
  *   ({@link startsAtScrollTop}): there is nothing above to scroll to, so that pull is the compass.
@@ -80,10 +80,19 @@ export const startsAtScrollTop = (target: EventTarget | null, boundary: Element)
 
 export type Lock = 'sideways' | 'vertical';
 
-/** Which way a touch that has moved `(dx, dy)` is going: `null` while it is under {@link LOCK_PX}. */
+/** A drag within this slope of the horizontal (|dx| over |dy|) is a swipe, not a scroll: a thumb never travels a straight line. */
+const SIDEWAYS_SLOPE = 0.75;
+
+/**
+ * Which way a touch that has moved `(dx, dy)` is going: `null` while it is under {@link LOCK_PX}, and, when it leans
+ * upward or downward, until it has gone twice that far (a wobble at the start of a sideways swipe is not a scroll).
+ * Sideways wins every drag that is mostly horizontal ({@link SIDEWAYS_SLOPE}).
+ */
 export const lockOf = (dx: number, dy: number): Lock | null => {
-  if (Math.hypot(dx, dy) < LOCK_PX) return null;
-  return Math.abs(dx) > Math.abs(dy) ? 'sideways' : 'vertical';
+  const travel = Math.hypot(dx, dy);
+  if (travel < LOCK_PX) return null;
+  if (Math.abs(dx) > Math.abs(dy) * SIDEWAYS_SLOPE) return 'sideways';
+  return travel < LOCK_PX * 2 ? null : 'vertical';
 };
 
 /** A touch held this long before it moves is the reader selecting text, never a swipe. */
