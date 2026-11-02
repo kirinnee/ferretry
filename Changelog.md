@@ -1,3 +1,9 @@
+## [4.229.0](https://github.com/kirinnee/ferretry/compare/v4.228.1...v4.229.0) (2026-11-02)
+
+### Features
+
+* **pwa:** versions you can see, compare, roll back and retire (catalogs 3d-4) ([#1327](https://github.com/kirinnee/ferretry/issues/1327)) ([3fbbca7](https://github.com/kirinnee/ferretry/commit/3fbbca7aa474240da2754f4c59c4e45b37bc628a))
+
 ## [4.228.1](https://github.com/kirinnee/ferretry/compare/v4.228.0...v4.228.1) (2026-11-02)
 
 ### Fixes
