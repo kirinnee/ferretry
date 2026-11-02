@@ -76,17 +76,20 @@ export const openSharedDraftStream = async (
     }
     return frame;
   };
+  // An item's own draft is named in the query, beside where a returning composer's copy stood.
+  const query: (readonly [string, string])[] = [
+    ...(scope.item === undefined ? [] : [['item', scope.item] as const]),
+    ...(position === undefined
+      ? []
+      : [
+          ['generation', position.generation] as const,
+          ['epoch', String(position.epoch)] as const,
+          ['rev', String(position.rev)] as const,
+        ]),
+  ];
   const session = await open(daemon, {
     path: sharedDraftStreamPath(scope),
-    ...(position === undefined
-      ? {}
-      : {
-          query: [
-            ['generation', position.generation],
-            ['epoch', String(position.epoch)],
-            ['rev', String(position.rev)],
-          ] as const,
-        }),
+    ...(query.length === 0 ? {} : { query }),
     onData: data => {
       if (ended || damaged) return;
       let parsed: SharedDraftServerFrame | undefined;

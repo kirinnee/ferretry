@@ -4,15 +4,16 @@ import {
   type AccountIndexDocument,
   type AskToStopJobsResult,
   type CapabilityGrants,
+  type CloseFinishedTerminalsResponse,
   type ComposerDraftRequest,
   type ComposerDraftResult,
   type ConfigChangeKind,
   type ConversionPreview,
   type CreateTerminalRequest,
   DAEMON_CAPABILITIES,
+  type DuplicateAsk,
   type IoPressureView,
   type LearningConfig,
-  type DuplicateAsk,
   type LegacyWireUse,
   PIN_SCHEMA_VERSION,
   type Pin,
@@ -35,7 +36,6 @@ import {
   type SurfaceOpener,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
-  type CloseFinishedTerminalsResponse,
   type TerminalHoldersView,
   type TerminalListView,
   type TerminalView,
@@ -182,6 +182,7 @@ import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../s
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import { SharedDraftService } from '../../../../src/lib/shared-drafts/index.ts';
 import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
+import type { TerminalCloseTrigger } from '../../../../src/lib/terminal/contracts.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
   nextTerminalTitle,
@@ -192,7 +193,6 @@ import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
 import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
 import type { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import { catalog, inventory } from '../../core/fixtures.ts';
-import type { TerminalCloseTrigger } from '../../../../src/lib/terminal/contracts.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
 
@@ -271,10 +271,17 @@ class FakePinSessions implements PinSessionDirectory {
  * A shared-draft service over memory: the sequencing is real, the disk and the timer are not. The timer
  * never fires, so nothing is written unless a test flushes.
  */
-export function sharedDraftService(known: readonly string[], instant: string = AT): SharedDraftService {
+export function sharedDraftService(
+  known: readonly string[],
+  instant: string = AT,
+  openItems: readonly string[] = ['A1', 'A2'],
+): SharedDraftService {
   return new SharedDraftService(
-    new FakePinSessions(known),
-    { load: async () => undefined, save: async () => undefined },
+    {
+      has: async sessionId => known.includes(sessionId),
+      hasOpenItem: async (_sessionId, item) => openItems.includes(item),
+    },
+    { load: async () => undefined, save: async () => undefined, remove: async () => undefined, items: async () => [] },
     { now: () => instant },
     { after: () => ({ cancel: () => undefined }) },
     { next: () => 'gen-1' },

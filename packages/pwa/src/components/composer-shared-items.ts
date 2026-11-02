@@ -206,7 +206,7 @@ export function useSharedComposerItems({
   const before = useRef(new Set<string>());
   const entriesNow = useRef(attachments.entries);
   entriesNow.current = attachments.entries;
-  const scopeKey = `${scope.daemonId}\n${scope.sessionId}`;
+  const scopeKey = `${scope.daemonId}\n${scope.sessionId}\n${scope.item ?? ''}`;
   const firstScope = useRef(true);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the scope is the reset trigger, not an input
   useEffect(() => {

@@ -1,6 +1,6 @@
 /**
  * Screenshots of the shared draft (&F331): the REAL `Composer`, kept in step with another of the owner's
- * devices, at phone 390 and desktop 1280, in the light and dark studio themes. Review evidence; nothing
+ * devices, at phone 390 and desktop 1440, in the light and dark studio themes. Review evidence; nothing
  * compares the PNGs.
  *
  *   bun harness/shared-draft-screenshot.tsx   # writes harness/out/shared-draft-<scene>-<phone|desktop>-<scheme>.png
@@ -12,6 +12,9 @@
  *   person is offered theirs back ("Restore them").
  * - `files` — another device attached a screenshot and a PDF (their chips, the picture drawn from the
  *   daemon's copy) and is still uploading a third (a placeholder nobody here can remove).
+ *
+ * - `slots` — the chat box and an Inbox card (`!A5`) of the SAME ferret, each holding its own words: the card's
+ *   draft is its own slot, never the chat's (B142).
  *
  * The daemon is faked IN THE PAGE: its stream answers with a snapshot, the other device's presence and
  * one edit, exactly in the frames `shared-draft.ts` defines. No network is used.
@@ -92,10 +95,21 @@ const fetcher = async (input: RequestInfo | URL) => {
   });
 };
 
-const open = async (_daemon: unknown, request: { onData: (frame: { kind: 'text'; text: string }) => void }) => {
+const cardText = 'Yes — keep the grace window at 5 minutes, and log every reuse.';
+const chatText = 'Different question: can you rebase onto main before the next push?';
+
+const open = async (
+  _daemon: unknown,
+  request: { query?: readonly (readonly [string, string])[]; onData: (frame: { kind: 'text'; text: string }) => void },
+) => {
+  const slot = request.query?.find(pair => pair[0] === 'item')?.[1];
   const down = (frame: object, after = 0) =>
     setTimeout(() => request.onData({ kind: 'text', text: JSON.stringify(frame) }), after);
-  down({ kind: 'snapshot', snapshot: { v: 1, sessionId: 's1', generation: 'g', epoch: 0, rev: 1, text: theirs, items: files, updatedAt: at } });
+  const text = scene === 'slots' ? (slot === undefined ? chatText : cardText) : theirs;
+  down({
+    kind: 'snapshot',
+    snapshot: { v: 1, sessionId: 's1', ...(slot === undefined ? {} : { slot }), generation: 'g', epoch: 0, rev: 1, text, items: files, updatedAt: at },
+  });
   down({ kind: 'ready' });
   if (scene === 'files') down({ kind: 'presence', peer: 'other', device: other, typing: false, uploading: ['network-trace.png'] }, 10);
   if (scene === 'typing') {
@@ -112,7 +126,19 @@ const open = async (_daemon: unknown, request: { onData: (frame: { kind: 'text';
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
-createRoot(root).render(
+const label = { fontSize: 12, fontWeight: 600, margin: '16px 4px 6px' } as const;
+if (scene === 'slots') {
+  createRoot(root).render(
+    <main data-shared-draft="" style={{ margin: '0 auto', maxWidth: 760, padding: '24px 12px' }}>
+      <p className="text-muted" style={label}>Inbox card · !A5 · “Keep the old session cookie for the grace window?”</p>
+      <Composer api={{ send: async () => ({}) } as never} autocompleteFetcher={fetcher as never} daemon={machine}
+        draftStore={drafts} openDraftStream={open as never} sharedSlots sessionId="s1" draftSlot="A5" />
+      <p className="text-muted" style={label}>Chat with the same ferret</p>
+      <Composer api={{ send: async () => ({}) } as never} autocompleteFetcher={fetcher as never} daemon={machine}
+        draftStore={drafts} openDraftStream={open as never} sharedUploads sessionId="s1" />
+    </main>,
+  );
+} else createRoot(root).render(
   <main data-shared-draft="" style={{ margin: '0 auto', maxWidth: 760, padding: '24px 12px' }}>
     <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible', marginBottom: 16 }}>
       <p className="text-muted" style={{ fontSize: 13, margin: '0 4px 12px' }}>
@@ -177,7 +203,7 @@ try {
     for (const device of [
       // The phone shows the laptop typing, and the laptop shows the phone.
       { name: 'phone', other: 'Desktop (Chrome)', viewport: { width: 390, height: 640 }, isMobile: true },
-      { name: 'desktop', other: 'Kirin’s iPhone', viewport: { width: 1280, height: 520 }, isMobile: false },
+      { name: 'desktop', other: 'Kirin’s iPhone', viewport: { width: 1440, height: 640 }, isMobile: false },
     ] as const) {
       const context = await browser.newContext({
         viewport: device.viewport,
@@ -192,7 +218,9 @@ try {
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
         const page = await context.newPage();
-        for (const scene of ['typing', 'conflict', 'files'] as const) {
+        // Words kept for "Restore them" live in localStorage; one scene's must not show in the next.
+        await page.addInitScript(() => localStorage.clear());
+        for (const scene of ['typing', 'conflict', 'files', 'slots'] as const) {
           const other = encodeURIComponent(device.other);
           await page.goto(`${server.url}?theme=studio-${scheme}&scene=${scene}&other=${other}`);
           await page.locator('[data-shared-draft]').waitFor({ state: 'visible' });
@@ -201,6 +229,12 @@ try {
             await page.waitForFunction(() =>
               (document.querySelector('textarea')?.value ?? document.body.innerText).includes('401 on refresh'),
             );
+          } else if (scene === 'slots') {
+            await page.waitForFunction(() => {
+              const seen =
+                [...document.querySelectorAll('textarea')].map(box => box.value).join('|') + document.body.innerText;
+              return seen.includes('and log every reuse') && seen.includes('rebase onto main');
+            });
           } else if (scene === 'conflict') await page.locator('[data-composer-conflict]').waitFor({ state: 'visible' });
           else {
             await page.getByText(`uploading on ${device.other}`).waitFor({ state: 'visible' });
