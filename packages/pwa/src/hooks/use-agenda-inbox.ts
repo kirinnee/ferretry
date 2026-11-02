@@ -36,6 +36,7 @@ import {
   type InboxResolved,
   type InboxUnavailable,
   inboxCards,
+  gateHolders,
   inboxCount,
   inboxParked,
   inboxResolved,
@@ -312,16 +313,22 @@ export function useAgendaInboxModel(
     [unread, boards, deferredState, answered],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
-  // A gate item stands in for its card's to-test row, on a machine that raises them. What is still in the undo window
-  // counts too, so an answered gate item does not bring its row back for the few seconds before the card moves.
-  const gateHolders = useMemo(
+  // A gate item stands in for its card's to-test row on a machine that raises them, open or parked (`gateHolders`).
+  const sources = useMemo(
     () =>
-      inboxCards(
-        unread,
-        (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
-        new Set<string>(),
-      ).filter(card => card.item.gate !== undefined),
-    [unread, boards],
+      machines.map(machine => ({
+        daemonId: machine.connection.daemonId,
+        name: machine.name,
+        sessions: machine.sessions,
+      })),
+    [machines],
+  );
+  const holders = useMemo(
+    () =>
+      gateHolders(unread, sources, (daemonId, sessionId) =>
+        boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+      ),
+    [unread, sources, boards],
   );
   const offersGates = useCallback(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
@@ -334,12 +341,12 @@ export function useAgendaInboxModel(
     [gateFlags],
   );
   const awakeRows = useMemo(
-    () => toTestBesideGates(split.awake, gateHolders, offersGates),
-    [split.awake, gateHolders, offersGates],
+    () => toTestBesideGates(split.awake, holders, offersGates),
+    [split.awake, holders, offersGates],
   );
   const snoozedRows = useMemo(
-    () => toTestBesideGates(split.snoozed, gateHolders, offersGates),
-    [split.snoozed, gateHolders, offersGates],
+    () => toTestBesideGates(split.snoozed, holders, offersGates),
+    [split.snoozed, holders, offersGates],
   );
   const toTest = useStable(awakeRows, toTestKeyOf(awakeRows));
   const toTestSnoozed = useStable(snoozedRows, toTestKeyOf(snoozedRows));
@@ -364,16 +371,6 @@ export function useAgendaInboxModel(
     freshUnavailable
       .map(entry => `${entry.daemonId}\u0000${entry.machineName}\u0000${entry.items}\u0000${entry.why ?? ''}`)
       .join('\u0001'),
-  );
-
-  const sources = useMemo(
-    () =>
-      machines.map(machine => ({
-        daemonId: machine.connection.daemonId,
-        name: machine.name,
-        sessions: machine.sessions,
-      })),
-    [machines],
   );
   const resolved = useMemo(
     () =>
