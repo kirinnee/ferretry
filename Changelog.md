@@ -1,3 +1,13 @@
+## [4.240.0](https://github.com/kirinnee/ferretry/compare/v4.239.1...v4.240.0) (2026-11-02)
+
+### Features
+
+* **inbox:** list every conversation's parked items, count what is listed, name the owner's thread ([#1356](https://github.com/kirinnee/ferretry/issues/1356)) ([b01b47d](https://github.com/kirinnee/ferretry/commit/b01b47dedec919d5f7708fdee46ac3b7b2b229df))
+
+### Fixes
+
+* **pwa:** a gate item swipes as the protocol lays it out (← Not good, → Done) ([#1360](https://github.com/kirinnee/ferretry/issues/1360)) ([9db934b](https://github.com/kirinnee/ferretry/commit/9db934b931a590ff1b5c2ab3c4dbb43b33929c9a))
+
 ## [4.239.1](https://github.com/kirinnee/ferretry/compare/v4.239.0...v4.239.1) (2026-11-02)
 
 ### Fixes
