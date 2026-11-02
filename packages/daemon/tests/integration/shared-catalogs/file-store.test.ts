@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -60,7 +60,7 @@ describe('the catalogs document on disk', () => {
 
     await documents.write(written);
 
-    should(await documents.readRaw()).deepEqual({ version: 2, doc: written });
+    should(await documents.readRaw()).deepEqual({ version: 3, doc: written });
     should(await mode(paths.catalogsDocument)).equal(0o600);
     should(await mode(paths.catalogs)).equal(0o700);
     should((await readdir(paths.catalogs)).filter(name => name.includes('tmp'))).deepEqual([]);
@@ -267,6 +267,7 @@ describe('a 3d-1 daemon meeting the version 3 file', () => {
   it('should refuse it without writing, and keep what it wrote as catalogs.v2.json for a restore', async () => {
     const { paths, documents } = await fixture();
     const v2Text = `${JSON.stringify({ ...migrated(), schemaVersion: 2 }, undefined, 2)}\n`;
+    await mkdir(paths.catalogs, { recursive: true });
     await writeFile(paths.catalogsDocument, v2Text);
     const raw = await documents.readRaw();
     should(raw).have.property('version', 2);
@@ -300,6 +301,7 @@ describe('a 3d-1 daemon meeting the version 3 file', () => {
 
   it('should still read a version 2 file, so the refusal above is the version and not the reader', async () => {
     const { paths } = await fixture();
+    await mkdir(paths.catalogs, { recursive: true });
     await writeFile(paths.catalogsDocument, JSON.stringify({ ...migrated(), schemaVersion: 2 }));
 
     should((await threeDOneRead(paths.catalogsDocument)).catalogs).have.length(1);
