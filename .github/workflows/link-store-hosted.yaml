@@ -1,0 +1,185 @@
+name: Deploy Hosted Link Store
+
+# MANUAL ONLY. The hosted link store is the Worker that holds sealed catalog-link envelopes
+# (docs/relay-protocol.md §17). Nothing here runs on a push, a schedule or another workflow: a deploy
+# restarts the Worker and its Durable Objects, and the operator who starts one is the whole approval.
+# Running a link store of your own is docs/cloudflare-relay-self-hosting.md, "Your own link store".
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: >-
+          Deploy, flip the kill switches (available: new links; serving: opening existing ones), read
+          operator metrics, or change the ceilings
+        required: true
+        default: metrics
+        type: choice
+        options:
+          - deploy
+          - enable
+          - disable
+          - serving-on
+          - serving-off
+          - metrics
+          - limits
+      confirm_deploy:
+        description: 'deploy only: tick to publish the Worker; a deploy without it is refused'
+        required: false
+        default: false
+        type: boolean
+      # `limits` only: a JSON object of the limits to change, merged over what the store holds now.
+      limits_json:
+        description: 'limits: JSON object merged over the stored limits, e.g. {"global":{"liveLinks":10000}}'
+        required: false
+        type: string
+
+# Per job, as in relay-hosted.yaml: `disable` is the emergency stop and must never queue behind a deploy.
+jobs:
+  deploy:
+    timeout-minutes: 20
+    name: Deploy Worker and Durable Objects
+    # Main-only, and only when the operator ticked the box.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'deploy' &&
+      inputs.confirm_deploy == true
+    concurrency:
+      group: hosted-link-store-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Validate hosted relay and link-store configuration
+        run: nix develop .#ci -c ./scripts/validate/relay-config.sh
+      - name: Publish hosted link store
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LINK_STORE_ORIGIN: ${{ vars.LINK_STORE_ORIGIN }}
+        run: |
+          set -euo pipefail
+
+          # A relay-independent bearer: a domain-separated digest of the existing high-entropy GitHub
+          # secret, so the raw Cloudflare token is never installed in the Worker.
+          operator_token="$({
+            printf 'ferretry-link-store-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          # A derived value is not a registered secret; mask it before it is used.
+          echo "::add-mask::$operator_token"
+
+          # One version, one restart: the secret travels with the deploy. The file is private to the
+          # runner and removed whatever happens next.
+          secrets_file="$RUNNER_TEMP/link-store-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          # shellcheck disable=SC2016 # $token is a jq variable
+          (umask 077 && jq -n --arg token "$operator_token" '{LINK_STORE_OPERATOR_TOKEN: $token}' >"$secrets_file")
+          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
+          LINK_STORE_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/relay
+            bun install --frozen-lockfile
+            wrangler deploy --config wrangler.link-store.hosted.json \
+              --message "hosted link store" --secrets-file "$LINK_STORE_SECRETS_FILE"
+          '
+          rm -f "$secrets_file"
+
+          # The hosted Worker has no workers.dev origin (workers_dev is false); its address is the
+          # route or custom domain the operator bound, supplied as the repository variable.
+          if [[ -z "$LINK_STORE_ORIGIN" ]]; then
+            echo "published; set the repository variable LINK_STORE_ORIGIN to the store's origin to enable the smoke check and the control operations"
+            exit 0
+          fi
+          smoke_status=""
+          for _ in 1 2 3 4 5 6; do
+            smoke_status="$(
+              curl --silent --output /dev/null --max-time 10 --write-out '%{http_code}' \
+                "$LINK_STORE_ORIGIN/v1/link-store" || true
+            )"
+            [[ "$smoke_status" == "200" ]] && break
+            sleep 5
+          done
+          if [[ "$smoke_status" != "200" ]]; then
+            echo "hosted link store advertisement answered ${smoke_status:-nothing}, not 200" >&2
+            exit 1
+          fi
+          echo "hosted link store advertisement answered 200"
+
+  control:
+    timeout-minutes: 20
+    name: Runtime Control
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation != 'deploy'
+    concurrency:
+      group: hosted-link-store-production-control
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read or change runtime state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          LINK_STORE_ORIGIN: ${{ vars.LINK_STORE_ORIGIN }}
+          OPERATION: ${{ inputs.operation }}
+          # Through the environment, never interpolated into the script: an input is untrusted text.
+          LIMITS_JSON: ${{ inputs.limits_json }}
+        run: |
+          set -euo pipefail
+
+          operator_token="$({
+            printf 'ferretry-link-store-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          # Mask the derived bearer before it is ever used. It matches the Worker's stored secret only
+          # while CLOUDFLARE_API_TOKEN is unchanged; after rotating that token, run `deploy` once.
+          echo "::add-mask::$operator_token"
+          if [[ -z "$LINK_STORE_ORIGIN" ]]; then
+            echo "set the repository variable LINK_STORE_ORIGIN to the link store's origin; nothing was changed" >&2
+            exit 1
+          fi
+          store="$LINK_STORE_ORIGIN/v1/operator/link-store"
+
+          if [[ "$OPERATION" == "metrics" ]]; then
+            # Counts only: the store holds no id, token or address it could print.
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" "$store" | jq
+            exit 0
+          fi
+
+          if [[ "$OPERATION" == "limits" ]]; then
+            if ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$LIMITS_JSON"; then
+              echo "limits_json must be a JSON object; nothing was changed" >&2
+              exit 1
+            fi
+            current="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $operator_token" "$store"
+            )"
+            next="$(jq -c --argjson change "$LIMITS_JSON" '{limits: (.limits * $change)}' <<<"$current")"
+          else
+            case "$OPERATION" in
+              enable) next='{"available":true}' ;;
+              disable) next='{"available":false}' ;;
+              serving-on) next='{"serving":true}' ;;
+              serving-off) next='{"serving":false}' ;;
+              *)
+                echo "unknown operation '${OPERATION}'; nothing was changed" >&2
+                exit 1
+                ;;
+            esac
+          fi
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer $operator_token" \
+            --header 'Content-Type: application/json' \
+            --data-binary "$next" \
+            "$store" | jq

@@ -27,7 +27,7 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/relay": {
-      "entry": ["tests/**/*.test.ts"],
+      "entry": ["tests/**/*.test.ts", "src/adapters/link-store-worker.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/protocol": {

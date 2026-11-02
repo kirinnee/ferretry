@@ -504,6 +504,80 @@ is gone. Move those daemons back to the hosted default, or to another relay, bef
 
 ---
 
+## Your own link store
+
+**Optional, and separate from the relay.** A _link_ is a URL that hands one skill to someone who has
+no connection to your machine. The skill is sealed on your daemon; a **link store** only keeps the
+ciphertext until it is fetched. Ferretry runs a hosted one. This section is for the person who wants
+links stored in their own Cloudflare account instead. You do not need a relay of your own to run one,
+and a relay does not need a store. What the store is and what it can see:
+[relay-protocol.md](relay-protocol.md) §17.
+
+**Nothing routes to it yet.** Deploying it gets you a running store at its own `workers.dev` address.
+Whether a daemon uses it and whether an app opens its links is slice 3f-3, not this runbook.
+
+### What you configure
+
+`packages/relay/wrangler.link-store.jsonc` is the standalone deployment (the hosted one,
+`wrangler.link-store.hosted.json`, is Ferretry's and not for you).
+
+1. Put the fingerprints of the daemons that may upload in `vars.LINK_STORE_DAEMON_IDS` (`fy pair`
+   prints one). It follows the same rules as `RELAY_DAEMON_IDS`: spaces or commas, an empty list serves
+   **nobody**, and a daemon not on it gets a `404` before any Durable Object is created. Fetching a link needs no
+   fingerprint, only the link.
+2. Rehearse, then deploy:
+
+   ```
+   task link-store:check     # compiles and prints bindings; publishes nothing
+   task link-store:deploy
+   ```
+
+   `link-store:deploy` **refuses to run in CI or unattended** — no terminal, or a `CI` environment — unless
+   you set `LINK_STORE_DEPLOY_UNATTENDED=1` on purpose. A deploy restarts the store's objects; it
+   never touches a relay you also run.
+
+3. Install the operator bearer as a Worker secret named `LINK_STORE_OPERATOR_TOKEN`:
+
+   ```
+   wrangler secret put LINK_STORE_OPERATOR_TOKEN --config packages/relay/wrangler.link-store.jsonc
+   ```
+
+   Make it a long random string and keep it in your password manager. Without it the operator route
+   answers `503` and you cannot use the switches below. It is a secret, so never put it in `vars` or in the
+   repository.
+
+Verify with `curl https://<your-worker>.workers.dev/v1/link-store`: it answers
+`{"version":1,"available":true,…}` with `Cache-Control: no-store`.
+
+### Operating it
+
+`GET` and `PUT` on `/v1/operator/link-store` with `Authorization: Bearer <token>`:
+
+| Call                       | What it does                                                                              |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| `GET`                      | The switches, the limits and counts only: owners, live links, bytes, tombstones.          |
+| `PUT {"available": false}` | Stops new links (challenge and upload). Existing links, revoking and status keep working. |
+| `PUT {"serving": false}`   | The emergency: fetch and peek stop too. Use it for abuse; turn it back on afterwards.     |
+| `PUT {"limits": { … }}`    | Replaces the limits, with no redeploy. The defaults are in relay-protocol.md §17.         |
+
+The defaults assume the paid plan's storage: **20,000 live links and 4 GiB**. On the free plan, lower
+`global.bytes` and `global.liveLinks` to fit your 5 GB, and expect `status` to answer about 50 links per call
+(the free plan's 50 subrequests per request).
+
+### What you take on
+
+- **You are the availability of your links.** A store that is down is a link that does not open.
+- **You are the operator, so you can see the metadata:** which fingerprint owns which
+  link ids, sizes, open counts and times, and visitors' IPs in Cloudflare's logs. You cannot read a
+  skill: the key is in the URL fragment, which no server ever receives.
+- **It bills to your account.** Durable Object requests, duration and storage; the per-link and per-IP
+  limits are what bound an abuser, so read them before you raise one.
+- **Upgrades are yours**, as for the relay: `git pull && task link-store:check && task link-store:deploy`.
+- **To stop:** `wrangler delete --config packages/relay/wrangler.link-store.jsonc`. Every link in the store
+  stops working, and nothing else is lost. Revoke links from the app first if you want them to say so.
+
+---
+
 ## Teardown
 
 ### Turn it off without deleting it

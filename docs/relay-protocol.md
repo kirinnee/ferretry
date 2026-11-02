@@ -1493,6 +1493,9 @@ The kill switch does not wait on any of it: `relayUrl: null` is enforced by this
 and on the live sweep, so disabling the hosted relay stops traffic regardless of what any client
 believes.
 
+The hosted link store (§17) is a separate Worker with its own deploy and is not part of this list; a relay
+deploy does not touch it, and nothing in this section routes to it.
+
 ---
 
 ## 14. The tunnel above the channel
@@ -2482,8 +2485,7 @@ each other, or for anything above: `ferretry-catalog-manifest-v1` signs a catalo
 signature never verifies as a link and the reverse. A link store's requests are signed over length-prefixed transcripts
 under their own labels, `ferretry-link-store-upload-v1`, `ferretry-link-store-delete-v1` and
 `ferretry-link-store-status-v1`, and the sealed envelope binds `ferretry-link-envelope-v1` as its AAD; none of these
-labels is used by anything above, and none of the above is accepted by a link store. (3f-1 ships the libraries only; the
-store itself is not built.)
+labels is used by anything above, and none of the above is accepted by a link store (§17 is that store).
 
 **`join`: one redemption, then the session ends.**
 
@@ -3396,3 +3398,166 @@ rendezvous.
   whether a given home router or carrier-grade NAT lets two server-reflexive candidates meet is the
   STUN half, which only a device on a real network can show. Symmetric NAT on both ends is expected to
   fail and fall back — that is what the deadline is for.
+
+---
+
+## 17. The hosted link store
+
+A **link** (`docs/catalogs.md` § Links) is a URL that carries one skill to someone who has no
+connection to the publisher's machine. The skill travels as a **sealed envelope** (`ferretry-link-envelope-v1`, 16 KiB
+padded, `src/lib/link-bundle.ts`); the key `k` that opens it lives only in the URL fragment, so the
+store holds ciphertext it cannot read. This section is the store: the Worker that keeps envelopes and hands one to whoever
+presents the fetch token. The wire contract is `src/lib/link-store.ts`, the rules that decide every
+answer are the pure reducer `src/lib/link-store-reducer.ts`, and the Cloudflare deployment is
+`src/adapters/link-store-worker.ts`. Nothing here is a carrier: a link store never sees a session.
+
+### One Worker, deployed apart from the relay
+
+The store is its own Worker, `ferretry-link-store` (`wrangler.link-store.hosted.json`, `workers_dev:
+false`; the self-hosted `wrangler.link-store.jsonc` is the §11 equivalent). It is separate so that a
+store fix never restarts the rendezvous objects: deploying the relay drops every live session (§13),
+and deploying the store must not. It runs in the same Cloudflare account as the hosted relay.
+
+**It is not routed from anywhere yet.** The hosted relay Worker has no `LINK_STORE` binding and
+dispatches none of these paths; a deployed store is reachable only by its own address. Wiring the
+relay's dispatch, the daemon's discovery and the app is slice 3f-3, which changes the relay Worker
+and therefore drops its sessions — it waits for the owner to be warned first. **GAP, by design**
+until then.
+
+**Deployment is manual only.** The workflow `link-store-hosted.yaml` has `workflow_dispatch` and no
+push trigger; `task link-store:deploy` refuses to run in CI or unattended unless
+`LINK_STORE_DEPLOY_UNATTENDED=1` is set. Nothing deploys the store as a side effect of merging.
+
+### The three objects
+
+All three are SQLite-backed Durable Objects, and each serialises its own requests, so the rules that
+must hold under a race hold by construction.
+
+| Class                           | Name                               | Holds                                                                                                                                                                                                                                             |
+| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LinkBundleDurableObject`       | `ferretry-link/1:<bundleId>`       | The owner, kind, sequence, `notAfter`, `expiresAt`, `installCap`, open count, fetch verifier and state (`live`, `used`, `ended`, `lapsed`); the envelope in rows of at most **512 KiB**; the link's minute and day windows and wrong-token window |
+| `LinkOwnerDurableObject`        | `ferretry-link-owner/1:<daemonId>` | The daemon's unspent challenge nonces and challenge window, its uploads today, and its **quota leases** (bundle id, bytes, end)                                                                                                                   |
+| `LinkStoreControlDurableObject` | `ferretry-link-store-control/1`    | The operator flags `available` and `serving`, the limits, the global quota leases and counters (live links, bytes, uploads and fetches today), the **registry** of known bundle ids with their tombstone dates, and the per-IP windows            |
+
+A bundle object keeps one alarm: at the link's end while it is live, then at the tombstone's purge.
+The envelope is chunked because a Durable Object row is capped at 2 MB and an envelope may be 3 MiB
+(`LINK_ENVELOPE_MAX_BYTES`).
+
+### What each request does
+
+The Worker is the coordinator. It parses each public body with the wire schema (bounded before it is
+parsed), refuses a malformed one as `link_bad_request` before any object is touched, and passes the
+host it is **serving** — read from the URL of the request it received, which is what a daemon signed
+if it discovered this store honestly.
+
+**Upload** (`PUT /v1/links/<bundleId>`), in this order:
+
+1. The Worker reads the body (bounded), decodes the frame and checks the envelope's length and SHA-256 against the signed metadata.
+2. The control object admits the daemon: the store is open for uploads and it has issued that daemon a challenge. A daemon it never challenged gets `link_challenge_expired` here, so **no owner object is created by a signed request from a stranger**. A _challenge_ does create one for a new daemon (hosted) — bounded by the global `owners` cap and the challenge windows, and forgotten when idle; a self-hosted store answers `404` before it.
+3. The owner object checks the single-use nonce (issued to that daemon less than 60 s ago, **spent by its first use, accepted or not**). The Worker then verifies the signature over the transcript it rebuilds from its own host, its own nonce and the body it parsed.
+4. The control object reserves the global quota and records the bundle id; then the owner object reserves per-daemon quota (live links, bytes, uploads today). Control goes first because a refusal there is the more common one and the owner's counters cost a write.
+5. The bundle object writes the chunks and the state in one transaction and sets its alarm. **A step that fails rolls the earlier reservations back, in reverse order** (owner, then control).
+
+A stored upload answers `200 {"version":1,"sequence":N}`; a delete answers `200 {"version":1}`.
+
+A reservation is a **lease** that ends at the link's `notAfter` (§13, "Reservations are leases"), so
+a rollback that is itself lost costs quota only until then. Replace, delete, status, peek and fetch
+follow `docs/catalogs.md` § Links and the reducer; the reducer is the oracle the objects are held to.
+
+**One-time fetch is atomic.** Inside the bundle object's single handler the token is compared to the
+stored verifier in constant time, the state and the end are checked, and the chunks are read; then
+**in one storage transaction** the state becomes `used` and the chunks are deleted. Output gates hold
+the response until that write is durable, so a crash cannot leave a link live after its bytes left,
+and 50 racing fetches get exactly one `200`. The bundle object then tells the owner and control
+objects to release the slot. That call is best effort, and the lease covers a lost one.
+
+### Unknown ids cost nothing
+
+The wrong-token window is keyed by the bundle id **whether or not it exists**, so a `429` says nothing about the id (reducer rule). The
+adapter must not turn that into one Durable Object per probed id, so a fetch or peek goes first to
+the control object, which holds the registry of ids ever created (until their tombstones are purged):
+
+- an id **not in the registry** is answered there — the uniform `410`, or `429` from a bounded
+  in-memory window — **without instantiating a bundle object**;
+- a registered id goes on to its bundle object, which does the token, state and per-link checks.
+
+In a self-hosted store (`LINK_STORE_DAEMON_IDS`, the same rules as `RELAY_DAEMON_IDS`; empty serves
+nobody) a daemon not on the list gets the same `404` before any object is touched, owner objects
+included.
+
+**Every failed peek or fetch is the same `410`** — including one whose body is not `{ "token" }` at all, since a caller who cannot produce a token holds none: the status, code and sentence are one constant, so
+the bytes cannot say whether the id is unknown, the token wrong, the link used, ended, lapsed,
+expired or capped. The only other answers on those routes are not about any one link: `429` and
+`503`.
+
+### Limits are operator configuration
+
+None of these is a protocol constant. The defaults are `DEFAULT_LINK_STORE_LIMITS`, held by the
+control object and changed at runtime through the operator route below, with no deploy:
+
+| Scope      | Default                                                                             |
+| ---------- | ----------------------------------------------------------------------------------- |
+| Per daemon | 50 live links, 64 MiB, 100 uploads a day                                            |
+| Per link   | 120 fetches a minute, 5,000 a day, 20 wrong tokens a minute                         |
+| Per IP     | 60 peeks or fetches a minute, 20 challenges a minute                                |
+| Challenges | 3 unspent per daemon, 6 a minute per daemon, 512 a minute store-wide                |
+| Global     | 20,000 live links, 4 GiB, 5,000 uploads a day, 200,000 fetches a day, 10,000 owners |
+
+**Per-IP limits are a bucket in the control object, not the Workers Rate Limiting binding.** That
+binding's limit and period are fixed in the wrangler configuration at deploy time, and every limit
+here must be settable by the operator at runtime. The windows live in memory only, are bounded to 4,096 keys each (`LINK_WINDOW_MAX_KEYS`, a memory bound and not a rate, so not operator configuration), and are
+never persisted or logged — the store does not keep an IP. An evicted object forgets its windows, which
+only loosens a limit for a minute. The IP is `CF-Connecting-IP`; with none the request shares one bucket.
+
+**The global fetches-a-day limit is a cost brake**, checked before a fetch and counted after it. It may
+overshoot by the requests in flight, and it never consumes a one-time link once the cap is reached.
+
+### Operator routes and the kill switches
+
+`GET /v1/operator/link-store` returns `{ available, serving, limits, metrics }`, the metrics being
+counts only (owners, live links, stored bytes, tombstones) — never an id, a daemon, a token or an IP.
+`PUT` takes `{ available?, serving?, limits? }`, validated before anything is written. The bearer is the
+Worker secret `LINK_STORE_OPERATOR_TOKEN`, a digest of the GitHub Cloudflare token under the label
+`ferretry-link-store-operator-v1\0`, derived and installed by the workflow exactly as §13's relay
+bearer is; it is compared in constant time and unset answers `503`.
+
+| Switch             | Refuses                                                                        | Keeps working                                                                 |
+| ------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `available: false` | Challenge and upload (`link_store_unavailable`), and the advertisement says so | Fetch, peek, delete, status — so existing links and revocation are unaffected |
+| `serving: false`   | Everything above **and** fetch and peek                                        | Delete and status                                                             |
+
+`serving: false` is the emergency for abuse and is an operator act.
+
+### Headers, bodies and logs
+
+Every public response carries `Cache-Control: no-store` and `Access-Control-Allow-Origin: *` and
+never a cookie. Peek and fetch are `POST`, so no preloader, unfurler, cache or service worker
+reuses them. A body is bounded before it is read; a wrong method is refused. **No body, token,
+verifier, bundle id or IP is ever logged**, and the Worker's observability does not log bodies. A request
+log still carries the path, so a log reader sees bundle ids and nothing that fetches.
+
+### What an operator can see, honestly
+
+The operator **can see**: which daemon fingerprint owns which bundle ids; each bundle's kind, size
+(in 16 KiB buckets), sequence, `notAfter`, `expiresAt` and cap; open counts and times; the uploader's and
+downloader's IP in Cloudflare's request logs; and the fetch verifier, which is useless without `k`.
+
+The operator **cannot see**: `k`, the token, the skill, its name or files, the publisher's other
+skills, or who installed it.
+
+### What is built, and what is not
+
+- **Built** — the wire contract and the reducer (`src/lib`, 100% unit coverage), and the Worker with its three objects
+  (`src/adapters/link-store-worker.ts`), the operator routes, both wrangler configurations, `task
+link-store:check` and `link-store:deploy`, and the manual workflow.
+- **GAP — nothing routes to it.** See above: the hosted relay Worker has no binding, the daemon does
+  not discover the store and the app does not open a link. That is slice 3f-3.
+- **GAP — the runtime is faked.** The Durable Object, storage, alarm and output-gate behaviour the
+  atomic fetch relies on is proved against fakes in `tests/integration`; only a deployment proves
+  that Cloudflare behaves as they do.
+- **GAP — status fans out.** One `status` call asks about up to 64 links, and each is a bundle
+  object, so it makes up to 64 subrequests; a Worker on the free plan (50 per request) answers about
+  50 distinct bundles per call. The hosted store is on a paid plan; a self-hosted one on the free plan
+  should expect the lower bound.
+- **GAP — over-refusal, not over-admission.** A lost rollback or release holds quota until `notAfter`,
+  and the global fetch cap can overshoot by requests in flight. Neither lets an expired link serve.
