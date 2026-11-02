@@ -359,6 +359,47 @@ describe('the composer in a real browser', () => {
     expect(idle.send.left).toBeGreaterThanOrEqual(idle.field.left + idle.field.width - 0.5);
   }, 60_000);
 
+  test('a phone composer’s attach, mic and Send never move: blurred, focused, writing, and right after Send (B135)', async () => {
+    for (const theme of ['studio-light', 'studio-dark']) {
+      const scene = await open({ editor: 'on', theme, mic: '1' }, { phone: true });
+      try {
+        const { page } = scene;
+        const boxes = () =>
+          page.evaluate(() => {
+            const box = (selector: string) => {
+              const rect = (document.querySelector(selector) as Element).getBoundingClientRect();
+              return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+            };
+            return {
+              attach: box('[data-composer-attach]'),
+              mic: box('[data-composer-dock="start"] > :last-child'),
+              send: box('[data-composer-send]'),
+              row: box('.fy-composer-row'),
+            };
+          });
+        const blurred = await boxes();
+        await page.locator(EDITOR).tap();
+        const focused = await boxes();
+        await page.keyboard.type('hello world');
+        const writing = await boxes();
+        await page.locator('[data-composer-send]').tap();
+        await page.waitForFunction(() => (window as unknown as { __sent: unknown[] }).__sent.length === 1);
+        const sent = await boxes();
+        // One layout in every state: side by side, on the bottom line, the box one line tall throughout.
+        for (const [state, measured] of Object.entries({ focused, writing, sent }))
+          expect(measured, `${theme}: ${state} against blurred`).toEqual(blurred);
+        expect(blurred.mic.left).toBeGreaterThanOrEqual(blurred.attach.left + blurred.attach.width - 0.5);
+        expect(Math.abs(blurred.mic.top - blurred.attach.top)).toBeLessThan(0.5);
+        expect(Math.abs(blurred.send.top + blurred.send.height - (blurred.mic.top + blurred.mic.height))).toBeLessThan(
+          0.5,
+        );
+        expect(await draftOf(page)).toBe('');
+      } finally {
+        await scene.close();
+      }
+    }
+  }, 60_000);
+
   test("the composer takes the theme's own input and button tokens, so Neo's frame is not Studio's", async () => {
     const scene = await open({ editor: 'on', theme: 'studio-light', busy: '1' }, { phone: true });
     const read = async (theme: string) => {

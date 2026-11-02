@@ -272,6 +272,8 @@ export interface ComposerField {
   readonly value: string;
   setSelectionRange(start: number, end: number): void;
   contains(node: Node | null): boolean;
+  /** The live editor's: ends an input-method composition, answering whether that changed the text. */
+  endComposition?(): boolean;
 }
 
 /** The slice of a key event the controller reads. */

@@ -483,3 +483,150 @@ describe('LiveMarkdownEditor', () => {
 const rerenderValue = async (editor: Probe, value: string): Promise<void> => {
   await editor.rerender({ value });
 };
+
+describe('a composition and the host (B135)', () => {
+  /** The input method writes `text` into the first line and reports it, as a composition does. */
+  const composeInto = async (editor: Probe, text: string): Promise<void> => {
+    must(editor.element.firstElementChild, 'the first line').textContent = text;
+    await interact(() => editor.element.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true })));
+  };
+  const start = async (editor: Probe): Promise<void> =>
+    await interact(() => editor.element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+  const end = async (editor: Probe): Promise<void> =>
+    await interact(() => editor.element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
+
+  test('CJK: every step of a composition reaches the host, and the committed word is what stays', async () => {
+    const editor = await probe('');
+    await focusAt(editor, 0);
+    await start(editor);
+    await interact(() => editor.element.dispatchEvent(new CompositionEvent('compositionupdate', { data: 'に' })));
+    await composeInto(editor, 'に');
+    await composeInto(editor, 'にほ');
+    await composeInto(editor, 'にほん');
+    expect(editor.value()).toBe('にほん');
+    await composeInto(editor, '日本');
+    await end(editor);
+    expect(editor.value()).toBe('日本');
+    expect(readLiveDocument(editor.element)).toBe('日本');
+    expect(editor.composition).toEqual(['start', 'end:日本']);
+  });
+
+  test('a prediction or autocorrect that replaces the composed word is taken as typed', async () => {
+    const editor = await probe('I ');
+    await focusAt(editor, 2);
+    await start(editor);
+    await composeInto(editor, 'I teh');
+    await composeInto(editor, 'I the');
+    await end(editor);
+    expect(editor.value()).toBe('I the');
+    // The keyboard's own spelling fix after the word is committed names its range.
+    expect(
+      await beforeInput(editor.element, 'insertReplacementText', {
+        text: 'They',
+        ranges: [
+          {
+            startContainer: must(editor.element.firstElementChild?.firstChild, 'text'),
+            startOffset: 2,
+            endContainer: must(editor.element.firstElementChild?.firstChild, 'text'),
+            endOffset: 5,
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(editor.value()).toBe('I They');
+  });
+
+  test('a render behind the composition is an echo: it repaints nothing and the composition goes on', async () => {
+    const editor = await probe('a');
+    await focusAt(editor, 1);
+    await start(editor);
+    await composeInto(editor, 'aに');
+    await composeInto(editor, 'aにほ');
+    // The host is one step behind: what it holds is a text this composition already reported.
+    await editor.rerender({ value: 'aに' });
+    expect(readLiveDocument(editor.element)).toBe('aにほ');
+    await composeInto(editor, 'aにほん');
+    await end(editor);
+    expect(editor.value()).toBe('aにほん');
+    expect(editor.composition).toEqual(['start', 'end:aにほん']);
+  });
+
+  test('a send clearing the box mid-composition is painted, and the rest of that composition is never read back', async () => {
+    const editor = await probe('hello ');
+    await focusAt(editor, 6);
+    await start(editor);
+    await composeInto(editor, 'hello wor');
+    expect(editor.value()).toBe('hello wor');
+
+    // The send lands: the host empties the box under the composition.
+    await editor.rerender({ value: '' });
+    expect(readLiveDocument(editor.element)).toBe('');
+    // The host is told the composition is over, so its keys are its own again.
+    expect(editor.composition).toEqual(['start', 'end:']);
+
+    // The keyboard carries on with the word it was composing: painted over, never read back.
+    await composeInto(editor, 'world');
+    expect(readLiveDocument(editor.element)).toBe('');
+    expect(editor.value()).toBe('');
+    await end(editor);
+    expect(readLiveDocument(editor.element)).toBe('');
+    expect(editor.value()).toBe('');
+    expect(editor.composition).toEqual(['start', 'end:']);
+
+    // The next message is typed as ever.
+    await beforeInput(editor.element, 'insertText', { data: 'n' });
+    expect(editor.value()).toBe('n');
+  });
+
+  test("another device's edit mid-composition lands, with what was already composed kept", async () => {
+    const editor = await probe('ab');
+    await focusAt(editor, 2);
+    await start(editor);
+    await composeInto(editor, 'abに');
+    // The phone put "X " in front: the host's draft is its edit applied to what this device reported.
+    await editor.rerender({ value: 'X abに' });
+    expect(readLiveDocument(editor.element)).toBe('X abに');
+    await end(editor);
+    expect(editor.value()).toBe('X abに');
+    expect(readLiveDocument(editor.element)).toBe('X abに');
+    // A new composition after it is read back normally.
+    await start(editor);
+    await composeInto(editor, 'X abにほ');
+    await end(editor);
+    expect(editor.value()).toBe('X abにほ');
+  });
+
+  test('ending a composition for a send reads the word being composed, and only once', async () => {
+    const editor = await probe('see ');
+    // Nothing is being composed: nothing to end, and the host need not wait.
+    expect(editor.field().endComposition()).toBe(false);
+    await focusAt(editor, 4);
+    await start(editor);
+    await composeInto(editor, 'see yo');
+    // Everything composed has been reported: ended, and nothing changed.
+    expect(editor.field().endComposition()).toBe(false);
+    expect(editor.composition).toEqual(['start', 'end:see yo']);
+    // The platform's own end afterwards is not read again.
+    must(editor.element.firstElementChild, 'the line').textContent = 'see you later';
+    await end(editor);
+    expect(editor.value()).toBe('see yo');
+    expect(readLiveDocument(editor.element)).toBe('see yo');
+
+    // A word the keyboard changed without reporting it yet goes with the send, and the host is told to wait.
+    await start(editor);
+    must(editor.element.firstElementChild, 'the line').textContent = 'see you';
+    let changed = false;
+    await interact(() => {
+      changed = editor.field().endComposition();
+    });
+    expect(changed).toBe(true);
+    expect(editor.value()).toBe('see you');
+  });
+
+  test('ending a composition once the editor is gone is nothing', async () => {
+    const editor = await probe('a');
+    const field = editor.field();
+    await editor.view.unmount();
+    expect(field.endComposition()).toBe(false);
+  });
+});
