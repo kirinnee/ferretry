@@ -1090,8 +1090,15 @@ describe('the tmux send terminal, as the tracker reads it', () => {
     ]);
 
     should(await subject([], 'held', joined).submitComposer(ID, 'please rerun the suite')).equal('absent');
+    const prompted = new FrameTmux([
+      [
+        ' Make auto mode your default permission mode?\n\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep bypass permissions\n\n› please rerun the suite\n\n  gpt-5 default',
+        '24|5',
+      ],
+    ]);
     should(await subject([], 'held', busy).submitComposer(ID, 'please rerun the suite')).equal('absent');
-    should([joined.keys, busy.keys]).deepEqual([[], []]);
+    should(await subject([], 'held', prompted).submitComposer(ID, 'please rerun the suite')).equal('absent');
+    should([joined.keys, busy.keys, prompted.keys]).deepEqual([[], [], []]);
   });
 });
 
