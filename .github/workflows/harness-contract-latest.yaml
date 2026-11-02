@@ -24,6 +24,8 @@ jobs:
   latest:
     timeout-minutes: 20
     name: Harness Contract latest (${{ matrix.os }})
+    # The macos-15 leg is advisory on a pull request (docs/standards/ci-cd, "macOS runner shortage"); the Linux leg is not.
+    continue-on-error: ${{ github.event_name == 'pull_request' && startsWith(matrix.os, 'macos') }}
     permissions:
       contents: read
     strategy:

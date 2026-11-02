@@ -130,12 +130,13 @@ pre-commit-lib.run {
 
     # A pull request runs Containment, Sandbox Shell (Safari) and the macos-15 Harness Contract only when
     # their inputs change. The lists live in scripts/ci/macos-relevance.sh; this holds them to the
-    # scripts and test files those jobs actually run, and realworld.yaml (and ci.yaml) to the decision.
+    # scripts and test files those jobs actually run, and realworld.yaml (and ci.yaml) to the decision. It also
+    # pins the macOS runner policy: advisory on a pull request, required and retried on main and a release tag.
     a-macos-relevance = {
       enable = true;
       name = "macOS job relevance";
       entry = validator "scripts/validate/macos-relevance.sh";
-      files = "^(scripts/(ci/(macos-relevance|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/workflows/(ci|realworld)\\.yaml|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
+      files = "^(scripts/(ci/(macos-relevance|macos-smoke-verdict|macos-advisory|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/(workflows/(ci|cd|realworld|smoke-darwin|harness-contract-latest)\\.yaml|actions/smoke-darwin/.*)|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
       pass_filenames = false;
       language = "system";
     };
