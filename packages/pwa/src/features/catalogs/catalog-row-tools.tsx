@@ -8,8 +8,6 @@
 import type { CatalogInstall, OwnedCatalog } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { daemonSharingPath } from '../../lib/pages/routes.ts';
-import { useOptionalRouter } from '../../lib/router.tsx';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { AddCatalogFromLink } from './add-from-link.tsx';
 import { listCatalogInstalls } from './catalog-installs-api.ts';
@@ -94,25 +92,6 @@ export function useCatalogRows(host: CatalogRowsHost | undefined): CatalogRowsRe
 
   const reload = useCallback(() => setTick(value => value + 1), []);
   return { installs, catalogs, features, reload, ...(defaultCatalogId === undefined ? {} : { defaultCatalogId }) };
-}
-
-/**
- * The side panel's one quiet way to add a catalog: a text link that opens Sharing › Shared with me, where the
- * paste field and Install from a file live (`AddCatalogEntry`).
- */
-export function AddFromLinkLink({ host }: { readonly host: CatalogRowsHost }) {
-  const router = useOptionalRouter();
-  const to = daemonSharingPath(host.connection.daemonId, 'shared');
-  return (
-    <button
-      className="fy-info-link"
-      data-catalog-add-link=""
-      onClick={() => (router === null ? window.location.assign(to) : router.navigate(to))}
-      type="button"
-    >
-      Add from a link…
-    </button>
-  );
 }
 
 /**

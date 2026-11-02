@@ -13,7 +13,7 @@ import {
   revealHidden,
   type SharedItemPreview,
 } from '@ferretry/protocol';
-import { CircleAlert, Share2 } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -83,8 +83,6 @@ export interface AddToCatalogSheetProps {
   readonly asDefault?: boolean;
   /** "Add to another catalog…": add-existing, not a first add from a source. */
   readonly existing?: ExistingItem;
-  /** When given, the last step offers "Share it now" and calls this with the catalog the item landed in. */
-  readonly onShareNow?: (catalogId: string) => void;
   /** What this machine can do with versions; without it the sheet is the one it always was. */
   readonly versionTools?: VersionTools;
   /** Test and harness seam; the app uses the daemon-bound client. */
@@ -125,7 +123,6 @@ export function AddToCatalogSheet({
   suggestNewName,
   asDefault = false,
   existing,
-  onShareNow,
   versionTools = NO_VERSION_TOOLS,
   createClient: injected,
 }: AddToCatalogSheetProps) {
@@ -320,19 +317,8 @@ export function AddToCatalogSheet({
               : `Saved to ${landed.catalogName} as version ${landed.published.itemVersion}.`}
           </p>
           <p className="m-0 text-cell text-muted">{FROZEN_COPY_NOTE}</p>
-          {onShareNow === undefined ? null : (
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => onShareNow(landed.catalogId)}
-              data-catalog-share-now=""
-            >
-              <Share2 size={14} aria-hidden="true" />
-              Share it now
-            </Button>
-          )}
           <Button type="button" onClick={onClose} data-catalog-done="">
-            {onShareNow === undefined ? 'Done' : 'Not now'}
+            Done
           </Button>
         </section>
       ) : madeCurrent !== null ? (

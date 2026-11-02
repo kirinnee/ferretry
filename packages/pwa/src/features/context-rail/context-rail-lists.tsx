@@ -1,21 +1,25 @@
 /**
  * Skills and Instructions: two plain lists.
  *
- * A skill row inserts the skill into the composer — the harness's own spelling, `/name` for Claude and
- * `$name` for Codex (`skillInsertText`) — and nothing else: there is deliberately no send. It says where
- * the skill comes from (Project, User or Ferretry) and, when a same-named one of another scope wins, which
- * one; Open reads its SKILL.md. An instruction row asks the host to open the file in a Files tab.
+ * The Skills list is what THIS SESSION CAN USE, and its header says so in words ("16 active in this
+ * session"). A skill row inserts the skill into the composer — the harness's own spelling, `/name` for
+ * Claude and `$name` for Codex (`skillInsertText`) — and nothing else: there is deliberately no send. It
+ * says where the skill came from (This project, This account or Ferretry, and the publisher for what a
+ * catalog installed) and, when a same-named one elsewhere wins, that it is not active; Open reads its
+ * SKILL.md. Nothing here publishes beside the name (docs/catalogs.md). An instruction row asks the host to
+ * open the file in a Files tab.
  */
 
 import type { SessionSkillsInventory, SkillEntry, SkillFile } from '@ferretry/protocol';
 import { useCallback, useId, useState } from 'react';
 import { Markdown } from '../../components/markdown.tsx';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
-import { AddFromLinkLink, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
+import { type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { SKILL_SCOPE_LABEL, SKILL_SCOPE_TITLE, skillOverride, sortedSkills } from '../mcp/mcp-model.ts';
-import { skillHarnessLabel, skillInsertText } from '../skills/skills-catalog.ts';
+import { skillInsertText } from '../skills/skills-catalog.ts';
 import {
+  activeSkillsLine,
   CONTEXT_RAIL_SEARCH_LABEL,
   type ContextDoc,
   contextEmptyCopy,
@@ -59,7 +63,7 @@ export interface ContextSkillsPanelProps extends ListPanelProps<SessionSkillsInv
   readonly loadSkillFile?: SkillFileLoader;
   /** The machine's own name, for a failure said in words. */
   readonly machineName: string;
-  /** Lets rows offer Share and Add, say where an installed skill came from, and install from a file. */
+  /** Lets rows say where an installed skill came from, and offer Publish and Uninstall in their ⋯. */
   readonly catalogs?: CatalogRowsHost;
 }
 
@@ -110,13 +114,9 @@ export function ContextSkillsPanel({
         onChipChange={onChipChange}
         {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })}
       />
-      <div className="flex min-w-0 items-center justify-between gap-sm">
-        <p className="m-0 text-2xs text-faint">
-          {skillHarnessLabel(harness)}
-          {load.value.truncated ? ' · the list was cut short' : ''}
-        </p>
-        {catalogs === undefined ? null : <AddFromLinkLink host={catalogs} />}
-      </div>
+      <p className="m-0 text-2xs text-faint" data-context-skills-active="">
+        {activeSkillsLine(load.value)}
+      </p>
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('skills', total, query, chipLabel)}</ContextNote>
       ) : (

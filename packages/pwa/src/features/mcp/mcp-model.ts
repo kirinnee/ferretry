@@ -33,14 +33,14 @@ export const MCP_SCOPE_TITLE: Readonly<Record<McpScope, string>> = {
 
 export const SKILL_SCOPE_LABEL: Readonly<Record<SkillScope, string>> = {
   ferretry: 'Ferretry',
-  user: 'User',
-  project: 'Project',
+  user: 'This account',
+  project: 'This project',
 };
 
 export const SKILL_SCOPE_TITLE: Readonly<Record<SkillScope, string>> = {
   ferretry: 'A Ferretry skill component in this runtime’s profile',
-  user: 'In this runtime’s own skills folder, put there by something other than Ferretry',
-  project: 'In the repo’s own skills folder, shared with everyone on the repo',
+  user: 'In this account’s own skills folder, so every session on this account has it',
+  project: 'In this project’s skills folder, so every session in this folder has it',
 };
 
 // ── MCP status ───────────────────────────────────────────────────────────────────────────────────
@@ -198,7 +198,9 @@ export const sortedMcpServers = (servers: readonly McpInventoryServer[]): McpInv
 
 /** "Overridden by Project", for a skill a same-named one of another scope wins over. */
 export const skillOverride = (skill: SkillEntry): string | undefined =>
-  skill.shadowedBy === undefined ? undefined : `Overridden by ${SKILL_SCOPE_LABEL[skill.shadowedBy]}`;
+  skill.shadowedBy === undefined
+    ? undefined
+    : `Not active: the skill of the same name in ${SKILL_SCOPE_LABEL[skill.shadowedBy]} wins`;
 
 const SKILL_SCOPE_ORDER: readonly SkillScope[] = ['project', 'user', 'ferretry'];
 

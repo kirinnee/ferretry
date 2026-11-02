@@ -172,12 +172,16 @@ describe('SharingPage', () => {
     await view.unmount();
   });
 
-  it('draws the Skills tab rows with Share, Add and ⋯, from the same catalogs read', async () => {
+  it('draws the Skills tab rows with one ⋯ that publishes, from the same catalogs read', async () => {
     const { view, fake } = await open('skills', { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const row = q('[data-catalog-item-row="pdf-tools"]');
-    expect(row?.querySelector('[data-row-share]')).not.toBeNull();
-    expect(row?.querySelector('[data-row-add]')).not.toBeNull();
-    expect(row?.querySelector('[data-row-more]')).not.toBeNull();
+    expect(row?.querySelector('[data-row-share]')).toBeNull();
+    expect(row?.querySelector('[data-row-add]')).toBeNull();
+    await click(row?.querySelector<HTMLElement>('[data-row-more]') ?? null);
+    await settle();
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toContain(
+      'Publish in another catalog…',
+    );
     expect(fake.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
     await view.unmount();
   });

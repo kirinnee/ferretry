@@ -106,9 +106,19 @@ const advance = async (milliseconds: number): Promise<void> => {
   await interact(() => clock?.advance(milliseconds));
   await flush();
 };
-const tapAdd = async (): Promise<void> => {
-  await click(q('[data-row-add]'));
+const step = async (): Promise<void> => {
   await (clock === null ? settle() : flush());
+};
+/** The one-tap Publish item, which the ⋯ menu shows while it is open. */
+const publishItem = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-menu-key="publish"]');
+const openMore = async (): Promise<void> => {
+  await click(q('[data-row-more]'));
+  await step();
+};
+const tapAdd = async (): Promise<void> => {
+  await openMore();
+  await click(publishItem());
+  await step();
 };
 const callsTo = (fake: Awaited<ReturnType<typeof show>>['fake'], path: string) =>
   fake.calls.filter(call => call.path === path);
@@ -122,31 +132,36 @@ const pickMenu = async (label: string): Promise<void> => {
 const added = { 'POST /v1/catalog-items/quick-add': () => addedAnswer() };
 const retracted = { catalogId: CATALOG, itemId: ITEM, mode: 'retracted', revision: 5, itemRemoved: false };
 
-describe('the Add button says where it goes', () => {
+describe('the Publish item says where it goes', () => {
+  const publishLabel = async (): Promise<string | null | undefined> => {
+    await openMore();
+    return publishItem()?.textContent;
+  };
+
   it('names the default catalog, or the one it will make from the machine name', async () => {
     const withDefault = await show();
-    expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools to Team skills');
+    expect(await publishLabel()).toBe('Publish in Team skills');
     await withDefault.view.unmount();
+    document.body.replaceChildren();
     const none = await show({ catalogs: [] });
-    expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools (makes kirin-box’s skills)');
+    expect(await publishLabel()).toBe('Publish in a new catalog, kirin-box’s skills');
     await none.view.unmount();
+    document.body.replaceChildren();
     const anonymous = await show({ catalogs: [], connection: UNNAMED });
-    expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools (makes My skills)');
+    expect(await publishLabel()).toBe('Publish in a new catalog, My skills');
     await anonymous.view.unmount();
   });
 
   it('finds the default by the id the list names', async () => {
     const { view } = await show({ catalogs: [ownedCatalog()], defaultCatalogId: CATALOG });
-    expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools to Team skills');
+    expect(await publishLabel()).toBe('Publish in Team skills');
     await view.unmount();
   });
 
-  it('opens today’s sheet when the machine has no one-tap Add, or cannot be asked', async () => {
+  it('opens today’s sheet when the machine has no one-tap Publish, or cannot be asked', async () => {
     for (const features of [['catalogs.items.1'], [], null]) {
-      const { view } = await show({ features });
-      expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools to a catalog');
-      await click(q('[data-row-add]'));
-      await settle();
+      const { view } = await show({ features, catalogs: [] });
+      await pickMenu('Publish in a catalog…');
       expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
       expect(q('[data-catalog-notice]')).toBeNull();
       await view.unmount();
@@ -161,8 +176,8 @@ describe('one tap', () => {
     clock = installManualClock();
     await tapAdd();
     expect(callsTo(fake, QUICK)[0]?.body).toEqual({ source });
-    expect(toastText()).toContain('Added to Team skills');
-    expect(q('[data-catalog-toast-undo]')?.getAttribute('aria-label')).toBe('Undo: Added to Team skills');
+    expect(toastText()).toContain('Published in Team skills');
+    expect(q('[data-catalog-toast-undo]')?.getAttribute('aria-label')).toBe('Undo: Published in Team skills');
     expect(q('[data-catalog-toast-count]')?.textContent).toBe('10s');
     expect(q('[data-catalog-sheet="add"]')).toBeNull();
     await advance(4000);
@@ -172,7 +187,7 @@ describe('one tap', () => {
     await view.unmount();
   });
 
-  it('sends one request for a double tap', async () => {
+  it('sends one request when Publish is picked again while the first is still going', async () => {
     let release: (() => void) | undefined;
     const { fake, view } = await show({
       more: {
@@ -182,15 +197,11 @@ describe('one tap', () => {
         },
       },
     });
-    const button = q('[data-row-add]');
-    await click(button);
-    await click(button);
-    await settle();
-    expect((q('[data-row-add]') as HTMLButtonElement).disabled).toBe(true);
+    await tapAdd();
+    await tapAdd();
     release?.();
     await settle();
     expect(callsTo(fake, QUICK)).toHaveLength(1);
-    expect((q('[data-row-add]') as HTMLButtonElement).disabled).toBe(false);
     await view.unmount();
   });
 
@@ -439,7 +450,7 @@ describe('Undo', () => {
   });
 });
 
-describe('Add to another catalog…', () => {
+describe('Publish in another catalog…', () => {
   const second = ownedCatalog({ id: SECOND, name: 'Other', items: [] });
   const existingHandlers = (item = sharedItem()) => ({
     'GET /v1/catalog-items': () => ({ publisher: `fy_daemon_${'q3Xk'.repeat(10)}Xkq`, items: [item] }),
@@ -463,7 +474,7 @@ describe('Add to another catalog…', () => {
         [`POST /v1/catalogs/${SECOND}/items`]: () => landed,
       },
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Add to another catalog');
     const picker = q('[data-catalog-picker]') as HTMLSelectElement;
     expect([...picker.options].map(option => option.value)).toEqual([SECOND, '__new']);
@@ -489,7 +500,7 @@ describe('Add to another catalog…', () => {
         },
       },
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     await click(q('[data-catalog-add]'));
     expect(adds).toBe(1);
     expect(q('[data-catalog-notice]')?.textContent).toBeTruthy();
@@ -513,7 +524,7 @@ describe('Add to another catalog…', () => {
         },
       },
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     await click(q('[data-catalog-add]'));
     expect(q('[data-catalog-preview-block]')).toBeNull();
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Preview');
@@ -525,7 +536,7 @@ describe('Add to another catalog…', () => {
       catalogs: [ownedCatalog({ role: 'default' })],
       more: existingHandlers(),
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('It is in all your catalogs already.');
     expect(q('[data-catalog-picker]')).toBeNull();
     expect(q('[data-catalog-new-name]')).not.toBeNull();
@@ -534,14 +545,14 @@ describe('Add to another catalog…', () => {
 
   it('opens the plain sheet when the machine has no item table, or does not know the item', async () => {
     const noTable = await show({ features: [] });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Add to catalog');
     await noTable.view.unmount();
     document.body.replaceChildren();
     const unknown = await show({
       more: existingHandlers(sharedItem({ source: { kind: 'skill', path: '/elsewhere/SKILL.md' }, name: 'other' })),
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Add to catalog');
     expect(q('[data-catalog-sheet="add"]')?.textContent).not.toContain('another');
     await unknown.view.unmount();
@@ -555,7 +566,7 @@ describe('Add to another catalog…', () => {
         },
       },
     });
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')).toBeNull();
     expect(document.body.textContent).toContain('shared items');
     await view.unmount();

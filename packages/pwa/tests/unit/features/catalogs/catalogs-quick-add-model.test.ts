@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { QuickAddAnswerSchema } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
-  addDestination,
+  publishDestination,
   addedSentence,
   alreadySentence,
   defaultCatalogName,
@@ -44,8 +44,8 @@ describe('the default catalog', () => {
   });
 
   it('says where Add goes, and never claims a catalog that is not made yet', () => {
-    expect(addDestination('/pdf', ownedCatalog(), 'kirin-box')).toBe('Add /pdf to Team skills');
-    expect(addDestination('/pdf', undefined, 'kirin-box')).toBe('Add /pdf (makes kirin-box’s skills)');
+    expect(publishDestination(ownedCatalog(), 'kirin-box')).toBe('Publish in Team skills');
+    expect(publishDestination(undefined, 'kirin-box')).toBe('Publish in a new catalog, kirin-box’s skills');
   });
 });
 
@@ -86,7 +86,7 @@ describe('the sentences', () => {
   });
 
   it('says what was added, what was already there, and what Undo did', () => {
-    expect(addedSentence('Team skills')).toBe('Added to Team skills');
+    expect(addedSentence('Team skills')).toBe('Published in Team skills');
     expect(alreadySentence('Team skills')).toBe('Already in Team skills');
     const base = { catalogId: CATALOG, itemId: ITEM, revision: 5, itemRemoved: false } as const;
     expect(undoneSentence({ ...base, mode: 'retracted' }, 'Team skills')).toBe(
