@@ -89,6 +89,8 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
 export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'> {
   /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
   readonly now?: boolean;
+  /** `--back`: it needs something new from the owner, so an item they replied to returns to their list. */
+  readonly back?: boolean;
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A Markdown file for the new body; `-` reads standard input. */
@@ -298,6 +300,7 @@ export class AgendaController {
     const snapshot = await this.gateway.apply(sessionId, {
       ...request,
       ...(options.now === true ? { now: true as const } : {}),
+      ...(options.back === true ? { back: true as const } : {}),
     });
     this.#report(snapshot, options, () => renderAgendaMutation('edited', agendaReference(id), snapshot, id));
   }

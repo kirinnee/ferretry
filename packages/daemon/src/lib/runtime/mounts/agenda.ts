@@ -203,7 +203,7 @@ async function apply(
     : request.action === 'add'
       ? agenda.raise(sessionId, await raiseRequestOf(request, config), actor)
       : request.action === 'edit'
-        ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true)
+        ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true, request.back === true)
         : request.action === 'progress'
           ? agenda.progress(sessionId, request.id, request.step, request.done, actor)
           : request.action === 'needs-info'
@@ -253,7 +253,7 @@ async function enrolledDevices(
 
 /** The fields an edit request names, with the ones it leaves out left out. */
 function editPatch(request: Extract<AgendaActionRequest, { action: 'edit' }>): EditAgendaPatch {
-  const { action: _action, id: _id, now: _now, ...patch } = request;
+  const { action: _action, id: _id, now: _now, back: _back, ...patch } = request;
   return patch;
 }
 

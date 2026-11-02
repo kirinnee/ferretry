@@ -312,15 +312,27 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
   }
 
-  /** `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour). */
+  /**
+   * `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour). `back`: it
+   * needs something new from the owner, so an item they replied to returns to their list; without it that item stays parked.
+   */
   async edit(
     sessionId: string,
     id: AgendaId,
     patch: EditAgendaPatch,
     actor: AgendaActor,
     now = false,
+    back = false,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'edit', actor, id, patch, ...(now ? { now } : {}), at: this.clock.now() });
+    return this.apply(sessionId, {
+      action: 'edit',
+      actor,
+      id,
+      patch,
+      ...(now ? { now } : {}),
+      ...(back ? { back } : {}),
+      at: this.clock.now(),
+    });
   }
 
   /** Tick (or untick) one step of an open item; never resolves it, pushes or tells the ferret. */

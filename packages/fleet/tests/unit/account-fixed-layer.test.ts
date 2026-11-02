@@ -807,11 +807,11 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]"=answer;');
-    // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
-    should(text).containEql('"[re !A3 …]"=chat, parks it:');
-    should(text).containEql('`edit <id>` reopens (`--question-answer`, or refresh summary/premise/context)');
+    // A reply PARKS the item: the ferret does the work and closes it; only `edit --back` brings it back, for NEW asks.
+    should(text).containEql('"[re !A3 …]"=chat, parks it: do the work, `done <id>`');
+    should(text).containEql('`edit <id> --back` + refreshed card only for NEW asks');
     // Closing a question the owner has not answered withdraws it and says why; only the owner's pick answers it.
-    should(text).containEql('else `done --reason "<why>"` withdraws.');
+    should(text).containEql('(question: `--reason "<why>"`)');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP CURRENT:');

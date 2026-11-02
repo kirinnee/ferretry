@@ -248,6 +248,8 @@ export type AgendaCommand =
       readonly patch: EditAgendaPatch;
       /** The ferret says it is urgent: a SNOOZED item wakes (`backFromParked`), at most once an hour. */
       readonly now?: boolean;
+      /** The ferret needs something NEW from the owner: an item the owner REPLIED to comes back to their list. */
+      readonly back?: boolean;
       readonly at: string;
     }
   | {
@@ -1121,7 +1123,13 @@ function addressById(
   // THE EXCEPTION IS AN INPUT CARD: the owner's field next to it may hold a password, and the app sends
   // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
   const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
-  return addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
+  const closed = addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
+  // A ferret closing an item the owner already replied to tells nobody: it was off their list, so nothing on it moves.
+  // The ferret reads that in the command's own result.
+  if (closed.ok && command.actor.kind === 'agent' && target.item.parked?.reason === 'replied') {
+    return { ...closed, notes: [`${command.id} closed; the owner is not notified (they had already replied)`] };
+  }
+  return closed;
 }
 
 function isQuestionShape(item: AgendaItem): boolean {
@@ -1399,6 +1407,14 @@ function sameField(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * Whether an edit asks to put a replied item back in front of the owner: the ferret's explicit `back`, or an
+ * answer to the owner's own question (`questionAnswer`) — the owner asked, so the answer is what they are waiting for.
+ */
+function bringsBack(command: EditCommand): boolean {
+  return command.back === true || (command.patch.questionAnswer ?? '').trim() !== '';
+}
+
+/**
  * Rewords an OPEN item in place. The writing changes (summary, context, premise, what is decided and still
  * open, terms, question wording, recommendation, impact, urgency, links); the ask, the reason and the raiser
  * do not, and neither does the item's place in line, so an edit never re-notifies. Only whoever may close an
@@ -1407,6 +1423,8 @@ function sameField(left: unknown, right: unknown): boolean {
  * Every edit that changes something appends ONE revision (who, which fields, what they said before) so the
  * card can be read as a living summary of its discussion; an edit that changes nothing adds none. An edit of
  * an item on the FERRET's turn by the ferret hands it back to the owner (`surface` does the same without words); it pings nobody.
+ * An edit of an item the owner REPLIED to updates the card and keeps it parked; only `back: true` (with the whole
+ * card refreshed) brings it to the owner's list again.
  */
 function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
@@ -1419,6 +1437,7 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
       command.at,
       { at: command.at, kind: 'updated' },
       command.patch,
+      bringsBack(command),
     );
     if (reopened === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
     if (!reopened.ok) return reopened;
@@ -1428,17 +1447,21 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
   }
-  if (target.item.parked?.reason === 'replied') {
-    const stale = repliedRefreshProblem(command.actor, command.id, command.patch);
+  // A ferret's edit of an item the owner REPLIED to rewrites the card and leaves it parked: the owner has already
+  // answered, so nothing it writes puts the item back in front of them. Only `back` does, with the card refreshed.
+  const staysParked =
+    target.item.parked?.reason === 'replied' && command.actor.kind === 'agent' && !bringsBack(command);
+  if (target.item.parked?.reason === 'replied' && !staysParked) {
+    const stale = repliedRefreshProblem(command.actor, command.id, command.patch, bringsBack(command));
     if (stale !== null) return failure('invalid', stale);
   }
-  const back = backFromParked(target.item, command.actor, command.at, command.now === true);
+  const back = staysParked ? target.item : backFromParked(target.item, command.actor, command.at, command.now === true);
   if ('code' in back) return failure(back.code, back.message);
   if (back !== target.item) {
     // The ferret's edit brings a parked item back first (fresh and unread), then edits it as it stands.
     const unparked = replaceItem(ledger, back, command.at, 'unparked');
     if (!unparked.ok) return unparked;
-    const edited = edit(unparked.ledger, { ...command, now: false });
+    const edited = edit(unparked.ledger, { ...command, now: false, back: false });
     return !edited.ok || edited.change === 'unchanged' ? (edited.ok ? unparked : edited) : edited;
   }
   const patch = command.patch;
@@ -1609,7 +1632,7 @@ function discuss(ledger: AgendaLedger, command: DiscussCommand): AgendaMutation 
  * `replied` — "the owner replied; nothing more is needed unless the ferret asks again" — and their words stay in
  * its history. It leaves every open list, badge and count, so an item the ferret never acts on cannot hang
  * around. Nothing is pushed and `infoRequests` does not move: the owner's message is itself what the ferret reads.
- * The ferret brings it back with `surface` or `edit` (see {@link reopenReplied}) when it needs more.
+ * The ferret brings it back with `edit` and `back` (see {@link reopenReplied}) when it needs something new.
  * Whatever the item waited on (a discussion, more information) ends with it. Only the owner replies, only an
  * open item is replied to, and a notice is read, not replied to.
  */
@@ -1638,8 +1661,8 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
 }
 
 /**
- * What a ferret's `edit` or `surface` does to a PARKED item: one parked as `replied` comes back — fresh, so the
- * owner sees it as new; one the owner `snoozed` stays asleep unless the ferret says it is urgent (`now`), and
+ * What a ferret's `surface`, or its `edit` with `back`, does to a PARKED item: one parked as `replied` comes back
+ * — fresh, so the owner sees it as new; one the owner `snoozed` stays asleep unless the ferret says it is urgent (`now`), and
  * then at most once an hour per item (`AGENDA_URGENT_WAKE_MS`). Anyone else's move, and any item in play, is
  * returned as it is.
  */
@@ -1707,14 +1730,23 @@ function wake(ledger: AgendaLedger, command: WakeCommand): AgendaMutation {
  * Why a ferret may not bring back an item the owner replied to as it stands, or `null` when it may: the owner's
  * reply changed what the ask is, so the card must be written again whole — the ask (`subject`), the `premise`
  * and the `context` — to stay an isolated, self-contained statement of what is going on. Restating a field
- * unchanged counts; leaving one out does not. `patch` is `null` for a bare `surface`. Owner and daemon are exempt.
+ * unchanged counts; leaving one out does not. `patch` is `null` for a bare `surface`, which is always refused;
+ * `back` is the ferret's own word that it needs something new from the owner. Owner and daemon are exempt.
  * An ANSWER TO THE OWNER'S QUESTION (`questionAnswer`) is the exception: the ask has not changed, so the item comes
  * back as it was, with that answer above its own options.
  */
-function repliedRefreshProblem(actor: AgendaActor, id: AgendaId, patch: EditAgendaPatch | null): string | null {
+function repliedRefreshProblem(
+  actor: AgendaActor,
+  id: AgendaId,
+  patch: EditAgendaPatch | null,
+  back: boolean,
+): string | null {
   if (actor.kind !== 'agent') return null;
   if (patch === null) {
-    return `${id} was replied to: bring it back with the whole card refreshed — \`fy agenda edit ${id} --summary … --premise … --context …\`, not surface`;
+    return `${id} was replied to and is off the owner's list: bring it back only if you need something new from them, with the whole card refreshed — \`fy agenda edit ${id} --back --summary … --premise … --context …\`, not surface`;
+  }
+  if (!back) {
+    return `${id} was replied to and is off the owner's list: add --back to bring it back to them`;
   }
   const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
   if (!blank(patch.questionAnswer)) return null;
@@ -1741,6 +1773,7 @@ function reopenReplied(
   at: string,
   entry: AgendaHistoryEntry,
   patch: EditAgendaPatch | null,
+  back: boolean,
 ): AgendaMutation | undefined {
   const closed = ledger.entries.find(
     (candidate): candidate is Extract<AgendaEntry, { lifecycle: 'addressed' }> =>
@@ -1749,7 +1782,7 @@ function reopenReplied(
   if (closed === undefined) return undefined;
   const allowed = actor.kind === 'daemon' && actor.cause === 'system' ? true : canAddressAgenda(actor, closed);
   if (!allowed) return failure('forbidden', 'only the owner or the ferret that raised an item may bring it back');
-  const stale = repliedRefreshProblem(actor, id, patch);
+  const stale = repliedRefreshProblem(actor, id, patch, back);
   if (stale !== null) return failure('invalid', stale);
   const active = ledger.entries.filter(isActiveAgenda);
   if (active.length + setAsideOf(ledger.unreadable).active >= MAX_AGENDA_PER_SESSION) {
@@ -1796,6 +1829,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
       command.at,
       { at: command.at, kind: 'surfaced', ...(why === '' ? {} : { note: why }) },
       null,
+      false,
     );
     if (reopened !== undefined) return reopened;
     return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
@@ -1812,7 +1846,7 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
   }
   if (target.item.parked !== undefined) {
     if (target.item.parked.reason === 'replied') {
-      const stale = repliedRefreshProblem(command.actor, command.id, null);
+      const stale = repliedRefreshProblem(command.actor, command.id, null, false);
       if (stale !== null) return failure('invalid', stale);
     }
     const back = backFromParked(target.item, command.actor, command.at, command.now === true);

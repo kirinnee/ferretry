@@ -1002,6 +1002,22 @@ describe('agenda route edit: clearing agenda fields', () => {
     should(items(cleared)[0]).containDeep({ willBlock: 'the deploy' });
   });
 
+  it('should accept back on an edit and leave an item that was never replied to as it was', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(agenda, agentIn('s1')));
+
+    // Act
+    const edited = await dispatch(
+      post({ action: 'edit', id: 'A1', willBlock: 'the release', back: true }, agentIn('s1')),
+    );
+
+    // Assert
+    should(edited.status).equal(200);
+    should(items(edited)[0]).containDeep({ willBlock: 'the release' });
+    should(items(edited)[0]).not.have.property('parked');
+  });
+
   it('should clear one field while it sets another in the same edit', async () => {
     // Arrange
     const dispatch = fixture();

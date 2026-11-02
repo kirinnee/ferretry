@@ -253,7 +253,7 @@ function mountVerbs(
     agenda
       .command('edit')
       .description(
-        'reword an open item you raised — only the writing, never the ask; on your turn it hands the item back to the owner',
+        'reword an open item you raised — only the writing, never the ask; on your turn it hands the item back to the owner, but an item the owner replied to stays off their list unless you pass --back',
       )
       .argument('<id>', 'the item reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
@@ -309,7 +309,11 @@ function mountVerbs(
       .option('--clear-will-block', 'drop what this will block')
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--clear-by', 'drop when it is needed')
-      .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)'),
+      .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)')
+      .option(
+        '--back',
+        'you need something NEW from the owner, who already replied: put the item back on their list (also needs --summary, --premise and --context, or --question-answer); without it the edit leaves the item off their list',
+      ),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));
   });

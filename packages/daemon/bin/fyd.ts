@@ -3628,7 +3628,7 @@ function createSessionSendSubsystem(
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
         const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
-        if (turn.referenced.length > 0) await conversation.settle(id, turn);
+        if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
           ...(await view(id, 'took the message')),

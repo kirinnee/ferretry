@@ -657,6 +657,39 @@ describe('agenda surface command', () => {
     should(edited.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', now: true });
   });
 
+  it('should send --back only when the ferret needs something new from the owner who already replied', async () => {
+    // Arrange + Act
+    const plain = run(['agenda', 'edit', '!A1', '--summary', 'Reworded'], snapshot([]));
+    await plain.parsed;
+    const back = run(
+      ['agenda', 'edit', '!A1', '--back', '--summary', 'Which region?', '--premise', 'p', '--context', 'c'],
+      snapshot([]),
+    );
+    await back.parsed;
+
+    // Assert
+    should(plain.gateway.applied[0]?.request).not.have.property('back');
+    should(back.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', back: true });
+  });
+
+  it('should explain --back in the edit help, and say a plain edit leaves a replied item off the owner’s list', async () => {
+    // Arrange
+    const gateway = new RecordingAgendaGateway(snapshot([]));
+    const program = new Command().name('fy').exitOverride();
+    let help = '';
+    program.configureOutput({ writeOut: text => (help += text), writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, new CapturingOutput(), SESSION));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'agenda', 'edit', '--help']).catch(() => undefined);
+
+    // Assert
+    const flat = help.replace(/\s+/gu, ' ');
+    should(flat).containEql('--back');
+    should(flat).containEql('something NEW from the owner');
+    should(flat).containEql('stays off their list unless you pass --back');
+  });
+
   it('should no longer take --surface on add: a new ask is the owner’s turn', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
