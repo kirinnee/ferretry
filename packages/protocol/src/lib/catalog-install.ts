@@ -229,7 +229,11 @@ export const CatalogInstallRemovedSchema = z.strictObject({
 });
 export type CatalogInstallRemoved = z.infer<typeof CatalogInstallRemovedSchema>;
 
-export const CatalogInstallListSchema = z.strictObject({ installs: z.array(CatalogInstallSchema) });
+export const CatalogInstallListSchema = z.strictObject({
+  installs: z.array(CatalogInstallSchema),
+  /** Set when the file of hold/skip choices is damaged: the list is complete but shows none of those choices. */
+  note: z.string().min(1).max(500).optional(),
+});
 export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
 
 /**
