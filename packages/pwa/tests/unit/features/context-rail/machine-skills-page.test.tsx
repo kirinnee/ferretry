@@ -119,6 +119,23 @@ describe('the On this machine group', () => {
     await view.unmount();
   });
 
+  it('keeps reading until the session’s own skills are known, so it never lists one the session already has', async () => {
+    const session = deferred<typeof SKILLS>();
+    const { host } = hostWith({});
+    const view = await mount(
+      <AddSkillsPage {...host} loadInventory={async () => await session.promise} onNavigate={() => undefined} />,
+    );
+    await settle();
+    await settle();
+    expect(text()).toContain(READING_MACHINE);
+    expect(machineRows()).toHaveLength(0);
+    session.resolve(SKILLS);
+    await settle();
+    expect(text()).not.toContain(READING_MACHINE);
+    expect(machineRows()).toHaveLength(3);
+    await view.unmount();
+  });
+
   it('says so when the machine’s skills cannot be read, and leaves the rest of the page alone', async () => {
     const { host } = hostWith({
       'GET /v1/skills': () => {
