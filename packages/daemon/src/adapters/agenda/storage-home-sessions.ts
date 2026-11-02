@@ -1,7 +1,16 @@
-import { SessionConfigSchema } from '@ferretry/protocol';
+import { z } from 'zod';
 import type { HomeSession, HomeSessions } from '../../lib/agenda/home.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
+
+/** Only the fields the home rule reads: a document with others missing still has a lineage. */
+const HomeConfigSchema = z.object({
+  parent: z.string().optional(),
+  mode: z.string(),
+  projectId: z.string().optional(),
+  updatedAt: z.string(),
+  provenance: z.object({ origin: z.enum(['human', 'session', 'warden']) }).optional(),
+});
 
 /** The home rule's reader over the session configuration documents; a document the schema rejects is unreadable. */
 export class StorageHomeSessions implements HomeSessions {
@@ -10,7 +19,7 @@ export class StorageHomeSessions implements HomeSessions {
   async get(sessionId: string): Promise<HomeSession | undefined> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined || this.storage.findSession(id) === undefined) return undefined;
-    const config = SessionConfigSchema.safeParse(await this.storage.readConfig(id));
+    const config = HomeConfigSchema.safeParse(await this.storage.readConfig(id));
     if (!config.success) return undefined;
     const { data } = config;
     return {
