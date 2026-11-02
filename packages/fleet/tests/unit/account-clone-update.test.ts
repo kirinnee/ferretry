@@ -33,6 +33,9 @@ interface Side {
   readonly notes?: string;
 }
 
+/** The origin keys a bundle carries (a version 1 bundle carries none). */
+const keysOf = (bundle: FleetCloneBundle): Record<string, string> => (bundle.version === 2 ? bundle.keys : {});
+
 const bundleOf = (side: Side, extra: Record<string, unknown> = {}): FleetCloneBundle => {
   const instructions: Record<string, unknown> = {};
   const files: { path: string; content: string }[] = [];
@@ -559,5 +562,511 @@ describe('a login is never changed (design §14.4)', () => {
       });
       should(loginsOf(plan.model)).equal(before);
     }
+  });
+});
+
+describe('logins during an update', () => {
+  const agentOn = (side: Side = { main: 'A' }) =>
+    bundleOf(side, {
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+    });
+  const withTwoLogins = () =>
+    parseAccountModel({
+      ...targetOf({ main: 'A' }).model,
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'ferretry', label: 'you', ...FROM, clonedFromKey: KEY_LOGIN },
+        'claude-two': { harness: 'claude', store: 'ferretry', label: 'two', ...FROM, clonedFromKey: KEY_LOGIN },
+        'codex-one': { harness: 'codex', store: 'ferretry', label: 'one' },
+      },
+    });
+  const asking = (patch: Partial<CloneUpdateInput> = {}) =>
+    inputOf(
+      { main: 'A' },
+      { main: 'A' },
+      { main: 'A' },
+      {
+        bundle: agentOn(),
+        target: withTwoLogins(),
+        logins: { matched: new Map(), ask: new Map([['claude-you', ['claude-two', 'claude-you']]]) },
+        ...patch,
+      },
+    );
+  const TAKE = { 'runtime/claude-default': 'take' } as const;
+
+  it('should ask which login when two here claim the source login, and refuse to guess', () => {
+    const review = reviewed(asking());
+    should(review.logins).eql([{ sourceId: 'claude-you', outcome: 'ask', candidates: ['claude-two', 'claude-you'] }]);
+    const refusal = (() => {
+      try {
+        planCloneUpdate(analyseCloneUpdate(asking()), { decisions: TAKE });
+      } catch (error) {
+        return error as Error;
+      }
+      return undefined;
+    })();
+    should(refusal).be.instanceOf(CloneRefusal);
+    should(refusal?.message).containEql('claude-two, claude-you');
+  });
+
+  it('should point the runtime at the login the person picked, changing no login', () => {
+    const input = asking();
+    const before = JSON.stringify(input.target.credentials);
+    const plan = planCloneUpdate(analyseCloneUpdate(input), {
+      decisions: TAKE,
+      logins: { 'claude-you': 'claude-two' },
+    });
+    should(plan.model.runtimes['claude-default']?.credential).equal('claude-two');
+    should(JSON.stringify(plan.model.credentials)).equal(before);
+    should(plan.slots).eql([]);
+  });
+
+  it('should add an empty slot when the person picked a new one', () => {
+    const plan = planCloneUpdate(analyseCloneUpdate(asking()), { decisions: TAKE, logins: { 'claude-you': 'slot' } });
+    should(plan.slots.length).equal(1);
+    should(Object.keys(plan.model.credentials).length).equal(4);
+  });
+
+  it('should refuse a login that is not one of this harness here, or not here at all', () => {
+    for (const picked of ['codex-one', 'nobody']) {
+      should(() =>
+        planCloneUpdate(analyseCloneUpdate(asking()), { decisions: TAKE, logins: { 'claude-you': picked } }),
+      ).throw(CloneRefusal);
+    }
+  });
+});
+
+describe('resolving logins from the record and from keys', () => {
+  it('should use the login the record paired, else the one carrying the key, else ask, else none', async () => {
+    const { resolveCloneLogins } = await import('../../src/lib/account/clone-update.ts');
+    const bundle = bundleOf({ main: 'A' });
+    const two = parseAccountModel({
+      ...targetOf({ main: 'A' }).model,
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'ferretry', clonedFromKey: KEY_LOGIN },
+        'claude-two': { harness: 'claude', store: 'ferretry', clonedFromKey: KEY_LOGIN },
+      },
+    });
+    const paired = baseOf({ main: 'A' }).sources[SOURCE.id];
+    should(resolveCloneLogins(bundle, two, paired).matched.get('claude-you')).equal('claude-you');
+    should(resolveCloneLogins(bundle, two, undefined).ask.get('claude-you')).eql(['claude-two', 'claude-you']);
+    const one = parseAccountModel({
+      ...targetOf({ main: 'A' }).model,
+    });
+    should(resolveCloneLogins(bundle, one, undefined).matched.get('claude-you')).equal('claude-you');
+    const none = parseAccountModel({ version: 2 });
+    const resolved = resolveCloneLogins(bundle, none, undefined);
+    should(resolved.matched.size).equal(0);
+    should(resolved.ask.size).equal(0);
+    const v1 = resolveCloneLogins({ ...bundle, version: 1 } as never, none, undefined);
+    should(v1.matched.size).equal(0);
+  });
+});
+
+describe('what applying an update says', () => {
+  it('should describe the counts, links, runnables, slots and missing parts in words', async () => {
+    const { describeCloneUpdate } = await import('../../src/lib/account/clone-update.ts');
+    const input = inputOf(
+      { main: 'B' },
+      { main: 'A' },
+      { main: 'A' },
+      {
+        installed: ['codex'],
+        existingSecrets: [],
+        logins: { matched: new Map(), ask: new Map() },
+      },
+    );
+    const plan = planCloneUpdate(analyseCloneUpdate(input), {
+      decisions: { 'instructions/main': 'take' },
+    });
+    const lines = describeCloneUpdate(plan, 'work-linux', 'studio-mac');
+    should(lines[0]).containEql('Updates work-linux from studio-mac');
+    should(lines.join('\n')).containEql('already the same');
+    should(lines.join('\n')).containEql('can make work-linux run something');
+  });
+
+  it('should list links, paths to check, missing harnesses, missing secrets and kept skills', async () => {
+    const { describeCloneUpdate } = await import('../../src/lib/account/clone-update.ts');
+    const plan = {
+      done: { taken: ['a'], added: [], removed: [], kept: [], linked: ['instructions/main'] },
+      same: { count: 2, probable: 1 },
+      runnables: [],
+      slots: [{ id: 'claude-you', harness: 'claude', runtimes: ['claude-default'] }],
+      checkPaths: [{ reference: 'hooks/guard', path: '/home/x/guard.sh' }],
+      missingHarnesses: ['claude'],
+      missingSecrets: ['API_TOKEN'],
+      keptSkillItems: ['review'],
+    };
+    const text = describeCloneUpdate(plan as never, 'work-linux', 'studio-mac').join('\n');
+    for (const part of [
+      'Links 1 item to studio-mac by name',
+      'empty login claude-you',
+      'Check after copying: hooks/guard names /home/x/guard.sh',
+      "claude isn't installed on work-linux",
+      'no API_TOKEN',
+      'Skill review is already on work-linux',
+    ]) {
+      should(text).containEql(part);
+    }
+  });
+});
+
+describe('skills folders and files', () => {
+  const skillsBundle = (files: { path: string; content: string }[], items = ['review']) => {
+    const base = bundleOf({ main: 'A' });
+    return FleetCloneBundleSchema.parse({
+      ...base,
+      components: { ...base.components, skills: { pack: { items } } },
+      keys: { ...keysOf(base), 'skills/pack': KEY_NOTES },
+      files: [...base.files, ...files],
+    });
+  };
+  const withSkills = (files: { path: string; content: string }[], items = ['review']) => {
+    const here = targetOf({ main: 'A' });
+    return {
+      model: parseAccountModel({
+        ...here.model,
+        components: {
+          ...here.model.components,
+          skills: { pack: { items, ...FROM, clonedFromKey: KEY_NOTES } },
+        },
+      }),
+      targetFiles: [...here.targetFiles, ...files],
+    };
+  };
+
+  it('should list a skill folder file added, changed and removed, and write them on take', () => {
+    const mine = withSkills([
+      { path: 'skills/review/SKILL.md', content: 'old' },
+      { path: 'skills/review/gone.md', content: 'x\ny' },
+    ]);
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
+      bundle: skillsBundle([
+        { path: 'skills/review/SKILL.md', content: 'new' },
+        { path: 'skills/review/fresh.md', content: 'a\nb\nc' },
+      ]),
+      target: mine.model,
+      targetFiles: mine.targetFiles,
+    });
+    const item = reviewed(input).items.find(entry => entry.ref === 'skills/pack');
+    should(item?.files.map(file => `${file.path}:${file.change}`)).eql([
+      'skills/review/SKILL.md:changed',
+      'skills/review/fresh.md:added',
+      'skills/review/gone.md:removed',
+    ]);
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: { 'skills/pack': 'take' } });
+    should(plan.files.map(file => file.path).toSorted()).eql(['skills/review/SKILL.md', 'skills/review/fresh.md']);
+  });
+
+  it('should say a skill folder is already here for a new skills component naming an item it has', () => {
+    const input = inputOf(
+      { main: 'A' },
+      { main: 'A' },
+      { main: 'A' },
+      {
+        bundle: skillsBundle([{ path: 'skills/extra/SKILL.md', content: 'e' }], ['extra']),
+        existingSkillItems: ['extra'],
+      },
+    );
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
+    should(plan.keptSkillItems).eql(['extra']);
+  });
+});
+
+describe('profiles and runtimes new here', () => {
+  const bigger = () => {
+    const bundle = bundleOf(
+      { main: 'A' },
+      {
+        profiles: {
+          default: { layers: ['instructions/main'] },
+          second: { layers: ['instructions/main'] },
+        },
+        runtimes: {
+          'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
+          'claude-second': { credential: 'claude-you', profile: 'second', agent: true },
+        },
+      },
+    );
+    return FleetCloneBundleSchema.parse({
+      ...bundle,
+      keys: { ...keysOf(bundle), 'profile/second': KEY_NOTES, 'runtime/claude-second': KEY_NOTES.replace(/e/gu, 'f') },
+    });
+  };
+
+  it('should add a new profile and runtime, pointing the runtime at the login here', () => {
+    const input = inputOf({ main: 'A' }, { main: 'A' }, { main: 'A' }, { bundle: bigger() });
+    const items = reviewed(input).items;
+    should(items.map(item => item.ref).toSorted()).eql(['profile/second', 'runtime/claude-second']);
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
+    should(plan.model.profiles.second?.layers).eql(['instructions/main']);
+    should(plan.model.runtimes['claude-second']?.credential).equal('claude-you');
+    should(plan.model.runtimes['claude-second']?.agent).equal(true);
+  });
+
+  it('should refuse a runtime added without the profile it runs on', () => {
+    const input = inputOf({ main: 'A' }, { main: 'A' }, { main: 'A' }, { bundle: bigger() });
+    should(() => planCloneUpdate(analyseCloneUpdate(input), { decisions: { 'profile/second': 'skip' } })).throw(
+      CloneRefusal,
+    );
+  });
+
+  it('should refuse a profile added without a layer it needs', () => {
+    const bundle = bundleOf(
+      { main: 'A', notes: 'N' },
+      { profiles: { default: { layers: ['instructions/main', 'instructions/notes'] } } },
+    );
+    const input = inputOf({ main: 'A' }, { main: 'A' }, { main: 'A' }, { bundle });
+    should(() =>
+      planCloneUpdate(analyseCloneUpdate(input), {
+        decisions: { 'instructions/notes': 'skip', 'profile/default': 'take' },
+      }),
+    ).throw(CloneRefusal);
+  });
+
+  it('should offer a profile that only matches by name, unticked, when its layers differ', () => {
+    const bundle = bundleOf(
+      { main: 'A', notes: 'N' },
+      { profiles: { default: { layers: ['instructions/main', 'instructions/notes'] } } },
+    );
+    const here = targetOf({ main: 'A' });
+    const model = parseAccountModel({
+      ...here.model,
+      profiles: { default: { layers: ['instructions/main'] } },
+      runtimes: {},
+    });
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
+      bundle,
+      target: model,
+      targetFiles: here.targetFiles,
+    });
+    const item = reviewed(input).items.find(entry => entry.ref === 'profile/default-2');
+    should(item?.outcome).equal('new');
+    should(item?.note).containEql('You may already have this');
+  });
+
+  it('should list a profile the source dropped with the runtimes here that use it', () => {
+    const full = bundleOf({ main: 'A' }, { profiles: {}, runtimes: {} });
+    const bundle = FleetCloneBundleSchema.parse({
+      ...full,
+      keys: Object.fromEntries(
+        Object.entries(keysOf(full)).filter(([ref]) => !ref.startsWith('profile/') && !ref.startsWith('runtime/')),
+      ),
+    });
+    const input = inputOf({ main: 'A' }, { main: 'A' }, { main: 'A' }, { bundle });
+    const item = reviewed(input).items.find(entry => entry.ref === 'profile/default');
+    should(item?.outcome).equal('gone');
+    should(item?.note).containEql('runtime/claude-default');
+  });
+});
+
+describe('removed here', () => {
+  it('should say a removed item has changed on the source too when the base differs from theirs', () => {
+    const input = inputOf({ main: 'B' }, {}, { main: 'A' });
+    const item = reviewed(input).items.find(entry => entry.ref === 'instructions/main');
+    should(item?.outcome).equal('removed-here');
+    should(item?.note).containEql('changed on the source too');
+  });
+
+  it('should tick a removed-here item a new profile needs', () => {
+    const bundle = bundleOf(
+      { main: 'A', notes: 'N' },
+      { profiles: { default: { layers: ['instructions/main'] }, extra: { layers: ['instructions/notes'] } } },
+    );
+    const here = targetOf({ main: 'A' });
+    const model = parseAccountModel({
+      ...here.model,
+      profiles: { default: { layers: ['instructions/main'], clonedFromKey: KEY_PROFILE } },
+    });
+    const base = baseOf({ main: 'A', notes: 'N' }).sources[SOURCE.id];
+    const input = inputOf({ main: 'A', notes: 'N' }, { main: 'A' }, undefined, {
+      bundle,
+      target: model,
+      targetFiles: here.targetFiles,
+      base,
+    });
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: { 'profile/extra': 'add' } });
+    should(plan.model.components.instructions.notes).not.be.undefined();
+  });
+});
+
+describe('the review the apply names', () => {
+  it('should refuse an apply that names no review or another one, and accept the same one', async () => {
+    const { checkCloneReviewed } = await import('../../src/lib/account/clone-update.ts');
+    const analysis = analyseCloneUpdate(inputOf({ main: 'B' }, { main: 'A' }, { main: 'A' }));
+    should(() => checkCloneReviewed(analysis, undefined)).throw(CloneRefusal);
+    should(() => checkCloneReviewed(analysis, 'other')).throw(CloneRefusal);
+    checkCloneReviewed(analysis, analysis.fingerprint);
+  });
+});
+
+describe('what else a copy can carry', () => {
+  const KEY_A = 'gggggggggggggggggggggggggg';
+  const KEY_B = 'hhhhhhhhhhhhhhhhhhhhhhhhhh';
+  const withKeys = (bundle: FleetCloneBundle, keys: Record<string, string>) =>
+    FleetCloneBundleSchema.parse({ ...bundle, keys: { ...keysOf(bundle), ...keys } });
+
+  it('should refuse an update that would leave two profiles layering each other', () => {
+    const shape = (a: string) => ({
+      profiles: { a: { layers: [a] }, b: { layers: ['instructions/main'] } },
+      runtimes: {},
+    });
+    const keys = { 'profile/a': KEY_A, 'profile/b': KEY_B };
+    const old = withKeys(
+      bundleOf(
+        { main: 'A' },
+        { profiles: { a: { layers: ['instructions/main'] }, b: { layers: ['instructions/main'] } }, runtimes: {} },
+      ),
+      keys,
+    );
+    const base = applyCloneToBase(EMPTY_CLONE_BASE, {
+      source: SOURCE,
+      at: AT,
+      replace: true,
+      copied: cloneBaseEntries(old, old, new Map()),
+      sourceKeys: new Set(cloneOriginKeys(old).values()),
+      model: parseAccountModel({
+        ...targetOf({ main: 'A' }).model,
+        profiles: {
+          a: { layers: ['instructions/main'], clonedFromKey: KEY_A },
+          b: { layers: ['instructions/main'], clonedFromKey: KEY_B },
+        },
+        runtimes: {},
+      }),
+    });
+    const here = targetOf({ main: 'A' });
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
+      bundle: withKeys(bundleOf({ main: 'A' }, shape('profile/b')), keys),
+      target: parseAccountModel({
+        ...here.model,
+        profiles: {
+          a: { layers: ['instructions/main'], clonedFromKey: KEY_A },
+          b: { layers: ['profile/a'], clonedFromKey: KEY_B },
+        },
+        runtimes: {},
+      }),
+      targetFiles: here.targetFiles,
+      base: base.sources[SOURCE.id],
+    });
+    should(() => planCloneUpdate(analyseCloneUpdate(input), { decisions: {} })).throw(/cannot read/u);
+  });
+
+  it('should write a hooks folder and name the secrets a new server needs', () => {
+    const bundle = withKeys(
+      bundleOf(
+        { main: 'A' },
+        {
+          components: {
+            instructions: { main: { file: MAIN_PATH } },
+            hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } },
+            mcp: { notes: { command: 'notes', env: { TOKEN: '${secret:API_TOKEN}' } } },
+          },
+          files: [
+            { path: MAIN_PATH, content: 'A' },
+            { path: 'components/hooks/guard/run.sh', content: 'echo hi' },
+          ],
+        },
+      ),
+      { 'hooks/guard': KEY_A, 'mcp/notes': KEY_B },
+    );
+    const input = inputOf({ main: 'A' }, { main: 'A' }, { main: 'A' }, { bundle });
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
+    should(plan.files.map(file => file.path)).containEql('components/hooks/guard/run.sh');
+    should(plan.missingSecrets).eql(['API_TOKEN']);
+    should(plan.model.components.hooks.guard?.directory).equal('components/hooks/guard');
+  });
+
+  it('should write over a hooks folder that is already here in the folder it has', () => {
+    const here = targetOf({ main: 'A' });
+    const model = parseAccountModel({
+      ...here.model,
+      components: {
+        instructions: { main: { file: MAIN_PATH, ...FROM, clonedFromKey: KEY_MAIN } },
+        hooks: { guard: { harness: 'claude', directory: 'components/hooks/mine', ...FROM, clonedFromKey: KEY_A } },
+      },
+    });
+    const bundle = withKeys(
+      bundleOf(
+        { main: 'A' },
+        {
+          components: {
+            instructions: { main: { file: MAIN_PATH } },
+            hooks: { guard: { harness: 'claude', directory: 'components/hooks/guard' } },
+          },
+          files: [
+            { path: MAIN_PATH, content: 'A' },
+            { path: 'components/hooks/guard/run.sh', content: 'new' },
+          ],
+        },
+      ),
+      { 'hooks/guard': KEY_A },
+    );
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
+      bundle,
+      target: model,
+      targetFiles: [...here.targetFiles, { path: 'components/hooks/mine/run.sh', content: 'old' }],
+    });
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: { 'hooks/guard': 'take' } });
+    should(plan.model.components.hooks.guard?.directory).equal('components/hooks/mine');
+  });
+
+  it('should copy an environment login as its own login and never touch one that exists', () => {
+    const bundle = FleetCloneBundleSchema.parse({
+      ...bundleOf({ main: 'A' }),
+      credentials: [
+        {
+          id: 'claude-you',
+          harness: 'claude',
+          store: 'environment',
+          env: { ANTHROPIC_API_KEY: '${secret:API_TOKEN}' },
+        },
+      ],
+    });
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
+      bundle,
+      target: parseAccountModel({ ...targetOf({ main: 'A' }).model, runtimes: {} }),
+      logins: { matched: new Map(), ask: new Map() },
+    });
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
+    should(plan.slots.length).equal(1);
+    should(plan.model.credentials['claude-you']).not.be.undefined();
+  });
+
+  it('should treat an item that names this source by machine alone as one it dropped', () => {
+    const here = targetOf({ main: 'A' });
+    const model = parseAccountModel({
+      ...here.model,
+      components: {
+        instructions: {
+          main: { file: MAIN_PATH, ...FROM, clonedFromKey: KEY_MAIN },
+          old: { file: 'components/instructions/old.md', clonedFrom: 'studio-mac', clonedFromKey: KEY_NOTES },
+        },
+      },
+    });
+    const input = inputOf(
+      { main: 'A' },
+      { main: 'A' },
+      { main: 'A' },
+      {
+        target: model,
+        targetFiles: [...here.targetFiles, { path: 'components/instructions/old.md', content: 'o' }],
+      },
+    );
+    should(outcomeOf(input, 'instructions/old')).equal('gone');
+  });
+});
+
+describe('linking a profile and a runtime by name', () => {
+  it('should stamp only the key on a profile and runtime, never where they came from', () => {
+    const here = targetOf({ main: 'A' });
+    const model = parseAccountModel({
+      ...here.model,
+      profiles: { default: { layers: ['instructions/main'] } },
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+    });
+    const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, { target: model, targetFiles: here.targetFiles });
+    const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
+    should(plan.model.profiles.default).eql({ layers: ['instructions/main'], clonedFromKey: KEY_PROFILE });
+    should(plan.model.runtimes['claude-default']?.clonedFromKey).equal(KEY_RUNTIME);
+    should(plan.model.runtimes['claude-default']).not.have.property('clonedFrom');
   });
 });

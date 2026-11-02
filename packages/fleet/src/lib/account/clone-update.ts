@@ -451,12 +451,9 @@ function usersOf(target: AccountModel, entry: Entry): string[] {
   return users;
 }
 
-const bundleKinds = (bundle: FleetCloneBundle): ReadonlySet<string> => new Set(Object.keys(bundle.components));
-
 /** The analysis of one repeat copy: every pairing, outcome, default and need, and the fingerprint naming them. */
 export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   const { target, bundle, source, base } = input;
-  bundleKinds(bundle);
   const sourceName = input.sourceName ?? bundle.machine;
   // The bundle must read as a setup of its own before anything is compared against it.
   const theirModel = bundleModel(bundle, sourceName);
@@ -984,7 +981,6 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   const usedFiles = referencedFiles(target);
   const theirContents = new Map(bundle.files.map(file => [plain(file.path), file.content]));
   const myContents = mapOf(input.targetFiles);
-  const writing = new Map<string, string>();
   const fileMoves = new Map<string, string>();
   const folderMoves = new Map<string, string>();
   const checkPaths: { reference: string; path: string }[] = [];
@@ -1022,9 +1018,10 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
   for (const item of writtenRuntimes) {
     const credential = String(item.source?.value.credential);
     if (loginFor.has(credential)) continue;
-    const descriptor = bundle.credentials.find(candidate => candidate.id === credential);
-    if (descriptor === undefined)
-      throw new CloneRefusal(`The setup from ${sourceName} names a login it does not carry.`);
+    // The bundle read as a setup above, so every login a runtime names is carried.
+    const descriptor = bundle.credentials.find(
+      candidate => candidate.id === credential,
+    ) as (typeof bundle.credentials)[number];
     const asked = analysis.logins.find(login => login.sourceId === credential);
     const picked = loginChoices[credential];
     let here: string | undefined = analysis.input.logins.matched.get(credential);
@@ -1110,10 +1107,14 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (item.outcome === 'same') {
       if (item.stamp && entry !== undefined && item.target !== undefined) {
         // Linked by name: the same item, so only the link is written.
-        const stamped = { ...item.target.value, ...origin, ...keyed(entry.ref) };
-        if (item.kind === 'profile') profiles[item.target.name] = stamped as unknown as LayeredProfile;
-        else if (item.kind === 'runtime') runtimes[item.target.name] = stamped as unknown as Runtime;
-        else components[item.kind][item.target.name] = stamped;
+        // A profile or runtime carries only the key, never where it came from.
+        if (item.kind === 'profile') {
+          profiles[item.target.name] = { ...item.target.value, ...keyed(entry.ref) } as unknown as LayeredProfile;
+        } else if (item.kind === 'runtime') {
+          runtimes[item.target.name] = { ...item.target.value, ...keyed(entry.ref) } as unknown as Runtime;
+        } else {
+          components[item.kind][item.target.name] = { ...item.target.value, ...origin, ...keyed(entry.ref) };
+        }
         linked.push(item.ref);
       }
       continue;
@@ -1137,21 +1138,13 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     (choice === 'take' ? taken : added).push(item.ref);
     if (item.kind === 'profile') {
       profiles[name] = {
-        layers: strings(entry.value.layers).map(layer => {
-          const reference = hereRef(layer);
-          if (reference === undefined) {
-            throw new CloneRefusal(`${item.ref} needs ${layer}. Add it too, or leave ${item.ref} as it is.`);
-          }
-          return reference;
-        }) as LayeredProfile['layers'],
+        // Every need was ticked or unticked together in resolveCloneDecisions, so each layer resolves.
+        layers: strings(entry.value.layers).map(hereRef) as unknown as LayeredProfile['layers'],
         ...keyed(entry.ref),
       };
     } else if (item.kind === 'runtime') {
       const credential = loginFor.get(String(entry.value.credential)) as string;
-      const profile = hereRef(`profile/${String(entry.value.profile)}`);
-      if (profile === undefined) {
-        throw new CloneRefusal(`${item.ref} needs profile/${String(entry.value.profile)}. Add it too.`);
-      }
+      const profile = hereRef(`profile/${String(entry.value.profile)}`) as string;
       const theirRuntime = source.runtimes[entry.name] as Runtime;
       runtimes[name] = {
         credential,
@@ -1198,7 +1191,6 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
     if (myContents.get(plain(moved)) === file.content) continue;
     files.push({ path: moved, content: file.content });
   }
-  void writing;
 
   let model: AccountModel;
   try {

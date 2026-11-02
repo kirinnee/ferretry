@@ -1421,6 +1421,47 @@ describe('the clone.import executor in update mode', () => {
     should(configTextOf(w.applied[0]?.documents ?? [])).not.containEql('claude-you');
     should([...w.secrets]).deepEqual([['NOTES_TOKEN', 'ghp_do_not_touch']]);
   });
+
+  it('should refuse a review of a setup exported from this very machine', async () => {
+    const w = await copied();
+    const bundle = { ...(await sourceAt('Main.\n')), machine: 'studio' };
+    const refusal = await setupRefusal(w.service.reviewClone({ bundle }), 'fleet_setup_refused');
+    should(refusal.message).containEql('itself');
+  });
+
+  it('should let an unexpected failure through, in a review and in an apply, rather than call it a refusal', async () => {
+    const broken = world({
+      overrides: {
+        cloneBase: {
+          read: async () => {
+            throw new Error('disk gone');
+          },
+          write: async () => undefined,
+        },
+      },
+    });
+    broken.state.reading = configReading(SET_UP_MODEL(), 'r');
+    const bundle = await sourceAt('Main.\n');
+    await broken.service.reviewClone({ bundle }).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+    await broken.service.executors.clone.describe(request(bundle, { reviewed: 'x', decisions: {} })).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+  });
+
+  it('should record nothing for a source that carries no identity, but still write what was chosen', async () => {
+    const w = await copied();
+    const { daemon: _daemon, keys: _keys, ...rest } = await sourceAt('Main, changed on the source.\n');
+    const bundle = { ...rest, version: 1 };
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(batchRecord(w)).be.undefined();
+  });
 });
 
 // ── The "last copied" record ─────────────────────────────────────────────────────────────────────
