@@ -445,6 +445,29 @@ describe('the last-copied record over real files', () => {
 
     should(Object.keys(parseCloneBase(await readFile(record, 'utf8')).sources)).deepEqual(['daemon-source']);
   });
+
+  it('should forget one source in the record alone, leaving the login and its secrets byte-identical', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await signedInTarget('work-linux');
+    const record = path.join(target.fleet, CLONE_BASE_FILE);
+    const staged = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await target.catalog.apply(staged.id, { governed: false } as never);
+    const before = await credentialBytes(target);
+
+    // Act
+    const forgot = await target.setup.forgetCloneSource('daemon-source');
+    const forgotAgain = await target.setup.forgetCloneSource('daemon-source');
+
+    // Assert
+    should(forgot).be.true();
+    should(forgotAgain).be.false();
+    should(Object.keys(parseCloneBase(await readFile(record, 'utf8')).sources)).deepEqual([]);
+    should((await stat(record)).mode & 0o777).equal(0o600);
+    should(await credentialBytes(target)).deepEqual(before);
+  });
 });
 
 describe('a catalog install over real files cannot leave the skill folder', () => {
