@@ -15,10 +15,14 @@ describe('attention writing lint', () => {
   });
 
   it('should warn about an ask over the target length', () => {
-    const actual = lintAgendaWriting({ ...clean, subject: 'word '.repeat(30).trim() });
+    const actual = lintAgendaWriting({ ...clean, subject: 'word '.repeat(20).trim() });
 
     should(actual).have.length(1);
-    should(actual[0]).match(/^ask is 149 characters; keep it under 120: .*--context/u);
+    should(actual[0]).match(/^ask is 99 characters; keep it to about 80: .*--body/u);
+  });
+
+  it('should accept an ask of exactly the target length', () => {
+    should(lintAgendaWriting({ ...clean, subject: 'x'.repeat(80) })).deepEqual([]);
   });
 
   it('should warn about ticket and pull request ids, naming where they sit', () => {
@@ -233,6 +237,44 @@ describe('attention writing lint: premise and isolation', () => {
     should(text).match(/ticket or PR ids \("#1234"\) in premise/u);
     should(text).match(/file paths \(.*main\.ts.*\) in decided/u);
     should(text).match(/unexplained capitals \("OCI"\) in premise/u);
+  });
+});
+
+describe('attention writing lint: headings', () => {
+  it('should warn about a heading line in the ask, naming it and the fix', () => {
+    const actual = lintAgendaWriting({ ...clean, subject: '# Pick a login plan' });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^markdown headings \(# …\) in ask: /u);
+    should(actual[0]).containEql('short points (- …) or a bold lead');
+  });
+
+  it('should name every segment that carries a heading, once, at any level', () => {
+    const actual = lintAgendaWriting({
+      ...clean,
+      premise: '## Situation\n- the login expires',
+      context: '- fine\n###### Deep\n- fine',
+      decided: '#\n- empty heading',
+      stillOpen: '   # indented up to three spaces',
+      questionAnswer: '# Answer',
+    });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(
+      /^markdown headings \(# …\) in premise, context, decided, still open, answer to the question: /u,
+    );
+  });
+
+  it('should leave references, bold leads, fenced code and a body alone', () => {
+    const context =
+      '#812 (the push worker fix) is merged\n#812 (the push worker fix) again\n**Decided:** ship it\n\n```sh\n# a comment, not a heading\n```';
+    const body = '# Steps\n\n## Run it\n- do the thing';
+
+    should(lintAgendaWriting({ ...clean, context, body })).deepEqual([]);
+  });
+
+  it('should not take a hash with no space after it, or four spaces of indent, for a heading', () => {
+    should(lintAgendaWriting({ ...clean, context: '#tag and #1b\n    # code block line' })).deepEqual([]);
   });
 });
 

@@ -428,6 +428,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // behind `fy render guide`, and compressing the lessons rule: 7,246 measured (the lane-by-category rule was paid for by tightening the Hypermedia wording), so keep 150 of headroom.
     // Board 817: opt-in first, then the search-first line and the card rules (cap 840); the total keeps the 8,000 - 150 cap.
     // #1197 and #1199 each fit alone but together measured 7,859; Pack's wording was tightened (pack 991 → 971).
+    // The agenda's bug-batch and card-formatting rules measured 7,856; its wording was tightened (agenda 1,252 → 1,244).
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);

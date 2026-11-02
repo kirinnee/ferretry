@@ -23,8 +23,9 @@ const JSON_HELP = 'print the protocol payload instead of the human rendering';
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
   --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
                  no IDs): it heads the card and is the notification's title — not the conversation's name
-  <the ask>      the ASK: one plain sentence, 120 characters or fewer, answer first — not backstory;
-                 it is the notification's body (\`--ask\` says the same when it is not given as words)
+  <the ask>      the ASK: a short title-like line, about 80 characters at most, answer first — not backstory;
+                 the detail goes in --body; no # headings in the ask or any segment (the card draws them huge).
+                 It is the notification's body (\`--ask\` says the same when it is not given as words)
   --premise      REQUIRED. The SITUATION: what is going on, so a cold reader starts here; plain lines, no
                  leading "- " (the card adds the bullet); repeat for one
                  bullet each (a --confirms card's premise is the daemon's: the held change)

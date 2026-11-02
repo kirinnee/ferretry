@@ -119,7 +119,7 @@ Read at start; a change needs a restart.
   title of the item the owner most likely wants first.
 - **A deadline or a ping:** the card's title as the heading and its ask as the text, nothing else. The
   title is trimmed to 40 characters at a word boundary; an item from before titles uses the start of its
-  ask (`agendaTitle`). The body is at most 120 characters, trimmed with `…`. A push never carries the
+  ask (`agendaTitle`). The body is at most 120 characters, trimmed with `…` (an ask is meant to be about 80, so it fits whole). A push never carries the
   context, the options or the recommendation.
 
 - **An approve-on-phone card:** the daemon's own title, "Approve on your phone", and a body built by
@@ -259,10 +259,10 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,230 characters, capped at 1,300 by a
-test) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,250 characters, capped at 1,300 by a
+test; the shipped prompt as a whole has its own cap, so a new rule here is paid for by tightening words) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
 action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
-and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
+and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
 `--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — one line mapping each kind to its answer shape (`AGENDA_SHAPE_LINE`; [agenda.md](agenda.md#what-i-need-from-you)), what `--blocking`,
 `--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
 parks the item as replied (bring it back with `fy agenda edit`: `--question-answer` to answer a question about it with its options kept, or refresh the whole card — `--summary`, `--premise` and `--context` — else `done --reason` withdraws it —

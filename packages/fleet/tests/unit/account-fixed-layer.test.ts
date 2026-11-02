@@ -768,28 +768,31 @@ describe('AGENDA_INSTRUCTION', () => {
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
+    should(text).startWith('Agenda mode: ONLY what the owner alone can give: info, a decision or action.');
     should(text).containEql('Search first (`zz search`).');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
-    should(text).containEql('Never track work ("please test/verify")');
-    should(text).containEql('gates or `zz notify` cover it; after a Not good');
-    should(text).containEql('after a Not good, open one only if you need input.');
+    should(text).containEql('No tracking items (test/verify)');
+    should(text).containEql('gates/`zz notify` cover it; after Not good');
+    should(text).containEql('after Not good, open one only for input.');
     // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
     should(text).containEql("Owner's question: answer ON it, options stay");
     should(text).containEql('`zz agenda edit <id> --question-answer "<text>"`');
-    should(text).containEql('not as `-k info`.');
+    should(text).containEql('not `-k info`.');
     should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
     should(text).containEql(
       '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
     );
-    should(text).containEql('Title ≤40, ask ≤120.');
-    should(text).containEql('no "as above", ticket/PR numbers, paths, acronyms');
+    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`).');
+    // The owner's formatting rule: a short title-like ask, short points in every segment, no Markdown headings anywhere.
+    should(text).containEql('short Markdown points, no headings, answer first;');
+    should(text).not.containEql('ask ≤120');
+    // Several bugs or asks at once get ONE info item that says each was heard and where it is tracked.
+    should(text).containEql('Many bugs/asks: ONE `-k info`, line each + where tracked.');
+    should(text).containEql('no "as above", ticket/PR ids, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided`=settled, `--still-open`=left');
     should(text).containEql('`--body`=hypermedia.');
-    // Each item stands alone, in full Markdown.
-    should(text).containEql('ALONE: Markdown, short points, answer first, no paragraphs;');
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);
     should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
@@ -803,9 +806,9 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--will-block`');
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
-    should(text).containEql('"[answer to !A3 …]" is the answer;');
+    should(text).containEql('"[answer to !A3 …]"=answer;');
     // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
-    should(text).containEql('"[re !A3 …]" is chat, parking it:');
+    should(text).containEql('"[re !A3 …]"=chat, parks it:');
     should(text).containEql('`edit <id>` reopens (`--question-answer`, or refresh summary/premise/context)');
     // Closing a question the owner has not answered withdraws it and says why; only the owner's pick answers it.
     should(text).containEql('else `done --reason "<why>"` withdraws.');
@@ -814,7 +817,6 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('KEEP CURRENT:');
     should(text).containEql('`edit` if changed');
     should(text).containEql('`done` if settled');
-    should(text).containEql('`ls` = open');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
   });
@@ -822,6 +824,11 @@ describe('AGENDA_INSTRUCTION', () => {
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
     // Assert
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
+  });
+
+  it('should keep the owner-card formatting and bug-batch rules inside the shipped total, not past it', () => {
+    // Assert — measured 1,252 after the two rules were added and other wording tightened (was 1,237)
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_260);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

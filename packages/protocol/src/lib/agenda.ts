@@ -30,12 +30,12 @@ export const MAX_AGENDA_WARNING_LENGTH = 400;
  * title is the card's own, so it is also how long a card's title should be; past it the lint advises.
  */
 export const AGENDA_PUSH_TITLE_LENGTH = 40;
-/** The push body is the card's ask, so it holds as much as an ask should say (`AGENDA_ASK_TARGET_LENGTH`). */
+/** The push body is the card's ask, clipped here; an ask meant to stay under `AGENDA_ASK_TARGET_LENGTH` fits whole. */
 export const AGENDA_PUSH_BODY_LENGTH = 120;
 /** The longest title an item may carry at all; past the target it is advice, past this a refusal. */
 export const MAX_AGENDA_TITLE_LENGTH = 60;
-/** The most a card's ASK should say: the one-line question or action, which is the push's text. */
-export const AGENDA_ASK_TARGET_LENGTH = 120;
+/** The most a card's ASK should say: a short title-like line, which is the push's text; the detail goes in `--body`. */
+export const AGENDA_ASK_TARGET_LENGTH = 80;
 /** A segment (premise, context, answer, body…) is short points; one paragraph past this many characters is a wall of text the lint warns about. */
 export const AGENDA_SEGMENT_PARAGRAPH_LENGTH = 280;
 /** The most answers a card offers: one per swipe direction, left, up and right. */

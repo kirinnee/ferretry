@@ -449,10 +449,9 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): gates or \`${fy} notify\` cover it; after a Not good, open one only if you need input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`), not as \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
-    `ALONE: Markdown, short points, answer first, no paragraphs; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
+    `Agenda mode: ONLY what the owner alone can give: info, a decision or action. No tracking items (test/verify): gates/\`${fy} notify\` cover it; after Not good, open one only for input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`); not \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤80 (rest: \`--body\`). Many bugs/asks: ONE \`-k info\`, line each + where tracked. Read cold (no "as above", ticket/PR ids, paths, acronyms: \`--term "X=meaning"\`): short Markdown points, no headings, answer first; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
     `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it: \`edit <id>\` reopens (\`--question-answer\`, or refresh summary/premise/context), else \`done --reason "<why>"\` withdraws. KEEP CURRENT: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
+    `"[answer to !A3 …]"=answer; "[re !A3 …]"=chat, parks it: \`edit <id>\` reopens (\`--question-answer\`, or refresh summary/premise/context), else \`done --reason "<why>"\` withdraws. KEEP CURRENT: \`edit\` if changed, \`done\` if settled.`,
   ].join('\n');
 
 /**
