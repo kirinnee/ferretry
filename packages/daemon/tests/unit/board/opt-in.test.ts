@@ -1,13 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type ResolvedAgendaItem, ResolvedAgendaItemSchema } from '@ferretry/protocol';
 import should from 'should';
-import {
-  approvalProblem,
-  cardLicence,
-  offBoardRefusal,
-  ownerAskedForTracking,
-  TRACKING_WORDS,
-} from '../../../src/lib/board/index.ts';
+import { approvalProblem, cardLicence, offBoardRefusal, TRACK_QUESTION } from '../../../src/lib/board/index.ts';
 import { NOW } from './support.ts';
 
 const FERRET = 'mvysjsw0-7071db05';
@@ -38,18 +32,11 @@ const answered = (extra: Record<string, unknown> = {}): ResolvedAgendaItem =>
     ...extra,
   });
 
-const OWNER_ASKS_FOR_A_CARD = 'please make a card for the login redesign so I can follow it on the board';
-const facts = {
-  boardOn: false,
-  parent: false,
-  approved: false,
-  askText: OWNER_ASKS_FOR_A_CARD,
-  ownerSaid: [] as readonly string[],
-};
+const facts = { boardOn: false, parent: false, approved: false };
 
 describe('whether a ferret may make a card', () => {
   it('should let any card through where the board is on', () => {
-    should(cardLicence({ ...facts, boardOn: true, parent: true, approved: true })).equal('board-on');
+    should(cardLicence({ boardOn: true, parent: true, approved: true })).equal('board-on');
   });
 
   it('should let a card under a parent the ferret holds through where the board is off', () => {
@@ -57,26 +44,7 @@ describe('whether a ferret may make a card', () => {
   });
 
   it("should let a card on the owner's Yes through where the board is off", () => {
-    should(cardLicence({ ...facts, approved: true, ownerSaid: [OWNER_ASKS_FOR_A_CARD] })).equal('approval');
-  });
-
-  it("should let a card through whose ask is the owner's words asking for a card", () => {
-    should(cardLicence({ ...facts, ownerSaid: ['hi', OWNER_ASKS_FOR_A_CARD] })).equal('owner-words');
-  });
-
-  it("should refuse a card whose ask is the owner's words when those words never ask for tracking", () => {
-    // Arrange
-    const ask = 'please fix the login redirect loop on the phone app today';
-
-    // Act
-    const licence = cardLicence({ ...facts, askText: ask, ownerSaid: [ask] });
-
-    // Assert
-    should(licence).be.null();
-  });
-
-  it("should refuse a card whose ask is the ferret's own words", () => {
-    should(cardLicence({ ...facts, ownerSaid: ['fix the login loop'] })).be.null();
+    should(cardLicence({ ...facts, approved: true })).equal('approval');
   });
 
   it('should refuse a card with nothing behind it', () => {
@@ -84,32 +52,27 @@ describe('whether a ferret may make a card', () => {
   });
 });
 
-describe('the words that ask for tracking', () => {
-  it('should name a card, the board, a ticket or tracking', () => {
+describe('the question the Yes must answer', () => {
+  it('should be "Track … on the board?", in the ferret\'s words for what', () => {
     for (const words of [
-      'a card',
-      'cards',
-      'the board',
-      'boards',
-      'a ticket',
-      'track it',
-      'tracks',
-      'tracked',
-      'tracking',
+      'Track this on the board?',
+      'track the login fix on the board',
+      '  Track it on the board ? ',
     ]) {
-      should(TRACKING_WORDS.test(words)).be.true(words);
+      should(TRACK_QUESTION.test(words)).be.true(words);
     }
   });
 
-  it('should not read "task" or a word that only contains one of them', () => {
-    for (const words of ['dont use actioned tasks', 'discard it', 'keyboard', 'racetrack', 'onboarding']) {
-      should(TRACKING_WORDS.test(words)).be.false(words);
+  it('should not be any yes/no that names a card, a board or tracking', () => {
+    for (const words of [
+      'Remove the credit card field?',
+      'Track down the leak?',
+      'Is the board page slow?',
+      'Should I keep tracking it on the board? Or ship?',
+      'Untrack this on the board?',
+    ]) {
+      should(TRACK_QUESTION.test(words)).be.false(words);
     }
-  });
-
-  it("should match only the owner's messages that ask for tracking", () => {
-    should(ownerAskedForTracking(OWNER_ASKS_FOR_A_CARD, [OWNER_ASKS_FOR_A_CARD])).be.true();
-    should(ownerAskedForTracking(OWNER_ASKS_FOR_A_CARD, [])).be.false();
   });
 });
 
@@ -160,15 +123,28 @@ describe("the owner's Yes", () => {
     should(approvalProblem('A12', open, FERRET, undefined)).equal('!A12 is not a yes/no question');
   });
 
-  it('should refuse a Yes to a question that never mentions tracking', () => {
+  it('should refuse a Yes to another question, even one that names a card or tracking', () => {
+    for (const subject of ['Ship the fix?', 'Remove the credit card field?', 'Track down the leak?']) {
+      // Arrange
+      const item = answered({ subject, why: 'it is on the board', howToResolve: 'Yes tracks it on the board' });
+
+      // Act
+      const problem = approvalProblem('A12', item, FERRET, undefined);
+
+      // Assert
+      should(problem).equal('!A12 does not ask "Track this on the board?"', subject);
+    }
+  });
+
+  it('should count the question in the title when the ask says it differently', () => {
     // Arrange
-    const item = answered({ subject: 'Ship the fix?', why: 'it is ready', howToResolve: 'Yes ships it' });
+    const item = answered({ title: 'Track this on the board?', subject: 'Should the login fix get a card?' });
 
     // Act
     const problem = approvalProblem('A12', item, FERRET, undefined);
 
     // Assert
-    should(problem).equal('!A12 does not ask about tracking this on the board');
+    should(problem).be.null();
   });
 
   it('should refuse an item the ferret or the daemon closed', () => {

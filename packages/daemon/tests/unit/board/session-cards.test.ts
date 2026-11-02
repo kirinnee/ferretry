@@ -78,6 +78,7 @@ const build = (options: Options = {}) => {
           snapshot: service.snapshot.bind(service),
           requireHandOver: service.requireHandOver.bind(service),
           handOver: service.handOver.bind(service),
+          mayAdoptUnder: service.mayAdoptUnder.bind(service),
           trigger: async () => {
             throw new Error('the board store is read-only');
           },
@@ -265,6 +266,29 @@ describe('a session started with a brief', () => {
       // Assert
       should(delegation).match({ id: 'F2', existing: false, parent: { id: 'F1' } });
       should(opened.card).match({ id: 'F2', owner: 'lead', assignee: 'child' });
+    });
+
+    it("should make no card under a card the brief merely names: somebody else's, closed or dropped", async () => {
+      // Arrange
+      const cards = [
+        card({ id: 'F1', owner: 'stranger' }),
+        card({ id: 'F2', owner: 'lead', laneId: 'closed' }),
+        card({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
+      ];
+      const { subject, ports, focus } = build({ off: [PROJECT], cards });
+      focus.anchors.set('lead', { id: 'F2' });
+
+      // Act
+      const outcomes = [];
+      for (const brief of ['Fix &F1 for the owner', 'Finish &F2', 'Redo &F3']) {
+        outcomes.push(await subject.delegate('lead', { brief, name: 'Build it' }, true));
+      }
+
+      // Assert
+      for (const outcome of outcomes) {
+        should(outcome.notes[0]).startWith('No card was made for the sub-ferret: the Ferretry board is off');
+      }
+      should(ports.store.cards.size).equal(3);
     });
   });
 

@@ -63,7 +63,7 @@ interface BoardProjectNames {
 export interface SessionCardsPorts {
   readonly board: Pick<
     BoardService,
-    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger'
+    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger' | 'mayAdoptUnder'
   >;
   readonly lanes: LaneSetSource;
   /** Whether a board is on: a start on a board that is off makes no card of its own. */
@@ -272,21 +272,22 @@ export class SessionCards {
 
   /**
    * The parent a NEW card goes under, from the lead's intent in priority order: the first card the brief
-   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last.
+   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last. Either counts
+   * only when the lead may put a child under it and it is still work (`BoardService.mayAdoptUnder`): a brief that
+   * merely mentions somebody else's card, or a closed one, gives no parent, so the board's switch decides.
    */
   private async parentFor(
     lead: string,
     brief: string,
   ): Promise<{ readonly parent: TaskRef | null; readonly from?: ParentFrom }> {
     const named = firstTaskRefIn(brief);
-    const { cards } = await this.ports.board.snapshot();
-    const usable = (ref: TaskRef | null | undefined): TaskRef | null => {
-      const found = ref === null || ref === undefined ? undefined : cards.find(card => card.id === ref.id);
-      return found === undefined || found.dropped !== null ? null : { id: found.id };
+    const usable = async (ref: TaskRef | null | undefined): Promise<TaskRef | null> => {
+      if (ref === null || ref === undefined) return null;
+      return (await this.ports.board.mayAdoptUnder(lead, ref.id)) ? { id: ref.id } : null;
     };
-    const fromBrief = usable(named);
+    const fromBrief = await usable(named);
     if (fromBrief !== null) return { parent: fromBrief, from: 'brief' };
-    const anchored = usable(await this.ports.focus.anchorOf(lead));
+    const anchored = await usable(await this.ports.focus.anchorOf(lead));
     return anchored === null ? { parent: null } : { parent: anchored, from: 'focus' };
   }
 

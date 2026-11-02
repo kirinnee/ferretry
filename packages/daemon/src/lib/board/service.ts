@@ -12,6 +12,7 @@
  */
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
+  type AgendaId,
   type AgendaRef,
   type BoardActor,
   type BoardActorVia,
@@ -44,6 +45,7 @@ import {
   type BoardStanding,
   type CardAudience,
   effectiveAssignee,
+  mayDo,
   mayHandDown,
   standingOf,
 } from './authority.ts';
@@ -373,11 +375,13 @@ export class BoardService {
     const laneSet = await this.requireLaneSet(projectId);
     const snapshot = await this.ports.store.read();
     const index = new BoardIndex(snapshot.cards, machineId);
-    if (request.parent !== null) {
-      const parent = requireLocalCard(index, request.parent, 'parent');
-      requireStanding('adopt', await this.standing(caller, parent), parent);
-    }
-    const approval = await this.requireLicence(request, caller, projectId, snapshot.cards);
+    const parent = request.parent === null ? undefined : requireLocalCard(index, request.parent, 'parent');
+    if (parent !== undefined) requireStanding('adopt', await this.standing(caller, parent), parent);
+    const approval = await this.requireLicence(caller, projectId, {
+      parent,
+      named: request.approval,
+      cards: snapshot.cards,
+    });
     const id = await this.ports.store.allocateId(request.kind);
     const card = await this.insert(id, request, {
       machineId,
@@ -752,10 +756,9 @@ export class BoardService {
     if (request.action === 'assign' && context.handsDown !== true) {
       await this.refuseSubFerret(caller, subFerretDoing(request));
     }
-    const target =
-      request.action === 'refile' && request.projectId !== card.projectId
-        ? await this.ports.lanes.laneSet(request.projectId)
-        : null;
+    const refiled = request.action === 'refile' && request.projectId !== card.projectId ? request.projectId : null;
+    if (refiled !== null) await this.requireRefileLicence(card, refiled, caller, context.index);
+    const target = refiled === null ? null : await this.ports.lanes.laneSet(refiled);
     const parentStanding =
       request.action === 'reparent' && request.parent !== null
         ? await this.parentStanding(request.parent, caller, context.index)
@@ -867,49 +870,79 @@ export class BoardService {
   }
 
   /**
-   * The board is opt-in (`opt-in.ts`): a ferret's card on a board that is off needs a parent it holds, the owner's
-   * Yes or the owner's own words asking for it, else it is refused with what to do instead. Answers the approval
-   * the card rests on, when that is what let it through; nobody but a ferret is asked.
+   * The board is opt-in (`opt-in.ts`): a ferret's card on a board that is off needs a live parent it holds on that
+   * board, or the owner's Yes (`named`, judged here; `carried` when the card already rests on one), else it is
+   * refused with what to do instead. Answers the approval a NEW card rests on, when that is what let it through;
+   * nobody but a ferret is asked.
    */
   private async requireLicence(
-    request: BoardTaskCreateRequest,
     caller: BoardCaller,
     projectId: BoardProjectId,
-    cards: readonly BoardTask[],
+    proof: {
+      readonly parent: BoardTask | undefined;
+      readonly named?: AgendaId;
+      readonly carried?: boolean;
+      readonly cards: readonly BoardTask[];
+    },
   ): Promise<AgendaRef | undefined> {
     const optIn = this.ports.optIn;
     if (caller.kind !== 'ferret' || optIn === undefined) return undefined;
     // A switch that cannot be read is off (docs/board.md): the rule fails closed, never open.
     const boardOn = await optIn.isOn(projectId).catch(() => false);
-    const named = boardOn ? undefined : request.approval;
+    const named = boardOn ? undefined : proof.named;
     let problem: string | undefined;
     if (named !== undefined) {
       const item = await optIn.answered(caller.sessionId, named).catch(() => undefined);
-      const usedBy = cards.find(card => card.approval?.sessionId === caller.sessionId && card.approval.id === named);
+      const usedBy = proof.cards.find(
+        card => card.approval?.sessionId === caller.sessionId && card.approval.id === named,
+      );
       problem = approvalProblem(named, item, caller.sessionId, usedBy) ?? undefined;
     }
-    const facts = {
+    const licence = cardLicence({
       boardOn,
-      parent: request.parent !== null,
-      approved: named !== undefined && problem === undefined,
-      askText: request.ask.text,
-    };
-    const licence =
-      cardLicence({ ...facts, ownerSaid: [] }) ??
-      cardLicence({ ...facts, ownerSaid: await this.ownerSaid(caller.sessionId) });
+      parent: proof.parent !== undefined && proof.parent.projectId === projectId && (await this.live(proof.parent)),
+      approved: proof.carried === true || (named !== undefined && problem === undefined),
+    });
     if (licence === 'approval' && named !== undefined) return { sessionId: caller.sessionId, id: named };
     if (licence !== null) return undefined;
     const board = await optIn.nameOf(projectId).catch(() => projectId);
     throw new BoardError('forbidden', offBoardRefusal(board, problem));
   }
 
-  /** What the owner said to a session; nothing when it cannot be read, so no ask matches. */
-  private async ownerSaid(sessionId: string): Promise<readonly string[]> {
-    try {
-      return (await this.ports.ownerWords?.said(sessionId)) ?? [];
-    } catch {
-      return [];
-    }
+  /**
+   * A refile onto another board is a card arriving there, so it asks what a create asks: a card made where the board
+   * is on is not moved onto one that is off unless its parent there is one the ferret holds, or it rests on a Yes.
+   */
+  private async requireRefileLicence(
+    card: BoardTask,
+    projectId: BoardProjectId,
+    caller: BoardCaller,
+    index: BoardIndex,
+  ): Promise<void> {
+    const parent = card.parent === null ? undefined : index.get(card.parent);
+    const held = parent !== undefined && mayDo('adopt', await this.standing(caller, parent)) ? parent : undefined;
+    await this.requireLicence(caller, projectId, {
+      parent: held,
+      carried: card.approval !== undefined,
+      cards: [],
+    });
+  }
+
+  /** Whether a card is still work: neither dropped nor in its board's closed lanes. */
+  private async live(card: BoardTask): Promise<boolean> {
+    if (card.dropped !== null) return false;
+    const laneSet = await this.ports.lanes.laneSet(card.projectId);
+    return laneSet !== null && cardCategory(card, new Map([[card.projectId, laneSet]])) !== 'closed';
+  }
+
+  /**
+   * Whether `sessionId` may put a new card under `id`: the card is on this machine, still work, and the session's
+   * standing on it admits a child. `fy new` asks it before it makes a sub-ferret's card under the card a brief names.
+   */
+  async mayAdoptUnder(sessionId: string, id: BoardTaskId): Promise<boolean> {
+    const card = (await this.ports.store.read()).cards.find(each => each.id === id);
+    if (card === undefined || !(await this.live(card))) return false;
+    return mayDo('adopt', await this.standing({ kind: 'ferret', sessionId }, card));
   }
 
   /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */
