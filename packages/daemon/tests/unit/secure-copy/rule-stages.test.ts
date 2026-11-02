@@ -111,6 +111,10 @@ describe('PasteRuleStages', () => {
     should(stages.view(PHONE, staged.stage).state).equal('expired');
     await should(stages.commit(PHONE, staged.stage, () => true)).be.rejectedWith(PasteRuleStageGone);
     should(made).eql([]);
+
+    // Its state is still answered a while, so a waiting command reads "Timed out"; then it is forgotten.
+    clock.at += PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
+    should(() => stages.view(PHONE, staged.stage)).throw(PasteRuleStageGone);
   });
 
   it("should keep a device's stage its own, and let one device take a machine stage before it can commit it", async () => {
