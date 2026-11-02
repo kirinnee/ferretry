@@ -964,12 +964,48 @@ describe('auditedRoutes', () => {
     should(records(journal)).have.length(0);
   });
 
-  it('should keep the rule’s own action when a retire is refused, because nothing was done', async () => {
+  it('should record a refused retire or unretire under the action the request asked for', async () => {
     // Arrange
     const ITEM = `itm_${'B'.repeat(22)}`;
+    // A refusal folds into the one before it, so each request is recorded in a journal of its own.
+    const askedAs = async (body: string) => {
+      const { journal, routes } = decorated({
+        'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+          jsonResponse({ code: 'version_current', message: 'refused' }, 409),
+      });
+      const api = await dispatcher(routes);
+      await api.dispatch(
+        request({
+          method: 'PATCH',
+          path: `/v1/catalog-items/${ITEM}/versions/3`,
+          headers: ADMIN,
+          loopback: true,
+          body,
+        }),
+      );
+      const logged = records(journal);
+      should(logged).have.length(1);
+      should(logged[0]?.outcome).not.equal('succeeded');
+      return logged[0]?.detail?.action;
+    };
+
+    // Act / Assert
+    should(await askedAs(JSON.stringify({ retired: false }))).equal('unretire');
+    should(await askedAs(JSON.stringify({ retired: true }))).equal('retire');
+    should(await askedAs('{not json')).equal('retirement');
+    should(await askedAs(JSON.stringify({ retired: 'yes' }))).equal('retirement');
+  });
+
+  it('should hand the handler the body it read, whole, and the same failure when the body cannot be read', async () => {
+    // Arrange
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const seen: string[] = [];
     const { journal, routes } = decorated({
-      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
-        jsonResponse({ code: 'version_current', message: 'refused' }, 409),
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async context => {
+        seen.push(await context.request.text());
+        seen.push(await context.request.text());
+        return jsonResponse({ itemId: ITEM, version: 2, changed: true, catalogs: [] });
+      },
     });
     const api = await dispatcher(routes);
 
@@ -977,7 +1013,7 @@ describe('auditedRoutes', () => {
     await api.dispatch(
       request({
         method: 'PATCH',
-        path: `/v1/catalog-items/${ITEM}/versions/3`,
+        path: `/v1/catalog-items/${ITEM}/versions/2`,
         headers: ADMIN,
         loopback: true,
         body: JSON.stringify({ retired: false }),
@@ -985,10 +1021,36 @@ describe('auditedRoutes', () => {
     );
 
     // Assert
-    const logged = records(journal);
-    should(logged).have.length(1);
-    should(logged[0]?.detail).containEql({ action: 'retire' });
-    should(logged[0]?.outcome).not.equal('succeeded');
+    should(seen).deepEqual([JSON.stringify({ retired: false }), JSON.stringify({ retired: false })]);
+    should(records(journal)[0]?.detail).containEql({ action: 'unretire', itemId: ITEM });
+
+    // A body that cannot be read is the handler's failure too, and is recorded without an action from the request.
+    const unreadable = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async context => {
+        await context.request.text();
+        return jsonResponse({ ok: true });
+      },
+    });
+    const failing = await unreadable.routes.find(
+      route => route.method === 'PATCH' && route.path.includes('/versions/:version'),
+    )?.handle;
+    if (failing === undefined) throw new Error('no route');
+    const cannotRead = request({
+      method: 'PATCH',
+      path: `/v1/catalog-items/${ITEM}/versions/2`,
+      headers: ADMIN,
+      loopback: true,
+      body: '',
+    });
+    const refused = await failing({
+      request: { ...cannotRead, text: async () => await Promise.reject(new Error('gone')) },
+      params: new Map([['itemId', ITEM]]),
+    } as unknown as Parameters<typeof failing>[0]).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(refused?.message).equal('gone');
+    should(records(unreadable.journal)[0]?.detail?.action).equal('retirement');
   });
 
   it('should record a one-tap Add and its Undo by id, and nothing for an answer that changed nothing', async () => {

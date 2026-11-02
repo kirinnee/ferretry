@@ -274,6 +274,11 @@ export const CatalogItemPreviewSchema = z.strictObject({
   version: z.number().int().min(1),
   /** The version it would follow, when the frozen copy is the same as that one (nothing to publish). */
   sameAsVersion: z.number().int().min(1).optional(),
+  /**
+   * The newest RETIRED version the frozen copy is the same as, when no version it could be published against is.
+   * Publishing is still allowed — it makes a new number — so this is a warning for the person, not a refusal.
+   */
+  sameAsRetiredVersion: z.number().int().min(1).optional(),
   digest: CatalogDigestSchema,
   /** Bytes of the frozen item. */
   size: z.number().int().min(1),

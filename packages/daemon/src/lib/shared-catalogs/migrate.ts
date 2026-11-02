@@ -1,5 +1,5 @@
 /**
- * Version 1 → version 2 of `state/catalogs/catalogs.json` (docs/catalogs.md § Storage and the upgrade).
+ * Version 1 → the current version (3) of `state/catalogs/catalogs.json` (docs/catalogs.md § Storage and the upgrade).
  *
  * ## Pure and deterministic
  *

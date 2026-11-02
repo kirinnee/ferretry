@@ -352,6 +352,12 @@ export class SharedCatalogService {
         : [currentVersion(existing), ...existing.versions.toReversed()].find(
             version => version.contentDigest === print.contentDigest && canBeMadeCurrent(document, existing, version),
           );
+    const retired =
+      existing === undefined || same !== undefined
+        ? undefined
+        : existing.versions
+            .toReversed()
+            .find(version => version.retiredAt !== undefined && version.contentDigest === print.contentDigest);
     return {
       ...(existing === undefined ? {} : { itemId: existing.itemId }),
       kind: prepared.body.kind,
@@ -361,6 +367,7 @@ export class SharedCatalogService {
       location: prepared.location,
       version: prepared.version,
       ...(same === undefined ? {} : { sameAsVersion: same.version }),
+      ...(retired === undefined ? {} : { sameAsRetiredVersion: retired.version }),
       digest: print.contentDigest,
       size: print.size,
       ...readItem(item),

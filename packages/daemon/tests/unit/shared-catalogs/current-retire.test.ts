@@ -243,13 +243,52 @@ describe('publishing a version make-current would not accept', () => {
     r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'notes.txt': 'notes' });
     const original = await r.service.previewItemVersion(itemId);
     should(original.sameAsVersion).be.undefined();
+    should(original.sameAsRetiredVersion).equal(1);
     should((await r.service.publishItemVersion(itemId, { digest: original.digest })).itemVersion).equal(4);
     r.tree.set(SKILL_PATH, V2);
     const again = await r.service.previewItemVersion(itemId);
     should(again.sameAsVersion).equal(2);
+    should(again.sameAsRetiredVersion).be.undefined();
     should(
       (await refusal(async () => await r.service.publishItemVersion(itemId, { digest: again.digest }))).refusal,
     ).equal('same_as_version');
+  });
+});
+
+describe('warning that a source is a retired version', () => {
+  async function retiredOne() {
+    const r = await rig();
+    const catalog = await r.service.create({ name: 'First' });
+    const preview = await r.service.previewItem(catalog.id, { source: SOURCE });
+    const { itemId } = await r.service.addItem(catalog.id, { source: SOURCE, digest: preview.digest });
+    await publish(r, itemId, V2);
+    await publish(r, itemId, V3);
+    await r.service.setRetired(itemId, 2, true);
+    return { r, itemId };
+  }
+
+  it('should name the retired version a source equals, and still let it be published as a new number', async () => {
+    const { r, itemId } = await retiredOne();
+    r.tree.set(SKILL_PATH, V2);
+    const shown = await r.service.previewItemVersion(itemId);
+    should(shown.sameAsRetiredVersion).equal(2);
+    should(shown.sameAsVersion).be.undefined();
+    should((await r.service.publishItemVersion(itemId, { digest: shown.digest })).itemVersion).equal(4);
+  });
+
+  it('should say nothing for a source that equals no retired version, or one that is retired and also servable', async () => {
+    const { r, itemId } = await retiredOne();
+    r.tree.set(SKILL_PATH, { ...V3, 'new.txt': 'new' });
+    should((await r.service.previewItemVersion(itemId)).sameAsRetiredVersion).be.undefined();
+    r.tree.set(SKILL_PATH, V3);
+    const servable = await r.service.previewItemVersion(itemId);
+    should(servable.sameAsVersion).equal(3);
+    should(servable.sameAsRetiredVersion).be.undefined();
+    await r.service.setRetired(itemId, 2, false);
+    r.tree.set(SKILL_PATH, V2);
+    const back = await r.service.previewItemVersion(itemId);
+    should(back.sameAsVersion).equal(2);
+    should(back.sameAsRetiredVersion).be.undefined();
   });
 });
 

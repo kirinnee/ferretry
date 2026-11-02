@@ -350,7 +350,12 @@ text that hides a character is already marked when it is compared.
   visible instead of looking like lines that changed to themselves.
 - **`sameAsVersion`** says the source hashes to a version already kept. The current one is checked first, then older
   ones. Publishing it is refused: 409 `nothing_to_publish` when it is the current version, 409 `same_as_version`
-  when it is an older one (making an older version current is 3d-2, below).
+  when it is an older one (making an older version current is 3d-2, below). Only a version that could be made current
+  again counts: one that is retired, or that a live catalog may not serve, is published as a new number instead, so
+  publishing and making current never refuse each other.
+- **`sameAsRetiredVersion`** (optional) says the source hashes to a RETIRED version, the newest such one, when
+  `sameAsVersion` is absent. Publishing is still allowed and makes a new version number; the field is a warning for the
+  app to show before it does.
 - Publishing keeps the preview binding: the source is read again and refused (409 `changed_since_preview`) unless
   it still hashes to the previewed digest. One item holds at most 1,000 versions (409 `items_full`).
 - `POST /v1/catalogs/:id/items/:itemId/versions` stays, as the same publish for an item that catalog lists. Both
@@ -441,7 +446,9 @@ owns its unit test. Nothing in this slice builds that app model.
 passkey. The audit records ids only: a `catalog.changed` entry with action `make-current`, `retire` or `unretire`,
 the item id, the version and the catalogs and revisions it raised. A retire or unretire is recorded only when it changed
 something: the answer carries `changed`, and asking for the state a version is already in (`changed: false`, nothing
-written, no revision raised) is not an audit entry. The action is the state the version ended in.
+written, no revision raised) is not an audit entry. The action comes from the request's `retired` flag, so a refused
+unretire is recorded as an `unretire` that did not succeed, never as a retire; a body that cannot be read is recorded
+as `retirement`.
 
 The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes, so an owner app
 dials the two owner routes only where the machine says it can. A member app has no flag to read and uses the 404 rule
@@ -452,11 +459,12 @@ above.
 verified with, and a manifest older than the revision of that catalog the app has already seen is refused, so a stale or
 replayed list cannot install an older version.
 
-**Declared gap.** An entry written before 3d-2 has a `sinceVersion` but no `joinedAtMax`, so if its item was rolled back
-before it was added, that catalog could still serve the versions between. The window needs a rollback, which did not exist
-before 3d-2, so no such entry can have been made by a released build. The one way to meet it is a 3d-1 build that has
-since been re-upgraded without restoring `catalogs.v2.json`: the version 3 file stops that build from reading the file at
-all, so it cannot add entries without `joinedAtMax`.
+**Declared gap.** An entry written before 3d-2 has a `sinceVersion` but no `joinedAtMax`, and the 2→3 upgrade does not
+invent one. That is safe because the window needs a rollback, no released build could roll an item back, and so such an
+entry never sat below a newer version. The one way to open it is to run a 3d-1 build on a file that a 3d-2 build had
+already rolled back (3d-1 would add entries without `joinedAtMax`). The version 3 file stops that: a 3d-1 build refuses
+it (`store_damaged`) and never writes. It happens only if the owner restores `catalogs.v2.json` over a file that holds a
+rollback, which the downgrade note above warns against.
 
 ### One item in many catalogs, and the default (catalogs 3c-2)
 

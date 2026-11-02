@@ -1,5 +1,5 @@
 /**
- * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`, schema version 2),
+ * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`, schema version 3),
  * and the pure rules that change it (docs/catalogs.md § The publisher side).
  *
  * ## One table of items, listed by catalogs

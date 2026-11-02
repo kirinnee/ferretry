@@ -294,6 +294,32 @@ describe('an item checked against the manifest and the version list together', (
     should(await check({ summary: 'a line nobody reviewed' })).match({ ok: false, refusal: 'item_mismatch' });
   });
 
+  it('should refuse a list whose current entry has the manifest line’s digest but not its size or summary, even for an older item that fits its own entry', async () => {
+    const { manifest, signedManifest, identity, list, resign } = await world();
+    const older = skill(identity.daemonId, 2, '# older\n');
+    const measured = await catalogItemDigest(relayCrypto, older);
+    if (measured === null) throw new Error('no form');
+    const current = list.offered[1] as SharedCatalogItemVersions['offered'][number];
+    // The older item matches its own entry exactly, so the only thing that can still catch the list is the check of the current entry against the manifest line.
+    const check = async (entry: Partial<SharedCatalogItemVersions['offered'][number]>) =>
+      await verifyCatalogItemAgainstVersions(
+        relayCrypto,
+        manifest,
+        signedManifest.spki,
+        await resign({
+          ...list,
+          offered: [
+            { version: 2, ...measured, publishedAt: AT, summary: older.summary },
+            { ...current, ...entry },
+          ],
+        }),
+        older,
+      );
+    should(await check({})).match({ ok: true });
+    should(await check({ size: current.size + 1 })).match({ ok: false, refusal: 'item_mismatch' });
+    should(await check({ summary: 'a line nobody reviewed' })).match({ ok: false, refusal: 'item_mismatch' });
+  });
+
   it('should refuse a list signed by another key, or with a bad signature', async () => {
     const { manifest, signedManifest, signedList, item } = await world();
     const check = (signed: SignedCatalogItemVersions) =>
