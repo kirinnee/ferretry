@@ -125,7 +125,7 @@ export const NO_ACCOUNTS_DEVICE_WORDS =
   'This device can’t see your accounts, so it can’t show this plan. Approve it on a device that can.';
 export const DISMISSED_PLAN_WORDS = 'The passkey was dismissed, so nothing was approved. Tick the lines to try again.';
 const NO_PASSKEY_DEVICE_WORDS =
-  'This device cannot confirm with a passkey, so it cannot approve a sign-in line. Paste lines can still be approved.';
+  'This device cannot confirm with a passkey, so no line can be approved here. Declining needs none.';
 export const NO_PASSKEY_TICK_WORDS =
   'This device cannot confirm with a passkey, so no line of this plan can be approved here. Declining needs no passkey.';
 const STAGE_GONE_WORDS = 'That selection timed out or was already answered. Tick the lines again.';
@@ -595,8 +595,8 @@ async function confirmStage(
 
 /**
  * THE OWNER'S APPROVAL: stage the ticks, ask for the passkey bound to the stage (the dialog shows the daemon's summary),
- * then commit. A selection with no sign-in line is answered by the stage route at once. A dismissed passkey drops the
- * stage and approves nothing.
+ * then commit. Only an empty selection, a decline, is answered by the stage route at once; every ticked line needs the
+ * passkey. A dismissed passkey drops the stage and approves nothing.
  */
 export async function runApproval(
   ports: ApprovalPorts,

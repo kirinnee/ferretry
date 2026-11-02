@@ -386,7 +386,7 @@ export const PASTE_RULES_SCREEN_PATH = 'Settings › Secure copy › Pastes appr
 
 /**
  * At most this many stages wait for a passkey at once FROM ONE STAGER (the machine, or one paired device): a new one past
- * it drops that stager's own oldest, never another's (secrev-1334 L2).
+ * it is REFUSED, and no waiting stage is ever dropped to make room (secrev-1334 L2).
  */
 export const PASTE_RULE_STAGES_MAX = 8;
 /** At most this many stages are listed at once: every stager's cap together. */
@@ -580,6 +580,7 @@ export const PASTE_RULE_ERROR_CODES = {
   passkeyNeeded: 'paste_rule_passkey_needed',
   profileTargetsPasskeyNeeded: 'profile_targets_passkey_needed',
   profileTargetsChanged: 'profile_targets_changed',
+  stagesFull: 'paste_rule_stages_full',
 } as const;
 
 export const PASTE_RULE_REFUSAL_WORDS = {
@@ -595,6 +596,8 @@ export const PASTE_RULE_REFUSAL_WORDS = {
   /** The paste rules it would widen changed since it was staged, so the proof would not cover them. */
   profile_targets_changed:
     'The paste rules this would widen changed since it was staged, so nothing was changed. Turn it on again to see the new list.',
+  /** A stager already has the most stages waiting: the new one is refused, nothing waiting is dropped. */
+  paste_rule_stages_full: 'Too many paste rules waiting; approve or drop one first.',
 } as const satisfies Record<(typeof PASTE_RULE_ERROR_CODES)[keyof typeof PASTE_RULE_ERROR_CODES], string>;
 
 /** One paste a ferret plans, said before it starts. `why` is the agent's own words, shown as such. */

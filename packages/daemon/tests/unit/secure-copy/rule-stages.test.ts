@@ -1,7 +1,7 @@
 /**
  * Changes waiting for their bound passkey (owner decision !A244, secrev-1334): a stage allows nothing, lives one
  * challenge's life, is bound to its own bytes and kind, and is answered only by the device that staged it or the one
- * that took a machine stage. Each stager's cap drops only its own oldest.
+ * that took a machine stage. Each stager's cap refuses a new stage and drops none that waits.
  */
 import { describe, it } from 'bun:test';
 import {
@@ -22,6 +22,7 @@ import {
   PasteRuleProofMissing,
   PasteRuleStageGone,
   PasteRuleStages,
+  PasteRuleStagesFull,
   ProfileTargetsChanged,
 } from '../../../src/lib/index.ts';
 
@@ -142,18 +143,43 @@ describe('PasteRuleStages', () => {
     should(stages.view(HOST, atMachine.stage).state).equal('denied');
   });
 
-  it("should refuse an agent, and keep each stager's cap by dropping only its own oldest", async () => {
+  it('should refuse an agent', async () => {
     const { stages } = world();
     await should(stages.stage({ kind: 'agent' }, RULE)).be.rejectedWith(PasteRuleStageGone);
+  });
+
+  it("should refuse a stager's ninth stage and drop nothing, so a flood cannot push out the owner's own", async () => {
+    const { stages } = world();
     const owners = await stages.stage(HOST, RULE);
+    stages.bind(PHONE, owners.stage);
 
+    // Anything holding the machine's token is the same stager: it fills the cap, then is refused.
     const flood: string[] = [];
-    for (let index = 0; index < PASTE_RULE_STAGES_MAX + 2; index += 1)
-      flood.push((await stages.stage(PHONE, RULE)).stage);
+    for (let index = 1; index < PASTE_RULE_STAGES_MAX; index += 1) flood.push((await stages.stage(HOST, RULE)).stage);
+    const refused = await stages.stage(HOST, RULE).catch((error: unknown) => error);
 
-    should(stages.waiting(PHONE).map(staged => staged.stage)).eql([owners.stage, ...flood.slice(2)]);
-    should(stages.view(HOST, owners.stage).state).equal('waiting');
-    should(stages.view(PHONE, flood[0] as PasteRuleStageId).state).equal('denied');
+    should(refused).be.instanceOf(PasteRuleStagesFull);
+    should((refused as PasteRuleStagesFull).message).equal('Too many paste rules waiting; approve or drop one first.');
+    should(stages.view(PHONE, owners.stage).state).equal('waiting');
+    should(stages.boundSubjectOf(owners.stage, 'rule', 'd1')).be.a.String();
+    should(flood.map(stage => stages.view(HOST, stage as PasteRuleStageId).state)).eql(flood.map(() => 'waiting'));
+    should(stages.waiting(HOST)).have.length(PASTE_RULE_STAGES_MAX);
+  });
+
+  it("should keep each stager's cap its own, and free a place when a stage is dropped", async () => {
+    const { stages } = world();
+    const first = await stages.stage(PHONE, RULE);
+    for (let index = 1; index < PASTE_RULE_STAGES_MAX; index += 1) await stages.stage(PHONE, RULE);
+    await should(stages.stage(PHONE, RULE)).be.rejectedWith(PasteRuleStagesFull);
+    // The machine and another device are other stagers.
+    await stages.stage(HOST, RULE);
+    await stages.stage(LAPTOP, RULE);
+
+    stages.drop(PHONE, first.stage);
+    await stages.stage(PHONE, RULE);
+    should(stages.waiting(PHONE).filter(staged => staged.rows.at(-1)?.value.startsWith('On '))).have.length(
+      PASTE_RULE_STAGES_MAX,
+    );
   });
 
   it('should turn profile targets on only with a proof bound to the rules it widens, and not once they changed', async () => {

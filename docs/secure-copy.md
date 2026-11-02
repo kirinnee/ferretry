@@ -198,8 +198,10 @@ profile on`) is listed for every paired device under Settings › Secure copy �
   **Waiting for your passkey**; Approve with passkey… first TAKES it (`POST /v1/copy-rules/stages/:stage/bind`), and
   from then on only that device gets its challenge or commits it. The machine reads and drops only its own stages and
   never commits one. Every stage's rows end with **Staged**: "At this machine" or "On <device name>", and when, so a
-  stage nobody expected stands out. Each stager keeps at most eight waiting: a new one drops that stager's own oldest,
-  never another's. A dismissed prompt drops a stage this device made, and leaves a machine's stage waiting (Deny
+  stage nobody expected stands out. Each stager has at most eight waiting: a ninth is refused
+  (`409 paste_rule_stages_full`, "Too many paste rules waiting; approve or drop one first."), and a waiting stage, one
+  a device took included, is never dropped to make room. "The machine" is one stager, shared with anything that holds
+  its token. A dismissed prompt drops a stage this device made, and leaves a machine's stage waiting (Deny
   drops it). `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it there. The old
   one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; an app or `fy` on a
   daemon that does not report `copy-rules.passkey.1` keeps the one-step add.

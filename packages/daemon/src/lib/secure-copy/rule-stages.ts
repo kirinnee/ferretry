@@ -40,8 +40,9 @@ import type { PasteRuleCaller, PasteRuleService } from './rules.ts';
  * WHO MAY ANSWER A STAGE (secrev-1334 L1): a stage a device made is that device's alone. A stage the machine made
  * (`fy copy rules add`, `fy copy rules profile on`) is shown to every paired device, and one of them TAKES it (`bind`)
  * before it can ask the passkey; from then on it is that device's. The machine answers only its own, and can never
- * commit one. Each stager keeps at most {@link PASTE_RULE_STAGES_MAX} waiting: a new one drops its own oldest, never
- * another's (L2). Held in memory only, for a passkey challenge's life.
+ * commit one. Each stager has at most {@link PASTE_RULE_STAGES_MAX} waiting: a new one past that is REFUSED, and a
+ * waiting stage (one a device took included) is never dropped to make room (L2). Held in memory only, for a passkey
+ * challenge's life.
  */
 
 const STAGE_TTL_MS = PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
@@ -98,6 +99,15 @@ export class ProfileTargetsChanged extends PasteRuleStageGone {
   constructor() {
     super(PASTE_RULE_REFUSAL_WORDS.profile_targets_changed);
     this.name = 'ProfileTargetsChanged';
+  }
+}
+
+/** The stager already has the most stages waiting: this one is refused, and none of those waiting is dropped. */
+export class PasteRuleStagesFull extends Error {
+  readonly code: string = PASTE_RULE_ERROR_CODES.stagesFull;
+  constructor() {
+    super(PASTE_RULE_REFUSAL_WORDS.paste_rule_stages_full);
+    this.name = 'PasteRuleStagesFull';
   }
 }
 
@@ -318,11 +328,10 @@ export class PasteRuleStages {
           }
         : { kind: 'host' };
     this.#sweep();
-    // Each stager's own cap: its oldest goes, never another's.
-    const own = [...this.#stages.values()].filter(
-      held => held.stager === stager && held.state === 'waiting' && held.committing !== true,
-    );
-    for (const held of own.slice(0, Math.max(0, own.length - PASTE_RULE_STAGES_MAX + 1))) this.#finish(held, 'denied');
+    // Each stager's own cap, taken stages and ones mid-commit counted: past it the new stage is refused, so whoever
+    // else holds this stager's key (every admin-token caller is "host") can never push the owner's waiting stage out.
+    const waiting = [...this.#stages.values()].filter(held => held.stager === stager && held.state === 'waiting');
+    if (waiting.length >= PASTE_RULE_STAGES_MAX) throw new PasteRuleStagesFull();
     const now = this.ports.clock.now();
     const id = this.#freshId();
     const held: Stage = {

@@ -136,7 +136,8 @@ export class PasteRuleService implements InputPasteRules {
 
   /**
    * The owner changes the settings. Turning `allowProfileTargets` ON loosens what a rule matches: whether this caller
-   * may (at the machine, or a device with a passkey for it) is the route's to decide; this only refuses an agent.
+   * may is the route's to decide (every caller, the machine included, needs a passkey proof bound to a staged change);
+   * this only refuses an agent.
    */
   async changeSettings(caller: PasteRuleCaller, settings: PasteRuleSettings): Promise<PasteRuleSettings> {
     requireOwner(caller);

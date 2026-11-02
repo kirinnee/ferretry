@@ -72,7 +72,7 @@ export interface TaskPlanCardProps {
   readonly machineSummary?: readonly string[];
   /** The staged lines that also type the 6-digit code, as the daemon says them; `undefined` until it is read. */
   readonly machineCodes?: readonly number[];
-  /** Whether this device can confirm with a passkey. Without it a sign-in line can't be ticked. */
+  /** Whether this device can confirm with a passkey. Without it no line can be approved here (Allow is blocked); declining needs none. */
   readonly canUsePasskey: boolean;
   /** Sends the ticked lines. An empty selection declines the plan. */
   readonly onApprove: (approval: ReturnType<typeof approvalOf>) => void;

@@ -28,7 +28,12 @@ import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { PasteRuleProofMissing, PasteRuleStageGone, type PasteRuleStages } from '../../secure-copy/rule-stages.ts';
+import {
+  PasteRuleProofMissing,
+  PasteRuleStageGone,
+  PasteRuleStagesFull,
+  type PasteRuleStages,
+} from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
@@ -80,6 +85,7 @@ function stageParam(context: RouteContext): PasteRuleStageId {
 /** A stage that is not waiting, as one sentence; anything else is the plans' and rules' own answer. */
 function stageAnswered(error: unknown): never {
   if (error instanceof PasteRuleStageGone) throw new ApiError(404, error.message, error.code);
+  if (error instanceof PasteRuleStagesFull) throw new ApiError(409, error.message, error.code);
   return taskPlanAnswered(error);
 }
 
