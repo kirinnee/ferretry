@@ -134,7 +134,7 @@ import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
-import { CardMetaLine, hasWords, joinMeta, MetaDot } from './card-meta-line.tsx';
+import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
 import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
