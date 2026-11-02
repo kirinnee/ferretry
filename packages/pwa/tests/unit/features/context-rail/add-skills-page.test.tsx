@@ -293,6 +293,41 @@ describe('the subscriptions list', () => {
   });
 });
 
+describe('the session’s skills', () => {
+  it('reads them from the machine when the host gives no reader', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { host } = hostWith(members, {
+      'GET /v1/catalog-installs': () => ({ installs: [] }),
+      'GET /v1/sessions/sess-1/skills/inventory': () => SKILLS,
+    });
+    const view = await mount(<AddSkillsPage {...host} onNavigate={() => undefined} />);
+    await settle();
+    await settle();
+    expect(q('[data-add-skills-install]')).not.toBeNull();
+    expect(q('[data-add-skills-scope]')?.textContent).not.toContain('could not be read');
+    await view.unmount();
+  });
+
+  it('says nothing can be installed yet when they cannot be read', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const view = await mount(
+      <AddSkillsPage
+        {...host}
+        loadInventory={async () => {
+          throw new Error('offline');
+        }}
+        onNavigate={() => undefined}
+      />,
+    );
+    await settle();
+    await settle();
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('could not be read');
+    expect(q('[data-add-skills-install]')?.hasAttribute('disabled')).toBe(true);
+    await view.unmount();
+  });
+});
+
 describe('which catalog a skill is from', () => {
   const twoCatalogs = () => okAttempt({ ...shared.browse, catalogs: [shared.view, otherCatalogView(shared)] });
   const chips = () => all('[data-context-chip]').map(chip => chip.textContent);

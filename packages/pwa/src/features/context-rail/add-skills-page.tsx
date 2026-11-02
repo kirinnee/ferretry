@@ -295,7 +295,7 @@ function AddSkillsBody({
   const subOf = (row: SkillRow): MemberSubscription | undefined =>
     groups.find(group => group.rows.some(candidate => candidate.key === row.key))?.sub;
   const settled = groups.every(group => group.state.kind !== 'loading');
-  const notes = groups.filter(group => group.state.kind !== 'ok');
+  const notes = groups.flatMap(({ sub, label, state }) => (state.kind === 'ok' ? [] : [{ sub, label, state }]));
   const canInstall = inventory !== null;
 
   return (
@@ -461,14 +461,12 @@ function PublisherNote({
   onAgain,
 }: {
   readonly label: string;
-  readonly state: CardState;
+  readonly state: Exclude<CardState, { readonly kind: 'ok' }>;
   readonly busy: boolean;
   readonly onUnlock: () => void;
   readonly onAgain: () => void;
 }) {
   switch (state.kind) {
-    case 'ok':
-      return null;
     case 'loading':
       return (
         <p className="m-0 text-cell text-muted" role="status">
