@@ -1153,7 +1153,7 @@
   font-family: var(--font-mono);
   font-size: inherit;
 }
-/* A mouse drag that is swiping the card is not selecting its text. */
+/* A touch that is swiping the card is not selecting its text. */
 .fy-attn-deck__top[data-dragging],
 .fy-totest__surface[data-dragging] {
   user-select: none;

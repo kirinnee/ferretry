@@ -5,6 +5,7 @@
 
 import { type PointerEvent, useRef } from 'react';
 import { swipeThreshold } from '../../lib/agenda-inbox.ts';
+import { isTouch } from './agenda-swipe-gesture.ts';
 import { useDeckReadsDown } from './deck-down-context.ts';
 
 /** A drag that is a clear, mostly vertical pull downward. */
@@ -17,14 +18,14 @@ interface Start {
   readonly y: number;
 }
 
-/** Pointer handlers for a region that does `onDown` when it is pulled down. Mouse never swipes. */
+/** Pointer handlers for a region that does `onDown` when it is pulled down. Only a touch swipes: a mouse or pen drag is left to the page. */
 export function useDownSwipe(onDown: () => void, enabled: boolean) {
   const start = useRef<Start | null>(null);
   // On the Inbox's deck the compass reads the pull down, from here too.
   const deckReads = useDeckReadsDown();
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>): void => {
-      if (!enabled || deckReads || event.pointerType === 'mouse') return;
+      if (!enabled || deckReads || !isTouch(event)) return;
       start.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     },
     onPointerUp: (event: PointerEvent<HTMLElement>): void => {

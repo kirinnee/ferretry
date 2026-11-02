@@ -26,6 +26,7 @@ import { cardLettered, letterOf } from '../../lib/agenda-options.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
+import { isTouch } from './agenda-swipe-gesture.ts';
 import { useDeckReadsDown } from './deck-down-context.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
 
@@ -182,7 +183,7 @@ export function AgendaQuickReplies({
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
-    if (!swipeable || busy || event.pointerType === 'mouse') return;
+    if (!swipeable || busy || !isTouch(event)) return;
     gesture.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
