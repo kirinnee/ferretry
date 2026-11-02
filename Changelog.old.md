@@ -1,3 +1,9 @@
+## [4.228.1](https://github.com/kirinnee/ferretry/compare/v4.228.0...v4.228.1) (2026-11-02)
+
+### Fixes
+
+* **pwa:** line up the Inbox toolbar and list on phone and desktop ([#1326](https://github.com/kirinnee/ferretry/issues/1326)) ([8f6124f](https://github.com/kirinnee/ferretry/commit/8f6124fa66d78f25af583e9f0025d98dd9fc1028))
+
 ## [4.228.0](https://github.com/kirinnee/ferretry/compare/v4.227.1...v4.228.0) (2026-11-02)
 
 ### Features
