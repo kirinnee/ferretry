@@ -193,7 +193,7 @@ keys or add a device.
 1. **Stop using it from the app** and take it offline.
 2. On your phone, **remove that machine** from the app (Settings, open the machine, its **Machine** tab › **Host checks**). This deletes its device
    key and its notification subscription from the phone.
-3. **Don't clone from it.** If you already cloned from it, check the other machine's Components tab:
+3. **Don't clone from it.** If you already cloned from it, check the other machine's Profiles tab, under **Built from**:
    everything it copied says **Copied from** it.
 4. Rotate any secrets and accounts that machine held. Treat everything on it as exposed.
 5. Rebuild it, install Ferretry fresh, and pair again.

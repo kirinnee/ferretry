@@ -22,10 +22,11 @@ import type {
   FleetRunningSession,
   FleetRuntimeView,
 } from '@ferretry/protocol';
-import { Pencil, Star, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../../../hooks/use-dialog-focus.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { ContextMenu, type MenuAnchor } from '../../../shell/context-menu.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
@@ -57,7 +58,7 @@ export interface RuntimeActionButtonsProps {
 }
 
 /**
- * Make default (when offered), Rename, and Remove in the destructive style, always on ONE line: icons alone below `sm`, named
+ * Rename and Remove in the destructive style, always on ONE line: icons alone below `sm`, named
  * by `aria-label`, so a row never grows taller for its actions. Disabled, with the reason, when the caller may not.
  */
 export function RuntimeActionButtons({
@@ -65,25 +66,10 @@ export function RuntimeActionButtons({
   refusal,
   onRename,
   onRemove,
-  onMakeDefault,
-}: RuntimeActionButtonsProps) {
+}: Omit<RuntimeActionButtonsProps, 'onMakeDefault'>) {
   const reason = refusal ?? undefined;
   return (
     <span className="flex gap-2" data-runtime-actions={runtime.name}>
-      {onMakeDefault === undefined ? null : (
-        <Button
-          type="button"
-          size="sm"
-          disabled={refusal !== null}
-          title={reason}
-          aria-label={`Make ${runtime.name} the default runtime`}
-          data-runtime-make-default={runtime.name}
-          onClick={onMakeDefault}
-        >
-          <Star size={14} aria-hidden="true" />
-          <span className="hidden sm:inline">Make default</span>
-        </Button>
-      )}
       <Button
         type="button"
         size="sm"
@@ -110,6 +96,69 @@ export function RuntimeActionButtons({
         <span className="hidden sm:inline">Remove</span>
       </Button>
     </span>
+  );
+}
+
+/** The shared menu's min-width: its right edge lines up with the ⋯ button's. */
+const MENU_MIN_WIDTH = 196;
+
+/**
+ * The same three acts behind one ⋯ button, for a list row that keeps to two lines: a menu button with the
+ * shared menu's keyboard and screen-reader behaviour (arrows, Escape, focus back on the button). Remove only
+ * opens its confirm dialog, so choosing it here asks nothing yet. Disabled, with the reason, when the caller may not.
+ */
+export function RuntimeActionsMenu({ runtime, refusal, onRename, onRemove, onMakeDefault }: RuntimeActionButtonsProps) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const openMenu = (): void => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    setAnchor({ x: (rect?.right ?? MENU_MIN_WIDTH) - MENU_MIN_WIDTH, y: (rect?.bottom ?? 0) + 4 });
+  };
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={refusal !== null}
+        title={refusal ?? undefined}
+        aria-haspopup="menu"
+        aria-expanded={anchor !== null}
+        aria-label={`Actions for ${runtime.name}`}
+        data-runtime-actions={runtime.name}
+        onClick={openMenu}
+        className="relative z-10 -my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 text-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <MoreHorizontal size={18} aria-hidden="true" />
+      </button>
+      <ContextMenu
+        open={anchor !== null}
+        anchor={anchor ?? { x: 0, y: 0 }}
+        ariaLabel={`Actions for ${runtime.name}`}
+        triggerRef={triggerRef}
+        onClose={() => setAnchor(null)}
+        items={[
+          ...(onMakeDefault === undefined
+            ? []
+            : [
+                {
+                  key: 'make-default',
+                  label: 'Make default',
+                  icon: <Star size={16} aria-hidden="true" />,
+                  onSelect: onMakeDefault,
+                },
+              ]),
+          { key: 'rename', label: 'Rename', icon: <Pencil size={16} aria-hidden="true" />, onSelect: onRename },
+          {
+            key: 'remove',
+            label: 'Remove',
+            danger: true,
+            separatorBefore: true,
+            icon: <Trash2 size={16} aria-hidden="true" />,
+            onSelect: onRemove,
+          },
+        ]}
+      />
+    </>
   );
 }
 

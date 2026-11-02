@@ -32,7 +32,15 @@ import { useLocalComputer } from '../browser/use-local-computer.ts';
 import type { CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { machineItemHash } from '../fleet/setup/settings-route.ts';
-import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
+import { panelGroup, panelTab } from '../fleet/shell/machine-panels.ts';
+import {
+  DEFAULT_MACHINE_TAB,
+  MACHINE_TABS,
+  type MachineRoute,
+  machineHash,
+  parseMachineHash,
+  redirectLegacyMachineHash,
+} from '../fleet/shell/machine-route.ts';
 import {
   type DaemonPanelsRenderer,
   MachinesSurface,
@@ -82,13 +90,15 @@ export const TEXT_SCALE_OPTIONS = [
 
 /**
  * Addresses that used to open the Daemons section or one of its panels. Daemons is part of each
- * machine now, so these land on that machine's Machine tab — a bookmark, a notice's link or a palette
+ * machine now, so these land on that panel's tab on that machine — a bookmark, a notice's link or a palette
  * row written before the merge still arrives where it meant to.
  */
 const LEGACY_DAEMONS_ANCHOR = 'daemons';
 const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'warden',
   'secrets',
+  'accounts',
+  'secure-copy',
   'devices',
   'grants',
   'security',
@@ -130,7 +140,13 @@ const sectionFromHash = (): SettingsSectionId | null => {
 const legacyDaemonsTarget = (machineName: string): string | null => {
   const value = hashWord();
   if (value === LEGACY_DAEMONS_ANCHOR) return machineHash(machineName, 'machine');
-  return LEGACY_PANEL_ANCHORS.has(value) ? machineItemHash(machineName, 'machine', value) : null;
+  return LEGACY_PANEL_ANCHORS.has(value) ? machineItemHash(machineName, panelTab(value) ?? 'machine', value) : null;
+};
+
+/** The words on the way back from an open panel: the tab that opened it. */
+const backLabel = (panel: string | undefined): string | undefined => {
+  const tab = panel === undefined ? undefined : panelTab(panel);
+  return MACHINE_TABS.find(candidate => candidate.id === tab)?.label;
 };
 
 export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
@@ -391,8 +407,11 @@ export function SettingsPage({
 
   const followHash = useCallback((): void => {
     if (followedHash.current === window.location.hash) return;
-    // An address from before Daemons joined Machines is rewritten in place, so Back does not return to it.
-    const legacy = selectedName === undefined ? null : legacyDaemonsTarget(selectedName);
+    // An address from before Daemons joined Machines, or before the tabs were regrouped, is rewritten in
+    // place so Back does not return to it and each tab reads the address it now owns.
+    const legacy =
+      (selectedName === undefined ? null : legacyDaemonsTarget(selectedName)) ??
+      redirectLegacyMachineHash(window.location.hash);
     if (legacy !== null) window.history.replaceState(window.history.state, '', legacy);
     followedHash.current = window.location.hash;
     const target = settingFromHash();
@@ -631,7 +650,7 @@ export function SettingsPage({
     () =>
       selectedRecord === undefined
         ? undefined
-        : (panel, onOpenPanel) => (
+        : (panel, onOpenPanel, group) => (
             <DaemonSettingsFrame
               key={String(daemonId)}
               connection={selectedRecord}
@@ -646,6 +665,8 @@ export function SettingsPage({
               otherMachines={otherMachines}
               panel={panel}
               onOpenPanel={onOpenPanel}
+              {...(group === undefined ? {} : { group: panelGroup(group) })}
+              {...(backLabel(panel) === undefined ? {} : { backLabel: backLabel(panel) })}
               additionalTabs={daemonSettingsTabs}
               carrier={carrier}
               relayAdvertised={relayAdvertised}

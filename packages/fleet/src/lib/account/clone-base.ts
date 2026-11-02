@@ -50,8 +50,11 @@ export const CLONE_BASE_FILES_LIMIT = 4096;
 
 const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u, 'a sha256 digest');
 
-/** The daemon id a source is filed under: as the browser verified it, else as the source reported itself. */
-export const CloneSourceIdSchema = NonEmptyStringSchema.max(200);
+/**
+ * The daemon id a source is filed under: as the browser verified it, else as the source reported itself
+ * (under {@link SELF_REPORTED_PREFIX}). `__proto__` is no id: a record keyed by it reads back as nothing.
+ */
+export const CloneSourceIdSchema = NonEmptyStringSchema.max(200).refine(id => id !== '__proto__', 'not an id');
 
 /** What a settings document's per-key digests are filed under (filled by the per-key merge). */
 export const CloneSettingsDocSchema = z.enum(['warden.yaml', 'learning.yaml', 'voice.yaml', 'controls']);
@@ -77,7 +80,7 @@ export const CloneBaseItemSchema = z.strictObject({
     .record(z.string().refine(isCanonicalAssetPath, 'a document path inside the setup folder'), CloneBaseFileSchema)
     .refine(files => Object.keys(files).length <= CLONE_BASE_FILES_LIMIT, 'too many documents for one item')
     .optional(),
-  /** The login here this source login was matched to, when it was reused rather than given a new slot. */
+  /** The login here this source login was copied to (reused, or given a new slot): set for every copied login. */
   login: NonEmptyStringSchema.optional(),
   /** "Gone from the source", and the person chose to keep it: not asked again until the source brings it back. */
   settled: z.boolean().optional(),
@@ -126,13 +129,67 @@ export function parseCloneBase(text: string | undefined): CloneBase {
   }
 }
 
-/** The file's text, sources and items in order, so writing an unchanged record is byte-identical. */
-export function serializeCloneBase(base: CloneBase): string {
+/** A map that has no prototype, so a key such as `__proto__` is an ordinary entry and nothing is inherited. */
+const plain = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
+
+const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined =>
+  Object.hasOwn(record, key) ? record[key] : undefined;
+
+/**
+ * The part of a source the record can hold: an item that fails its own schema (more documents than one item
+ * may list) loses its document list, and goes when it still fails; a source that still fails loses its
+ * settings and key timestamps, and goes when it still fails. The rest of the record is left as it is.
+ */
+function fitSource(source: CloneBaseSource): CloneBaseSource | undefined {
+  const items = plain<CloneBaseItem>();
+  for (const [key, item] of Object.entries(source.items)) {
+    if (!OriginKeySchema.safeParse(key).success) continue;
+    if (CloneBaseItemSchema.safeParse(item).success) {
+      items[key] = item;
+      continue;
+    }
+    const { files: _dropped, ...bare } = item;
+    if (CloneBaseItemSchema.safeParse(bare).success) items[key] = bare;
+  }
+  const { settings: _settings, keys: _keys, ...bare } = source;
+  return [
+    { ...source, items: { ...items } },
+    { ...bare, items: { ...items } },
+  ].find(candidate => CloneBaseSourceSchema.safeParse(candidate).success);
+}
+
+/**
+ * The record as it can be written: every part of it that reads back, so one oversize item can never make the
+ * whole record read as empty. What cannot be kept is left out; nothing else is changed.
+ */
+function fitCloneBase(base: CloneBase): CloneBase {
+  const sources = plain<CloneBaseSource>();
+  for (const [id, source] of Object.entries(base.sources)) {
+    const fitted = CloneSourceIdSchema.safeParse(id).success ? fitSource(source) : undefined;
+    if (fitted !== undefined) sources[id] = fitted;
+  }
+  const oldestFirst = Object.entries(sources).toSorted(
+    ([, left], [, right]) => Date.parse(left.lastCopiedAt) - Date.parse(right.lastCopiedAt),
+  );
+  for (const [id] of oldestFirst) {
+    if (Object.keys(sources).length <= CLONE_BASE_SOURCES_LIMIT) break;
+    delete sources[id];
+  }
+  const fitted: CloneBase = { version: CLONE_BASE_VERSION, sources: { ...sources } };
+  return CloneBaseSchema.safeParse(fitted).success ? fitted : EMPTY_CLONE_BASE;
+}
+
+/**
+ * The file's text, sources and items in order, so writing an unchanged record is byte-identical. What the
+ * record cannot hold ({@link fitCloneBase}) is left out, so the text always reads back as written.
+ */
+export function serializeCloneBase(written: CloneBase): string {
+  const base = fitCloneBase(written);
   const sorted = <T>(record: Readonly<Record<string, T>>, each: (value: T) => unknown = value => value) =>
     Object.fromEntries(
       Object.keys(record)
         .toSorted()
-        .map(key => [key, each(record[key] as T)]),
+        .map(key => [key, each(own(record, key) as T)]),
     );
   const sources = sorted(base.sources, source => ({
     ...source,
@@ -160,17 +217,28 @@ export interface CloneSourceIdentity {
   readonly verified: 'browser' | 'self';
 }
 
+/**
+ * What a source reports of itself is filed under this prefix: a bundle can say anything, so it never shares
+ * an entry with an id the browser verified, whatever it claims to be.
+ */
+export const SELF_REPORTED_PREFIX = 'self:';
+
 /** Why a copy cannot be filed under one source, as the sentence a person reads. */
 export class CloneSourceMismatch extends Error {
-  constructor() {
-    super('That export says it is from another machine than the one you picked.');
+  constructor(reason: 'another-machine' | 'id-too-long' = 'another-machine') {
+    super(
+      reason === 'id-too-long'
+        ? 'That export names its machine with an id too long to remember. Export it again from the other machine.'
+        : 'That export says it is from another machine than the one you picked.',
+    );
     this.name = 'CloneSourceMismatch';
   }
 }
 
 /**
  * Who the bundle is from. The browser's verified id wins when there is one; a v2 bundle also says who it
- * is from, and when both exist and disagree the copy is refused. A v1 bundle with no verified id has no
+ * is from, and when both exist and disagree the copy is refused. An id the bundle gave for itself alone is
+ * filed under {@link SELF_REPORTED_PREFIX}, apart from every verified id. A v1 bundle with no verified id has no
  * identity at all: nothing is recorded for it.
  */
 export function cloneSourceIdentity(
@@ -179,14 +247,18 @@ export function cloneSourceIdentity(
   displayName: string | undefined,
 ): CloneSourceIdentity | undefined {
   const claimed = bundle.version === 2 ? bundle.daemon : undefined;
-  // The id is the key of a record entry, so one the record cannot hold is not an identity at all.
-  const reported = claimed !== undefined && CloneSourceIdSchema.safeParse(claimed).success ? claimed : undefined;
-  if (verifiedDaemon !== undefined && claimed !== undefined && reported === undefined) throw new CloneSourceMismatch();
+  // The id is the key of a record entry, so one the record cannot hold is not an identity at all. Only an
+  // id filed under the self-reported prefix pays for it; a browser-verified id keeps the full length.
+  const filedAs = verifiedDaemon === undefined ? `${SELF_REPORTED_PREFIX}${claimed ?? ''}` : claimed;
+  const reported = claimed !== undefined && CloneSourceIdSchema.safeParse(filedAs).success ? claimed : undefined;
+  if (verifiedDaemon !== undefined && claimed !== undefined && reported === undefined) {
+    throw new CloneSourceMismatch(claimed === verifiedDaemon ? 'id-too-long' : 'another-machine');
+  }
   if (verifiedDaemon !== undefined && reported !== undefined && verifiedDaemon !== reported) {
     throw new CloneSourceMismatch();
   }
-  const id = verifiedDaemon ?? reported;
-  if (id === undefined) return undefined;
+  const id = verifiedDaemon ?? (reported === undefined ? undefined : `${SELF_REPORTED_PREFIX}${reported}`);
+  if (id === undefined || !CloneSourceIdSchema.safeParse(id).success) return undefined;
   return {
     id,
     name: (displayName ?? bundle.machine).slice(0, 120),
@@ -320,14 +392,26 @@ export interface CloneBaseUpdate {
   readonly model: AccountModel;
 }
 
-/** Every origin key the model's items carry. */
-export function linkedKeys(model: AccountModel): ReadonlySet<OriginKey> {
+/**
+ * Every origin key the model's items carry; with `from`, only those on items copied from that source. A
+ * browser-verified source owns the items stamped with its id; a source filed under {@link SELF_REPORTED_PREFIX}
+ * owns the items no browser stamped (a copy made from a file), so one source never keeps another's entry alive.
+ */
+export function linkedKeys(
+  model: AccountModel,
+  from?: Pick<CloneSourceIdentity, 'id' | 'verified'>,
+): ReadonlySet<OriginKey> {
   const keys = new Set<OriginKey>();
-  const take = (item: { readonly clonedFromKey?: string }): void => {
-    if (item.clonedFromKey !== undefined) keys.add(item.clonedFromKey);
+  const take = (item: { readonly clonedFromKey?: string; readonly clonedFromDaemon?: string }): void => {
+    if (item.clonedFromKey === undefined) return;
+    if (from !== undefined && item.clonedFromDaemon !== (from.verified === 'browser' ? from.id : undefined)) return;
+    keys.add(item.clonedFromKey);
   };
   for (const entries of Object.values(model.components)) {
-    for (const item of Object.values(entries as Readonly<Record<string, { clonedFromKey?: string }>>)) take(item);
+    for (const item of Object.values(
+      entries as Readonly<Record<string, { clonedFromKey?: string; clonedFromDaemon?: string }>>,
+    ))
+      take(item);
   }
   for (const item of Object.values(model.profiles)) take(item);
   for (const item of Object.values(model.runtimes)) take(item);
@@ -348,26 +432,34 @@ export function linkedKeys(model: AccountModel): ReadonlySet<OriginKey> {
  * as "new" and "changed" where nothing was, which is worse than starting from a clean slate.
  */
 export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): CloneBase {
-  const before = update.replace ? undefined : previous.sources[update.source.id];
-  const items: Record<string, CloneBaseItem> = { ...before?.items };
+  const existing = own(previous.sources, update.source.id);
+  // What a machine says of itself never touches an entry the browser verified. A verified copy over an
+  // entry that was only reported starts it afresh: nothing a bundle planted is trusted as a base.
+  if (existing?.verified === 'browser' && update.source.verified === 'self') return previous;
+  const before =
+    update.replace || existing === undefined || existing.verified !== update.source.verified ? undefined : existing;
+  const items = plain<CloneBaseItem>();
+  for (const [key, item] of Object.entries(before?.items ?? {})) items[key] = item;
   for (const { key, ...entry } of update.copied) items[key] = entry;
 
-  const here = linkedKeys(update.model);
+  // Only items copied from THIS source keep its entries: another source's copy of the same key is not a link
+  // to it. What this copy just stamped belongs to it, however the entry was filed before.
+  const here = new Set([...linkedKeys(update.model, update.source), ...update.copied.map(copied => copied.key)]);
   const loginsHere = new Set(Object.keys(update.model.credentials));
-  const linked = (key: string, item: CloneBaseItem): boolean =>
-    here.has(key) || (item.login !== undefined && loginsHere.has(item.login));
-  const kept: Record<string, CloneBaseItem> = {};
+  const viaLogin = (item: CloneBaseItem): boolean => item.login !== undefined && loginsHere.has(item.login);
+  const linked = (key: string, item: CloneBaseItem): boolean => here.has(key) || viaLogin(item);
+  const kept = plain<CloneBaseItem>();
   for (const [key, item] of Object.entries(items)) {
     if (update.sourceKeys.has(key) || linked(key, item)) kept[key] = item;
   }
 
   // A Replace can leave another source with nothing here to link to; that source goes too.
-  const { [update.source.id]: _replaced, ...others } = previous.sources;
-  const sources: Record<string, CloneBaseSource> = Object.fromEntries(
-    Object.entries(others).filter(([, source]) =>
-      Object.entries(source.items).some(([key, item]) => linked(key, item)),
-    ),
-  );
+  const sources = plain<CloneBaseSource>();
+  for (const [id, source] of Object.entries(previous.sources)) {
+    if (id === update.source.id) continue;
+    const its = linkedKeys(update.model, { id, verified: source.verified });
+    if (Object.entries(source.items).some(([key, item]) => its.has(key) || viaLogin(item))) sources[id] = source;
+  }
   if (
     Object.entries(kept).some(([key, item]) => linked(key, item)) &&
     Object.keys(kept).length <= CLONE_BASE_ITEMS_LIMIT
@@ -376,7 +468,7 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
       name: update.source.name,
       verified: update.source.verified,
       lastCopiedAt: update.at,
-      items: kept,
+      items: { ...kept },
       ...(before?.settings === undefined ? {} : { settings: before.settings }),
       ...(before?.keys === undefined ? {} : { keys: before.keys }),
     };
@@ -388,11 +480,12 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
     if (Object.keys(sources).length <= CLONE_BASE_SOURCES_LIMIT) break;
     delete sources[id];
   }
-  return { version: CLONE_BASE_VERSION, sources };
+  return { version: CLONE_BASE_VERSION, sources: { ...sources } };
 }
 
 /** The record without one source: the next copy from it starts as if there was never one. Nothing else changes. */
 export function forgetCloneSource(base: CloneBase, sourceId: string): CloneBase {
-  const { [sourceId]: _gone, ...sources } = base.sources;
-  return { version: CLONE_BASE_VERSION, sources };
+  const sources = plain<CloneBaseSource>();
+  for (const [id, source] of Object.entries(base.sources)) if (id !== sourceId) sources[id] = source;
+  return { version: CLONE_BASE_VERSION, sources: { ...sources } };
 }

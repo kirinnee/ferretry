@@ -2,7 +2,8 @@
  * Links between the Machines tabs' pages: `#machines/<machine>/<tab>/<item>`.
  *
  * The shell's address names a machine and a tab; a fourth segment names one page on that tab — a
- * runtime, a credential, a profile or a component (`<kind>/<name>`, encoded as one segment). The shell
+ * runtime, a credential, a profile or a component (`<kind>/<name>`, encoded as one segment). Profiles
+ * and components share the Profiles tab, and a component's slash is what tells them apart. The shell
  * reads only the first three, so the Settings page still switches tab, and the tab that mounts opens
  * the item. A runtime's page links its profile this way, and a profile's page links its runtimes.
  */
@@ -20,6 +21,9 @@ export function itemFromHash(hash: string, tab: MachineTabId): string | undefine
     return undefined;
   }
 }
+
+/** True for a component's `<kind>/<name>` reference; a profile's name never has a slash. */
+export const isComponentReference = (item: string): boolean => item.includes('/');
 
 /** The address of one page on a tab. */
 export const itemHref = (machineName: string, tab: MachineTabId, item: string): string =>

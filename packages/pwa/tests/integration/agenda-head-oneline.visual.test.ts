@@ -6,7 +6,7 @@
  * and margins make them even smaller".
  *
  *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row. A title too long for it scrolls (a
- *    marquee) — or, under `prefers-reduced-motion`, ends in an ellipsis and opens in full on a tap. The ask moves
+ *    marquee) — or, under `prefers-reduced-motion`, ends at a whole word and "…" and opens in full on a tap. The ask moves
  *    behind ⓘ, whose panel hangs under the row and sticks with it.
  *  - The card is one border level: no frame, no padding of its own inside the view, so a form's fields use the column,
  *    which keeps a 16px gutter on a phone.
@@ -198,20 +198,33 @@ describe('the open item’s head', () => {
           }
         });
 
-        it(`ends a long title in an ellipsis under reduced motion, and a tap opens it whole (${name}, ${family}, ${scheme})`, async () => {
+        it(`ends a long title at a whole word and an ellipsis under reduced motion, and a tap opens it whole (${name}, ${family}, ${scheme})`, async () => {
           const { tab, close } = await open(name, family, scheme, '&title=long', 'reduce');
           try {
+            await tab.waitForSelector('[data-agenda-title][data-cut]');
             const rowHeight = (await headBox(tab)).head.height;
             expect(rowHeight).toBeLessThanOrEqual(ONE_ROW);
             const still = await tab.evaluate(() => {
               const text = document.querySelector('.fy-item-view__title-text') as HTMLElement;
+              const box = text.parentElement as HTMLElement;
+              const cut = box.querySelector('.fy-item-view__title-cut') as HTMLElement | null;
+              const whole = text.textContent ?? '';
+              const shown = cut?.textContent ?? '';
+              const stem = shown.slice(0, -1);
               return {
                 animations: text.getAnimations().filter(a => a instanceof CSSAnimation).length,
-                ellipsis: getComputedStyle(text.parentElement as HTMLElement).textOverflow,
+                shown,
+                endsInEllipsis: shown.endsWith('…'),
+                wholeWords: whole.startsWith(stem) && /\s/u.test(whole.charAt(stem.length)),
+                fitsOneLine: cut !== null && cut.getBoundingClientRect().width <= box.clientWidth,
+                oneLine: cut !== null && cut.getClientRects().length === 1,
               };
             });
             expect(still.animations, 'nothing moves').toBe(0);
-            expect(still.ellipsis).toBe('ellipsis');
+            expect(still.endsInEllipsis, `the visible title ends in an ellipsis (${still.shown})`).toBe(true);
+            expect(still.wholeWords, 'and stops at a word boundary, never mid-word').toBe(true);
+            expect(still.fitsOneLine, 'and fits the one row').toBe(true);
+            expect(still.oneLine, 'drawn on a single line').toBe(true);
             await shot(tab, name, `${family}-${scheme}`, 'long-title-reduced');
             await tab.locator('[data-agenda-title]').click();
             await framesSettled(tab);

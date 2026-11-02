@@ -21,7 +21,7 @@ const GET_MACHINE_FILE = 'GET /v1/config/file?path=machine.yaml';
 const GET_LOGIN_FILE = 'GET /v1/config/file?path=logins%2Fclaude-personal.yaml';
 const PUT = 'PUT /v1/config/file';
 const CONFIRM = 'POST /v1/config/confirm';
-const PAGE = '#machines/studio-mac/credentials/claude-personal';
+const PAGE = '#machines/studio-mac/sign-ins/claude-personal';
 
 afterEach(() => {
   window.location.hash = '';
@@ -240,11 +240,11 @@ describe('BudgetEditor · the page', () => {
   });
 
   it('carries the hold’s own words onto the editor, in their colour', async () => {
-    const work = await open({ hash: '#machines/studio-mac/credentials/claude-work' });
+    const work = await open({ hash: '#machines/studio-mac/sign-ins/claude-work' });
     const held = must(work.view.container.querySelector('[data-budget-held]'), 'the held line');
     expect(held.textContent).toBe('Over budget — not routing');
     expect(held.className).toContain('text-warn');
-    const codex = await open({ hash: '#machines/studio-mac/credentials/codex' });
+    const codex = await open({ hash: '#machines/studio-mac/sign-ins/codex' });
     const stopped = must(codex.view.container.querySelector('[data-budget-held]'), 'the held line');
     expect(stopped.textContent).toBe('Hard limit — ferrets stopped');
     expect(stopped.className).toContain('text-err');

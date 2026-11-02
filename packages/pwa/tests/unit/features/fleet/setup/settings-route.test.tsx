@@ -1,8 +1,10 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import { useEffect } from 'react';
+import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
 import {
   machineItemHash,
   machinePanelFromHash,
+  machinePanelHash,
   type SettingsFlow,
   type SettingsFlowRoute,
   settingsFlowFromHash,
@@ -23,25 +25,28 @@ const hashchange = (browser: Window): Promise<void> =>
 const Probe = ({
   machine,
   browser,
+  tab,
   onRoute,
 }: {
   readonly machine: string;
   readonly browser?: Window;
+  readonly tab?: MachineTabId;
   readonly onRoute: (route: SettingsFlowRoute) => void;
 }) => {
-  const route = useSettingsFlow(machine, browser);
+  const route = useSettingsFlow(machine, browser, tab);
   useEffect(() => {
     onRoute(route);
   });
   return <span data-testid="flow">{route.flow ?? 'tab'}</span>;
 };
 
-const renderProbe = async (machine: string, browser?: Window) => {
+const renderProbe = async (machine: string, browser?: Window, tab?: MachineTabId) => {
   let latest: SettingsFlowRoute | undefined;
   const mounted = await mount(
     <Probe
       machine={machine}
       {...(browser === undefined ? {} : { browser })}
+      {...(tab === undefined ? {} : { tab })}
       onRoute={route => {
         latest = route;
       }}
@@ -75,7 +80,7 @@ describe('settingsFlowFromHash', () => {
 
   it('reads a flow word on another tab as no flow', () => {
     expect(settingsFlowFromHash('#machines/studio/runtimes/setup')).toBeNull();
-    expect(settingsFlowFromHash('#machines/studio/credentials/clone')).toBeNull();
+    expect(settingsFlowFromHash('#machines/studio/sign-ins/clone')).toBeNull();
   });
 
   it('reads an address outside the machines section as no flow', () => {
@@ -92,11 +97,25 @@ describe('settingsFlowFromHash', () => {
 describe('machinePanelFromHash', () => {
   it.each<[string, string]>([
     ['#machines/studio/machine/security', 'security'],
-    ['#machines/studio/machine/warden', 'warden'],
     ['#machines/studio/machine/devices', 'devices'],
-    ['#machines/studio/machine/security%20log', 'security log'],
+    ['#machines/studio/machine/security-log', 'security-log'],
   ])('reads %s as the %s panel', (hash, panel) => {
     expect(machinePanelFromHash(hash)).toBe(panel);
+  });
+
+  it.each<[string, MachineTabId, string]>([
+    ['#machines/studio/agents/warden', 'agents', 'warden'],
+    ['#machines/studio/agents/learning', 'agents', 'learning'],
+    ['#machines/studio/sign-ins/accounts', 'sign-ins', 'accounts'],
+    ['#machines/studio/sign-ins/secure-copy', 'sign-ins', 'secure-copy'],
+  ])('reads %s as the %s tab’s %s panel', (hash, tab, panel) => {
+    expect(machinePanelFromHash(hash, tab)).toBe(panel);
+  });
+
+  it('reads a panel only on the tab that opens it', () => {
+    expect(machinePanelFromHash('#machines/studio/machine/warden')).toBeNull();
+    expect(machinePanelFromHash('#machines/studio/agents/security', 'agents')).toBeNull();
+    expect(machinePanelFromHash('#machines/studio/sign-ins/claude-work', 'sign-ins')).toBeNull();
   });
 
   it('reads a flow word as no panel, so a flow is never also a panel', () => {
@@ -197,13 +216,28 @@ describe('useSettingsFlow', () => {
     const { mounted, current } = await renderProbe('studio', browser);
     try {
       expect(current().panel).toBeNull();
-      await interact(() => current().openPanel('warden'));
-      expect(browser.location.hash).toBe('#machines/studio/machine/warden');
-      expect(current().panel).toBe('warden');
+      await interact(() => current().openPanel('doctor'));
+      expect(browser.location.hash).toBe('#machines/studio/machine/doctor');
+      expect(current().panel).toBe('doctor');
       expect(current().flow).toBeNull();
       await interact(() => current().openPanel(null));
       expect(browser.location.hash).toBe('#machines/studio/machine');
       expect(current().panel).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('opens a panel on the tab it was asked on, and shows no flow there', async () => {
+    const browser = fakeWindow('#machines/studio/agents');
+    const { mounted, current } = await renderProbe('studio', browser, 'agents');
+    try {
+      await interact(() => current().openPanel('warden'));
+      expect(browser.location.hash).toBe('#machines/studio/agents/warden');
+      expect(current().panel).toBe('warden');
+      expect(current().flow).toBeNull();
+      await interact(() => current().openPanel(null));
+      expect(browser.location.hash).toBe('#machines/studio/agents');
     } finally {
       await mounted.unmount();
     }
@@ -291,5 +325,17 @@ describe('useSettingsFlow', () => {
       await mounted.unmount();
       window.location.hash = '';
     }
+  });
+});
+
+describe('machinePanelHash', () => {
+  it('links a panel on the tab that lists it', () => {
+    expect(machinePanelHash('studio', 'warden')).toBe(machineItemHash('studio', 'agents', 'warden'));
+    expect(machinePanelHash('studio', 'secrets')).toBe(machineItemHash('studio', 'sign-ins', 'secrets'));
+    expect(machinePanelHash('studio', 'devices')).toBe(machineItemHash('studio', 'machine', 'devices'));
+  });
+
+  it('falls back to the Machine tab for a word that names no panel', () => {
+    expect(machinePanelHash('studio', 'retired-panel')).toBe(machineItemHash('studio', 'machine', 'retired-panel'));
   });
 });

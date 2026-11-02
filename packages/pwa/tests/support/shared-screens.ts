@@ -6,17 +6,15 @@
  */
 
 import {
-  parseShareFragment,
-  SharedCatalogItemSchema,
   type CatalogInstall,
+  parseShareFragment,
   type SharedCatalogItem,
+  SharedCatalogItemSchema,
   type SharedCatalogManifestEntry,
   type ShareLinkSeed,
   type SignedCatalogItemVersions,
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { InstalledItem } from '../../src/features/shared/shared-installs.ts';
 import { type OpenedCatalogFile, openCatalogFile } from '../../src/features/catalogs/catalog-install-model.ts';
 import type {
   Attempt,
@@ -24,10 +22,12 @@ import type {
   SharedCatalogView,
   SharedController,
 } from '../../src/features/shared/shared-controller.ts';
+import type { InstalledItem } from '../../src/features/shared/shared-installs.ts';
 import type { Problem, ProblemKind } from '../../src/features/shared/shared-model.ts';
-import { installPreview, installRecord } from './catalog-views.ts';
-import { FAKE_LINK } from './catalog-sharing.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { crypto, mcpItem, newIdentity, signedFile, signedVersionsOf, skillItem } from './catalog-files.ts';
+import { FAKE_LINK } from './catalog-sharing.ts';
+import { installPreview, installRecord } from './catalog-views.ts';
 
 export const FAKE_FRAGMENT = `#${FAKE_LINK.split('#')[1]}`;
 export const SEED: ShareLinkSeed = parseShareFragment(FAKE_FRAGMENT);
@@ -237,4 +237,24 @@ export function machinePreview(fixture: UpdateFixture, version: number, change: 
     secrets: [],
     ...change,
   });
+}
+
+/** A second verified catalog beside the fixture's, listing one skill of its own. The signature is the first one's. */
+export function otherCatalogView(
+  fixture: SharedItemFixture,
+  name = 'Design catalog',
+  skillName = 'ocr-tools',
+): SharedCatalogView {
+  const { manifest } = fixture.view;
+  if (manifest === undefined) throw new Error('the fixture catalog has no manifest');
+  const entry = fixture.entries.find(candidate => candidate.kind === 'skill');
+  if (entry === undefined) throw new Error('the fixture catalog has no skill');
+  const catalogId = `cat_${'o'.repeat(22)}` as typeof manifest.catalogId;
+  const own = { ...entry, itemId: `itm_${'o'.repeat(22)}` as typeof entry.itemId, name: skillName };
+  return {
+    ...fixture.view,
+    catalogId,
+    name,
+    manifest: { ...manifest, catalogId, name, items: [own] },
+  };
 }

@@ -13,8 +13,8 @@ import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
 import { type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
-import { McpServerDetails } from '../mcp/mcp-server-details.tsx';
 import { MCP_SCOPE_LABEL, MCP_SCOPE_TITLE, MCP_TRANSPORT_LABEL, sortedMcpServers } from '../mcp/mcp-model.ts';
+import { McpServerDetails } from '../mcp/mcp-server-details.tsx';
 import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
 import {
   CONTEXT_RAIL_SEARCH_LABEL,

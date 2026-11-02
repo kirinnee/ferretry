@@ -1151,6 +1151,55 @@ describe('the clone.import executor', () => {
     );
   });
 
+  it('should reuse a login this machine already has, by email, and say there is no new sign-in', async () => {
+    // Arrange
+    const { service, applied, state } = world();
+    state.reading = configReading(
+      parseAccountModel({ version: 2, credentials: { 'claude-mine': { harness: 'claude', store: 'ferretry' } } }),
+      'r',
+    );
+    state.emails = async () => [credentialRow('claude-mine', 'YOU@example.com')];
+    const change = { kind: 'clone.import', mode: 'alongside', bundle: BUNDLE() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+    // Act
+    const description = await service.executors.clone.describe(change);
+    const summary = await service.executors.clone.execute(change);
+
+    // Assert
+    should(description).containEql('Login YOU@example.com — already here, no new sign-in (used by 1 runtime).');
+    should(description).not.containEql('needs sign-in');
+    should(summary).equal('Copied 1 runtime from work-mac. Already signed in here, no new sign-in: YOU@example.com.');
+    const config = configTextOf(applied[0]?.documents ?? []);
+    should(config).containEql('credential: claude-mine');
+    should(config).not.containEql('claude-you');
+  });
+
+  it('should add an empty slot, as before, when this machine cannot tell which account its logins are', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = configReading(
+      parseAccountModel({ version: 2, credentials: { 'claude-mine': { harness: 'claude', store: 'ferretry' } } }),
+      'r',
+    );
+    state.emails = async () => {
+      throw new Error('down');
+    };
+    const change = { kind: 'clone.import', mode: 'alongside', bundle: BUNDLE() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+    // Act
+    await service.executors.clone.describe(change);
+    const summary = await service.executors.clone.execute(change);
+
+    // Assert
+    should(summary).equal('Copied 1 runtime from work-mac. Sign in once for 1 runtime: you@example.com.');
+  });
+
   it('should leave out what the person skipped and record the source daemon the browser verified', async () => {
     // Arrange
     const { service, applied } = world();
@@ -1266,7 +1315,7 @@ describe('the clone-base record', () => {
     should(record?.mode).equal(0o600);
     should(record?.expect).equal('absent');
     const parsed = parseCloneBase(record?.content);
-    const source = parsed.sources['daemon-source'];
+    const source = parsed.sources['self:daemon-source'];
     should(source?.verified).equal('self');
     should(source?.name).equal('work-mac');
     should(source?.lastCopiedAt).equal('2026-10-13T08:00:00.000Z');
@@ -1378,7 +1427,34 @@ describe('the clone-base record', () => {
     const change = clone(await sourceBundle());
     await w.service.executors.clone.describe(change);
     await w.service.executors.clone.execute(change);
-    should(Object.keys(parseCloneBase(batchRecord(w)?.content).sources)).deepEqual(['daemon-source']);
+    should(Object.keys(parseCloneBase(batchRecord(w)?.content).sources)).deepEqual(['self:daemon-source']);
+  });
+
+  it('should copy without a record, and say so, when the record file exists but cannot be read', async () => {
+    // Arrange
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    const w = target({
+      overrides: {
+        cloneBase: {
+          read: async () => {
+            throw denied;
+          },
+          write: async () => {
+            throw new Error('must not write over a record that could not be read');
+          },
+        },
+      },
+    });
+    const change = clone(await sourceBundle());
+
+    // Act
+    const review = await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    should(JSON.stringify(review)).containEql('cannot be read');
+    should(w.applied).have.length(1);
+    should(batchRecord(w)).be.undefined();
   });
 
   it('should forget one source, writing only the record, and say whether it knew it', async () => {
@@ -1390,7 +1466,7 @@ describe('the clone-base record', () => {
 
     should(await w.service.forgetCloneSource('daemon-nobody')).equal(false);
     should(w.state.baseWrites).deepEqual([]);
-    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(await w.service.forgetCloneSource('self:daemon-source')).equal(true);
     should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
     should(w.applied).have.length(1);
   });

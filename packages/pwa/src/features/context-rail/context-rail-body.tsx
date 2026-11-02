@@ -14,7 +14,6 @@ import type { McpInventory, SessionSkillsInventory } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
 import type { CatalogRowsHost } from '../catalogs/catalog-row-tools.tsx';
-import type { AddSkillsHost } from './add-skills-sheet.tsx';
 import { ContextDocsPanel, ContextSkillsPanel, type SkillFileLoader } from './context-rail-lists.tsx';
 import { ContextMcpPanel, type ContextMcpSignInHost } from './context-rail-mcp.tsx';
 import {
@@ -47,8 +46,8 @@ export interface ContextRailBodyProps {
   readonly mcpSignIn?: ContextMcpSignInHost;
   /** Lets skill and MCP rows add to a catalog, show where an install came from, and install from a file. */
   readonly catalogs?: CatalogRowsHost;
-  /** Lets the Skills tab open "+ Add skills". Without it the button is not drawn. */
-  readonly addSkills?: AddSkillsHost;
+  /** Opens the Add skills page. Without it the Skills tab draws no "+ Add skills". */
+  readonly onAddSkills?: () => void;
   /** The shown sub-tab, when the host keeps it (the phone sheet remembers it between openings). */
   readonly tab?: ContextRailTab;
   readonly onTabChange?: (tab: ContextRailTab) => void;
@@ -87,7 +86,7 @@ export function ContextRailBody({
   onOpenFile,
   mcpSignIn,
   catalogs,
-  addSkills,
+  onAddSkills,
   tab: shownTab,
   onTabChange,
   tabs = CONTEXT_RAIL_TABS,
@@ -165,7 +164,7 @@ export function ContextRailBody({
             machineName={machineName}
             {...(loadSkillFile === undefined ? {} : { loadSkillFile })}
             {...(catalogs === undefined ? {} : { catalogs })}
-            {...(addSkills === undefined ? {} : { addSkills })}
+            {...(onAddSkills === undefined ? {} : { onAddSkills })}
             {...shared}
           />
         ) : (

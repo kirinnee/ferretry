@@ -337,7 +337,7 @@ const tickWorld = (swept: SweepBoard, memory: SweepMemory, failing: ReadonlySet<
   const warnings: string[] = [];
   const store = new MemoryStore(memory);
   const ports: BoardSweepPorts = {
-    board: { sweepBoard: async () => swept },
+    board: { sweepBoard: async () => swept, closeEndedHelper: async () => false },
     sessions: new FakeSessions(everyone),
     memory: store,
     nudges: {
@@ -374,7 +374,7 @@ describe('the board sweep tick', () => {
     const report = await sweep.tick();
 
     // Assert
-    should(report).eql({ nudged: ['F5'], unblocked: ['F2'] });
+    should(report).eql({ nudged: ['F5'], unblocked: ['F2'], closed: [] });
     should(sent).eql([
       { sessionId: 'child', message: '&F2 can go ahead: &F9 merged.' },
       { sessionId: 'lead', message: nudgeMessage({ id: 'F5' }, 3 * HOUR, 'Implement') },
@@ -396,7 +396,7 @@ describe('the board sweep tick', () => {
     const report = await world.sweep.tick();
 
     // Assert
-    should(report).eql({ nudged: ['F6'], unblocked: [] });
+    should(report).eql({ nudged: ['F6'], unblocked: [], closed: [] });
     should(world.warnings).eql([
       'could not nudge child about &F2: composer busy',
       'could not nudge other about &F5: composer busy',
@@ -426,8 +426,8 @@ describe('the board sweep tick', () => {
     const third = await world.sweep.tick();
 
     // Assert
-    should(second).eql({ nudged: [], unblocked: [] });
-    should(third).eql({ nudged: [], unblocked: [] });
+    should(second).eql({ nudged: [], unblocked: [], closed: [] });
+    should(third).eql({ nudged: [], unblocked: [], closed: [] });
     should(world.store.written).have.length(2);
   });
 });

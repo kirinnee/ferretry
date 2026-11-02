@@ -541,6 +541,12 @@ const refineBoardTask = (value: BoardTaskCoherence, context: z.RefinementCtx): v
 export const BoardTaskSchema = z.object(BoardTaskShape).superRefine(refineBoardTask);
 export type BoardTask = z.infer<typeof BoardTaskSchema>;
 
+/**
+ * A SUB-CARD is a card made under a bigger one for one piece of work (one PR, one review, one fix round). The owner
+ * tests the parent, never the sub-card, so the board closes it when its work ships and hides it by default.
+ */
+export const isSubCard = (card: { readonly parent: TaskRef | null }): boolean => card.parent !== null;
+
 // ---------------------------------------------------------------------------------------------------
 // Derived at read time
 // ---------------------------------------------------------------------------------------------------

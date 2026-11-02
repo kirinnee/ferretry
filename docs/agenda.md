@@ -566,6 +566,18 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **A bunch of bugs or asks heard at once gets ONE info item.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret raises one `-k info` item that lists each in a short line and where it is tracked (its card, or "answered here"), so the owner knows every one was heard. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule is one line of the Agenda-mode instruction (`AGENDA_INSTRUCTION`).
 
+**A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
+as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
+you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
+(`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
+
+**A card's title is one line, and never ends mid-word.** The open card's head stays ONE row: a title too wide for it
+scrolls to its end and back (the marquee), as before. Where motion is reduced it does not move: it ends at the last
+whole WORD that fits, then "…" (`wordCut`, drawn in `data-cut`; the whole title stays in the DOM for a screen reader
+and a tap shows all of it). Only a gate item or a machine notice folds onto two lines. A card's who/where line
+("ferret · task · card · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
+leading, trailing or doubled dot.
+
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
 the facts around it — so every NEW item a ferret raises must carry both:
 
@@ -604,7 +616,8 @@ go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message
 
 **Every card has one answer shape, and it says it in one place.** Under the premise and the context, before any
 optional section, every open card draws a segment headed **What I need from you**. It holds exactly the ask and
-ends with one plain instruction, so the owner always knows what to do:
+ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
+and the card stays the card:
 
 | Kind (`--kind`)                     | The segment shows                                   | The buttons                                            |
 | ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
@@ -784,7 +797,7 @@ tomorrow / custom) snoozes; the arrow keys are unchanged. Snooze is offered only
 
 ### Gate items
 
-A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (`item.gate`: the card, its lane and what each option does):
+A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
 the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — the **Test** chip
 (a card in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats

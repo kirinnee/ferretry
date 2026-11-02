@@ -1,12 +1,12 @@
 /**
- * Screenshots of the Board with the Internal filter off and on, at a 390px phone (its filter sheet open) and a
+ * Screenshots of the Board with the Ferret cards filter off and on, at a 390px phone (its filter sheet open) and a
  * 1440px desktop, light and dark:
  *
- *   bun harness/board-internal-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-internal-*.png
+ *   bun harness/board-ferret-cards-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-ferret-cards-*.png
  *
- * It bundles `board-page.tsx` (the real page, invented cards, every fourth big-board card made by a ferret),
+ * It bundles `board-page.tsx` (the real page, invented cards, every fourth big-board card made by a ferret, and a sub-card every fourth from the third),
  * serves it on an ephemeral loopback port, aborts anything that leaves it, and fails when a page scrolls sideways
- * or when turning Internal on adds no cards.
+ * or when turning Ferret cards on adds no cards.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -16,7 +16,7 @@ import { type BrowserContext, chromium, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
-const buildDir = join(harnessDir, 'out', 'board-internal');
+const buildDir = join(harnessDir, 'out', 'board-ferret-cards');
 const shotsDir = resolve(process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? '/tmp/claude-1000');
 
 const fail = (message: string): never => {
@@ -116,8 +116,8 @@ try {
       ] as const) {
         const counts: Record<string, number> = {};
         for (const [state, extra] of [
-          ['off', '&big=1'],
-          ['on', '&big=1&agents=1'],
+          ['off', '&big=1&subs=1'],
+          ['on', '&big=1&subs=1&agents=1'],
         ] as const) {
           const page = await open(context, theme, 'kanban', extra);
           counts[state] = await page.locator('.fy-board-card').count();
@@ -128,18 +128,18 @@ try {
               .waitFor({ state: 'visible' });
             await page.waitForTimeout(400);
           }
-          await shot(page, `${scheme}-${label}-internal-${state}`, 'board-internal');
+          await shot(page, `${scheme}-${label}-ferret-cards-${state}`, 'board-ferret-cards');
           await page.close();
         }
         if ((counts.on ?? 0) <= (counts.off ?? 0))
-          fail(`${scheme} ${label}: turning Internal on did not add cards (${counts.off} → ${counts.on})`);
+          fail(`${scheme} ${label}: turning Ferret cards on did not add cards (${counts.off} → ${counts.on})`);
       }
     } finally {
       await phone.close();
       await desktop.close();
     }
   }
-  process.stdout.write('✅ the board captured with Internal off and on; nothing scrolls sideways\n');
+  process.stdout.write('✅ the board captured with Ferret cards off and on; nothing scrolls sideways\n');
 } finally {
   await browser.close();
   server.stop();

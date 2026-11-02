@@ -28,10 +28,13 @@
  */
 
 import {
+  type CloneLoginTarget,
+  type CloneTargetLogin,
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetMachineView,
   isSignInSecretName,
+  planCloneLogins,
   type SpeedupProvider,
   type SpeedupsView,
   secretReferencesIn,
@@ -261,6 +264,62 @@ export const cloneNeeds = (
   }
   return [...secrets.values(), ...signIns];
 };
+
+/** A login on this machine, as the copy reads it: enough to match a sign-in against and to tell if it is signed in. */
+export interface MatchableLogin extends CloneTargetLogin {
+  readonly status: { readonly word: string };
+}
+
+/** The status words that mean a login can be used now. `checking` is not one of them: it has not been classified yet. */
+const SIGNED_IN_WORDS: ReadonlySet<string> = new Set(['ready', 'refresh_due']);
+
+/**
+ * What each source sign-in became, by the rule the daemon's copy used (`planCloneLogins`, the same function)
+ * run on this machine's logins as they were BEFORE the copy: a login it already had (`matched`), or a new
+ * slot under a free id, `-2` included (`new`). Never re-matched against the logins after the copy, which
+ * already hold the slot it made.
+ */
+export const cloneLoginTargets = (
+  credentials: FleetCloneBundle['credentials'],
+  before: readonly MatchableLogin[],
+): ReadonlyMap<string, CloneLoginTarget> => planCloneLogins(credentials, before);
+
+/** The login a sign-in need is about, once the copy is done: its target when the copy settled it, else its own id. */
+const needTarget = (need: CloneNeed, targets: ReadonlyMap<string, CloneLoginTarget>): string | undefined => {
+  if (need.credentialId === undefined) return undefined;
+  return targets.get(need.credentialId)?.id ?? need.credentialId;
+};
+
+/**
+ * Where a sign-in need points on this machine after the copy: the login it was matched to, or the slot the
+ * copy made for it (a renamed `-2` slot included). Nothing when that login is not on this machine.
+ */
+export const signInLink = (
+  need: CloneNeed,
+  targets: ReadonlyMap<string, CloneLoginTarget>,
+  after: readonly MatchableLogin[],
+): string | undefined => {
+  const id = needTarget(need, targets);
+  return id === undefined ? undefined : after.find(login => login.id === id)?.id;
+};
+
+/**
+ * The needs still worth showing once the copy is done. A sign-in is dropped only when the copy matched it to a
+ * login this machine already had and that login is signed in (`ready` / `refresh_due`; `checking` is not yet
+ * known to be). A login the copy made a slot for, one that still needs sign-in, and any other need stay.
+ */
+export const needsAfterCopy = (
+  needs: readonly CloneNeed[],
+  targets: ReadonlyMap<string, CloneLoginTarget>,
+  after: readonly MatchableLogin[],
+): readonly CloneNeed[] =>
+  needs.filter(need => {
+    if (need.kind !== 'sign-in' || need.credentialId === undefined) return true;
+    const target = targets.get(need.credentialId);
+    if (target?.kind !== 'matched') return true;
+    const login = after.find(candidate => candidate.id === target.id);
+    return login === undefined || !SIGNED_IN_WORDS.has(login.status.word);
+  });
 
 /** The secret names an environment login names anywhere: its variables and, for a two-CLI login, either half. */
 const loginSecretNames = (credential: FleetCloneBundle['credentials'][number]): readonly string[] =>

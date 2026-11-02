@@ -32,6 +32,7 @@ import {
   boardOk,
   compareProtocolVersions,
   isInBoardState,
+  isSubCard,
   type LaneCategory,
   type LaneSet,
   type MoveReasonProblem,
@@ -40,7 +41,7 @@ import {
   type TaskKind,
   TaskKindSchema,
 } from '@ferretry/protocol';
-import { isAgentTask, splitAvailable } from './board-human.ts';
+import { isFerretCard, splitAvailable } from './board-human.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 // ---------------------------------------------------------------------------------------------------
@@ -124,7 +125,7 @@ export interface BoardFilters {
   readonly activity: BoardActivityFilter | null;
   /** The cards the owner created or that wait on the owner. */
   readonly mine: boolean;
-  /** "Internal": cards ferrets made for other ferrets. Off, the board is what the owner asked for. */
+  /** "Ferret cards": cards ferrets made for their own work (sub-cards and helper cards). Off, the board is what the owner asked for. */
   readonly agents: boolean;
   /** A lane id, or a lane name in the card's own project (case does not matter). */
   readonly lane: string | null;
@@ -168,7 +169,7 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
   return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
 };
 
-/** The URL parameter "Internal" lives in, on the Board and on a ferret's Tasks tab alike. */
+/** The URL parameter "Ferret cards" lives in, on the Board and on a ferret's Tasks tab alike. */
 export const AGENTS_PARAM = 'agents';
 
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
@@ -420,7 +421,7 @@ export interface BoardModel {
   readonly quarantined: readonly BoardQuarantine[];
   /** More than one machine is in the model: the page shows a machine chip. */
   readonly multiMachine: boolean;
-  /** The machines say who asked for a card, so "Internal" means something; an older daemon says nothing. */
+  /** The machines say who asked for a card, so "Ferret cards" means something; an older daemon says nothing. */
   readonly splitsAgents: boolean;
 }
 
@@ -454,7 +455,7 @@ const COUNTED: readonly (readonly [
   ['active', 'active'],
 ];
 
-/** A machine's header counts without the agent cards the board is not showing, so a pill and its cards agree. */
+/** A machine's header counts without the ferret cards the board is not showing, so a pill and its cards agree. */
 const withoutCards = (
   counts: BoardCounts,
   hidden: readonly { readonly task: BoardTaskView; readonly category: LaneCategory | null }[],
@@ -501,14 +502,14 @@ export const mergeBoard = (
   const quarantined: BoardQuarantine[] = [];
 
   for (const data of kept) {
-    const hiddenAgents: { readonly task: BoardTaskView; readonly category: LaneCategory | null }[] = [];
+    const hidden: { readonly task: BoardTaskView; readonly category: LaneCategory | null }[] = [];
     if (data.quarantined.length > 0) {
       quarantined.push({ daemonId: data.daemonId, machine: data.machine, cards: data.quarantined });
     }
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
-      if (!showAgents && isAgentTask(task)) {
-        hiddenAgents.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
+      if (!showAgents && isFerretCard(task)) {
+        hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }
       if (filters.mine && !isMine(task)) continue;
@@ -527,7 +528,7 @@ export const mergeBoard = (
       if (members === undefined) byProject.set(task.projectId, [card]);
       else members.push(card);
     }
-    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hiddenAgents));
+    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hidden));
     for (const [projectId, members] of byProject) {
       const laneSet = data.laneSets.get(projectId) ?? null;
       const known = new Set(laneSet?.lanes.map(lane => lane.id));
@@ -554,7 +555,7 @@ export const mergeBoard = (
     counts,
     quarantined,
     multiMachine: kept.length > 1,
-    splitsAgents: kept.some(data => splitAvailable(data.cards)),
+    splitsAgents: kept.some(data => splitAvailable(data.cards) || data.cards.some(isSubCard)),
   };
 };
 

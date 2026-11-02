@@ -163,7 +163,7 @@ export const onboardingRailMarker = (progress: MachineSetupProgress, id: Machine
 // ── Set up later ─────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Where each step lives in Settings once setup is over: a Machine-tab panel, a machine tab, or — for
+ * Where each step lives in Settings once setup is over: a panel on its tab, a machine tab, or — for
  * Voice, whose engine belongs to this DEVICE — Settings › Behaviour › Dictation. Every address names the
  * machine by the name this browser shows, exactly as a Settings link does.
  */
@@ -176,9 +176,9 @@ const LATER: Readonly<
   codex: { tab: 'runtimes' },
   speedups: { tab: 'machine', item: 'speedups' },
   voice: { setting: 'dictation' },
-  warden: { tab: 'machine', item: 'warden' },
-  learning: { tab: 'machine', item: 'learning' },
-  controls: { tab: 'machine' },
+  warden: { tab: 'agents', item: 'warden' },
+  learning: { tab: 'agents', item: 'learning' },
+  controls: { tab: 'agents' },
 };
 
 /** The Settings address a step is revisited at. */

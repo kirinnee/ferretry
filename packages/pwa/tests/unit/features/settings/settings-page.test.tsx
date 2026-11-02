@@ -4,6 +4,7 @@ import { type ReactNode, Suspense, useLayoutEffect, useState } from 'react';
 import { renderToString } from 'react-dom/server';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
+import type { MachineTabId } from '../../../../src/features/fleet/shell/machine-route.ts';
 import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-route.ts';
 import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
@@ -51,11 +52,17 @@ const answering: FleetClientFactory = async () => machineClient(machineView({ na
  * the panel word from the address the way the real one does, so these tests are about what the PAGE
  * hands the tab — the routed daemon's frame and its pairing record — and not about the tab's sections.
  */
-const PanelsTab = ({ machineName, daemonPanels }: MachineTabProps) => {
-  const route = useSettingsFlow(machineName);
-  return <>{daemonPanels?.(route.panel ?? undefined, route.openPanel)}</>;
+const panelsTab =
+  (tab: MachineTabId) =>
+  ({ machineName, daemonPanels }: MachineTabProps) => {
+    const route = useSettingsFlow(machineName, window, tab);
+    return <>{daemonPanels?.(route.panel ?? undefined, route.openPanel)}</>;
+  };
+const PANEL_TABS: MachineTabSurfaces = {
+  machine: panelsTab('machine'),
+  agents: panelsTab('agents'),
+  'sign-ins': panelsTab('sign-ins'),
 };
-const PANEL_TABS: MachineTabSurfaces = { machine: PanelsTab };
 
 /**
  * Stable, as the composition root's memoised list is: the frame defaults a missing list to a fresh `[]`
@@ -613,27 +620,30 @@ describe('SettingsPage legacy Daemons addresses', () => {
     await view.unmount();
   });
 
-  it.each([
-    'warden',
-    'secrets',
-    'devices',
-    'grants',
-    'security',
-    'resource-limits',
-    'doctor',
-    'model-pricing',
-    'security-log',
-    'carrier',
-    'host-checks',
-    'files',
-    'speedups',
-    'learning',
-    'clone',
-    'export',
-  ])('rewrites the old #%s panel anchor to that panel on the Machine tab', async panel => {
+  it.each<[string, MachineTabId]>([
+    ['warden', 'agents'],
+    ['learning', 'agents'],
+    ['pack', 'agents'],
+    ['secrets', 'sign-ins'],
+    ['accounts', 'sign-ins'],
+    ['secure-copy', 'sign-ins'],
+    ['devices', 'machine'],
+    ['grants', 'machine'],
+    ['security', 'machine'],
+    ['resource-limits', 'machine'],
+    ['doctor', 'machine'],
+    ['model-pricing', 'machine'],
+    ['security-log', 'machine'],
+    ['carrier', 'machine'],
+    ['host-checks', 'machine'],
+    ['files', 'machine'],
+    ['speedups', 'machine'],
+    ['clone', 'machine'],
+    ['export', 'machine'],
+  ])('rewrites the old #%s panel anchor to that panel on its own tab (%s)', async (panel, tab) => {
     const view = await mount(panelsPage());
     await visit(`#${panel}`);
-    expect(window.location.hash).toBe(`${ALPHA_MACHINE}/${panel}`);
+    expect(window.location.hash).toBe(`#machines/Alpha%20workstation/${tab}/${panel}`);
     expect(shownSection(view.container)).toBe('machines');
     await view.unmount();
   });
@@ -810,7 +820,6 @@ describe('SettingsPage daemon panels on the Machine tab', () => {
       'secrets',
       'accounts',
       'secure-copy',
-      'catalogs',
       'devices',
       'grants',
       'security',
@@ -840,7 +849,7 @@ describe('SettingsPage daemon panels on the Machine tab', () => {
     window.history.replaceState(
       {},
       '',
-      '/d/daemon%20beta/settings#machines/https%3A%2F%2Fbeta.example.test/machine/secrets',
+      '/d/daemon%20beta/settings#machines/https%3A%2F%2Fbeta.example.test/sign-ins/secrets',
     );
     const view = await mount(panelsPage({ current, connections: [current] }));
     await settle();
@@ -1206,14 +1215,21 @@ describe('SettingsPage Machines section', () => {
     expect(view.container.querySelector('[data-machine-tab="profiles"]')?.getAttribute('aria-current')).toBe('page');
     expect(view.container.querySelector('[data-machine-unknown]')).toBeNull();
 
+    // Components is a section of Profiles now: its old address lands there, rewritten in place.
     await visit('#machines/Alpha%20workstation/components');
-    expect(view.container.querySelector('[data-machine-tab="components"]')?.getAttribute('aria-current')).toBe('page');
+    expect(view.container.querySelector('[data-machine-tab="profiles"]')?.getAttribute('aria-current')).toBe('page');
+    expect(view.container.querySelector('[data-machine-tab="components"]')).toBeNull();
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/profiles');
+
+    await visit('#machines/Alpha%20workstation/credentials');
+    expect(view.container.querySelector('[data-machine-tab="sign-ins"]')?.getAttribute('aria-current')).toBe('page');
+    expect(window.location.hash).toBe('#machines/Alpha%20workstation/sign-ins');
 
     // A tab is an address: the page navigates to it rather than holding it as private state.
     await interact(() =>
-      must(view.container.querySelector<HTMLElement>('[data-machine-tab="credentials"]'), 'credentials tab').click(),
+      must(view.container.querySelector<HTMLElement>('[data-machine-tab="agents"]'), 'agents tab').click(),
     );
-    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#machines/Alpha%20workstation/credentials']);
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/settings#machines/Alpha%20workstation/agents']);
     await view.unmount();
   });
 

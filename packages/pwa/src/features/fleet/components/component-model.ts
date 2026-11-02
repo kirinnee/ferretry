@@ -1,5 +1,5 @@
 /**
- * The Components tab as data (docs/design/account-model.md §3.3, §4.2, E20–E22, E30).
+ * The Components section as data (docs/design/account-model.md §3.3, §4.2, E20–E22, E30).
  *
  * A component is saved once and referenced, so everything here is about two questions: what it
  * holds, and who it reaches. The daemon answers both — the catalogue carries each component's
@@ -32,7 +32,7 @@ export const HARNESS_NAMES: Readonly<Record<CatalogHarness, string>> = { claude:
 
 /**
  * A scope in words (§3.4 P7): what every badge on a component or a profile says. The ONE place the PWA
- * spells them, so the Profiles tab, the builder, Add runtime and the Components tab can never disagree.
+ * spells them, so the Profiles tab, the builder, Add runtime and the Components section can never disagree.
  */
 export const SCOPE_WORDS: Readonly<Record<FleetHarnessScope, string>> = {
   generic: 'Generic',

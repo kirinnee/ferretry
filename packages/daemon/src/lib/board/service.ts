@@ -51,6 +51,7 @@ import {
 } from './authority.ts';
 import {
   applyAction,
+  closeAsDaemon,
   type CardContext,
   type CardOutcome,
   newCard,
@@ -91,6 +92,7 @@ import type {
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
+import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
 
 export interface BoardServiceDependencies {
   readonly store: BoardStore;
@@ -298,6 +300,56 @@ export class BoardService {
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
     const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
     return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
+  }
+
+  /**
+   * Closes a helper whose ferret ended (the board sweep found it gone): a sub-card with no PR to ship, closed as
+   * the daemon with the reason "helper finished". Judged again inside the card's write, so a card that gained a PR
+   * or moved since the sweep read it is left alone. `true` when it closed.
+   */
+  async closeEndedHelper(id: BoardTaskId): Promise<boolean> {
+    const caller: BoardCaller = { kind: 'daemon' };
+    const closed = await this.ports.store.write(id, async current => {
+      if (current === undefined) return { task: null, result: null };
+      const context = await this.context(current, caller);
+      const reason = helperCloseReason(current, context.laneSet);
+      const task = reason === null ? null : closeAsDaemon(current, reason, context);
+      return { task: task === null ? null : requireValidCard(task), result: task };
+    });
+    if (closed === null) return false;
+    await this.afterWrite(caller, closed, [closed.projectId]);
+    return true;
+  }
+
+  /**
+   * Closes every sub-card still waiting where a top-level card waits for the owner to try it (a verify lane): the
+   * ones that sat there before sub-cards closed themselves. Idempotent; a card that cannot be written is reported
+   * and left for the next boot. Answers how many it closed.
+   */
+  async closeStrandedSubCards(): Promise<number> {
+    const caller: BoardCaller = { kind: 'daemon' };
+    const { cards } = await this.snapshot();
+    let closed = 0;
+    for (const { id, parent } of cards) {
+      if (parent === null) continue;
+      try {
+        const task = await this.ports.store.write(id, async current => {
+          if (current === undefined) return { task: null, result: null };
+          const context = await this.context(current, caller);
+          const reason = strandedCloseReason(current, context.laneSet);
+          const next = reason === null ? null : closeAsDaemon(current, reason, context);
+          return { task: next === null ? null : requireValidCard(next), result: next };
+        });
+        if (task === null) continue;
+        await this.afterWrite(caller, task, [task.projectId]);
+        closed += 1;
+      } catch (error) {
+        this.ports.diagnostics.warn(
+          `board: could not close sub-card ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return closed;
   }
 
   /**
@@ -525,6 +577,16 @@ export class BoardService {
       if (current === undefined) return { task: null, result: null };
       const context = await this.context(current, caller);
       const noted = applyAction(current, { action: 'note', text: doneNote(message) }, context).task as BoardTask;
+      // A helper (a sub-card with no PR to ship) closes with its ferret's done; the owner never tests it.
+      const closing = helperCloseReason(noted, context.laneSet);
+      if (closing !== null) {
+        const closed = closeAsDaemon(noted, closing, context);
+        const lane =
+          closed === null ? undefined : context.laneSet.lanes.find(candidate => candidate.id === closed.laneId);
+        if (closed !== null && lane !== undefined) {
+          return { task: requireValidCard(closed), result: { task: closed, moved: lane } };
+        }
+      }
       const target = doneLane(current, context.laneSet);
       if (target === null) return { task: requireValidCard(noted), result: { task: noted, moved: null } };
       const blockers = blockedBy(current, context.index, context.laneSets);

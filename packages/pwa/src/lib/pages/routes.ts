@@ -90,6 +90,16 @@ export interface DaemonSessionRoute {
 }
 
 /**
+ * Add skills: the skills of every catalog this browser subscribes to, to install into one session. A page of its
+ * own (`/d/<id>/session/<sid>/skills`), not a sheet over the chat: it has a catalog filter, a Refresh and room.
+ */
+export interface DaemonAddSkillsRoute {
+  readonly kind: 'add-skills';
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+}
+
+/**
  * The Inbox: every open item, across every paired machine, newest first. Addressed under the
  * machine on screen only because every page is — the deck itself is not one machine's.
  */
@@ -181,6 +191,7 @@ export type DaemonPageRoute =
   | DaemonProjectDetailRoute
   | DaemonProjectLanesRoute
   | DaemonSessionRoute
+  | DaemonAddSkillsRoute
   | DaemonAgendaRoute
   | DaemonBoardRoute
   | DaemonQueueRoute
@@ -299,6 +310,10 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   return `${daemonHomePath(id)}/session/${encodeURIComponent(scope.sessionId)}`;
 };
 
+/** Builds the Add skills pathname for one daemon and session. */
+export const daemonAddSkillsPath = (id: DaemonId, sessionId: string): string =>
+  `${daemonSessionPath(id, sessionId)}/skills`;
+
 /** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
 export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
 
@@ -379,6 +394,16 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'board', daemonId: id } };
   }
 
+  if (
+    destination === 'session' &&
+    sessionSegment !== undefined &&
+    remainder.length === 1 &&
+    remainder[0] === 'skills'
+  ) {
+    const sessionId = parsedSessionId(sessionSegment);
+    if (sessionId !== undefined) return { kind: 'add-skills', daemonId: id, sessionId };
+  }
+
   if (destination === 'queue' && sessionSegment !== undefined && remainder.length === 0)
     return { kind: 'queue', daemonId: id, sessionId: decodeRouteSegment(sessionSegment) };
 
@@ -453,6 +478,8 @@ export const routePath = (route: Route): string => {
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'attention':
       return daemonAgendaPath(route.daemonId);
+    case 'add-skills':
+      return daemonAddSkillsPath(route.daemonId, route.sessionId);
     case 'board':
       return route.taskId === undefined
         ? daemonBoardPath(route.daemonId)
@@ -491,6 +518,7 @@ export const routePageKey = (route: Route): string => {
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
   // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.
   if (route.kind === 'analytics' && route.view === 'query') return `analytics-query:${JSON.stringify(route.daemonId)}`;
+  if (route.kind === 'add-skills') return `add-skills:${JSON.stringify([route.daemonId, route.sessionId])}`;
   if (route.kind === 'project-detail') return `project-detail:${JSON.stringify([route.daemonId, route.projectId])}`;
   if (route.kind === 'project-lanes') return `project-lanes:${JSON.stringify([route.daemonId, route.projectId])}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;

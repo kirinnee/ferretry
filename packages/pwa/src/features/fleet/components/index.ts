@@ -1,4 +1,4 @@
-// The Components tab (docs/design/account-model.md §4.2, §13.2 U18), and the catalogue reads, words and
+// The Components section (docs/design/account-model.md §4.2, §13.2 U18), and the catalogue reads, words and
 // pieces the Profiles tab shares with it.
 export * from './account-catalog.ts';
 export * from './catalog-ui.tsx';

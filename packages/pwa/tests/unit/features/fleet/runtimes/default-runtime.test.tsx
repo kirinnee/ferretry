@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog } from '@ferretry/protocol';
 import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
+import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.ts';
 import {
   type Call,
   CHANGE_ID,
@@ -258,38 +259,30 @@ describe('The Default badge and Make default on the runtimes list', () => {
     ).not.toBeNull();
   });
 
-  it('offers Make default on each non-default agent runtime, not on the default, a plain runtime or a switched-off one', async () => {
+  it('offers Make default in the ⋯ menu of each non-default agent runtime, not on the default, a plain runtime or a switched-off one', async () => {
     const view = await open();
 
     for (const name of ['claude-default', 'claude-plain', 'claude-atomi'])
-      expect(view.container.querySelector(`[data-runtime-make-default="${name}"]`)).toBeNull();
+      expect((await openRuntimeMenu(view.container, name)).has('make-default')).toBe(false);
     for (const name of ['claude-work', 'codex-kirin'])
-      expect(must(view.container.querySelector(`[data-runtime-make-default="${name}"]`), name).textContent).toBe(
-        'Make default',
-      );
+      expect((await openRuntimeMenu(view.container, name)).get('make-default')?.textContent).toContain('Make default');
   });
 
-  it('keeps every action on one line: below sm the buttons are icons named by aria-label', async () => {
+  it('keeps every action behind one ⋯ button named by aria-label, so a card stays two lines', async () => {
     const view = await open();
 
-    const actions = must(view.container.querySelector('[data-runtime-actions="claude-work"]'), 'actions');
-    expect(actions.className).not.toContain('flex-wrap');
-    for (const [selector, label] of [
-      ['[data-runtime-make-default]', 'Make claude-work the default runtime'],
-      ['[data-runtime-rename]', 'Rename claude-work'],
-      ['[data-runtime-remove]', 'Remove claude-work'],
-    ] as const) {
-      const button = must(actions.querySelector(selector), selector);
-      expect(button.getAttribute('aria-label')).toBe(label);
-      expect(must(button.querySelector('span'), 'label').className).toBe('hidden sm:inline');
-    }
+    const card = must(view.container.querySelector('[data-runtime-card="claude-work"]'), 'card');
+    const buttons = card.querySelectorAll('[data-runtime-actions]');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.getAttribute('aria-label')).toBe('Actions for claude-work');
+    expect(card.querySelector('[data-runtime-rename], [data-runtime-remove], [data-runtime-make-default]')).toBeNull();
   });
 
   it('Make default fills the select and shows the same apply panel; saving writes that runtime', async () => {
     const calls: Call[] = [];
     const view = await open({ calls });
 
-    await click(view.container, '[data-runtime-make-default="claude-work"]');
+    await chooseRuntimeAction(view.container, 'claude-work', 'make-default');
 
     expect(select(view.container).value).toBe('claude-work');
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
@@ -306,10 +299,7 @@ describe('The Default badge and Make default on the runtimes list', () => {
       machine: machine({ authority: { mayApply: false, applyRefusal: 'not-granted' } }),
     });
 
-    const button = must(
-      view.container.querySelector<HTMLButtonElement>('[data-runtime-make-default="claude-work"]'),
-      'button',
-    );
+    const button = menuButton(view.container, 'claude-work');
     expect(button.disabled).toBe(true);
     expect(button.title.length).toBeGreaterThan(0);
   });

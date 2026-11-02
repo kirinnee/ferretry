@@ -1,15 +1,16 @@
 /**
- * "Default for new agents" on the Runtimes tab (docs/design/account-model.md §4.2): the one-row select with its
- * hint, the inline Save / Keep panel after a change, and the list with its Default badge and Make default
- * buttons, on a machine with 13 runtimes. At a 390px phone and a 1440px desktop, light and dark. Review
+ * The Runtimes tab (docs/design/account-model.md §4.2) on a machine with 13 runtimes: the one-row "Default for new
+ * agents" select with its hint, the inline Save / Keep panel after a change, and the two-line runtime cards (name row
+ * with Default / Disabled / Not an agent, the switch and the ⋯ menu; details row) with the menu open. At a 390px phone and a 1440px desktop, light and dark. Review
  * evidence; nothing compares the PNGs.
  *
  *   bun harness/default-runtime-screenshot.tsx [out-dir]   # writes <state>-<390|1440>-<light|dark>.png
  *
  * It renders the REAL `RuntimesTab` against the harness catalogue with a 13-runtime overlay. Nothing touches a
- * network (every request off the loopback origin is aborted). It fails if any state scrolls sideways, if the
- * label, select and hint do not share one row on the desktop or do not stack on the phone, if any row's actions wrap
- * onto a second line, or if Make default is offered on a switched-off runtime.
+ * network (every request off the loopback origin is aborted) and serves the app's own font files, so the shots draw
+ * in Inter as the app does. It fails if any state scrolls sideways, if the label, select and hint do not share one
+ * row on the desktop or do not stack on the phone, if a card's name row is not one line, if a card's text does not
+ * start at the name's left edge, or if Make default is offered on a switched-off runtime.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -19,7 +20,7 @@ import { chromium } from 'playwright-core';
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out');
-const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000/shots/b141/e-default-runtime');
+const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000/shots/b141/f-tab-regroup');
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -137,7 +138,14 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
-    return new Response(Bun.file(join(buildDir, url.pathname)));
+    // The CSS names its faces `../assets/fonts/…`, which resolves to /assets/fonts/… from /app.css.
+    return new Response(
+      Bun.file(
+        url.pathname.startsWith('/assets/fonts/')
+          ? join(packageDir, 'src', url.pathname)
+          : join(buildDir, url.pathname),
+      ),
+    );
   },
 });
 
@@ -207,21 +215,47 @@ try {
         if (vp === '1440' && layout?.oneRow !== true) fail(`the control is not one row at ${vp}/${theme}`);
         if (vp === '390' && layout?.stacked !== true) fail(`the control does not stack at ${vp}/${theme}`);
 
-        const split = await page.evaluate(() =>
-          [...document.querySelectorAll('[data-runtime-actions]')]
-            .filter(actions => {
-              const tops = new Set(
-                [...actions.querySelectorAll('button')].map(b => Math.round(b.getBoundingClientRect().top)),
-              );
-              return tops.size > 1;
-            })
-            .map(actions => actions.getAttribute('data-runtime-actions')),
-        );
-        if (split.length > 0) fail(`actions wrap onto a second line at ${vp}/${theme}: ${split.join(', ')}`);
-        const offered = await page
-          .locator('[data-runtime-make-default="claude-atomi"], [data-runtime-make-default="codex-atomi"]')
-          .count();
-        if (offered > 0) fail('Make default is offered on a switched-off runtime');
+        const fonts = await page.evaluate(async () => {
+          await document.fonts.ready;
+          return document.fonts.check('16px Inter');
+        });
+        if (!fonts) fail(`the app's font did not load at ${vp}/${theme}`);
+
+        const cards = await page.evaluate(() => {
+          const left = (element: Element | null) => element?.getBoundingClientRect().left ?? Number.NaN;
+          const textLeft = (element: Element) =>
+            left(element) + Number.parseFloat(getComputedStyle(element).paddingLeft);
+          return [...document.querySelectorAll('[data-runtime-card]')].map(card => {
+            const name = card.getAttribute('data-runtime-card') ?? '';
+            const nameRow = card.querySelector('[data-runtime-row]')?.parentElement;
+            const nameText = card.querySelector('[data-runtime-row] [data-runtime-name]');
+            const lines = ['[data-runtime-details]', '[data-disable-note]', '[data-runtime-skipped]'].flatMap(
+              selector => [...card.querySelectorAll(selector)].map(element => textLeft(element) - left(nameText)),
+            );
+            return {
+              name,
+              nameRowHeight: nameRow?.getBoundingClientRect().height ?? 0,
+              menus: card.querySelectorAll('[data-runtime-actions]').length,
+              looseButtons: card.querySelectorAll(
+                '[data-runtime-rename], [data-runtime-remove], [data-runtime-make-default]',
+              ).length,
+              offsets: lines,
+            };
+          });
+        });
+        for (const card of cards) {
+          if (card.menus !== 1 || card.looseButtons !== 0) fail(`${card.name} does not keep its actions in one ⋯ menu`);
+          if (card.nameRowHeight > (vp === '390' ? 96 : 56))
+            fail(`${card.name}'s name row wraps (${card.nameRowHeight}px) at ${vp}/${theme}`);
+          for (const offset of card.offsets)
+            if (Math.abs(offset) > 1)
+              fail(`${card.name} has a line ${offset}px off the name's left edge at ${vp}/${theme}`);
+        }
+
+        await page.locator('[data-runtime-card="claude-atomi"] [data-runtime-actions]').click();
+        const switchedOff = await page.locator('[role="menu"] [data-menu-key="make-default"]').count();
+        await page.keyboard.press('Escape');
+        if (switchedOff > 0) fail('Make default is offered on a switched-off runtime');
 
         await shoot('select-closed', 520);
 
@@ -234,14 +268,24 @@ try {
         await page.locator('[data-default-runtime-undo]').click();
         await page.locator('[data-default-runtime-undo]').waitFor({ state: 'detached' });
 
-        await shoot('default-badge');
+        await shoot('runtimes-list');
+
+        // A taller window, set before the menu opens (a resize closes it), so the open menu is in the picture.
+        await page.setViewportSize({ width: page.viewportSize()?.width ?? 390, height: 1000 });
+        await page.locator('[data-runtime-card="claude-work"] [data-runtime-actions]').click();
+        await page.locator('[role="menu"] [data-menu-key="make-default"]').waitFor({ state: 'visible' });
+        await sideways(`menu-open at ${vp}/${theme}`);
+        const menuFile = join(outDir, `menu-open-${vp}-${theme}.png`);
+        await page.screenshot({ path: menuFile });
+        process.stdout.write(`📸 ${menuFile}\n`);
+        await page.keyboard.press('Escape');
         await page.close();
       } finally {
         await context.close();
       }
     }
   }
-  process.stdout.write('✅ no state scrolls sideways; one row on desktop, stacked on the phone\n');
+  process.stdout.write('✅ no state scrolls sideways; two-line cards aligned under the name; ⋯ menu on every card\n');
 } finally {
   await browser.close();
   server.stop();

@@ -1,27 +1,37 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import type { CatalogInstall } from '@ferretry/protocol';
 import {
+  ALL_CHIP,
   accountSentence,
   CLAUDE_LIVE,
   CLAUDE_RELOAD,
   CODEX_NEXT,
+  catalogChips,
   filterRows,
+  groupByCatalog,
   installPlan,
   landedSentence,
   likelyNewFolder,
-  newInstalls,
   NOT_HERE,
+  newInstalls,
   PICK_A_PLACE,
   PROJECT_SENTENCE,
   projectHolding,
-  readsPlace,
   type RuntimeChoice,
+  readsPlace,
   scopeLine,
   skillRows,
+  unreachableLine,
+  updatedLine,
 } from '../../../../src/features/context-rail/add-skills-model.ts';
 import { cardState } from '../../../../src/features/shared/shared-screens-model.ts';
 import { installRecord } from '../../../support/catalog-views.ts';
-import { type SharedItemFixture, okAttempt, sharedItemFixture } from '../../../support/shared-screens.ts';
+import {
+  okAttempt,
+  otherCatalogView,
+  type SharedItemFixture,
+  sharedItemFixture,
+} from '../../../support/shared-screens.ts';
 import { SKILLS, skill } from './context-rail-fixtures.ts';
 
 const projects = [
@@ -54,7 +64,7 @@ describe('where an install goes unless the person picks another place', () => {
     expect(projectHolding('/work/application', projects)).toBeUndefined();
   });
 
-  it('is This project when the session has a folder in a known project', () => {
+  it('is this project when the session has a folder in a known project', () => {
     const plan = installPlan({ cwd: '/work/app/src', harness: 'codex', runtime: 'claude-work' }, projects, runtimes);
     expect(plan).toEqual({
       draft: { scope: 'project', projectRoot: '/work/app', harness: 'codex' },
@@ -67,7 +77,7 @@ describe('where an install goes unless the person picks another place', () => {
     );
   });
 
-  it('is This account, by the runtime the inventory names, when the folder is in no known project', () => {
+  it('is this account, by the runtime the inventory names, when the folder is in no known project', () => {
     const plan = installPlan({ cwd: '/tmp/scratch', harness: 'claude', runtime: 'claude-work' }, projects, runtimes);
     expect(plan.draft).toEqual({ scope: 'runtime', runtime: 'rt-work', profile: 'default' });
     expect(plan.sentence).toBe(accountSentence('claude-work'));
@@ -128,6 +138,68 @@ describe('the skills of a subscription', () => {
     expect(filterRows(rows, 'PDF')).toHaveLength(1);
     expect(filterRows(rows, 'ocr studio kirin')).toHaveLength(1);
     expect(filterRows(rows, 'pdf nothing')).toHaveLength(0);
+  });
+});
+
+describe('which catalog a skill is from', () => {
+  const rowsOf = (...views: ReturnType<typeof otherCatalogView>[]) => {
+    const state = cardState(okAttempt({ ...shared.browse, catalogs: views }));
+    if (state.kind !== 'ok') throw new Error('expected an ok card');
+    return skillRows(state, 'pub', 'Studio', new Map());
+  };
+
+  it('keeps the catalog on each row, apart from the publisher', () => {
+    expect(rowsOf(shared.view)[0]).toMatchObject({
+      catalogKey: `pub/${shared.view.catalogId}`,
+      catalogName: "Kirin's catalog",
+      publisher: 'Studio',
+    });
+  });
+
+  it('offers All and one chip per catalog, counting what the search kept', () => {
+    const all = rowsOf(shared.view, otherCatalogView(shared));
+    expect(catalogChips(all, all).map(chip => [chip.key === ALL_CHIP ? 'all' : chip.label, chip.count])).toEqual([
+      ['all', 2],
+      ["Kirin's catalog", 1],
+      ['Design catalog', 1],
+    ]);
+    expect(catalogChips(all, filterRows(all, 'ocr-tools')).map(chip => chip.count)).toEqual([1, 0, 1]);
+  });
+
+  it('offers no chips for one catalog, and names two catalogs of one name with their publisher', () => {
+    expect(catalogChips(rowsOf(shared.view), rowsOf(shared.view))).toEqual([]);
+    const same = [
+      ...rowsOf(shared.view),
+      ...skillRows(
+        (() => {
+          const state = cardState(
+            okAttempt({ ...shared.browse, catalogs: [otherCatalogView(shared, "Kirin's catalog")] }),
+          );
+          if (state.kind !== 'ok') throw new Error('expected an ok card');
+          return state;
+        })(),
+        'other',
+        'Guild',
+        new Map(),
+      ),
+    ];
+    expect(catalogChips(same, same).map(chip => chip.label)).toEqual([
+      'All catalogs',
+      "Kirin's catalog (Studio)",
+      "Kirin's catalog (Guild)",
+    ]);
+  });
+
+  it('groups rows by catalog in order, or narrows to the one chosen', () => {
+    const all = rowsOf(shared.view, otherCatalogView(shared));
+    expect(groupByCatalog(all, ALL_CHIP).map(group => [group.name, group.publisher, group.rows.length])).toEqual([
+      ["Kirin's catalog", 'Studio', 1],
+      ['Design catalog', 'Studio', 1],
+    ]);
+    expect(groupByCatalog(all, `pub/${otherCatalogView(shared).catalogId}`).map(group => group.name)).toEqual([
+      'Design catalog',
+    ]);
+    expect(groupByCatalog([], ALL_CHIP)).toEqual([]);
   });
 });
 
@@ -193,5 +265,20 @@ describe('where it landed', () => {
     expect(landedSentence(inRuntime('rt-other'), accountPlan, SKILLS, 'claude')).toBe(
       `Installed pdf-tools on the account rt-other. ${NOT_HERE}`,
     );
+  });
+});
+
+describe('what sits beside Refresh', () => {
+  it('says when the lists were read, in the coarsest unit that fits', () => {
+    const at = Date.parse('2026-11-01T10:00:00Z');
+    expect(updatedLine(at, at + 20_000)).toBe('Updated just now');
+    expect(updatedLine(at, at + 5 * 60_000)).toBe('Updated 5m ago');
+    expect(updatedLine(at, at + 3 * 3_600_000)).toBe('Updated 3h ago');
+  });
+
+  it('names the publishers that did not answer', () => {
+    expect(unreachableLine(['Studio'])).toBe('Could not reach Studio, so the list may be out of date.');
+    expect(unreachableLine(['Studio', 'Lab'])).toBe('Could not reach Studio and Lab, so the list may be out of date.');
+    expect(unreachableLine(['A', 'B', 'C'])).toBe('Could not reach A, B and C, so the list may be out of date.');
   });
 });

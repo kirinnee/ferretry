@@ -439,7 +439,7 @@ function ImportedNote({
           {needsSignIn.map(runtime => (
             <a
               key={runtime.name}
-              href={machineItemHash(machineName, 'credentials', runtime.credential.id)}
+              href={machineItemHash(machineName, 'sign-ins', runtime.credential.id)}
               className="inline-flex items-center gap-1 font-semibold text-accent underline"
               data-harness-sign-in-later={runtime.credential.id}
             >

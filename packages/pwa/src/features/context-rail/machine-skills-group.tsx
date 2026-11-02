@@ -1,5 +1,5 @@
 /**
- * The "On this machine" group of the Add skills sheet: skills on other accounts and projects here that this
+ * The "On this machine" group of the Add skills page: skills on other accounts and projects here that this
  * session does not have, each with Install (or Installed, once it was copied).
  */
 
@@ -35,7 +35,7 @@ export function MachineGroup({
 }) {
   return (
     <section className="flex min-w-0 flex-col gap-xs" aria-label={ON_THIS_MACHINE} data-add-skills-machine="">
-      <h4 className="m-0 text-cell font-semibold text-fg">{ON_THIS_MACHINE}</h4>
+      <h2 className="m-0 text-cell font-semibold text-fg">{ON_THIS_MACHINE}</h2>
       <p className="m-0 break-words text-meta text-muted">{MACHINE_NOTE}</p>
       {rows === undefined ? (
         <p className="m-0 text-cell text-muted" role="status">

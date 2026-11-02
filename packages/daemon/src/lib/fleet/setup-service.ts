@@ -680,6 +680,7 @@ export class FleetSetupService {
         installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
         existingSkillItems: await this.deps.skillItems(),
         existingSecrets: await this.deps.secrets.names().catch(() => []),
+        targetEmails: await this.#emails(),
         ...(change.skip === undefined ? {} : { skip: change.skip }),
         ...(change.source === undefined ? {} : { sourceDaemon: change.source.daemonId }),
         ...(change.names === undefined ? {} : { sourceName: change.names.source }),
@@ -692,16 +693,25 @@ export class FleetSetupService {
       throw error;
     }
     // The record of what was copied rides this batch, so it can never claim a copy that did not land.
-    const record = await this.#cloneBaseDocument(change, plan, source);
+    const { record, unreadable } = await this.#cloneBaseDocument(change, plan, source);
     const documents = await this.#documents(reading, plan.model, plan.files, record === undefined ? [] : [record]);
     const busiest = plan.slots.toSorted((left, right) => right.runtimes.length - left.runtimes.length)[0];
+    const reused = plan.logins.filter(login => login.outcome === 'matched').map(login => login.name);
     return {
       model: plan.model,
       documents,
       secrets: [],
-      lines: describeClone(plan, bundle, machine, change.names?.source),
+      lines: [
+        ...describeClone(plan, bundle, machine, change.names?.source),
+        ...(unreadable === undefined
+          ? []
+          : [
+              `The record of what was last copied (${unreadable}) cannot be read, so this copy is made without it and is not added to it. Nothing there is changed.`,
+            ]),
+      ],
       summary: [
         `Copied ${plural(plan.copied.runtimes, 'runtime')} from ${change.names?.source ?? bundle.machine}.`,
+        ...(reused.length === 0 ? [] : [`Already signed in here, no new sign-in: ${reused.join(', ')}.`]),
         ...(busiest === undefined || busiest.runtimes.length === 0
           ? []
           : [
@@ -715,16 +725,28 @@ export class FleetSetupService {
   /**
    * The "last copied" record after this copy (`clone-base.json`, docs/design/account-model.md §3.8), as a
    * document for the copy's own batch. None for a bundle that carries no origin keys (version 1) or no
-   * source identity: there is then nothing to link a later copy to.
+   * source identity: there is then nothing to link a later copy to. A record that exists but cannot be read
+   * (no permission, a folder in its place) never blocks a copy and is never written over: the copy goes
+   * ahead without it, and `unreadable` names the file so the review can say so (design §8c).
    */
   async #cloneBaseDocument(
     change: CloneChange,
     plan: ClonePlan,
     source: ReturnType<typeof cloneSourceIdentity>,
-  ): Promise<{ readonly path: string; readonly content: string } | undefined> {
-    if (source === undefined || plan.sourceKeys.size === 0) return undefined;
+  ): Promise<{
+    readonly record?: { readonly path: string; readonly content: string };
+    readonly unreadable?: string;
+  }> {
+    if (source === undefined || plan.sourceKeys.size === 0) return {};
     const path = this.#cloneBasePath();
-    const next = applyCloneToBase(parseCloneBase(await this.deps.cloneBase.read(path)), {
+    let stored: string | undefined;
+    try {
+      stored = await this.deps.cloneBase.read(path);
+      await this.deps.catalog.documentRevision(path);
+    } catch {
+      return { unreadable: CLONE_BASE_FILE };
+    }
+    const next = applyCloneToBase(parseCloneBase(stored), {
       source,
       at: new Date(this.deps.catalog.now()).toISOString(),
       replace: change.mode === 'replace',
@@ -732,7 +754,7 @@ export class FleetSetupService {
       sourceKeys: plan.sourceKeys,
       model: plan.model,
     });
-    return { path, content: serializeCloneBase(next) };
+    return { record: { path, content: serializeCloneBase(next) } };
   }
 
   /**
@@ -742,7 +764,7 @@ export class FleetSetupService {
   async forgetCloneSource(sourceId: string): Promise<boolean> {
     const path = this.#cloneBasePath();
     const before = parseCloneBase(await this.deps.cloneBase.read(path));
-    if (before.sources[sourceId] === undefined) return false;
+    if (!Object.hasOwn(before.sources, sourceId)) return false;
     await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, sourceId)));
     return true;
   }

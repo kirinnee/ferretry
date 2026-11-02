@@ -62,6 +62,19 @@ describe('Markdown prose', () => {
     should(tree.root.findAllByType('strong')).have.length(1);
   });
 
+  test('should keep headings as headings unless the surface demotes them to bold body text', () => {
+    // Act
+    const chat = render(<Markdown text={'## Plan\n\nbody'} />);
+    const card = render(<Markdown demoteHeadings text={'## Plan\n\nbody'} />);
+
+    // Assert
+    should(chat.root.findAllByType('h2')).have.length(1);
+    should(card.root.findAllByType('h2')).have.length(0);
+    const [line] = card.root.findAll(node => node.props['data-demoted-heading'] !== undefined);
+    should(line?.type).equal('p');
+    should(line?.findAllByType('strong')).have.length(1);
+  });
+
   test('should keep the caller class alongside its own prose class', () => {
     // Act
     const tree = render(<Markdown className="extra" text="plain" />);

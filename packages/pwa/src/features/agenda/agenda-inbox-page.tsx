@@ -135,7 +135,7 @@ import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
-import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
+import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
 import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
 import { InboxFindResults } from './inbox-find-results.tsx';
@@ -342,25 +342,18 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       hooks={{ 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(card.item)} />
-      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-        {who.ferret}
-      </span>
-      {who.task === null ? null : (
-        <>
-          <MetaDot />
-          <span data-inbox-who-task="">{who.task}</span>
-        </>
-      )}
-      {who.card === null ? null : (
-        <>
-          <MetaDot />
+      {joinMeta(
+        <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+          {who.ferret}
+        </span>,
+        hasWords(who.task) ? <span data-inbox-who-task="">{who.task}</span> : null,
+        hasWords(who.card) ? (
           <span className="fy-meta-line__card" data-inbox-who-card="">
             {who.card}
           </span>
-        </>
+        ) : null,
+        hasWords(who.machine) ? <span>{who.machine}</span> : null,
       )}
-      <MetaDot />
-      <span>{who.machine}</span>
     </CardMetaLine>
   );
 }
@@ -532,16 +525,12 @@ function GateMeta({
       hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(item)} />
-      {gate.projectName === undefined ? null : (
-        <>
-          <MetaDot />
-          <span data-inbox-gate-project="">{gate.projectName}</span>
-        </>
+      {joinMeta(
+        hasWords(gate.projectName) ? <span data-inbox-gate-project="">{gate.projectName}</span> : null,
+        <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+          {inboxWho(card).ferret}
+        </span>,
       )}
-      <MetaDot />
-      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-        {inboxWho(card).ferret}
-      </span>
     </CardMetaLine>
   );
 }

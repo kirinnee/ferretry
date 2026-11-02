@@ -242,7 +242,7 @@ failing (`packages/protocol/src/lib/daemon-restart.ts`):
 A daemon restart leaves the ferrets running (above). A **host** restart — a reboot, a crash, a logout
 that tears down the user's processes — does not: the daemon's tmux server goes with it, and every pane
 is gone while the session records still say they were running. **Auto-resume brings those ferrets back
-with their conversation intact.** It is a per-machine setting, **on by default**: Settings › Machine ›
+with their conversation intact.** It is a per-machine setting, **on by default**: Settings › Agents ›
 _Auto-resume after restart_, or `fy machine set auto-resume on|off` (`fy machine` shows it, and the last
 pass).
 
@@ -263,7 +263,7 @@ pass).
 - **What is skipped, and said.** A session whose runtime or login is unavailable is not resumed; its
   journal gets `couldn't auto-resume: <reason>` (a `session.auto_resume_skipped` event), and so does a
   revive that failed. A resumed one gets `session.auto_resumed`.
-- **Where it shows.** The Machine tab shows "Resumed 5 ferrets after restart" with the skipped ones and
+- **Where it shows.** The Agents tab shows "Resumed 5 ferrets after restart" with the skipped ones and
   their reasons, from `lastAutoResume` on the machine view (`<state home>/auto-resume-summary.json`).
 - **Turned off** it resumes nothing and clears the ledger, so turning it on later does not revive a
   reboot from days ago.

@@ -1,5 +1,5 @@
 /**
- * The Components tab (docs/design/account-model.md §4.2, K1–K7, E20–E22, E30): the six kinds, each
+ * The Components section (docs/design/account-model.md §4.2, K1–K7, E20–E22, E30): the six kinds, each
  * kind's list, one component's page, and its Edit and New forms.
  *
  * One page is one concept. The kinds page says what each kind is for; a list says who uses each one;
@@ -9,7 +9,7 @@
 
 import type { FleetAccountChange, FleetComponentKind, FleetComponentView, FleetMachineView } from '@ferretry/protocol';
 import { Lock } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Markdown } from '../../../components/markdown.tsx';
 import { useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
@@ -47,7 +47,7 @@ import {
   profilesWithLayer,
   SECRET_REFERENCE,
 } from './component-model.ts';
-import { itemHref, useHashItem } from './machine-links.ts';
+import { isComponentReference, itemHref, useHashItem } from './machine-links.ts';
 import { signsInWithOAuth } from './mcp-sign-in-model.ts';
 import { McpSignInSection } from './mcp-sign-in-section.tsx';
 import { ComponentMcpStatus, ComponentMcpStatusSection, type MachineMcpHost, useMachineMcp } from './mcp-status.tsx';
@@ -76,7 +76,7 @@ const parentOf = (page: Page, catalog: AccountCatalog): Page => {
 };
 
 /** The tab as the composition root mounts it: the reader's own name for each paired machine comes from the store. */
-export function ComponentsSurface(props: MachineTabProps) {
+export function ComponentsSurface(props: MachineTabProps & { readonly onAtList?: (atList: boolean) => void }) {
   const { connections } = useConnectionSnapshot();
   const machineNames = useMemo(
     () => new Map(connections.map(record => [String(record.daemonId), daemonDisplayName(record)])),
@@ -92,7 +92,12 @@ export function ComponentsTab({
   online,
   createClient,
   machineNames = new Map(),
-}: MachineTabProps & { readonly machineNames?: ReadonlyMap<string, string> }) {
+  onAtList,
+}: MachineTabProps & {
+  readonly machineNames?: ReadonlyMap<string, string>;
+  /** Told whether the kinds page is showing, so a tab that holds this one can hide what it sits beside. */
+  readonly onAtList?: (atList: boolean) => void;
+}) {
   const { read, reload } = useAccountCatalog(connection, createClient);
   const [page, setPage] = useState<Page>({ kind: 'kinds' });
   const [saved, setSaved] = useState<string | undefined>(undefined);
@@ -101,7 +106,11 @@ export function ComponentsTab({
     setPage(next);
   };
 
-  useHashItem('components', reference => open({ kind: 'detail', reference }));
+  // A profile's address on the shared Profiles tab sends this section back to its list.
+  useHashItem('profiles', reference =>
+    open(isComponentReference(reference) ? { kind: 'detail', reference } : { kind: 'kinds' }),
+  );
+  useEffect(() => onAtList?.(page.kind === 'kinds'), [onAtList, page.kind]);
 
   if (read.kind === 'loading')
     return (
@@ -168,7 +177,7 @@ interface SharedProps {
 function KindsPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Page) => void }) {
   return (
     <>
-      <PageHead title="Components" sub="Saved once, reused in any profile" />
+      <PageHead title="Built from" sub="Components: saved once, reused in any profile" />
       <Prose>
         Instructions, MCP servers and skills are adapted to each harness. Settings and hooks belong to one harness.
       </Prose>

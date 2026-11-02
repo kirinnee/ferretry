@@ -1,5 +1,5 @@
 /**
- * The Credentials tab (docs/design/account-model.md §4.2): the logins kept on this machine, grouped by
+ * The Sign-ins tab (docs/design/account-model.md §4.2): the logins kept on this machine, grouped by
  * harness, each with its status, its usage and who uses it — and each login's own page, where it is
  * signed in, labelled, checked or signed out.
  *
@@ -8,7 +8,7 @@
 
 import type { FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
@@ -575,13 +575,21 @@ export function CredentialsTab({
   createClient,
   now = Date.now,
   pollMs,
-}: MachineTabProps & CredentialsTabOptions) {
+  onAtList,
+}: MachineTabProps &
+  CredentialsTabOptions & {
+    /** Told whether the list of logins is showing, so a tab that holds this one can hide what it sits beside. */
+    readonly onAtList?: (atList: boolean) => void;
+  }) {
   const { state, data, reload } = useMachineData(connection, createClient);
   const changes = useAccountChanges({ connection, createClient });
-  const [detail, openDetail] = useMachineDetail(machineName, 'credentials');
+  const [detail, openDetail] = useMachineDetail(machineName, 'sign-ins');
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const removeRefusal = runtimeActionRefusal(changes.authority);
+  const atList =
+    !adding && (detail === null || data === null || !data.credentials.credentials.some(item => item.id === detail));
+  useEffect(() => onAtList?.(atList), [onAtList, atList]);
 
   if (adding)
     return (
@@ -718,7 +726,7 @@ export function CredentialsTab({
                   <li key={item.id}>
                     <CredentialRow
                       credential={item}
-                      href={machineDetailHash(machineName, 'credentials', item.id)}
+                      href={machineDetailHash(machineName, 'sign-ins', item.id)}
                       now={now()}
                       machineName={machineName}
                       online={online}

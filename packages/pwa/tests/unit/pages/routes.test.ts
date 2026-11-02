@@ -3,6 +3,7 @@ import should from 'should';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   connectionPickerPath,
+  daemonAddSkillsPath,
   daemonAgendaPath,
   daemonAnalyticsPath,
   daemonAnalyticsQueryPath,
@@ -441,5 +442,25 @@ describe('sharing routes', () => {
       routePageKey(parseRoute('/d/daemon-b/sharing/skills')),
     );
     should(routePageKey(parseRoute('/d/daemon-b/sharing'))).equal('sharing:"daemon-b"');
+  });
+});
+
+describe('the Add skills address', () => {
+  it('should name the session the skills are for and read back to the same address', () => {
+    const path = daemonAddSkillsPath(daemonA, 'session one');
+    should(path).equal('/d/daemon%2Fa/session/session%20one/skills');
+    should(parseRoute(path)).deepEqual({ kind: 'add-skills', daemonId: daemonA, sessionId: 'session one' });
+    should(routePath(parseRoute(path))).equal(path);
+  });
+
+  it('should keep a page per session, apart from the chat itself', () => {
+    const chat = routePageKey(parseRoute('/d/daemon%2Fa/session/s1'));
+    const skills = routePageKey(parseRoute('/d/daemon%2Fa/session/s1/skills'));
+    should(skills).not.equal(chat);
+    should(skills).not.equal(routePageKey(parseRoute('/d/daemon%2Fa/session/s2/skills')));
+  });
+
+  it('should leave any other tail under a session to the usual fallback', () => {
+    should(parseRoute('/d/daemon%2Fa/session/s1/nope').kind).not.equal('add-skills');
   });
 });

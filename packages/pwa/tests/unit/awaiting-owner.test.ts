@@ -45,6 +45,11 @@ describe('awaitingOwner', () => {
     expect(await stageIn({ laneId: 'plan', askedBy: 'agent' })).toBeNull();
   });
 
+  test('a sub-card in a gate lane never waits on the owner, who tests its parent', async () => {
+    expect(await stageIn({ laneId: 'tested', parent: { id: 'F9' } })).toBeNull();
+    expect(await stageIn({ laneId: 'plan', parent: { id: 'F9' } })).toBeNull();
+  });
+
   test('a dropped card never waits on the owner', async () => {
     expect(await stageIn({ laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } })).toBeNull();
   });

@@ -64,7 +64,7 @@ two differ. The catalogs design this extends is [catalogs.md](catalogs.md). Card
 
 **Both**
 
-- Settings › Machine › Catalogs stays, as a one-line link to the Sharing page.
+- The "Catalogs moved" stub under Settings › Machine is gone; the Sharing page is the one home.
 - When someone shares with you, a dot appears on Sharing.
 
 ```

@@ -6,15 +6,24 @@
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useId, useState } from 'react';
+import { cn } from '../../../lib/class-names.ts';
 import { type SkippedItem, skippedCountLine } from '../shell/skipped-model.ts';
 
-export function SkippedLine({ name, items }: { readonly name: string; readonly items: readonly SkippedItem[] }) {
+export function SkippedLine({
+  name,
+  items,
+  className,
+}: {
+  readonly name: string;
+  readonly items: readonly SkippedItem[];
+  readonly className?: string;
+}) {
   const [open, setOpen] = useState(false);
   const listId = useId();
   if (items.length === 0) return null;
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div className="relative flex min-w-0 flex-col gap-1" data-runtime-skipped={name}>
+    <div className={cn('relative flex min-w-0 flex-col gap-1', className)} data-runtime-skipped={name}>
       <button
         type="button"
         aria-expanded={open}

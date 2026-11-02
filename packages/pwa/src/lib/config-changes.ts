@@ -2,7 +2,7 @@
  * WHAT THIS BROWSER KNOWS ABOUT EACH MACHINE'S CONFIGURATION REVISION, and which screens must read again
  * (docs/config-files.md "Live changes").
  *
- * Every screen that shows configuration — the Runtimes and Credentials tabs, the runtime picker, What
+ * Every screen that shows configuration — the Runtimes and Sign-ins tabs, the runtime picker, What
  * agents may control, Speed-ups, the Warden and Learning settings, the voice default, the files — read it
  * once and kept it. That is what made a change invisible until the whole app was reloaded: nothing ever
  * told those screens the machine had moved on. The daemon now counts every change, from any source, and

@@ -14,6 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ConnectionChoice } from '@ferretry/relay';
 import type { ComponentProps } from 'react';
 
 import {
@@ -86,7 +87,6 @@ describe('daemon settings panel rail', () => {
       'secrets',
       'accounts',
       'secure-copy',
-      'catalogs',
       'devices',
       'grants',
       'security',
@@ -110,7 +110,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(17);
+    expect(glyphs).toHaveLength(16);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -180,8 +180,8 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame());
     try {
       const section = must(view.container.querySelector<HTMLElement>('[data-daemon-settings-frame="alpha"]'), 'frame');
-      expect(section.getAttribute('aria-labelledby')).toBe('daemon-settings-heading');
-      expect(section.querySelector('#daemon-settings-heading')?.textContent).toBe('Connection and security');
+      const headingId = must(section.getAttribute('aria-labelledby'), 'the heading id');
+      expect(section.querySelector(`[id="${headingId}"]`)?.textContent).toBe('Connection and security');
       expect(section.textContent).toContain(
         'This machine: shared by every device paired to Alpha. Appearance and behaviour stay on each device.',
       );
@@ -237,13 +237,11 @@ describe('daemon settings panel list', () => {
     }
   });
 
-  it('points the old catalogs tab at Sharing instead of showing the catalogs', async () => {
+  it('has no Catalogs panel: Sharing owns them', async () => {
     const view = await mount(frame({ panel: 'catalogs' }));
     try {
-      const link = view.container.querySelector<HTMLAnchorElement>('[data-catalogs-moved] a');
-      expect(link?.textContent).toBe('Catalogs moved to Sharing');
-      expect(link?.getAttribute('href')).toBe('/d/alpha/sharing/catalogs');
-      expect(view.container.querySelector('[data-catalogs-surface]')).toBeNull();
+      expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
+      expect(view.container.querySelector('[data-daemon-panel="catalogs"]')).toBeNull();
     } finally {
       await view.unmount();
     }
@@ -253,7 +251,7 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(17);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(16);
     } finally {
       await view.unmount();
     }
@@ -263,7 +261,6 @@ describe('daemon settings panel list', () => {
     ['secrets', '[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]'],
     ['accounts', '[aria-label="Loading accounts"], [aria-label="Accounts unavailable"]'],
     ['secure-copy', '[aria-label="Loading approved pastes"], [aria-label="Approved pastes unavailable"]'],
-    ['catalogs', '[data-catalogs-moved]'],
     ['devices', '[data-daemon-panel-open="devices"] *'],
     ['grants', '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]'],
     ['security', '[data-daemon-panel-open="security"] *'],
@@ -273,6 +270,103 @@ describe('daemon settings panel list', () => {
     try {
       expect(view.container.querySelector(`[data-daemon-panel-open="${panel}"]`)).not.toBeNull();
       expect(view.container.querySelectorAll(marker).length).toBeGreaterThan(0);
+    } finally {
+      await view.unmount();
+    }
+  });
+});
+
+describe('daemon settings panel group', () => {
+  const opened: Array<string | null> = [];
+  const grouped = (group: { label: string; panels: readonly string[] }, carrier?: ConnectionChoice) => (
+    <DaemonSettingsFrame
+      connection={alpha}
+      name="Alpha"
+      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+      readWardenStatus={unavailable}
+      createWardenClient={unavailable}
+      onOpenPanel={panel => opened.push(panel)}
+      group={group}
+      {...(carrier === undefined ? {} : { carrier })}
+    />
+  );
+  const chosen = (method: Extract<ConnectionChoice, { ok: true }>['method']): ConnectionChoice => ({
+    ok: true,
+    method,
+    reason: 'Reached it.',
+    passedOver: [],
+  });
+
+  beforeEach(() => {
+    opened.length = 0;
+  });
+
+  it('is one titled run of compact rows, only the panels it was asked for, in the order asked', async () => {
+    const view = await mount(grouped({ label: 'Sites and secrets', panels: ['secrets', 'accounts'] }));
+    try {
+      const section = must(view.container.querySelector<HTMLElement>('[data-daemon-panel-group]'), 'group');
+      expect(section.getAttribute('data-daemon-panel-group')).toBe('Sites and secrets');
+      const headingId = must(section.getAttribute('aria-labelledby'), 'the heading id');
+      expect(section.querySelector(`[id="${headingId}"]`)?.textContent).toBe('Sites and secrets');
+      expect(
+        [...section.querySelectorAll('[data-daemon-panel]')].map(row => row.getAttribute('data-daemon-panel')),
+      ).toEqual(['secrets', 'accounts']);
+      expect(section.textContent).not.toContain('shared by every device');
+      const secrets = must(section.querySelector<HTMLButtonElement>('[data-daemon-panel="secrets"]'), 'Secrets row');
+      expect(secrets.className).toContain('min-h-11');
+      // The description rides as the row's tooltip, not as a second line.
+      expect(secrets.getAttribute('title')).not.toBeNull();
+      await interact(() => secrets.click());
+      expect(opened).toEqual(['secrets']);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('names a row by its short word, and claims a state only where it can read one', async () => {
+    const view = await mount(grouped({ label: 'Devices and access', panels: ['security', 'carrier', 'devices'] }));
+    try {
+      const names = [...view.container.querySelectorAll('[data-daemon-panel]')].map(row => row.textContent);
+      expect(names[0]).toContain('Passkeys');
+      expect(names[1]).toContain('Connection');
+      expect(view.container.querySelector('[data-daemon-panel-value="security"]')).toBeNull();
+      expect(view.container.querySelector('[data-daemon-panel-value="devices"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says the live carrier on the Connection row, from what this browser already measured', async () => {
+    const cases: Array<[Extract<ConnectionChoice, { ok: true }>['method'], string]> = [
+      [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }, 'Direct'],
+      [{ kind: 'webrtc' }, 'WebRTC'],
+      [{ kind: 'relay', relayUrl: 'wss://relay.example.test/ws' }, 'Relay'],
+    ];
+    for (const [method, word] of cases) {
+      const view = await mount(grouped({ label: 'Devices and access', panels: ['carrier'] }, chosen(method)));
+      try {
+        expect(view.container.querySelector('[data-daemon-panel-value="carrier"]')?.textContent).toBe(word);
+      } finally {
+        await view.unmount();
+      }
+    }
+  });
+
+  it('says nothing on the Connection row when no carrier is live', async () => {
+    const failed: ConnectionChoice = { ok: false, reason: 'Nothing answered.', passedOver: [] };
+    const view = await mount(grouped({ label: 'Devices and access', panels: ['carrier'] }, failed));
+    try {
+      expect(view.container.querySelector('[data-daemon-panel="carrier"]')).not.toBeNull();
+      expect(view.container.querySelector('[data-daemon-panel-value="carrier"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('draws nothing when none of its panels is available', async () => {
+    const view = await mount(grouped({ label: 'Nothing here', panels: ['retired-panel'] }));
+    try {
+      expect(view.container.querySelector('[data-daemon-panel-group]')).toBeNull();
     } finally {
       await view.unmount();
     }

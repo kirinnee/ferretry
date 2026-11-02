@@ -1,13 +1,13 @@
 /**
- * "+ Add skills" → On this machine (docs/catalogs.md "On this machine", &B131 A4): the sheet with its On this
+ * "+ Add skills" → On this machine (docs/catalogs.md "On this machine", &B131 A4): the page with its On this
  * machine group, the place choice an Install opens, the review with its WARNING sentences, and the REFUSAL for a
  * file that holds a password or key. On a phone and a desktop, light and dark.
  *
  *   bun harness/machine-skills-screenshot.tsx      # writes harness/out/machine-skills-*.png
  *
- * It renders the REAL `ContextRailBody` (and through it `AddSkillsSheet` and `LocalSkillInstallSheet`) against
+ * It renders the REAL `AddSkillsPage` (and through it `LocalSkillInstallSheet`) against
  * fixed fake data from tests/support/local-skills.ts, parsed through the real protocol schemas. All names, folders
- * and ids are invented. It fails if any frame scrolls sideways or a button in the sheet is shorter than 44px on the
+ * and ids are invented. It fails if any frame scrolls sideways or a button in the page is shorter than 44px on the
  * phone.
  */
 import { spawnSync } from 'node:child_process';
@@ -32,7 +32,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
+import { AddSkillsPage } from '../../src/features/context-rail/add-skills-page.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { crypto } from '../../tests/support/catalog-files.ts';
 import { installPreview, installRecord } from '../../tests/support/catalog-views.ts';
@@ -126,35 +126,21 @@ const SKILLS = {
   ],
 };
 
-const addSkills = {
-  connection: CONNECTION,
-  machineName: MACHINE,
-  cwd: '/work/app/src',
-  onSubscribe: () => undefined,
-  install: { createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] },
-  members,
-};
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <main style={{ margin: '0 auto', maxWidth: 440, padding: '12px 0' }}>
-    <section data-frame="" className="flex flex-col overflow-hidden rounded border border-border-soft bg-surface">
-      <ContextRailBody
-        sessionId="harness-session"
+    <section data-frame="" className="flex flex-col overflow-hidden rounded border border-border-soft bg-surface" style={{ height: 1900 }}>
+      <AddSkillsPage
+        connection={CONNECTION}
         machineName={MACHINE}
-        loadMcp={async () => ({ problems: [], servers: [] })}
-        loadSkills={async () => SKILLS}
-        loadSkillFile={async path => ({ path, content: '# Skill' })}
-        loadDocs={async () => []}
-        onInsertSkill={() => undefined}
-        onOpenFile={() => undefined}
-        catalogs={{ connection: CONNECTION, createClient }}
-        addSkills={addSkills}
-        tabs={['skills', 'mcp']}
-        tab="skills"
-        label="Context sections"
-        now={() => NOW}
+        sessionId="harness-session"
+        cwd="/work/app/src"
+        onNavigate={() => undefined}
+        install={{ createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] }}
+        members={members}
+        loadInventory={async () => SKILLS}
       />
     </section>
   </main>,
@@ -246,16 +232,18 @@ const shot = async (page: Page, name: string, theme: string, vp: string, around:
 const open = async (page: Page, theme: string, scenario: string): Promise<void> => {
   await page.goto(`${server.url}?theme=${theme}&scenario=${scenario}`);
   await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
-  await page.locator('[data-context-add-skills]').waitFor({ state: 'visible' });
+  await page.locator('[data-add-skills-page]').waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
 };
 
 const CREDENTIAL_TEXT = 'holds what looks like a password or key. Remove it, then copy the skill.';
 const SHEET = ['[role="dialog"]'];
+const PAGE = ['[data-add-skills-back]', '[data-add-skills-machine]'];
 
 const tallEnough = async (page: Page, vp: string): Promise<void> => {
-  if (vp !== 'phone') return;
-  for (const button of await page.locator('[role="dialog"] button').all()) {
+  // This Chrome does not report a coarse pointer for an emulated phone, so the 44px floor (a coarse-pointer rule) is not in force there.
+  if (vp !== 'phone' || !(await page.evaluate(() => matchMedia('(pointer: coarse)').matches))) return;
+  for (const button of await page.locator('[role="dialog"] button, [data-add-skills-machine] button').all()) {
     const box = await button.boundingBox();
     if (box !== null && box.height < 44) fail(`a button in the sheet is ${box.height}px tall on the phone`);
   }
@@ -263,14 +251,13 @@ const tallEnough = async (page: Page, vp: string): Promise<void> => {
 
 const openSheet = async (page: Page, theme: string, scenario: string): Promise<void> => {
   await open(page, theme, scenario);
-  await page.locator('[data-context-add-skills]').click();
   await page.locator('[data-add-skills-machine-row]').first().waitFor({ state: 'visible' });
 };
 
 const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await openSheet(page, theme, 'ok');
   await tallEnough(page, vp);
-  await shot(page, 'sheet', theme, vp, SHEET);
+  await shot(page, 'sheet', theme, vp, PAGE);
 
   const install = (): ReturnType<Page['click']> =>
     page

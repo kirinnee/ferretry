@@ -355,7 +355,7 @@ describe('useMachineData when the machine says its configuration moved', () => {
 describe('machineDetailFromHash', () => {
   it('reads the page segment of a link to this tab', () => {
     expect(machineDetailFromHash('#machines/studio-mac/runtimes/claude-default', 'runtimes')).toBe('claude-default');
-    expect(machineDetailFromHash('machines/studio-mac/credentials/claude-work', 'credentials')).toBe('claude-work');
+    expect(machineDetailFromHash('machines/studio-mac/sign-ins/claude-work', 'sign-ins')).toBe('claude-work');
   });
 
   it('decodes a percent-encoded page', () => {
@@ -364,7 +364,7 @@ describe('machineDetailFromHash', () => {
 
   it('is null for another section, another tab or no page', () => {
     expect(machineDetailFromHash('#settings/studio-mac/runtimes/claude-default', 'runtimes')).toBeNull();
-    expect(machineDetailFromHash('#machines/studio-mac/credentials/claude-work', 'runtimes')).toBeNull();
+    expect(machineDetailFromHash('#machines/studio-mac/sign-ins/claude-work', 'runtimes')).toBeNull();
     expect(machineDetailFromHash('#machines/studio-mac/runtimes', 'runtimes')).toBeNull();
     expect(machineDetailFromHash('#machines/studio-mac/runtimes/', 'runtimes')).toBeNull();
     expect(machineDetailFromHash('', 'runtimes')).toBeNull();
@@ -379,8 +379,8 @@ describe('machineDetailFromHash', () => {
 describe('machineDetailHash', () => {
   it('links to the tab, or to one page in it', () => {
     expect(machineDetailHash('studio-mac', 'runtimes')).toBe('#machines/studio-mac/runtimes');
-    expect(machineDetailHash('studio-mac', 'credentials', 'claude-work')).toBe(
-      '#machines/studio-mac/credentials/claude-work',
+    expect(machineDetailHash('studio-mac', 'sign-ins', 'claude-work')).toBe(
+      '#machines/studio-mac/sign-ins/claude-work',
     );
   });
 
@@ -406,7 +406,7 @@ function DetailHost({
   browser,
 }: {
   readonly machine: string;
-  readonly tab: 'runtimes' | 'credentials';
+  readonly tab: 'runtimes' | 'sign-ins';
   readonly probe: DetailProbe;
   readonly browser?: Window;
 }) {
@@ -482,21 +482,21 @@ describe('useMachineDetail', () => {
     fake.location.hash = '#machines/studio-mac/runtimes/claude-review';
     await interact(() => fake.fire('hashchange'));
     expect(detailOf(view.container)).toBe('claude-review');
-    fake.location.hash = '#machines/studio-mac/credentials/claude-work';
+    fake.location.hash = '#machines/studio-mac/sign-ins/claude-work';
     await interact(() => fake.fire('hashchange'));
     expect(detailOf(view.container)).toBe('');
     await view.unmount();
   });
 
   it('reads again for a different tab or browser', async () => {
-    const fake = fakeBrowser('#machines/studio-mac/credentials/claude-work');
+    const fake = fakeBrowser('#machines/studio-mac/sign-ins/claude-work');
     const probe: DetailProbe = { current: null };
     const view = await mount(<DetailHost machine="studio-mac" tab="runtimes" probe={probe} browser={fake.browser} />);
     expect(detailOf(view.container)).toBe('');
-    await view.render(<DetailHost machine="studio-mac" tab="credentials" probe={probe} browser={fake.browser} />);
+    await view.render(<DetailHost machine="studio-mac" tab="sign-ins" probe={probe} browser={fake.browser} />);
     expect(detailOf(view.container)).toBe('claude-work');
-    const other = fakeBrowser('#machines/studio-mac/credentials/codex');
-    await view.render(<DetailHost machine="studio-mac" tab="credentials" probe={probe} browser={other.browser} />);
+    const other = fakeBrowser('#machines/studio-mac/sign-ins/codex');
+    await view.render(<DetailHost machine="studio-mac" tab="sign-ins" probe={probe} browser={other.browser} />);
     expect(detailOf(view.container)).toBe('codex');
     expect(fake.listeners.get('hashchange')?.size).toBe(0);
     expect(other.listeners.get('hashchange')?.size).toBe(1);

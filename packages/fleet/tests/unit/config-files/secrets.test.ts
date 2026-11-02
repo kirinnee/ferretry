@@ -171,9 +171,20 @@ describe('looksLikeRawSecret — a high-entropy value under a credential key', (
 
     // Act + Assert
     should(originKey).have.length(26);
-    should(looksLikeRawSecret('clonedFromKey', originKey)).be.false();
-    should(looksLikeRawSecret('API_KEY', originKey)).be.true();
-    should(looksLikeRawSecret('clonedFromKey', RANDOM_LOOKING)).be.true();
+    should(looksLikeRawSecret('clonedFromKey', originKey, { topLevel: true })).be.false();
+    should(looksLikeRawSecret('API_KEY', originKey, { topLevel: true })).be.true();
+    should(looksLikeRawSecret('clonedFromKey', RANDOM_LOOKING, { topLevel: true })).be.true();
+  });
+
+  it("should flag a clonedFromKey that is not the item's own top-level field", () => {
+    // Arrange
+    const originKey = 'q7zk2px5mlw4tnr6sbd3fgh2jk';
+
+    // Act + Assert
+    should(looksLikeRawSecret('clonedFromKey', originKey)).be.true();
+    should(findRawSecrets({ clonedFromKey: originKey })).deepEqual([]);
+    should(findRawSecrets({ env: { clonedFromKey: originKey } })).deepEqual([{ path: ['env', 'clonedFromKey'] }]);
+    should(findRawSecrets({ args: [{ clonedFromKey: originKey }] })).have.length(1);
   });
 });
 

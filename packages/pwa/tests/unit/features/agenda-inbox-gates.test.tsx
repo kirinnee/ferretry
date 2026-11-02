@@ -112,6 +112,19 @@ describe('a gate item in the Inbox', () => {
     await mounted.unmount();
   });
 
+  it('draws no dot where the project has no words: the line opens on the ferret', async () => {
+    const noProject = inboxCard(
+      gateItem('G8', 'F8', { gate: { ...gateItem('G8', 'F8').gate, projectName: '' } } as never),
+      owner,
+    );
+    const mounted = await mount(page(fakeInbox(), [noProject], { initialOpen: noProject.key }));
+    const facts = must(mounted.container.querySelector('[data-inbox-gate] .fy-meta-line__facts'), 'the facts');
+    expect(facts.querySelector('[data-inbox-gate-project]')).toBeNull();
+    expect(facts.querySelector('[data-inbox-who-ferret]')?.textContent).toBe('Judson');
+    expect(facts.querySelector('.fy-meta-line__dot')).toBeNull();
+    await mounted.unmount();
+  });
+
   it('says "OK to build?" for the approval gate', async () => {
     const approve = inboxCard(
       gateItem('G2', 'F2', { subject: 'OK to build? Pairing QR' }),

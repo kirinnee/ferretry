@@ -1,5 +1,5 @@
 /**
- * What the Runtimes and Credentials tabs read, and how their pages are addressed.
+ * What the Runtimes and Sign-ins tabs read, and how their pages are addressed.
  *
  * ## One read of four answers
  *

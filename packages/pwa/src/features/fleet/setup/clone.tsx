@@ -26,7 +26,13 @@
  * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
-import type { CloneRunnable, FleetCloneBundle, FleetCredentialView, SpeedupsView } from '@ferretry/protocol';
+import type {
+  CloneLoginTarget,
+  CloneRunnable,
+  FleetCloneBundle,
+  FleetCredentialView,
+  SpeedupsView,
+} from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
@@ -55,8 +61,10 @@ import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { currentFlow, type StepperState, startStepper, stepForward, withSteps } from '../shell/stepper-model.ts';
 import {
   CLONE_FLOW_KIND,
+  CLONE_NO_DEFAULT,
   type CloneMode,
   type ClonePreview,
+  cloneDefaultView,
   clonePreview,
   cloneSharesSentence,
   cloneSlots,
@@ -64,17 +72,15 @@ import {
   cloneSteps,
   copiesRows,
   documentSize,
-  CLONE_NO_DEFAULT,
-  cloneDefaultView,
   existingSentence,
   runnableTitle,
 } from './clone-model.ts';
 import {
   CloneItemsChoices,
-  DefaultRuntimeChoice,
   CloneLoginsSection,
   CloneNeedsList,
   CloneOutcomes,
+  DefaultRuntimeChoice,
 } from './clone-settings.tsx';
 import {
   ALL_CLONE_ITEMS,
@@ -87,9 +93,12 @@ import {
   type CloneNeed,
   type CloneOutcomeItem,
   cloneLogins,
+  cloneLoginTargets,
   cloneNeeds,
   controlsChange,
   keysToCopy,
+  needsAfterCopy,
+  signInLink,
   type SourceSettingsFile,
   sourceItemSummary,
 } from './clone-settings-model.ts';
@@ -116,6 +125,10 @@ interface CloneResult {
   readonly summary: string | null;
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
+  /** What each source sign-in became here: a login this machine already had, or the slot the copy made. */
+  readonly logins: ReadonlyMap<string, CloneLoginTarget>;
+  /** This machine's logins after the copy, for their sign-in state. */
+  readonly after: readonly FleetCredentialView[];
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
   /** The source as the person names it, for the Done sentences. */
   readonly sourceName: string;
@@ -323,6 +336,8 @@ export function CloneMachine(props: CloneMachineProps) {
       let summary: string | null = null;
       const outcomes: { item: CloneOutcomeItem; outcome: CloneItemOutcome }[] = [];
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
+      // This machine's logins BEFORE the copy: the sign-ins it already has, which the copy matches against.
+      const before = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
       if (copiesFleet) {
         const applied = await changes.apply({
           kind: 'clone.import' as const,
@@ -370,6 +385,8 @@ export function CloneMachine(props: CloneMachineProps) {
         summary,
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
+        logins: before?.kind === 'done' ? cloneLoginTargets(bundle.credentials, before.value.credentials) : new Map(),
+        after: credentials?.kind === 'done' ? credentials.value.credentials : [],
         outcomes,
         sourceName,
       });
@@ -595,7 +612,7 @@ export function CloneMachine(props: CloneMachineProps) {
                 status="needs_sign_in"
                 statusLabel="Doesn’t copy"
                 title={countWords(preview.signIns, 'sign-in')}
-                detail={`Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. Each becomes an empty slot on ${machineName}; sign in there. Runtimes keep pointing at their slot.`}
+                detail={`Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. A sign-in ${machineName} already has (same account) is reused, not added again; each other becomes an empty slot on ${machineName}; sign in there. Runtimes keep pointing at their login.`}
               />
             ) : null}
             <SetupRow
@@ -836,8 +853,6 @@ function DoneStep({
 }) {
   if (result === null) return null;
   const busiest = result.slots[0];
-  const slotFor = (need: CloneNeed): FleetCredentialView | undefined =>
-    result.slots.find(slot => slot.id === need.credentialId);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-clone-step="done">
       <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
@@ -845,17 +860,17 @@ function DoneStep({
       </SetupNote>
       <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
       <CloneNeedsList
-        needs={needs}
+        needs={needsAfterCopy(needs, result.logins, result.after)}
         machineName={machineName}
         onAdd={onAdd}
         copy={copy}
         signIn={need => {
-          const slot = slotFor(need);
-          return slot === undefined ? null : (
+          const target = signInLink(need, result.logins, result.after);
+          return target === undefined ? null : (
             <a
-              href={machineItemHash(machineName, 'credentials', slot.id)}
+              href={machineItemHash(machineName, 'sign-ins', target)}
               className="inline-flex min-h-control items-center gap-1 font-semibold text-accent underline"
-              data-clone-need-sign-in={slot.id}
+              data-clone-need-sign-in={target}
             >
               Sign in
               <ChevronRight size={14} aria-hidden="true" />
@@ -868,7 +883,7 @@ function DoneStep({
           {result.slots.map(slot => (
             <a
               key={slot.id}
-              href={machineItemHash(machineName, 'credentials', slot.id)}
+              href={machineItemHash(machineName, 'sign-ins', slot.id)}
               data-clone-slot={slot.id}
               className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
             >
@@ -913,7 +928,7 @@ function DoneStep({
         </Button>
         {busiest === undefined ? null : (
           <a
-            href={machineItemHash(machineName, 'credentials', busiest.id)}
+            href={machineItemHash(machineName, 'sign-ins', busiest.id)}
             data-clone-sign-in={busiest.id}
             className="kt-btn"
             data-variant="primary"

@@ -376,7 +376,7 @@ stdin — they refuse the command rather than fall back to exposing it. To move 
 
    A login that shows **Needs sign-in** is fixed with one command, such as
    `fy credential signin <id>`. That one sign-in covers every runtime that uses the login. You can
-   do the same from the browser: Settings → **Machines** → your machine → **Credentials**.
+   do the same from the browser: Settings → **Machines** → your machine → **Sign-ins**.
 
 4. **Pair your phone.**
 

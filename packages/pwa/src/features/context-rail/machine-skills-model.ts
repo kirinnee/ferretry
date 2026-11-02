@@ -18,14 +18,14 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetProject } from '../../lib/fleet-grouping.ts';
-import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import type { TargetOptions, TargetPick } from '../catalogs/catalog-install-model.ts';
+import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import type { RuntimeChoice } from './add-skills-model.ts';
 
 export const ON_THIS_MACHINE = 'On this machine';
 export const MACHINE_NOTE = 'Skills on other accounts and projects here that this session does not have.';
 export const READING_MACHINE = 'Reading this machine’s skills…';
-export const MACHINE_UNREADABLE = 'This machine’s skills could not be read. Close this and open it again to retry.';
+export const MACHINE_UNREADABLE = 'This machine’s skills could not be read. Press Refresh to try again.';
 export const NO_MACHINE_SKILLS = 'No other account or project on this machine has a skill this session lacks.';
 export const NO_MACHINE_MATCH = 'No skill on this machine matches that.';
 export const MACHINE_TRUNCATED = 'This machine has more skills than the list holds, so some are not shown.';

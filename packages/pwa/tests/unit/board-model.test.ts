@@ -155,7 +155,7 @@ describe('mergeBoard', () => {
     expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
   });
 
-  it('keeps a card an agent asked for (askedBy alone) out of every count while Internal is off', () => {
+  it('keeps a card an agent asked for (askedBy alone) out of every count while Ferret cards is off', () => {
     const asked = (id: string, askedBy: 'person' | 'agent') => card(id, { laneId: 'tested', askedBy });
     const cards = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
     const read = (agents: boolean) =>
@@ -168,6 +168,42 @@ describe('mergeBoard', () => {
     expect(read(false).cards.map(entry => entry.task.id)).toEqual(['F1']);
     expect(read(true).counts.toTest).toBe(3);
     expect(read(true).cards.map(entry => entry.task.id)).toEqual(['F1', 'F2', 'F3']);
+  });
+
+  it('counts a sub-card as a ferret card unless a person asked for it', () => {
+    const machines = [
+      data(laptop, 'laptop', [
+        card('F1'),
+        card('F2', { parent: { id: 'F1' }, askedBy: 'agent' }),
+        card('F3', { parent: { id: 'F1' }, askedBy: 'person' }),
+        card('F4', { parent: { id: 'F1' }, askedBy: 'agent' }),
+      ]),
+    ];
+    const ids = (filters: BoardFilters) => mergeBoard(machines, filters).cards.map(entry => entry.task.id);
+    expect(ids(NO_BOARD_FILTERS)).toEqual(['F1', 'F3']);
+    expect(ids({ ...NO_BOARD_FILTERS, agents: true })).toEqual(['F1', 'F2', 'F3', 'F4']);
+    expect(ids({ ...NO_BOARD_FILTERS, ferret: CHILD })).toEqual(['F1', 'F2', 'F3', 'F4']);
+  });
+
+  it('treats a sub-card from a daemon that says nothing about who asked as a ferret card, and offers the filter', () => {
+    const machines = [data(laptop, 'laptop', unasked([card('F1'), card('F2', { parent: { id: 'F1' } })]))];
+    expect(mergeBoard(machines, NO_BOARD_FILTERS).cards.map(entry => entry.task.id)).toEqual(['F1']);
+    expect(mergeBoard(machines, NO_BOARD_FILTERS).splitsAgents).toBe(true);
+  });
+
+  it('takes ferret sub-cards out of the header counts while they are hidden, and back in when shown', () => {
+    const cards = [
+      card('F1', { laneId: 'tested' }),
+      card('F2', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent' }),
+      card('F3', { laneId: 'tested', parent: { id: 'F1' }, askedBy: 'agent', activity: 'active' }),
+    ];
+    const read = (agents: boolean) =>
+      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3, active: 1 } }], {
+        ...NO_BOARD_FILTERS,
+        agents,
+      }).counts;
+    expect(read(false)).toMatchObject({ toTest: 1, active: 0 });
+    expect(read(true)).toMatchObject({ toTest: 3, active: 1 });
   });
 
   it('shows every card and offers no toggle when the daemon does not say who asked', () => {

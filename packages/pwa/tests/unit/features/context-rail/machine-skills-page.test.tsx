@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { CLAUDE_LIVE, CODEX_NEXT, NOT_HERE } from '../../../../src/features/context-rail/add-skills-model.ts';
-import { type AddSkillsHost, AddSkillsSheet } from '../../../../src/features/context-rail/add-skills-sheet.tsx';
+import { AddSkillsPage, type AddSkillsPageProps } from '../../../../src/features/context-rail/add-skills-page.tsx';
 import {
   CHECK_AGAIN,
   MACHINE_TRUNCATED,
@@ -13,8 +13,8 @@ import {
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { crypto } from '../../../support/catalog-files.ts';
-import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { interact, mount } from '../../../support/dom.ts';
+import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import {
   CREDENTIAL_SENTENCE,
   localInstall,
@@ -28,7 +28,7 @@ import {
   WARNED_PREVIEW,
 } from '../../../support/local-skills.ts';
 import { deferred, fakeMembers } from '../../../support/shared-screens.ts';
-import { SKILLS } from './context-rail-fixtures.ts';
+import { SKILLS, skill } from './context-rail-fixtures.ts';
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -51,6 +51,8 @@ const PREVIEW_RUNTIME = 'POST /v1/skill-installs/local/runtime/preview';
 const APPLY_PROJECT = 'POST /v1/skill-installs/local/project';
 const APPLY_RUNTIME = 'POST /v1/skill-installs/local/runtime';
 
+type AddSkillsHost = Omit<AddSkillsPageProps, 'onNavigate' | 'loadInventory'>;
+
 const hostWith = (routes: Parameters<typeof fakeClient>[0], extra: Partial<AddSkillsHost> = {}) => {
   const { members } = fakeMembers({ list: async () => [] });
   const fake = fakeClient({
@@ -63,8 +65,8 @@ const hostWith = (routes: Parameters<typeof fakeClient>[0], extra: Partial<AddSk
   const host: AddSkillsHost = {
     connection,
     machineName: 'alpha box',
+    sessionId: 'sess-1',
     cwd: '/work/app/src',
-    onSubscribe: () => undefined,
     install: { createClient: fake.factory, crypto, projects: PROJECTS },
     members,
     ...extra,
@@ -73,18 +75,12 @@ const hostWith = (routes: Parameters<typeof fakeClient>[0], extra: Partial<AddSk
 };
 
 const open = async (host: AddSkillsHost, inventory = SKILLS) => {
-  const events: string[] = [];
   const view = await mount(
-    <AddSkillsSheet
-      host={host}
-      inventory={inventory}
-      onInstalled={() => events.push('installed')}
-      onClose={() => events.push('closed')}
-    />,
+    <AddSkillsPage {...host} loadInventory={async () => inventory} onNavigate={() => undefined} />,
   );
   await settle();
   await settle();
-  return { view, events };
+  return { view };
 };
 
 /** Opens the copy sheet for a row, by the skill's name. */
@@ -98,7 +94,7 @@ describe('the On this machine group', () => {
   it('lists the skills of other accounts and projects, not the ones this session has', async () => {
     const { host } = hostWith({});
     const { view } = await open(host);
-    expect(q('[data-add-skills-machine] h4')?.textContent).toBe('On this machine');
+    expect(q('[data-add-skills-machine] h2')?.textContent).toBe('On this machine');
     expect(machineRows().map(row => row.querySelector('span')?.textContent)).toEqual([
       'pdf-tools',
       'lint-fix',
@@ -123,7 +119,24 @@ describe('the On this machine group', () => {
     await view.unmount();
   });
 
-  it('says so when the machine’s skills cannot be read, and leaves the rest of the sheet alone', async () => {
+  it('keeps reading until the session’s own skills are known, so it never lists one the session already has', async () => {
+    const session = deferred<typeof SKILLS>();
+    const { host } = hostWith({});
+    const view = await mount(
+      <AddSkillsPage {...host} loadInventory={async () => await session.promise} onNavigate={() => undefined} />,
+    );
+    await settle();
+    await settle();
+    expect(text()).toContain(READING_MACHINE);
+    expect(machineRows()).toHaveLength(0);
+    session.resolve(SKILLS);
+    await settle();
+    expect(text()).not.toContain(READING_MACHINE);
+    expect(machineRows()).toHaveLength(3);
+    await view.unmount();
+  });
+
+  it('says so when the machine’s skills cannot be read, and leaves the rest of the page alone', async () => {
     const { host } = hostWith({
       'GET /v1/skills': () => {
         throw new Error('offline');
@@ -131,7 +144,7 @@ describe('the On this machine group', () => {
     });
     const { view } = await open(host);
     expect(q('[data-add-skills-machine-failed]')?.textContent).toBe(MACHINE_UNREADABLE);
-    expect(q('[data-add-skills-search]')).not.toBeNull();
+    expect(q('[data-add-skills-empty]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -193,10 +206,10 @@ describe('Install from this machine', () => {
       },
       'GET /v1/skill-installs/local': () => ({ installs: applied ? [localInstall()] : [] }),
     });
-    const { view, events } = await open(host);
+    const { view } = await open(host);
     await installRow('pdf-tools');
     expect(q('[data-catalog-sheet="local-skill"] h3')?.textContent).toBe('Install pdf-tools');
-    expect(q('[data-catalog-sheet="add-skills"]')).toBeNull();
+    expect(q('[data-catalog-sheet="local-skill"]')).not.toBeNull();
     expect(q('[data-local-source]')?.textContent).toContain('claude-play account · Claude');
     expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('project');
     expect((q('[data-catalog-project]') as HTMLSelectElement).value).toBe('/work/app');
@@ -234,11 +247,10 @@ describe('Install from this machine', () => {
 
     await click(q('[data-local-done]'));
     await settle();
-    expect(q('[data-catalog-sheet="add-skills"]')).not.toBeNull();
+    expect(q('[data-add-skills-page]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
       `Installed pdf-tools in this project (every session in this folder). ${CLAUDE_LIVE}`,
     );
-    expect(events).toEqual(['installed']);
     expect(machineRows()[0]?.querySelector('[data-add-skills-machine-installed]')).not.toBeNull();
     await view.unmount();
   });
@@ -402,7 +414,7 @@ describe('Install from this machine', () => {
       },
       { cwd: '/tmp/elsewhere' },
     );
-    const { view, events } = await open(host);
+    const { view } = await open(host);
     await installRow('pdf-tools');
     expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('runtime');
     await click(q('[data-local-preview]'));
@@ -416,7 +428,6 @@ describe('Install from this machine', () => {
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
       `Installed pdf-tools in this account (every session on claude-work). ${CLAUDE_LIVE}`,
     );
-    expect(events).toEqual(['installed']);
     await view.unmount();
   });
 
@@ -456,16 +467,55 @@ describe('Install from this machine', () => {
     await second.view.unmount();
   });
 
+  it('reads the session’s skills again after a copy lands, so the copied skill leaves this machine’s list', async () => {
+    let reads = 0;
+    const { host } = hostWith({
+      [PREVIEW_PROJECT]: () => localPreview(),
+      [APPLY_PROJECT]: () => localInstalled(),
+    });
+    const view = await mount(
+      <AddSkillsPage
+        {...host}
+        loadInventory={async () => {
+          reads += 1;
+          return reads === 1
+            ? SKILLS
+            : {
+                ...SKILLS,
+                skills: [
+                  ...SKILLS.skills,
+                  skill({ name: 'pdf-tools', path: '/work/app/.claude/skills/pdf-tools/SKILL.md' }),
+                ],
+              };
+        }}
+        onNavigate={() => undefined}
+      />,
+    );
+    await settle();
+    await settle();
+    expect(machineRows().map(row => row.querySelector('span')?.textContent)).toContain('pdf-tools');
+    await installRow('pdf-tools');
+    await click(q('[data-local-preview]'));
+    await settle();
+    await click(q('[data-local-install]'));
+    await settle();
+    await click(q('[data-local-done]'));
+    await settle();
+    await settle();
+    expect(reads).toBe(2);
+    expect(machineRows().map(row => row.querySelector('span')?.textContent)).not.toContain('pdf-tools');
+    await view.unmount();
+  });
+
   it('closes without copying anything, and says nothing landed', async () => {
     const { host } = hostWith({});
-    const { view, events } = await open(host);
+    const { view } = await open(host);
     await installRow('deploy-notes');
     expect(q('[data-local-source]')?.textContent).toContain('project api · Claude');
     await click(q('button[aria-label="Close Install from this machine"]'));
     await settle();
-    expect(q('[data-catalog-sheet="add-skills"]')).not.toBeNull();
+    expect(q('[data-add-skills-page]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')).toBeNull();
-    expect(events).toEqual([]);
     await view.unmount();
   });
 

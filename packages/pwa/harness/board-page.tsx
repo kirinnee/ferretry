@@ -349,6 +349,9 @@ const WORDS = [
 const LONG_SUMMARY =
   'Imported from the old task list: rework the settings page, the daemon route and the wording of every message a person sees.';
 
+/** `?subs=1` (with `big`): every fourth big card, from the third, is a sub-card of the one two before it. */
+const SUBS_ON = new URLSearchParams(window.location.search).get('subs') !== null;
+
 /** `?big=1`: sixty more cards in every lane, with long titles, long summaries and imported ones. */
 const BIG = Array.from({ length: 40 }, (_, index) => {
   const lane = LANES[index % LANES.length] ?? 'todo';
@@ -368,6 +371,7 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
         : links([]),
     activity: index % 6 === 0 ? 'stale' : index % 3 === 0 ? 'idle' : 'active',
     lastTouchedAt: ago(10 + index * 55),
+    ...(SUBS_ON && index % 4 === 2 ? { parent: { id: `F${300 + index - 2}` } } : {}),
     shippedIn:
       lane === 'released' || lane === 'tested'
         ? { version: `4.141.${index % 4}`, tag: `v4.141.${index % 4}`, at: ago(90 + index * 35) }
@@ -377,7 +381,7 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
 /** What a newer daemon says about each card: every fourth big card was made by a ferret for the one before it. */
 const withOrigin = (cards: readonly BoardTaskView[], firstId: number): BoardTaskView[] =>
   cards.map((item, index) =>
-    index % 4 === 1 && firstId >= 300
+    (index % 4 === 1 || (SUBS_ON && index % 4 === 2)) && firstId >= 300
       ? Object.assign(item, { origin: 'agent', askedBy: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
       : Object.assign(item, { origin: 'human', askedBy: 'person', humanParent: null }),
   );

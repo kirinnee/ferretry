@@ -51,7 +51,7 @@ const toDetail = async (root: HTMLElement, kind: string, reference: string) => {
 describe('ComponentsTab — reading', () => {
   it('lists the six kinds with their counts and opens a kind’s list with badges and use', async () => {
     const root = await open();
-    expect(text(root, 'h3')).toBe('Components');
+    expect(text(root, 'h3')).toBe('Built from');
     expect(root.querySelectorAll('[data-component-kind]')).toHaveLength(6);
     expect(text(root, '[data-component-kind="mcp"]')).toContain('MCP servers');
     expect(text(root, '[data-component-kind="mcp"]')).toContain('2');
@@ -238,10 +238,10 @@ describe('ComponentsTab — a component’s page', () => {
   });
 
   it('opens the page a link names, and says when it is gone', async () => {
-    window.history.replaceState(null, '', `/#machines/studio-mac/components/${encodeURIComponent('mcp/github')}`);
+    window.history.replaceState(null, '', `/#machines/studio-mac/profiles/${encodeURIComponent('mcp/github')}`);
     const root = await open();
     expect(text(root, 'h3')).toBe('github');
-    await followHash('#machines/studio-mac/components/mcp%2Fgone');
+    await followHash('#machines/studio-mac/profiles/mcp%2Fgone');
     expect(root.textContent).toContain('This component is not on studio-mac any more.');
     await click(root, '[data-catalog-back]');
     expect(root.querySelector('[data-components-page="kinds"]')).not.toBeNull();

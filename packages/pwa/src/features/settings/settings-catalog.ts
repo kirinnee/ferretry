@@ -547,12 +547,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     /**
      * ONE PLACE PER MACHINE. Daemons used to sit beside this as its own section — the pairing on one
-     * screen, what runs on the machine on another. Its panels now live on each machine's Machine tab,
+     * screen, what runs on the machine on another. Its panels now live on each machine's tabs,
      * and the address is `#machines/<machine>/<tab>`.
      */
     id: 'machines',
     label: 'Machines',
-    description: 'Each machine’s runtimes, credentials, profiles and components, and its connection and security.',
+    description: 'Each machine’s runtimes, agents, sign-ins and profiles, and its connection and security.',
     settingIds: [],
   },
 ] as const;
@@ -630,7 +630,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'accounts',
     label: 'Accounts',
     description:
-      'Who ferrets sign in as: a username, a password and 2FA keys per site, and the standing rules that let a sign-in go without asking. On this machine — opens its Machine tab.',
+      'Who ferrets sign in as: a username, a password and 2FA keys per site, and the standing rules that let a sign-in go without asking. On this machine — opens its Sign-ins tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#accounts`,
     keywords: [
       'account',
@@ -655,7 +655,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'secure-copy',
     label: 'Secure copy',
     description:
-      'Values moved without a ferret seeing them: standing sign-in rules, task plans (lines approved in advance) and paste rules. On this machine — opens its Machine tab.',
+      'Values moved without a ferret seeing them: standing sign-in rules, task plans (lines approved in advance) and paste rules. On this machine — opens its Sign-ins tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#secure-copy`,
     keywords: [
       'secure copy',
@@ -680,7 +680,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'secrets',
     label: 'Secrets',
     description:
-      'Env vars for the programs ferrets run: a ferret names one and Ferretry runs the command with it, so the ferret never holds the value. On this machine — opens its Machine tab.',
+      'Env vars for the programs ferrets run: a ferret names one and Ferretry runs the command with it, so the ferret never holds the value. On this machine — opens its Sign-ins tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#secrets`,
     keywords: ['secret', 'secrets', 'env', 'environment', 'variable', 'variables', 'token', 'api key', 'key'],
   },
@@ -762,7 +762,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'warden',
     label: 'Warden',
     description:
-      'Supervision, current checks, AI login failover, and policy for this daemon. On this machine — opens its Machine tab.',
+      'Supervision, current checks, AI login failover, and policy for this daemon. On this machine — opens its Agents tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#warden`,
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'ai login', 'quota', 'token', 'wrapper', 'supervision'],
   },
@@ -859,7 +859,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'pack',
     label: 'Pack mode',
     description:
-      'Whether ferrets may start sub-ferrets and pick the model each runs on: the switch, who decides (the agent or Jev), how many may run and how deep, and the routing prompt. On this machine — opens its Machine tab.',
+      'Whether ferrets may start sub-ferrets and pick the model each runs on: the switch, who decides (the agent or Jev), how many may run and how deep, and the routing prompt. On this machine — opens its Agents tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#pack`,
     keywords: [
       'pack',
@@ -891,7 +891,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'agenda-mode',
     label: 'Agenda mode',
     description:
-      'Whether ferrets you start from now on keep an agenda of what only you can decide or do. On by default; a ferret you already have keeps its own switch. On this machine — opens its Machine tab.',
+      'Whether ferrets you start from now on keep an agenda of what only you can decide or do. On by default; a ferret you already have keeps its own switch. On this machine — opens its Agents tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#machines`,
     keywords: [
       'agenda',
