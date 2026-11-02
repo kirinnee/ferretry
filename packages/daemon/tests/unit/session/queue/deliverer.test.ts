@@ -7,6 +7,7 @@ import {
   foldQueue,
   type HandOver,
   movesFrom,
+  type OwnDraft,
   QueueDeliverer,
   type QueueEvent,
   type SendFate,
@@ -60,6 +61,10 @@ class World {
   hold: Promise<void> | undefined;
   /** A drain bound that never runs out, so only the hand-over finishing can end a stop. */
   sleepForever = false;
+  /** What the send path says of a draft in the box: a person's unless a test says it is a send of ours. */
+  ownDraft: () => OwnDraft = () => ({ kind: 'foreign' });
+  /** How many times the deliverer asked the send path to finish a draft of ours. */
+  clears = 0;
   readonly deliverer: QueueDeliverer;
 
   constructor(...messages: QueuedMessage[]) {
@@ -85,6 +90,10 @@ class World {
           return answer;
         },
         fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
+        clearOwnDraft: async () => {
+          this.clears += 1;
+          return this.ownDraft();
+        },
       },
       sessions: () => [ID],
       sleep: async milliseconds => {
@@ -125,6 +134,49 @@ describe('handing over a queue', () => {
     should(world.queue.map(entry => entry.waitReason)).eql(['draft', 'draft']);
     should(world.log.filter(event => event.kind === 'waiting')).have.length(2);
     should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+  });
+
+  it('should finish a send of ours left unsubmitted in the box, then deliver at once (B144)', async () => {
+    // annabeth, 2026-11-02: her own turn pointer sat typed in the box, idle, and thirteen messages waited
+    // behind it as a "draft" for five hours. The draft is the daemon's, so the queue clears it and goes on.
+    const world = new World(message('a', 'agent'), message('b', 'daemon', 1));
+    world.pane = pane({ activeWork: false, draft: 'Read the file /x/turns/turn-063.md now, then …' });
+    world.ownDraft = () => {
+      world.pane = pane({ activeWork: false });
+      return { kind: 'clear' };
+    };
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.clears).equal(1);
+    should(world.handed).eql(['a', 'b']);
+    should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
+    should(world.log.filter(event => event.kind === 'waiting')).be.empty();
+  });
+
+  it('should name the send of ours a message waits behind when an Enter did not take it', async () => {
+    const world = new World(message('a', 'agent'));
+    world.pane = pane({ activeWork: false, draft: '[Pasted text #40 +3 lines]' });
+    world.ownDraft = () => ({ kind: 'stuck', sendId: 'stranded-1', tried: true });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).be.empty();
+    should(world.state('a')?.waitReason).equal('draft');
+    should(world.state('a')?.waitBehind).equal('stranded-1');
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+  });
+
+  it("should leave a person's draft alone, waiting with no send named behind it", async () => {
+    const world = new World(message('a', 'agent'));
+    world.pane = pane({ activeWork: false, draft: 'half a question' });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.clears).equal(1);
+    should(world.handed).be.empty();
+    should(world.state('a')?.waitReason).equal('draft');
+    should(world.state('a')).not.have.property('waitBehind');
   });
 
   it('should go as soon as the box clears, dropping the reason it waited for', async () => {
@@ -363,7 +415,11 @@ describe('handing over a queue', () => {
       clock: { now: () => new Date(T0).toISOString() },
       scheduler: { schedule: () => undefined, cancelAll: () => undefined },
       view: async () => ({ target: world.target, pane: pane(), launching: false }),
-      transport: { handOver: async () => ({ kind: 'landed' }), fate: async () => undefined },
+      transport: {
+        handOver: async () => ({ kind: 'landed' }),
+        fate: async () => undefined,
+        clearOwnDraft: async () => ({ kind: 'foreign' }),
+      },
       sessions: () => [ID],
       sleep: async () => undefined,
     });

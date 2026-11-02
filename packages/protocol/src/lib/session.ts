@@ -14,6 +14,7 @@ import { HarnessDialogSchema } from './session-dialog.ts';
 import { SessionLiveActivitySchema, SessionTranscriptMovedSchema } from './session-live.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
+import { QueueWaitReasonSchema } from './session-queue-wait.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
 import { SharedDraftSentSchema } from './shared-draft.ts';
 
@@ -1478,6 +1479,16 @@ export const SendResultSchema = SessionViewSchema.extend({
   sendId: z.string().min(1).optional(),
   /** The ledger fate as of the answer; read the send later for where it settled. */
   fate: SendFateSchema.optional(),
+  /**
+   * Set when the message is still in FERRETRY's queue — not typed yet, so not in the agent's own queue —
+   * and why it waits there. Absent once a key has gone to the pane.
+   */
+  waitReason: QueueWaitReasonSchema.optional(),
+  /**
+   * Beside a `draft` wait: the earlier send of Ferretry's own whose text sits typed and unsubmitted in the
+   * agent's box. Ferretry pressed Enter on it (bounded) and it did not take; the Warden escalates it.
+   */
+  waitBehind: z.string().min(1).optional(),
 });
 export type SendResult = z.infer<typeof SendResultSchema>;
 

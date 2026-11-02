@@ -1,4 +1,5 @@
 import { parseHandoffPointer } from '@ferretry/protocol';
+import { composerTransport, PASTE_PLACEHOLDER_PATTERN } from '../../tmux/composer.ts';
 import type { SendPath, SendRecord } from './types.ts';
 
 /**
@@ -34,7 +35,8 @@ function squeezed(value: string): string {
 
 /** The pointer a send typed, when it typed one and it could still be stranded in the composer. */
 export function strandablePointer(record: SendRecord): string | undefined {
-  if (record.held === true || !UNSETTLED.has(record.fate) || !POINTER_PATHS.has(record.path)) return undefined;
+  if (record.held === true || record.untyped === true || !UNSETTLED.has(record.fate) || !POINTER_PATHS.has(record.path))
+    return undefined;
   const pointer = record.matchText;
   return pointer !== undefined && parseHandoffPointer(pointer) !== null ? pointer : undefined;
 }
@@ -72,4 +74,69 @@ export function strandedPointerSend(draft: string, records: readonly SendRecord[
 /** Whether two readings of the composer are the same text, however the TUI wrapped either. */
 export function sameComposerText(left: string, right: string): boolean {
   return squeezed(left) === squeezed(right);
+}
+
+/**
+ * B144: NOT ONLY A POINTER. A message typed AS ITSELF — a peer's envelope, a Warden notice, the person's own
+ * words from the app — is stranded the same way when its Enter is swallowed: on 2026-11-02 a lead's
+ * three-paragraph message sat in a ferret's composer as `[Pasted text #40 +3 lines]` for fourteen hours, the
+ * ferret idle at its prompt, while every later message waited behind it as a "draft".
+ *
+ * WHAT MAKES IT OURS is still the ledger: the fill typed it into a composer it had proven EMPTY, so text that
+ * is exactly it, still there, is the send's own. A message this short could be a word a person typed, so it
+ * is never claimed below {@link OWN_TEXT_MIN} characters; and a paste drawn as a placeholder is claimed only
+ * when the placeholder is ALL the composer shows.
+ */
+
+/** The transports that type the message itself rather than a pointer at it. */
+const INLINE_PATHS: ReadonlySet<SendPath> = new Set<SendPath>(['direct', 'native-inline']);
+
+/** Below this many characters (whitespace ignored) a message could be a person's own words, so it is never claimed. */
+export const OWN_TEXT_MIN = 12;
+
+/** One collapsed-paste placeholder and nothing else: `[Pasted text #40 +3 lines]`, `[Pasted Content 1204 chars]`. */
+const LONE_PASTE = new RegExp(`^${PASTE_PLACEHOLDER_PATTERN}$`, 'iu');
+
+/**
+ * The text a send typed that may still be sitting in the composer: its pointer, or — for a message typed as
+ * itself — the message, when it is long enough to be told from a person's word. `undefined` when the send is
+ * settled, held for a revive, was never typed, or is too short to claim.
+ */
+export function strandableText(record: SendRecord): string | undefined {
+  const pointer = strandablePointer(record);
+  if (pointer !== undefined) return pointer;
+  if (record.held === true || record.untyped === true || !UNSETTLED.has(record.fate)) return undefined;
+  if (!INLINE_PATHS.has(record.path)) return undefined;
+  const text = record.matchText ?? record.message;
+  return squeezed(text).length >= OWN_TEXT_MIN ? text : undefined;
+}
+
+/**
+ * Whether `draft` is exactly what this send typed, as a TUI may draw it: the pointer re-wrapped or clipped
+ * after its path; the message re-wrapped, or clipped with `…` past {@link OWN_TEXT_MIN} characters; or, for a
+ * message that travelled as a paste, one collapsed placeholder alone.
+ */
+export function showsOwnText(draft: string, text: string): boolean {
+  if (parseHandoffPointer(text) !== null) return showsOwnPointer(draft, text);
+  const shown = squeezed(draft);
+  const wanted = squeezed(text);
+  if (wanted.length < OWN_TEXT_MIN || shown === '') return false;
+  if (shown === wanted) return true;
+  if (composerTransport(text) === 'paste' && LONE_PASTE.test(draft.trim())) return true;
+  if (!shown.endsWith('…')) return false;
+  const visible = shown.slice(0, -1);
+  return visible.length >= OWN_TEXT_MIN && wanted.startsWith(visible);
+}
+
+/**
+ * The one unsettled send of this session whose own text the composer is holding, or `undefined` when the
+ * draft is anything else — or when two sends would both match it (two pastes drawn as the same kind of
+ * placeholder), because then neither is provably the one in the box.
+ */
+export function strandedSend(draft: string, records: readonly SendRecord[]): SendRecord | undefined {
+  const matches = records.filter(record => {
+    const text = strandableText(record);
+    return text !== undefined && showsOwnText(draft, text);
+  });
+  return matches.length === 1 ? matches[0] : undefined;
 }

@@ -1,4 +1,4 @@
-import type { SendDisposition, SendRecord } from '@ferretry/protocol';
+import type { QueueWaitReason, SendDisposition, SendRecord, SendResult } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -71,6 +71,52 @@ const DISPOSITION_NOTES: Readonly<Record<SendDisposition, string>> = {
 /** What actually happened to the message, as the daemon reported it. */
 export function describeDisposition(disposition: SendDisposition): string {
   return DISPOSITION_NOTES[disposition];
+}
+
+/** Why a message is still in Ferretry's own queue, in the words a sender can act on. */
+const WAIT_REASON_NOTES: Readonly<Record<QueueWaitReason, string>> = {
+  launching: 'the agent is still starting',
+  busy: 'the agent is busy',
+  question: 'the agent is asking a question that must be answered first',
+  dialog: 'a dialog is open on its screen',
+  draft: 'its input box holds unsent text',
+  unreadable: 'its screen cannot be read',
+  stopped: 'it is not running',
+};
+
+/**
+ * Whether the answer says the message is still in FERRETRY's queue: accepted there, never typed. A
+ * `queued` disposition with a fate of `accepted` is exactly that — a message the agent's own queue holds
+ * has the fate `queued` — and an older daemon that sends no wait reason says it the same way.
+ */
+export function waitingInFerretryQueue(result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason'>): boolean {
+  return result.waitReason !== undefined || (result.disposition === 'queued' && result.fate === 'accepted');
+}
+
+/**
+ * The one line a sender reads about the send it just made (B144).
+ *
+ * "queued in the agent's own queue (it auto-submits at the turn boundary)" was printed for messages that
+ * were never typed: they sat in Ferretry's queue behind an earlier send stuck unsubmitted in an idle
+ * ferret's box, and the boundary never came. So a message not yet typed says so, says why, and — when
+ * what it waits behind is an unconfirmed send of Ferretry's own — that a re-submit was attempted.
+ */
+export function describeSendResult(
+  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'waitBehind'>,
+): string {
+  if (!waitingInFerretryQueue(result)) return describeDisposition(result.disposition);
+  if (result.waitBehind !== undefined)
+    return (
+      `NOT delivered yet: it is waiting in Ferretry's queue behind an unconfirmed earlier send (${result.waitBehind}) ` +
+      "whose text sits unsubmitted in the agent's input box. Ferretry attempted a re-submit (pressed Enter) and it " +
+      'did not take; the Warden flags the ferret as stuck. Do not resend — it is typed as soon as the box clears'
+    );
+  if (result.waitReason !== undefined)
+    return (
+      `NOT delivered yet: it is waiting in Ferretry's queue (not the agent's), because ${WAIT_REASON_NOTES[result.waitReason]}. ` +
+      'It is typed as soon as that clears; do not resend'
+    );
+  return "accepted into Ferretry's queue and not typed into the agent yet; do not resend";
 }
 
 /** The stderr note that follows a successful park, or the refusal when no agent received it. */

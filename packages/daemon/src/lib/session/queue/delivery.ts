@@ -32,6 +32,16 @@ export function waitReasonOf(view: DeliveryView): QueueWaitReason | undefined {
   return undefined;
 }
 
+/**
+ * Whose text a composer holding a "draft" is (B144): nobody's any more (`clear` — it was ours, and an Enter
+ * took it), a person's (`foreign`), or a send of this session's own the daemon typed and could not get
+ * submitted (`stuck`), with whether an Enter was tried on it this time.
+ */
+export type OwnDraft =
+  | { readonly kind: 'clear' }
+  | { readonly kind: 'foreign' }
+  | { readonly kind: 'stuck'; readonly sendId: string; readonly tried: boolean };
+
 /** What one hand-over to the send path did. */
 export type HandOver =
   /** The pane proved it: submitted as a turn, or held in the harness's own queue. */

@@ -50,6 +50,7 @@ function transport(answer: SendDisposition | Error, records: readonly SendRecord
           ReturnType<SessionSendService['send']>
         >;
       },
+      finishOwnDraft: async () => ({ kind: 'clear' as const }),
     },
     { list: async () => records },
   );

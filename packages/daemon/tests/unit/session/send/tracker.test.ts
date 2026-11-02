@@ -219,7 +219,13 @@ class World {
             if (this.resubmitDeclines) return current;
             this.resubmitted.push(sendId);
             const counted = { ...current, submitNudges: (current.submitNudges ?? 0) + 1 };
-            this.records.set(sendId, this.enterTakes ? { ...counted, attemptAt: clock.now() } : counted);
+            // An Enter that takes re-opens an unconfirmed send, as the service's `entered` does.
+            const entered = { ...counted, attemptAt: clock.now() };
+            if (entered.fate === 'unaccounted') {
+              entered.fate = 'accepted';
+              delete (entered as { unaccountedReason?: string }).unaccountedReason;
+            }
+            this.records.set(sendId, this.enterTakes ? entered : counted);
             if (this.enterTakes) this.inPane = false;
             return this.records.get(sendId);
           },
@@ -814,7 +820,7 @@ describe('a pointer of ours left typed in the composer', () => {
     should(world.events).not.containEql('control.send_typed_not_sent');
   });
 
-  it('looks again when the next nudge is due, and no sooner than a first check once one is overdue', async () => {
+  it('looks again when the next nudge is due, and only after the deferral once one is overdue and was not pressed', async () => {
     const due = new World(pointer());
     due.inPane = 'composer';
     due.evidence(new ClaudeObservedInputObserver(), []);
@@ -828,10 +834,27 @@ describe('a pointer of ours left typed in the composer', () => {
     await overdue.checkAt(20_000);
 
     should(due.scheduled.at(-1)?.delayMs).equal(2_000);
-    should(overdue.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.firstCheckMs);
+    should(overdue.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.deferredNudgeMs);
   });
 
-  it('never nudges a message typed as itself, which a person might equally have typed', async () => {
+  it('keeps an owed nudge after the row says typed-not-sent, so a long turn ending still gets its Enter', async () => {
+    // braelynn, 2026-11-02: a message typed into her busy pane kept its swallowed Enter in the box. Every
+    // nudge fell due mid-turn and was deferred; once the row said "typed, not sent" none was ever pressed,
+    // and she sat idle with it there for fourteen hours after the turn ended.
+    const world = new World(pointer());
+    world.inPane = 'composer';
+    world.resubmitDeclines = true;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    for (const ms of [2_000, 4_000, 12_000, 34_000, 40_000]) await world.checkAt(ms);
+    should(world.only.typedNotSent).be.true();
+    world.resubmitDeclines = false;
+    await world.checkAt(45_000);
+
+    should(world.resubmitted).eql(['send-1']);
+  });
+
+  it('never nudges a message typed as itself too short to tell from a word a person might have typed', async () => {
     const world = new World(record({ message: 'hi', matchText: 'hi' }));
     world.inPane = 'composer';
     world.evidence(new CodexObservedInputObserver(), []);
@@ -840,6 +863,92 @@ describe('a pointer of ours left typed in the composer', () => {
 
     should(world.resubmitted).be.empty();
     should(world.only.typedNotSent).be.true();
+  });
+});
+
+describe('B144: text of ours left unsubmitted, the ferret idle', () => {
+  const POINTER = turnFileInstruction('/state/sessions/session-1/turns/turn-063.md');
+  const unconfirmed = (overrides: Partial<SendRecord> = {}) =>
+    record({
+      path: 'turn-file',
+      message: 'the long message',
+      matchText: POINTER,
+      senderKind: 'agent',
+      from: SENDER,
+      fate: 'unaccounted',
+      unaccountedReason: 'landing_unconfirmed',
+      fateAt: at(25_000),
+      ...overrides,
+    });
+
+  it('presses Enter on an unconfirmed pointer that turns up in the composer after the fill gave up', async () => {
+    // annabeth, 2026-11-02 15:00: the fill typed her turn pointer into a stalled pane, saw nothing within its
+    // window, and settled it unconfirmed. The pointer was drawn later; nothing ever pressed Enter on it.
+    const world = new World(unconfirmed());
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.inPane = false;
+    await world.checkAt(27_000);
+    should(world.resubmitted).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.busyExtensionMs);
+
+    world.inPane = 'composer';
+    world.enterTakes = true;
+    await world.checkAt(87_000);
+
+    should(world.resubmitted).eql(['send-1']);
+    should(world.only).match({ fate: 'accepted', submitNudges: 1 });
+    should(world.retyped).be.empty();
+  });
+
+  it('presses at most the bounded number of times while the Enter does not take, then leaves it to the Warden', async () => {
+    const world = new World(unconfirmed());
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    for (const ms of [27_000, 29_000, 31_000, 33_000, 35_000, 60_000]) await world.checkAt(ms);
+
+    should(world.resubmitted).eql(['send-1', 'send-1', 'send-1']);
+    should(world.only).match({ fate: 'unaccounted', submitNudges: 3 });
+    should(world.retyped).be.empty();
+  });
+
+  it('stops looking once its keys could no longer plausibly be arriving', async () => {
+    const world = new World(unconfirmed());
+    world.inPane = false;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(defaultSendTrackerSettings.strandedWatchMs + 1_000);
+
+    should(world.scheduled).be.empty();
+    should(world.resubmitted).be.empty();
+  });
+
+  it('presses Enter on a long message typed as itself once its nudge is due', async () => {
+    const world = new World(
+      record({ path: 'native-inline', message: 'please re-run the suite', matchText: 'please re-run the suite' }),
+    );
+    world.inPane = 'composer';
+    world.enterTakes = true;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+    should(world.resubmitted).be.empty();
+    await world.checkAt(4_000);
+
+    should(world.resubmitted).eql(['send-1']);
+  });
+
+  it('never presses for a send that was never typed, or one settled for good', async () => {
+    const world = new World(
+      unconfirmed({ sendId: 'untyped', fate: 'accepted', untyped: true, senderKind: 'human' }),
+      unconfirmed({ sendId: 'gone', fate: 'cancelled' }),
+    );
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(30_000);
+
+    should(world.resubmitted).be.empty();
   });
 });
 

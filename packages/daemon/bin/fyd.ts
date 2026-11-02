@@ -3639,7 +3639,10 @@ function createSessionSendSubsystem(
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
-        const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
+        const answer = answerOf(
+          (await ledger.list(id)).find(record => record.sendId === enqueued.message.id),
+          (await queue.list(id)).find(message => message.id === enqueued.message.id),
+        );
         if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
@@ -3647,6 +3650,8 @@ function createSessionSendSubsystem(
           disposition: answer.disposition,
           sendId: enqueued.message.id,
           fate: answer.fate,
+          ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
+          ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
         };
       }
       const outcome = await service

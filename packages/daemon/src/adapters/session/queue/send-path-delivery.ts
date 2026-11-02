@@ -1,5 +1,5 @@
 import type { QueuedMessage, SendDisposition } from '@ferretry/protocol';
-import type { DeliveryView, HandOver } from '../../../lib/session/queue/delivery.ts';
+import type { DeliveryView, HandOver, OwnDraft } from '../../../lib/session/queue/delivery.ts';
 import type { QueueTransport } from '../../../lib/session/queue/deliverer.ts';
 import type { SessionSendService } from '../../../lib/session/send/service.ts';
 import {
@@ -31,7 +31,7 @@ const LANDED: ReadonlySet<SendDisposition> = new Set(['delivered', 'queued', 're
  */
 export class SendPathQueueTransport implements QueueTransport {
   constructor(
-    private readonly sends: Pick<SessionSendService, 'send'>,
+    private readonly sends: Pick<SessionSendService, 'send' | 'finishOwnDraft'>,
     private readonly ledger: Pick<SendLedger, 'list'>,
   ) {}
 
@@ -65,6 +65,10 @@ export class SendPathQueueTransport implements QueueTransport {
 
   async fate(id: SessionId, messageId: string): Promise<SendFate | undefined> {
     return (await this.ledger.list(id)).find(record => record.sendId === messageId)?.fate;
+  }
+
+  async clearOwnDraft(id: SessionId): Promise<OwnDraft> {
+    return await this.sends.finishOwnDraft(id);
   }
 }
 
