@@ -3,7 +3,7 @@
  * the first step lists only accounts that sign in at THIS site; accounts saved for another site are behind a second step
  * ("Use an account from another site…") and each says where it signs in ("not linked to a site" when it signs in
  * nowhere). Never a one-tap. Views: the card as it opens (one account here: the one-tap and "Only account here"), the
- * first step open, both steps open, two accounts here ("Pick one", no one-tap, both steps open), and a card whose only
+ * first step open (only when this site has another account to choose), both steps open, two accounts here ("Pick one", no one-tap, both steps open), and a card whose only
  * saved accounts are other sites'. At a 390px phone and a
  * 1440px desktop, in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
@@ -46,6 +46,7 @@ const pickOne = view === 'pick-one';
 const accounts = AccountListSchema.parse({ v: 1, health: 'ready', accounts: [], signIns: [] });
 const google = offer({ id: 'GOOGLE_KIRINNEE97', label: 'Google kirinnee97', username: 'kirinnee97@gmail.com', matched: true, signIn: SIGN_IN, ...(pickOne ? {} : { primary: true as const, why: 'only' as const }) });
 const googleB = offer({ id: 'GOOGLE_ERNEST', label: 'Google ernest', username: 'ernest@atomi.tech', matched: true, signIn: SIGN_IN_B });
+const hand = offer({ id: 'GOOGLE_WORK', label: 'Google work', username: 'work@atomi.tech', matched: false });
 const scratch = offer({ id: 'SCRATCH_LOGIN', label: 'Scratch login', matched: false, elsewhere: [] });
 const okta = offer({ id: 'LIFTOFF_OKTA_COM', label: 'Liftoff Okta', username: 'kirin@liftoff.example', matched: false, elsewhere: ['liftoff.okta.com'] });
 const github = offer({ id: 'GITHUB_KIRINNEE', label: 'GitHub (kirinnee)', matched: false, elsewhere: ['github.com', 'api.github.com'] });
@@ -66,7 +67,7 @@ const request = requestOf('secret', {
   saved: saved({
     match: 'accounts.google.com',
     suggest: { id: 'GOOGLE_KIRINNEE97', label: 'Google kirinnee97' },
-    offers: onlyOther ? [okta, github, scratch] : pickOne ? [google, googleB, okta, github, scratch] : [google, okta, github, scratch],
+    offers: onlyOther ? [okta, github, scratch] : pickOne ? [google, googleB, hand, okta, github, scratch] : [google, hand, okta, github, scratch],
   }),
 });
 const machine = fakeClient(() => ({}));
@@ -153,7 +154,7 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           await page.locator('[data-harness-surface]').waitFor({ state: 'visible' });
           if (state !== 'closed') {
-            await page.locator('[data-input-others] > summary').click();
+            if (state !== 'only-other') await page.locator('[data-input-others] > summary').click();
             if (state !== 'first-step') await page.locator('[data-input-elsewhere] > summary').click();
           }
           const where = `${state} at ${viewport.name}/${scheme}`;

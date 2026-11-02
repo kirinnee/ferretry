@@ -235,7 +235,7 @@ describe('next time: a saved login', () => {
     });
 
     it('keeps them out of "Choose another account" and behind a second step that says where each signs in', async () => {
-      const here = offer({ id: 'GOOGLE_B', label: 'Google b', matched: true, signIn: 'si_0123456789abcdee' });
+      const here = offer({ id: 'GOOGLE_B', label: 'Google b', matched: false });
       const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, here, okta] })));
 
       const first = must(q('[data-input-others]'), 'the choose-another list');
@@ -272,7 +272,7 @@ describe('next time: a saved login', () => {
       const bare = offer({ id: 'SCRATCH', label: 'Scratch login', matched: false, elsewhere: [] });
       const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, bare] })));
 
-      expect(q('[data-input-others] > [data-input-offer="SCRATCH"]')).toBeNull();
+      expect(q('[data-input-others]')).toBeNull();
       expect(q('[data-input-elsewhere] [data-input-offer="SCRATCH"] [data-input-signs-in-at]')?.textContent).toBe(
         'not linked to a site',
       );
@@ -296,6 +296,13 @@ describe('next time: a saved login', () => {
 
       expect(q('[data-input-offer-matched]')).not.toBeNull();
       expect(q('[data-input-why]')?.textContent).toBe('Only account here');
+    });
+
+    it('hides "Choose another account" when this site has no other account, leaving only the second step', async () => {
+      const { q } = await show(withSaved(saved({ match: 'accounts.google.com', offers: [matched, okta] })));
+
+      expect(q('[data-input-others]')).toBeNull();
+      expect(q('[data-input-elsewhere] [data-input-offer="LIFTOFF_OKTA_COM"]')).not.toBeNull();
     });
 
     it('draws no second step when no offer signs in elsewhere', async () => {

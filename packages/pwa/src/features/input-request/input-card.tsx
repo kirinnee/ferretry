@@ -974,6 +974,16 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     );
   };
 
+  const otherSites =
+    elsewhere.length === 0 ? null : (
+      <details className="min-w-0" data-input-elsewhere="">
+        <summary className="cursor-pointer text-cell text-muted">{OTHER_SITE_ACCOUNTS_WORDS}</summary>
+        <div className="mt-2 flex flex-col items-stretch gap-2">
+          {elsewhere.map(offer => offerButton(offer, false))}
+        </div>
+      </details>
+    );
+
   return (
     <div className="flex min-w-0 flex-col gap-3" data-input-form="">
       {signInLine === undefined ? null : (
@@ -1180,7 +1190,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         </div>
       ) : null}
 
-      {others.length === 0 && elsewhere.length === 0 ? null : (
+      {others.length === 0 ? null : (
         <details className="min-w-0" data-input-others="">
           <summary className="cursor-pointer text-cell text-muted">Choose another account</summary>
           <div className="mt-2 flex flex-col items-stretch gap-2">
@@ -1190,17 +1200,11 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
                 {othersOneFactor}
               </p>
             )}
-            {elsewhere.length === 0 ? null : (
-              <details className="min-w-0" data-input-elsewhere="">
-                <summary className="cursor-pointer text-cell text-muted">{OTHER_SITE_ACCOUNTS_WORDS}</summary>
-                <div className="mt-2 flex flex-col items-stretch gap-2">
-                  {elsewhere.map(offer => offerButton(offer, false))}
-                </div>
-              </details>
-            )}
+            {otherSites}
           </div>
         </details>
       )}
+      {others.length === 0 ? otherSites : null}
 
       {extra}
 
