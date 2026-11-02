@@ -6,6 +6,9 @@ import {
   AgendaItemSchema,
   AgendaSnapshotSchema,
   agendaBadgeCount,
+  gateReference,
+  MAX_AGENDA_DETAIL_LENGTH,
+  MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
@@ -4161,6 +4164,109 @@ describe('Agenda state machine: one unreadable entry', () => {
     should(parseAgendaLedger(reused, SESSION_ID)).be.null();
     should(next.item?.id).equal('A4');
     should(parseAgendaLedger(odd, SESSION_ID)?.unreadable).have.length(4);
+  });
+
+  it('should keep a set-aside open entry’s place under the agent cap', () => {
+    // Arrange — A1 and the set-aside A3 are the ferret's: two of its ten
+    const board = stored();
+    board.entries[2]!.item.subject = LONG;
+    let ledger = parseAgendaLedger(board, SESSION_ID)!;
+    for (let index = 2; index < MAX_AGENT_AGENDA_PER_SESSION; index += 1)
+      ledger = succeeded(applyAgendaCommand(ledger, raiseCommand(AGENT, { subject: `Ask ${index}` }, LATER))).ledger;
+
+    // Act
+    const full = failed(applyAgendaCommand(ledger, raiseCommand(AGENT, { subject: 'One too many' }, LATER)));
+
+    // Assert
+    should(full.error.code).equal('full');
+    should(full.error.message).match(/unresolved agent requests/u);
+  });
+
+  it('should keep a set-aside closed entry’s place in the history, so the board stays within its cap', () => {
+    // Arrange — A3 closed and set aside
+    const board = stored();
+    board.entries[2] = { ...board.entries[2]!, lifecycle: 'addressed' } as (typeof board.entries)[number];
+    let ledger = parseAgendaLedger(board, SESSION_ID)!;
+    should(ledger.unreadable).have.length(1);
+
+    // Act
+    for (let index = 0; index <= MAX_AGENDA_RESOLUTIONS; index += 1) {
+      const raisedNow = succeeded(applyAgendaCommand(ledger, raiseCommand(AGENT, { subject: `Ask ${index}` }, LATER)));
+      ledger = succeeded(
+        applyAgendaCommand(raisedNow.ledger, { action: 'dismiss', actor: HUMAN, id: raisedNow.item!.id, at: LATER }),
+      ).ledger;
+    }
+
+    // Assert
+    should(ledger.entries.filter(entry => entry.lifecycle === 'addressed')).have.length(MAX_AGENDA_RESOLUTIONS - 1);
+    should(parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID)?.unreadable).have.length(1);
+  });
+
+  it('should refuse a board whose set-aside entry claims an id another item holds', () => {
+    // Arrange
+    const board = stored();
+    board.entries[2]!.item.subject = LONG;
+    board.entries[2]!.item.id = 'A1';
+
+    // Act + Assert
+    should(parseAgendaLedger(board, SESSION_ID)).be.null();
+  });
+
+  it('should not raise beside a set-aside entry that holds the same reference while open, or a gate’s once closed', () => {
+    // Arrange
+    const gate = gateReference({ cardId: 'F12', laneId: 'tested', entry: 1 });
+    const board = stored();
+    board.entries[1]!.item.why = ['not text'];
+    const closedGate = {
+      lifecycle: 'addressed',
+      origin: { kind: 'daemon', cause: 'system' },
+      item: { id: 'A4', source: 'task', sourceRef: gate },
+    };
+    const closedTask = { ...closedGate, item: { ...closedGate.item, id: 'A5', sourceRef: 'F12' } };
+    const ledger = parseAgendaLedger(
+      { ...board, nextId: 6, entries: [...board.entries, closedGate, closedTask] },
+      SESSION_ID,
+    )!;
+    should(ledger.unreadable).have.length(3);
+
+    // Act
+    const notice = succeeded(
+      applyAgendaCommand(
+        ledger,
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', ask: undefined, kind: 'info' }, LATER),
+      ),
+    );
+    const again = succeeded(
+      applyAgendaCommand(ledger, raiseCommand(DAEMON, { source: 'task', sourceRef: gate, ask: undefined }, LATER)),
+    );
+    const task = succeeded(
+      applyAgendaCommand(ledger, raiseCommand(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }, LATER)),
+    );
+
+    // Assert
+    should(notice.changed).be.false();
+    should(again.changed).be.false();
+    should(task.changed).be.true();
+    should(task.item?.id).equal('A6');
+  });
+
+  it('should leave the daemon’s other items as written, and keep a Warden reason’s line breaks when it is cut', () => {
+    // Arrange
+    const task = JSON.parse(
+      agendaLedgerDocument(raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger),
+    ) as ReturnType<typeof stored>;
+    task.entries[0]!.item.subject = LONG;
+    const board = stored();
+    board.entries[1]!.item.why = `First line.\n${'a long reason '.repeat(200)}`;
+
+    // Act
+    const left = parseAgendaLedger(task, SESSION_ID);
+    const why = parseAgendaLedger(board, SESSION_ID)?.entries[1]?.item.why ?? '';
+
+    // Assert
+    should(left?.unreadable).have.length(1);
+    should(why.length).be.belowOrEqual(MAX_AGENDA_DETAIL_LENGTH);
+    should(why).startWith('First line.\na long reason').endWith(' a…');
   });
 
   it('should refuse a change whose item would not read back, instead of writing it', () => {

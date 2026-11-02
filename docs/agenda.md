@@ -521,7 +521,7 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
 
 - **A machine whose boards could not be read says so on its own line, and why** — "Couldn't read 3 items on Liftoff
   EC2 — the machine hit an error. Trying again." The reason is the last failed read's: `the machine hit an error` (a
-  5xx), `refused` (401/403), `not found` (404), `unexpected answer` (another 4xx, or a board the app cannot read),
+  5xx), `the machine is busy` (429), `refused` (401/403), `not found` (404), `unexpected answer` (another 4xx, or a board the app cannot read),
   `timed out` or `no answer`. Boards on one machine that failed differently list each reason, the one covering the
   most items first. A read that only ended (the machine was paired again meanwhile) adds none.
 
@@ -695,14 +695,20 @@ unreadable (that answered every board read with a 500, and the Inbox could only 
 it):
 
 - **It is set aside, never dropped.** The other items read as usual; the bad entry is written back exactly as it was
-  read on every later write, its id is never reused, and it is counted as the snapshot's `parseErrors`. The CLI, the
-  chat's agenda and the Warden already say a board has unreadable entries when that count is above zero.
-- **Only the daemon's own words are fitted.** An item the daemon raised (a Warden notice, for one) whose only fault is
-  text past a limit reads with that text cut at a word to the limit, and the next write keeps the cut. A person's or a
-  ferret's words are never changed: such an item is set aside as above.
+  read on every later write, and it is counted as the snapshot's `parseErrors`. The CLI, the chat's agenda and the
+  Warden already say a board has unreadable entries when that count is above zero.
+- **It still counts as what it was.** Its id is never reused, and an id another item holds refuses the board. It
+  holds its place under the caps (open items, a ferret's open items, and the closed history, which is pruned short by
+  as many). A raise does not go beside it: an open one keeps its `sourceRef`, and a gate's closed one keeps its
+  "raised once". So the board stays one that reads whole should the entry read again.
+- **Only the Warden's own words are fitted.** An item the Warden raised whose only fault is text past a limit reads
+  with that text cut at a word to the limit, its line breaks kept, and the next write keeps the cut. Every other item
+  is left as written, the daemon's other items included, since those can quote a person or a ferret (an input card's
+  prompt, a gate's card title): such an item is set aside as above.
 - **What is written reads back.** Every item a change makes or changes is checked against the schema the reader uses,
   and a change that would not read back is refused (`invalid`) instead of written. The Warden's notices fit their
-  subject to the limit themselves, and carry the whole of it in their reason.
+  subject to the limit themselves, and carry the whole of it in their reason; one the agenda still refuses is
+  journaled as `fleet.warden_notice_refused`, never lost silently.
 
 ### How each end finds out
 

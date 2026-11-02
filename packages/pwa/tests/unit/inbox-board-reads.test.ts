@@ -235,6 +235,8 @@ describe('InboxBoardReads', () => {
   test.each([
     [new DaemonResponseError(500, 'boom'), 'error'],
     [new DaemonResponseError(502, 'daemon returned another session'), 'error'],
+    [new DaemonResponseError(429, 'too many requests'), 'busy'],
+    [new DaemonResponseError(409, 'conflict'), 'unexpected'],
     [new DaemonResponseError(401, 'unauthorized'), 'refused'],
     [new DaemonResponseError(403, 'not granted'), 'refused'],
     [new DaemonResponseError(404, 'unknown session'), 'not-found'],

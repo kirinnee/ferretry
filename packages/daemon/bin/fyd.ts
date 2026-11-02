@@ -595,7 +595,7 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
-import { isAgendaSessionId } from '../src/lib/agenda/index.ts';
+import { type AgendaMutation, isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
@@ -4503,14 +4503,34 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const wardenJournal: WardenJournal = {
     record: (type, data) => process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
   };
+  // A notice the agenda refused is said in the journal: swallowed, the owner was simply never told.
+  const journalRefusedNotice = (sessionId: string, sourceRef: string, raised: Promise<AgendaMutation>): Promise<void> =>
+    raised.then(
+      mutation => {
+        if (!mutation.ok)
+          wardenJournal.record('fleet.warden_notice_refused', {
+            sessionId,
+            sourceRef,
+            message: mutation.error.message,
+          });
+      },
+      (error: unknown) =>
+        wardenJournal.record('fleet.warden_notice_refused', {
+          sessionId,
+          sourceRef,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    );
   const revive = new WardenReviveService({
     ...parts.revive,
     journal: wardenJournal,
     focusCard: async sessionId => await parts.board.focusCard(sessionId),
     // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
     notifyOwner: async notice => {
-      await parts.attention
-        .raise(
+      await journalRefusedNotice(
+        notice.sessionId,
+        'warden-revive-breaker',
+        parts.attention.raise(
           notice.sessionId,
           {
             source: 'agent-raised',
@@ -4528,8 +4548,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             premise: 'Ferretry restarts sessions that die abnormally, at most a few at a time.',
           },
           WARDEN_ESCALATION_ACTOR,
-        )
-        .catch(() => undefined);
+        ),
+      );
     },
   });
   const redactedJobs = async (jobs: readonly AgentJob[]): Promise<readonly AgentJob[]> =>
@@ -4566,8 +4586,10 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     emit: async (sessionId, type, data) => await parts.revive.events.emit(sessionId, type, data),
     journal: wardenJournal,
     notifyOwner: async notice => {
-      await parts.attention
-        .raise(
+      await journalRefusedNotice(
+        notice.sessionId,
+        'warden-auto-migrate',
+        parts.attention.raise(
           notice.sessionId,
           {
             source: 'agent-raised',
@@ -4584,8 +4606,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
           },
           WARDEN_ESCALATION_ACTOR,
-        )
-        .catch(() => undefined);
+        ),
+      );
     },
   });
   const service = new WardenSweepService(

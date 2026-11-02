@@ -37,7 +37,6 @@ import {
   agendaShape,
   agendaShapeProblems,
   agendaWakeAt,
-  clipAtWord,
   formAnswerProblems,
   parseGateFollowupReference,
   parseGateReference,
@@ -462,12 +461,12 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   let addressed = 0;
   // ONE BAD ENTRY IS ONE BAD ENTRY: it is set aside (and written back as it was) while the rest of the board
   // reads. A board that refused to read over one item hid every other item on it, and the Inbox could only say
-  // "Couldn't read" for all of them. Its id still counts, so the next item never reuses it.
+  // "Couldn't read" for all of them. It still counts as what it was (`setAsideOf`): its id is never reused and
+  // it holds its place under the caps, so the board stays one that reads whole should the entry read again.
   for (const rawEntry of raw.entries) {
     const entry = parseAgendaEntry(rawEntry);
     if (entry === null) {
       unreadable.push(rawEntry);
-      maxId = Math.max(maxId, rawEntryIdNumber(rawEntry));
       continue;
     }
     if (ids.has(entry.item.id)) return null;
@@ -481,11 +480,13 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     }
     entries.push(entry);
   }
+  const aside = setAsideOf(unreadable);
   if (
-    (raw.nextId as number) <= maxId ||
-    active > MAX_AGENDA_PER_SESSION ||
-    agentActive > MAX_AGENT_AGENDA_PER_SESSION ||
-    addressed > MAX_AGENDA_RESOLUTIONS
+    (raw.nextId as number) <= Math.max(maxId, ...aside.ids) ||
+    aside.ids.some(id => ids.has(`A${id}`)) ||
+    active + aside.active > MAX_AGENDA_PER_SESSION ||
+    agentActive + aside.agentActive > MAX_AGENT_AGENDA_PER_SESSION ||
+    addressed + aside.addressed > MAX_AGENDA_RESOLUTIONS
   ) {
     return null;
   }
@@ -498,11 +499,46 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   });
 }
 
-/** The id number an entry that does not read as an item still claims, or 0 when it claims none. */
-function rawEntryIdNumber(value: unknown): number {
-  const item = value !== null && typeof value === 'object' ? (value as { item?: unknown }).item : undefined;
-  const id = item !== null && typeof item === 'object' ? (item as { id?: unknown }).id : undefined;
-  return typeof id === 'string' && /^A[1-9]\d*$/u.test(id) ? Number(id.slice(1)) : 0;
+const isWardenActor = (actor: AgendaActor): boolean => actor.kind === 'daemon' && actor.cause === 'warden-escalation';
+
+/** `text` cut at a word to at most `limit` characters, ending in an ellipsis; its line breaks are kept. */
+function fitText(text: string, limit: number): string {
+  const room = text.slice(0, limit - 1);
+  const space = room.search(/\s\S*$/u);
+  const cut = space >= Math.floor(limit / 2) ? room.slice(0, space) : room;
+  return `${cut.trimEnd()}…`;
+}
+
+/** What the entries a ledger set aside still claim: their ids, their places under the caps, and their sources. */
+interface SetAside {
+  readonly ids: readonly number[];
+  readonly active: number;
+  readonly agentActive: number;
+  /** Everything not plainly open counts as closed history: an entry too damaged to say is never an open item. */
+  readonly addressed: number;
+  readonly refs: readonly { readonly open: boolean; readonly source: unknown; readonly sourceRef: unknown }[];
+}
+
+const field = (value: unknown, name: string): unknown =>
+  value !== null && typeof value === 'object' ? (value as Record<string, unknown>)[name] : undefined;
+
+function setAsideOf(unreadable: readonly unknown[] | undefined): SetAside {
+  const entries = unreadable ?? [];
+  const open = entries.filter(entry => field(entry, 'lifecycle') === 'active');
+  return {
+    ids: entries.flatMap(entry => {
+      const id = field(field(entry, 'item'), 'id');
+      return typeof id === 'string' && /^A[1-9]\d*$/u.test(id) ? [Number(id.slice(1))] : [];
+    }),
+    active: open.length,
+    agentActive: open.filter(entry => field(field(entry, 'origin'), 'kind') === 'agent').length,
+    addressed: entries.length - open.length,
+    refs: entries.map(entry => ({
+      open: field(entry, 'lifecycle') === 'active',
+      source: field(field(entry, 'item'), 'source'),
+      sourceRef: field(field(entry, 'item'), 'sourceRef'),
+    })),
+  };
 }
 
 /**
@@ -555,11 +591,12 @@ export function parkOwnerReplies(ledger: AgendaLedger): AgendaLedger {
         ? { ...entry, item: parkedReply(entry.item, entry.item.askedAt) }
         : entry,
     );
-  let agents = active.filter(entry => entry.origin.kind === 'agent').length;
+  const aside = setAsideOf(ledger.unreadable);
+  let agents = active.filter(entry => entry.origin.kind === 'agent').length + aside.agentActive;
   const reopened: AgendaEntry[] = [];
   for (const entry of closed) {
     const room =
-      active.length + reopened.length < MAX_AGENDA_PER_SESSION &&
+      active.length + aside.active + reopened.length < MAX_AGENDA_PER_SESSION &&
       (entry.origin.kind !== 'agent' || agents < MAX_AGENT_AGENDA_PER_SESSION);
     const item = room ? reopenedReply(entry.item as ResolvedAgendaItem) : null;
     if (item === null) continue;
@@ -735,6 +772,14 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   const sameRef = (entry: AgendaEntry): boolean =>
     entry.item.source === request.source && entry.item.sourceRef === request.sourceRef;
   if (once && !active.some(sameRef) && ledger.entries.some(sameRef)) return unchanged(ledger);
+  // A set-aside entry still holds its reference: an open one cannot be refreshed, and a gate's closed one keeps its
+  // "raised once". Raising beside it would ask the owner again, or put a second item on the board for one source.
+  const aside = setAsideOf(ledger.unreadable);
+  if (
+    request.sourceRef !== null &&
+    aside.refs.some(ref => ref.source === request.source && ref.sourceRef === request.sourceRef && (ref.open || once))
+  )
+    return unchanged(ledger);
   const stable =
     request.sourceRef === null
       ? undefined
@@ -751,12 +796,12 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   );
   if (duplicate) return unchanged(ledger);
 
-  if (active.length >= MAX_AGENDA_PER_SESSION) {
+  if (active.length + aside.active >= MAX_AGENDA_PER_SESSION) {
     return failure('full', `this session already has ${MAX_AGENDA_PER_SESSION} unresolved items`);
   }
   if (
     actor.kind === 'agent' &&
-    active.filter(entry => entry.origin.kind === 'agent').length >= MAX_AGENT_AGENDA_PER_SESSION
+    active.filter(entry => entry.origin.kind === 'agent').length + aside.agentActive >= MAX_AGENT_AGENDA_PER_SESSION
   ) {
     return failure('full', `this session already has ${MAX_AGENT_AGENDA_PER_SESSION} unresolved agent requests`);
   }
@@ -1019,23 +1064,22 @@ function parseAgendaEntry(value: unknown): AgendaEntry | null {
 /**
  * An entry's item, or `null` when it does not read as one.
  *
- * THE DAEMON'S OWN WORDS ARE FITTED, NOBODY ELSE'S: an item the daemon raised whose only fault is text past a
- * limit — a daemon before writes were checked (`unreadableWrite`) wrote Warden notices with a subject that long
- * — reads with that text cut to the limit, and the next write keeps the cut. A person's or a ferret's words are
- * never changed to make them fit: such an item is set aside as unreadable instead, and the board says so.
+ * ONLY THE WARDEN'S OWN WORDS ARE FITTED: an item the Warden raised whose only fault is text past a limit — a
+ * daemon before writes were checked (`unreadableWrite`) wrote its notices with a subject that long — reads with
+ * that text cut to the limit, and the next write keeps the cut. Every other item is left as written, the
+ * daemon's other items included, since those can quote a person or a ferret (an input card's prompt, a gate's
+ * card title): such an item is set aside as unreadable instead, and the board says so.
  */
 function parseEntryItem<Item>(schema: z.ZodType<Item>, value: unknown, origin: AgendaActor): Item | null {
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
-  if (origin.kind !== 'daemon' || value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!isWardenActor(origin) || value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const fitted: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   for (const issue of parsed.error.issues) {
     const [field, ...deeper] = issue.path;
     if (issue.code !== 'too_big' || issue.origin !== 'string' || typeof field !== 'string' || deeper.length > 0)
       return null;
-    const text = fitted[field];
-    if (typeof text !== 'string') return null;
-    fitted[field] = clipAtWord(text, Number(issue.maximum));
+    fitted[field] = fitText(String(fitted[field]), Number(issue.maximum));
   }
   const again = schema.safeParse(fitted);
   return again.success ? again.data : null;
@@ -1102,7 +1146,8 @@ function addressed(
     ...ledger.entries.filter(
       (entry): entry is Extract<AgendaEntry, { lifecycle: 'addressed' }> => entry.lifecycle === 'addressed',
     ),
-  ].slice(0, MAX_AGENDA_RESOLUTIONS);
+    // Set-aside closed entries keep their places in the history, so it stays within its cap when they read again.
+  ].slice(0, Math.max(0, MAX_AGENDA_RESOLUTIONS - setAsideOf(ledger.unreadable).addressed));
   const next: AgendaLedger = { ...ledger, entries: [...active, ...history], updatedAt: at };
   return success(next, true, change, undefined, item);
 }
@@ -1605,7 +1650,7 @@ function reopenReplied(
   const stale = repliedRefreshProblem(actor, id, patch);
   if (stale !== null) return failure('invalid', stale);
   const active = ledger.entries.filter(isActiveAgenda);
-  if (active.length >= MAX_AGENDA_PER_SESSION) {
+  if (active.length + setAsideOf(ledger.unreadable).active >= MAX_AGENDA_PER_SESSION) {
     return failure('full', `${id} cannot reopen: this board already holds ${MAX_AGENDA_PER_SESSION} open items`);
   }
   const {
@@ -1737,7 +1782,7 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
       entry.lifecycle === 'addressed' && entry.item.id === command.id,
   );
   if (closed === undefined || closed.item.raisedBy !== 'agent') return unchanged(ledger);
-  if (active.length >= MAX_AGENDA_PER_SESSION)
+  if (active.length + setAsideOf(ledger.unreadable).active >= MAX_AGENDA_PER_SESSION)
     return failure(
       'full',
       `${command.id} cannot reopen: this board already holds ${MAX_AGENDA_PER_SESSION} open items`,

@@ -28,6 +28,7 @@ import { DaemonResponseError } from './runtime-models.ts';
  */
 export type BoardReadFailure =
   | 'error'
+  | 'busy'
   | 'refused'
   | 'not-found'
   | 'timed-out'
@@ -38,6 +39,7 @@ export type BoardReadFailure =
 /** What each failure says after "Couldn't read N items on <machine> —"; `unsettled` says nothing more. */
 export const BOARD_READ_FAILURE_WORDS: Readonly<Record<BoardReadFailure, string | undefined>> = {
   error: 'the machine hit an error',
+  busy: 'the machine is busy',
   refused: 'refused',
   'not-found': 'not found',
   'timed-out': 'timed out',
@@ -50,6 +52,7 @@ export const BOARD_READ_FAILURE_WORDS: Readonly<Record<BoardReadFailure, string 
 export const boardReadFailure = (cause: unknown): BoardReadFailure => {
   if (cause instanceof DaemonResponseError) {
     if (cause.status >= 500) return 'error';
+    if (cause.status === 429) return 'busy';
     if (cause.status === 401 || cause.status === 403) return 'refused';
     return cause.status === 404 ? 'not-found' : 'unexpected';
   }
