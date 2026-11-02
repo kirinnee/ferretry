@@ -166,7 +166,13 @@ describe('hideSecrets: leftovers', () => {
 
   it('should cut a short password after its name, on the same line or the next', () => {
     should(one('password: hunter2\nrest')).equal(`password: ${HIDDEN}\nrest`);
-    should(one('password:\nhunter2\nrest')).equal(`password:\n${HIDDEN}\nrest`);
+    should(one('password:\nhunter2\nrest')).equal(HIDDEN);
+  });
+
+  it('should keep a file whose key line is followed by a key of its own, and hide one followed by a value', () => {
+    should(one('auth:\n  login_page: https://example.com\n')).equal('auth:\n  login_page: https://example.com\n');
+    should(one('password:\n$PASSWORD\n')).equal('password:\n$PASSWORD\n');
+    should(one('password:\n"hunter2"\n')).equal(HIDDEN);
   });
 
   it('should hide PASS and DB_PASS values and the argument after --pass, and leave -p alone', () => {
