@@ -3,12 +3,12 @@
  *
  * A card needs the owner only while it sits in a GATE lane — a lane only the owner moves on from: a verify lane ("Try
  * it": Done / Not good) or an owner-gated active lane ("OK to build?": the plan or design to approve) — and only when a
- * person asked for it. A card in any other lane (todo, in progress, review, merged, closed), a dropped card, and a card
+ * person asked for it. A sub-card never waits on the owner, who tests its parent. A card in any other lane (todo, in progress, review, merged, closed), a dropped card, and a card
  * a ferret made for another ferret never wait on the owner, however long they have been quiet: they live on the Kanban
  * and the List, and nowhere that asks for an answer.
  */
 
-import type { Lane, LaneSet } from '@ferretry/protocol';
+import { isSubCard, type Lane, type LaneSet } from '@ferretry/protocol';
 import { askedByPerson } from './board-human.ts';
 import type { BoardCardOf } from './board-view.ts';
 
@@ -29,6 +29,8 @@ const gateStageOf = (
   return lane.category === 'verify' ? 'try' : 'approve';
 };
 
-/** The gate this card is waiting in for the owner, or `null`: not in a gate lane, dropped, or not asked for by a person. */
+/** The gate this card is waiting in for the owner, or `null`: not in a gate lane, dropped, a sub-card, or not asked for by a person. */
 export const awaitingOwner = (card: BoardCardOf, laneSet: Pick<LaneSet, 'lanes'> | null): GateStage | null =>
-  card.task.dropped !== null || !askedByPerson(card.task) ? null : gateStageOf(card.task, laneSet);
+  card.task.dropped !== null || isSubCard(card.task) || !askedByPerson(card.task)
+    ? null
+    : gateStageOf(card.task, laneSet);

@@ -350,7 +350,7 @@ describe('ChatTasks — Internal and Expand', () => {
   const split = async (agents: boolean) => {
     const model = await boardModelOf(
       [...agentCards(), originCard('F52', 'agent', null, { owner: KID, laneId: 'implement', title: 'Kid step' })],
-      { ...NO_BOARD_FILTERS, agents: true },
+      { ...NO_BOARD_FILTERS, agents: true, subCards: true },
     );
     const cards = chatCards(model, {
       daemonId: laptop.daemonId,

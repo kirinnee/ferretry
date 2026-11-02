@@ -349,6 +349,9 @@ const WORDS = [
 const LONG_SUMMARY =
   'Imported from the old task list: rework the settings page, the daemon route and the wording of every message a person sees.';
 
+/** `?subs=1` (with `big`): every fourth big card, from the third, is a sub-card of the one two before it. */
+const SUBS_ON = new URLSearchParams(window.location.search).get('subs') !== null;
+
 /** `?big=1`: sixty more cards in every lane, with long titles, long summaries and imported ones. */
 const BIG = Array.from({ length: 40 }, (_, index) => {
   const lane = LANES[index % LANES.length] ?? 'todo';
@@ -368,6 +371,7 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
         : links([]),
     activity: index % 6 === 0 ? 'stale' : index % 3 === 0 ? 'idle' : 'active',
     lastTouchedAt: ago(10 + index * 55),
+    ...(SUBS_ON && index % 4 === 2 ? { parent: { id: `F${300 + index - 2}` } } : {}),
     shippedIn:
       lane === 'released' || lane === 'tested'
         ? { version: `4.141.${index % 4}`, tag: `v4.141.${index % 4}`, at: ago(90 + index * 35) }
@@ -489,7 +493,7 @@ function Harness() {
   const [search, setSearch] = useState(() => {
     const view = params.get('view');
     const start = view === null || view === 'kanban' ? [] : [`view=${view}`];
-    const passed = ['at', 'agents', 'window'].flatMap(key => {
+    const passed = ['at', 'agents', 'subCards', 'window'].flatMap(key => {
       const value = params.get(key);
       return value === null ? [] : [`${key}=${value}`];
     });

@@ -105,7 +105,7 @@ describe('projectCards', () => {
         card('F1', { owner: SESSION, askedBy: 'agent' }),
         Object.assign(card('F2', { owner: SESSION }), { askedBy: undefined, origin: 'agent' }),
       ],
-      { ...NO_BOARD_FILTERS, agents: true },
+      { ...NO_BOARD_FILTERS, agents: true, subCards: true },
     );
 
     const byId = new Map(projectCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));
@@ -121,7 +121,7 @@ describe('projectCards', () => {
         originCard('F2', 'agent', { id: 'F1' }, { owner: SESSION, createdBy: { kind: 'owner' } }),
         ...unasked([card('F3', { owner: SESSION }), card('F4', { owner: SESSION, createdBy: { kind: 'owner' } })]),
       ],
-      { ...NO_BOARD_FILTERS, agents: true },
+      { ...NO_BOARD_FILTERS, agents: true, subCards: true },
     );
 
     const byId = new Map(projectCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));

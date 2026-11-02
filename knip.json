@@ -78,6 +78,7 @@
         "harness/lane-editor-stages-screenshot.ts",
         "harness/lane-editor-stages-page.tsx",
         "harness/board-internal-screenshot.ts",
+        "harness/board-subcards-screenshot.ts",
         "harness/board-chat-screenshot.ts",
         "harness/board-agenda-screenshot.ts",
         "harness/board-scope-screenshot.ts",

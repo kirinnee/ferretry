@@ -270,7 +270,7 @@ So every template, every proposal and every lane a ferret adds follows it:
 - **Information only where it costs nothing.** Merged is kept as a compact, de-emphasised lane (`emphasis: info`).
   A release is what the owner can test, so released IS "to test": one lane, never two.
 - **Closed keeps the board lean.** It is hidden from the Kanban (`emphasis: info`), and only the owner's Done
-  enters it.
+  enters it. The one exception is a [sub-card, which closes itself](#sub-cards-close-themselves).
 - **No lane the workflow does not need.** A ferret proposing lanes starts from a template and renames; it does not
   add lanes.
 
@@ -281,14 +281,14 @@ This section is the one owner of the rule; templates and the lane editor impleme
 A project's lane set is a list of lanes plus, per workflow, which of them a card walks. A lane is a name the owner
 can change; its **category** is one of six fixed values that the rest of the system reasons about.
 
-| Category  | Means                                      |
-| --------- | ------------------------------------------ |
-| `backlog` | not started                                |
-| `active`  | a ferret is planning or building it        |
-| `review`  | built, waiting on review and CI            |
-| `shipped` | merged or released, not yet confirmed done |
-| `verify`  | waiting for the owner to try it            |
-| `closed`  | done; only the owner closes                |
+| Category  | Means                                             |
+| --------- | ------------------------------------------------- |
+| `backlog` | not started                                       |
+| `active`  | a ferret is planning or building it               |
+| `review`  | built, waiting on review and CI                   |
+| `shipped` | merged or released, not yet confirmed done        |
+| `verify`  | waiting for the owner to try it                   |
+| `closed`  | done; the owner closes (a sub-card closes itself) |
 
 Each lane has an `id`, a `name`, a `category`, and optionally:
 
@@ -679,6 +679,35 @@ and falls back to the ask's source (`cardAskedBy`) only for a card not yet backf
 sends nothing and the app reads that as `agent`. The cards left out are still on the Board, and each card shown names
 its project beside its machine.
 
+## Sub-cards close themselves
+
+A **sub-card** is a card with a parent: a ferret made it under a bigger card for one piece of work (one PR, one review,
+one fix round). The owner tests the PARENT and never the sub-card, so a sub-card never waits for the owner and never
+sits in Released · to test. `isSubCard` (protocol) is the one test: `parent !== null`. The daemon closes it, in three
+places, and always as the daemon (`auto`, with the trigger that caused it):
+
+| When                                                                               | Reason in history                               | Where it is decided                  |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ |
+| its PR merged or released, no PR open: where a top-level card would go to be tried | `sub-card shipped; the parent carries the test` | `reconcileFacts` (every PR update)   |
+| its ferret signals done (`fy signal done`) and it has no PR open or merged         | `helper finished`                               | `BoardService.signalDone`            |
+| it was handed to another ferret that has ended (gone two minutes) and it has no PR | `helper finished`                               | the board sweep (`closeEndedHelper`) |
+
+A sub-card with a PR still **open** stays open, whoever signals. A sub-card the lead keeps for itself (assigned to its
+own owner) is bookkeeping, not a helper: the sweep never closes it. The close goes to the lane set's Done lane, else its
+first `closed` lane, and is not a verdict: it records nothing for the owner and asks nothing of them. On boot the daemon
+also closes the sub-cards that were already waiting in a verify lane from before this rule (`closeStrandedSubCards`,
+idempotent).
+
+**No gate item and no agenda item is ever raised for a sub-card** (`gateOf` returns nothing for one in a verify lane),
+and a sub-card is never "awaiting the owner" in the app. The parent's roll-up (`rollup`) is unchanged by this: a closed
+child counts under `closed`, so the parent still reads shipped, active or waiting from the children it has.
+
+**On the Board** sub-cards are hidden by default, with the filter **Show sub-cards** to bring them back (URL
+`subCards=1`; on a phone it is in the Filters sheet beside **Internal**). Choosing a ferret shows them, because a
+sub-ferret's own card is a sub-card. While hidden they are in no lane and in none of the header counts (To test, Active,
+Waiting on you, Stale, Orphaned), so a count and its cards agree. They are always in the **parent's detail**, under
+"Sub-cards", open or closed. The Archive follows the same toggle; the ferret's own Tasks tab always lists its cards.
+
 ## Authority
 
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to
@@ -697,7 +726,8 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
 or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
-and close it ([Gates ask the owner](#gates-ask-the-owner)). A ferret's change to a project's lanes waits for the owner
+and close it ([Gates ask the owner](#gates-ask-the-owner)), and a sub-card, which the daemon closes when its work
+ships or its helper finishes ([Sub-cards close themselves](#sub-cards-close-themselves)). A ferret's change to a project's lanes waits for the owner
 ([above](#a-ferrets-lane-change-waits-for-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 

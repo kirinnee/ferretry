@@ -32,6 +32,7 @@ import {
   boardOk,
   compareProtocolVersions,
   isInBoardState,
+  isSubCard,
   type LaneCategory,
   type LaneSet,
   type MoveReasonProblem,
@@ -126,6 +127,8 @@ export interface BoardFilters {
   readonly mine: boolean;
   /** "Internal": cards ferrets made for other ferrets. Off, the board is what the owner asked for. */
   readonly agents: boolean;
+  /** "Show sub-cards": cards a ferret made under a bigger card. Off, the board is the cards the owner tests. */
+  readonly subCards: boolean;
   /** A lane id, or a lane name in the card's own project (case does not matter). */
   readonly lane: string | null;
   /** When the card was created (`createdAt`). */
@@ -144,6 +147,7 @@ export const NO_BOARD_FILTERS: BoardFilters = Object.freeze({
   activity: null,
   mine: false,
   agents: false,
+  subCards: false,
   lane: null,
   created: NO_DATE_RANGE,
   touched: NO_DATE_RANGE,
@@ -170,6 +174,9 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
 
 /** The URL parameter "Internal" lives in, on the Board and on a ferret's Tasks tab alike. */
 export const AGENTS_PARAM = 'agents';
+
+/** The URL parameter "Show sub-cards" lives in. */
+const SUB_CARDS_PARAM = 'subCards';
 
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
   if (range.preset !== null) {
@@ -202,6 +209,7 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
     activity: activity.success ? activity.data : null,
     mine: mine === '1' || mine === 'true',
     agents: params.get(AGENTS_PARAM) === '1',
+    subCards: params.get(SUB_CARDS_PARAM) === '1',
     lane: nonEmpty(params.get('lane')),
     created: parseDateRange(params, 'created'),
     touched: parseDateRange(params, 'touched'),
@@ -223,6 +231,7 @@ export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => 
   if (filters.activity !== null) params.set('activity', filters.activity);
   if (filters.mine) params.set('mine', '1');
   if (filters.agents) params.set(AGENTS_PARAM, '1');
+  if (filters.subCards) params.set(SUB_CARDS_PARAM, '1');
   if (filters.lane !== null) params.set('lane', filters.lane);
   writeDateRange(params, 'created', filters.created);
   writeDateRange(params, 'touched', filters.touched);
@@ -273,6 +282,13 @@ export const serverQueryKey = (query: BoardServerQuery): string =>
  */
 export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'activity'>): boolean =>
   filters.agents || filters.ferret !== null || filters.activity !== null;
+
+/**
+ * Whether sub-cards are on the board. They are when asked for, and also when the reader narrowed the board to
+ * one ferret: that ferret's own card is often a sub-card, and choosing the ferret must show it.
+ */
+export const showsSubCards = (filters: Pick<BoardFilters, 'subCards' | 'ferret'>): boolean =>
+  filters.subCards || filters.ferret !== null;
 
 /** Whether the owner has a stake in the card: they raised it, or it waits on their answer. */
 export const isMine = (task: Pick<BoardTaskView, 'createdBy' | 'waitingOnOwner'>): boolean =>
@@ -454,7 +470,7 @@ const COUNTED: readonly (readonly [
   ['active', 'active'],
 ];
 
-/** A machine's header counts without the agent cards the board is not showing, so a pill and its cards agree. */
+/** A machine's header counts without the agent and sub-cards the board is not showing, so a pill and its cards agree. */
 const withoutCards = (
   counts: BoardCounts,
   hidden: readonly { readonly task: BoardTaskView; readonly category: LaneCategory | null }[],
@@ -494,6 +510,7 @@ export const mergeBoard = (
 ): BoardModel => {
   const versions = machines.map(({ daemonId, machine, version }) => ({ daemonId, machine, version }));
   const showAgents = showsAgents(filters);
+  const showSubCards = showsSubCards(filters);
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);
   const groups: BoardGroup[] = [];
   const cards: BoardCard[] = [];
@@ -501,14 +518,14 @@ export const mergeBoard = (
   const quarantined: BoardQuarantine[] = [];
 
   for (const data of kept) {
-    const hiddenAgents: { readonly task: BoardTaskView; readonly category: LaneCategory | null }[] = [];
+    const hidden: { readonly task: BoardTaskView; readonly category: LaneCategory | null }[] = [];
     if (data.quarantined.length > 0) {
       quarantined.push({ daemonId: data.daemonId, machine: data.machine, cards: data.quarantined });
     }
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
-      if (!showAgents && isAgentTask(task)) {
-        hiddenAgents.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
+      if ((!showAgents && isAgentTask(task)) || (!showSubCards && isSubCard(task))) {
+        hidden.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
         continue;
       }
       if (filters.mine && !isMine(task)) continue;
@@ -527,7 +544,7 @@ export const mergeBoard = (
       if (members === undefined) byProject.set(task.projectId, [card]);
       else members.push(card);
     }
-    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hiddenAgents));
+    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hidden));
     for (const [projectId, members] of byProject) {
       const laneSet = data.laneSets.get(projectId) ?? null;
       const known = new Set(laneSet?.lanes.map(lane => lane.id));

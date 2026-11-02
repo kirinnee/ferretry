@@ -322,7 +322,7 @@ describe('TableView', () => {
   it('draws an agent card right under the human card it serves', async () => {
     const model = await boardModelOf(
       [originCard('F2', 'human'), originCard('F9', 'human'), originCard('F10', 'agent', { id: 'F2' })],
-      { ...NO_BOARD_FILTERS, agents: true },
+      { ...NO_BOARD_FILTERS, agents: true, subCards: true },
     );
     view = await mount(table(model, { env: envOf(model, { doneFor }) }));
     const root = view.container;

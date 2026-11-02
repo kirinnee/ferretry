@@ -87,7 +87,7 @@ export const useProjectCards = (
     [reading, connection],
   );
   const filters = useMemo(
-    () => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true, state: 'all' as const }),
+    () => ({ ...NO_BOARD_FILTERS, project: projectId, agents: true, subCards: true, state: 'all' as const }),
     [projectId],
   );
   const board = useBoard(store ?? IDLE_STORE, machines, filters, { beat: false });

@@ -59,6 +59,7 @@ import {
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
+import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
 
 /** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
 const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
@@ -512,14 +513,53 @@ export const reconcileFacts = (card: BoardTask, context: CardContext): BoardTask
     prs: card.links.prs,
     runningVersion: context.runningVersion ?? null,
   });
-  if (move === null) return null;
-  return triggerMove(
-    card,
-    move.trigger,
-    move.reason,
-    { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
-    move.backward,
-  );
+  const moved =
+    move === null
+      ? null
+      : triggerMove(
+          card,
+          move.trigger,
+          move.reason,
+          { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
+          move.backward,
+        );
+  // A sub-card that ships does not wait for the owner to try it: its parent carries the test.
+  const reason = shippedCloseReason(moved ?? card, context.laneSet);
+  return reason === null ? moved : (closeAsDaemon(moved ?? card, reason, context) ?? moved);
+};
+
+/** What a close is recorded as: the release or merge that shipped a sub-card, else the helper's own done. */
+const closeTrigger = (card: BoardTask, reason: string): LaneTrigger =>
+  reason !== SUB_CARD_SHIPPED_REASON
+    ? 'signal.done'
+    : card.links.prs.some(pr => pr.releasedIn !== null)
+      ? 'release.published'
+      : 'pr.merged';
+
+/**
+ * The daemon's automatic move of a card into the board's closed lane, with the reason beside it. It is for a sub-card
+ * that shipped or whose helper finished ({@link sub-card-close}); the owner's own Done is a verdict, not this.
+ */
+export const closeAsDaemon = (card: BoardTask, reason: string, context: CardContext): BoardTask | null => {
+  const target = closedLaneOf(context.laneSet);
+  if (target === undefined || target.id === card.laneId) return null;
+  const { actorVia: _via, ...rest } = context;
+  return {
+    ...withEvent(
+      card,
+      {
+        type: 'moved',
+        from: card.laneId,
+        to: target.id,
+        backward: false,
+        reason,
+        auto: true,
+        trigger: closeTrigger(card, reason),
+      },
+      { ...rest, actor: { kind: 'daemon' } },
+    ),
+    laneId: target.id,
+  };
 };
 
 // ---------------------------------------------------------------------------------------------------

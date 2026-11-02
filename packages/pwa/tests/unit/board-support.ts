@@ -277,6 +277,6 @@ export const boardModelOf = async (
         quarantined: [],
       },
     ],
-    filters ?? NO_BOARD_FILTERS,
+    filters ?? { ...NO_BOARD_FILTERS, subCards: true },
   );
 };
