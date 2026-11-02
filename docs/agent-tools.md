@@ -847,8 +847,9 @@ The server's own `initialize` instructions are one line; `lessons_suggest` files
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 
-`search_work` {`query`, `kind`?, `open`?} is `fy search` for a ferret: cards and agenda items by what they say
-(or an id like F303 or A3), one text line per hit — id, kind, standing, title, the matching line. It calls
+`search_work` {`query`, `kind`?, `open`?, `all`?} is `fy search` for a ferret: cards and agenda items by what they say
+(or an id like F303 or A3, which finds its item at any age), one text line per hit — id, kind, standing, title, the matching line.
+Old closed work is left out unless `all` is true; when it was, a last line says `N older closed items hidden`. It calls
 `GET /v1/search` through the person gateway the MCP server already holds (the route is operator-minimum plus
 `fleet:use`, and an agent's own credential is not that), so it adds no route of its own. The ferret is told
 to search before it files (the board and agenda sections end their opening with the same rule), and

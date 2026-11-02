@@ -77,8 +77,34 @@ describe('GET /v1/search', () => {
     should(jsonBody(response)).eql({ hits: [HIT], total: 1, indexed: { tasks: 1, agenda: 0 } });
   });
 
+  it('should read `all` into the query, and leave it out when it was not sent', async () => {
+    // Arrange
+    const { calls, search } = recording();
+    const run = async (query: readonly (readonly [string, string])[]) =>
+      (await dispatcher(search)).dispatch(request({ path: '/v1/search', headers: human, query }));
+
+    // Act
+    const asked = await run([
+      ['q', 'old'],
+      ['all', 'true'],
+    ]);
+    const notAsked = await run([['q', 'old']]);
+
+    // Assert
+    should(asked.status).equal(200);
+    should(notAsked.status).equal(200);
+    should(calls.map(call => (call.value as { all?: boolean }).all)).eql([true, undefined]);
+  });
+
   it.each([
     ['no words', []],
+    [
+      'an all that is not a boolean',
+      [
+        ['q', 'x'],
+        ['all', 'yes'],
+      ],
+    ],
     [
       'an unknown kind',
       [

@@ -93,8 +93,13 @@ export class WorkSearchService {
 
   async search(query: WorkSearchQuery): Promise<WorkSearchResponse> {
     await this.current();
-    const { hits, total } = this.index.search(query, this.ports.now());
-    return { hits: await this.masked(hits), total, indexed: this.index.size };
+    const { hits, total, olderHidden } = this.index.search(query, this.ports.now());
+    return {
+      hits: await this.masked(hits),
+      total,
+      indexed: this.index.size,
+      ...(query.all === undefined ? {} : { olderHidden }),
+    };
   }
 
   async related(request: WorkRelatedRequest): Promise<WorkRelatedResponse> {
@@ -171,17 +176,15 @@ export class WorkSearchService {
     if (changed.length === 0) return;
     for (const projectId of new Set(changed.map(card => card.projectId)))
       if (!this.laneSets.has(projectId)) this.laneSets.set(projectId, await this.ports.cards.laneSet(projectId));
-    const nowMs = this.ports.now();
     const documents = await this.ports.redaction.batch(scrub =>
       changed.map(card => ({
         card,
-        document: cardDocument(card, this.laneSets.get(card.projectId) ?? undefined, scrub, nowMs),
+        document: cardDocument(card, this.laneSets.get(card.projectId) ?? undefined, scrub),
       })),
     );
     for (const { card, document } of documents) {
       this.seenCards.set(card.id, card);
-      if (document === undefined) this.index.remove(taskKey(card.id));
-      else this.index.put(document);
+      this.index.put(document);
     }
   }
 
@@ -199,12 +202,11 @@ export class WorkSearchService {
       }
     }
     if (read.length === 0) return;
-    const nowMs = this.ports.now();
     const documents = await this.ports.redaction.batch(scrub =>
       read.map(({ sessionId, ledger }) => ({
         sessionId,
         ledger,
-        documents: ledger === null ? [] : ledgerDocuments(ledger, scrub, nowMs),
+        documents: ledger === null ? [] : ledgerDocuments(ledger, scrub),
       })),
     );
     for (const { sessionId, ledger, documents: found } of documents) this.replaceSession(sessionId, ledger, found);

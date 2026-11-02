@@ -10,10 +10,10 @@ The contract is `packages/protocol/src/lib/work-search.ts`. The daemon side is
 
 ## Routes
 
-| Route                     | Does                                                                    |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `GET /v1/search`          | `q`, optional `kind` (`task`/`agenda`), `open=true`, `project`, `limit` |
-| `POST /v1/search/related` | `{kind, title, ask?}` → up to 5 matches, each `strong` or `weak`        |
+| Route                     | Does                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /v1/search`          | `q`, optional `kind` (`task`/`agenda`), `open=true`, `all=true`, `project`, `limit` |
+| `POST /v1/search/related` | `{kind, title, ask?}` → up to 5 matches, each `strong` or `weak`                    |
 
 Both have **the board's grants**: `operator` minimum plus the `fleet` capability for a caller off this host
 ([grants.md](grants.md)). A paired device the owner keeps off the fleet gets `403` from both. A shared-catalog
@@ -50,7 +50,28 @@ The fields are a **whitelist**. A field added to a schema later is not searchabl
 - **Plain notifications** (`fy notify`) are not agenda items and are not indexed.
 - **An input request's card** carries its label. Values are never stored anywhere.
 
-**Window:** all open work, plus work closed, dropped or addressed within the last 30 days.
+**Window:** all open work (snoozed and replied agenda items count as open), plus work closed, dropped or
+addressed within the last 30 days. Two things lift it:
+
+- **An exact id** (`F291`, `&F291`, `A3`, `!A3`) always finds its item, whatever its age.
+- **`all`** (`all=true`; `fy search --all`; `search_work` with `all: true`; the ⌘K "Everything" scope) searches
+  old closed work too.
+
+Old closed work stays in the index; the window is applied when a search is answered. When the query sent
+`all`, the answer carries `olderHidden`: how many older closed, dropped or addressed hits the window left out
+(`0` when `all` was on). A query that did not send `all` gets no `olderHidden`, so an older client sees the same
+answer as before. `fy search` and `search_work` print it as a last line, `N older closed items hidden`, with the
+flag to retry with.
+
+## Where it is asked
+
+- **`fy search`, `search_work`, ⌘K:** the routes above.
+- **Inbox Find (app):** the Inbox is not a daemon search. With words typed, Find looks in **every tab at once** —
+  Open (including items on a ferret), Snoozed, Replied, Resolved and Cards to test (snoozed ones too) — and each
+  row carries a **state chip**: `Open`, `With <ferret>`, the card's lane, `Snoozed until 09:00`, `Replied` or
+  `Resolved`. An empty Find is not a search: each tab keeps its own list. The logic is
+  `packages/pwa/src/lib/agenda-inbox-find.ts`; the rows are `features/agenda/inbox-find-results.tsx`.
+- **Composer `&` / `!` autocomplete:** asks with `open: true` and shows each hit's `standing` as its chip.
 
 **Secrets.** Every text passes the daemon's secret redactor (vault values and saved-login values) before it
 enters the index, and every answer is scrubbed again on the way out. The index rebuilds itself when the vault
