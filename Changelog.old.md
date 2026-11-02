@@ -1,3 +1,10 @@
+## [4.229.1](https://github.com/kirinnee/ferretry/compare/v4.229.0...v4.229.1) (2026-11-02)
+
+### Fixes
+
+* **accounts:** point ferrets to Approve on your phone for a phone prompt ([#1330](https://github.com/kirinnee/ferretry/issues/1330)) ([b1785a2](https://github.com/kirinnee/ferretry/commit/b1785a260282cd6633195c08d47bd3b46a009887))
+* **credentials:** one source per fact and the ferret's view (audit PR 1) ([#1329](https://github.com/kirinnee/ferretry/issues/1329)) ([96092fb](https://github.com/kirinnee/ferretry/commit/96092fba6bc91aea3d6302b7cf4121794279e391))
+
 ## [4.229.0](https://github.com/kirinnee/ferretry/compare/v4.228.1...v4.229.0) (2026-11-02)
 
 ### Features
