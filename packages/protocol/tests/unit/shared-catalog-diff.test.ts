@@ -236,6 +236,7 @@ describe('catalogItemChanges', () => {
     const changes = catalogItemChanges(
       skill({ 'SKILL.md': lines(half, 'old ') }),
       skill({ 'SKILL.md': lines(half, 'new ') }),
+      { remaining: 10 * CATALOG_DIFF_MAX_STEPS },
     );
     expect(changes.entries).toEqual([
       { label: 'Skill file SKILL.md', change: 'changed', document: true, tooLarge: true },
@@ -248,6 +249,7 @@ describe('catalogItemChanges', () => {
     const changes = catalogItemChanges(
       skill({ 'SKILL.md': lines(half, 'old ') }),
       skill({ 'SKILL.md': lines(half, 'new ') }),
+      { remaining: 10 * CATALOG_DIFF_MAX_STEPS },
     );
     expect(entry(changes, 'Skill file SKILL.md').hunks).toBeDefined();
   });
@@ -422,13 +424,13 @@ describe('the work one answer may spend', () => {
   });
 
   it('spends the same budget across files, then leaves every later file undiffed and says so', () => {
-    // Each of these needs exactly the bound of edits: diffable alone, and about 8 million steps each.
-    const [before, after] = pathological(12, CATALOG_DIFF_MAX_EDITS / 2);
+    // Each of these is diffable alone and costs about 4.5 million steps, so the budget pays for one.
+    const [before, after] = pathological(12, 1_500);
     const budget = newDiffBudget();
     const changes = catalogItemChanges(before, after, budget);
     const diffed = changes.entries.filter(candidate => candidate.hunks !== undefined);
-    expect(diffed).toHaveLength(3);
-    expect(changes.entries.filter(candidate => candidate.tooLarge === true)).toHaveLength(9);
+    expect(diffed).toHaveLength(1);
+    expect(changes.entries.filter(candidate => candidate.tooLarge === true)).toHaveLength(11);
     expect(changes.truncated).toBe(true);
     expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeLessThanOrEqual(CATALOG_DIFF_MAX_STEPS + 1);
     expect(CatalogChangesSchema.safeParse(changes).success).toBe(true);
@@ -442,6 +444,18 @@ describe('the work one answer may spend', () => {
     expect(changes.entries.every(candidate => candidate.tooLarge === true)).toBe(true);
     expect(changes.truncated).toBe(true);
     expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeLessThanOrEqual(CATALOG_DIFF_MAX_STEPS + 1);
+  });
+
+  it('charges every line a run of equal lines walks past, not only the diagonals', () => {
+    const run = Array.from({ length: 5_000 }, () => 'same');
+    const before = ['first', ...run, 'last'];
+    const after = ['last', ...run, 'first'];
+    const budget = newDiffBudget();
+    expect(lineEdits(before, after, CATALOG_DIFF_MAX_EDITS, budget)).toBeDefined();
+    expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeGreaterThanOrEqual(run.length);
+    const small = { remaining: run.length / 2 };
+    expect(lineEdits(before, after, CATALOG_DIFF_MAX_EDITS, small)).toBeUndefined();
+    expect(small.remaining).toBeLessThan(0);
   });
 
   it('does not say truncated when the budget was not spent', () => {

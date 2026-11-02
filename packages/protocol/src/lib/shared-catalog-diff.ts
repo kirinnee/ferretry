@@ -35,10 +35,11 @@ export const CATALOG_DIFF_MAX_LINES = 20_000;
 
 /**
  * Work one answer may spend finding differences, in Myers steps (one diagonal visited, plus every line a run of equal
- * lines walks past), across ALL its files. About a fifth of a second of one core: a preview is open to a ferret over a
- * folder it can write, so what a hostile skill can cost is a number, not "as long as it takes".
+ * lines walks past), across ALL its files. Measured at about 28 ns a step on the development host, so 8 million is
+ * about a quarter of a second of one core (a whole preview about 0.45 s): a preview is open to a ferret over a folder it
+ * can write, so what a hostile skill can cost is a number, not "as long as it takes".
  */
-export const CATALOG_DIFF_MAX_STEPS = 25_000_000;
+export const CATALOG_DIFF_MAX_STEPS = 8_000_000;
 
 /** Unchanged lines shown either side of a change. */
 export const CATALOG_DIFF_CONTEXT = 3;

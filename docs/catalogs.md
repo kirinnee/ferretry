@@ -341,7 +341,7 @@ text that hides a character is already marked when it is compared.
 - **Bounded.** A file needing more than 4,000 edits is `tooLarge` (read it whole in the full review), and the answer
   stops at 20,000 lines in all: the entries that did not fit say `tooLarge` and the answer says `truncated`.
   Nothing is dropped without saying so. The work is bounded too: two texts whose lengths differ by more than 4,000
-  lines are `tooLarge` at once, and **one answer spends one budget of 25,000,000 diff steps across all its files**.
+  lines are `tooLarge` at once, and **one answer spends one budget of 8,000,000 diff steps across all its files**.
   Once it is spent, every later document entry is `tooLarge`, is not diffed, and the answer says `truncated`.
   A folder a ferret can write therefore cannot hold the daemon busy for more than that budget.
 - **A carriage return at the end of a line is marked** (`⟨U+000D⟩`) on hunk lines, so a CRLF to LF change is
