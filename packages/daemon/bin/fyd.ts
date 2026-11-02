@@ -125,6 +125,10 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
+import { AutoMoveFailures } from '../src/lib/warden/auto-move-failures.ts';
+import { OrphanList } from '../src/lib/warden/orphan-list.ts';
+import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
@@ -641,7 +645,7 @@ const WORK_SEARCH_WARM_DELAY_MS = 5_000;
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
-import { budgetNoticeRequest } from '../src/lib/budget/notice.ts';
+import { budgetNoticeRef, budgetNoticeRequest } from '../src/lib/budget/notice.ts';
 import { BUDGET_TICK_MS, BudgetService } from '../src/lib/budget/service.ts';
 import { budgetAlternative, budgetedLogins } from '../src/lib/budget/state.ts';
 import {
@@ -726,6 +730,9 @@ import {
   AgendaHomes,
   AgendaService,
   migrateToAgendaHomes,
+  foldNoticesIntoMachineAgenda,
+  MACHINE_AGENDA_ID,
+  MachineAgenda,
   AgendaTurnNudge,
   AgendaWaker,
   type AgentCopyPagesPort,
@@ -1340,7 +1347,6 @@ import {
   usageProbeUrls,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
-  WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
   type WardenAutoMigratePorts,
@@ -4453,6 +4459,8 @@ interface WardenParts {
    * resolved anything.
    */
   readonly attention: AgendaService;
+  /** The machine items the Warden keeps: ferrets it could not move, cards with nobody on them. */
+  readonly machine: { readonly autoMove: AutoMoveFailures; readonly orphans: OrphanList };
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort & Partial<RuntimeNamesPort>;
   /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
@@ -4649,35 +4657,21 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     ledger: new FileAutoMigrateLedger(parts.files, parts.wardenRoot),
     emit: async (sessionId, type, data) => await parts.revive.events.emit(sessionId, type, data),
     journal: wardenJournal,
+    // One machine item lists every ferret that could not be moved (docs/agenda.md § The machine agenda), never one per ferret.
     notifyOwner: async notice => {
-      await journalRefusedNotice(
-        notice.sessionId,
-        'warden-auto-migrate',
-        parts.attention.raise(
-          notice.sessionId,
-          {
-            source: 'agent-raised',
-            sourceRef: 'warden-auto-migrate',
-            subject: notice.subject,
-            why: notice.why,
-            context: 'The Warden moves a ferret whose login hit a limit, as warden.yaml (autoMigrate) allows.',
-            waitingSince: new Date().toISOString(),
-            howToResolve: 'Move it yourself with fy migrate, or wait for its login to reset.',
-            notice: true,
-            ping: true,
-            title: notice.title,
-            kind: 'info',
-            premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
-          },
-          WARDEN_ESCALATION_ACTOR,
-        ),
-      );
+      await parts.machine.autoMove.note(notice.sessionId, notice.subject).catch((error: unknown) => {
+        wardenJournal.record('fleet.warden_auto_migrate_notice_failed', {
+          sessionId: notice.sessionId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
     },
   });
   const service = new WardenSweepService(
     {
       revive,
       autoMigrate,
+      orphans: parts.machine.orphans,
       board: parts.board,
       exchanges: parts.exchanges,
       guard: parts.guard,
@@ -4862,31 +4856,6 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 kind: 'info',
                 premise: request.premise,
                 ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
-              },
-              WARDEN_ESCALATION_ACTOR,
-            )
-            .catch(() => undefined);
-          if (mutation === undefined || !mutation.ok) return 'rejected';
-          return mutation.change === 'created' || mutation.change === 'refreshed' ? mutation.change : 'unchanged';
-        },
-        // A plain notice about a CARD (an orphaned one): tied to it, so the card and the Inbox name each other.
-        notice: async (sessionId, notice) => {
-          const mutation = await parts.attention
-            .raise(
-              sessionId,
-              {
-                source: WARDEN_ESCALATION_SOURCE,
-                sourceRef: notice.sourceRef,
-                subject: notice.subject,
-                why: notice.why,
-                context: notice.context,
-                waitingSince: notice.waitingSince,
-                howToResolve: notice.howToResolve,
-                notice: true,
-                title: notice.title,
-                kind: 'info',
-                premise: notice.premise,
-                task: notice.task,
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -10532,6 +10501,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ledger: notificationLedger,
         sessions: {
           describe: async id => {
+            if (id === MACHINE_AGENDA_ID) return { name: 'Machine', title: 'Machine', interactive: false };
             const view = await sessions.get(id);
             return view === undefined
               ? undefined
@@ -10574,6 +10544,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
+      const machineBoards = new FileAgendaLedgerRepository(
+        () => join(paths.state, 'machine-agenda'),
+        undefined,
+        agendaFilesMigrated,
+      );
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))
@@ -10588,8 +10564,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           laneSet: async projectId => await laneSets.laneSet(projectId),
         },
         agenda: {
-          sessions: agendaSessionIds,
-          ledger: async sessionId => await agendaBoards.read(sessionId),
+          sessions: async () => [...(await agendaSessionIds()), MACHINE_AGENDA_ID],
+          ledger: async sessionId =>
+            await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
         },
         redaction: {
           batch: async work => await secretRedactor.batch(scrub => work(text => scrub.text(text))),
@@ -10843,6 +10820,79 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               : await gateItems?.asking(ref.id),
         },
       );
+      // The machine agenda: the same agenda machinery over its own ledger. Nothing a ferret sends reaches it (no
+      // session route names it); the daemon raises through `machineAgenda`, the owner answers over /v1/machine/agenda.
+      const machineAgendaService = new AgendaService(
+        machineBoards,
+        clock,
+        { has: async id => id === MACHINE_AGENDA_ID },
+        notifications,
+        { changed: async sessionId => await workSearch.changed(sessionId) },
+      );
+      const machineAgenda = new MachineAgenda(
+        machineAgendaService,
+        new FileMachineMembers(stateFiles, join(paths.state, 'machine-agenda-members.json')),
+        clock,
+      );
+      // The Warden's two list items: ferrets it could not move, and cards with nobody on them. Each is kept in a
+      // small file so a restart still names them; a stopped or moved ferret leaves the first by itself.
+      const wardenMachine = {
+        autoMove: new AutoMoveFailures(
+          new FileMachineMembers(stateFiles, join(paths.state, 'warden-auto-move-failed.json')),
+          machineAgenda,
+          {
+            current: async sessionId => {
+              const view = await sessions.get(sessionId).catch(() => undefined);
+              return view === undefined || HYPERMEDIA_NOT_RUNNING.has(view.state.status)
+                ? undefined
+                : { agent: view.config.agent };
+            },
+          },
+        ),
+        orphans: new OrphanList(
+          new FileMachineMembers(stateFiles, join(paths.state, 'warden-orphans.json')),
+          machineAgenda,
+        ),
+      };
+      setInterval(() => void wardenMachine.autoMove.reconcile().catch(() => undefined), 60_000).unref();
+      void foldNoticesIntoMachineAgenda({
+        agenda,
+        sessions: { all: agendaSessionIds },
+        seed: {
+          autoMoveFailed: async (sessionId, item) => await wardenMachine.autoMove.note(sessionId, item.subject),
+          orphan: async item => {
+            if (item.task === undefined || item.task === null) return;
+            await wardenMachine.orphans.add({
+              sourceRef: item.sourceRef ?? '',
+              task: item.task,
+              title: item.title ?? item.subject,
+              subject: item.subject,
+              why: item.why,
+              premise: item.premise ?? '',
+              context: item.context ?? '',
+              howToResolve: item.howToResolve,
+              waitingSince: item.waitingSince,
+            });
+          },
+          budget: async (sourceRef, item) => {
+            await machineAgenda.raiseOrUpdate(sourceRef, {
+              title: item.title ?? item.subject,
+              subject: item.subject,
+              why: item.why,
+              ...(item.premise === undefined ? {} : { premise: item.premise }),
+              ...(item.context === undefined || item.context === null ? {} : { context: item.context }),
+              howToResolve: item.howToResolve,
+              waitingSince: item.waitingSince,
+              notice: true,
+              ping: true,
+              kind: 'info',
+            });
+          },
+        },
+        marker: new FileMachineMigrationMarker(join(paths.home, 'machine-agenda-notices-migration.json')),
+        now: () => clock.now(),
+        diagnostics: boardDiagnostics,
+      }).catch((error: unknown) => boardDiagnostics.warn(`the machine agenda's folding failed: ${String(error)}`));
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
       // daemon starts get theirs once, in the background (docs/board.md § Gates ask the owner).
@@ -12171,16 +12221,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           alternative: async (login, holds) =>
             budgetAlternative(configFiles.current().evaluation.effective.model, login, millisecondClock.now(), holds),
           notify: async notice => {
-            await agenda.raise(
-              notice.anchor.id,
-              budgetNoticeRequest(
-                notice,
-                CLIENT_NAME,
-                analyticsMachineName ?? hostname(),
-                new Date(millisecondClock.now()).toISOString(),
-              ),
-              { kind: 'daemon', cause: 'system' },
+            const {
+              source: _source,
+              sourceRef,
+              ...request
+            } = budgetNoticeRequest(
+              notice,
+              CLIENT_NAME,
+              analyticsMachineName ?? hostname(),
+              new Date(millisecondClock.now()).toISOString(),
             );
+            await machineAgenda.raiseOrUpdate(sourceRef ?? budgetNoticeRef(notice), request);
           },
           told: new FileBudgetTold(stateFiles, join(paths.state, 'budget-told.json')),
           remember: budgetHoldsWriter(stateFiles, budgetHoldsPath),
@@ -12676,6 +12727,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         agendaRollup: new AgendaRollup(agendaBoards, () => storage.listSessions().map(session => session.id)),
+        machineAgenda: machineAgendaService,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
@@ -13137,6 +13189,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await gateItems?.sweep();
             await duplicateSweep.run();
           },
+          machine: wardenMachine,
           usage,
           accounts,
           defaultRuntime: async () => {

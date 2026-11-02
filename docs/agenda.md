@@ -287,6 +287,37 @@ A notice is a plain notification: `notice: true` on the raise request. No ask, n
 reference it. `ping: true` asks for the phone to buzz and is only valid on a notice. `fy notify` raises one
 (the older `fy attention notify` still works, deprecated).
 
+## The machine agenda
+
+Some notices belong to no ferret's thread: the Warden could not move a ferret, a card has nobody on it, a login
+hit its budget. They are held on **one daemon-owned board** — the machine agenda — instead of on whichever
+ferret's agenda they concern, and the Inbox shows them as their own **Machine** group (tag `@machine`), counted,
+searchable (`/v1/search`) and notified like any other item.
+
+- **Who writes, who answers.** Only the daemon raises (`{kind:'daemon',cause:'system'}`); no ferret can address it
+  — the session agenda routes do not accept its id. Only the owner answers, and only by **dismissing** (the board
+  holds notices, which are read, never snoozed or replied to).
+- **Routes.** `GET /v1/machine/agenda` lists, `POST /v1/machine/agenda` dismisses. Both are owner-only
+  (`minimum: 'operator'`, `caller: 'person'`) and take no grant — the `clear-agents` rule in
+  [grants.md](grants.md).
+- **One item per cause.** The same `sourceRef` refreshes in place:
+  - `warden:auto-move-failed` — "N ferrets could not be moved", listing each (up to 12, then "…and N more."). A
+    ferret that stops, is gone, or moved to another login drops off; the item resolves when the list is empty. A
+    stopped ferret is never added.
+  - `warden:orphans` — one item naming the cards that have nobody on them. A card leaves it when someone takes it.
+    The nudge to a live owner ferret is unchanged.
+  - `budget:<login>:<window>` — one per login per budget window. (It used to double because the notice was
+    de-duplicated only inside the agenda of the ferret it was anchored to, and the anchor differed.)
+- **Waking.** A machine item's member list is kept beside it. An update that **adds** a member to an item the owner
+  parked wakes it; one that only shrinks it does not. Once the owner dismisses an item, the same members do not
+  raise it again.
+- **Port.** Other daemon code uses `MachineAgenda`: `raiseOrUpdate(ref, request, members?)`, `resolve(ref, note?)`
+  and `list()`. Only notice-type items belong here; gate items and Not-good follow-ups never do.
+- **Migration.** On first start after this shipped, the daemon folds the old per-ferret notices (`warden-auto-move`,
+  `warden-orphan:*`, `budget:*`) into their machine item and closes the originals. It writes
+  `machine-agenda-notices-migration.json` only when every agenda was read and every item folded; otherwise it tries
+  again next start.
+
 ## Lane proposals
 
 A ferret that works in a project with no lanes runs `fy board lanes propose --template <t> [--rename old=new]…`.

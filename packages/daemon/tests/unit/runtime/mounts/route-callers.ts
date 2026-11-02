@@ -249,6 +249,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sessions/:sessionId/notify operator any',
   'POST /v1/agenda/clear-agents operator person',
   'GET /v1/agenda/open operator person',
+  'GET /v1/machine/agenda operator person',
+  'POST /v1/machine/agenda operator person',
   'GET /v1/sessions/:sessionId/pins operator any',
   'POST /v1/sessions/:sessionId/pins operator any',
   'GET /v1/sessions/:sessionId/shared-draft operator person',

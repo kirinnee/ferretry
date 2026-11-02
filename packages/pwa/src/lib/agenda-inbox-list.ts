@@ -24,6 +24,7 @@ import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import { visibleWhy } from './agenda-inbox.ts';
 import type { ModeFilter } from './controls.ts';
 import type { DaemonId } from './daemon-connection.ts';
+import { isMachineAgendaId } from './machine-agenda.ts';
 
 /** One ferret's open items on one machine, under one header. */
 export interface FerretGroup {
@@ -40,6 +41,8 @@ export interface FerretGroup {
   /** The sub-ferret's own name when the group's session is not the owner's thread it is named for; `null` when it is. */
   readonly via: string | null;
   readonly machineName: string;
+  /** The machine's own agenda (docs/agenda.md § The machine agenda): no ferret, no chat, always first. */
+  readonly machine: boolean;
   /** The ferret is idle until the owner answers. */
   readonly stopped: boolean;
   /** Agenda items (not plain notifications), in the agenda's order. */
@@ -106,6 +109,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
           ? null
           : (ownNames.ferret ?? ownNames.title),
       machineName: head.machineName,
+      machine: isMachineAgendaId(head.view.config.id),
       stopped: sessionAgendaSummary(head.view.state)?.stopped === true,
       items: ordered.flatMap(item => byItem.get(item) ?? []),
       notices: members.filter(isNoticeCard),
@@ -118,7 +122,8 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
     const item = lead(group);
     if (item !== undefined) rank.set(item, group);
   }
-  return sortAgenda([...rank.keys()]).flatMap(item => rank.get(item) ?? []);
+  const ranked = sortAgenda([...rank.keys()]).flatMap(item => rank.get(item) ?? []);
+  return [...ranked.filter(group => group.machine), ...ranked.filter(group => !group.machine)];
 };
 
 /** The inbox's three sections. */

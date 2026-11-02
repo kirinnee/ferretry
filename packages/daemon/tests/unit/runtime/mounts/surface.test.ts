@@ -375,6 +375,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   attention: agendaService(),
   agendaReplies: NO_HELD_REPLIES,
+  machineAgenda: {} as never,
   agendaClearer: {
     preview: async () => ({ cleared: 0, sessions: 0 }),
     clear: async () => ({ cleared: 0, sessions: 0 }),
@@ -939,6 +940,7 @@ describe('the mounted daemon surface', () => {
       6 + // the project boards: the board query, its card ids, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
+      2 + // the machine agenda: its read and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -1321,6 +1323,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/notify',
       'POST /v1/agenda/clear-agents',
       'GET /v1/agenda/open',
+      'GET /v1/machine/agenda',
+      'POST /v1/machine/agenda',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
       'GET /v1/sessions/:sessionId/shared-draft',

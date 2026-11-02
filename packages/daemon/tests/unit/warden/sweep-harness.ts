@@ -345,6 +345,16 @@ export function harness(
     },
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
+    orphans: {
+      add: async notice => {
+        if (options.noticeWrite === 'rejected') throw new Error('the machine agenda refused');
+        if (!notices.some(each => each.notice.task.id === notice.task.id))
+          notices.push({ sessionId: 'machine', notice });
+      },
+      remove: async taskId => {
+        resolved.push({ sessionId: 'machine', sourceRef: `warden-orphan:${taskId}`, note: 'orphan cleared' });
+      },
+    },
     attention: {
       ...(options.homeOf === undefined ? {} : { homeOf: options.homeOf }),
       board: async sessionId => {
@@ -360,17 +370,6 @@ export function harness(
         boards.set(sessionId, [
           ...existing,
           { source: request.source, sourceRef: request.sourceRef, raisedBy: 'daemon' as const },
-        ]);
-        return 'created';
-      },
-      notice: async (sessionId, notice) => {
-        notices.push({ sessionId, notice });
-        if (options.noticeWrite !== undefined) return options.noticeWrite;
-        const existing = boards.get(sessionId) ?? [];
-        if (existing.some(item => item.sourceRef === notice.sourceRef)) return 'unchanged';
-        boards.set(sessionId, [
-          ...existing,
-          { source: 'agent-raised' as const, sourceRef: notice.sourceRef, raisedBy: 'daemon' as const },
         ]);
         return 'created';
       },

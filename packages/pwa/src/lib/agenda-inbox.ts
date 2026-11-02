@@ -33,6 +33,7 @@ import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } fr
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from './daemon-connection.ts';
+import { isMachineAgendaId } from './machine-agenda.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
 import { rootViews } from './session-root.ts';
@@ -241,7 +242,9 @@ export const agendaSummaryKey = (summary: SessionAgendaSummary): string =>
 
 /** Where a conversation opens AT an item: the session's page, naming the item (`?agenda=A3`). */
 export const agendaConversationPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  `${daemonSessionPath(daemonId, sessionId)}?${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  isMachineAgendaId(sessionId)
+    ? inboxTargetPath(daemonId, sessionId, id)
+    : `${daemonSessionPath(daemonId, sessionId)}?${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
 
 /** The item a conversation link names (`?agenda=A3` or the older `?attention=A3`), or `null` for none or a malformed one. */
 export const agendaTargetFromSearch = (search: string): AgendaId | null => {

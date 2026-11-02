@@ -244,6 +244,13 @@ went idle), which are what the list shows beside the badge.
 - On start, the daemon reconciles every session once, in the background.
 - It clears only when items resolve. Viewing a conversation does not clear it.
 
+## Machine notices
+
+Notices that belong to no ferret — a ferret the Warden could not move, a card with nobody on it, a login at its
+budget limit — are raised **once per cause** on the machine agenda ([agenda.md](agenda.md#the-machine-agenda)), not
+once per ferret. They notify and count like any item, an update in place does not buzz again, and nothing is raised
+on a stopped session.
+
 ## Agenda mode
 
 A ferret keeps an agenda only when it is told to. **Agenda mode** is a switchable section of its

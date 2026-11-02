@@ -140,7 +140,6 @@ import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from '
 import {
   planWardenEscalations,
   planWardenRemedy,
-  WARDEN_ESCALATION_SOURCE,
   type WardenEscalationBoard,
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
@@ -402,8 +401,6 @@ export interface WardenAgendaPort {
   /** Where a notification about this ferret sits: its agenda home. Absent, or its own, when it is not a sub-ferret. */
   homeOf?(sessionId: string): Promise<string>;
   raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAgendaWrite>;
-  /** A plain notice to the owner tied to a board card (`orphans.ts`), deduped by its `sourceRef`. */
-  notice(sessionId: string, notice: WardenCardNotice): Promise<WardenAgendaWrite>;
   resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, note: string): Promise<boolean>;
 }
 
@@ -439,7 +436,14 @@ export interface WardenFeedReader {
   board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
+/** The machine item that lists every card with nobody on it (`orphan-list.ts`). Throws when the item cannot be written. */
+export interface WardenOrphanList {
+  add(notice: WardenCardNotice): Promise<void>;
+  remove(taskId: string): Promise<void>;
+}
+
 export interface WardenSweepPorts {
+  readonly orphans: WardenOrphanList;
   /** The Jev guard, built for the guard settings in effect. It holds no key: see `speedups/jev.ts`. */
   readonly guard: (settings: WardenGuardConfig) => TriageGuardPort;
   readonly evidence: WardenTriageEvidenceReader;
@@ -2443,9 +2447,10 @@ export class WardenSweepService {
       ...(machine === undefined || machine === '' ? {} : { machine }),
     });
     for (const resolution of plan.resolve) {
-      const cleared = await this.ports.attention
-        .resolveSource(resolution.sessionId, WARDEN_ESCALATION_SOURCE, resolution.sourceRef, resolution.note)
-        .catch(() => false);
+      const cleared = await this.ports.orphans.remove(resolution.taskId).then(
+        () => true,
+        () => false,
+      );
       if (cleared)
         this.ports.journal.record('fleet.warden_orphan_cleared', {
           taskId: resolution.taskId,
@@ -2458,8 +2463,11 @@ export class WardenSweepService {
         reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
       });
     const memory: Record<string, OrphanTold> = { ...plan.memory };
-    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<boolean> =>
-      (await this.ports.attention.notice(sessionId, notice).catch(() => 'rejected' as const)) !== 'rejected';
+    const posted = async (notice: WardenCardNotice): Promise<boolean> =>
+      await this.ports.orphans.add(notice).then(
+        () => true,
+        () => false,
+      );
     for (const tell of plan.tell) {
       // A message that could not be typed goes on the same ferret's board, and is remembered as a notice.
       const typed =
@@ -2468,7 +2476,7 @@ export class WardenSweepService {
           () => true,
           () => false,
         ));
-      const landed = typed || (await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice));
+      const landed = typed || (await posted(tell.kind === 'message' ? tell.fallback : tell.notice));
       if (!landed) {
         this.ports.journal.record('fleet.warden_orphan_failed', {
           taskId: tell.taskId,

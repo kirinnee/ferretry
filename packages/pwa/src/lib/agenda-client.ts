@@ -7,6 +7,7 @@ import {
   AgendaSnapshotSchema,
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
+import { isMachineAgendaId } from './machine-agenda.ts';
 import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
@@ -57,7 +58,12 @@ export const fetchAgendaSnapshot = async (
   fetcher: DaemonFetch = browserFetch,
   wire: AgendaWire = 'attention',
 ): Promise<AgendaSnapshot> =>
-  parseSnapshot(scope, await fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId, wire), {}, fetcher));
+  parseSnapshot(
+    scope,
+    await (isMachineAgendaId(scope.sessionId)
+      ? fetchAgenda(daemon, scope, '/v1/machine/agenda', { method: 'GET' }, fetcher)
+      : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId, wire), {}, fetcher)),
+  );
 
 /**
  * Reads the mounted full snapshot route and derives its count for a badge
@@ -89,17 +95,14 @@ export const applyAgendaAction = async (
   wire: AgendaWire = 'attention',
 ): Promise<AgendaSnapshot> => {
   const body = AgendaActionRequestSchema.parse(action);
-  const value = await fetchAgenda(
-    daemon,
-    scope,
-    sessionAgendaPath(scope.sessionId, wire),
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
-      body: JSON.stringify(body),
-    },
-    fetcher,
-  );
+  const init = {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
+    body: JSON.stringify(body),
+  };
+  const value = await (isMachineAgendaId(scope.sessionId)
+    ? fetchAgenda(daemon, scope, '/v1/machine/agenda', init, fetcher)
+    : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId, wire), init, fetcher));
   return parseSnapshot(scope, value);
 };
 

@@ -143,6 +143,7 @@ import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.t
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
+import { isMachineAgendaId } from './lib/machine-agenda.ts';
 import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
@@ -2308,6 +2309,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
         );
       }}
       readConversation={async card => {
+        if (isMachineAgendaId(card.view.config.id)) return [];
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
         return await readItemConversation(

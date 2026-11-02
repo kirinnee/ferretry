@@ -51,6 +51,7 @@ import {
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
+import { MACHINE_AGENDA_ID, withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { toTestBesideGates } from '../lib/gate-items.ts';
@@ -268,28 +269,45 @@ export function useAgendaInboxModel(
   }, [deferred]);
   const deferredState = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot, deferred.getSnapshot);
 
+  const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
+  const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
+  const boards = useSyncExternalStore(subscribeBoards, readBoards, readBoards);
+  // The machine's own agenda is read like a conversation's board and listed first among the machine's conversations.
+  useEffect(() => {
+    for (const { connection } of machines) {
+      client.revalidate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
+    }
+  }, [client, machines]);
+  const withMachine = useMemo(
+    () =>
+      withMachineAgendas(machines, (daemonId, sessionId) =>
+        boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+      ),
+    [machines, boards],
+  );
+
   const freshUnread = useMemo(
     () =>
       unreadSessions(
-        machines.map(machine => ({
+        withMachine.map(machine => ({
           daemonId: machine.connection.daemonId,
           name: machine.name,
           sessions: machine.sessions,
         })),
       ),
-    [machines],
+    [withMachine],
   );
   const unread = useStable(freshUnread, unreadKey(freshUnread));
   const freshWithFerret = useMemo(
     () =>
       withFerretSessions(
-        machines.map(machine => ({
+        withMachine.map(machine => ({
           daemonId: machine.connection.daemonId,
           name: machine.name,
           sessions: machine.sessions,
         })),
       ),
-    [machines],
+    [withMachine],
   );
   const withFerretEntries = useStable(freshWithFerret, unreadKey(freshWithFerret));
 
@@ -316,9 +334,6 @@ export function useAgendaInboxModel(
   }, [boardReads, client, connectionFor, unread, withFerretEntries]);
   const failedBoards = useSyncExternalStore(boardReads.subscribe, boardReads.getSnapshot, boardReads.getSnapshot);
 
-  const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
-  const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
-  const boards = useSyncExternalStore(subscribeBoards, readBoards, readBoards);
   // A ferret's rule suggestion the owner already answered stays open on the ferret's agenda until it expires (C2): it
   // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card.
   const answered = useSyncExternalStore(
@@ -342,12 +357,12 @@ export function useAgendaInboxModel(
   // A gate item stands in for its card's to-test row on a machine that raises them, open or parked (`gateHolders`).
   const sources = useMemo(
     () =>
-      machines.map(machine => ({
+      withMachine.map(machine => ({
         daemonId: machine.connection.daemonId,
         name: machine.name,
         sessions: machine.sessions,
       })),
-    [machines],
+    [withMachine],
   );
   // A conversation's items: its board when this device holds one (it is the newer), else the machine's roll-up.
   const itemsOf = useCallback(
