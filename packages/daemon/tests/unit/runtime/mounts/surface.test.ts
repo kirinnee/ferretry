@@ -997,6 +997,7 @@ describe('the mounted daemon surface', () => {
       13 + // standing sign-in rules: the ferrets' suggestions (read and dismiss, memory only), the list, eligibility, a stage, its read, confirm-in-app, a device taking a machine stage, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       9 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, a remove per scope, and stay or skip per scope (docs/catalogs.md)
+      7 + // copying a skill from this machine into a project or runtime: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       10 + // the people a catalog is shared with: mint, list and end a share, approve a new passkey for an invite; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
@@ -1285,6 +1286,13 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/catalog-installs/runtime/:installId',
       'PATCH /v1/catalog-installs/project/:installId',
       'PATCH /v1/catalog-installs/runtime/:installId',
+      'POST /v1/skill-installs/local/project/preview',
+      'POST /v1/skill-installs/local/runtime/preview',
+      'POST /v1/skill-installs/local/project',
+      'POST /v1/skill-installs/local/runtime',
+      'GET /v1/skill-installs/local',
+      'DELETE /v1/skill-installs/local/project/:installId',
+      'DELETE /v1/skill-installs/local/runtime/:installId',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'GET /v1/sessions/:sessionId/sends',

@@ -16,7 +16,7 @@ function build(existingSkill = false) {
     cwd: '/work',
     binaryName: 'fy',
   });
-  const program = new Command().exitOverride();
+  const program = new Command().exitOverride().configureOutput({ writeErr: () => undefined });
   if (existingSkill) program.command('skill').option('--json').command('other');
   registerLocalSkillInstallCommands(program, controller);
   return { program, gateway, out };
