@@ -1469,7 +1469,8 @@ describe('the clone.import executor in update mode', () => {
 describe('the clone.import executor in update mode refuses what the review did not say', () => {
   const KEY_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
   const KEY_API = 'cccccccccccccccccccccccccc';
-  const FROM_SOURCE = { clonedFrom: 'source', clonedFromDaemon: 'daemon-source' };
+  // A copy made from a file: no id a browser verified is stamped on it.
+  const FROM_SOURCE = { clonedFrom: 'source' };
   const bundleOf = (patch: Record<string, unknown> = {}) =>
     FleetCloneBundleSchema.parse({
       format: 'ferretry-clone',
