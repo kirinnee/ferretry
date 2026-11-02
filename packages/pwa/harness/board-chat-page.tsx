@@ -6,7 +6,7 @@
  * not given), `?totest=1` adds two cards waiting for a try (the moves the page is asked for are kept in `window.__moves`), `?cards=few`
  * the six-card fixture (the default is 70 cards), `?agents=1` turns "Internal" on, `?expanded=1` opens the
  * Tasks tab over the whole chat area (the desktop Info panel steps out of the way). `?origin=0` serves cards
- * the way an older daemon does, with no `origin`.
+ * the way an older daemon does, with no `origin`. `?long=1` gives the first card to test sixteen steps (the box scrolls).
  */
 
 import { type BoardTaskView, boardOk, type SessionView } from '@ferretry/protocol';
@@ -150,7 +150,13 @@ const TO_TEST =
           shippedIn: SHIPPED,
           howToTest: richRequested()
             ? RICH_HOW_TO_TEST
-            : '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+            : params.get('long') === '1'
+              ? Array.from(
+                  { length: 16 },
+                  (_, step) =>
+                    `${step + 1}. Open Settings, choose Pair a device, then check that step ${step + 1} of the pairing shows on both phones.`,
+                ).join('\n')
+              : '1. Open Settings and choose Pair a device.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
           lastTouchedAt: ago(55),
         }),
         card('F31', {

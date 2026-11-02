@@ -38,8 +38,13 @@ describe('lockOf', () => {
   it('reads the longer axis, sideways or vertical', () => {
     expect(lockOf(12, 3)).toBe('sideways');
     expect(lockOf(-30, 20)).toBe('sideways');
-    expect(lockOf(3, -12)).toBe('vertical');
-    expect(lockOf(10, 10)).toBe('vertical');
+    expect(lockOf(3, -24)).toBe('vertical');
+    expect(lockOf(10, 10)).toBe('sideways');
+    expect(lockOf(10, 20)).toBe('vertical');
+    expect(lockOf(16, 20)).toBe('sideways');
+    expect(lockOf(4, 12)).toBeNull();
+    expect(lockOf(4, 22)).toBe('vertical');
+    expect(lockOf(-8, -30)).toBe('vertical');
   });
 });
 

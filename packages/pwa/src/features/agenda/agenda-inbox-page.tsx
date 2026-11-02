@@ -31,12 +31,13 @@
  */
 
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, CloudOff, Search, SkipForward, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, CloudOff, SkipForward, Users, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
+import { itemCardKind } from '../../lib/card-kind.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -105,7 +106,9 @@ import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
+import { FilterMenu, FindBox, FindToggle } from './inbox-filter-menu.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -282,6 +285,7 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
       }}
       hooks={{ 'data-inbox-who': '' }}
     >
+      <CardKindChip kind={itemCardKind(card.item)} />
       <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
         {who.ferret}
       </span>
@@ -398,6 +402,7 @@ function GateMeta({
       className="fy-meta-line--gate"
       hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
     >
+      <CardKindChip kind={itemCardKind(item)} />
       <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
         {gateVerb(item)}
       </span>
@@ -649,7 +654,7 @@ function InboxFilterBar({
   return (
     // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
     <div aria-label="Show" className="fy-attn-inbox__filter" data-agenda-filter="" role="group">
-      {(['open', 'snoozed', 'replied', 'resolved'] as const).map(entry => (
+      {FILTER_CHOICES.map(entry => (
         <button
           aria-pressed={filter === entry}
           className="fy-attn-inbox__filter-button"
@@ -666,6 +671,8 @@ function InboxFilterBar({
 }
 
 const KIND_WORDS: Readonly<Record<ModeFilter, string>> = { all: 'All', interactive: 'Interactive', auto: 'Agents' };
+const KIND_CHOICES = (Object.keys(KIND_WORDS) as ModeFilter[]).map(value => ({ value, label: KIND_WORDS[value] }));
+const FILTER_CHOICES = ['open', 'snoozed', 'replied', 'resolved'] as const;
 
 /** All / Interactive / Agents: which kind of ferret raised the items — the sessions bar's own split. */
 function KindFilterBar({
@@ -1210,30 +1217,6 @@ const ownedElsewhere = (target: EventTarget | null): boolean => {
   return target.closest('input, textarea, select, [role="menu"], [role="dialog"], [role="listbox"]') !== null;
 };
 
-/** The header's Find box. */
-function FindBox({ query, onChange }: { readonly query: string; readonly onChange: (next: string) => void }) {
-  return (
-    <label className="fy-attn-inbox__find">
-      <Search aria-hidden="true" size={14} />
-      <input
-        aria-label="Find in Inbox"
-        className="fy-attn-inbox__find-input"
-        data-agenda-find=""
-        onChange={event => onChange(event.target.value)}
-        onKeyDown={event => {
-          if (event.key === 'Escape' && query !== '') {
-            event.preventDefault();
-            onChange('');
-          }
-        }}
-        placeholder="Find"
-        type="search"
-        value={query}
-      />
-    </label>
-  );
-}
-
 export function AgendaInboxPage({
   inbox,
   onNavigate,
@@ -1433,10 +1416,33 @@ export function AgendaInboxPage({
           <span className="fy-attn-inbox__updating-text">Updating</span>
         </span>
       ) : null}
-      <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
+      {phone ? (
+        <FilterMenu
+          choiceHook="data-agenda-filter-option"
+          choices={FILTER_CHOICES.map(entry => ({ value: entry, label: filterWords(entry, parkedCounts) }))}
+          hook="data-agenda-filter"
+          name="Show"
+          onChange={choose}
+          value={filter}
+        />
+      ) : (
+        <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
+      )}
       <div className="fy-attn-inbox__tools">
         {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
-        <KindFilterBar kind={kind} onChange={setKind} />
+        {phone ? (
+          <FilterMenu
+            choiceHook="data-agenda-kind-option"
+            choices={KIND_CHOICES}
+            hook="data-agenda-kind"
+            icon={<Users aria-hidden="true" size={14} />}
+            name="Ferrets"
+            onChange={setKind}
+            value={kind}
+          />
+        ) : (
+          <KindFilterBar kind={kind} onChange={setKind} />
+        )}
         {machines.length > 1 ? (
           <select
             aria-label="Machine"
@@ -1453,7 +1459,7 @@ export function AgendaInboxPage({
             ))}
           </select>
         ) : null}
-        <FindBox onChange={setQuery} query={query} />
+        {phone ? <FindToggle onChange={setQuery} query={query} /> : <FindBox onChange={setQuery} query={query} />}
         <PageThemeSwitch />
       </div>
     </header>
