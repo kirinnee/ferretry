@@ -176,7 +176,7 @@ describe('the upgrade, inside the service', () => {
             JSON.stringify(item),
           );
     }
-    should(r.documents.raw.version).equal(2);
+    should(r.documents.raw.version).equal(3);
     should(r.documents.backup).equal(legacy.text);
   });
 
@@ -275,7 +275,7 @@ describe('the upgrade, inside the service', () => {
     should(r.documents.backup).be.undefined();
     r.blobs.failAfter = undefined;
     await r.service.list();
-    should(r.documents.raw.version).equal(2);
+    should(r.documents.raw.version).equal(3);
     should(JSON.stringify(r.documents.document)).equal(JSON.stringify(clean.r.documents.document));
     should([...r.blobs.blobs.keys()].sort()).deepEqual([...clean.r.blobs.blobs.keys()].sort());
   });
@@ -351,7 +351,7 @@ describe('the upgrade, inside the service', () => {
     should(r.documents.raw.version).equal(1);
     r.blobs.blobs.set(digest, text);
     should((await r.service.list()).catalogs).have.length(2);
-    should(r.documents.raw.version).equal(2);
+    should(r.documents.raw.version).equal(3);
   });
 });
 
@@ -512,5 +512,68 @@ describe('new ids', () => {
     should(failure?.message).match(/placeholder id three times/u);
     should(calls).equal(3);
     should(r.events).have.length(0);
+  });
+});
+
+describe('the version 2 to 3 upgrade', () => {
+  async function asVersion2() {
+    const { r } = await upgraded();
+    await r.service.list();
+    const doc = { ...r.documents.document, schemaVersion: 2 as const };
+    const text = `${JSON.stringify(doc, undefined, 2)}\n`;
+    r.documents.raw = { version: 2, doc, text };
+    r.documents.backup = undefined;
+    r.documents.backupV2 = undefined;
+    r.events.length = 0;
+    return { r, doc, text };
+  }
+
+  it('should change only the version, keeping the old file as catalogs.v2.json before the new one', async () => {
+    const { r, doc, text } = await asVersion2();
+    await r.service.list();
+    should(r.events).deepEqual(['backup2', 'document']);
+    should(r.documents.backupV2).equal(text);
+    should(r.documents.raw.version).equal(3);
+    should(JSON.stringify({ ...r.documents.document, schemaVersion: 2 })).equal(JSON.stringify(doc));
+    should(r.documents.backup).be.undefined();
+  });
+
+  it('should do it once, and write nothing on the reads that follow', async () => {
+    const { r } = await asVersion2();
+    await Promise.all([r.service.list(), r.service.list(), r.service.exportCatalog(LEGACY_CATALOG, {})]);
+    should(r.events.filter(event => event === 'backup2')).have.length(1);
+    should(r.events.filter(event => event === 'document')).have.length(1);
+    r.events.length = 0;
+    await r.service.list();
+    should(r.events).have.length(0);
+  });
+
+  it('should repair a crash between the backup and the file by running again to the same bytes', async () => {
+    const { r, doc, text } = await asVersion2();
+    r.documents.failWrites = true;
+    const failure = await r.service.list().then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(failure?.message).equal('disk full');
+    should(r.documents.raw.version).equal(2);
+    should(r.documents.backupV2).equal(text);
+    r.documents.failWrites = false;
+    await r.service.list();
+    should(r.documents.raw.version).equal(3);
+    should(r.documents.backupV2).equal(text);
+    should(JSON.stringify({ ...r.documents.document, schemaVersion: 2 })).equal(JSON.stringify(doc));
+  });
+
+  it('should leave the file as it was when the backup cannot be written', async () => {
+    const { r } = await asVersion2();
+    r.documents.failBackup = true;
+    const failure = await r.service.list().then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(failure?.message).equal('disk full');
+    should(r.documents.raw.version).equal(2);
+    should(r.documents.backupV2).be.undefined();
   });
 });

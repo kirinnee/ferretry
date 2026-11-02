@@ -3,17 +3,18 @@
  * reads a file, asks the inventory, or holds a key (docs/standards/three-layer-architecture).
  */
 import type { DaemonIdentity } from '@ferretry/relay';
-import type { CatalogsDocument } from './document.ts';
+import type { CatalogsDocument, CatalogsDocumentV2 } from './document.ts';
 import type { CatalogsDocumentV1 } from './document-v1.ts';
 import type { McpSourceServer } from './mcp-source.ts';
 
 /**
- * What `state/catalogs/catalogs.json` holds. A version 1 file arrives with its exact text, because the
+ * What `state/catalogs/catalogs.json` holds. A version 1 or 2 file arrives with its exact text, because the
  * backup written before the upgrade is those bytes and no re-spelling of them.
  */
 export type RawCatalogs =
   | { readonly version: 1; readonly doc: CatalogsDocumentV1; readonly text: string }
-  | { readonly version: 2; readonly doc: CatalogsDocument }
+  | { readonly version: 2; readonly doc: CatalogsDocumentV2; readonly text: string }
+  | { readonly version: 3; readonly doc: CatalogsDocument }
   | { readonly version: 'none' };
 
 /** `state/catalogs/catalogs.json`. A damaged file is an error from `readRaw`, never an empty document. */
@@ -22,6 +23,8 @@ export interface CatalogDocumentStore {
   write(document: CatalogsDocument): Promise<void>;
   /** Writes `catalogs.v1.json` with exactly these bytes, over any older backup. */
   writeBackupV1(text: string): Promise<void>;
+  /** Writes `catalogs.v2.json` with exactly these bytes, over any older backup. */
+  writeBackupV2(text: string): Promise<void>;
 }
 
 /** The frozen item versions, content-addressed by the digest (`sha256:<hex>`) of their text. */

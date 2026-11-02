@@ -286,7 +286,7 @@ between them are byte-identical**. A reader that saw revision 7 refuses a signed
 
 Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them, whichever route published it), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
 
-A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. `sinceVersion` is a floor, not a ceiling: when an item is added or relisted while newer versions already exist (the current version was rolled back), the entry also stores `joinedAtMax`, the newest version that existed then, because the person who added it reviewed `sinceVersion` and was never shown the ones between. **A catalog may serve its `sinceVersion`, its current version, and any version after `joinedAtMax`; never one in between.** `joinedAtMax` is absent (no gap) unless a newer version existed, so entries from before 3d-2 carry none; see the declared gap below. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
+A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. `sinceVersion` is a floor, not a ceiling: when an item is added or relisted while newer versions already exist (the current version was rolled back), the entry also stores `joinedAtMax`, the newest version that existed then, because the person who added it reviewed `sinceVersion` and was never shown the ones between. **A catalog may serve its `sinceVersion`, its current version, and any version after `joinedAtMax`; never one in between.** `joinedAtMax` is absent (no gap) unless a newer version existed, so entries from before 3d-2 carry none; see the declared gap below. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. The first call on a 3d-2 daemon raises the file to **`schemaVersion: 3`** (same shape, nothing else changes) and keeps the old file as `catalogs.v2.json`, so a 3c-1 or 3d-1 daemon, which only reads versions it knows, refuses it (`store_damaged`) and never writes. A downgrade needs the file restored: stop the daemon, `mv catalogs.v2.json catalogs.json` ([Going back from version 3](#upgrading-from-version-2)). Without that, a 3d-1 build would have read the file, ignored `joinedAtMax` and retirement, and written entries back without them.
 
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes
@@ -296,7 +296,7 @@ the restored older one, and the fix is to publish something new so the revision 
 
 ### Routes
 
-All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidden`.
+All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `owner_only` (the `person` caller check at the route boundary). The handlers keep a second line, 403 `forbidden`, that is only reached if the boundary ever lets a ferret through, and a unit test calls them directly to pin it.
 
 | Route                                               | Does                                                                                                                                          | Ferret       |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
@@ -389,8 +389,14 @@ current cannot widen who sees what:
   The sentence names those catalogs. `sinceVersion` and `joinedAtMax` are never changed implicitly.
 - Retiring the current version is refused, 409 `version_current`. A retired version cannot be made current,
   409 `version_retired` (bring it back first).
-- Every write is checked again at the commit: a document where a live entry's `sinceVersion` is newer than its
-  item's current version is refused as `store_damaged` and nothing is written.
+- Every write is checked again at the commit, and a document that breaks any of these rules is refused as
+  `store_damaged` with nothing written: a live entry's `sinceVersion` newer than its item's current version; the current
+  version inside the entry's `joinedAtMax` gap (above `sinceVersion`, up to and including `joinedAtMax`); a
+  `joinedAtMax` that is not above `sinceVersion` or is past the item's last version (it must lie in
+  (`sinceVersion`, number of versions]).
+- Publishing the content of an older version again is refused (409 `same_as_version`) only when **making that version
+  current would be accepted**: it is not retired and every live catalog may serve it. Otherwise it is published as a new
+  version number, so a publish and a make-current never refuse each other.
 
 **The signed version list** says which versions of one item one catalog offers, so an app that already holds the
 signed manifest can ask "what else is there" without trusting the transport.
@@ -431,9 +437,11 @@ retired, below-join, never-existed and withdrawn are indistinguishable to a memb
 The decision is a pure function of the manifest and the status; the member app that needs it is catalogs 3d-5, which
 owns its unit test. Nothing in this slice builds that app model.
 
-**Who may.** Both writes are the owner's (`sharing.use`, a person, not a ferret: 403 `forbidden`) and ask for no new
+**Who may.** Both writes are the owner's (`sharing.use`, a person, not a ferret: 403 `owner_only`) and ask for no new
 passkey. The audit records ids only: a `catalog.changed` entry with action `make-current`, `retire` or `unretire`,
-the item id, the version and the catalogs and revisions it raised.
+the item id, the version and the catalogs and revisions it raised. A retire or unretire is recorded only when it changed
+something: the answer carries `changed`, and asking for the state a version is already in (`changed: false`, nothing
+written, no revision raised) is not an audit entry. The action is the state the version ended in.
 
 The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes, so an owner app
 dials the two owner routes only where the machine says it can. A member app has no flag to read and uses the 404 rule
@@ -446,7 +454,9 @@ replayed list cannot install an older version.
 
 **Declared gap.** An entry written before 3d-2 has a `sinceVersion` but no `joinedAtMax`, so if its item was rolled back
 before it was added, that catalog could still serve the versions between. The window needs a rollback, which did not exist
-before 3d-2, so no such entry can have been made by a released build.
+before 3d-2, so no such entry can have been made by a released build. The one way to meet it is a 3d-1 build that has
+since been re-upgraded without restoring `catalogs.v2.json`: the version 3 file stops that build from reading the file at
+all, so it cannot add entries without `joinedAtMax`.
 
 ### One item in many catalogs, and the default (catalogs 3c-2)
 
@@ -549,7 +559,7 @@ every route above except the two reads. Governed remote callers also need a pass
 
 Under `<FY_HOME>/state/catalogs/`, directory `0700`, files `0600`, written atomically:
 
-- `catalogs.json` (**schema version 2**): one shared **item table** and the catalogs that list its items.
+- `catalogs.json` (**schema version 3**): one shared **item table** and the catalogs that list its items.
   An item holds its kind, name, source and a line per version. A catalog holds its own settings, its
   `revision` and an ordered list of `entries` (`itemId`, `addedAt`, `withdrawnAt` once withdrawn). A
   version carries two digests:
@@ -571,6 +581,7 @@ Under `<FY_HOME>/state/catalogs/`, directory `0700`, files `0600`, written atomi
   shared copy against its `contentDigest`, and the re-identified item against that catalog's
   `bindings[catalogId].digest`. A blob is written before the document that lists it.
 - `catalogs.v1.json`: the version 1 file as it was, kept by the upgrade (see below). Nothing reads it.
+- `catalogs.v2.json`: the version 2 file as it was, kept by the 2→3 upgrade (see below). Nothing reads it.
 
 Mutations are serialised, so two requests never interleave a read-modify-write. A new version of an item
 raises the `revision` of **every** catalog that lists it live, in one document write; a catalog where it
@@ -618,6 +629,19 @@ moved-aside file back as `catalogs.json` (it is a whole, valid version 2 file, s
 it as it was, with every shared copy still in `blobs/`), or, to go back to version 1, move your saved
 `catalogs.v1.json` over `catalogs.json` as above. Anything the previous daemon published in between is in
 the file it wrote and is lost either way; keep that file too if you need it.
+
+#### Upgrading from version 2
+
+Version 3 has the same shape as version 2. It exists so that a build that does not know `joinedAtMax` or retirement
+cannot read the file and write it back without them. The first call that finds a version 2 file, inside the write
+queue, writes `catalogs.v2.json` with the exact text of the old file, then writes the version 3 `catalogs.json`. A
+crash between the two leaves the version 2 file in place and the next call repeats both to the same bytes. A version 3
+file is left alone.
+
+**Going back from version 3.** A 3c-1 or 3d-1 daemon refuses the version 3 file and never writes to it
+(`store_damaged`). To go back: stop the daemon, `mv catalogs.v2.json catalogs.json`, then start the previous version.
+Everything changed since the upgrade is lost and revision numbers may be reused, as for version 1. Copy
+`catalogs.v2.json` somewhere safe first if you want to keep it: a later upgrade writes a new one over it.
 
 ### Audit
 

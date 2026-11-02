@@ -78,7 +78,7 @@ describe('the catalogs document', () => {
   it('should parse a round trip and name the first problem of a damaged one', () => {
     should(CatalogsDocumentSchema.safeParse(one).success).be.true();
     should(problemOf(one)).be.null();
-    should(problemOf({ schemaVersion: 2, catalogs: [] })).match(/items/u);
+    should(problemOf({ schemaVersion: 3, catalogs: [] })).match(/items/u);
     should(problemOf({ ...one, schemaVersion: 1 })).be.a.String();
     should(problemOf(7)).be.a.String();
     should(documentProblem({ success: false, error: { issues: [] } as never })).equal('it is malformed');

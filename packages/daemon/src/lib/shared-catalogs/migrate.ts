@@ -21,6 +21,7 @@
 import { type SharedCatalogItem, SharedCatalogItemSchema } from '@ferretry/protocol';
 import type { RelayCrypto } from '@ferretry/relay';
 import {
+  CATALOGS_SCHEMA_VERSION,
   CatalogsDocumentSchema,
   type CatalogsDocument,
   type StoredCatalog,
@@ -119,7 +120,7 @@ export async function migrateCatalogs(
     });
   }
 
-  const parsed = CatalogsDocumentSchema.safeParse({ schemaVersion: 2, items, catalogs });
+  const parsed = CatalogsDocumentSchema.safeParse({ schemaVersion: CATALOGS_SCHEMA_VERSION, items, catalogs });
   if (!parsed.success) throw upgradeRefused(documentProblem(parsed) ?? 'it is malformed');
   return { document: parsed.data, sharedBlobs: [...blobs.values()] };
 }

@@ -166,8 +166,10 @@ describe('making a version current and retiring one', () => {
     const answer = {
       itemId: ITEM,
       version: 2,
+      changed: true,
       catalogs: [{ catalogId: `cat_${'A'.repeat(22)}`, revision: 3 }],
     };
+    should(RetiredVersionSchema.safeParse({ ...answer, changed: undefined }).success).equal(false);
     should(RetiredVersionSchema.safeParse(answer).success).equal(true);
     should(RetiredVersionSchema.safeParse({ ...answer, retiredAt: '2026-01-01T00:00:00.000Z' }).success).equal(true);
     should(

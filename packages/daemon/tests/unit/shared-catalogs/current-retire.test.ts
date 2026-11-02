@@ -104,22 +104,6 @@ describe('making a version current', () => {
       'version_unknown',
     );
   });
-
-  it('should fail closed when a write would leave a live line newer than the version served', async () => {
-    const { r, itemId } = await joinedAtThree();
-    const document = r.documents.document;
-    r.documents.document = {
-      ...document,
-      catalogs: document.catalogs.map(catalog => ({
-        ...catalog,
-        entries: catalog.entries.map(entry => ({ ...entry, sinceVersion: 9 })),
-      })),
-    };
-    const writes = r.documents.writes;
-    const damaged = await refusal(async () => await r.service.setRetired(itemId, 1, true));
-    should(damaged.refusal).equal('store_damaged');
-    should(r.documents.writes).equal(writes);
-  });
 });
 
 describe('a catalog added after a rollback', () => {
@@ -171,6 +155,104 @@ describe('a catalog added after a rollback', () => {
   });
 });
 
+describe('a document the commit rules would refuse', () => {
+  const V4 = { ...V3, 'four.txt': 'four' };
+  const V5 = { ...V4, 'five.txt': 'five' };
+
+  /** Versions 1..5 exist, 3 is current, and "Late" lists the item. The tests then break one line of Late's. */
+  async function lateAtThree() {
+    const r = await rig();
+    const first = await r.service.create({ name: 'First' });
+    const late = await r.service.create({ name: 'Late' });
+    const preview = await r.service.previewItem(first.id, { source: SOURCE });
+    const { itemId } = await r.service.addItem(first.id, { source: SOURCE, digest: preview.digest });
+    for (const files of [V2, V3, V4, V5]) await publish(r, itemId, files);
+    await r.service.makeCurrent(itemId, { version: 3, from: 5 });
+    await r.service.addItem(late.id, { itemId, version: 3 });
+    return { r, late, itemId };
+  }
+
+  const breakLate = async (change: { sinceVersion: number; joinedAtMax?: number }) => {
+    const { r, late, itemId } = await lateAtThree();
+    const document = r.documents.document;
+    r.documents.document = {
+      ...document,
+      catalogs: document.catalogs.map(catalog =>
+        catalog.id === late.id
+          ? { ...catalog, entries: catalog.entries.map(entry => ({ ...entry, ...change })) }
+          : catalog,
+      ),
+    };
+    const writes = r.documents.writes;
+    const damaged = await refusal(async () => await r.service.setRetired(itemId, 1, true));
+    should(damaged.refusal).equal('store_damaged');
+    should(r.documents.writes).equal(writes);
+  };
+
+  it('should refuse a live line that began at a version newer than the one served, though that version exists', async () => {
+    await breakLate({ sinceVersion: 4 });
+  });
+
+  it('should refuse a live line whose joinedAtMax covers the version served', async () => {
+    await breakLate({ sinceVersion: 1, joinedAtMax: 5 });
+  });
+
+  it('should refuse a joinedAtMax that is not above sinceVersion, or is past the last version', async () => {
+    await breakLate({ sinceVersion: 3, joinedAtMax: 3 });
+    await breakLate({ sinceVersion: 3, joinedAtMax: 6 });
+  });
+});
+
+describe('publishing a version make-current would not accept', () => {
+  const V3SAME = V3;
+
+  it('should publish the content of a version a later catalog may not serve as a new number', async () => {
+    const r = await rig();
+    const first = await r.service.create({ name: 'First' });
+    const late = await r.service.create({ name: 'Late' });
+    const preview = await r.service.previewItem(first.id, { source: SOURCE });
+    const { itemId } = await r.service.addItem(first.id, { source: SOURCE, digest: preview.digest });
+    await publish(r, itemId, V2);
+    await publish(r, itemId, V3SAME);
+    await r.service.makeCurrent(itemId, { version: 1, from: 3 });
+    await r.service.addItem(late.id, { itemId, version: 1 });
+    // Version 3 cannot be made current (Late may not serve it), so the same content must not be refused as "version 3 again".
+    r.tree.set(SKILL_PATH, V3SAME);
+    const shown = await r.service.previewItemVersion(itemId);
+    should(shown.sameAsVersion).be.undefined();
+    should((await refusal(async () => await r.service.makeCurrent(itemId, { version: 3, from: 1 }))).refusal).equal(
+      'version_before_join',
+    );
+    const written = await r.service.publishItemVersion(itemId, { digest: shown.digest });
+    should(written.itemVersion).equal(4);
+    should(await r.service.currentOf(itemId)).equal(4);
+    should((await r.service.signedVersions(late.id, itemId)).versions.offered.map(each => each.version)).deepEqual([
+      1, 4,
+    ]);
+    should((await r.service.frozenItem(late.id, itemId, 4)).itemVersion).equal(4);
+  });
+
+  it('should publish the content of a retired version as a new number, and still point back to a servable one', async () => {
+    const r = await rig();
+    const catalog = await r.service.create({ name: 'First' });
+    const preview = await r.service.previewItem(catalog.id, { source: SOURCE });
+    const { itemId } = await r.service.addItem(catalog.id, { source: SOURCE, digest: preview.digest });
+    await publish(r, itemId, V2);
+    await publish(r, itemId, V3);
+    await r.service.setRetired(itemId, 1, true);
+    r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'notes.txt': 'notes' });
+    const original = await r.service.previewItemVersion(itemId);
+    should(original.sameAsVersion).be.undefined();
+    should((await r.service.publishItemVersion(itemId, { digest: original.digest })).itemVersion).equal(4);
+    r.tree.set(SKILL_PATH, V2);
+    const again = await r.service.previewItemVersion(itemId);
+    should(again.sameAsVersion).equal(2);
+    should(
+      (await refusal(async () => await r.service.publishItemVersion(itemId, { digest: again.digest }))).refusal,
+    ).equal('same_as_version');
+  });
+});
+
 describe('retiring a version', () => {
   it('should retire and unretire, stamping the time, and raise every live catalog once each time', async () => {
     const { r, first, itemId } = await joinedAtThree();
@@ -179,6 +261,7 @@ describe('retiring a version', () => {
     r.clock.ms += 5_000;
     const retired = await r.service.setRetired(itemId, 2, true);
     should(retired.retiredAt).be.a.String();
+    should(retired.changed).be.true();
     should(retired.catalogs.map(each => each.revision)).deepEqual([before[0] + 1, before[1] + 1]);
     const listed = await r.service.getItem(itemId, { sourceState: false });
     should(listed.versions.find(each => each.version === 2)?.retiredAt).equal(retired.retiredAt);
@@ -192,6 +275,7 @@ describe('retiring a version', () => {
     const writes = r.documents.writes;
     const same = await r.service.setRetired(itemId, 1, false);
     should(same.retiredAt).be.undefined();
+    should(same.changed).be.false();
     should(r.documents.writes).equal(writes);
   });
 

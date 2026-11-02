@@ -63,7 +63,7 @@ export interface AuditedRouteRule {
    * `review` or `already` with a 2xx and changed nothing); it is recorded when the field holds this word, or is absent
    * or unreadable. A refusal or an error is always recorded.
    */
-  readonly recordOnlyWhen?: { readonly field: string; readonly equals: string };
+  readonly recordOnlyWhen?: { readonly field: string; readonly equals: string | boolean };
   /**
    * One route does two opposite things (retire a version, bring it back) and its answer says which by whether a
    * top-level field is there. On a success `detail.action` becomes `present` when the field is, `absent` when it is
@@ -628,6 +628,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'itemId',
     detail: { action: 'retire' },
     actionByField: { field: 'retiredAt', present: 'retire', absent: 'unretire' },
+    recordOnlyWhen: { field: 'changed', equals: true },
     responseFields: {
       itemId: ['itemId'],
       itemVersion: ['version'],

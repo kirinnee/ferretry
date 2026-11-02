@@ -50,7 +50,14 @@ import { z } from 'zod';
 import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from './freeze.ts';
 import { CatalogRefusal } from './refusal.ts';
 
-export const CATALOGS_SCHEMA_VERSION = 2;
+/**
+ * The file's version. 3 is the same shape as 2 (3c-1 and 3d-1 wrote 2), raised only so that a build which does not know
+ * `joinedAtMax` or retirement fails closed on the file instead of reading it and writing it back without them.
+ */
+export const CATALOGS_SCHEMA_VERSION = 3;
+
+/** The version 3c-1 and 3d-1 wrote: the same shape, read once to be upgraded and never written. */
+export const CATALOGS_SCHEMA_VERSION_V2 = 2;
 
 const BindingSchema = z.strictObject({
   /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
@@ -209,19 +216,32 @@ function firstProblem(document: {
   return undefined;
 }
 
-export const CatalogsDocumentSchema = z
-  .strictObject({
-    schemaVersion: z.literal(CATALOGS_SCHEMA_VERSION),
-    defaultCatalogId: SharedCatalogIdSchema.optional(),
-    items: z.array(StoredSharedItemSchema),
-    catalogs: z.array(StoredCatalogSchema),
-  })
-  .check(ctx => {
-    const problem = firstProblem(ctx.value);
-    if (problem !== undefined)
-      ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
-  });
+const documentSchemaFor = <V extends number>(version: V) =>
+  z
+    .strictObject({
+      schemaVersion: z.literal(version),
+      defaultCatalogId: SharedCatalogIdSchema.optional(),
+      items: z.array(StoredSharedItemSchema),
+      catalogs: z.array(StoredCatalogSchema),
+    })
+    .check(ctx => {
+      const problem = firstProblem(ctx.value);
+      if (problem !== undefined)
+        ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
+    });
+
+export const CatalogsDocumentSchema = documentSchemaFor(CATALOGS_SCHEMA_VERSION);
 export type CatalogsDocument = z.infer<typeof CatalogsDocumentSchema>;
+
+/** A version 2 file, read only to be upgraded to this one (`upgradeCatalogsV2`). */
+export const CatalogsDocumentV2Schema = documentSchemaFor(CATALOGS_SCHEMA_VERSION_V2);
+export type CatalogsDocumentV2 = z.infer<typeof CatalogsDocumentV2Schema>;
+
+/** Version 2 to 3 changes no data, only the number a build that does not know the new rules cannot read. */
+export const upgradeCatalogsV2 = (document: CatalogsDocumentV2): CatalogsDocument => ({
+  ...document,
+  schemaVersion: CATALOGS_SCHEMA_VERSION,
+});
 
 export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = {
   schemaVersion: CATALOGS_SCHEMA_VERSION,
@@ -552,14 +572,23 @@ const bumpLive = (document: CatalogsDocument, itemId: string, now: string): Stor
   );
 
 /**
+ * Whether `withCurrentVersion` would accept this version: it is the current one, or it is not retired and every live
+ * catalog that lists the item may serve it. A version that is not is not one a republish can point back to.
+ */
+export const canBeMadeCurrent = (document: CatalogsDocument, item: StoredSharedItem, version: StoredVersion): boolean =>
+  version.version === item.current ||
+  (version.retiredAt === undefined &&
+    liveCatalogsOf(document, item.itemId).every(catalog => mayServe(findEntry(catalog, item.itemId), version.version)));
+
+/**
  * Makes a kept version the one every live catalog serves. Every catalog that lists the item live rises a revision in
  * this one change, as a publish does.
  *
  * - `current_changed` when `from` is no longer the current version (the person saw a stale page).
  * - `version_unknown` for a number the item never had; `version_retired` for a retired one (bring it back first).
  * - `nothing_to_publish` when it already is the current version.
- * - `version_before_join` when any live catalog joined later than that version: a catalog never serves a version below
- *   its `sinceVersion`, and nothing here lowers it. The sentence names the catalogs.
+ * - `version_before_join` when any live catalog may not serve that version (below its `sinceVersion`, or between it and
+ *   `joinedAtMax`): nothing here changes either. The sentence names the catalogs.
  */
 export function withCurrentVersion(
   document: CatalogsDocument,

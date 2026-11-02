@@ -494,4 +494,29 @@ describe('the handlers’ own second line', () => {
     should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
     should(answer.message).match(/a ferret cannot make a catalog/u);
   });
+
+  it('should refuse a ferret the new version, make-current and retire handlers before they reach the service', async () => {
+    // Arrange: a service that fails the test if it is ever called, and the caller the boundary now refuses first.
+    const catalogs = {} as SharedCatalogSubsystem['catalogs'];
+    const routes = sharedCatalogRoutes({ catalogs });
+
+    // Act
+    const answers = [
+      await handleDirectly(routes, 'POST', `/v1/catalog-items/${ITEM}/versions`, undefined, { digest: DIGEST }),
+      await handleDirectly(routes, 'PUT', `/v1/catalog-items/${ITEM}/current`, undefined, { version: 1, from: 2 }),
+      await handleDirectly(routes, 'PATCH', `/v1/catalog-items/${ITEM}/versions/1`, undefined, { retired: true }),
+    ];
+
+    // Assert
+    should(answers.map(answer => [answer.status, answer.code])).deepEqual([
+      [403, 'forbidden'],
+      [403, 'forbidden'],
+      [403, 'forbidden'],
+    ]);
+    should(answers.map(answer => answer.message)).match([
+      /a ferret cannot publish a new version of an item/u,
+      /a ferret cannot choose which version of an item is current/u,
+      /a ferret cannot retire a version of an item/u,
+    ]);
+  });
 });

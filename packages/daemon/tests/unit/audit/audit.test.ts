@@ -885,9 +885,10 @@ describe('auditedRoutes', () => {
         itemId: ITEM,
         version: 2,
         retiredAt: '2026-01-01T00:00:00.000Z',
+        changed: true,
         catalogs: [{ catalogId: CAT, revision: 6 }],
       }),
-      jsonResponse({ itemId: ITEM, version: 2, catalogs: [{ catalogId: CAT, revision: 7 }] }),
+      jsonResponse({ itemId: ITEM, version: 2, changed: true, catalogs: [{ catalogId: CAT, revision: 7 }] }),
       jsonResponse('not an object'),
       jsonTextResponse('{not json'),
     ];
@@ -923,6 +924,44 @@ describe('auditedRoutes', () => {
     should(logged[4]?.detail).containEql({ action: 'retire' });
     should(logged[0]?.subject).equal(ITEM);
     should(JSON.stringify(logged)).not.match(/secret name/u);
+  });
+
+  it('should record nothing for a retire or an unretire that found the version already so', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const answers = [
+      jsonResponse({
+        itemId: ITEM,
+        version: 2,
+        retiredAt: '2026-01-01T00:00:00.000Z',
+        changed: false,
+        catalogs: [{ catalogId: CAT, revision: 6 }],
+      }),
+      jsonResponse({ itemId: ITEM, version: 2, changed: false, catalogs: [{ catalogId: CAT, revision: 6 }] }),
+    ];
+    const { journal, routes } = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+        answers.shift() as ReturnType<typeof jsonResponse>,
+    });
+    const api = await dispatcher(routes);
+    const ask = async (retired: boolean) =>
+      await api.dispatch(
+        request({
+          method: 'PATCH',
+          path: `/v1/catalog-items/${ITEM}/versions/2`,
+          headers: ADMIN,
+          loopback: true,
+          body: JSON.stringify({ retired }),
+        }),
+      );
+
+    // Act
+    await ask(true);
+    await ask(false);
+
+    // Assert
+    should(records(journal)).have.length(0);
   });
 
   it('should keep the rule’s own action when a retire is refused, because nothing was done', async () => {

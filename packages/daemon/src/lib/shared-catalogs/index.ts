@@ -1,5 +1,12 @@
-export { CATALOGS_SCHEMA_VERSION, CatalogsDocumentSchema, EMPTY_CATALOGS_DOCUMENT } from './document.ts';
-export type { CatalogsDocument } from './document.ts';
+export {
+  CATALOGS_SCHEMA_VERSION,
+  CATALOGS_SCHEMA_VERSION_V2,
+  CatalogsDocumentSchema,
+  CatalogsDocumentV2Schema,
+  EMPTY_CATALOGS_DOCUMENT,
+  upgradeCatalogsV2,
+} from './document.ts';
+export type { CatalogsDocument, CatalogsDocumentV2 } from './document.ts';
 export { CATALOGS_SCHEMA_VERSION_V1, CatalogsDocumentV1Schema } from './document-v1.ts';
 export type { CatalogsDocumentV1 } from './document-v1.ts';
 export { migrateCatalogs } from './migrate.ts';

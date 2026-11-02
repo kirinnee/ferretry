@@ -74,6 +74,7 @@ import {
 } from '@ferretry/relay';
 import {
   bindingOf,
+  canBeMadeCurrent,
   type CatalogBinding,
   type CatalogEntry,
   type CatalogsDocument,
@@ -100,6 +101,7 @@ import {
   withDefault,
   withListedItem,
   withNewItem,
+  upgradeCatalogsV2,
   withoutCatalog,
   withoutEntry,
   withPublishedVersion,
@@ -276,7 +278,7 @@ export class SharedCatalogService {
       'itemId' in request
         ? await this.#prepare({ ...this.#listed(document, catalog, request.itemId) })
         : await this.#prepare({ source: request.source, summary: request.summary });
-    return { catalogId: catalog.id, ...(await this.#preview(identity, prepared)) };
+    return { catalogId: catalog.id, ...(await this.#preview(identity, document, prepared)) };
   }
 
   /** One shared item, as the list shows it. */
@@ -321,8 +323,9 @@ export class SharedCatalogService {
   /** The next version of an item, read from the source it remembers, with what would change from the current one. */
   async previewItemVersion(itemId: string): Promise<SharedItemPreview> {
     const identity = await this.#identity();
-    const item = findItem(await this.#document(), itemId);
-    return await this.#preview(identity, await this.#prepare({ item }));
+    const document = await this.#document();
+    const item = findItem(document, itemId);
+    return await this.#preview(identity, document, await this.#prepare({ item }));
   }
 
   #versionOfItem(item: StoredSharedItem, version: number): StoredVersion {
@@ -336,7 +339,7 @@ export class SharedCatalogService {
    * What the next version of an item (or a new item) would be: the candidate frozen from the source as it reads
    * now, its digest, and — against the CURRENT version, the one every catalog serves — what changed.
    */
-  async #preview(identity: DaemonIdentity, prepared: Prepared): Promise<SharedItemPreview> {
+  async #preview(identity: DaemonIdentity, document: CatalogsDocument, prepared: Prepared): Promise<SharedItemPreview> {
     const item = freezeItem(
       this.#input(identity, NORMALISED_CATALOG_ID, prepared, NORMALISED_ITEM_ID, prepared.version),
     );
@@ -347,7 +350,7 @@ export class SharedCatalogService {
       existing === undefined
         ? undefined
         : [currentVersion(existing), ...existing.versions.toReversed()].find(
-            version => version.contentDigest === print.contentDigest,
+            version => version.contentDigest === print.contentDigest && canBeMadeCurrent(document, existing, version),
           );
     return {
       ...(existing === undefined ? {} : { itemId: existing.itemId }),
@@ -784,6 +787,7 @@ export class SharedCatalogService {
         itemId,
         version,
         ...(stored.retiredAt === undefined ? {} : { retiredAt: stored.retiredAt }),
+        changed: next !== document,
         catalogs: revisionsOf(next, itemId),
       };
     });
@@ -792,7 +796,7 @@ export class SharedCatalogService {
   /**
    * Re-reads the source, refuses unless it still hashes to the digest the person previewed, and writes the next
    * version: refused when it is the same as the current one (`nothing_to_publish`) or as an older one
-   * (`same_as_version`). The document comes back with every live catalog bumped.
+   * (`same_as_version`) that make-current would accept. The document comes back with every live catalog bumped.
    */
   async #publish(
     identity: DaemonIdentity,
@@ -817,7 +821,11 @@ export class SharedCatalogService {
         'nothing_to_publish',
         `${item.name} has not changed since version ${current.version}, so there is nothing new to publish.`,
       );
-    const same = item.versions.find(other => other.contentDigest === version.contentDigest);
+    // Only a version make-current would accept is a version to point back to: a retired one, or one a catalog that
+    // joined later may not serve, is published again as a new number instead, so the two never refuse each other.
+    const same = item.versions.find(
+      other => other.contentDigest === version.contentDigest && canBeMadeCurrent(document, item, other),
+    );
     if (same !== undefined)
       throw new CatalogRefusal(
         'same_as_version',
@@ -1043,21 +1051,28 @@ export class SharedCatalogService {
   }
 
   /**
-   * The document for a read. A version 1 file is upgraded first, and only inside the queue: whoever gets
-   * there first does it, the rest find version 2.
+   * The document for a read. A version 1 or 2 file is upgraded first, and only inside the queue: whoever gets
+   * there first does it, the rest find version 3.
    */
   async #document(): Promise<CatalogsDocument> {
     const raw = await this.deps.documents.readRaw();
-    if (raw.version === 2) return raw.doc;
+    if (raw.version === 3) return raw.doc;
     if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
     return await this.#serially(() => this.#writable());
   }
 
-  /** The document for a write, which already runs in the queue: version 1 is upgraded here, once. */
+  /** The document for a write, which already runs in the queue: version 1 or 2 is upgraded here, once. */
   async #writable(): Promise<CatalogsDocument> {
     const raw = await this.deps.documents.readRaw();
-    if (raw.version === 2) return raw.doc;
+    if (raw.version === 3) return raw.doc;
     if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
+    if (raw.version === 2) {
+      // Version 2 to 3 changes no data. The old file is kept first so that a build which wrote it can be restored.
+      const upgraded = upgradeCatalogsV2(raw.doc);
+      await this.deps.documents.writeBackupV2(raw.text);
+      await this.deps.documents.write(upgraded);
+      return upgraded;
+    }
     // Three repeatable steps, in this order: the shared copies, the old file kept as it was, the new file. A crash
     // between any two leaves the old file in place and is repaired by the next call making the same bytes.
     const migration = await migrateCatalogs(this.deps.crypto, raw.doc, digest => this.deps.blobs.get(digest));

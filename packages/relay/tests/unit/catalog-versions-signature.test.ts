@@ -269,6 +269,31 @@ describe('an item checked against the manifest and the version list together', (
     should(result.ok && result.value.version).equal(2);
   });
 
+  it('should refuse an older offered version whose size or summary is not the list’s, though its digest is', async () => {
+    const { manifest, signedManifest, identity, list, resign } = await world();
+    const older = skill(identity.daemonId, 2, '# older\n');
+    const measured = await catalogItemDigest(relayCrypto, older);
+    if (measured === null) throw new Error('no form');
+    const check = async (entry: Partial<SharedCatalogItemVersions['offered'][number]>) =>
+      await verifyCatalogItemAgainstVersions(
+        relayCrypto,
+        manifest,
+        signedManifest.spki,
+        await resign({
+          ...list,
+          offered: [
+            { version: 2, ...measured, publishedAt: AT, summary: older.summary, ...entry },
+            ...list.offered.slice(1),
+          ],
+        }),
+        older,
+      );
+    should(await check({})).match({ ok: true });
+    // The digest is the item's own, so only the size check can catch a wrong size, and only the summary check a wrong summary.
+    should(await check({ size: measured.size + 1 })).match({ ok: false, refusal: 'item_mismatch' });
+    should(await check({ summary: 'a line nobody reviewed' })).match({ ok: false, refusal: 'item_mismatch' });
+  });
+
   it('should refuse a list signed by another key, or with a bad signature', async () => {
     const { manifest, signedManifest, signedList, item } = await world();
     const check = (signed: SignedCatalogItemVersions) =>

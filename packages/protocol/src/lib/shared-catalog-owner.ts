@@ -493,6 +493,8 @@ export const RetiredVersionSchema = z.strictObject({
   version: z.number().int().min(1),
   /** When it was retired; unset when it is in use again. */
   retiredAt: InstantSchema.optional(),
+  /** False when the version was already in the state asked for: nothing was written and no revision rose. */
+  changed: z.boolean(),
   catalogs: z.array(z.strictObject({ catalogId: SharedCatalogIdSchema, revision: z.number().int().min(1) })).readonly(),
 });
 export type RetiredVersion = z.infer<typeof RetiredVersionSchema>;
