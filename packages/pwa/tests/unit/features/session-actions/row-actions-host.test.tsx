@@ -284,6 +284,7 @@ describe('the sessions bar row actions', () => {
       'hypermedia',
       'pack',
       'agenda',
+      'compact-at',
       'passive-learning',
       'scan-ferret',
       'restart',

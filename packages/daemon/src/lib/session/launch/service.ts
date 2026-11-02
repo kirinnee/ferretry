@@ -25,7 +25,7 @@ import type { SessionPlanner } from '../../core/session-planner.ts';
 import type { SessionId } from '../../session-id.ts';
 import { relaunchCommand } from '../transcript/relaunch.ts';
 import { buildLaunchArgv, FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
-import { currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
+import { currentLaunchCompactAt, currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
 
 /** What a relaunch reads about one session. */
 export interface LaunchSubject {
@@ -151,10 +151,13 @@ export class SessionLaunchService {
     if (outcome.kind !== 'planned') return undefined;
     const effort = currentLaunchEffort(config, state);
     const fast = currentLaunchFast(config, state);
-    // Claude carries fast mode in a replacement overlay, so the one it replaces has to be in hand. A
+    const compactAt = currentLaunchCompactAt(config, account.compactAt);
+    // Claude carries fast mode and the compaction trigger in a replacement overlay, so the one it replaces has to be in hand. A
     // login whose overlay cannot be read cannot be rebuilt: the record is replayed as it was.
     const fixedSettings =
-      account.kind === 'claude' && fast !== undefined ? await this.ports.fixedSettings(executable, account.kind) : '';
+      account.kind === 'claude' && (fast !== undefined || compactAt !== undefined)
+        ? await this.ports.fixedSettings(executable, account.kind)
+        : '';
     if (fixedSettings === undefined) return undefined;
     try {
       return {
@@ -166,7 +169,9 @@ export class SessionLaunchService {
           readableFolders: this.ports.readableFolders(id),
           model: outcome.plan.model,
           ...(effort === undefined ? {} : { effort }),
-          ...(fast === undefined ? {} : { fast, fixedSettings }),
+          ...(fast === undefined ? {} : { fast }),
+          ...(compactAt === undefined ? {} : { compactAt }),
+          ...(fast === undefined && compactAt === undefined ? {} : { fixedSettings }),
           harnessFlags: config.harnessFlags,
         }),
         model: outcome.plan.model,

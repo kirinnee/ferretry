@@ -22,14 +22,15 @@ Everything the CLI itself reads at launch. **Restart CLI** (Actions, or Info ›
 revive of a stopped ferret, the relaunch of a pane that died with `fy daemon restart`, and a migration onto
 another login all apply them, because all four build the launch the same way:
 
-| Setting                                                           | Where it lives                                                     |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| The login's agent permission mode                                 | the generated wrapper (`--permission-mode`)                        |
-| The login's profile: its environment and credential               | the generated wrapper, and the credential resolved again at launch |
-| The fixed layer: Ferretry tools, its instructions, fixed settings | the generated wrapper and `<harness home>/.fy/fixed.json`          |
-| MCP servers, skills and instruction files the CLI loads           | the harness home and the project, read by the CLI when it starts   |
-| The arguments Ferretry launches with                              | built by the daemon at every launch (below)                        |
-| Resource limits                                                   | the saved resource-limit document, read at launch                  |
+| Setting                                                           | Where it lives                                                                      |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| The login's agent permission mode                                 | the generated wrapper (`--permission-mode`)                                         |
+| The login's profile: its environment and credential               | the generated wrapper, and the credential resolved again at launch                  |
+| The fixed layer: Ferretry tools, its instructions, fixed settings | the generated wrapper and `<harness home>/.fy/fixed.json`                           |
+| MCP servers, skills and instruction files the CLI loads           | the harness home and the project, read by the CLI when it starts                    |
+| The arguments Ferretry launches with                              | built by the daemon at every launch (below)                                         |
+| Resource limits                                                   | the saved resource-limit document, read at launch                                   |
+| Compact memory at, per ferret or per runtime                      | the launch's `--settings` (Claude) or `-c` (Codex) ([compact-at.md](compact-at.md)) |
 
 A restart **keeps the conversation, the model, the effort and fast mode** the ferret is on — including a model the
 owner switched to with `/model` — unless the person restarting it picks another.

@@ -393,3 +393,17 @@ describe('TERMINAL_STATUSES', () => {
     should([...TERMINAL_STATUSES]).deepEqual(['completed', 'failed', 'stalled', 'stopped']);
   });
 });
+
+describe('renderSessionView compaction trigger', () => {
+  it('should show a ferret’s own trigger and say nothing when it has none', () => {
+    // Arrange / Act
+    const set = renderSessionView(sessionView({ compactAt: 250_000 }), NOW).join('\n');
+    const auto = renderSessionView(sessionView({ compactAt: 'auto' }), NOW).join('\n');
+    const none = renderSessionView(sessionView(), NOW).join('\n');
+
+    // Assert
+    should(set).containEql('compact at 250k');
+    should(auto).containEql('compact at Auto');
+    should(none).not.containEql('compact at');
+  });
+});

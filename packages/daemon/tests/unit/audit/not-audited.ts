@@ -175,6 +175,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'switches what one ferret is told about presentation at its next launch; changes no access',
   'PATCH /v1/sessions/:sessionId/agenda-mode':
     'switches whether one ferret keeps an agenda at its next launch; it changes no access and only what the ferret is told',
+  'PATCH /v1/sessions/:sessionId/compact-at':
+    'sets where one ferret compacts its conversation at its next launch; it changes no access and only the harness setting it is started with',
   'PATCH /v1/sessions/:sessionId/pack':
     'switches whether one ferret is told about sub-ferrets at its next launch; it grants nothing a start could not',
   'POST /v1/pack/recommend': 'a read with a body: lists the models usable now for a task',

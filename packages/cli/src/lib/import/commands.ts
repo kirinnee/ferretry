@@ -115,6 +115,10 @@ export function registerNewCommand(
     .option('--model <model>', 'the model, as the runtime lists it')
     .option('--effort <level>', 'the reasoning effort')
     .option(
+      '--compact-at <tokens|auto>',
+      'squeeze its conversation at this many tokens (e.g. 250k); auto leaves the default',
+    )
+    .option(
       '--auto',
       'let Ferretry choose: the models the routing prompt names, in its order (or Jev, when Jev decides)',
     )

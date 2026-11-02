@@ -262,6 +262,11 @@ import {
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
 import {
+  ProtocolSessionCompactAtGateway,
+  registerSessionCompactAtCommand,
+  SessionCompactAtController,
+} from '../src/lib/session/compact-at.ts';
+import {
   PinAgentController,
   ProtocolSessionPinGateway,
   registerSessionPinCommands,
@@ -1257,6 +1262,15 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerSessionPinCommands(
       program,
       new PinAgentController(new ProtocolSessionPinGateway(client), presenter),
+      presenter,
+    );
+  },
+  // `fy session compact-at`: where one ferret squeezes its conversation (docs/compact-at.md).
+  ({ program, world, client }) => {
+    const presenter = new SessionPresenter(world.io, new SystemClock());
+    registerSessionCompactAtCommand(
+      program,
+      new SessionCompactAtController(new ProtocolSessionCompactAtGateway(client), presenter),
       presenter,
     );
   },

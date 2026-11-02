@@ -18,6 +18,7 @@
  */
 import { z } from 'zod';
 import { BoardTaskIdSchema } from './board-refs.ts';
+import { CompactAtSchema } from './compact-at.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { HarnessSchema, InteractionModeSchema, SessionViewSchema } from './session.ts';
 
@@ -435,6 +436,8 @@ export const PackNewRequestSchema = z
     mode: InteractionModeSchema.optional(),
     /** An existing card the sub-ferret works on (`--card`): assigned to it, never copied into a second card. */
     card: BoardTaskIdSchema.optional(),
+    /** Where it compacts its conversation (`--compact-at`); absent follows its login's default. */
+    compactAt: CompactAtSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.auto === true && value.runtime !== undefined)

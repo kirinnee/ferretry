@@ -425,6 +425,7 @@ export class PackService {
             ...(parent === undefined ? {} : { parent }),
             ...(choice.model === undefined ? {} : { model: choice.model }),
             ...(choice.effort === undefined ? {} : { effort: choice.effort }),
+            ...(request.compactAt === undefined ? {} : { compactAt: request.compactAt }),
             name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
           },
           delegation,

@@ -15,7 +15,7 @@
  * not drag the session back onto the model it just left.
  */
 
-import type { SessionConfig, SessionState } from '@ferretry/protocol';
+import type { CompactAt, SessionConfig, SessionState } from '@ferretry/protocol';
 
 /** A `[1m]`-style selector suffix, which a harness drops from the model it reports. */
 const SELECTOR = /\[[^\]]*\]$/u;
@@ -59,6 +59,19 @@ export function currentLaunchModel(
 export function currentLaunchFast(config: SessionConfig, state: SessionState): boolean | undefined {
   if (state.observedFast !== undefined && observedSinceDecision(config, state)) return state.observedFast;
   return config.launchFast;
+}
+
+/**
+ * Where a relaunch compacts the conversation, as a token count: the ferret's own choice, else its login's
+ * default. `auto` (either said so, or neither said anything) is nothing, which leaves the harness's own
+ * trigger in charge. A ferret's explicit `auto` beats a login default.
+ */
+export function currentLaunchCompactAt(
+  config: Pick<SessionConfig, 'compactAt'>,
+  accountDefault: CompactAt | undefined,
+): number | undefined {
+  const wanted = config.compactAt ?? accountDefault;
+  return typeof wanted === 'number' ? wanted : undefined;
 }
 
 /**

@@ -370,6 +370,7 @@ export * from './account-health-view.ts';
 export * from './account-picker-catalog.ts';
 export * from './account-picker-store.ts';
 export * from './agenda-api.ts';
+export * from './compact-at-api.ts';
 export * from './agenda-client.ts';
 export * from './agenda-store.ts';
 export * from './agent-references.ts';

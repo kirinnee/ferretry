@@ -1,4 +1,4 @@
-import type { StartSessionRequestInput } from '@ferretry/protocol';
+import { parseCompactAt, type StartSessionRequestInput } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -33,6 +33,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly model?: string;
   /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
   readonly fast?: boolean;
+  /** What was typed after `--compact-at` (`auto`, `250k`, `250000`); parsed here so a bad value is refused in plain words. */
+  readonly compactAt?: string;
   /** Only set when the caller actually passed `--rc`/`--no-rc`; unset leaves the daemon default. */
   readonly remoteControl?: boolean;
   readonly harnessFlags?: readonly string[];
@@ -120,6 +122,9 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
         ]
       : [];
 
+  const compactAt = flags.compactAt === undefined ? undefined : parseCompactAt(flags.compactAt);
+  if (compactAt?.ok === false) throw new SessionCommandError(`--compact-at: ${compactAt.reason}`);
+
   const parent = resolveParent({
     explicit: flags.parent,
     callerSessionId: environment.callerSessionId,
@@ -139,6 +144,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.fast === undefined ? {} : { fast: flags.fast }),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
+    ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
     ...(flags.interval === undefined ? {} : { intervalSeconds: flags.interval }),
     ...(flags.turnTimeout === undefined ? {} : { timeoutSeconds: flags.turnTimeout }),
     ...(flags.nudgeAfter === undefined ? {} : { nudgeAfterSeconds: flags.nudgeAfter }),
