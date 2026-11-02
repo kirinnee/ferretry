@@ -772,7 +772,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Search first (`zz search`).');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
-    should(text).containEql('the board covers it; after a Not good');
+    should(text).containEql('gates or `zz notify` cover it; after a Not good');
     should(text).containEql('after a Not good, open one only if you need input.');
     // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
     should(text).containEql("Owner's question: answer ON it, options stay");
@@ -841,9 +841,9 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Board: opt-in; most work needs no card.');
+    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
     should(text).containEql(
-      'Make one only if the owner asked, your lead gave one, or `zz board status` says on; else ask: `zz agenda add -k yesno` "Track this on the board?".',
+      'Card only if `zz board status` is on, under your card (`--parent`), or the owner said Yes to `zz agenda add -k yesno` "Track this on the board?" (`--approval !A<n>`).',
     );
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
@@ -855,7 +855,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).containEql('A card (&F412; agenda !A48):');
-    should(text).containEql('First `zz search`; link a match, no duplicate.');
+    should(text).containEql('`zz search` first; link a match.');
     should(text).not.containEql('#F');
     should(text).containEql(
       'Make: `zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
@@ -865,7 +865,6 @@ describe('BOARD_INSTRUCTION', () => {
     );
     should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('`zz agenda add --task <id>` (owner)');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');

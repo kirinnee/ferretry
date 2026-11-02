@@ -22,20 +22,64 @@ The owner's decision (2026-11-01): "board is overkill — most ferrets should no
 doing that". So each project's board has a switch, **off unless the owner turns it on**, and a ferret makes a card
 only when
 
-1. the owner asked for a card or the board,
-2. its lead handed it one (`fy new` under a card the lead holds, or `--card <id>`), or
-3. the project's board is on (`fy board status`).
+1. the project's board is on (`fy board status`),
+2. the card goes under a live card on that board it holds (`--parent`: its own, or one its lead handed it with
+   `fy new`), or
+3. the owner said **Yes** to its agenda question "Track this on the board?" (`--approval !A<n>`).
 
 Otherwise it asks first: one agenda yes/no, "Track this on the board?". A card a ferret holds works as it always did,
-whatever the switch says.
+whatever the switch says. **The daemon enforces this** ([below](#the-daemon-refuses-a-card-nobody-asked-for)): words
+alone did not hold, because a person's own instructions that say "record every task" outvoted the Board rule.
 
-| Where the board is off                                    | What happens                                                                                                 |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `fy start`, the app's New session                         | no card is made                                                                                              |
-| `fy new`                                                  | a card only under the card the lead holds (the brief names it, or its focus), or the one `--card` hands over |
-| `fy task create`                                          | never refused (the owner may have said yes); a ferret is reminded that the board is off                      |
-| the [turn-end check](#the-turn-end-check)                 | silent                                                                                                       |
-| the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a card that exists, so only a ferret holding one hears them                  |
+| Where the board is off                                    | What happens                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `fy start`, the app's New session                         | no card is made                                                                                                    |
+| `fy new`                                                  | a card only under a live card the lead holds on the child's board (brief or focus), or the one `--card` hands over |
+| `fy task create`, `fy task refile` to another board       | a ferret's card is refused unless it rests on a live parent it holds there or on the owner's Yes                   |
+| the [turn-end check](#the-turn-end-check)                 | silent                                                                                                             |
+| the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a card that exists, so only a ferret holding one hears them                        |
+
+### The daemon refuses a card nobody asked for
+
+`BoardService.create` decides (`packages/daemon/src/lib/board/opt-in.ts`), for a **ferret on its own session
+credential** only, after the sub-ferret refusal and the parent's standing — and so does a **refile onto another board**,
+because a card made where the board is on must not be moved onto one that is off. The first proof that holds lets the
+card through:
+
+| Proof                  | What the daemon checks                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The board is on        | the switch of the board the card lands on. A switch that cannot be read is off.                                                                                                                                                                                                                                                                                                         |
+| A live parent it holds | `--parent` (a refile: the card's parent) is a card on **that same board**, neither dropped nor closed, that the ferret may adopt under (owner, assignee or ancestor standing) — it is splitting work already on the board.                                                                                                                                                              |
+| The owner's Yes        | `--approval !A<n>`: an item on the ferret's **own** agenda, raised by it, asking exactly Yes or No, whose title or ask is "Track … on the board?", closed by the **owner** with **Yes**. The card stores it (`approval`). **One Yes makes one card**: two creates on one Yes are decided one after the other, and the second is refused. A refile carries the Yes the card was made on. |
+
+**The owner's words are no proof.** An earlier draft let a card through whose ask matched the owner's message when
+that message named a card, the board or tracking. Its security review showed "track down the bug" and "the credit card
+field" passing, so an honest ferret told to "record every task" would still have made cards. The Yes costs the owner one
+tap and has no such hole.
+
+Otherwise the create (or refile) is refused (`403 forbidden`) with one message that says what to do instead:
+
+```text
+The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" — then, once the owner says Yes, fy task create … --approval !A<n>.
+```
+
+A named approval that does not count adds why (`The approval does not count: the owner did not answer Yes to !A12.`).
+An agenda that cannot be read counts as no Yes, so the rule fails closed.
+
+**`fy new` asks the same of the card it makes for a sub-ferret**, of the board the **child** will work on (its own folder's
+with `--cwd`, resolved as its start resolves it, and checked again on the board it lands on). Where that board is off it
+makes one only under a card on that same board that the lead may adopt under and that is still work
+(`BoardService.mayAdoptUnder`): the first card the brief names, else the lead's focus. A brief that merely mentions
+somebody else's card, a closed or dropped one, or one on another board gives no card.
+
+Not asked: the owner (a paired device, the Board page), the admin token, and the daemon's own writes — gates, PRs,
+releases. Moves, links, notes and closes of a card a ferret holds are unchanged.
+
+**GAP: the same user is the owner.** The admin token (`fy --as-owner task create`, an old `fy` without the session
+credential) passes, the same GAP the switch has (below; closing it is RF-3, &F291). A ferret runs as the owner's own
+user, so it can also write the daemon's files directly — the board, the switch, its agenda ledger — as
+[secrets.md](secrets.md) says of every same-user process. The rule stops a ferret that follows instructions, not one
+that sets out to forge the owner.
 
 **Only the owner throws the switch**: `fy board on|off [--project <name>]` from their own terminal, or **Use the
 board** on the project's page in the app. A ferret's `fy board on` is refused (`403 owner-only`), because the session
@@ -105,7 +149,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". First `fy search`; link a match, no duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes. Gate? The daemon asks; raise nothing.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or the owner said Yes to `fy agenda add -k yesno` "Track this on the board?" (`--approval !A<n>`). `fy search` first; link a match. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes. Gate? The daemon asks; raise nothing.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`

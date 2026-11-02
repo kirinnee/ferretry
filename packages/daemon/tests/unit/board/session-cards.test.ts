@@ -50,6 +50,8 @@ interface Options {
   readonly failTrigger?: boolean;
   /** The boards that are off; absent means every board is on. */
   readonly off?: readonly BoardProjectId[];
+  /** The board a child started in each folder works on; absent means PROJECT. */
+  readonly folders?: Readonly<Record<string, BoardProjectId>>;
 }
 
 const build = (options: Options = {}) => {
@@ -78,6 +80,7 @@ const build = (options: Options = {}) => {
           snapshot: service.snapshot.bind(service),
           requireHandOver: service.requireHandOver.bind(service),
           handOver: service.handOver.bind(service),
+          mayAdoptUnder: service.mayAdoptUnder.bind(service),
           trigger: async () => {
             throw new Error('the board store is read-only');
           },
@@ -88,6 +91,7 @@ const build = (options: Options = {}) => {
   const cardsPorts: SessionCardsPorts = {
     board,
     lanes: lanesSource,
+    starts: { projectForStart: async ({ cwd }) => options.folders?.[cwd] ?? PROJECT },
     switches: { isOn: async projectId => !(options.off ?? []).includes(projectId) },
     proposer: {
       propose: async (projectId, sessionId) => {
@@ -265,6 +269,94 @@ describe('a session started with a brief', () => {
       // Assert
       should(delegation).match({ id: 'F2', existing: false, parent: { id: 'F1' } });
       should(opened.card).match({ id: 'F2', owner: 'lead', assignee: 'child' });
+    });
+
+    it("should make no card under a card the brief merely names: somebody else's, closed or dropped", async () => {
+      // Arrange
+      const cards = [
+        card({ id: 'F1', owner: 'stranger' }),
+        card({ id: 'F2', owner: 'lead', laneId: 'closed' }),
+        card({ id: 'F3', owner: 'lead', dropped: { reason: 'superseded', at: NOW } }),
+      ];
+      const { subject, ports, focus } = build({ off: [PROJECT], cards });
+      focus.anchors.set('lead', { id: 'F2' });
+
+      // Act
+      const outcomes = [];
+      for (const brief of ['Fix &F1 for the owner', 'Finish &F2', 'Redo &F3']) {
+        outcomes.push(await subject.delegate('lead', { brief, name: 'Build it' }, true));
+      }
+
+      // Assert
+      for (const outcome of outcomes) {
+        should(outcome.notes[0]).startWith('No card was made for the sub-ferret: the Ferretry board is off');
+      }
+      should(ports.store.cards.size).equal(3);
+    });
+
+    it("should ask the board a fy new --cwd child will work on, not the lead's", async () => {
+      // Arrange: the lead works on Ferretry (on) and holds F1 there; the child runs in a folder whose board is off.
+      const { subject, ports, focus } = build({
+        off: [OTHER_PROJECT],
+        folders: { '/work/other': OTHER_PROJECT },
+        cards: [card({ id: 'F1', owner: 'lead' })],
+      });
+
+      // Act
+      const bare = await subject.delegate('lead', { brief: 'Build it', name: 'Build it' }, false, '/work/other');
+      focus.anchors.set('lead', { id: 'F1' });
+      const underFerretryCard = await subject.delegate(
+        'lead',
+        { brief: 'Build it under &F1', name: 'Build it' },
+        false,
+        '/work/other',
+      );
+
+      // Assert
+      for (const outcome of [bare, underFerretryCard]) {
+        should(outcome.delegation).be.undefined();
+        should(outcome.notes[0]).startWith('No card was made for the sub-ferret: the Home board is off');
+      }
+      should(ports.store.cards.size).equal(1);
+    });
+
+    it("should make a fy new --cwd card under a card the lead holds on the child's own board", async () => {
+      // Arrange
+      const { subject } = build({
+        off: [OTHER_PROJECT],
+        folders: { '/work/other': OTHER_PROJECT },
+        cards: [card({ id: 'F1', owner: 'lead', projectId: OTHER_PROJECT, laneId: 'todo' })],
+      });
+
+      // Act
+      const { delegation } = await subject.delegate(
+        'lead',
+        { brief: 'Part of &F1', name: 'Build it' },
+        false,
+        '/work/other',
+      );
+
+      // Assert
+      should(delegation).match({ id: 'F2', existing: false, parent: { id: 'F1' } });
+    });
+
+    it('should make no card when the child lands on a board that is off, whatever the start guessed', async () => {
+      // Arrange: the delegation was made for Ferretry, under F1; the child landed on the Home board, which is off.
+      const { subject, ports } = build({
+        off: [OTHER_PROJECT],
+        projects: { child: OTHER_PROJECT },
+        cards: [card({ id: 'F1', owner: 'lead' })],
+      });
+      const delegation = { lead: 'lead', brief: 'Build it', id: 'F2', existing: false, parent: { id: 'F1' } };
+
+      // Act
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
+
+      // Assert
+      should(opened).deepEqual({
+        notes: ['No card was made for the sub-ferret: the Home board is off and you hold no card on it for this work.'],
+      });
+      should([...ports.store.cards.keys()]).deepEqual(['F1']);
     });
   });
 
@@ -555,6 +647,7 @@ describe('a session started with a brief', () => {
     const subject = new SessionCards({
       board: new BoardService(world({ lanes: projectLanes })),
       lanes: projectLanes,
+      starts: { projectForStart: async () => BARE_PROJECT },
       switches: { isOn: async () => true },
       proposer: {
         propose: async (projectId, sessionId) => {

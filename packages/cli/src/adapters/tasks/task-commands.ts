@@ -73,6 +73,10 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--workflow <workflow>', `one of ${choices(TaskWorkflowSchema.options)}`)
     .option('--depends-on <id>', 'a task this one waits on (repeatable)', collect, [])
     .option('--parent <id>', 'the task this one is part of')
+    .option(
+      '--approval <id>',
+      'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',
+    )
     .option('--assignee <who>', 'the ferret doing it: a callsign or a session id')
     .option('--project <name>', 'the board to create it on; default: the board of the calling session')
     .option('--lane <lane>', "the lane to start in; default: the workflow's first")

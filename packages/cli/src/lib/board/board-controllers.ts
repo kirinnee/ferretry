@@ -308,30 +308,12 @@ export class BoardController {
       }
     }
     await this.print('create', latest, options);
-    if (as !== undefined) await this.remindOffBoard(created.task, target?.name);
     for (const problem of failed) {
       this.deps.output.diagnostic(
         `${formatTaskRef(created.task)} was created but the PR link failed — ${problem}\nlink it again: ${this.deps.binary} task link ${formatTaskRef(created.task)} --pr <url>`,
       );
     }
     if (failed.length > 0) refuse(`${String(failed.length)} PR link(s) did not attach`);
-  }
-
-  /**
-   * The board is opt-in (docs/board.md § The board is opt-in): a ferret that made a card on a board that is off
-   * is reminded, once, when that card is right. Never refused — the owner may have said yes — and silent when
-   * the switch cannot be read (an older daemon has none).
-   */
-  private async remindOffBoard(
-    card: Pick<BoardTaskResponse['task'], 'id' | 'projectId'>,
-    name: string | undefined,
-  ): Promise<void> {
-    const state = await this.gateway.switchOf(card.projectId).catch(() => undefined);
-    if (state === undefined || state.on) return;
-    const ref = formatTaskRef(card);
-    this.deps.output.report(
-      `The ${name ?? "project's"} board is off: keep ${ref} only if the owner asked for it or your lead gave it to you; otherwise ${this.deps.binary} task drop ${ref} --reason "<why>".`,
-    );
   }
 
   async move(idText: string, laneText: string, options: BoardCommonOptions & { readonly reason?: string }) {

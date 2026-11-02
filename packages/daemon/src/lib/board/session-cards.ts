@@ -63,9 +63,13 @@ interface BoardProjectNames {
 export interface SessionCardsPorts {
   readonly board: Pick<
     BoardService,
-    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger'
+    'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger' | 'mayAdoptUnder'
   >;
   readonly lanes: LaneSetSource;
+  /** The board a session about to start in a folder will work on, for a `fy new --cwd` (`SessionProjects`). */
+  readonly starts: {
+    projectForStart(start: { readonly cwd: string; readonly parent?: string }): Promise<BoardProjectId>;
+  };
   /** Whether a board is on: a start on a board that is off makes no card of its own. */
   readonly switches: BoardSwitchReader;
   readonly proposer: LaneProposer;
@@ -193,10 +197,17 @@ export class SessionCards {
    * A `fy new`'s card, before the child starts, and the child's id reserved (or the existing card named).
    * Its parent comes from intent: the card the brief names, else the lead's explicit focus card, else none.
    * `inLeadFolder` says the child runs where the lead does, so it inherits the lead's board and the footer can
-   * name it. No delegation when the board can do nothing (the child then starts with no card, and `notes` is
-   * what to say) or when `--card` named a card that cannot be handed over (`refusal`).
+   * name it; otherwise `cwd` is the folder it runs in. No delegation when the board can do nothing (the child then
+   * starts with no card, and `notes` is what to say) or when `--card` named a card that cannot be handed over
+   * (`refusal`). The board is opt-in, and asked of the board the CHILD will work on: a card is made there only when
+   * it is on, or under a parent the lead holds on that same board (docs/board.md § The board is opt-in).
    */
-  async delegate(lead: string, request: DelegationRequest, inLeadFolder: boolean): Promise<DelegationOutcome> {
+  async delegate(
+    lead: string,
+    request: DelegationRequest,
+    inLeadFolder: boolean,
+    cwd?: string,
+  ): Promise<DelegationOutcome> {
     try {
       if (request.card !== undefined) return await this.existingCard(lead, request.card);
       const title = cardTitle(request.name, request.brief);
@@ -219,9 +230,13 @@ export class SessionCards {
         };
       }
       const { parent, from } = await this.parentFor(lead, request.brief);
-      const leadBoard = projectId ?? (await this.ports.lanes.projectOf(lead));
-      if (parent === null && !(await this.ports.switches.isOn(leadBoard))) {
-        const name = project ?? (await this.ports.projects.nameOf(leadBoard));
+      const childBoard =
+        projectId ??
+        (cwd === undefined
+          ? await this.ports.lanes.projectOf(lead)
+          : await this.ports.starts.projectForStart({ cwd, parent: lead }));
+      if (!(await this.licensed(childBoard, parent))) {
+        const name = project ?? (await this.ports.projects.nameOf(childBoard));
         return {
           notes: [
             `No card was made for the sub-ferret: the ${name} board is off and you hold no card for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
@@ -272,21 +287,22 @@ export class SessionCards {
 
   /**
    * The parent a NEW card goes under, from the lead's intent in priority order: the first card the brief
-   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last.
+   * names, then the lead's explicit focus card. Neither is the card the lead merely touched last. Either counts
+   * only when the lead may put a child under it and it is still work (`BoardService.mayAdoptUnder`): a brief that
+   * merely mentions somebody else's card, or a closed one, gives no parent, so the board's switch decides.
    */
   private async parentFor(
     lead: string,
     brief: string,
   ): Promise<{ readonly parent: TaskRef | null; readonly from?: ParentFrom }> {
     const named = firstTaskRefIn(brief);
-    const { cards } = await this.ports.board.snapshot();
-    const usable = (ref: TaskRef | null | undefined): TaskRef | null => {
-      const found = ref === null || ref === undefined ? undefined : cards.find(card => card.id === ref.id);
-      return found === undefined || found.dropped !== null ? null : { id: found.id };
+    const usable = async (ref: TaskRef | null | undefined): Promise<TaskRef | null> => {
+      if (ref === null || ref === undefined) return null;
+      return (await this.ports.board.mayAdoptUnder(lead, ref.id)) ? { id: ref.id } : null;
     };
-    const fromBrief = usable(named);
+    const fromBrief = await usable(named);
     if (fromBrief !== null) return { parent: fromBrief, from: 'brief' };
-    const anchored = usable(await this.ports.focus.anchorOf(lead));
+    const anchored = await usable(await this.ports.focus.anchorOf(lead));
     return anchored === null ? { parent: null } : { parent: anchored, from: 'focus' };
   }
 
@@ -323,6 +339,14 @@ export class SessionCards {
       )
         return { notes: [] };
       const placed = await this.place(start.sessionId, owner);
+      // The board the child landed on is the one asked: a guess at start time that came out otherwise makes no card.
+      if (delegation !== undefined && !(await this.licensed(placed.projectId, delegation.parent))) {
+        return {
+          notes: [
+            `No card was made for the sub-ferret: the ${placed.project} board is off and you hold no card on it for this work.`,
+          ],
+        };
+      }
       const id = delegation?.id ?? (await this.ports.board.reserve('feature'));
       const card = await this.ports.board.spawn(
         id,
@@ -347,6 +371,14 @@ export class SessionCards {
       this.ports.diagnostics.warn(note);
       return { notes: [note] };
     }
+  }
+
+  /** Whether a lead's new card may go on `projectId`: its board is on, or the parent (already judged) is on it. */
+  private async licensed(projectId: BoardProjectId, parent: TaskRef | null): Promise<boolean> {
+    if (await this.ports.switches.isOn(projectId)) return true;
+    if (parent === null) return false;
+    const { cards } = await this.ports.board.snapshot();
+    return cards.find(card => card.id === parent.id)?.projectId === projectId;
   }
 
   /** The lead's existing card, assigned to the session just started; it keeps its owner and its parent. */
