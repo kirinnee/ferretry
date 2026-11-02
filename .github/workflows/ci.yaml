@@ -496,8 +496,6 @@ jobs:
             runs_on: ubuntu-latest
           - target: linux-arm64
             runs_on: ubuntu-24.04-arm
-          - target: darwin-arm64
-            runs_on: macos-15
     runs-on: ${{ matrix.runs_on }}
     steps:
       - uses: actions/checkout@v5
@@ -506,13 +504,11 @@ jobs:
       - name: Download compiled binaries
         uses: ./.github/actions/download-binaries
       # The smoke starts a real session, and a session lives in a tmux pane. Not every runner
-      # image ships tmux (macOS never does), so install it where it is missing.
+      # image ships tmux, so install it where it is missing.
       - name: Install tmux
         run: |
           if command -v tmux >/dev/null 2>&1; then
             tmux -V
-          elif [ "$(uname -s)" = Darwin ]; then
-            brew install tmux
           else
             sudo apt-get update && sudo apt-get install -y tmux
           fi
@@ -525,3 +521,18 @@ jobs:
         run: |
           prefix="$(jq -r '.bin | to_entries[0].key' packages/cli/package.json)"
           ./scripts/release/smoke.sh "dist/bin/${prefix}-${TARGET}"
+
+  # The darwin-arm64 smoke, the one macOS job in this workflow. GitHub's macOS pool is small and shared,
+  # and when it has no runner it CANCELS the job with no step run (docs/standards/ci-cd, "macOS runner
+  # shortage"). smoke-darwin.yaml tells that from a smoke that ran and failed: on a pull request it is
+  # ADVISORY (a missing runner is a warning, a failed smoke is still red); on `main` it is REQUIRED and
+  # a job that could not start is re-queued up to 3 times before the verdict fails. Release waits on
+  # this, so a darwin binary is never released unproven. The Linux legs above stay required everywhere.
+  smoke-darwin:
+    name: Smoke darwin-arm64
+    needs: compile
+    permissions:
+      contents: read
+    uses: ./.github/workflows/smoke-darwin.yaml
+    with:
+      advisory: ${{ github.event_name == 'pull_request' }}

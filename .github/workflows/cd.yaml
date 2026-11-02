@@ -6,9 +6,55 @@ on:
       - 'v*.*.*'
 
 jobs:
+  # The release proves darwin works before it publishes. GoReleaser cross-compiles the darwin binary on
+  # Linux, and nothing else runs it: `compile` builds the same binaries once more so `smoke-darwin` can
+  # start the shipped darwin-arm64 binary on a real Mac. REQUIRED here (`advisory: false`): when GitHub's
+  # macOS pool gives the job no runner it is re-queued up to 3 times with backoff, and only then does
+  # the release stop, saying the runner was unavailable (docs/standards/ci-cd, "macOS runner shortage").
+  compile:
+    timeout-minutes: 15
+    name: Compile Binaries
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Cross-compile standalone binaries
+        run: ./scripts/ci/in-devshell.sh ./scripts/release/compile.sh
+      # The manifest every consumer holds its download to (.github/actions/download-binaries).
+      - name: List the binaries
+        run: ./scripts/ci/binaries-manifest.sh write dist/bin
+      - name: Upload binaries
+        id: upload_1
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin/
+          if-no-files-found: error
+      - name: Upload binaries (retry)
+        if: steps.upload_1.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin/
+          overwrite: true
+          if-no-files-found: error
+  smoke-darwin:
+    name: Smoke darwin-arm64
+    needs: compile
+    permissions:
+      contents: read
+    uses: ./.github/workflows/smoke-darwin.yaml
+    with:
+      advisory: false
   goreleaser:
     timeout-minutes: 30
     name: GoReleaser Publish
+    needs: smoke-darwin
     permissions:
       contents: write
     runs-on: ubuntu-latest

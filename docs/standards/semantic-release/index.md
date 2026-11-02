@@ -121,7 +121,8 @@ plain semver while the tag keeps its `v` prefix.
 3. `nix develop .#ci -c ./scripts/ci/release.sh` runs semantic-release, which computes the
    version, rewrites the changelog, stamps the version files, commits, and pushes the `vX.Y.Z`
    tag.
-4. The tag fires `cd.yaml`, which runs
+4. The tag fires `cd.yaml`, which first proves the darwin-arm64 binary on a macOS runner (required, re-queued
+   up to 3 times if GitHub has no runner; see [CI/CD](../ci-cd/index.md#macos-runner-shortage)), then runs
    `nix develop .#releaser -c ./scripts/release/publish.sh`.
 5. `publish.sh` compiles the standalone binaries into `prebuilt/` (it survives GoReleaser's
    `--clean`), diffs `Changelog.md` against `Changelog.old.md` into `IncrementalChangelog.md`,
