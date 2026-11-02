@@ -68,7 +68,7 @@ flag to retry with.
 - **`fy search`, `search_work`, ⌘K:** the routes above.
 - **Inbox Find (app):** the Inbox is not a daemon search. With words typed, Find looks in **every tab at once** —
   Open (including items on a ferret), Snoozed, Replied, Resolved and Cards to test (snoozed ones too) — and each
-  row carries a **state chip**: `Open`, `With <ferret>`, the card's lane, `Snoozed until 09:00`, `Replied` or
+  row carries a **state chip**: `Open`, `With <ferret>`, the card's lane, `Snoozed · tmrw 09:00` (full wording in the tooltip), `Replied` or
   `Resolved`. An empty Find is not a search: each tab keeps its own list. The logic is
   `packages/pwa/src/lib/agenda-inbox-find.ts`; the rows are `features/agenda/inbox-find-results.tsx`.
 - **Composer `&` / `!` autocomplete:** asks with `open: true` and shows each hit's `standing` as its chip.

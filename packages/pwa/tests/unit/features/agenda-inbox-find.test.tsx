@@ -55,6 +55,47 @@ const sources = async () => {
   };
 };
 
+describe('the chip stays short', () => {
+  it('shortens "tomorrow", keeps a clock or a date as said, and keeps the full wording', async () => {
+    const find = async (until: string) => {
+      const base = await sources();
+      const later = parked('A2', 'Rebase the relay branch later', { reason: 'snoozed', until });
+      return findRows({ ...base, parked: [later] }, { ...NO_FILTER, query: 'rebase' }, false, NOW).find(
+        row => row.chip.tone === 'snoozed',
+      )?.chip;
+    };
+    expect(await find('2026-08-01T15:00:00.000Z')).toEqual({
+      tone: 'snoozed',
+      label: 'Snoozed · 15:00',
+      full: 'Snoozed until 15:00',
+    });
+    expect(await find('2026-08-05T09:00:00.000Z')).toMatchObject({
+      label: expect.stringMatching(/^Snoozed · \w{3} 09:00$/u),
+    });
+    expect(await find('not a time')).toEqual({ tone: 'snoozed', label: 'Snoozed', full: 'Snoozed' });
+  });
+
+  it('says plain Snoozed for a card to test whose wake is unknown or unreadable', async () => {
+    const base = await sources();
+    const [row] = base.toTestSnoozed;
+    for (const snoozedUntil of [null, 'not a time'])
+      expect(
+        findRows(
+          {
+            ...base,
+            toTest: [],
+            parked: [],
+            resolved: [],
+            toTestSnoozed: [{ ...(row as NonNullable<typeof row>), snoozedUntil }],
+          },
+          { ...NO_FILTER, query: 'relay' },
+          false,
+          NOW,
+        )[0]?.chip,
+      ).toEqual({ tone: 'snoozed', label: 'Snoozed', full: 'Snoozed' });
+  });
+});
+
 describe('isFinding', () => {
   it('is a search only once words are typed', () => {
     expect(isFinding('')).toBe(false);
@@ -67,7 +108,7 @@ describe('findRows', () => {
   it('looks in every tab and gives each row the state it is in', async () => {
     const rows = findRows(await sources(), { ...NO_FILTER, query: 'relay' }, false, NOW);
     expect(rows.map(row => [row.key.includes('A2') ? 'A2' : row.chip.tone, row.chip.label])).toEqual(
-      expect.arrayContaining([['A2', expect.stringMatching(/^Snoozed until /u)]]),
+      expect.arrayContaining([['A2', 'Snoozed · tmrw 09:00']]),
     );
     expect(rows.map(row => row.chip.tone).sort()).toEqual(['card', 'replied', 'resolved', 'snoozed', 'snoozed']);
     expect(rows.find(row => row.chip.tone === 'replied')?.chip.label).toBe('Replied');
@@ -132,6 +173,8 @@ const results = (root: HTMLElement) =>
     text: row.textContent ?? '',
     chip: row.querySelector('[data-find-chip]')?.getAttribute('data-find-chip'),
     label: row.querySelector('[data-find-chip]')?.textContent,
+    full: row.querySelector('[data-find-chip]')?.getAttribute('aria-label'),
+    title: row.querySelector('[data-find-chip]')?.getAttribute('title'),
   }));
 
 describe('Inbox Find across every tab', () => {
@@ -148,7 +191,10 @@ describe('Inbox Find across every tab', () => {
     await fill(find, 'relay');
     const rows = results(root);
     expect(rows.map(row => row.chip).sort()).toEqual(['card', 'replied', 'resolved', 'snoozed', 'snoozed']);
-    expect(rows.find(row => row.chip === 'snoozed' && row.text.includes('!A2'))?.label).toStartWith('Snoozed until');
+    const wake = rows.find(row => row.chip === 'snoozed' && row.text.includes('!A2'));
+    expect(wake?.label).toBe('Snoozed · tmrw 09:00');
+    expect(wake?.full).toBe('Snoozed until tomorrow 09:00');
+    expect(wake?.title).toBe('Snoozed until tomorrow 09:00');
     expect(rows.find(row => row.chip === 'replied')?.label).toBe('Replied');
     expect(root.querySelector('[data-agenda-parked-pane]')).toBeNull();
     expect(loads.count).toBeGreaterThan(0);

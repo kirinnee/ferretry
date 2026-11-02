@@ -7,7 +7,7 @@
  * the snoozed and replied ones, the resolved ones and the cards to test (snoozed ones too). An EMPTY Find is
  * not a search: every tab keeps its own list, exactly as before.
  *
- * Each row carries a STATE CHIP — "Open", "With zoe", "Snoozed until 09:00", "Replied", "Resolved", or the
+ * Each row carries a STATE CHIP — "Open", "With zoe", "Snoozed · 09:00", "Replied", "Resolved", or the
  * lane a card is in — so a row is never mistaken for work that is waiting on you now.
  */
 
@@ -20,7 +20,7 @@ import {
   inboxWho,
   parkedBy,
 } from './agenda-inbox-list.ts';
-import { clockWords, parkedWords } from './agenda-status.ts';
+import { clockWords, parkedUntilWords } from './agenda-status.ts';
 import { filterToTest, type ToTestCard } from './to-test-inbox.ts';
 
 /** What the chip is about; the page tints it from this and never parses the words. */
@@ -28,7 +28,10 @@ export type FindTone = 'open' | 'with-ferret' | 'snoozed' | 'replied' | 'resolve
 
 interface FindChip {
   readonly tone: FindTone;
+  /** Short enough to stay on one line on a phone. */
   readonly label: string;
+  /** The full wording, for the chip's tooltip and accessible name; the label itself when it is already whole. */
+  readonly full: string;
 }
 
 export type FindRow =
@@ -55,15 +58,23 @@ const SNOOZED = 'Snoozed';
 const cardLaneLabel = (row: ToTestCard): string =>
   row.group.laneSet?.lanes.find(lane => lane.id === row.card.task.laneId)?.name ?? 'To test';
 
-const snoozedUntil = (until: string | null, now: number): string => {
-  const words = until === null ? null : clockWords(until, now);
-  return words === null ? SNOOZED : `${SNOOZED} until ${words}`;
-};
+const plainChip = (tone: FindTone, label: string): FindChip => ({ tone, label, full: label });
 
-const parkedChip = (item: Pick<AgendaItem, 'parked' | 'neededBy'>, ferret: string, now: number): FindChip =>
-  item.parked?.reason === 'replied'
-    ? { tone: 'replied', label: 'Replied' }
-    : { tone: 'snoozed', label: parkedWords(item, ferret, now) || SNOOZED };
+/** "Snoozed · tmrw 09:00" on the chip, "Snoozed until tomorrow 09:00" in its tooltip; plain "Snoozed" when the wake is unknown. */
+const snoozedChip = (words: string | null): FindChip =>
+  words === null
+    ? plainChip('snoozed', SNOOZED)
+    : {
+        tone: 'snoozed',
+        label: `${SNOOZED} · ${words.replace(/^tomorrow /u, 'tmrw ')}`,
+        full: `${SNOOZED} until ${words}`,
+      };
+
+const snoozedUntil = (until: string | null, now: number): FindChip =>
+  snoozedChip(until === null ? null : clockWords(until, now));
+
+const parkedChip = (item: Pick<AgendaItem, 'parked' | 'neededBy'>, now: number): FindChip =>
+  item.parked?.reason === 'replied' ? plainChip('replied', 'Replied') : snoozedChip(parkedUntilWords(item, now));
 
 /**
  * Every row the words match, tab by tab in the order the Show menu lists them — Open (with the items on a
@@ -79,26 +90,24 @@ export const findRows = (
   const toTest = (row: ToTestCard, chip: FindChip): FindRow => ({ kind: 'card', key: row.key, row, chip });
   const toTestFilter = { machine: filter.machine, query: filter.query, agendaOnly };
   return [
-    ...filterInboxCards(sources.cards, filter).map(card => agenda(card, { tone: 'open', label: 'Open' })),
+    ...filterInboxCards(sources.cards, filter).map(card => agenda(card, plainChip('open', 'Open'))),
     ...filterInboxCards(sources.withFerret, filter).map(card =>
-      agenda(card, { tone: 'with-ferret', label: `With ${inboxWho(card).ferret}` }),
+      agenda(card, plainChip('with-ferret', `With ${inboxWho(card).ferret}`)),
     ),
-    ...filterToTest(sources.toTest, toTestFilter).map(row => toTest(row, { tone: 'card', label: cardLaneLabel(row) })),
+    ...filterToTest(sources.toTest, toTestFilter).map(row => toTest(row, plainChip('card', cardLaneLabel(row)))),
     ...filterInboxCards(parkedBy(sources.parked, 'snoozed'), filter).map(card =>
-      agenda(card, parkedChip(card.item, inboxWho(card).ferret, now)),
+      agenda(card, parkedChip(card.item, now)),
     ),
-    ...filterToTest(sources.toTestSnoozed, toTestFilter).map(row =>
-      toTest(row, { tone: 'snoozed', label: snoozedUntil(row.snoozedUntil, now) }),
-    ),
+    ...filterToTest(sources.toTestSnoozed, toTestFilter).map(row => toTest(row, snoozedUntil(row.snoozedUntil, now))),
     ...filterInboxCards(parkedBy(sources.parked, 'replied'), filter).map(card =>
-      agenda(card, parkedChip(card.item, inboxWho(card).ferret, now)),
+      agenda(card, parkedChip(card.item, now)),
     ),
     ...filterInboxResolved(sources.resolved, filter).map(
       (row): FindRow => ({
         kind: 'resolved',
         key: `${row.key}:${row.record.resolvedAt}`,
         row,
-        chip: { tone: 'resolved', label: 'Resolved' },
+        chip: plainChip('resolved', 'Resolved'),
       }),
     ),
   ];

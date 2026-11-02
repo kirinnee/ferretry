@@ -96,7 +96,16 @@ describe('Inbox Find looks in every tab', () => {
           const chips = await tab.$$eval('[data-find-row] [data-find-chip]', nodes =>
             nodes.map(node => node.textContent ?? ''),
           );
-          expect(chips).toEqual(['Open', expect.stringMatching(/^Snoozed until /u), 'Replied', 'Resolved']);
+          expect(chips).toEqual(['Open', expect.stringMatching(/^Snoozed · /u), 'Replied', 'Resolved']);
+          const lines = await tab.$$eval('[data-find-row] [data-find-chip]', nodes =>
+            nodes.map(node => node.getBoundingClientRect().height),
+          );
+          for (const height of lines) expect(height, 'every chip is one line').toBeLessThan(26);
+          const squeezed = await tab.$$eval('[data-find-row] .fy-inbox-row__title', nodes =>
+            nodes.map(node => node.getBoundingClientRect().width),
+          );
+          const row = await tab.$eval('[data-find-row]', node => node.getBoundingClientRect().width);
+          for (const width of squeezed) expect(width, 'no title is squeezed by its chip').toBeGreaterThan(row * 0.6);
           const overflow = await tab.evaluate(
             () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
           );

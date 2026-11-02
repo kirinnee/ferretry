@@ -51,6 +51,12 @@ export const neededByWords = (item: Timed, now: number): string | null => {
 
 const isNotice = (item: Pick<AgendaItem, 'notice'>): boolean => item.notice === true;
 
+/** When a snoozed item wakes, as a person says it ("tomorrow 09:00"); `null` when it is not snoozed or the instant cannot be read. */
+export const parkedUntilWords = (item: Pick<AgendaItem, 'parked' | 'neededBy'>, now: number): string | null =>
+  item.parked === undefined || item.parked.reason === 'replied'
+    ? null
+    : clockWords(agendaWakeAt(item) ?? item.parked.until, now);
+
 /**
  * Where a parked item waits: "Snoozed until Thu 15:00" (or the deadline that wakes it sooner), or "Replied 14:02 —
  * waiting on Johnnie". An instant that cannot be read is left unsaid rather than guessed.
@@ -65,7 +71,7 @@ export const parkedWords = (
     const at = clockWords(item.parked.at, now);
     return at === null ? `Replied — waiting on ${ferret}` : `Replied ${at} — waiting on ${ferret}`;
   }
-  const until = clockWords(agendaWakeAt(item) ?? item.parked.until, now);
+  const until = parkedUntilWords(item, now);
   return until === null ? 'Snoozed' : `Snoozed until ${until}`;
 };
 

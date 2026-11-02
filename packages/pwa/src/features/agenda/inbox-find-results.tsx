@@ -51,9 +51,10 @@ const lineOf = (row: FindRow): Line => {
   };
 };
 
-function StateChip({ tone, label }: { readonly tone: FindTone; readonly label: string }) {
+/** One line, always: the label is short, and the full wording is the tooltip and the accessible name. */
+function StateChip({ tone, label, full }: { readonly tone: FindTone; readonly label: string; readonly full: string }) {
   return (
-    <span className="fy-find-chip" data-find-chip={tone}>
+    <span aria-label={full} className="fy-find-chip" data-find-chip={tone} role="img" title={full}>
       {label}
     </span>
   );
@@ -96,9 +97,9 @@ export function InboxFindResults({
                 onNavigate={open === null ? onNavigate : () => onOpen(open)}
                 to={line.to}
               >
-                <span className="fy-inbox-row__top">
+                <span className="fy-inbox-row__top fy-find-row__top">
                   <span className="fy-inbox-row__title">{line.title}</span>
-                  <StateChip label={row.chip.label} tone={row.chip.tone} />
+                  <StateChip full={row.chip.full} label={row.chip.label} tone={row.chip.tone} />
                 </span>
                 <span className="fy-inbox-row__meta">
                   {line.more.map((text, index) => (
