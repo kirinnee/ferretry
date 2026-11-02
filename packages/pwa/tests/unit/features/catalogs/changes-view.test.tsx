@@ -46,6 +46,38 @@ describe('ChangesView', () => {
     await view.unmount();
   });
 
+  it('draws the hidden note as a sentence with a lock, never in the code style', async () => {
+    const view = await mount(
+      <ChangesView
+        changes={catalogChanges({
+          entries: [{ label: 'Starts', change: 'changed', document: false, hidden: true }],
+        })}
+      />,
+    );
+    const note = q('[data-change-hidden]');
+    expect(note?.textContent).toBe('Changed. Hidden, because it may hold a secret. Open it yourself to compare.');
+    expect(note?.closest('pre')).toBeNull();
+    expect(note?.closest('.mono')).toBeNull();
+    expect(note?.className).toContain('text-fg');
+    expect(note?.className).not.toContain('text-muted');
+    expect(note?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('draws the too-large note the same way', async () => {
+    const view = await mount(
+      <ChangesView
+        changes={catalogChanges({
+          entries: [{ label: 'Skill file big.md', change: 'changed', document: true, tooLarge: true }],
+        })}
+      />,
+    );
+    const note = q('[data-change-too-large]');
+    expect(note?.closest('pre')).toBeNull();
+    expect(note?.querySelector('svg')).not.toBeNull();
+    await view.unmount();
+  });
+
   it('renders a long line whole: it wraps, and nothing on it clips, truncates or scrolls', async () => {
     const long = `acme --stdio --remote https://evil.example.test/${'a'.repeat(300)}${ZWSP}`;
     const view = await mount(
