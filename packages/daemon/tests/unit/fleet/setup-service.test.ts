@@ -1464,6 +1464,186 @@ describe('the clone.import executor in update mode', () => {
   });
 });
 
+// ── The update copy: security review regressions (#F544) ─────────────────────────────────────────
+
+describe('the clone.import executor in update mode refuses what the review did not say', () => {
+  const KEY_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const KEY_API = 'cccccccccccccccccccccccccc';
+  const FROM_SOURCE = { clonedFrom: 'source', clonedFromDaemon: 'daemon-source' };
+  const bundleOf = (patch: Record<string, unknown> = {}) =>
+    FleetCloneBundleSchema.parse({
+      format: 'ferretry-clone',
+      version: 2,
+      daemon: 'daemon-source',
+      keys: {},
+      machine: 'source',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      credentials: [],
+      components: {},
+      profiles: {},
+      runtimes: {},
+      files: [],
+      notCopied: [],
+      ...patch,
+    }) as unknown as Record<string, unknown>;
+  const update = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+  const run = async (w: World, change: Extract<FleetAccountChange, { kind: 'clone.import' }>) => {
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    return w.applied[0]?.documents ?? [];
+  };
+
+  it('should honour skip: a left-out new component is not written, and a contradicting decision is refused', async () => {
+    // Arrange
+    const w = world();
+    const bundle = bundleOf({
+      keys: { 'mcp/skip-me': KEY_A },
+      components: { mcp: { 'skip-me': { command: 'not-supposed-to-copy' } } },
+    });
+    const review = await w.service.reviewClone({ bundle });
+
+    // Act
+    const documents = await run(w, update(bundle, { skip: ['mcp/skip-me'], reviewed: review.fingerprint }));
+
+    // Assert
+    should(documents.map(document => document.path).filter(path => path.includes('skip-me'))).eql([]);
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(bundle, {
+          skip: ['mcp/skip-me'],
+          decisions: { 'mcp/skip-me': 'add' },
+          reviewed: review.fingerprint,
+        }),
+      ),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('mcp/skip-me is left out');
+  });
+
+  it('should refuse an environment login changed after the review, writing nothing', async () => {
+    // Arrange
+    const environment = (value: string) =>
+      bundleOf({
+        keys: { 'login/api': KEY_API },
+        credentials: [{ id: 'api', harness: 'claude', store: 'environment', env: { NODE_OPTIONS: value } }],
+        profiles: { default: { layers: [] } },
+        runtimes: { agent: { credential: 'api', profile: 'default', agent: false } },
+      });
+    const w = world();
+    const review = await w.service.reviewClone({ bundle: environment('--trace-warnings') });
+    should(review.logins[0]?.runnable?.entries).containEql({
+      label: 'Environment NODE_OPTIONS',
+      text: '--trace-warnings',
+      document: false,
+    });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(environment('--require /tmp/other-module.cjs'), { reviewed: review.fingerprint }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).eql([]);
+  });
+
+  it('should refuse a bundle that carries a script and also says it could not, on review and on apply', async () => {
+    const masked = bundleOf({
+      keys: { 'hooks/a': KEY_A },
+      components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+      files: [{ path: 'components/hooks/a/run.sh', content: 'different script' }],
+      notCopied: [{ path: 'components/hooks/a/run.sh', reason: 'too large' }],
+    });
+    const w = world();
+    const reviewing = await setupRefusal(w.service.reviewClone({ bundle: masked }), 'fleet_setup_refused');
+    should(reviewing.message).containEql('also says it could not carry it');
+    const applying = await catalogRefusal(
+      w.service.executors.clone.describe(update(masked, { reviewed: 'any' })),
+      'fleet_change_refused',
+    );
+    should(applying.message).containEql('also says it could not carry it');
+    should(w.applied).eql([]);
+  });
+
+  /** A target whose hooks/a, copied before from the source, owns a folder holding `files`. */
+  const withHooks = (directory: string, files: string[], layout = LAYOUT): World => {
+    const w = world({ catalog: { layout } });
+    w.state.reading = configReading(
+      parseAccountModel({
+        version: 2,
+        components: { hooks: { a: { harness: 'claude', directory, ...FROM_SOURCE, clonedFromKey: KEY_A } } },
+      }),
+      'r',
+    );
+    const folder = `${layout.assetsDirectory}/${directory}`;
+    w.state.folders[folder] = { files: files.map(path => ({ path, content: `${path} here` })), skipped: [] };
+    for (const path of files) w.state.assets[`${folder}/${path}`] = `${path} here`;
+    return w;
+  };
+  const keepOnly = bundleOf({
+    keys: { 'hooks/a': KEY_A },
+    components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+    files: [{ path: 'components/hooks/a/keep.sh', content: 'keep, from the source' }],
+  });
+
+  it('should remove a file the review listed as removed, in the same batch and only if unchanged', async () => {
+    // Arrange
+    const w = withHooks('components/hooks/a', ['keep.sh', 'gone.sh']);
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+    should(review.items[0]?.files).containEql({
+      path: 'components/hooks/a/gone.sh',
+      change: 'removed',
+      lines: { added: 0, removed: 1 },
+    });
+
+    // Act
+    const documents = await run(
+      w,
+      update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+    );
+
+    // Assert
+    should(documents.find(document => document.path.endsWith('/gone.sh'))).eql({
+      path: '/state/fleet/assets/components/hooks/a/gone.sh',
+      content: '',
+      mode: 0o600,
+      expect: 'digest:/state/fleet/assets/components/hooks/a/gone.sh',
+      remove: true,
+    });
+    should(documents.find(document => document.path.endsWith('/keep.sh'))?.content).equal('keep, from the source');
+  });
+
+  it('should refuse to remove anything inside a credential store, even if the planner named it (§14.4)', async () => {
+    // Arrange: a layout whose asset tree holds the credential store, and a folder pointed into it.
+    const w = withHooks('credentials/claude-you', ['keep.sh', '.credentials.json'], {
+      ...LAYOUT,
+      assetsDirectory: '/state/fleet',
+    });
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal(
+      "credentials/claude-you/.credentials.json is not one of this machine's own setup documents, so an update never removes it. Nothing was changed.",
+    );
+    should(w.applied).eql([]);
+  });
+});
+
 // ── The "last copied" record ─────────────────────────────────────────────────────────────────────
 
 describe('the clone-base record', () => {

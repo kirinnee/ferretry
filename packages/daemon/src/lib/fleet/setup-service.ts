@@ -51,6 +51,7 @@ import {
   buildCloneBundle,
   CLONE_BASE_FILE,
   type ClonePlan,
+  CREDENTIALS_DIRECTORY,
   CloneRefusal,
   cloneSourceIdentity,
   CloneSourceMismatch,
@@ -823,6 +824,7 @@ export class FleetSetupService {
       plan = planCloneUpdate(found.analysis, {
         decisions: change.decisions ?? {},
         ...(change.logins === undefined ? {} : { logins: change.logins }),
+        ...(change.skip === undefined ? {} : { skip: change.skip }),
       });
     } catch (error) {
       if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
@@ -848,7 +850,14 @@ export class FleetSetupService {
               }),
             ),
           };
-    const documents = await this.#documents(reading, plan.model, plan.files, record === undefined ? [] : [record]);
+    const removals = plan.removals.map(file => this.#removableAsset(file));
+    const documents = await this.#documents(
+      reading,
+      plan.model,
+      plan.files,
+      record === undefined ? [] : [record],
+      removals,
+    );
     const sourceName = change.names?.source ?? found.bundle.machine;
     return {
       model: plan.model,
@@ -923,11 +932,35 @@ export class FleetSetupService {
   }
 
   /** The configuration files, then the asset documents, then any document by absolute path — each with what it expects. */
+  /**
+   * Where a document an update removes lives, refused unless it is inside the asset tree and outside every
+   * place a login keeps its sign-in: the credential store, the runtime homes and the harnesses' own homes.
+   * The planner only ever names files inside a folder a taken item alone owns; this holds even if it did not.
+   */
+  #removableAsset(file: string): string {
+    const { layout } = this.deps.catalog;
+    const absolute = expandAssetPath(file, layout.userHome, layout.assetsDirectory);
+    const inside = (root: string): boolean => absolute.startsWith(`${root.replace(/\/+$/u, '')}/`);
+    const fenced = [
+      `${layout.fleetDirectory.replace(/\/+$/u, '')}/${CREDENTIALS_DIRECTORY}`,
+      layout.homesDirectory,
+      ...Object.values(layout.defaultHomeDirectories),
+    ];
+    if (file.split('/').includes('..') || !inside(layout.assetsDirectory) || fenced.some(inside)) {
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        `${file} is not one of this machine's own setup documents, so an update never removes it. Nothing was changed.`,
+      );
+    }
+    return absolute;
+  }
+
   async #documents(
     reading: AccountDocumentReading,
     model: AccountModel,
     assets: readonly FleetCloneFile[],
     absolute: readonly { readonly path: string; readonly content: string }[],
+    removals: readonly string[] = [],
   ): Promise<FleetDocumentWrite[]> {
     const { catalog } = this.deps;
     const documents: FleetDocumentWrite[] = [...reading.documents(model)];
@@ -944,6 +977,16 @@ export class FleetSetupService {
         content: target.content,
         mode: DOCUMENT_MODE,
         expect: await catalog.documentRevision(target.path),
+      });
+    }
+    // Removed in the same batch, each only if it is still exactly what the review compared.
+    for (const path of removals) {
+      documents.push({
+        path,
+        content: '',
+        mode: DOCUMENT_MODE,
+        expect: await catalog.documentRevision(path),
+        remove: true,
       });
     }
     return documents;
@@ -964,6 +1007,7 @@ export class FleetSetupService {
           document.path,
           timed.includes(document.path) ? '' : this.deps.digest(document.content),
           document.expect,
+          document.remove === true,
         ]),
         secrets,
       }),
