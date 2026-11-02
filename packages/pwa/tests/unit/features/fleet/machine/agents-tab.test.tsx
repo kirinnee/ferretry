@@ -43,8 +43,12 @@ interface Context {
   readonly retried: { count: number };
   readonly browser: Window;
   readonly q: (selector: string) => Element | null;
-  /** The switch whose label starts with these words. */
+  /** The switch on the row with this title. */
   readonly sw: (label: string) => HTMLElement;
+  /** That row's (i) button. */
+  readonly info: (label: string) => HTMLElement;
+  /** That row's open explanation, or `null` while the (i) is closed. */
+  readonly explanation: (label: string) => string | null;
 }
 
 const withTab = async (setup: Setup, run: (ctx: Context) => Promise<void>): Promise<void> => {
@@ -77,11 +81,16 @@ const withTab = async (setup: Setup, run: (ctx: Context) => Promise<void>): Prom
       q,
       sw: label =>
         must(
-          [...view.container.querySelectorAll<HTMLElement>('[role="switch"]')].find(node =>
-            node.textContent?.startsWith(label),
-          ) ?? null,
+          view.container.querySelector<HTMLElement>(`[data-switch-row="${label}"] [role="switch"]`),
           `the ${label} switch`,
         ),
+      info: label =>
+        must(
+          view.container.querySelector<HTMLElement>(`[data-switch-row="${label}"] [data-switch-info]`),
+          `the ${label} (i) button`,
+        ),
+      explanation: label =>
+        view.container.querySelector(`[data-switch-row="${label}"] [data-switch-explanation]`)?.textContent ?? null,
     });
   } finally {
     await view.unmount();
@@ -263,6 +272,8 @@ describe('AgentsTab', () => {
         const group = must(q('[data-agent-control]'), 'the group');
         expect(group.querySelectorAll('[role="switch"]')).toHaveLength(5);
         expect(group.querySelector('input[type="checkbox"]')).toBeNull();
+        // One line each: no explanation is on the page until its (i) is opened.
+        expect(group.querySelectorAll('[data-switch-explanation]')).toHaveLength(0);
         expect(sw('Terminals').getAttribute('aria-checked')).toBe('true');
         expect(sw('Browsers').getAttribute('aria-checked')).toBe('true');
         expect(sw('Files').getAttribute('aria-checked')).toBe('true');
@@ -295,22 +306,24 @@ describe('AgentsTab', () => {
       });
     });
 
-    it('says plainly that Page scripts can read sign-ins, and sends it when turned on', async () => {
-      await withTab({ answers: SAVES }, async ({ q, calls, sw }) => {
-        const row = sw('Page scripts');
-        expect(row.textContent).toContain('your sign-ins');
-        expect(row.textContent).toContain('shared agent profile');
-        await click(row, 'page scripts switch');
+    it('keeps the Page scripts warning one tap away, and sends it when turned on', async () => {
+      await withTab({ answers: SAVES }, async ({ q, calls, sw, info, explanation }) => {
+        expect(q('[data-switch-row="Page scripts"] [data-switch-hint]')?.textContent).toBe('Can read site sign-ins');
+        expect(explanation('Page scripts')).toBeNull();
+        await click(info('Page scripts'), 'page scripts (i)');
+        expect(explanation('Page scripts')).toContain('your sign-ins');
+        expect(explanation('Page scripts')).toContain('shared agent profile');
+        await click(sw('Page scripts'), 'page scripts switch');
         await click(q('[data-change-submit]'), 'save agent control');
         expect(staged(calls).body).toMatchObject({ change: { agentControl: { pageScripts: true } } });
       });
     });
 
     it('offers Ferretry settings off by default and Save turns it on', async () => {
-      await withTab({ answers: SAVES }, async ({ q, calls, sw }) => {
-        const row = sw('Ferretry settings');
-        expect(row.textContent).toContain("an agent's edit that loosens anything still waits for you");
-        await click(row, 'Ferretry settings switch');
+      await withTab({ answers: SAVES }, async ({ q, calls, sw, info, explanation }) => {
+        await click(info('Ferretry settings'), 'Ferretry settings (i)');
+        expect(explanation('Ferretry settings')).toContain("an agent's edit that loosens anything still waits for you");
+        await click(sw('Ferretry settings'), 'Ferretry settings switch');
         await click(q('[data-change-submit]'), 'save agent control');
         expect(staged(calls).body).toMatchObject({
           change: { agentControl: { terminals: true, ferretrySettings: true, pageScripts: false } },
@@ -331,6 +344,62 @@ describe('AgentsTab', () => {
     });
   });
 
+  describe('the (i) on a switch row', () => {
+    it('opens and closes the longer explanation, and says so to a screen reader', async () => {
+      await withTab({}, async ({ info, explanation }) => {
+        const button = info('Terminals');
+        expect(button.getAttribute('aria-label')).toBe('More about Terminals');
+        expect(button.getAttribute('aria-expanded')).toBe('false');
+        expect(explanation('Terminals')).toBeNull();
+        await click(button, 'open');
+        expect(button.getAttribute('aria-expanded')).toBe('true');
+        expect(explanation('Terminals')).toBe('Open, read and type into session terminals.');
+        const controlled = button.getAttribute('aria-controls');
+        expect(document.getElementById(controlled ?? '')?.textContent ?? null).toBe(explanation('Terminals'));
+        await click(button, 'close');
+        expect(button.getAttribute('aria-expanded')).toBe('false');
+        expect(explanation('Terminals')).toBeNull();
+      });
+    });
+
+    it('is a real button and the switch beside it is named by the row title, so both work by keyboard', async () => {
+      await withTab({}, async ({ sw, info }) => {
+        expect(info('Files').tagName).toBe('BUTTON');
+        expect(info('Files').getAttribute('type')).toBe('button');
+        expect(sw('Files').tagName).toBe('BUTTON');
+        const labelled = sw('Files').getAttribute('aria-labelledby');
+        expect(document.getElementById(labelled ?? '')?.textContent).toBe('Files');
+      });
+    });
+
+    it('opening one does not change the switch or stage a change', async () => {
+      await withTab({}, async ({ q, sw, info }) => {
+        await click(info('Browsers'), 'open');
+        expect(sw('Browsers').getAttribute('aria-checked')).toBe('true');
+        expect(q('[data-change-submit]')).toBeNull();
+      });
+    });
+
+    it('draws each on/off setting as one switch row, its explanation closed', async () => {
+      await withTab({ machine: machineView({ autoResume: true, agendaMode: true }) }, async ({ q }) => {
+        for (const label of [
+          'Terminals',
+          'Browsers',
+          'Files',
+          'Ferretry settings',
+          'Page scripts',
+          'Resume ferrets after a restart',
+          'Agenda mode for new ferrets',
+          'Keep in sync',
+        ]) {
+          const row = must(q(`[data-switch-row="${label}"]`), `the ${label} row`);
+          expect(row.querySelectorAll('[role="switch"]')).toHaveLength(1);
+          expect(row.querySelector('[data-switch-explanation]')).toBeNull();
+        }
+      });
+    });
+  });
+
   describe('Auto-resume', () => {
     it('is hidden for a daemon that predates it, and never sent one', async () => {
       await withTab({ answers: SAVES }, async ({ q, calls }) => {
@@ -344,9 +413,10 @@ describe('AgentsTab', () => {
     it('shows On, and Save sends Off with a way to Keep On', async () => {
       await withTab(
         { machine: machineView({ autoResume: true }), answers: SAVES },
-        async ({ q, calls, retried, sw }) => {
+        async ({ q, calls, retried, sw, info, explanation }) => {
           const toggle = sw('Resume ferrets after a restart');
-          expect(toggle.textContent).toContain('ferrets that were running');
+          await click(info('Resume ferrets after a restart'), 'auto-resume (i)');
+          expect(explanation('Resume ferrets after a restart')).toContain('ferrets that were running');
           expect(toggle.getAttribute('aria-checked')).toBe('true');
           expect(q('[data-auto-resume-summary]')).toBeNull();
           await click(toggle, 'auto-resume switch');
@@ -404,9 +474,10 @@ describe('AgentsTab', () => {
     it('shows On, and Save sends Off with a way to Keep On', async () => {
       await withTab(
         { machine: machineView({ agendaMode: true }), answers: SAVES },
-        async ({ q, calls, retried, sw }) => {
+        async ({ q, calls, retried, sw, info, explanation }) => {
           const toggle = sw('Agenda mode for new ferrets');
-          expect(toggle.textContent).toContain('keep an agenda');
+          await click(info('Agenda mode for new ferrets'), 'agenda (i)');
+          expect(explanation('Agenda mode for new ferrets')).toContain('keep an agenda');
           expect(toggle.getAttribute('aria-checked')).toBe('true');
           await click(toggle, 'agenda switch');
           expect(q('[data-change-submit]')?.textContent).toBe('Save agenda mode');
@@ -451,9 +522,10 @@ describe('AgentsTab', () => {
     const checked = (sw: Context['sw']): string | null => sw('Keep in sync').getAttribute('aria-checked');
 
     it('shows it on when the file cannot be read, since on is the default', async () => {
-      await withTab({}, async ({ sw }) => {
+      await withTab({}, async ({ sw, info, explanation }) => {
         expect(checked(sw)).toBe('true');
-        expect(sw('Keep in sync').textContent).toContain('Read-only; nothing is imported');
+        await click(info('Keep in sync'), 'keep in sync (i)');
+        expect(explanation('Keep in sync')).toContain('Read-only; nothing is imported');
       });
     });
 

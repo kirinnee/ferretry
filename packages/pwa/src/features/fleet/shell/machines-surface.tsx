@@ -24,8 +24,8 @@ import { UnderlineTabs } from '../../../shell/underline-tabs.tsx';
 import { daemonDisplayName, distinctDaemonName, replacedPairing } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from './account-status.tsx';
-import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
 import type { PanelGroupId } from './machine-panels.ts';
+import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';
 
 /**
@@ -37,6 +37,8 @@ export type DaemonPanelsRenderer = (
   panel: string | undefined,
   onOpen: (panel: string | null) => void,
   group?: PanelGroupId,
+  /** Rows (list items) the tab puts at the head of the group's list. */
+  lead?: ReactNode,
 ) => ReactNode;
 
 /** What every tab surface is handed: the machine, whether it answers, and the way to ask it things. */

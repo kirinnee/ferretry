@@ -363,6 +363,50 @@ describe('daemon settings panel group', () => {
     }
   });
 
+  it('draws the rows it is handed at the head of the group, ahead of the panels', async () => {
+    const lead = <li data-lead-row="">Claude Code</li>;
+    const view = await mount(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        onOpenPanel={() => undefined}
+        group={{ label: 'Tools', panels: ['secrets'] }}
+        lead={lead}
+      />,
+    );
+    try {
+      const section = must(view.container.querySelector<HTMLElement>('[data-daemon-panel-group]'), 'group');
+      expect(section.querySelector('li')?.hasAttribute('data-lead-row')).toBe(true);
+      expect(section.querySelectorAll('[data-lead-row]')).toHaveLength(1);
+      expect(section.querySelector('[data-daemon-panel="secrets"]')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('still draws the group for its lead rows when none of its panels is available', async () => {
+    const view = await mount(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        onOpenPanel={() => undefined}
+        group={{ label: 'Only lead', panels: ['retired-panel'] }}
+        lead={<li data-lead-row="">Only</li>}
+      />,
+    );
+    try {
+      expect(view.container.querySelector('[data-daemon-panel-group="Only lead"] [data-lead-row]')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('draws nothing when none of its panels is available', async () => {
     const view = await mount(grouped({ label: 'Nothing here', panels: ['retired-panel'] }));
     try {
