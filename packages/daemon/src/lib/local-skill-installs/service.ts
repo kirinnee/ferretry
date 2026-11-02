@@ -26,6 +26,7 @@ import { posix } from 'node:path';
 import {
   type CatalogInstallScope,
   type CatalogInstallTarget,
+  type CatalogInstallWarning,
   type CatalogProvenance,
   type CatalogSourceProblem,
   catalogItemReview,
@@ -58,6 +59,8 @@ import { projectRootFor } from '../session-mcp/service.ts';
 import { skillOf } from '../shared-catalogs/freeze.ts';
 import { readSkillFolder, type SkillTreePort } from '../shared-catalogs/skill-source.ts';
 import { LocalSkillRefusalError } from './ports.ts';
+import { mayHoldSecret } from '../catalog-installs/conservative-changes.ts';
+import { holdsCredential } from './credentials.ts';
 import { type HeldLocalSkill, LocalSkillPreviews } from './previews.ts';
 import { type LocalSkillInstalledFile, type LocalSkillInstallRecord, type LocalSkillInstallStore } from './store.ts';
 
@@ -128,6 +131,18 @@ interface ResolvedTarget {
   readonly folder?: string;
 }
 
+/** One warning per file that mentions keys, tokens or passwords: the person's own file, shown whole, but not for blind copying. */
+const secretWords = (
+  files: readonly { readonly path: string; readonly content: string }[],
+  destination: string,
+): CatalogInstallWarning[] =>
+  files
+    .filter(file => mayHoldSecret(file.content))
+    .map(file => ({
+      code: 'possible-secret' as const,
+      text: `${file.path} mentions keys, tokens or passwords. Check it holds no secret value before you copy it to ${destination}.`,
+    }));
+
 /** A source, found in the inventory and read whole. */
 interface ReadSource {
   readonly name: string;
@@ -196,7 +211,7 @@ export class LocalSkillInstallService {
       destination: resolved.words,
       review: [...catalogItemReview(item)],
       skipped: [...source.skipped],
-      warnings: [...catalogItemWarnings(item)],
+      warnings: [...catalogItemWarnings(item), ...secretWords(source.files, resolved.words)],
       ...(replaces === undefined ? {} : { replaces: { installId: replaces.installId } }),
     };
   }
@@ -300,6 +315,12 @@ export class LocalSkillInstallService {
     if (folder.refusal !== undefined) return refuse('local_skill_source_invalid', folder.refusal);
     const skill = skillOf(folder.files);
     if (typeof skill === 'string') return refuse('local_skill_source_invalid', `${name} cannot be copied: ${skill}.`);
+    const holder = skill.files.find(file => holdsCredential(file.content));
+    if (holder !== undefined)
+      return refuse(
+        'local_skill_source_invalid',
+        `${holder.path} holds what looks like a password. Remove it, then copy the skill.`,
+      );
     const origin: LocalSkillOrigin =
       entry.scope === 'project' && entry.project !== undefined
         ? { kind: 'project', owner: entry.project.root, harness: entry.harness, path: entry.path }

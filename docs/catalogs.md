@@ -896,6 +896,15 @@ another account's home (`~/.claude/skills`, a runtime's skills folder) or a regi
 - **The review is a catalog review.** Every file in full, hidden characters marked, the same warnings, and
   the secret redaction the catalog review has. Where it is from is `origin` (account or project, and the
   `SKILL.md` path), as this machine found it, never as the caller reported it.
+- **Your own files are shown whole, and a password is never copied.** The source is the person's own file on
+  this machine, shown to them and only to them (the routes are person-only), so the review draws every file
+  in full. Two shapes are certain enough to **refuse** the preview, naming the file and never showing the text
+  (`local_skill_source_invalid`: "<file> holds what looks like a password. Remove it, then copy the skill."): an
+  address with a password in it (`scheme://user:pass@host`) and an environment-style assignment whose name
+  looks like a secret and whose value is 16 or more characters (`API_KEY=…`; `$VAR`, `${VAR}` and `<…>` references
+  are not values). A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
+  warning per file: "<file> mentions keys, tokens or passwords. Check it holds no secret value before you copy
+  it to <target>." Files are never rewritten.
 - **A preview writes nothing.** Previews live in memory for 600 seconds, up to 8 per caller, and are bound
   to the caller that reviewed them. An apply writes **exactly** the bytes that were previewed (the preview
   holds them; the source is not read a second time, so it cannot change between review and write). The

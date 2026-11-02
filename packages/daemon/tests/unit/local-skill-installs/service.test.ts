@@ -141,6 +141,48 @@ describe('previewing a skill from this machine', () => {
     should(refusal.message).match(/cannot be copied/u);
   });
 
+  it('refuses to copy a file that holds a password, naming it and never showing it', async () => {
+    const r = rig();
+    r.tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'setup.sh': 'curl https://me:hunter2hunter2@example.com/x' });
+
+    const refusal = await refusedWith(
+      r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+
+    should(refusal.message).equal('setup.sh holds what looks like a password. Remove it, then copy the skill.');
+    should(refusal.message).not.match(/hunter2/u);
+  });
+
+  it('refuses a long value assigned to a secret-looking name', async () => {
+    const r = rig();
+    r.tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'run.sh': 'export API_KEY="abcdef0123456789abcdef"' });
+
+    await refusedWith(
+      r.service.preview('runtime', { source: { path: ACCOUNT_SKILL }, target: runtimeTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+  });
+
+  it('warns, per file, where a file mentions keys, tokens or passwords, and still shows it whole', async () => {
+    const r = rig();
+    r.tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'notes.md': 'Set your token in the settings first.' });
+
+    const preview = await r.service.preview(
+      'project',
+      { source: { path: ACCOUNT_SKILL }, target: projectTarget() },
+      CALLER,
+    );
+
+    const warning = preview.warnings.find(item => item.text.startsWith('notes.md '));
+    should(warning?.code).equal('possible-secret');
+    should(warning?.text).equal(
+      `notes.md mentions keys, tokens or passwords. Check it holds no secret value before you copy it to ${preview.destination}.`,
+    );
+    should(preview.warnings.some(item => item.text.startsWith('SKILL.md '))).be.false();
+    should(preview.review.some(entry => entry.text.includes('Set your token in the settings first.'))).be.true();
+  });
+
   it('refuses a project this machine does not know', async () => {
     const r = rig();
 
