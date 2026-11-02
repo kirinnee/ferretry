@@ -372,7 +372,7 @@ describe('the composer in a real browser', () => {
             };
             return {
               attach: box('[data-composer-attach]'),
-              mic: box('[data-composer-dock="start"] > :last-child'),
+              mic: box('[data-composer-dock="start"] button:not([data-composer-attach])'),
               send: box('[data-composer-send]'),
               row: box('.fy-composer-row'),
             };
