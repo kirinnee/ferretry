@@ -128,7 +128,7 @@ for (const width of [390, 1440] as const) {
         route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
       );
       await page.clock.setFixedTime(NOW);
-      await page.goto(`${server.url}?theme=${theme}&view=${place.view}`);
+      await page.goto(`${server.url}?theme=${theme}&view=${place.view}&voice=1`);
       await page.locator('[data-fixture]').waitFor({ state: 'visible' });
       await page.locator(place.ask).first().waitFor({ state: 'visible' });
       await page.waitForTimeout(250);
@@ -142,6 +142,16 @@ for (const width of [390, 1440] as const) {
       check((await box.locator('form').count()) === 1, `${label}: the box is not the chat composer`);
       check((await box.locator('button[data-composer-send]').count()) === 1, `${label}: no composer send button`);
       check((await box.getByRole('button', { name: 'Cancel' }).count()) === 1, `${label}: the box has no Cancel`);
+      check(
+        (await box.getByRole('button', { name: /^Dictat/ }).count()) === 1,
+        `${label}: the box has no mic with Settings › Voice on`,
+      );
+      // Only the Inbox deck's Not good takes pictures: the to-test rows move the card on the Board's own flag.
+      const pictures = await box.locator('button[data-composer-attach]').count();
+      check(
+        pictures === (place.state === 'gate-deck' ? 1 : 0),
+        `${label}: ${pictures} attach button(s) where ${place.state === 'gate-deck' ? 'one is' : 'none is'} expected`,
+      );
       const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(wide <= 0, `${label}: scrolls sideways by ${wide}px`);
       const geometry = await page.evaluate(card => {
@@ -207,6 +217,19 @@ for (const width of [390, 1440] as const) {
       check(typed.includes('second phone'), `${label}: typed words did not reach the field`);
       await page.screenshot({ path: join(outDir, `${name.replace(place.state, `${place.state}-not-good-text`)}.png`) });
 
+      if (place.state === 'gate-deck') {
+        // A picked picture uploads at once and sits above the field with the words.
+        const picker = box.locator('input[type="file"]:not([capture])').first();
+        await picker.setInputFiles({ name: 'blank-qr.png', mimeType: 'image/png', buffer: Buffer.from('png') });
+        await page.waitForTimeout(400);
+        check(
+          (await box.locator('[aria-label="Attached files"] li').count()) === 1,
+          `${label}: the picked picture is not listed in the box`,
+        );
+        await page.screenshot({
+          path: join(outDir, `${name.replace(place.state, `${place.state}-not-good-picture`)}.png`),
+        });
+      }
       await box.getByRole('button', { name: 'Cancel' }).click();
       await page.waitForTimeout(200);
       check((await box.count()) === 0, `${label}: Cancel did not close the box`);

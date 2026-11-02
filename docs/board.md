@@ -889,8 +889,8 @@ creator is read as the owner's.
 
 **GAPS.** Every guarantee here holds against a ferret on its own session credential. The admin token with no session
 (an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
-([The board is opt-in](#the-board-is-opt-in), &F291). The Inbox's Not good carries words only: the agenda answer has no field for files, so a picture still goes
-through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
+([The board is opt-in](#the-board-is-opt-in), &F291). The Inbox's Not good takes files only on a machine that reports `agenda.gate.attachments.1` (docs/agenda.md § Gate
+items); an older one keeps it as words, and a picture goes through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
 (`MAX_AGENDA_RESOLUTIONS`): a card left at a gate the owner dismissed long ago may ask again once its record is gone.
 
 ### One ask per thing

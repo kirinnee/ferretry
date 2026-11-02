@@ -72,6 +72,12 @@ export const DAEMON_FEATURES = {
    */
   boardReopenAttachments: 'board.reopen.attachments.1',
   /**
+   * An agenda `resolve` that answers a card's gate may carry `attachments` — files the owner sent with "Not good" in
+   * the Inbox — which the daemon delivers to the card's ferret with the reopen. A daemon without this name refuses
+   * the field: the Inbox offers the composer's attach only where the machine reports it.
+   */
+  agendaGateAttachments: 'agenda.gate.attachments.1',
+  /**
    * An agenda add may carry `offerClose`, and an item may come back with it: the app then offers "Done · closes
    * &F12" beside the answers. A daemon without this name refuses the add, so the app and the CLI send it only
    * where the machine reports it.

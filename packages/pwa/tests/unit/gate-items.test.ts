@@ -66,6 +66,12 @@ describe('a gate item answers as a plain multiple choice', () => {
     });
   });
 
+  test('gateAnswerAction carries files only when there are some', () => {
+    const attachments = { from: 'sess-g', ids: [`att_${'a'.repeat(64)}`] };
+    expect(gateAnswerAction('Not good', 'blank', false, attachments)).toMatchObject({ attachments });
+    expect(gateAnswerAction('Not good', 'blank')).not.toHaveProperty('attachments');
+  });
+
   test('gateAnswerAction builds the same action from the label and the words', () => {
     expect(gateAnswerAction('Not good', '  blank  ')).toEqual({
       kind: 'respond',

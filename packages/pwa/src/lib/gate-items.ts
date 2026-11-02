@@ -15,6 +15,7 @@ import {
   AGENDA_KIND_LABELS,
   type AgendaGate,
   type AgendaItem,
+  type BoardReopenAttachments,
   gateAnswers,
   gateAskOptions,
   TEST_KIND_LABEL,
@@ -97,7 +98,12 @@ export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] 
   item.gate.options.find(option => option.outcome === 'reopen-with-agenda');
 
 /** The gate's answer as the action to send: the choice, and the owner's words as its note. */
-export const gateAnswerAction = (label: string, words: string, attached = false): InboxAction => {
+export const gateAnswerAction = (
+  label: string,
+  words: string,
+  attached = false,
+  attachments?: BoardReopenAttachments,
+): InboxAction => {
   const note = words.trim();
   return {
     kind: 'respond',
@@ -105,6 +111,7 @@ export const gateAnswerAction = (label: string, words: string, attached = false)
     response: { kind: 'multiple-choice', choice: label },
     ...(note === '' ? {} : { note }),
     ...(attached ? { gate: true as const } : {}),
+    ...(attachments === undefined ? {} : { attachments }),
   };
 };
 
