@@ -997,6 +997,28 @@ describe('joinNeed', () => {
     should(joinNeed(multiForExisting, withPasskey, T0)).equal('proof');
   });
 
+  it('should keep a group link open after its person has no passkey and no passkey window left', () => {
+    // Arrange
+    const group = storedShare(1, { memberKind: 'new', uses: { kind: 'multi', cap: 50 } });
+    const swept = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 })] });
+    const closed = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0) })] });
+
+    // Act / Assert
+    should(joinNeed(group, withoutPasskey, T0)).equal('first-browser');
+    should(joinNeed(group, swept, T0)).equal('first-browser');
+    should(joinNeed(group, closed, T0)).equal('first-browser');
+    should(joinNeed(group, storedMember(1), T0)).equal('first-browser');
+  });
+
+  it('should block a code made for an existing person with no passkey even while a browser of theirs has a window open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing' });
+    const open = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })] });
+
+    // Act / Assert
+    should(joinNeed(share, open, T0)).equal('blocked');
+  });
+
   it('should still need a proof for a single-use code made before the person joined, once they have a passkey', () => {
     // Arrange
     const share = storedShare(1, { memberKind: 'new', uses: { kind: 'single' } });

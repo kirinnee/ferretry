@@ -1068,6 +1068,9 @@ even though the person exists; the browser then registers its own passkey as usu
 - **A group link is exempt.** A multi-use code made for a name nobody held or reserved (a workshop) has nobody to
   prove, so every browser joins that new person as before. The mint decides this, not the join: a code for many
   people is refused for a reserved name (above), so a multi-use code that names a new person can only be a group link.
+  It stays open even when everyone has removed that person's browsers or skipped the passkey prompt: no passkey and no
+  open window never blocks a group link. (Codes minted before this rule keep their old meaning for their lifetime, at
+  most a day.)
 - **An existing person with no passkey and no D8 mark is blocked.** The join is refused (the code stays live) rather
   than opened by default. The owner marks the invite, or mints one that does. A second invite for a person who
   has not joined (`memberKind: 'new'`) joins freely **only while a browser of theirs is inside its passkey window**

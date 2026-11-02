@@ -180,10 +180,11 @@ export type JoinNeed = 'first-browser' | 'owner-approved' | 'proof' | 'blocked';
  *
  * - No such person yet: nothing; this is their first browser.
  * - The owner marked the invite (D8): nothing; the new browser registers its own passkey.
- * - The person has a passkey: a proof of one of them, EXCEPT on a group link (a multi-use code minted for a person who
- *   did not exist yet), whose whole point is that many strangers join the one name the owner chose. A multi-use code
- *   is `memberKind: 'new'` only when the mint found nobody holding or reserving the name (the mint refuses a multi-use
- *   code for a reserved name), so `new` plus multi means exactly "a group link".
+ * - A group link (a multi-use code minted for a person who did not exist yet): nothing, whether or not the person has
+ *   a passkey or an open window, because its whole point is that many strangers join the one name the owner chose. A
+ *   multi-use code is `memberKind: 'new'` only when the mint found nobody holding or reserving the name (the mint
+ *   refuses a multi-use code for a reserved name), so `new` plus multi means exactly "a group link".
+ * - The person has a passkey: a proof of one of them.
  * - The person has no passkey and the code was minted for them while they existed: BLOCKED until the owner marks the
  *   invite. Nothing is ever approved by the machine; a forwarded invite for a person with no passkey left is refused
  *   rather than opened.
@@ -195,8 +196,8 @@ export type JoinNeed = 'first-browser' | 'owner-approved' | 'proof' | 'blocked';
 export function joinNeed(share: StoredShare, member: StoredMember | undefined, now: number): JoinNeed {
   if (member === undefined) return 'first-browser';
   if (share.newPasskey === true) return 'owner-approved';
-  if (member.keys.some(key => key.passkeyCount > 0))
-    return share.uses.kind === 'multi' && share.memberKind === 'new' ? 'first-browser' : 'proof';
+  if (share.uses.kind === 'multi' && share.memberKind === 'new') return 'first-browser';
+  if (member.keys.some(key => key.passkeyCount > 0)) return 'proof';
   const inWindow = member.keys.some(
     key => key.passkeyWindowEndsAt !== undefined && Date.parse(key.passkeyWindowEndsAt) > now,
   );

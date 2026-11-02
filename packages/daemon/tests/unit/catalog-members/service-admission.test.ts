@@ -214,6 +214,20 @@ describe('CatalogMemberService.admitJoin: single and multi use', () => {
     should(refusedOf(third).reason).equal('spent');
   });
 
+  it('should keep admitting strangers to a group link after the owner removes every browser of its person', async () => {
+    // Arrange
+    const r = await rig();
+    const { code } = await r.service.mint(multiFor('Team', 5));
+    const joined = await r.service.commit(joinOf(r.service.admitJoin(code, T0)), newKey(1));
+    await r.service.removeKey(joined.memberId, joined.keyId);
+
+    // Act
+    const next = r.service.admitJoin(code, T0);
+
+    // Assert
+    should(joinOf(next).memberId).equal(joined.memberId);
+  });
+
   it('should give every browser of a multi-use code the one member it names', async () => {
     // Arrange
     const r = await rig();
