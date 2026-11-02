@@ -190,6 +190,9 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // app.css names its faces `url('../assets/fonts/…')`, which the page resolves to `/assets/fonts/…`: serve
+    // them from the source tree or every shot falls back to the system sans.
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     return new Response(Bun.file(join(outDir, url.pathname)));
   },
 });
@@ -240,6 +243,10 @@ try {
             await page.getByText(`uploading on ${device.other}`).waitFor({ state: 'visible' });
             await page.locator('img[src^="blob:"]').first().waitFor({ state: 'visible' });
           }
+          // A face is fetched on first use: wait for it, and fail loudly rather than shoot the fallback font.
+          await page.evaluate(() => document.fonts.ready);
+          const drawn = await page.evaluate(() => document.fonts.check('16px Inter'));
+          if (!drawn) fail(`${scene} ${device.name} ${scheme}: the app font did not load`);
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene} ${device.name} ${scheme} scrolls sideways by ${overflow}px`);
           const target = join(outDir, `shared-draft-${scene}-${device.name}-${scheme}.png`);
