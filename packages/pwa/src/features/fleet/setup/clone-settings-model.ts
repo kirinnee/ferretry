@@ -262,6 +262,15 @@ export const cloneNeeds = (
   return [...secrets.values(), ...signIns];
 };
 
+/**
+ * The needs still worth showing once the copy is done: a sign-in only when the copy left an empty slot
+ * for it. A login this machine already had is reused as it is, so it has no slot and nothing to sign in to.
+ */
+export const needsAfterCopy = (needs: readonly CloneNeed[], slotIds: readonly string[]): readonly CloneNeed[] =>
+  needs.filter(
+    need => need.kind !== 'sign-in' || (need.credentialId !== undefined && slotIds.includes(need.credentialId)),
+  );
+
 /** The secret names an environment login names anywhere: its variables and, for a two-CLI login, either half. */
 const loginSecretNames = (credential: FleetCloneBundle['credentials'][number]): readonly string[] =>
   secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}]));

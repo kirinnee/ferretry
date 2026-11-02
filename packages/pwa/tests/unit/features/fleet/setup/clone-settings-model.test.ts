@@ -10,6 +10,7 @@ import {
   cloneNeeds,
   controlsChange,
   keysToCopy,
+  needsAfterCopy,
   needsSentence,
   outcomeSentence,
   providersNeededBy,
@@ -524,5 +525,27 @@ describe('outcomeSentence', () => {
     expect(outcomeSentence(itemOf('voice'), { kind: 'refused', reason: 'The file does not check.' })).toBe(
       'Voice clean-up: not copied. The file does not check.',
     );
+  });
+});
+
+describe('needsAfterCopy', () => {
+  const signIn = (id: string): CloneNeed => ({
+    key: `sign-in:${id}`,
+    kind: 'sign-in',
+    name: `Claude Code login (${id})`,
+    credentialId: id,
+    why: 'me@work.example',
+    held: false,
+  });
+  const secret: CloneNeed = { key: 'secret:KEY', kind: 'secret', name: 'KEY', why: 'login glm', held: false };
+
+  it('drops a sign-in for a login this machine already had, since the copy left no slot for it', () => {
+    const reused = signIn('claude-you');
+    const slotted = signIn('codex-you');
+    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'])).toEqual([slotted, secret]);
+  });
+
+  it('keeps every secret and drops every sign-in when the copy left no slot at all', () => {
+    expect(needsAfterCopy([signIn('claude-you'), secret], [])).toEqual([secret]);
   });
 });

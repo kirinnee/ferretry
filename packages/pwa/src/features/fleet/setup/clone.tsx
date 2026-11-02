@@ -88,6 +88,7 @@ import {
   type CloneOutcomeItem,
   cloneLogins,
   cloneNeeds,
+  needsAfterCopy,
   controlsChange,
   keysToCopy,
   type SourceSettingsFile,
@@ -845,7 +846,10 @@ function DoneStep({
       </SetupNote>
       <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
       <CloneNeedsList
-        needs={needs}
+        needs={needsAfterCopy(
+          needs,
+          result.slots.map(slot => slot.id),
+        )}
         machineName={machineName}
         onAdd={onAdd}
         copy={copy}

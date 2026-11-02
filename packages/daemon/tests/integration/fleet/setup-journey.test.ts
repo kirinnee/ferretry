@@ -7,10 +7,9 @@
  * every credential is a placeholder, so no real harness setup, login or fleet is read or written.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import {
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
@@ -18,18 +17,19 @@ import {
   parseExportKeys,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
+import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
-import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
-import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
-import { request } from '../../unit/api/support.ts';
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
-import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
+import { request } from '../../unit/api/support.ts';
+import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -55,6 +55,8 @@ const FAKE_LOGIN = JSON.stringify({
   },
 });
 const FAKE_SECRET = 'ghp_placeholderplaceholderplaceholder0000';
+/** A placeholder Codex login: shaped like one, worth nothing. */
+const FAKE_CODEX_LOGIN = JSON.stringify({ tokens: { access_token: 'placeholder-codex-access' } });
 
 interface Machine {
   readonly home: ConfigHome;
@@ -699,18 +701,34 @@ describe('the export writes its origin keys into state over real files', () => {
   });
 });
 
-/** A machine whose person is already signed in to Claude Code as `kirin@example.test`, with a runtime on that login. */
+/**
+ * A machine whose person is already signed in to Claude Code as `kirin@example.test` and to Codex as
+ * `codex@example.test`, both logins kept in Ferretry's own store with a token on disk, each with a runtime.
+ */
 async function reusedLoginTarget(name: string): Promise<Machine> {
-  const target = await machine(name, { claude: false, emails: { 'claude-kirin': 'kirin@example.test' } });
+  const target = await machine(name, {
+    claude: false,
+    emails: { 'claude-kirin': 'kirin@example.test', 'codex-kirin': 'codex@example.test' },
+  });
   const steps = [
     { kind: 'credential.add', id: 'claude-kirin', harness: 'claude' },
+    { kind: 'credential.add', id: 'codex-kirin', harness: 'codex' },
     { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
     { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
     { kind: 'runtime.put', name: 'mine', credential: 'claude-kirin', profile: 'plain', agent: true, create: true },
+    { kind: 'runtime.put', name: 'codex-mine', credential: 'codex-kirin', profile: 'plain', agent: true, create: true },
   ];
   for (const step of steps) {
     const staged = await target.catalog.propose(step as never);
     await target.catalog.apply(staged.id, { governed: false } as never);
+  }
+  for (const [id, file, token] of [
+    ['claude-kirin', '.credentials.json', FAKE_LOGIN],
+    ['codex-kirin', 'auth.json', FAKE_CODEX_LOGIN],
+  ] as const) {
+    const store = path.join(target.fleet, 'credentials', id);
+    await mkdir(store, { recursive: true });
+    await writeFile(path.join(store, file), token, { mode: 0o600 });
   }
   const claude = path.join(target.userHome, '.claude');
   await mkdir(claude, { recursive: true });
@@ -734,11 +752,41 @@ async function signInState(on: Machine): Promise<Record<string, string>> {
   return state;
 }
 
+/** Every `auth.json` link under a directory (a Codex runtime's way to its login), as where it points. */
+async function authLinks(root: string, relative = ''): Promise<Record<string, string>> {
+  const found: Record<string, string> = {};
+  for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
+    const next = relative === '' ? entry.name : `${relative}/${entry.name}`;
+    if (entry.isDirectory()) Object.assign(found, await authLinks(root, next));
+    else if (entry.isSymbolicLink() && entry.name === 'auth.json') found[next] = await readlink(path.join(root, next));
+  }
+  return found;
+}
+
 describe('Clone reuses a login the target already has, and never touches it (design §14.4)', () => {
-  /** The source machine, signed in under an email that differs from the target's only by case. */
+  /** The source machine, signed in to both CLIs under emails that differ from the target's only by case. */
   async function source(): Promise<ReturnType<typeof FleetCloneBundleSchema.parse>> {
-    const studio = await machine('studio', { claude: true, emails: { 'claude-you': 'Kirin@Example.TEST' } });
+    const studio = await machine('studio', {
+      claude: true,
+      emails: { 'claude-you': 'Kirin@Example.TEST', 'codex-you': 'Codex@Example.TEST' },
+    });
     await importHost(studio);
+    const steps = [
+      { kind: 'credential.add', id: 'codex-you', harness: 'codex' },
+      {
+        kind: 'component.put',
+        name: 'house',
+        component: { kind: 'instructions' },
+        content: 'Be kind.\n',
+        create: true,
+      },
+      { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
+      { kind: 'runtime.put', name: 'codex-copy', credential: 'codex-you', profile: 'plain', agent: true, create: true },
+    ];
+    for (const step of steps) {
+      const staged = await studio.catalog.propose(step as never);
+      await studio.catalog.apply(staged.id, { governed: false } as never);
+    }
     return FleetCloneBundleSchema.parse(await studio.setup.exportBundle());
   }
 
@@ -746,27 +794,47 @@ describe('Clone reuses a login the target already has, and never touches it (des
     it(`should point the copied runtime at the existing login in ${mode} mode and leave its sign-in and secrets byte-identical`, async () => {
       // Arrange
       const bundle = await source();
-      should(bundle.credentials.map(credential => credential.email)).deepEqual(['Kirin@Example.TEST']);
+      should(bundle.credentials.map(credential => credential.email).toSorted()).deepEqual([
+        'Codex@Example.TEST',
+        'Kirin@Example.TEST',
+      ]);
       const target = await reusedLoginTarget('work-linux');
       const before = await signInState(target);
+      const claudeToken = 'fleet/credentials/claude-kirin/.credentials.json';
+      const codexToken = 'fleet/credentials/codex-kirin/auth.json';
       should(Object.keys(before)).containEql('claude/.credentials.json');
       should(Object.keys(before)).containEql('secret/KEEP_ME');
+      should(before[claudeToken]).equal(FAKE_LOGIN);
+      should(before[codexToken]).equal(FAKE_CODEX_LOGIN);
+      const codexFile = path.join(target.fleet, 'credentials', 'codex-kirin', 'auth.json');
+      const linksBefore = await authLinks(target.fleet);
+      should(Object.values(linksBefore)).deepEqual([codexFile]);
 
       // Act
       const staged = await target.catalog.propose({ kind: 'clone.import', mode, bundle });
       const outcome = await target.catalog.apply(staged.id, { governed: false } as never);
 
       // Assert: no new slot, the copied runtime uses the login that was already here, nothing about it changed.
-      should(outcome).deepEqual({
-        outcome: 'executed',
-        executor: 'clone',
-        summary: 'Copied 1 runtime from studio. Already signed in here, no new sign-in: kirin@example.test.',
-      });
+      should(outcome).containEql({ outcome: 'executed', executor: 'clone' });
+      const summary = (outcome as { summary: string }).summary;
+      should(summary).startWith('Copied 2 runtimes from studio. Already signed in here, no new sign-in: ');
+      should(summary).containEql('kirin@example.test').and.containEql('codex@example.test');
       should(JSON.stringify(staged.preview)).containEql('kirin@example.test — already here, no new sign-in');
+      should(JSON.stringify(staged.preview)).containEql('codex@example.test — already here, no new sign-in');
       const model = await declared(target);
-      should(Object.keys(model.credentials)).deepEqual(['claude-kirin']);
+      should(Object.keys(model.credentials).toSorted()).deepEqual(['claude-kirin', 'codex-kirin']);
       should(model.runtimes['claude-default']?.credential).equal('claude-kirin');
+      should(model.runtimes['codex-copy']?.credential).equal('codex-kirin');
       should(await signInState(target)).deepEqual(before);
+
+      // The copied Codex runtime's own auth.json is a link to the login that was already here, and every
+      // link there is still points at that one file.
+      const linksAfter = await authLinks(target.fleet);
+      should(Object.keys(linksAfter).length).be.aboveOrEqual(2);
+      should([...new Set(Object.values(linksAfter))]).deepEqual([codexFile]);
+      if (mode === 'alongside') {
+        for (const [link, destination] of Object.entries(linksBefore)) should(linksAfter[link]).equal(destination);
+      }
     });
   }
 });
