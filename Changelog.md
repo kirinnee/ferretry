@@ -1,3 +1,15 @@
+## [4.244.0](https://github.com/kirinnee/ferretry/compare/v4.243.0...v4.244.0) (2026-11-02)
+
+### Features
+
+* **agenda:** teach card formatting and bug-batch rules, lint headings ([#1373](https://github.com/kirinnee/ferretry/issues/1373)) ([941df2c](https://github.com/kirinnee/ferretry/commit/941df2cdb2812b2c304a4f5846c435b4050f66aa))
+* **protocol:** item digest + clone bundle v2 (keys, daemon) ([#1370](https://github.com/kirinnee/ferretry/issues/1370)) ([9df91fa](https://github.com/kirinnee/ferretry/commit/9df91fa1f9bd16926664bd9ac859e60fc492400d))
+* **pwa:** name agenda kind chips in plain words ([#1375](https://github.com/kirinnee/ferretry/issues/1375)) ([5f2a0ac](https://github.com/kirinnee/ferretry/commit/5f2a0ac2ad4e6d9bc395f318549857cdb3c1f6c6))
+
+### Fixes
+
+* **fleet:** move a clashing hooks folder on clone ([#1368](https://github.com/kirinnee/ferretry/issues/1368)) ([c49d7bf](https://github.com/kirinnee/ferretry/commit/c49d7bf5814d105331cb2b2f06c326764ffd8e05))
+
 ## [4.243.0](https://github.com/kirinnee/ferretry/compare/v4.242.0...v4.243.0) (2026-11-02)
 
 ### Features
