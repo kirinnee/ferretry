@@ -1,11 +1,11 @@
 /**
  * Screenshots and checks for the Warden's "A card has nobody working on it" notice: the item open with one card and
- * with three, in the Inbox list (`?from=warden`), and the Close card confirm. Phone 390 and desktop 1440, light and dark.
+ * with three, in the Inbox list (`?from=warden`), and the Close confirm. Phone 390 and desktop 1440, light and dark.
  *
  *   bun harness/orphan-notice-screenshot.ts [outDir]   # writes <outDir>/<state>-<390|1440>-<light|dark>.png
  *
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage` and `AgendaCardsHost`, invented data and a fake board),
- * serves it on an ephemeral loopback port and drives it with a real browser. It FAILS (after writing every picture)
+ * serves it, with the app's own fonts, on an ephemeral loopback port and drives it with a real browser. It FAILS (after writing every picture)
  * when a page scrolls sideways, a card line lacks its three buttons, Got it is missing, Close acts before the owner
  * says yes, or the confirm does not offer a reason and Keep it.
  */
@@ -61,6 +61,7 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     const built = Bun.file(join(buildDir, url.pathname));
     return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
@@ -128,14 +129,31 @@ const scene = async (width: Width, theme: (typeof THEMES)[number], state: State)
   await page.clock.setFixedTime(NOW);
   await page.goto(`${server.url}?theme=studio-${theme}&view=${state.view}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.evaluate(async () => document.fonts.ready.then(() => undefined));
   await page.waitForTimeout(400);
+  const loaded = await page.evaluate(() => [...document.fonts].filter(face => face.status === 'loaded').length);
+  check(loaded > 0, `${label}: the app's own font did not load`);
 
   check((await count(page, '[data-agenda-card-row]')) === state.cards, `${label}: expected ${state.cards} card rows`);
   check(
     (await count(page, '[data-agenda-card-open]')) === state.cards &&
       (await count(page, '[data-agenda-card-start]')) === state.cards &&
       (await count(page, '[data-agenda-card-close]')) === state.cards,
-    `${label}: every card line needs Open card, Start a ferret on it and Close card`,
+    `${label}: every card line needs Open, Start a ferret and Close`,
+  );
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-agenda-card-buttons]')].map(row => {
+      const tops = [...row.querySelectorAll('button')].map(button => Math.round(button.getBoundingClientRect().top));
+      return new Set(tops).size;
+    }),
+  );
+  check(
+    rows.every(lines => lines === 1),
+    `${label}: a card's buttons wrap onto more than one row`,
+  );
+  check(
+    (await page.getByText('Tap Got it to dismiss this notice').count()) === 0,
+    `${label}: the redundant lead is back`,
   );
   if (state.list !== true)
     check((await page.getByRole('button', { name: /Got it/u }).count()) > 0, `${label}: Got it is missing`);

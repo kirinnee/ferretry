@@ -13,6 +13,7 @@ import {
   cardFooterLine,
   cardTitle,
   type DelegationRequest,
+  ownerDelegation,
   SessionCards,
   type SessionCardsPorts,
 } from '../../../src/lib/board/index.ts';
@@ -80,6 +81,7 @@ const build = (options: Options = {}) => {
           snapshot: service.snapshot.bind(service),
           requireHandOver: service.requireHandOver.bind(service),
           handOver: service.handOver.bind(service),
+          assignForOwner: service.assignForOwner.bind(service),
           mayAdoptUnder: service.mayAdoptUnder.bind(service),
           trigger: async () => {
             throw new Error('the board store is read-only');
@@ -538,6 +540,51 @@ describe('a session started with a brief', () => {
     });
   });
 
+  describe('the owner starting a ferret on a card', () => {
+    it("should assign the card to the new ferret as the owner's act, keep its owner and parent, and focus and anchor it", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({
+        cards: [
+          card({ id: 'F9', owner: 'lead', assignee: 'worker', parent: { id: 'F1' } }),
+          card({ id: 'F1', owner: 'lead' }),
+        ],
+      });
+      focus.focused.set('worker', { id: 'F9' });
+
+      // Act
+      const delegation = ownerDelegation(stored(ports, 'F9'));
+      const opened = await subject.open({ sessionId: 'child', brief: 'take over', delegation });
+
+      // Assert
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child', laneId: 'plan' });
+      should(opened.card?.parent).deepEqual({ id: 'F1' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')).match({
+        to: 'child',
+        actor: { kind: 'owner' },
+      });
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+      should(focus.anchors.get('child')).deepEqual({ id: 'F9' });
+      should([...ports.store.cards.keys()].sort()).deepEqual(['F1', 'F9']);
+    });
+
+    it('should make no card, and leave the ferret alone, when the card was dropped after the owner chose it', async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } })],
+      });
+
+      // Act
+      const opened = await subject.open({
+        sessionId: 'child',
+        brief: 'take over',
+        delegation: ownerDelegation(stored(ports, 'F9')),
+      });
+
+      // Assert
+      should(opened.card).be.undefined();
+      should(stored(ports, 'F9').assignee).be.null();
+    });
+  });
   describe('a fy new --card', () => {
     it("should assign the lead's existing card to the child, keep its owner and parent, and make no second card", async () => {
       // Arrange

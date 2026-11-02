@@ -758,7 +758,7 @@ describe('DaemonBoardStore start', () => {
       fakePort({
         start: async (machine, id) => {
           started.push(`${machine.daemonId}:${id}`);
-          return boardOk({ task: id, sessionId: 'worker' });
+          return boardOk({ task: id, sessionId: 'worker', started: true });
         },
       }),
     );
@@ -766,6 +766,6 @@ describe('DaemonBoardStore start', () => {
     const result = await store.start(laptop, 'F1' as never);
 
     expect(started).toEqual([`${laptop.daemonId}:F1`]);
-    expect(result).toEqual(boardOk({ task: 'F1', sessionId: 'worker' }));
+    expect(result).toEqual(boardOk({ task: 'F1', sessionId: 'worker', started: true }));
   });
 });

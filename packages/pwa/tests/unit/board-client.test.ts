@@ -180,23 +180,23 @@ describe('postBoardAction', () => {
 });
 
 describe('postBoardStart', () => {
-  it('posts to the card’s start route and returns the ferret that came back', async () => {
+  it('posts to the card’s start route and returns the ferret that was started', async () => {
     let sent: { url: string; method?: string } = { url: '' };
     const answer = await postBoardStart(laptop, 'F1', async (asked, init) => {
       sent = { url: String(asked), method: init?.method };
-      return json({ task: 'F1', sessionId: 'worker' });
+      return json({ task: 'F1', sessionId: 'worker', started: true });
     });
     expect(sent).toEqual({ url: 'https://laptop.example.test/v1/board/tasks/F1/start', method: 'POST' });
-    expect(answer).toEqual({ ok: true, value: { task: 'F1', sessionId: 'worker' } });
+    expect(answer).toEqual({ ok: true, value: { task: 'F1', sessionId: 'worker', started: true } });
   });
 
   it('hands a refusal back as a value, with the daemon’s words and code', async () => {
     const gone = await postBoardStart(laptop, 'F1', async () =>
-      json({ error: '&F1’s ferret is no longer on this machine', code: 'not-found' }, 404),
+      json({ error: 'This card was closed; reopen it first.', code: 'not-found' }, 404),
     );
     expect(gone).toEqual({
       ok: false,
-      error: { status: 404, message: '&F1’s ferret is no longer on this machine', boardCode: 'not-found' },
+      error: { status: 404, message: 'This card was closed; reopen it first.', boardCode: 'not-found' },
     });
   });
 

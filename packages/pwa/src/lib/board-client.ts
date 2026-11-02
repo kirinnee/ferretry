@@ -89,7 +89,7 @@ export interface BoardPort {
     id: BoardTaskId,
     request: BoardTaskActionRequestInput,
   ): Promise<BoardResult<BoardTaskResponse, BoardWriteError>>;
-  /** Starts the card's own ferret again, as the owner (`POST /v1/board/tasks/:id/start`). */
+  /** Starts a NEW ferret on the card, as the owner (`POST /v1/board/tasks/:id/start`). */
   start(daemon: DaemonConnection, id: BoardTaskId): Promise<BoardResult<BoardTaskStartResponse, BoardWriteError>>;
   /** Opens a card the owner writes, on the machine that will hold it. */
   create(
@@ -239,8 +239,8 @@ export const postBoardAction = async (
 };
 
 /**
- * `POST /v1/board/tasks/:id/start`: the ferret the daemon brought back onto the card, or its refusal as a value.
- * An older daemon has no such route and answers `404`, which reads here as the card's ferret being gone.
+ * `POST /v1/board/tasks/:id/start`: the new ferret the daemon started on the card (or the live one that already held
+ * it: `started: false`), or its refusal as a value. An older daemon has no such route and answers `404`.
  */
 export const postBoardStart = async (
   daemon: DaemonConnection,

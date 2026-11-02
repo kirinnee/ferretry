@@ -172,7 +172,7 @@ describe('the Machine group in the Inbox', () => {
     expect(view?.container.querySelectorAll('[data-agenda-card-open]').length).toBe(2);
     expect(view?.container.querySelectorAll('[data-agenda-card-start]').length).toBe(2);
     expect(view?.container.querySelectorAll('[data-agenda-card-close]').length).toBe(2);
-    expect(text).toContain('Tap Got it to dismiss this notice.');
+    expect(text).not.toContain('Tap Got it to dismiss this notice.');
     expect(text.split(line('B1')).length).toBe(2);
     expect(text).not.toContain('Nothing to decide');
   });

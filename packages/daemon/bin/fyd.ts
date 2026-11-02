@@ -618,6 +618,7 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
+import { isTerminalStatus } from '../src/lib/warden/types.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
@@ -640,6 +641,7 @@ import {
   SessionCards,
   type SessionLivenessSource,
   CardStartRefused,
+  ownerDelegation,
   startOnCard,
   walkLadder,
 } from '../src/lib/board/index.ts';
@@ -1230,7 +1232,6 @@ import {
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
-  resumeActorOf,
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
@@ -10206,6 +10207,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ledger is published when the Warden builds its monitor, further down, and reads nothing until then.
       const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
       const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
+      // One owner's start at a time per card (board/start-on-card.ts): the check and the start are one step.
+      const cardStarts = new KeyedSerialExecutor();
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
@@ -13033,22 +13036,45 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           create: async (request, caller) => await boardWorld.board.create(request, caller),
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           skip: async (request, caller) => await boardWorld.board.skip(request, caller),
-          // The owner's start resumes the card's own ferret with the card as its brief (board/start-on-card.ts).
-          start: async (id, caller, actor) =>
+          // The owner's start puts a NEW ferret on the card, in the card's own project's folder, on the machine's
+          // default runtime (board/start-on-card.ts). One at a time per card, so a retry finds the first start.
+          start: async (id, caller) =>
             await startOnCard(
               {
                 task: async taskId => await boardWorld.board.task(taskId),
-                exists: async sessionId => storage.findSession(parseSessionId(sessionId)) !== undefined,
-                isSubFerret: async sessionId =>
-                  (await new StorageSubFerretDirectory(storage).leadOf(sessionId).catch(() => undefined)) !== undefined,
-                resume: async (sessionId, message) => {
-                  await sessionResumeSubsystem
-                    .resume(sessionId, resumeActorOf(actor), message)
-                    .catch((error: unknown) => {
-                      if (error instanceof SessionResumeError) throw new CardStartRefused(error.message);
-                      throw error;
-                    });
+                folderOf: async card => {
+                  const project = (await catalogs.projects()).find(row => row.id === card.projectId);
+                  return project?.path ?? undefined;
                 },
+                live: async () => {
+                  const roster = await boardSessions.roster();
+                  return new Map(
+                    [...roster.sessions.values()]
+                      .filter(session => !isTerminalStatus(session.status))
+                      .map(session => [session.id, session.focusTask?.id ?? null] as const),
+                  );
+                },
+                exclusive: async (taskId, work) => await cardStarts.run(taskId, work),
+                start: async ({ card, folder, name, prompt }) => {
+                  const request = StartSessionRequestSchema.parse({ mode: 'auto', prompt, cwd: folder, name });
+                  try {
+                    const started = await sessionControl.start(
+                      request,
+                      crypto.randomUUID(),
+                      JSON.stringify(request),
+                      ownerDelegation(card),
+                      DAEMON_START,
+                    );
+                    return started.config.id;
+                  } catch (error) {
+                    if (error instanceof SessionControlError) throw new CardStartRefused(error.message);
+                    throw error;
+                  }
+                },
+                stop: async (sessionId, reason) => {
+                  await sessionControl.stop(sessionId, reason);
+                },
+                bin: CLIENT_NAME,
               },
               id,
               caller,

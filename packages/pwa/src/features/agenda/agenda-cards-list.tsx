@@ -1,31 +1,36 @@
 /**
- * THE CARDS A NOTICE IS ABOUT (`AgendaItem.cards`) — one row per card, each with its own three buttons: Open card,
- * Start a ferret on it, Close card. The line is the daemon's own (it says the card, where it waits and why nothing
+ * THE CARDS A NOTICE IS ABOUT (`AgendaItem.cards`) — one row per card, each with its own three buttons on ONE line:
+ * Open, Start a ferret, Close (a phone's width holds them; the accessible names say the card: "Open card &B1"). The line is the daemon's own (it says the card, where it waits and why nothing
  * will happen); the buttons are the owner's, and each goes through the same authorization as the board's own
  * (`AgendaCardsHost`). Got it is not here: it dismisses the whole notice and stays on the answer row.
  *
  * One card is already named by the notice's own words above the buttons, so its line is shown only when there are
  * several: each line then says which card its buttons are for.
  *
+ * A card a live ferret already holds is not started a second time: the daemon answers with that ferret and the row
+ * swaps Start for "Open its chat", which goes to that ferret.
+ *
  * Close asks first, in the row: the card leaves the board, so the owner sees what is about to happen, may edit the
  * reason the daemon will record, and must say yes. A refusal is shown on the row in the daemon's words and the
  * buttons stay, so the owner can try the other one.
  */
 
-import type { AgendaCardRow, BoardTaskId } from '@ferretry/protocol';
+import { type AgendaCardRow, type BoardTaskId, formatTaskRef } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
 import { defaultAgendaProse } from './agenda-prose.tsx';
 
 /** What a button did: a plain sentence either way, so the row can say it without knowing the board. */
 export type AgendaCardOutcome =
-  | { readonly ok: true; readonly note: string }
+  | { readonly ok: true; readonly note: string; readonly ferret?: string }
   | { readonly ok: false; readonly message: string };
 
 export interface AgendaCardsActions {
   /** Shows the card. */
   readonly open: (id: BoardTaskId) => void;
-  /** Brings the card's ferret back onto it. */
+  /** Starts a new ferret on the card; `ferret` in the answer means one already held it and nothing was started. */
   readonly start: (id: BoardTaskId) => Promise<AgendaCardOutcome>;
+  /** Shows the chat of the ferret that holds the card. */
+  readonly openChat: (sessionId: string) => void;
   /** Drops the card, with the reason the board records. */
   readonly close: (id: BoardTaskId, reason: string) => Promise<AgendaCardOutcome>;
 }
@@ -55,11 +60,18 @@ function CardRow({
   const id = card.task.id;
   const [state, setState] = useState<RowState>(IDLE);
   const [problem, setProblem] = useState<string | null>(null);
+  const [held, setHeld] = useState<{ readonly ferret: string; readonly note: string } | null>(null);
+  const ref = formatTaskRef({ id });
 
   const run = async (what: 'start' | 'close', go: () => Promise<AgendaCardOutcome>): Promise<void> => {
     setProblem(null);
     setState({ step: 'working', what });
     const outcome = await go();
+    if (outcome.ok && outcome.ferret !== undefined) {
+      setHeld({ ferret: outcome.ferret, note: outcome.note });
+      setState(IDLE);
+      return;
+    }
     if (outcome.ok) {
       setState({ step: 'done', note: outcome.note });
       return;
@@ -120,27 +132,43 @@ function CardRow({
           </div>
         </fieldset>
       ) : (
-        <div className="flex flex-wrap gap-2" data-agenda-card-buttons="">
+        <div className="flex gap-2" data-agenda-card-buttons="">
           <button
-            className="kt-btn min-h-[44px]"
+            aria-label={`Open card ${ref}`}
+            className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
             data-agenda-card-open=""
             disabled={working}
             onClick={() => actions.open(id)}
             type="button"
           >
-            Open card
+            Open
           </button>
+          {held === null ? (
+            <button
+              aria-label={`Start a ferret on ${ref}`}
+              className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
+              data-agenda-card-start=""
+              disabled={working}
+              onClick={() => void run('start', () => actions.start(id))}
+              type="button"
+            >
+              {state.step === 'working' && state.what === 'start' ? 'Starting…' : 'Start a ferret'}
+            </button>
+          ) : (
+            <button
+              aria-label={`Open the chat of the ferret on ${ref}`}
+              className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
+              data-agenda-card-chat=""
+              disabled={working}
+              onClick={() => actions.openChat(held.ferret)}
+              type="button"
+            >
+              Open its chat
+            </button>
+          )}
           <button
-            className="kt-btn min-h-[44px]"
-            data-agenda-card-start=""
-            disabled={working}
-            onClick={() => void run('start', () => actions.start(id))}
-            type="button"
-          >
-            {state.step === 'working' && state.what === 'start' ? 'Starting…' : 'Start a ferret on it'}
-          </button>
-          <button
-            className="kt-btn min-h-[44px]"
+            aria-label={`Close card ${ref}`}
+            className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
             data-agenda-card-close=""
             disabled={working}
             onClick={() => {
@@ -149,9 +177,14 @@ function CardRow({
             }}
             type="button"
           >
-            {state.step === 'working' && state.what === 'close' ? 'Closing…' : 'Close card'}
+            {state.step === 'working' && state.what === 'close' ? 'Closing…' : 'Close'}
           </button>
         </div>
+      )}
+      {held === null ? null : (
+        <p className="m-0 text-ui text-muted" data-agenda-card-held="" role="status">
+          {held.note}
+        </p>
       )}
       {problem === null ? null : (
         <p className="m-0 text-ui text-err" data-agenda-card-problem="" role="alert">

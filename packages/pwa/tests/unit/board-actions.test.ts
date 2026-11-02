@@ -38,8 +38,8 @@ const harness = (paired = [laptop]) => {
       start: async (machine, id) => {
         started.push({ daemonId: machine.daemonId, id });
         return refuse
-          ? boardErr({ status: 404, message: 'its ferret is gone', boardCode: 'not-found' as const })
-          : boardOk({ task: id, sessionId: 'worker' });
+          ? boardErr({ status: 404, message: 'the card was closed', boardCode: 'not-found' as const })
+          : boardOk({ task: id, sessionId: 'worker', started: true });
       },
       create: async (machine, request) => {
         created.push({ daemonId: machine.daemonId, request });
@@ -198,10 +198,10 @@ describe('the other verbs', () => {
 describe('start', () => {
   const card1 = { daemonId: laptop.daemonId, id: 'F1' };
 
-  it('starts the card’s ferret on the machine it names', async () => {
+  it('starts a new ferret on the card, on the machine it names', async () => {
     const { actions, started } = harness();
     const answer = await actions.start(card1);
-    expect(answer.ok && answer.value).toEqual({ task: 'F1', sessionId: 'worker' });
+    expect(answer.ok && answer.value).toEqual({ task: 'F1', sessionId: 'worker', started: true });
     expect(started).toEqual([{ daemonId: laptop.daemonId, id: 'F1' }]);
   });
 
@@ -209,7 +209,7 @@ describe('start', () => {
     const { actions, refuse } = harness();
     refuse(true);
     const answer = await actions.start(card1);
-    expect(!answer.ok && answer.error).toEqual({ status: 404, message: 'its ferret is gone', boardCode: 'not-found' });
+    expect(!answer.ok && answer.error).toEqual({ status: 404, message: 'the card was closed', boardCode: 'not-found' });
     const gone = await actions.start({ daemonId: workstation.daemonId, id: 'F1' });
     expect(!gone.ok && gone.error.boardCode).toBe('no-machine');
   });

@@ -1,6 +1,6 @@
 /**
- * THE THREE BUTTONS OF A CARD IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open card goes to the
- * card's page, Start a ferret on it is `POST /v1/board/tasks/:id/start`, Close card is the board's drop with the
+ * THE THREE BUTTONS OF A CARD IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open goes to the
+ * card's page, Start a ferret is `POST /v1/board/tasks/:id/start` (a NEW ferret on the card, or the one that already holds it), Close is the board's drop with the
  * reason the owner confirmed. Nothing here is a second path to the daemon: each is the verb the board page uses,
  * so the daemon's authorization applies to it exactly as it does there, and a refusal comes back in its words.
  */
@@ -9,7 +9,7 @@ import type { BoardTaskId } from '@ferretry/protocol';
 import type { AgendaCardOutcome, AgendaCardsActions } from '../features/agenda/agenda-cards-list.tsx';
 import type { BoardActions } from './board-actions.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import { daemonBoardCardPath } from './pages/routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from './pages/routes.ts';
 
 export const agendaCardsActions = (
   board: Pick<BoardActions, 'start' | 'drop'>,
@@ -23,9 +23,12 @@ export const agendaCardsActions = (
     start: async id => {
       const started = await board.start(target(id));
       return started.ok
-        ? { ok: true, note: 'Started: the last ferret on this card is back on it.' }
+        ? started.value.started
+          ? { ok: true, note: 'Started: a new ferret is working on this card.' }
+          : { ok: true, ferret: started.value.sessionId, note: 'A ferret is already working on this card.' }
         : refused(started.error.message);
     },
+    openChat: sessionId => onNavigate(daemonSessionPath(daemonId, sessionId)),
     close: async (id, reason) => {
       const dropped = await board.drop(target(id), reason);
       return dropped.ok ? { ok: true, note: 'Closed. The card is off the board.' } : refused(dropped.error.message);

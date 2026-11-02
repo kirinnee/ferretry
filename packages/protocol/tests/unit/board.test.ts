@@ -316,7 +316,11 @@ const VALID: readonly SchemaCase[] = [
   { name: 'all projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null, laneSet: null } },
   { name: 'unconfigured board', schema: BoardResponseSchema, value: { ...BOARD, laneSet: null } },
   { name: 'card response', schema: BoardTaskResponseSchema, value: { task: VIEW, laneSet: LANES } },
-  { name: 'card start', schema: BoardTaskStartResponseSchema, value: { task: 'F1', sessionId: 'worker' } },
+  {
+    name: 'card start',
+    schema: BoardTaskStartResponseSchema,
+    value: { task: 'F1', sessionId: 'worker', started: true },
+  },
   { name: 'machine card ids', schema: BoardIdsResponseSchema, value: { ids: [CARD.id] } },
   {
     name: 'create',
@@ -522,7 +526,16 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'unknown action', schema: BoardTaskActionRequestSchema, value: { action: 'status', status: 'done' } },
   { name: 'unknown lanes action', schema: LaneSetActionRequestSchema, value: { action: 'delete' } },
   { name: 'unknown error', schema: BoardErrorCodeSchema, value: 'ambiguous' },
-  { name: 'card start with more', schema: BoardTaskStartResponseSchema, value: { task: 'F1', sessionId: 'w', run: 1 } },
+  {
+    name: 'card start with more',
+    schema: BoardTaskStartResponseSchema,
+    value: { task: 'F1', sessionId: 'w', started: true, run: 1 },
+  },
+  {
+    name: 'card start without saying whether one started',
+    schema: BoardTaskStartResponseSchema,
+    value: { task: 'F1', sessionId: 'w' },
+  },
   { name: 'nothing changed', schema: BoardChangedEventSchema, value: { projectId: PROJECT, taskIds: [] } },
   {
     name: 'quarantined by path',

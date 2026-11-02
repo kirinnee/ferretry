@@ -48,6 +48,9 @@ const draw = async (
       calls.push(`start:${id}`);
       return { ok: true, note: 'Started.' };
     },
+    openChat: (sessionId: string) => {
+      calls.push(`chat:${sessionId}`);
+    },
     close: async (id: BoardTaskId, reason: string): Promise<AgendaCardOutcome> => {
       calls.push(`close:${id}:${reason}`);
       return { ok: true, note: 'Closed.' };
@@ -62,24 +65,39 @@ const draw = async (
 };
 
 describe('the cards of a notice', () => {
-  it('draws one row per card, each with Open card, Start a ferret on it and Close card', async () => {
+  it('draws one row per card, each with Open, Start a ferret and Close, named in full for a screen reader', async () => {
     const list = await draw(THREE);
 
     for (const id of ['B1', 'B2', 'B3']) {
-      expect(list.q(id, '[data-agenda-card-open]')?.textContent).toBe('Open card');
-      expect(list.q(id, '[data-agenda-card-start]')?.textContent).toBe('Start a ferret on it');
-      expect(list.q(id, '[data-agenda-card-close]')?.textContent).toBe('Close card');
+      const open = list.q(id, '[data-agenda-card-open]');
+      const start = list.q(id, '[data-agenda-card-start]');
+      const close = list.q(id, '[data-agenda-card-close]');
+      expect(open?.textContent).toBe('Open');
+      expect(open?.getAttribute('aria-label')).toBe(`Open card &${id}`);
+      expect(start?.textContent).toBe('Start a ferret');
+      expect(start?.getAttribute('aria-label')).toBe(`Start a ferret on &${id}`);
+      expect(close?.textContent).toBe('Close');
+      expect(close?.getAttribute('aria-label')).toBe(`Close card &${id}`);
     }
     expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toContain(
       '&B2 Fix the login page is waiting in Implement',
     );
   });
 
+  it('keeps a card’s three buttons on one row, which does not wrap', async () => {
+    const list = await draw(ONE);
+    const buttons = list.q('B1', '[data-agenda-card-buttons]');
+
+    expect(buttons?.className).toContain('flex');
+    expect(buttons?.className).not.toContain('flex-wrap');
+    expect(buttons?.querySelectorAll('button')).toHaveLength(3);
+  });
+
   it('does not repeat the line of a lone card, which the notice above it already says', async () => {
     const list = await draw(ONE);
 
     expect(list.q('B1', '[data-agenda-card-line]')).toBeNull();
-    expect(list.q('B1', '[data-agenda-card-open]')?.textContent).toBe('Open card');
+    expect(list.q('B1', '[data-agenda-card-open]')?.textContent).toBe('Open');
   });
 
   it('opens only the card whose button was pressed', async () => {
@@ -99,6 +117,23 @@ describe('the cards of a notice', () => {
     expect(list.calls).toEqual(['start:B3']);
     expect(list.q('B3', '[data-agenda-card-done]')?.textContent).toBe('Started.');
     expect(list.q('B1', '[data-agenda-card-start]')).not.toBeNull();
+  });
+
+  it('offers Open its chat in place of Start when a live ferret already holds the card, and opens that ferret', async () => {
+    const list = await draw(ONE, {
+      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
+    });
+
+    await click(list.q('B1', '[data-agenda-card-start]'));
+    await settle();
+
+    expect(list.q('B1', '[data-agenda-card-start]')).toBeNull();
+    expect(list.q('B1', '[data-agenda-card-held]')?.textContent).toBe('A ferret is already working on this card.');
+    const chat = list.q('B1', '[data-agenda-card-chat]');
+    expect(chat?.textContent).toBe('Open its chat');
+    expect(chat?.getAttribute('aria-label')).toBe('Open the chat of the ferret on &B1');
+    await click(chat);
+    expect(list.calls).toEqual(['chat:worker']);
   });
 
   it('shows the daemon’s refusal on the row and keeps the buttons', async () => {
@@ -153,7 +188,7 @@ describe('the cards of a notice', () => {
 });
 
 describe('the buttons as the board’s own writes', () => {
-  const board = (refuse: boolean) => {
+  const board = (refuse: boolean, held = false) => {
     const sent: string[] = [];
     return {
       sent,
@@ -162,7 +197,7 @@ describe('the buttons as the board’s own writes', () => {
           sent.push(`start:${target.daemonId}:${target.id}`);
           return refuse
             ? boardErr({ status: 403, message: 'only the owner may do that', boardCode: 'forbidden' as const })
-            : boardOk({ task: target.id, sessionId: 'worker' });
+            : boardOk({ task: target.id, sessionId: 'worker', started: held ? false : true });
         },
         drop: async (target: { daemonId: string; id: string }, reason: string) => {
           sent.push(`drop:${target.daemonId}:${target.id}:${reason}`);
@@ -192,8 +227,22 @@ describe('the buttons as the board’s own writes', () => {
     const closed = await actions.close('B1' as BoardTaskId, 'no longer needed');
 
     expect(sent).toEqual(['start:laptop:B1', 'drop:laptop:B1:no longer needed']);
-    expect(started.ok).toBe(true);
+    expect(started).toEqual({ ok: true, note: 'Started: a new ferret is working on this card.' });
     expect(closed).toEqual({ ok: true, note: 'Closed. The card is off the board.' });
+  });
+
+  it('answers a card a live ferret holds with that ferret, and opens its chat page', async () => {
+    const opened: string[] = [];
+    const { board: wired } = board(false, true);
+    const actions = agendaCardsActions(wired, LAPTOP, to => opened.push(to));
+
+    const started = await actions.start('B1' as BoardTaskId);
+    actions.openChat('worker');
+
+    expect(started).toEqual({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' });
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toContain('laptop');
+    expect(opened[0]).toContain('worker');
   });
 
   it('carries the daemon’s refusal back in its own words', async () => {

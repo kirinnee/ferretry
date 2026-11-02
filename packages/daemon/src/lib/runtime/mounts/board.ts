@@ -44,8 +44,8 @@ export interface BoardSubsystem {
   create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
-  /** The owner's start of a ferret on a card: the card's own ferret, resumed with the card as its brief. */
-  start(id: BoardTaskId, caller: BoardCaller, actor: ApiActor | undefined): Promise<BoardTaskStartResponse>;
+  /** The owner's start of a NEW ferret on a card, or the live ferret that already holds it. */
+  start(id: BoardTaskId, caller: BoardCaller): Promise<BoardTaskStartResponse>;
 }
 
 /** The HTTP status each refusal answers with. */
@@ -251,7 +251,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       },
     },
     {
-      // A person's act only: a ferret starts a card's ferret by handing it down (`fy task assign`), never here.
+      // A person's act only: a ferret hands a card down (`fy task assign`, `fy new --card`), it does not start one here.
       method: 'POST',
       path: '/v1/board/tasks/:taskId/start',
       minimum: 'operator',
@@ -261,7 +261,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       handle: async context => {
         const caller = boardCaller(context.actor);
         const id = pathTaskId(context);
-        return await answer(async () => await board.start(id, caller, context.actor));
+        return await answer(async () => await board.start(id, caller));
       },
     },
   ];

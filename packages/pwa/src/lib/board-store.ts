@@ -674,7 +674,7 @@ export class DaemonBoardStore {
     return boardOk(answer.value.task);
   }
 
-  /** Starts the card's ferret again on the machine that holds it; the card itself moves when the feed says so. */
+  /** Starts a new ferret on the card on the machine that holds it; the card itself moves when the feed says so. */
   start(machine: DaemonConnection, id: BoardTaskId): Promise<BoardResult<BoardTaskStartResponse, BoardWriteError>> {
     return this.#port.start(machine, id);
   }

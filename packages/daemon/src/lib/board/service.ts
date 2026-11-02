@@ -472,15 +472,27 @@ export class BoardService {
    * assignment is recorded as the lead's; the lead's own focus is not touched.
    */
   async handOver(id: BoardTaskId, lead: string, session: string): Promise<BoardTask> {
-    const caller: BoardCaller = { kind: 'ferret', sessionId: lead };
-    const outcome = await this.ports.store.write(id, async current => {
+    const outcome = await this.assignTo(id, { kind: 'ferret', sessionId: lead }, session, 'hand it to a sub-ferret');
+    await this.afterWrite({ kind: 'daemon', sessionId: lead }, outcome, [outcome.projectId]);
+    return await this.focusOn(outcome, session);
+  }
+
+  /**
+   * The owner's "start a ferret on it" (`startOnCard`), once the new session exists: the card is assigned to it
+   * as the owner's act and becomes the session's focus and anchor. Refused, with nothing changed, when the card
+   * was dropped in the meantime — the same write that assigns it reads that, so a drop and this cannot both win.
+   */
+  async assignForOwner(id: BoardTaskId, session: string): Promise<BoardTask> {
+    const outcome = await this.assignTo(id, { kind: 'owner' }, session, 'start a ferret on it');
+    await this.afterWrite({ kind: 'owner' }, outcome, [outcome.projectId]);
+    return await this.focusOn(outcome, session);
+  }
+
+  private async assignTo(id: BoardTaskId, caller: BoardCaller, session: string, doing: string): Promise<BoardTask> {
+    return await this.ports.store.write(id, async current => {
       const card = this.requireCard(current, id);
-      if (card.dropped !== null) {
-        throw new BoardError(
-          'invalid',
-          `${formatTaskRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
-        );
-      }
+      if (card.dropped !== null)
+        throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing}`);
       const applied = applyAction(
         card,
         { action: 'assign', assignee: session },
@@ -489,11 +501,13 @@ export class BoardService {
       const task = requireValidCard(applied.task as BoardTask);
       return { task, result: task };
     });
-    await this.afterWrite({ kind: 'daemon', sessionId: lead }, outcome, [outcome.projectId]);
-    if (!(await this.ports.focus.setFocus(session, { id }, outcome.title, { anchor: true }).catch(() => false))) {
-      this.ports.diagnostics.warn(`could not focus ${session} on ${formatTaskRef(outcome)}`);
+  }
+
+  private async focusOn(card: BoardTask, session: string): Promise<BoardTask> {
+    if (!(await this.ports.focus.setFocus(session, { id: card.id }, card.title, { anchor: true }).catch(() => false))) {
+      this.ports.diagnostics.warn(`could not focus ${session} on ${formatTaskRef(card)}`);
     }
-    return outcome;
+    return card;
   }
 
   /**

@@ -17,13 +17,7 @@
  * bars, no hint lines, no menus.
  */
 
-import {
-  AGENDA_CARDS_LEAD,
-  type AgendaCardAnswer,
-  type AgendaItem,
-  type AgendaTerm,
-  singleAgendaQuestion,
-} from '@ferretry/protocol';
+import { type AgendaCardAnswer, type AgendaItem, type AgendaTerm, singleAgendaQuestion } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -459,7 +453,7 @@ export function AgendaItemCard({
           {...(gated && body !== null ? { heading: 'How to test' } : {})}
           {...(gated ? { lead: '' } : {})}
           {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
-          {...(answerable && cardsForm !== undefined ? { lead: AGENDA_CARDS_LEAD } : {})}
+          {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
         >
           {askLine === '' ||
           (gated && body !== null) ||

@@ -41,10 +41,6 @@ export const AGENDA_SHAPE_LEADS: Readonly<Record<AgendaShape, string>> = {
   input: 'Type the value below.',
 };
 
-/** The lead under a machine notice that lists board cards: each card has its own buttons. */
-export const AGENDA_CARDS_LEAD =
-  'Open a card to look at it, start a ferret on it, or close it. Tap Got it to dismiss this notice.';
-
 /**
  * The refusals a raise that mixes shapes gets, from the CLI and from the daemon alike: each says what was wrong
  * AND the shape to write instead, so a ferret fixes the item in one go.

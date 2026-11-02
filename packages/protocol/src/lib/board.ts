@@ -726,8 +726,15 @@ export type BoardResponse = z.infer<typeof BoardResponseSchema>;
 export const BoardTaskResponseSchema = z.object({ task: BoardTaskViewSchema, laneSet: LaneSetSchema.nullable() });
 export type BoardTaskResponse = z.infer<typeof BoardTaskResponseSchema>;
 
-/** The owner's start of a ferret on a card: the card, and the ferret that is on it again. */
-export const BoardTaskStartResponseSchema = z.strictObject({ task: BoardTaskIdSchema, sessionId: SessionIdSchema });
+/**
+ * The owner's start of a ferret on a card: the card, and the ferret that is on it. `started: false` means a live
+ * ferret already held the card, so none was started and `sessionId` is that ferret (the app then offers its chat).
+ */
+export const BoardTaskStartResponseSchema = z.strictObject({
+  task: BoardTaskIdSchema,
+  sessionId: SessionIdSchema,
+  started: z.boolean(),
+});
 export type BoardTaskStartResponse = z.infer<typeof BoardTaskStartResponseSchema>;
 
 /**

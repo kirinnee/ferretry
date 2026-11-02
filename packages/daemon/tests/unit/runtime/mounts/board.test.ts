@@ -87,10 +87,10 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
       calls.push({ route: 'skip', value, caller });
       return await service.skip(value, caller);
     },
-    start: async (id, caller, actor) => {
-      calls.push({ route: 'start', value: id, caller, actor });
+    start: async (id, caller) => {
+      calls.push({ route: 'start', value: id, caller });
       if (caller.kind !== 'owner') throw new BoardError('forbidden', 'only the owner may start a ferret on a card');
-      return { task: id, sessionId: 'worker' };
+      return { task: id, sessionId: 'worker', started: true };
     },
   };
   return { calls, board };
@@ -490,7 +490,7 @@ describe('the board mount', () => {
     should(calls).eql([]);
   });
 
-  it('should start the card’s ferret for the owner at the machine, and say which ferret', async () => {
+  it('should start a new ferret on the card for the owner at the machine, and say which one', async () => {
     // Arrange
     const { calls, board } = recording();
 
@@ -501,13 +501,11 @@ describe('the board mount', () => {
 
     // Assert
     should(response.status).equal(200);
-    should(jsonBody(response)).eql({ task: 'F1', sessionId: 'worker' });
-    should(calls).eql([
-      { route: 'start', value: 'F1', caller: { kind: 'owner', via: 'admin-token' }, actor: 'admin-cli' },
-    ]);
+    should(jsonBody(response)).eql({ task: 'F1', sessionId: 'worker', started: true });
+    should(calls).eql([{ route: 'start', value: 'F1', caller: { kind: 'owner', via: 'admin-token' } }]);
   });
 
-  it('should start the card’s ferret for a paired device the fleet grant lets in, as that device', async () => {
+  it('should start a ferret on the card for a paired device the fleet grant lets in, as the owner', async () => {
     // Arrange
     const { calls, board } = recording();
 
@@ -519,7 +517,6 @@ describe('the board mount', () => {
     // Assert
     should(response.status).equal(200);
     should(calls[0]?.caller).eql({ kind: 'owner' });
-    should(calls[0]?.actor).startWith('device:');
   });
 
   it('should refuse a ferret’s own credential, and a remote device when the fleet grant is off', async () => {
