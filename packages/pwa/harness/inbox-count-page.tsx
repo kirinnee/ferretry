@@ -13,6 +13,7 @@ import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import { type AgendaInboxMachine, useAgendaInboxModel } from '../src/hooks/use-agenda-inbox.ts';
 import type { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
 import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import { AgendaRollupStore } from '../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../src/lib/daemon-scope.ts';
@@ -146,6 +147,7 @@ const store = new DaemonAgendaStore();
 const client = {
   store,
   wires: new AgendaWireDirectory(),
+  rollup: new AgendaRollupStore(async () => new Response('{}', { status: 404 })),
   revalidate: async (daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> => {
     if (hold) return new Promise<void>(() => undefined);
     if (daemon.daemonId === laptop.daemonId) {

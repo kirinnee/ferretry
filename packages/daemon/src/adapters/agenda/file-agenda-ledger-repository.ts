@@ -19,8 +19,8 @@ export class InvalidAgendaLedgerError extends Error {
   }
 }
 
-/** How many sessions' parsed agendas are kept before the whole cache is dropped and refilled from disk. */
-const AGENDA_CACHE_LIMIT = 2_048;
+/** How many sessions' parsed agendas are kept; past it the one read longest ago is dropped and read again from disk when asked for. */
+export const AGENDA_CACHE_LIMIT = 2_048;
 
 /** The files a repository reads: the agenda's store, with the identity reads the cache is proved by. */
 type IdentifiedAgendaFiles = AgendaFileStore &
@@ -75,13 +75,21 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const now = await this.files.identity(sessionId, name);
       if (now === undefined) continue;
       const cached = this.cache.get(sessionId);
-      if (cached !== undefined && cached.name === name && cached.identity === now) return cached.ledger;
+      if (cached !== undefined && cached.name === name && cached.identity === now) {
+        this.cache.delete(sessionId);
+        this.cache.set(sessionId, cached);
+        return cached.ledger;
+      }
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
       const ledger = deepFreezeJson(
         this.parse(sessionId, name, read.text) as unknown as JsonValue,
       ) as unknown as AgendaLedger;
-      if (this.cache.size >= AGENDA_CACHE_LIMIT) this.cache.clear();
+      this.cache.delete(sessionId);
+      for (const oldest of this.cache.keys()) {
+        if (this.cache.size < AGENDA_CACHE_LIMIT) break;
+        this.cache.delete(oldest);
+      }
       this.cache.set(sessionId, { name, identity: read.identity, ledger });
       return ledger;
     }

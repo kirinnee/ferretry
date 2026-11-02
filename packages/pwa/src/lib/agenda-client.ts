@@ -8,6 +8,7 @@ import {
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
 import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
+import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
@@ -163,13 +164,17 @@ export class DaemonAgendaClient {
   readonly #boardRevisions = new Map<string, number>();
   /** Board reads in flight, bounded per daemon: see {@link AGENDA_READS_PER_DAEMON}. */
   readonly #reads = new Map<DaemonId, ConcurrencyLimit>();
+  /** Every conversation's open and parked items per machine: what the Inbox lists parked items from. */
+  readonly rollup: AgendaRollupStore;
 
   constructor(
     readonly store: DaemonAgendaStore = new DaemonAgendaStore(),
     private readonly fetcher: DaemonFetch = browserFetch,
     /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
     readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
-  ) {}
+  ) {
+    this.rollup = new AgendaRollupStore(fetcher);
+  }
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
     return this.#load(daemon, scope, false);
@@ -322,6 +327,7 @@ export class DaemonAgendaClient {
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);
     this.#bindings.delete(daemonId);
     this.store.clearDaemon(daemonId);
+    this.rollup.clearDaemon(daemonId);
     this.#clearInFlight(this.#fullInFlight, daemonId);
     this.#clearInFlight(this.#countInFlight, daemonId);
     this.#clearInFlight(this.#mutationTails, daemonId);

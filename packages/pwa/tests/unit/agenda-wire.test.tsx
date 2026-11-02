@@ -229,3 +229,32 @@ describe('the agenda wire in React', () => {
     expect(wireShown()).toBe('attention');
   });
 });
+
+describe('whether a machine rolls up every conversation’s items (agenda.open.1)', () => {
+  const ROLLS: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.140.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOpen]),
+  };
+
+  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    expect(wires.openOf(A)).toBeUndefined();
+    wires.note(A, ROLLS);
+    wires.note(B, NEW);
+    expect(wires.openOf(A)).toBe(true);
+    expect(wires.openOf(B)).toBe(false);
+    const heardBefore = heard;
+    wires.note(A, ROLLS);
+    expect(heard).toBe(heardBefore);
+    wires.note(A, NEW);
+    expect(wires.openOf(A)).toBe(false);
+    expect(heard).toBe(heardBefore + 1);
+    wires.note(A, ROLLS);
+    wires.clearDaemon(A);
+    expect(wires.openOf(A)).toBeUndefined();
+  });
+});

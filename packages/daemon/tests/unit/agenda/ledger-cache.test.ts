@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import {
+  AGENDA_CACHE_LIMIT,
+  FileAgendaLedgerRepository,
+} from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { AGENDA_FILES, emptyAgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { AgendaService } from '../../../src/lib/agenda/service.ts';
 
@@ -159,5 +162,51 @@ describe('the agenda repository cache', () => {
     // Assert
     await should(repository.read(SESSION)).be.rejectedWith({ name: 'Error', file: files.file(SESSION, current) });
     await should(repository.read(SESSION)).be.rejectedWith({ file: files.file(SESSION, current) });
+  });
+});
+
+describe('the agenda repository cache limit', () => {
+  const seed = (files: MemoryFiles, count: number) => {
+    for (let n = 0; n < count; n += 1) {
+      const id = `bounded-${n}`;
+      files.put(id, current, `${JSON.stringify(emptyAgendaLedger(id, NOW))}\n`);
+    }
+  };
+
+  it('should drop the session read longest ago when full, and keep every other copy', async () => {
+    // Arrange
+    const { files, repository } = subject();
+    seed(files, AGENDA_CACHE_LIMIT + 1);
+    for (let n = 0; n < AGENDA_CACHE_LIMIT; n += 1) await repository.read(`bounded-${n}`);
+    const parsed = files.parses;
+
+    // Act
+    await repository.read(`bounded-${AGENDA_CACHE_LIMIT}`);
+    await repository.read('bounded-1');
+    const keptParses = files.parses;
+    await repository.read('bounded-0');
+
+    // Assert
+    should(keptParses).equal(parsed + 1);
+    should(files.parses).equal(keptParses + 1);
+  });
+
+  it('should keep a session that was read again recently, and drop the next oldest instead', async () => {
+    // Arrange
+    const { files, repository } = subject();
+    seed(files, AGENDA_CACHE_LIMIT + 1);
+    for (let n = 0; n < AGENDA_CACHE_LIMIT; n += 1) await repository.read(`bounded-${n}`);
+    await repository.read('bounded-0');
+    const parsed = files.parses;
+
+    // Act
+    await repository.read(`bounded-${AGENDA_CACHE_LIMIT}`);
+    await repository.read('bounded-0');
+    const keptParses = files.parses;
+    await repository.read('bounded-1');
+
+    // Assert
+    should(keptParses).equal(parsed + 1);
+    should(files.parses).equal(keptParses + 1);
   });
 });

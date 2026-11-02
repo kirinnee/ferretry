@@ -60,6 +60,12 @@ export const DAEMON_FEATURES = {
    */
   agendaClearAgents: 'agenda.clear-agents.1',
   /**
+   * The roll-up of every conversation's open and parked agenda items (`GET /v1/agenda/open`, docs/agenda.md § The
+   * roll-up). A daemon without this name answers 404: the Inbox then lists the snoozed and replied items of the boards
+   * it has read, and says so.
+   */
+  agendaOpen: 'agenda.open.1',
+  /**
    * A board move back (`move` or `reopen`) may carry `attachments` — files the owner sent with "Not good" —
    * which the daemon delivers to the card's ferret with the reopen and names in the card's history. A daemon
    * without this name refuses the field: the app offers the composer's attach only where the machine reports it.

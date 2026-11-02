@@ -747,3 +747,48 @@ describe('parked items', () => {
     expect(UNSNOOZE_ACTION).toEqual({ kind: 'unsnooze', label: 'Back to my list' });
   });
 });
+
+describe('the owner’s thread of a conversation', () => {
+  const parentOf = (id: string, parent: string, agenda?: SessionAgendaSummary) =>
+    sessionView(id, { config: { parent } as never, ...(agenda === undefined ? {} : { state: { attention: agenda } }) });
+  const top = waiting('top', summary(1, 1));
+  const kid = parentOf('kid', 'top', summary(1, 9));
+  const sources = [{ daemonId: STUDIO, name: 'Studio', sessions: [top, kid] }];
+  const parkedItem = {
+    ...item('A1', 1),
+    parked: { reason: 'snoozed', at: at(2), until: at(60) },
+  } as AgendaItem;
+  const boardFor = (_daemon: DaemonId, sessionId: string) =>
+    sessionId === 'kid' ? { items: [item('A5', 3), parkedItem] } : undefined;
+
+  test('names the root of a lineage on its unread entries and its with-ferret entries', () => {
+    expect(unreadSessions(sources).map(entry => [entry.view.config.id, entry.root?.config.id])).toEqual([
+      ['kid', 'top'],
+      ['top', 'top'],
+    ]);
+    expect(withFerretSessions(sources).map(entry => [entry.view.config.id, entry.root?.config.id])).toEqual([
+      ['top', 'top'],
+      ['kid', 'top'],
+    ]);
+  });
+
+  test('carries the root on an owner card, and none when the entry has none', () => {
+    const [card] = inboxCards(unreadSessions(sources), boardFor);
+    expect(card?.view.config.id).toBe('kid');
+    expect(card?.root?.config.id).toBe('top');
+    const bare = inboxCards([{ ...unreadSessions(sources)[0]!, root: undefined }], boardFor);
+    expect('root' in (bare[0] as InboxCard)).toBe(false);
+  });
+
+  test('lists a parked item from a roll-up’s items, naming the root', () => {
+    const [card] = inboxParked(sources, boardFor);
+    expect(card?.item.id).toBe('A1');
+    expect(card?.root?.config.id).toBe('top');
+  });
+
+  test('names the root on a resolved row', () => {
+    const resolvedBoard = { ...board('kid', []), resolved: [{ ...item('A9', 1), resolvedAt: at(5) } as never] };
+    const [row] = inboxResolved(sources, () => resolvedBoard as AgendaSnapshot);
+    expect(row?.root?.config.id).toBe('top');
+  });
+});

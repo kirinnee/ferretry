@@ -35,6 +35,7 @@ import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from './daemon-connection.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
+import { rootViews } from './session-root.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
 export interface AgendaInboxSource {
@@ -48,7 +49,14 @@ export interface UnreadSession {
   readonly daemonId: DaemonId;
   readonly machineName: string;
   readonly view: SessionView;
+  /** The conversation's owner thread (`rootViews`): what its rows are named for. Absent: the conversation itself. */
+  readonly root?: SessionView;
   readonly attention: SessionAgendaSummary;
+}
+
+/** The items a conversation's board holds: all the Inbox reads of one, so a roll-up's items stand in for a board. */
+export interface BoardItems {
+  readonly items: readonly AgendaItem[];
 }
 
 const instant = (value: string): number => {
@@ -96,10 +104,18 @@ const byNewestAgenda = (left: UnreadSession, right: UnreadSession): number =>
 export const unreadSessions = (sources: readonly AgendaInboxSource[]): readonly UnreadSession[] => {
   const entries: (UnreadSession & { readonly order: number })[] = [];
   sources.forEach((source, order) => {
+    const roots = rootViews(source.sessions ?? []);
     for (const view of source.sessions ?? []) {
       const agenda = sessionAgenda(view);
       if (agenda !== undefined)
-        entries.push({ daemonId: source.daemonId, machineName: source.name, view, attention: agenda, order });
+        entries.push({
+          daemonId: source.daemonId,
+          machineName: source.name,
+          view,
+          root: roots.get(view.config.id),
+          attention: agenda,
+          order,
+        });
     }
   });
   entries.sort(
@@ -196,14 +212,23 @@ export const agendaFirst = <T>(rows: readonly T[], viewOf: (row: T) => SessionVi
  * boards for, so the items that are with a ferret are on the page (under "With ferrets") and not only counted.
  */
 export const withFerretSessions = (sources: readonly AgendaInboxSource[]): readonly UnreadSession[] =>
-  sources.flatMap(source =>
-    (source.sessions ?? []).flatMap(view => {
+  sources.flatMap(source => {
+    const roots = rootViews(source.sessions ?? []);
+    return (source.sessions ?? []).flatMap(view => {
       const agenda = sessionAgendaSummary(view.state);
       return agenda === undefined
         ? []
-        : [{ daemonId: source.daemonId, machineName: source.name, view, attention: agenda }];
-    }),
-  );
+        : [
+            {
+              daemonId: source.daemonId,
+              machineName: source.name,
+              view,
+              root: roots.get(view.config.id),
+              attention: agenda,
+            },
+          ];
+    });
+  });
 
 /**
  * What a board read is keyed on: the summary's facts. When they move the board moved, so the inbox
@@ -253,6 +278,8 @@ export interface InboxCard {
   readonly daemonId: DaemonId;
   readonly machineName: string;
   readonly view: SessionView;
+  /** The conversation's owner thread: the ferret and task a row names. Absent: the conversation itself. */
+  readonly root?: SessionView;
   readonly item: AgendaItem;
 }
 
@@ -261,7 +288,7 @@ export const inboxCardKey = (daemonId: DaemonId, sessionId: string, id: AgendaId
 
 const collectCards = (
   entries: readonly UnreadSession[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
   hidden: ReadonlySet<string>,
   wanted: (item: AgendaItem) => boolean,
 ): readonly InboxCard[] => {
@@ -271,7 +298,14 @@ const collectCards = (
     for (const item of board?.items ?? []) {
       const key = inboxCardKey(entry.daemonId, entry.view.config.id, item.id);
       if (wanted(item) && !hidden.has(key))
-        cards.push({ key, daemonId: entry.daemonId, machineName: entry.machineName, view: entry.view, item });
+        cards.push({
+          key,
+          daemonId: entry.daemonId,
+          machineName: entry.machineName,
+          view: entry.view,
+          ...(entry.root === undefined ? {} : { root: entry.root }),
+          item,
+        });
     }
   }
   return cards.sort(
@@ -291,14 +325,14 @@ export const isOnOwner = (item: AgendaItem): boolean => item.notice === true || 
  */
 export const inboxCards = (
   entries: readonly UnreadSession[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
   hidden: ReadonlySet<string> = new Set(),
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isOnOwner);
 
 /** The items on the FERRET's turn, as cards of the same shape and order as the deck's: the "With ferrets" section. */
 export const withFerretCards = (
   entries: readonly UnreadSession[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
   hidden: ReadonlySet<string> = new Set(),
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => agendaTurn(item) === 'ferret');
 
@@ -310,7 +344,7 @@ export const withFerretCards = (
 export const gateHolders = (
   entries: readonly UnreadSession[],
   sources: readonly AgendaInboxSource[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
 ): readonly InboxCard[] =>
   [...inboxCards(entries, boardFor), ...inboxParked(sources, boardFor)].filter(card => card.item.gate !== undefined);
 
@@ -322,11 +356,12 @@ export const gateHolders = (
  */
 export const inboxParked = (
   sources: readonly AgendaInboxSource[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => BoardItems | undefined,
   hidden: ReadonlySet<string> = new Set(),
 ): readonly InboxCard[] => {
   const cards: InboxCard[] = [];
   for (const source of sources) {
+    const roots = rootViews(source.sessions ?? []);
     for (const view of source.sessions ?? []) {
       for (const item of boardFor(source.daemonId, view.config.id)?.items ?? []) {
         const key = inboxCardKey(source.daemonId, view.config.id, item.id);
@@ -336,6 +371,7 @@ export const inboxParked = (
           daemonId: source.daemonId,
           machineName: source.name,
           view,
+          root: roots.get(view.config.id) ?? view,
           item,
         });
       }
@@ -355,6 +391,8 @@ export interface InboxResolved {
   readonly daemonId: DaemonId;
   readonly machineName: string;
   readonly view: SessionView;
+  /** The conversation's owner thread: the ferret a row names. */
+  readonly root?: SessionView;
   readonly record: ResolvedAgendaItem;
 }
 
@@ -368,6 +406,7 @@ export const inboxResolved = (
 ): readonly InboxResolved[] => {
   const rows: InboxResolved[] = [];
   for (const source of sources) {
+    const roots = rootViews(source.sessions ?? []);
     for (const view of source.sessions ?? []) {
       for (const record of boardFor(source.daemonId, view.config.id)?.resolved ?? []) {
         rows.push({
@@ -375,6 +414,7 @@ export const inboxResolved = (
           daemonId: source.daemonId,
           machineName: source.name,
           view,
+          root: roots.get(view.config.id) ?? view,
           record,
         });
       }

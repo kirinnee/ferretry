@@ -14,6 +14,7 @@ import { awaitingOwner, type GateStage } from './awaiting-owner.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardCardOf, BoardGroupOf } from './board-view.ts';
 import { displayCallsign } from './callsign.ts';
+import { rootViews } from './session-root.ts';
 
 export interface ToTestCard {
   /** The board card's own key: stable across reads, unique across machines. */
@@ -134,13 +135,40 @@ export const sessionTaskNames = (sessions: readonly Pick<SessionView, 'config'>[
   return names;
 };
 
-/** The card with the task name of the ferret on it (its assignee, else its owner); the same card when nothing is known. */
-export const withTaskName = (row: ToTestCard, names: ReadonlyMap<string, string> | undefined): ToTestCard => {
+/**
+ * Each session's task name as its OWNER'S THREAD has it: a sub-ferret is named for the root of its lineage
+ * (`rootViews`), the conversation the owner talks to. A session whose root has no task of its own is left out.
+ */
+export const rootTaskNames = (sessions: readonly SessionView[]): ReadonlyMap<string, string> => {
+  const roots = rootViews(sessions);
+  const own = sessionTaskNames([...roots.values()]);
+  const names = new Map<string, string>();
+  for (const [id, root] of roots) {
+    const name = own.get(root.config.id);
+    if (name !== undefined) names.set(id, name);
+  }
+  return names;
+};
+
+/** Each session's root session id: the chat a name from {@link rootTaskNames} opens. */
+export const rootSessionIds = (sessions: readonly SessionView[]): ReadonlyMap<string, string> =>
+  new Map([...rootViews(sessions)].map(([id, root]) => [id, root.config.id] as const));
+
+/**
+ * The card with the task name of the ferret on it (its assignee, else its owner); the same card when nothing is known.
+ * With `roots` the chat it opens is the root's, where `names` came from `rootTaskNames`.
+ */
+export const withTaskName = (
+  row: ToTestCard,
+  names: ReadonlyMap<string, string> | undefined,
+  roots?: ReadonlyMap<string, string>,
+): ToTestCard => {
   if (names === undefined) return row;
   const { assignee, owner } = row.card.task;
   const assigned = assignee === null ? undefined : names.get(assignee);
   const taskName = assigned ?? names.get(owner) ?? null;
-  const taskSession = taskName === null ? null : assigned === undefined ? owner : assignee;
+  const namedBy = assigned === undefined ? owner : (assignee as string);
+  const taskSession = taskName === null ? null : (roots?.get(namedBy) ?? namedBy);
   return taskName === row.taskName && taskSession === (row.taskSession ?? null)
     ? row
     : { ...row, taskName, taskSession };

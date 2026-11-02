@@ -711,6 +711,7 @@ import {
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
+  AgendaRollup,
   AgendaBoardUndelivered,
   AgendaBuzz,
   AgendaChangeFanout,
@@ -12634,6 +12635,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaHomesMigrated,
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
+        agendaRollup: new AgendaRollup(agendaBoards, () => storage.listSessions().map(session => session.id)),
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.

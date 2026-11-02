@@ -526,6 +526,13 @@
 .fy-inbox-group__dot {
   margin: 0 var(--gap-xs);
 }
+/* A sub-ferret's own name, on a line of its own under the owner's thread it is grouped by. */
+.fy-inbox-group__via {
+  min-width: 0;
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs, var(--text-sm));
+}
 /* A line: the item's title and age, its ask, its kind and reference. A light border and a roomy pad make
    the target; selection and press fill it. */
 .fy-inbox-row {

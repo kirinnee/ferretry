@@ -26,6 +26,7 @@ import {
 } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import {
+  type BoardItems,
   agendaSummaryKey,
   browserDeferredTimers,
   DeferredAgendaActions,
@@ -54,7 +55,14 @@ import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { toTestBesideGates } from '../lib/gate-items.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
-import { nextWake, sessionTaskNames, splitSnoozed, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
+import {
+  nextWake,
+  rootSessionIds,
+  rootTaskNames,
+  splitSnoozed,
+  type ToTestCard,
+  withTaskName,
+} from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
@@ -80,13 +88,18 @@ export interface AgendaInbox {
   readonly reading: boolean;
   /** Machines with an unread conversation whose board could not be read: counted in `total`, said on the page. */
   readonly unavailable: readonly InboxUnavailable[];
-  /** Snoozed and replied items of every conversation whose board is held, newest parked first. */
+  /**
+   * Snoozed and replied items, newest parked first: of EVERY conversation on a machine that rolls them up
+   * (`agenda.open.1`), else of the conversations whose board is held.
+   */
   readonly parked: readonly InboxCard[];
+  /** True once every machine has been read to the end, so `parked` is all of it and not the recent conversations'. */
+  readonly parkedWhole: boolean;
   /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
   readonly resolved: readonly InboxResolved[];
   /** True while `loadResolved` is reading boards. */
   readonly resolvedReading: boolean;
-  /** Reads the recent conversations' boards that are not held yet, once per call that finds any. */
+  /** Reads every machine's roll-up and the recent conversations' boards that are not held yet, once per call that finds any. */
   readonly loadResolved: () => void;
   readonly deferred: DeferredAgendaActions;
   readonly deferredState: DeferredAgendaState;
@@ -193,8 +206,14 @@ export function useAgendaInboxModel(
   timers?: DeferredTimers,
   toTestRead: readonly ToTestCard[] = NO_TO_TEST,
 ): AgendaInbox {
-  const taskNames = useMemo(() => sessionTaskNames(machines.flatMap(machine => machine.sessions ?? [])), [machines]);
-  const named = useMemo(() => toTestRead.map(row => withTaskName(row, taskNames)), [toTestRead, taskNames]);
+  // A card to test is named for its owner's thread (the lineage root), never the sub-ferret that built it.
+  const allSessions = useMemo(() => machines.flatMap(machine => machine.sessions ?? []), [machines]);
+  const taskNames = useMemo(() => rootTaskNames(allSessions), [allSessions]);
+  const rootIds = useMemo(() => rootSessionIds(allSessions), [allSessions]);
+  const named = useMemo(
+    () => toTestRead.map(row => withTaskName(row, taskNames, rootIds)),
+    [toTestRead, taskNames, rootIds],
+  );
   const now = useWakeClock(named, timers ?? browserDeferredTimers);
   const split = useMemo(() => splitSnoozed(named, now), [named, now]);
   const latest = useRef(machines);
@@ -208,6 +227,13 @@ export function useAgendaInboxModel(
       )
       .join(',');
   const gateFlags = useSyncExternalStore(client.wires.subscribe, readGateFlags, readGateFlags);
+  // Which machines roll up every conversation's items (`agenda.open.1`): the ones asked for them.
+  const readOpenFlags = () =>
+    latest.current
+      .map(({ connection }) => `${connection.daemonId}=${client.wires.openOf(connection.daemonId)}`)
+      .join(',');
+  const openFlags = useSyncExternalStore(client.wires.subscribe, readOpenFlags, readOpenFlags);
+  const rollup = useSyncExternalStore(client.rollup.subscribe, client.rollup.getSnapshot, client.rollup.getSnapshot);
   const connectionFor = useMemo(
     () =>
       (daemonId: DaemonId): DaemonConnection | undefined =>
@@ -323,13 +349,15 @@ export function useAgendaInboxModel(
       })),
     [machines],
   );
-  const holders = useMemo(
-    () =>
-      gateHolders(unread, sources, (daemonId, sessionId) =>
-        boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
-      ),
-    [unread, sources, boards],
+  // A conversation's items: its board when this device holds one (it is the newer), else the machine's roll-up.
+  const itemsOf = useCallback(
+    (daemonId: DaemonId, sessionId: string): BoardItems | undefined =>
+      boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })) ?? {
+        items: rollup.boards.get(daemonId)?.get(sessionId) ?? [],
+      },
+    [boards, rollup],
   );
+  const holders = useMemo(() => gateHolders(unread, sources, itemsOf), [unread, sources, itemsOf]);
   const offersGates = useCallback(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
     [gateFlags],
@@ -381,12 +409,35 @@ export function useAgendaInboxModel(
     () =>
       inboxParked(
         sources,
-        (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+        itemsOf,
         new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
       ),
-    [sources, boards, deferredState],
+    [sources, itemsOf, deferredState],
   );
   const parked = useStable(freshParked, cardsKey(freshParked));
+  // Every machine that rolls up its conversations' items is read to the end on mount and whenever the owner opens
+  // a filter beyond Open; one that does not keeps the recent conversations' boards.
+  const readRollups = useCallback(
+    (): readonly Promise<void>[] =>
+      latest.current
+        .filter(({ connection }) => client.wires.openOf(connection.daemonId) === true)
+        .map(({ connection }) => client.rollup.read(connection)),
+    [client],
+  );
+  useEffect(() => {
+    void openFlags;
+    void readRollups();
+  }, [openFlags, readRollups]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: openFlags is the signal that a machine's health now says whether it rolls up
+  const parkedWhole = useMemo(
+    () =>
+      machines.length > 0 &&
+      machines.every(
+        ({ connection }) =>
+          client.wires.openOf(connection.daemonId) === true && rollup.complete.has(connection.daemonId),
+      ),
+    [machines, client, rollup, openFlags],
+  );
   const [resolvedReading, setResolvedReading] = useState(false);
   const resolvedBusy = useRef(false);
   const loadResolved = useCallback((): void => {
@@ -394,20 +445,23 @@ export function useAgendaInboxModel(
     const wanted = sessionsToReadForResolved(sources, (daemonId, sessionId) =>
       boards.snapshots.has(daemonSessionKey({ daemonId, sessionId })),
     );
-    if (wanted.length === 0) return;
+    const reads = [
+      ...readRollups(),
+      ...wanted.flatMap(({ daemonId, sessionId }) => {
+        const connection = connectionFor(daemonId);
+        return connection === undefined
+          ? []
+          : [client.revalidate(connection, daemonSessionScope(connection, sessionId)).catch(() => undefined)];
+      }),
+    ];
+    if (reads.length === 0) return;
     resolvedBusy.current = true;
     setResolvedReading(true);
-    const reads = wanted.flatMap(({ daemonId, sessionId }) => {
-      const connection = connectionFor(daemonId);
-      return connection === undefined
-        ? []
-        : [client.revalidate(connection, daemonSessionScope(connection, sessionId)).catch(() => undefined)];
-    });
     void Promise.all(reads).finally(() => {
       resolvedBusy.current = false;
       setResolvedReading(false);
     });
-  }, [client, connectionFor, sources, boards]);
+  }, [client, connectionFor, sources, boards, readRollups]);
 
   return useMemo(
     () => ({
@@ -420,6 +474,7 @@ export function useAgendaInboxModel(
       reading,
       unavailable,
       parked,
+      parkedWhole,
       resolved,
       resolvedReading,
       loadResolved,
@@ -438,6 +493,7 @@ export function useAgendaInboxModel(
       withFerret,
       reading,
       parked,
+      parkedWhole,
       resolved,
       resolvedReading,
       loadResolved,

@@ -1,4 +1,4 @@
-import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
+import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaRollup, AgendaService } from '../../agenda/index.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
@@ -48,6 +48,7 @@ import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
 import { agendaClearRoutes } from './agenda-clear.ts';
+import { agendaOpenRoutes } from './agenda-open.ts';
 import { configFilesConfirmations } from './agenda-confirms.ts';
 import type { AgendaGatePort } from './agenda-gates.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
@@ -274,6 +275,7 @@ export interface MountedSubsystems {
   readonly agendaReplies: AgendaRepliesSubsystem;
   /** The owner's bulk "clear all from agent ferrets". */
   readonly agendaClearer: AgendaAgentClearer;
+  readonly agendaRollup: AgendaRollup;
   /** A card's gate items (docs/board.md § Gates ask the owner): the owner's answer to one moves the card first. */
   readonly gateItems?: AgendaGatePort;
   /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
@@ -724,6 +726,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.gateItems,
         ),
         ...agendaClearRoutes(subsystems.agendaClearer),
+        ...agendaOpenRoutes(subsystems.agendaRollup),
         ...pinRoutes(subsystems.pins),
         ...sharedDraftRoutes(subsystems.sharedDrafts),
         ...legacyTaskRoutes(subsystems.legacyTasks),

@@ -301,3 +301,69 @@ describe('parkedBy', () => {
     expect(parkedBy(cards, 'replied').map(card => card.item.id)).toEqual(['A2', 'A1']);
   });
 });
+
+describe('naming the owner’s thread', () => {
+  const root = sessionView('root', { config: { teammate: 'ada', name: 'Billing rewrite' } });
+  const kid = sessionView('kid', {
+    config: { teammate: 'vena', name: 'Revive Button Flaky', parent: 'root' } as never,
+  });
+  const underRoot = { ...inboxCard(agendaItem('A1', { subject: 'Ship it?' }), kid), root };
+
+  it('says the root’s ferret and task, never the sub-ferret’s', () => {
+    expect(inboxWho(underRoot)).toMatchObject({ ferret: 'Ada', task: 'Billing rewrite' });
+  });
+
+  it('groups a row under the root’s ferret', () => {
+    const { needsYou } = inboxSections([underRoot], []);
+    expect(needsYou.map(group => [group.ferret, group.task])).toEqual([['Ada', 'Billing rewrite']]);
+  });
+
+  it('names the sub-ferret under the root’s heading, and nothing for a conversation that is its own root', () => {
+    const own = { ...inboxCard(agendaItem('A2'), root), root };
+    const unrooted = inboxCard(agendaItem('A4'), kid);
+    const { needsYou } = inboxSections([underRoot, own, unrooted], []);
+    expect(needsYou.map(group => [group.view.config.id, group.via])).toEqual(
+      expect.arrayContaining([
+        ['kid', 'Vena'],
+        ['root', null],
+      ]),
+    );
+    expect(needsYou.filter(group => group.view.config.id === 'kid')).toHaveLength(1);
+  });
+
+  it('keeps two sub-ferrets of one lead as two groups, each saying who it is', () => {
+    const other = sessionView('kid-2', {
+      config: { teammate: 'bari', name: 'Fix Round', parent: 'root' } as never,
+    });
+    const { needsYou } = inboxSections([underRoot, { ...inboxCard(agendaItem('A5'), other), root }], []);
+    expect(needsYou.map(group => [group.ferret, group.via]).sort()).toEqual([
+      ['Ada', 'Bari'],
+      ['Ada', 'Vena'],
+    ]);
+  });
+
+  it('finds a row by the root’s words as well as the conversation’s', () => {
+    const ids = (query: string) => filterInboxCards([underRoot], { machine: null, query }).map(card => card.item.id);
+    expect(ids('billing')).toEqual(['A1']);
+    expect(ids('ada')).toEqual(['A1']);
+    expect(ids('revive')).toEqual(['A1']);
+    expect(ids('vena')).toEqual(['A1']);
+  });
+
+  it('finds a conversation that is its own root once, with no second set of words', () => {
+    const own = { ...inboxCard(agendaItem('A2'), root), root };
+    expect(filterInboxCards([own], { machine: null, query: 'ada' })).toHaveLength(1);
+  });
+
+  it('finds a resolved row by the root’s words', () => {
+    const row = {
+      key: 'r',
+      daemonId: daemonId('workshop'),
+      machineName: 'Workshop',
+      view: kid,
+      root,
+      record: { ...agendaItem('A3'), resolvedAt: '2026-08-01T00:00:00.000Z' },
+    } as never as InboxResolved;
+    expect(filterInboxResolved([row], { machine: null, query: 'billing' })).toHaveLength(1);
+  });
+});

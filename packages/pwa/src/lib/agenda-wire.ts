@@ -43,6 +43,8 @@ export class AgendaWireDirectory {
   readonly #workSearch = new Map<DaemonId, boolean>();
   /** Whether each read machine raises gate items for cards waiting on the owner (`board.gate-items.1`); absent until its health answered. */
   readonly #gateItems = new Map<DaemonId, boolean>();
+  /** Whether each read machine answers `GET /v1/agenda/open` (`agenda.open.1`); absent until its health answered. */
+  readonly #open = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -88,6 +90,14 @@ export class AgendaWireDirectory {
     return this.#gateItems.get(daemonId);
   }
 
+  /**
+   * Whether the machine rolls up every conversation's open and parked items (`agenda.open.1`): the Inbox lists parked
+   * items from it only where it does. `undefined` until its health answered, which asks nothing.
+   */
+  openOf(daemonId: DaemonId): boolean | undefined {
+    return this.#open.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
     this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
@@ -100,10 +110,13 @@ export class AgendaWireDirectory {
     const gates = machineOffers(read, DAEMON_FEATURES.boardGateItems);
     const gatesChanged = this.#gateItems.get(daemonId) !== gates;
     this.#gateItems.set(daemonId, gates);
+    const opens = machineOffers(read, DAEMON_FEATURES.agendaOpen);
+    const openChanged = this.#open.get(daemonId) !== opens;
+    this.#open.set(daemonId, opens);
     const wire = agendaWireOf(read);
     const spelled = this.#wires.get(daemonId) !== wire;
     this.#wires.set(daemonId, wire);
-    if (changed || spelled || searchChanged || gatesChanged) this.#notify();
+    if (changed || spelled || searchChanged || gatesChanged || openChanged) this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
@@ -111,7 +124,8 @@ export class AgendaWireDirectory {
     const had = this.#offerClose.delete(daemonId);
     const hadSearch = this.#workSearch.delete(daemonId);
     const hadGates = this.#gateItems.delete(daemonId);
-    if (this.#wires.delete(daemonId) || had || hadSearch || hadGates) this.#notify();
+    const hadOpen = this.#open.delete(daemonId);
+    if (this.#wires.delete(daemonId) || had || hadSearch || hadGates || hadOpen) this.#notify();
   }
 
   #notify(): void {

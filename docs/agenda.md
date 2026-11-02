@@ -571,6 +571,31 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   `timed out` or `no answer`. Boards on one machine that failed differently list each reason, the one covering the
   most items first. A read that only ended (the machine was paired again meanwhile) adds none.
 
+### The roll-up: every conversation, and a count that is the list
+
+The Inbox lists **Open, Snoozed and Replied for every conversation**, not the most recent ones, and a count it shows
+(each filter's badge and the page's header) is **the length of the rows listed under it** — the rows the machine,
+Ferrets and Find filters keep, never a total taken before they applied.
+
+- **`GET /v1/agenda/open`** (`agenda.open.1` in `GET /v1/health` features) answers every session's open AND parked
+  (snoozed, replied) items on the machine: `{ sessions: [{ sessionId, items }], next? }`, in session-id order, paged
+  with `?after=<next>&limit=` (default 200 items, at most 500; a conversation is never split across pages and one with
+  nothing on its board is left out). It is read from the boards the agenda service already holds — no new store.
+- **Who may read it**: the same grants as one conversation's board (`operator`, no capability, gated by who asks —
+  [grants.md](grants.md)) with one narrowing: `caller: 'person'`. A board read names one session; this names every
+  session and item on the machine, which a ferret has no use for, so a ferret credential gets 403. `noStore`, as a board is.
+- **The app ships first**: the Inbox asks a machine for the roll-up only once its health lists `agenda.open.1`. It reads
+  every page on mount and when the owner opens Snoozed, Replied or Resolved, and keeps the last good read if a later one
+  fails. A board this device already holds is newer than the roll-up and wins for its conversation. An older machine
+  keeps the window it had — the 30 most recent conversations — and the list says so ("From your 30 most recent
+  conversations"); the caveat is shown only while some machine is not read to the end. Resolved stays windowed to those
+  30 conversations on every machine, and its footer says so.
+- **Rows name the owner's thread.** A sub-ferret is named for a piece of work ("Revive Button Flaky") or a callsign
+  ("Vena"); the owner talks to the thread that started it. Every Inbox row — an agenda item, a parked item, a resolved
+  record and a card to test — names the **root of the conversation's lineage**, found client-side by walking
+  `SessionConfig.parent` through the session list the app already holds (a parent that is gone ends the walk at the
+  topmost session that is held; a loop ends where it repeats). Find also matches the sub-ferret's own words.
+
 ### The compass
 
 Every item — a question, a gate, a notice — has a second swipe layer. Pull **down** past the Skip threshold and **keep the
