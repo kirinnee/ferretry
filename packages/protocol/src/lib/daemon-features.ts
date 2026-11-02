@@ -131,7 +131,8 @@ export const DAEMON_FEATURES = {
    * REPORTED SINCE EVERY ROUTE TAKES IT: a route declares `caller: 'person' | 'any'`, the credential is the
    * caller's own on every `any` route a ferret's `fy` and MCP tools need (send, notify, the board, its
    * agenda, signals, input requests, reads), and a `person` route refuses it with `403 owner_only` before
-   * anything is read.
+   * anything is read. Health lists it only to a request whose carrier can resolve a session bearer (the privileged
+   * loopback carrier): on a wildcard or LAN bind no ferret's credential can be read, so the name is withheld there.
    */
   sessionCredential: 'session.credential.1',
   /**
@@ -144,10 +145,11 @@ export const DAEMON_FEATURES = {
   taskPlan: 'task-plan.1',
   /**
    * Standing sign-in rules (sign-in-rules.ts, docs/input-requests.md): the owner's passkey-signed permission, kept on
-   * disk, for Ferretry to fill one page sign-in for any ferret until it expires. The input request and its outcome
-   * carry a `sign-in-rule` actor and a `preapproval` note by rule, which an older app's strict parse refuses, so the
-   * daemon fills under a rule only while it reports this name.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the rule service and the app's sheet ship first.
+   * disk, for Ferretry to fill one sign-in (a page, or sudo, su or doas in a terminal beside {@link
+   * DAEMON_FEATURES.signInRulesTerminal}) for any ferret until it expires. The input request and its outcome carry a
+   * `sign-in-rule` actor and a `preapproval` note by rule, which an older app's strict parse refuses, so the daemon
+   * fills under a rule only while it reports this name.
+   * REPORTED SINCE R3c-6, WHEN THE APP DRAWS THE RULE SHEET AND CARDS.
    */
   signInRules: 'sign-in-rules.1',
   /**
@@ -204,6 +206,13 @@ export const daemonFeatureList = (): readonly DaemonFeature[] =>
   Object.values(DAEMON_FEATURES)
     .filter(feature => !NOT_YET_REPORTED.has(feature))
     .sort();
+
+/**
+ * WHETHER TERMINAL RULES ARE OFFERED: `sign-in-rules-terminal.1` AND `sign-in-rules.1`, the one decision every program
+ * makes the same way (a terminal rule is staged, suggested, offered to a fill and drawn only while both are reported).
+ */
+export const terminalRulesOffered = (features: readonly string[]): boolean =>
+  features.includes(DAEMON_FEATURES.signInRules) && features.includes(DAEMON_FEATURES.signInRulesTerminal);
 
 /**
  * Whether a daemon's health report offers a feature. A report with no list at all — a daemon from

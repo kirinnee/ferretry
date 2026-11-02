@@ -281,6 +281,22 @@ export function grantMissLineFor(note: GrantMissNote): string | undefined {
   return `Your standing rule for this sign-in didn't apply: ${words}.${after}`;
 }
 
+/**
+ * THE OWNER'S LINE for a card a pre-approval filled, by its source, with the place when it is known (`github.com`,
+ * `sudo@kirin-box`): one sentence for a plan fill's agenda history and for the owner's input card (C9). A rule fill's
+ * agenda card closes in the words a tap fill closes with, because every ferret can read every agenda (C26): this line
+ * is drawn on the owner's input card only.
+ */
+export function grantFilledLineFor(
+  note: { readonly by: 'plan'; readonly line: number } | { readonly by: 'rule' },
+  place?: string,
+): string {
+  const at = place === undefined || place === '' ? '' : ` on ${place}`;
+  return note.by === 'plan'
+    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
+    : `Filled under your standing sign-in rule${at}.`;
+}
+
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
 
@@ -447,9 +463,97 @@ export const TaskPlanLineStateSchema = z.enum([
 ]);
 export type TaskPlanLineState = z.infer<typeof TaskPlanLineStateSchema>;
 
-/** The daemon's flags on a sign-in line: drawn red (`root`, `one-factor`) or amber (`no-history`). */
+/**
+ * The daemon's flags on a sign-in line: drawn red (`root`, `one-factor`) or amber (`no-history`). The amber one means
+ * FIRST FILL (Ferretry has not filled this sign-in before, so it checks the page and remembers the form): the fill is
+ * allowed. It is not the grant-miss reason `no-history` (a refusal, {@link grantMissWords}) nor a rule's ineligibility.
+ * The wire name stays `no-history`, since an older app's strict parse knows no other.
+ */
 export const TaskPlanLineFlagSchema = z.enum(['root', 'one-factor', 'no-history']);
 export type TaskPlanLineFlag = z.infer<typeof TaskPlanLineFlagSchema>;
+
+/** The amber line under a sign-in line flagged `no-history` (first fill), verbatim. */
+export const TASK_PLAN_FIRST_FILL_WORDS =
+  'First time Ferretry fills this sign-in: it checks the page and remembers the form';
+
+/**
+ * Whether a sign-in line shows {@link TASK_PLAN_FIRST_FILL_WORDS}: keyed on the PICKED account once one is (its own
+ * `history`), and on the daemon's line flag (any candidate without history) while none is.
+ */
+export const taskPlanLineFirstFill = (
+  line: { readonly flags: readonly TaskPlanLineFlag[]; readonly candidates: readonly TaskPlanCandidate[] },
+  picked?: SignInId,
+): boolean => {
+  const candidate = picked === undefined ? undefined : line.candidates.find(each => each.signIn === picked);
+  return candidate === undefined ? line.flags.includes('no-history') : !candidate.history;
+};
+
+/**
+ * THE ROOT WORDS OF A TERMINAL PLAN LINE, one owner for the daemon's card and passkey lines and the app's: a plan is for
+ * one task, so it says "the ferret" (a standing rule says "any ferret").
+ * `host` is where the password is typed, or `undefined` while that is not one host.
+ */
+export const taskPlanRootWords = (host: string | undefined): string =>
+  `this gives the ferret ${taskPlanRootBadge(host)}`;
+
+/** The short badge beside a terminal line: "root on kirin-box". */
+export const taskPlanRootBadge = (host: string | undefined): string =>
+  host === undefined ? 'root on this machine' : `root on ${host}`;
+
+/** The one host a set of places types at: their terminal host when they share one, else `undefined`. */
+export const taskPlanRootHost = (places: readonly Place[]): string | undefined => {
+  const hosts = [...new Set(places.flatMap(place => (place.kind === 'terminal' ? [place.host] : [])))];
+  return hosts.length === 1 ? hosts[0] : undefined;
+};
+
+/**
+ * WHAT A PLAN OR A STANDING RULE CAN'T COVER, listed under "You'll still be asked" on every plan card and rule sheet:
+ * one list, so the two cannot drift. `for` says which surface shows an item (`both`, or one of them only).
+ */
+export const STILL_ASKED_ITEMS: readonly {
+  readonly what: string;
+  readonly instead: string;
+  readonly for: 'both' | 'plan' | 'rule';
+}[] = [
+  { what: 'Push approvals (Okta Verify, Duo, a Google prompt)', instead: 'you approve on your phone', for: 'both' },
+  {
+    what: 'Security keys and passkeys',
+    instead: 'handed to you; passkeys stay off in the agent browser',
+    for: 'both',
+  },
+  { what: 'Captchas and human checks', instead: 'the ferret asks you to do it', for: 'both' },
+  {
+    what: 'Sign-ins not in Accounts, and sign-ins through another account',
+    instead: 'the normal card',
+    for: 'plan',
+  },
+  {
+    what: 'A paste that would replace a secret the store already holds',
+    instead: 'the normal card, in amber, every time',
+    for: 'plan',
+  },
+  { what: 'A sign-in whose form changed since you approved it', instead: 'the rule stops and asks', for: 'rule' },
+  {
+    what: 'ssh, scp, npm or docker login, gh and any program but sudo, su and doas',
+    instead: 'the normal card',
+    for: 'both',
+  },
+  {
+    what: 'SMS and email codes, and a code you did not tick',
+    instead: 'the ferret reads its inbox, or you type it',
+    for: 'both',
+  },
+  { what: 'Anything after a line stopped', instead: 'the normal card, with the reason', for: 'plan' },
+];
+
+/** The "You'll still be asked" items one surface lists, in order. */
+export const stillAskedFor = (
+  surface: 'plan' | 'rule',
+): readonly { readonly what: string; readonly instead: string }[] =>
+  STILL_ASKED_ITEMS.filter(item => item.for === 'both' || item.for === surface).map(({ what, instead }) => ({
+    what,
+    instead,
+  }));
 
 const LineBaseShape = {
   line: TaskPlanLineNumberSchema,
@@ -968,3 +1072,28 @@ export const TASK_PLAN_ERROR_CODES = {
 /** The fragment that opens one agenda card in the app (`<app>/#agenda/<id>?session=<sessionId>`), printed by `fy plan approve`. */
 export const agendaDeepLinkFragment = (id: string, sessionId?: string): string =>
   `#agenda/${encodeURIComponent(id)}${sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`}`;
+
+/**
+ * The card an `#agenda/<id>?session=<sessionId>` fragment names, the reader of {@link agendaDeepLinkFragment}: `null`
+ * for any other fragment or an id that is not one. A fragment only picks which card the app opens.
+ */
+export const agendaDeepLinkFromFragment = (
+  fragment: string,
+): { readonly id: z.infer<typeof AgendaIdSchema>; readonly sessionId?: string } | null => {
+  const match = /^#?agenda\/([^?]+)(?:\?(.*))?$/u.exec(fragment);
+  if (match === null) return null;
+  let raw: string;
+  try {
+    raw = decodeURIComponent(match[1] ?? '');
+  } catch {
+    return null;
+  }
+  const id = AgendaIdSchema.safeParse(raw);
+  if (!id.success) return null;
+  const session = new URLSearchParams(match[2] ?? '').get('session');
+  return session === null || session.trim() === '' ? { id: id.data } : { id: id.data, sessionId: session };
+};
+
+/** `DELETE …/task-plans/:planId/approval/:stage`: the staged selection was dropped. */
+export const TaskPlanStageDroppedSchema = z.strictObject({ stage: TaskPlanStageIdSchema, dropped: z.literal(true) });
+export type TaskPlanStageDropped = z.infer<typeof TaskPlanStageDroppedSchema>;

@@ -98,7 +98,8 @@ export const cardModel = (item: AgendaItem): CardModel => {
     recommendation,
     recommended,
     recommendationLine,
-    dismissInMenu: !answers.some(answer => answer.does === 'dismiss'),
+    // A ferret's rule suggestion is never closed on the agenda (the daemon refuses): its card's own Dismiss says no.
+    dismissInMenu: !answers.some(answer => answer.does === 'dismiss') && item.signInRuleSuggestion === undefined,
     composerHint: textOnly
       ? AGENDA_SHAPE_LEADS[shape]
       : shape === 'form'

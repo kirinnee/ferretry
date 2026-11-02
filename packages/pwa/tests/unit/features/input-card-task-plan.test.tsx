@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { InputRequest } from '@ferretry/protocol';
+import { grantFilledLineFor, type InputRequest } from '@ferretry/protocol';
 import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { fieldsOf } from '../../../src/lib/input-card.ts';
 import { type Mounted, mount } from '../../support/dom.ts';
-import { fakeClient, NOW, request } from '../../support/input-fixtures.ts';
+import { browserField, fakeClient, NOW, request } from '../../support/input-fixtures.ts';
 import { PLAN_ID } from '../../support/task-plan-fixtures.ts';
 
 const mounted: Mounted[] = [];
@@ -56,6 +56,37 @@ describe('an input card a standing sign-in rule touched', () => {
     const q = await show(request({ preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'filled' } }));
     expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule.');
     expect(q('[data-input-plan-miss]')).toBeNull();
+  });
+
+  it('says where, on a page, in the one sentence the daemon’s history uses (C9)', async () => {
+    const page: InputRequest['observed'] = {
+      kind: 'browser',
+      pageId: 'page-1',
+      origin: 'https://GitHub.com',
+      secure: true,
+      navigationId: 'nav-1',
+      fields: [browserField('password')],
+    };
+    const q = await show(
+      request({ observed: page, preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'filled' } }),
+    );
+    expect(q('[data-input-plan-filled]')?.textContent).toBe(grantFilledLineFor({ by: 'rule' }, 'github.com'));
+    expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule on github.com.');
+  });
+
+  it('says no place when the page’s origin cannot be read', async () => {
+    const page: InputRequest['observed'] = {
+      kind: 'browser',
+      pageId: 'page-1',
+      origin: 'not a url',
+      secure: true,
+      navigationId: 'nav-1',
+      fields: [browserField('password')],
+    };
+    const q = await show(
+      request({ observed: page, preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'filled' } }),
+    );
+    expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule.');
   });
 
   it('says in the daemon’s fixed words why the rule did not apply', async () => {

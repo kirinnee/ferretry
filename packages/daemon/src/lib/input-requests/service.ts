@@ -6,6 +6,7 @@ import {
   copyHandle,
   factorAskWords,
   fillRoleFor,
+  grantFilledLineFor,
   type GrantMissReason,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_ERROR_CODES,
@@ -16,7 +17,10 @@ import {
   INPUT_MAX_REBINDS,
   INPUT_PROMPT_MAX_LENGTH,
   INPUT_QUARANTINE_EVENT_TYPES,
+  INPUT_CODE_VISIBLE_NOTICE,
+  INPUT_PLAIN_VALUE_NOTICE,
   INPUT_QUARANTINE_SECONDS,
+  INPUT_QUARANTINE_WORDS,
   INPUT_SINGLE_FIELD_ID,
   type InputActor,
   type InputAgentView,
@@ -675,10 +679,13 @@ export class InputRequestService {
       chosen = decided.grant;
       if (!decided.ok) return await this.grantMissed(held, decided.grant, decided.reason, decided.misses);
       const { grant, match, reservation, project } = decided;
+      // The grants tried before this one (a plan line that missed, say) are carried to whatever this one comes to (R3,
+      // C24): a later miss still reports the plan's words, and a fill still stops a line its own miss stops.
+      const before = decided.misses;
       const actor = actorOf(grant);
       if (actor === undefined) {
         grants.ledger.release(reservation);
-        return await this.grantMissed(held, grant, undefined);
+        return await this.grantMissed(held, grant, undefined, before);
       }
       const body: InputDeliverBody = {
         deliveryId: crypto.randomUUID(),
@@ -737,6 +744,7 @@ export class InputRequestService {
           },
         );
         settle();
+        await this.stopMisses(before);
       } catch (error) {
         if (written) settle();
         else {
@@ -745,7 +753,7 @@ export class InputRequestService {
           if (held.request.state === 'pending') held.agentLock = { lock: raisedLock };
         }
         delete held.agentSees;
-        await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined);
+        await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined, before);
       } finally {
         delete held.agentSees;
       }
@@ -774,6 +782,8 @@ export class InputRequestService {
         readonly match: Extract<GrantMatch, { readonly ok: true }>;
         readonly reservation: GrantReservation;
         readonly project: string | undefined;
+        /** The grants tried before this one, and why each missed. */
+        readonly misses: readonly GrantMiss[];
       }
     | {
         readonly ok: false;
@@ -817,7 +827,8 @@ export class InputRequestService {
           untouchedSince: (at: number) => !this.tainted(held.request.sessionId, at),
         },
       );
-      if (typeof reservation !== 'string') return { ok: true, grant, match, reservation, project: seen.project };
+      if (typeof reservation !== 'string')
+        return { ok: true, grant, match, reservation, project: seen.project, misses: [...misses] };
       misses.push({ grant, reason: reservation });
     }
     // `here` is never empty, so every grant that did not fill left its miss.
@@ -904,14 +915,15 @@ export class InputRequestService {
   ): Promise<void> {
     if (held.request.state !== 'pending') {
       this.quiet.delete(held.request.id);
+      await this.stopMisses(misses);
       return;
     }
-    held.request = { ...held.request, preapproval: preapprovalOf(grant, 'did-not-apply', reason) };
-    const stopping = [...misses, ...(reason === undefined ? [] : [{ grant, reason }])].filter(
-      (each, index, all) =>
-        grantStops(each.grant, each.reason) && all.findIndex(other => other.grant.id === each.grant.id) === index,
-    );
-    for (const each of stopping) await this.deps.grants?.stopped(each.grant, each.reason);
+    // The miss the owner reads, and the ferret's card is worded by, is a PLAN line's whenever one was tried, as it would
+    // be with no rule: a ferret that knows its plan learns nothing from a rule tried after it (C24).
+    const reported = misses.find(each => each.grant.source === 'plan') ?? { grant, reason };
+    const shown = reported.grant;
+    held.request = { ...held.request, preapproval: preapprovalOf(shown, 'did-not-apply', reported.reason) };
+    await this.stopMisses([...misses, { grant, reason }]);
     await this.record(
       held.request,
       'input.requested',
@@ -919,14 +931,27 @@ export class InputRequestService {
       {
         ...this.auditOf(held.request),
         preapproval: 'did-not-apply',
-        ...(grant.plan === undefined ? {} : { plan: grant.plan.id, line: grant.plan.line }),
-        ...(grant.rule === undefined
+        ...(shown.plan === undefined ? {} : { plan: shown.plan.id, line: shown.plan.line }),
+        ...(shown.rule === undefined
           ? {}
-          : { by: 'rule' as const, signInRule: grant.rule.id, revision: grant.rule.revision }),
-        ...(reason === undefined ? {} : { because: reason }),
+          : { by: 'rule' as const, signInRule: shown.rule.id, revision: shown.rule.revision }),
+        ...(reported.reason === undefined ? {} : { because: reported.reason }),
       },
     );
-    await this.unquiet(held, grant.source === 'plan' ? GRANT_MISS_CONTEXT_LINE : undefined);
+    await this.unquiet(held, shown.source === 'plan' ? GRANT_MISS_CONTEXT_LINE : undefined);
+  }
+
+  /** Stops every grant whose miss stops it (a plan line) or suspends it (a rule), each once. */
+  private async stopMisses(
+    misses: readonly { readonly grant: SignInGrant; readonly reason: GrantMissReason | undefined }[],
+  ): Promise<void> {
+    const stopping = misses.filter(
+      (each, index, all): each is { readonly grant: SignInGrant; readonly reason: GrantMissReason } =>
+        each.reason !== undefined &&
+        grantStops(each.grant, each.reason) &&
+        all.findIndex(other => other.grant.id === each.grant.id) === index,
+    );
+    for (const each of stopping) await this.deps.grants?.stopped(each.grant, each.reason);
   }
 
   /**
@@ -1089,7 +1114,8 @@ export class InputRequestService {
       ...(hint === undefined ? {} : { hint }),
       ...(factor === undefined ? {} : { factor }),
     });
-    return about === undefined ? undefined : clipped(factorAskWords(about.keys, about.account));
+    // The title is agenda text, which every ferret reads: it names the place, never the account (the app names it).
+    return about === undefined ? undefined : clipped(factorAskWords(about.keys, { place: matchKey }));
   }
 
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
@@ -1733,7 +1759,7 @@ export class InputRequestService {
         throw new InputRequestError('bad_request', 'this card pastes no secure copy; type the value instead');
       const typed = pasted === undefined ? typedValues(request, body) : new Map<string, string>();
       if (body.entry !== undefined && this.deps.logins === undefined)
-        throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
+        throw new InputRequestError('bad_request', 'this daemon keeps no accounts; type the value instead');
       const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
       // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
       // nothing is counted; the card reads the request again and the owner checks it before sending.
@@ -1757,7 +1783,9 @@ export class InputRequestService {
       const submitted = body.submit && request.submit !== 'agent';
       const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
       const seen =
-        looked.ok && digestFacts(looked.facts) === request.observedDigest ? looked : await this.lookAgain(held, looked);
+        looked.ok && digestFacts(looked.facts) === request.observedDigest
+          ? looked
+          : await this.lookAgain(held, looked, grant !== undefined);
       if (codeFields.length > 0) this.guardCodeTarget(held, seen, codeFields);
       // A fill under a grant: every check holds again on what was just seen, before anything is opened or typed.
       await grant?.recheck(seen);
@@ -1899,6 +1927,8 @@ export class InputRequestService {
         await this.letGo(hold);
         hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
+        // A grant fill is a miss here, with nothing redrawn or counted: no owner tapped anything (C25).
+        if (grant !== undefined) throw new GrantUnchecked();
         // Nothing was typed: the target changed between the last look and the write. The same target found
         // again redraws the card; it is never typed into within this Send.
         const gone: ObserveResult = { ok: false, reason: 'target_gone' };
@@ -1975,14 +2005,14 @@ export class InputRequestService {
    */
   private guardSave(request: InputRequest, typed: ReadonlyMap<string, string>): LoginFieldValues {
     if (this.deps.logins === undefined)
-      throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; send without saving');
+      throw new InputRequestError('bad_request', 'this daemon keeps no accounts; send without saving');
     const roles = savedRolesOf(request.fields);
     if (roles === undefined)
       throw new InputRequestError(
         'bad_request',
         request.fields.every(field => field.sensitivity === 'private' || field.sensitivity === 'code')
-          ? 'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead'
-          : 'this card cannot be kept as one saved login (it has two usernames or two passwords); send without saving',
+          ? 'a one-time code is not saved; add the 2FA key to the account in Settings instead'
+          : 'this card cannot be kept as one account (it has two usernames or two passwords); send without saving',
       );
     const kept: { username?: string; password?: string } = {};
     for (const [id, role] of roles) {
@@ -2098,7 +2128,7 @@ export class InputRequestService {
     if (listing === undefined)
       throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
     if (!listing.accounts.some(account => account.id === entry))
-      throw new InputRequestError('not_found', `there is no saved login ${entry}; nothing was typed`);
+      throw new InputRequestError('not_found', `there is no account ${entry}; nothing was typed`);
     if (signIn !== undefined && listing.signIns.find(each => each.id === signIn)?.account !== entry)
       throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
     // At least one: an `entry` with every field typed was already refused (`typedValues`).
@@ -2184,11 +2214,11 @@ export class InputRequestService {
               error.refusal === 'unknown_login' ? 'not_found' : 'bad_request',
               `${error.message}; nothing was typed`,
             )
-          : new InputRequestError('unavailable', 'Ferretry could not open the saved login, so nothing was typed');
+          : new InputRequestError('unavailable', 'Ferretry could not open the account, so nothing was typed');
       });
     const problem = inputValueProblem(value, field.sensitivity);
     if (problem !== undefined)
-      throw new InputRequestError('bad_request', 'that saved login cannot be typed here; nothing was typed');
+      throw new InputRequestError('bad_request', 'that account cannot be typed here; nothing was typed');
     return value;
   }
 
@@ -2283,9 +2313,19 @@ export class InputRequestService {
    * ({@link refound}); found exactly as the card showed it (a stale ref that still finds the same node), those facts
    * are typed into. Anything else is {@link redrawOrRefuse}d.
    */
-  private async lookAgain(held: Held, looked: ObserveResult): Promise<Extract<ObserveResult, { readonly ok: true }>> {
+  /**
+   * The target looked for again when it is not as the card showed. For a grant fill (`underGrant`) nobody tapped
+   * anything, so it neither redraws the card nor counts a failed check (R4, C25): it is a miss, and the card is the
+   * owner's as raised.
+   */
+  private async lookAgain(
+    held: Held,
+    looked: ObserveResult,
+    underGrant = false,
+  ): Promise<Extract<ObserveResult, { readonly ok: true }>> {
     const again = await this.refound(held, looked);
     if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
+    if (underGrant) throw new GrantUnchecked();
     return await this.redrawOrRefuse(held, again, looked.ok ? 'target_changed' : 'target_gone');
   }
 
@@ -2478,11 +2518,11 @@ export class InputRequestService {
       await this.deps.agenda.close(
         request.sessionId,
         request.agendaItemId,
+        // A rule fill closes in a tap fill's words: every ferret reads every agenda, so naming the rule there would let
+        // ferrets list which places have one (C26). The owner's input card says it, from `preapproval`.
         state === 'delivered' && by?.kind === 'plan'
-          ? planFilledNote(by.line, held.matchKey)
-          : state === 'delivered' && by?.kind === 'sign-in-rule'
-            ? ruleFilledNote(held.matchKey)
-            : noteOf(state, reason, request.target.kind, options.unsettled === true),
+          ? grantFilledLineFor({ by: 'plan', line: by.line }, held.matchKey)
+          : noteOf(state, reason, request.target.kind, options.unsettled === true),
       );
     if (options.tellAgent)
       await this.deps.notifier.tell(
@@ -2784,7 +2824,7 @@ function maskedFromReads(field: InputRequestField, typed: ReadonlyMap<string, st
   return field.sensitivity !== 'code' || !typed.has(field.id);
 }
 
-const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
+const PLAIN_FLAG = INPUT_PLAIN_VALUE_NOTICE;
 /**
  * A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked
  * on. The card shows the origin and the picture, not the address, so that is what the owner is sent to check.
@@ -2794,10 +2834,10 @@ const NEW_DOCUMENT_FLAG: InputRisk = {
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
-const PRIVATE_FLAG = 'This value will show on screen while the terminal is hidden from the ferret for 2 minutes.';
+const PRIVATE_FLAG = `This value will show on screen while the terminal is hidden from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
 /** A one-time code is not secret: neutral, neither the red of a plain value nor the amber of a private one. */
-const CODE_FLAG: InputRisk = { level: 'neutral', reason: 'One-time code: the ferret can see it.' };
-const CODE_ASK = 'One-time code: the ferret can see this value.';
+const CODE_FLAG: InputRisk = { level: 'neutral', reason: INPUT_CODE_VISIBLE_NOTICE };
+const CODE_ASK = INPUT_CODE_VISIBLE_NOTICE;
 
 /**
  * The flag a card carries, from what was seen at the target: it is never a refusal, the owner decides. The
@@ -2857,7 +2897,7 @@ const RELAY_FLAG: InputRisk = {
     'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
 };
 
-const PAGE_PRIVATE_FLAG = 'This value will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
+const PAGE_PRIVATE_FLAG = `This value will show on the page; Ferretry hides the page from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -3060,16 +3100,6 @@ const RULE_FILLED_AGENT_NOTE = 'Filled under a rule the owner approved in advanc
 
 /** The line a paste card that a rule did not fill after all carries: the same words whatever went wrong. */
 const RULE_MISS_CONTEXT_LINE = "A paste rule you approved didn't apply here, so you're asked as usual.";
-
-/** How a card a task-plan line filled closes, for the agenda history: the line and where, never the account. */
-function planFilledNote(line: number, matchKey: string | undefined): string {
-  return `Filled under your task plan (line ${String(line + 1)})${matchKey === undefined ? '' : ` on ${matchKey}`}.`;
-}
-
-/** How a card a standing rule filled closes, for the agenda history: where, never the rule or the account. */
-function ruleFilledNote(matchKey: string | undefined): string {
-  return `Filled under your standing rule${matchKey === undefined ? '' : ` on ${matchKey}`}.`;
-}
 
 /**
  * The owner's note on a card about the grant tried on it, by its source: filled, or did not apply (and why, when

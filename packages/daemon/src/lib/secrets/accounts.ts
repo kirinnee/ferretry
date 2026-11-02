@@ -715,7 +715,7 @@ export class AccountDirectory {
     if (seeded.length > 1)
       throw new LoginEntryError(
         'account_has_2fa_keys',
-        `${account.label} keeps ${String(seeded.length)} 2FA seeds; update the app or use \`fy account\` to change one`,
+        `${account.label} keeps ${String(seeded.length)} 2FA keys Ferretry makes codes for; update the app or use \`fy account\` to change one`,
       );
     const next = factors.filter(factor => !seeded.includes(factor));
     const { factors: _old, ...rest } = account;
@@ -1140,7 +1140,7 @@ export class AccountDirectory {
         if (!(await this.anySame(seal, keepSeeds)))
           throw new LoginEntryError(
             'merge_refused',
-            `${keep.label} and ${from.label} keep different 2FA seeds; remove one of them first`,
+            `${keep.label} and ${from.label} keep different 2FA keys Ferretry makes codes for; remove one of them first`,
           );
         continue;
       }
@@ -1524,7 +1524,7 @@ export class AccountVault implements AccountSealPort {
   ): Promise<string> {
     const { document } = await this.documents.read();
     const account = Object.hasOwn(document.accounts, id) ? document.accounts[id] : undefined;
-    if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+    if (account === undefined) throw new LoginEntryError('unknown_login', `there is no account ${id}`);
     if (role === 'username') {
       if (account.username === undefined)
         throw new LoginEntryError('no_such_field', `${account.label} has no username saved`);
@@ -1538,14 +1538,14 @@ export class AccountVault implements AccountSealPort {
     if (name === undefined)
       throw new LoginEntryError(
         'no_such_field',
-        `${account.label} has no ${role === 'password' ? 'password' : '2FA seed'} saved`,
+        `${account.label} has no ${role === 'password' ? 'password' : '2FA key Ferretry makes codes for'} saved`,
       );
     const value = await this.open(name);
     if (value === undefined) throw new LoginEntryError('no_such_field', `${account.label} has lost its ${role}`);
     if (role === 'password') return value;
     const code = key?.kind === 'totp' && key.params !== undefined ? totpCode(value, key.params, nowMs) : undefined;
     if (code === undefined)
-      throw new LoginEntryError('no_such_field', `${account.label} has a 2FA seed that is not base32`);
+      throw new LoginEntryError('no_such_field', `${account.label} has a 2FA key that is not base32`);
     return code;
   }
 

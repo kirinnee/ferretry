@@ -203,6 +203,7 @@ const cases: SchemaCase[] = [
   },
   { name: 'revoke all', schema: plans.TaskPlanRevokeSchema, value: {} },
   { name: 'revoke lines', schema: plans.TaskPlanRevokeSchema, value: { lines: [0, 2] } },
+  { name: 'stage dropped', schema: plans.TaskPlanStageDroppedSchema, value: { stage: STAGE, dropped: true } },
 ];
 
 describe('task plan schemas', () => {

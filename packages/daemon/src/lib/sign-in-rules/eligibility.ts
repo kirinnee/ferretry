@@ -7,6 +7,7 @@ import {
   type SignInRuleSurface,
   type SignInSummary,
   signInRuleKeysFit,
+  signInRuleSurfaceOf,
 } from '@ferretry/protocol';
 
 /**
@@ -57,9 +58,9 @@ export function tappedCount(signIn: Pick<SignInSummary, 'place' | 'observed'>): 
   return Math.min(Math.max(0, ...counts), SIGN_IN_RULE_HISTORY_MAX);
 }
 
-/** The surface a rule for this sign-in would be for: its place's kind. */
+/** The surface a rule for this sign-in would be for: the protocol's one decision from its place. */
 export const ruleSurfaceOf = (signIn: Pick<SignInSummary, 'place'>): SignInRuleSurface =>
-  signIn.place.kind === 'site' ? 'page' : 'terminal';
+  signInRuleSurfaceOf(signIn.place);
 
 /**
  * Why a sign-in can't have a standing rule, before any passkey is asked: a terminal sign-in for any program but sudo, su

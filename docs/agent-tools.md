@@ -314,11 +314,9 @@ A line names only what the owner already saved (a `si_…` id, a host, or `tool@
 path or value. The answer is `taskPlan`: each line's state, the account picked and the uses left, and nothing about
 which secret fields an account holds. Until the owner answers, each sign-in or paste asks them as it always did.
 
-**Not filling yet (R3a-4, R3a-5).** A plan is only recorded and shown for now: the owner can approve, list and revoke
-it, but no sign-in is filled from it and the app does not show plan cards yet. A ferret keeps raising
-`browser_request_input` / `terminal_request_input` as usual and the owner is asked each time. Once fills arrive, the
-ferret's calls will not change: a covered sign-in will be filled for it, and where no line covers it the owner is
-asked.
+A ferret keeps raising `browser_request_input` / `terminal_request_input` as usual: once the owner approves a line, a
+sign-in or paste it covers is filled for the ferret, and anything no line covers still asks the owner
+([secure-copy.md](secure-copy.md), "Task plans").
 
 The old `secure.preapprove { items }` still works for an older pane: it is read as one-use paste lines through the
 same call, and answers the old `plan` shape. It is no longer listed in MCP.
@@ -359,17 +357,23 @@ around Ferretry: every ferret can read Ferretry's own state-home files. Every pl
   and shown only in the owner's sheet, faint and quoted.
 - **The caps are taken before anything awaits.** At most **one pending suggestion per sign-in per session** and
   **three an hour per session**, reserved in the same synchronous run that checks them, so calls sent together cannot
-  all pass. A refused call gives its place back. A suggestion lives in memory only and ends after 24 hours (the card
-  closes with it). The owner can dismiss it (`DELETE /v1/sign-in-rules/suggestions/:sid`) or close its card on the
-  agenda: either way it leaves the owner's sheet and the card closes with the note "The owner closed this card.", but a
-  **tombstone** stays until the original expiry, so the sign-in still counts as waiting and a retry gets the same
-  "already suggested" answer as while the owner is silent. A dismissed suggestion does not free its place.
+  all pass. A refused call gives its place back. A suggestion lives in memory only and ends after 24 hours.
+- **The card reads the same whatever the owner does.** It sits on the ferret's own agenda, which the ferret can read,
+  so it stays open, exactly as raised, until the 24 hours are up; then the **daemon** closes it with the one note "This
+  suggestion expired.". The owner says no with **Dismiss** on its card (`DELETE /v1/sign-in-rules/suggestions/:sid`),
+  and approving a rule for that sign-in answers it too: either way it is marked **answered** on the owner's side only,
+  so it leaves the owner's list (`GET /v1/sign-in-rules/suggestions`) and the app's Inbox, and nothing the ferret reads
+  changes. Closing or "Not needed" on the agenda is refused (`use_input_form`), from the owner and the ferret alike.
+  Until the expiry the sign-in still counts as waiting, and a retry gets the same "already suggested" answer as while
+  the owner is silent: dismissing, approving and silence give the ferret byte-identical agendas.
 - **What the ferret is told.** One line: it suggested a rule for the host, the owner decides, it will not hear back, and
   it must not ask again. A refusal is only ever about the sign-in it can already read (a sign-in that goes through
-  another account, one that is not a password, a program no rule covers, an unknown id) or about its own earlier
+  another account, one that is not a password, a program no rule covers (ssh, npm…, even with terminal rules on), an
+  unknown id) or about its own earlier
   suggestion or the hourly cap. **What the ferret is not told:** whether the owner has a rule, tapped this sign-in by
   hand, holds a passkey, or turned the suggestion down. The answer is the same whatever any of those is.
-- **Terminal sign-ins** are suggestible only while the daemon reports `sign-in-rules-terminal.1`.
+- **Terminal sign-ins** (sudo, su or doas) are suggestible only while the daemon reports `sign-in-rules-terminal.1`
+  beside `sign-in-rules.1`.
 - **Both in one call.** With a `recipe` too, the recipe is filed first; a refused suggestion is then said in the
   summary instead of failing the recipe.
 
@@ -610,7 +614,8 @@ leaves the session's stored environment.
   through the one credential rotation, which refuses a marked session: no Warden auto-revive (even after the
   ferret ends its own harness), no peer's `fy resume`, no `/v1/restarts`, no migration, no revive on a send hands
   it a credential again. The Warden skips it, and a resume by anyone but a person is refused before anything is
-  touched. A **person's** resume (`fy resume <session>`, or Resume in the app) clears the mark, and that launch is
+  touched. A **person's** resume (`fy resume <session>`, or Resume in the app, on this host or on a paired device: the
+  device actor `device:<id>` is a person; from anywhere but the host it is a widen, so it also needs `fleet.configure` and a passkey proved for that one act, `resume-cut-off`; a resume that is then refused puts the cut-off mark back) clears the mark, and that launch is
   handed a fresh credential. A person's restart or migration of a marked session is refused too: resume it
   first.
 - **Recorded** in the security log as `session.credential-revoked`, named by the session, never by a value.

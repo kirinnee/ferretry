@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { SignInIdSchema, SignInRuleIdSchema, SignInRuleRevisionSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
-import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { durationWords, InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
 import { SecretNameSchema } from './secrets.ts';
 import { CopyNameSchema, CopyOriginSchema, CopyPlanIdSchema } from './secure-copy.ts';
@@ -35,6 +35,15 @@ export const INPUT_MAX_REDACTION_SECONDS = 3_600;
  * refused and the owner's viewer shows a cover instead of the screen. The owner can end it sooner.
  */
 export const INPUT_QUARANTINE_SECONDS = 120;
+/** The lock's length in the owner's and the ferret's words ("two minutes"), from {@link INPUT_QUARANTINE_SECONDS}. */
+export const INPUT_QUARANTINE_WORDS = durationWords(INPUT_QUARANTINE_SECONDS);
+/**
+ * ONE SENTENCE EACH for what the ferret can read (C41): a plain value, and a one-time code (not secret either, but
+ * neutral). The daemon's flag on a field and the app's and CLI's words are these; a client that tells one only once
+ * compares the risk to them, never searches the text.
+ */
+export const INPUT_PLAIN_VALUE_NOTICE = 'Not secret: the ferret can see this value.';
+export const INPUT_CODE_VISIBLE_NOTICE = 'One-time code: the ferret can see it.';
 /**
  * THE SHORT LOCK (docs/input-requests.md, "How long the lock lasts"): a target PROVEN not to show what is typed is
  * kept from the ferret this long after the write instead of {@link INPUT_QUARANTINE_SECONDS}. Masking still runs
@@ -226,12 +235,12 @@ export const InputRaiseSchema = z
     /** A follow-up in a multi-step login: the card it follows. */
     chain: AgendaIdSchema.optional(),
     /**
-     * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
+     * The account the ferret expects to be used. A HINT only: the daemon decides what matches the target,
      * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
      * An account handle, or a sign-in (`si_…`). A daemon from before sign-ins refuses a `si_` hint, and one that
-     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing: a client sends
-     * one only where the daemon reports the feature. Either way a hint can only choose among the sign-ins the daemon
-     * itself matched (accounts.ts `chosenSignIn`).
+     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing. No client gates
+     * it: the MCP tools pass the ferret's hint through as given, and the DAEMON refuses one it cannot read. Either way
+     * a hint can only choose among the sign-ins the daemon itself matched (accounts.ts `chosenSignIn`).
      */
     secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
     /**

@@ -237,8 +237,14 @@ export interface PhoneApprovalWords {
   readonly noNumber?: string;
   /** The line every card ends with. */
   readonly warning: string;
-  /** The agenda item's subject: what an app that does not know these cards shows. Never the number. */
+  /**
+   * The agenda item's subject: what an app that does not know these cards shows. Never the number, and never the
+   * account's label or username: agenda text is every ferret's to read, so it names the place ("your account on
+   * company.okta.com"); the card draws the account from the approval, read on a person's route.
+   */
   readonly subject: string;
+  /** The agenda item's `why`, by place only like {@link subject}: "Your account on company.okta.com." */
+  readonly agendaWhy: string;
   /**
    * The push's body: the number first when there is one (owner decision !A171), else where to look for it. A sign-in
    * Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating, and a lock screen
@@ -282,7 +288,9 @@ const NO_NUMBER_WORDS: Readonly<Record<PhoneApprovalNumberMissing, string>> = {
 /**
  * THE WORDS OF AN APPROVE-ON-PHONE CARD, from the approval's own fields: the daemon-matched account and username,
  * the observed host, the provider it goes via, and the number the daemon read. It takes nothing else, so nothing a
- * ferret wrote can reach the card, the agenda subject or the push.
+ * ferret wrote can reach the card, the agenda subject or the push. The agenda's words (`subject`, `agendaWhy`) and the
+ * push name the place alone: a push reaches every subscribed device, a device without `secrets.use` included
+ * (secrev-1329a L7); the card draws the account from the owner's routes.
  */
 export function phoneApprovalWords(
   approval: Pick<PhoneApproval, 'surface' | 'origin' | 'account' | 'username' | 'via' | 'number' | 'numberMissing'>,
@@ -315,9 +323,11 @@ export function phoneApprovalWords(
       ? undefined
       : NO_NUMBER_WORDS[terminal ? 'terminal' : (approval.numberMissing ?? 'none-found')];
   const pointed = number?.from === 'pointed';
-  const subject = cut(`Approve on your phone: ${who}`, MAX_AGENDA_SUBJECT_LENGTH);
-  // The push names a sign-in it doesn't know without its host (see `push`), and says when the ferret chose the element.
-  const pushWho = known ?? "a sign-in Ferretry doesn't know";
+  const placed = known === undefined ? who : `your account ${place}`;
+  const subject = cut(`Approve on your phone: ${placed}`, MAX_AGENDA_SUBJECT_LENGTH);
+  // The push names the place, never the account; a sign-in it doesn't know without its host. It says when the ferret
+  // chose the element.
+  const pushWho = known === undefined ? "a sign-in Ferretry doesn't know" : placed;
   const push =
     numberLine !== undefined
       ? `${numberLine}${pointed ? ' (read where the ferret pointed)' : ''}: ${pushWho}`
@@ -331,6 +341,7 @@ export function phoneApprovalWords(
     ...(noNumber === undefined ? {} : { noNumber }),
     warning: PHONE_APPROVAL_WARNING,
     subject,
+    agendaWhy: cut(`${placed.charAt(0).toUpperCase()}${placed.slice(1)}.`, MAX_AGENDA_SUBJECT_LENGTH),
     push: cut(push, MAX_AGENDA_SUBJECT_LENGTH),
   };
 }

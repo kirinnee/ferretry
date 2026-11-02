@@ -10,6 +10,7 @@ import {
   type TaskPlanList,
   TaskPlanRevokeSchema,
   TaskPlanSchema,
+  TaskPlanStageDroppedSchema,
   type TaskPlanStageId,
   TaskPlanStageIdSchema,
   TaskPlanStageViewSchema,
@@ -72,7 +73,10 @@ function owned<T>(work: () => T): T {
   }
 }
 
-const owner = (context: RouteContext): PasteRuleCaller => ({ kind: 'owner', actor: ownerActorOf(context) });
+const owner = (context: RouteContext): PasteRuleCaller => ({
+  kind: 'owner',
+  actor: ownerActorOf(context, 'approves or changes a task plan'),
+});
 
 const ID = /^[0-9a-f]{32}$/u;
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
@@ -258,7 +262,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
         owned(() => plans.drop(caller, sessionId, planId, stage));
-        return jsonResponse({ stage, dropped: true });
+        return jsonResponse(TaskPlanStageDroppedSchema.parse({ stage, dropped: true }));
       },
     },
     {
@@ -266,6 +270,8 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/sessions/:sessionId/task-plans/:planId/revoke',
       ...USE,
+      // Revoking only takes away: the grant, never a per-act passkey (docs/grants.md § Narrowing never asks again).
+      capability: { ...USE.capability, narrowing: true },
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const names = refusedAccountNames(context);

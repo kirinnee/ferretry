@@ -11,7 +11,7 @@ import {
   type StoredProofStepUpAct,
 } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
-import { callerIsAgent, OWNER_ONLY_CODE } from './agent-caller.ts';
+import { callerIsAgent, OWNER_ONLY_CODE, ownerOnlyWords } from './agent-caller.ts';
 import {
   type ApiCredentials,
   type Authentication,
@@ -263,7 +263,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       kind: 'refused',
       response: errorResponse(
         403,
-        `only a person may use ${request.method} ${request.path}; a ferret asks the owner instead`,
+        `${ownerOnlyWords(`may use ${request.method} ${request.path}`)}${lookup.route.ferretDoor === undefined ? '' : `; ${lookup.route.ferretDoor}`}`,
         OWNER_ONLY_CODE,
       ),
     };

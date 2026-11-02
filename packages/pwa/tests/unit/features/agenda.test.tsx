@@ -966,6 +966,22 @@ describe('a task plan card', () => {
     expect(offered({ taskPlan, copyPlan: { planId: 'b'.repeat(32) } } as Partial<AgendaItem>)).toBeDefined();
     expect(offered({})).toBeUndefined();
   });
+
+  test('offers no Snooze on the daemon’s suggestion card: the ferret reads its own board (C2)', () => {
+    const snoozeOf = (extra: Partial<AgendaItem>) => {
+      const view = mount({
+        snapshot: board([item('A1', { kind: 'info', ...extra } as Partial<AgendaItem>)]),
+        focus: { target: 'A1' as AgendaId, seq: 1 },
+      });
+      const onSnooze = view.root.findByType(AgendaItemView).props.onSnooze;
+      run(() => view.unmount());
+      return onSnooze;
+    };
+    expect(
+      snoozeOf({ signInRuleSuggestion: { suggestion: 'srg_aaaaaaaaaaaaaaaa' } } as Partial<AgendaItem>),
+    ).toBeUndefined();
+    expect(snoozeOf({})).toBeDefined();
+  });
 });
 
 describe('an approve-on-phone card', () => {
@@ -997,7 +1013,7 @@ describe('a staged 2FA seed card', () => {
         item('A1', {
           kind: 'permission',
           raisedBy: 'daemon',
-          subject: 'Save automatic codes to GitHub · kirinnee?',
+          subject: 'Save automatic codes to your account on github.com?',
           twoFactorSeed: REF,
         } as Partial<AgendaItem>),
       ]),
@@ -1011,7 +1027,7 @@ describe('a staged 2FA seed card', () => {
         item('A1', {
           kind: 'permission',
           raisedBy: 'agent',
-          subject: 'Save automatic codes to GitHub · kirinnee?',
+          subject: 'Save automatic codes to your account on github.com?',
         } as Partial<AgendaItem>),
       ]),
       focus: { target: 'A1' as AgendaId, seq: 1 },

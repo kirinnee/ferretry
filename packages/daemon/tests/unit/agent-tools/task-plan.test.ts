@@ -125,15 +125,15 @@ const BOTH_NAMES: readonly { readonly name: string; readonly call: AgentToolCall
 ];
 
 describe('the task.plan agent tool', () => {
-  it('should raise one card for the lines and say plainly that nothing is filled from it yet', async () => {
+  it('should raise one card for the lines and say what is filled once the owner approves', async () => {
     const world = planWorld();
 
     const answered = await world.service.call(agent, { tool: 'task.plan', lines: [PASTE_LINE, SITE_LINE] });
 
     should(answered.summary).equal(
       'Asked the owner to approve 2 lines in advance (!A1). ' +
-        'The plan is only recorded for now: Ferretry fills nothing from it yet, so keep raising ' +
-        'browser_request_input / terminal_request_input and the owner is asked each time.',
+        'Keep raising browser_request_input / terminal_request_input as usual: covered sign-ins and pastes are ' +
+        'filled for you once the owner approves; anything else still asks.',
     );
     should(world.cards).have.length(1);
     should(world.cards[0]?.sessionId).equal('s1');

@@ -121,7 +121,10 @@ left out.
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone
-else's is written and held. An agent never confirms. The agenda's Allow
+else's is written and held. `PUT /v1/config/file` is a person's route (`caller: 'person'`): a ferret's
+credential, or the admin token naming a ferret's session, is refused with `403 owner_only` before the body is read,
+so `fy config write` from inside a ferret is refused too. A ferret's one write door is `config.write`
+(`POST /v1/agent/config`), where every loosening is held. An agent never confirms. The agenda's Allow
 ([agenda.md](agenda.md#confirming-a-configuration-change)) is a third door to the same act and asks exactly
 what `POST /v1/config/confirm` asks: one rule, `heldEditRefusal` in `runtime/mounts/config-files.ts`.
 

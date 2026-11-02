@@ -340,6 +340,34 @@ describe('a staged seed', () => {
     should((await r.call('GET', path)).body).match({ state: 'dropped' });
   });
 
+  it('should read a stage by its id alone for the caller that staged it or a paired device, and no one else (M2)', async () => {
+    // Arrange
+    const r = await rig();
+    const staged = await stage(r);
+    const path = `/v1/accounts/seed-stages/${staged.stage}`;
+
+    // Act
+    const owner = await r.call('GET', path);
+    const device = await r.call('GET', path, undefined, asDevice);
+    const other = await r.call('GET', path, undefined, { headers: { authorization: human.authorization } });
+    const ferret = await r.call('GET', path, undefined, { headers: { ...ferretOwn }, pane: true });
+    const unknown = await r.call('GET', `/v1/accounts/seed-stages/st_${'f'.repeat(24)}`, undefined, asDevice);
+    const malformed = await r.call('GET', '/v1/accounts/seed-stages/nope', undefined, asDevice);
+    const route = secretRoutes(r.subsystem).find(
+      each => each.method === 'GET' && each.path === '/v1/accounts/seed-stages/:stage',
+    );
+
+    // Assert — the account comes back from the stage, the same answer the per-account read gives
+    should(owner.body).match({ stage: staged.stage, account: 'GITHUB', state: 'waiting' });
+    should(device.body).eql(
+      (await r.call('GET', `/v1/accounts/GITHUB/factors/seed/${staged.stage}`, undefined, asDevice)).body,
+    );
+    should([other.status, unknown.status, malformed.status]).eql([404, 404, 404]);
+    should(ferret.status).equal(403);
+    // A device the grants deny `secrets` is refused at the boundary, before the stage is looked at.
+    should(route).match({ caller: 'person', capability: { capability: 'secrets', axis: 'configure' } });
+  });
+
   it('should refuse a key that says it is for another account, unless "save it here anyway" was ticked', async () => {
     // Arrange
     const r = await rig();
@@ -405,7 +433,7 @@ describe('a staged seed', () => {
 
   it('should put a daemon-worded card on the agenda, and close it when the seed is saved', async () => {
     // Arrange
-    const raised: unknown[] = [];
+    const raised: Record<string, unknown>[] = [];
     const closed: unknown[] = [];
     const r = await rig({
       agenda: {
@@ -434,12 +462,21 @@ describe('a staged seed', () => {
       {
         sessionId: 'owner-board',
         stage: staged.stage,
-        account: 'GITHUB',
-        subject: 'Save automatic codes to GitHub · kirinnee?',
+        subject: 'Save automatic codes to your account on github.com?',
         why: /^Asked by fy on kirin-box at \d\d:\d\d UTC\./u,
       },
     ]);
     should(JSON.stringify(raised)).not.containEql(SEED);
+    // Agenda text is every ferret's to read: the account's label and username, and what the key says, stay off it.
+    const { subject, why, context } = raised[0] ?? {};
+    for (const text of [subject, why, context]) {
+      should(String(text ?? '')).not.containEql('GitHub');
+      should(String(text ?? '')).not.containEql('kirinnee');
+    }
+    // Nor its handle, anywhere on the card (secrev-1329a M2): the app reads the account from the stage, by its id.
+    should(JSON.stringify(raised)).not.containEql('GITHUB');
+    const view = await r.call('GET', `/v1/accounts/seed-stages/${staged.stage}`, undefined, asDevice);
+    should(view.body).match({ account: 'GITHUB', issuer: 'GitHub', accountName: 'kirinnee' });
     should(closed).match([{ sessionId: 'owner-board', id: 'A7', note: /^Saved/u }]);
   });
 });

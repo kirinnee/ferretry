@@ -23,7 +23,11 @@ import {
   type ConfigDirectoryPort,
   ConfigFilesService,
 } from '../../../../src/lib/config-files/index.ts';
-import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
+import {
+  ACCOUNT_DEFAULT_OWNER_ONLY,
+  type SecretSubsystem,
+  secretRoutes,
+} from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { AccountDefaults } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { secretSubsystem } from './support.ts';
@@ -244,10 +248,16 @@ describe('PUT /v1/accounts/defaults', () => {
       const answer = await w.drive(ferret, 'PUT', '/v1/accounts/defaults', SITE_LINE);
 
       should(answer.status).equal(403);
-      should(answer.code).equal('forbidden');
+      should(answer.code).equal('owner_only');
       should(answer.consumed).be.false();
     }
     should(text(w)).be.undefined();
+  });
+
+  it('should tell a ferret how to ask, naming the agenda first since config_write is off by default (C36)', () => {
+    should(ACCOUNT_DEFAULT_OWNER_ONLY).equal(
+      'only a person chooses the default account for a place; a ferret asks the owner instead: say which account and why on an agenda card, or, where "Ferretry settings" is on, write the line with config_write to account-defaults.yaml, where it waits for them',
+    );
   });
 
   it('should ask a paired device for the passkey step-up, then spend it on the one write', async () => {

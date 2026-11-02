@@ -50,3 +50,9 @@ export function agentSessionOf(context: RouteContext): string | undefined {
 
 /** The code a person-only act refuses an agent with, at the boundary and in a handler alike. */
 export const OWNER_ONLY_CODE = 'owner_only';
+
+/**
+ * THE ONE SENTENCE a person-only act refuses an agent with, at the boundary, in a handler and in a service alike: what
+ * only a person does, and the ferret's next step. Always with {@link OWNER_ONLY_CODE}.
+ */
+export const ownerOnlyWords = (act: string): string => `only a person ${act}; a ferret asks the owner instead`;

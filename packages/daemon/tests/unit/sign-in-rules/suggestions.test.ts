@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { SignInId, SignInRuleSuggestionId } from '@ferretry/protocol';
 import should from 'should';
 import {
+  SignInRuleError,
   type SignInRuleSuggestionCard,
   SignInRuleSuggestionError,
   SignInRuleSuggestions,
@@ -35,14 +36,11 @@ function world(
     terminalRules?: boolean;
     redact?: (text: string) => Promise<string>;
     listing?: () => Promise<ReturnType<typeof listing>>;
-    isOpen?: () => Promise<boolean>;
   } = {},
 ) {
   const clock = { now: NOW };
   const cards: { sessionId: string; card: SignInRuleSuggestionCard }[] = [];
   const closed: { sessionId: string; id: string; note: string }[] = [];
-  /** Cards the owner closed on the agenda itself. */
-  const closedOnAgenda = new Set<string>();
   const audits: Record<string, unknown>[] = [];
   let count = 0;
   const suggestions = new SignInRuleSuggestions({
@@ -68,7 +66,6 @@ function world(
       close: async (sessionId, id, note) => {
         closed.push({ sessionId, id, note });
       },
-      isOpen: options.isOpen ?? (async (_sessionId, id) => !closedOnAgenda.has(id)),
     },
     redact: options.redact ?? (async text => text),
     audit: {
@@ -80,7 +77,7 @@ function world(
     ids: { suggestionId: () => `srg_${String(++count).padStart(16, '0')}` as SignInRuleSuggestionId },
     terminalRules: () => options.terminalRules ?? false,
   });
-  return { suggestions, clock, cards, closed, closedOnAgenda, audits };
+  return { suggestions, clock, cards, closed, audits };
 }
 
 const refusal = async (promise: Promise<unknown>): Promise<SignInRuleSuggestionError> => {
@@ -162,19 +159,19 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     should(w.closed).match([{ sessionId: 's-one', id: 'A1', note: 'This suggestion expired.' }]);
   });
 
-  it('should let the owner turn one down, and close its card', async () => {
+  it('should let the owner turn one down, off the owner’s list only: its card stays as it was', async () => {
     // Arrange
     const w = world();
     const done = await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily' });
 
     // Act
-    const gone = await w.suggestions.dismiss(deviceOwner(), done.suggestion);
-    const again = await w.suggestions.dismiss(deviceOwner(), done.suggestion);
+    const gone = w.suggestions.dismiss(deviceOwner(), done.suggestion);
+    const again = w.suggestions.dismiss(deviceOwner(), done.suggestion);
 
     // Assert
     should(gone).be.true();
     should(again).be.false();
-    should(w.closed).match([{ sessionId: 's-one', id: 'A1', note: 'The owner closed this card.' }]);
+    should(w.closed).eql([]);
     should(w.suggestions.list(HOST_OWNER).suggestions).eql([]);
   });
 
@@ -185,7 +182,7 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     const silent = await refusal(w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'again' }));
 
     // Act
-    await w.suggestions.dismiss(HOST_OWNER, done.suggestion);
+    w.suggestions.dismiss(HOST_OWNER, done.suggestion);
     const dismissed = await refusal(w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'once more' }));
 
     // Assert — no new card, the same words, the same code, and the sign-in is still waiting
@@ -195,44 +192,29 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     should(w.suggestions.waiting('s-one', GITHUB)).be.true();
   });
 
-  it('should treat a card the owner closed on the agenda like a dismissal: off the sheet, the ferret still blocked', async () => {
+  it('should take every suggestion of a sign-in off the owner’s list once a rule is approved, and keep the ferret blocked', async () => {
     // Arrange
     const w = world();
     await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily' });
-    w.closedOnAgenda.add('A1');
+    await w.suggestions.suggest('s-two', { signIn: GITHUB, why: 'daily too' });
+    await w.suggestions.suggest('s-one', { signIn: FOURTH, why: 'another' });
 
     // Act
-    await w.suggestions.reconcile();
+    w.suggestions.approved(GITHUB);
     const retry = await refusal(w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'again' }));
 
-    // Assert
-    should(w.suggestions.list(HOST_OWNER).suggestions).eql([]);
-    should(retry.code).equal('capacity');
-    should(w.cards).have.length(1);
+    // Assert — only the other sign-in is left to answer, no card closed, and the ferret is told what silence tells it
+    should(w.suggestions.list(HOST_OWNER).suggestions.map(each => each.signIn)).eql([FOURTH]);
     should(w.closed).eql([]);
+    should(retry.code).equal('capacity');
+    should(w.suggestions.waiting('s-two', GITHUB)).be.true();
   });
 
-  it('should keep an open card on the sheet, even when the agenda cannot be read', async () => {
-    // Arrange
-    const w = world({
-      isOpen: async () => {
-        throw new Error('the agenda cannot be read');
-      },
-    });
-    await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily' });
-
-    // Act
-    await w.suggestions.reconcile();
-
-    // Assert
-    should(w.suggestions.list(HOST_OWNER).suggestions).have.length(1);
-  });
-
-  it('should free the sign-in at the original expiry after a dismissal, without closing the card twice', async () => {
+  it('should free the sign-in at the original expiry after a dismissal, closing the card once in the expiry’s words', async () => {
     // Arrange
     const w = world();
     const done = await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily' });
-    await w.suggestions.dismiss(HOST_OWNER, done.suggestion);
+    w.suggestions.dismiss(HOST_OWNER, done.suggestion);
 
     // Act
     w.clock.now = NOW + 24 * HOUR + 1;
@@ -242,7 +224,7 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
 
     // Assert
     should(w.suggestions.waiting('s-one', GITHUB)).be.false();
-    should(w.closed).have.length(1);
+    should(w.closed).eql([{ sessionId: 's-one', id: 'A1', note: 'This suggestion expired.' }]);
   });
 
   it('should show and dismiss for the owner only', async () => {
@@ -251,8 +233,16 @@ describe('SignInRuleSuggestions — what a ferret may ask', () => {
     const done = await w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'daily' });
 
     // Act / Assert
-    should(() => w.suggestions.list(AGENT)).throw(/only the owner/u);
-    (await refusal(w.suggestions.dismiss(AGENT, done.suggestion))).message.should.match(/only the owner/u);
+    // The one owner-only refusal (C28): 403 owner_only, never a 400 the mount could not map.
+    should(() => w.suggestions.list(AGENT)).throw({
+      status: 403,
+      code: 'owner_only',
+      message: 'only a person reads or dismisses a rule suggestion; a ferret asks the owner instead',
+    });
+    should(() => w.suggestions.dismiss(AGENT, done.suggestion)).throw(SignInRuleError, {
+      status: 403,
+      code: 'owner_only',
+    });
     should(w.suggestions.list(HOST_OWNER).suggestions).have.length(1);
   });
 });
@@ -306,7 +296,7 @@ describe('SignInRuleSuggestions — the caps are taken before anything awaits (s
     // Act
     const fourth = await refusal(w.suggestions.suggest('s-one', { signIn: GITHUB, why: 'again' }));
     const elsewhere = await w.suggestions.suggest('s-two', { signIn: GITHUB, why: 'daily' });
-    await w.suggestions.dismiss(HOST_OWNER, (first as { suggestion: SignInRuleSuggestionId }).suggestion);
+    w.suggestions.dismiss(HOST_OWNER, (first as { suggestion: SignInRuleSuggestionId }).suggestion);
     w.clock.now = NOW + HOUR + 1;
     const later = await w.suggestions.suggest('s-one', { signIn: FOURTH, why: 'again' }).catch(error => error);
 
@@ -337,7 +327,6 @@ describe('SignInRuleSuggestions — the caps are taken before anything awaits (s
       agenda: {
         raise: async () => (refuse ? { ok: false, message: 'agenda full' } : { ok: true, id: 'A1' }),
         close: async () => undefined,
-        isOpen: async () => true,
       },
       redact: async text => text,
       audit: { record: async () => undefined },
@@ -384,6 +373,35 @@ describe('SignInRuleSuggestions — the ferret learns nothing about rules', () =
     should(w.cards).eql([]);
   });
 
+  it('should refuse ssh and npm even with terminal rules on, in the same words, and raise no card (C27)', async () => {
+    // Arrange — terminal sign-ins for programs no rule ever covers
+    const SSH = 'si_00000000000000d1' as SignInId;
+    const NPM = 'si_00000000000000d2' as SignInId;
+    const w = world({
+      terminalRules: true,
+      listing: async () => {
+        const all = listing();
+        all.signIns.push(
+          signInSummary({
+            id: SSH,
+            place: { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'prod.example' },
+          } as never),
+          signInSummary({ id: NPM, place: { kind: 'terminal', tool: 'npm', host: 'kirin-box' } } as never),
+        );
+        return all;
+      },
+    });
+
+    // Act
+    const ssh = await refusal(w.suggestions.suggest('s-one', { signIn: SSH, why: 'deploys' }));
+    const npm = await refusal(w.suggestions.suggest('s-one', { signIn: NPM, why: 'publishes' }));
+
+    // Assert
+    should([ssh.code, ssh.message]).eql(['bad_request', 'No standing rule can cover this sign-in.']);
+    should([npm.code, npm.message]).eql([ssh.code, ssh.message]);
+    should(w.cards).eql([]);
+  });
+
   it('should accept a terminal sign-in once terminal rules are reported, naming the program and host', async () => {
     // Arrange
     const w = world({ terminalRules: true });
@@ -419,7 +437,7 @@ describe('suggestionHost', () => {
 });
 
 describe('SignInRuleSuggestions — refusals in words the ferret can act on', () => {
-  it('should say the saved logins cannot be read, and give the hour back', async () => {
+  it('should say the accounts cannot be read, and give the hour back', async () => {
     // Arrange
     let broken = true;
     const w = world({
@@ -469,7 +487,7 @@ describe('SignInRuleSuggestions — refusals in words the ferret can act on', ()
 
     // Assert
     should(many.code).equal('bad_request');
-    should(many.message).match(/several sign-ins/u);
+    should(many.message).match(/^That account signs in at \d places; name one as signIn \(si_/u);
     should(only).be.instanceOf(SignInRuleSuggestionError);
     should(w.cards).eql([]);
   });

@@ -20,6 +20,7 @@ import type { AuditSink } from '../audit/types.ts';
 import type { ClockPort } from '../ports.ts';
 import { type AccountDirectory, type AccountListing, LoginEntryError } from './accounts.ts';
 import type { LoginDirectory } from './logins.ts';
+import { proposalTarget } from './proposal-target.ts';
 
 /**
  * LOGIN RECIPES, as policy (docs/input-requests.md, "Login recipes"). The directory stores a recipe and its
@@ -110,26 +111,12 @@ export class LoginRecipeService {
   async resolve(
     target: RecipeProposalTarget,
   ): Promise<{ readonly signIn: SignInSummary; readonly account: AccountSummary }> {
-    const listing = await this.ports.accounts.list();
-    if ('signIn' in target) {
-      const signIn = listing.signIns.find(each => each.id === target.signIn);
-      const account = listing.accounts.find(each => each.id === signIn?.account);
-      if (signIn === undefined || account === undefined)
-        throw new LoginEntryError('unknown_sign_in', `there is no sign-in ${target.signIn}; account_hint lists them`);
-      return { signIn, account };
-    }
-    const account = listing.accounts.find(each => each.id === target.login);
-    if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${target.login}`);
-    const own = listing.signIns.filter(each => each.account === account.id);
-    const [only] = own;
-    if (only === undefined)
-      throw new LoginEntryError('no_sign_in', `${account.label} signs in nowhere yet, so it has no recipe`);
-    if (own.length > 1)
-      throw new LoginEntryError(
-        'account_has_sign_ins',
-        `name the sign-in: ${account.label} signs in at ${String(own.length)} places (${own.map(each => each.id).join(', ')})`,
-      );
-    return { signIn: only, account };
+    const found = proposalTarget(
+      await this.ports.accounts.list(),
+      'signIn' in target ? { signIn: target.signIn } : { login: target.login },
+    );
+    if (!found.ok) throw new LoginEntryError(found.refusal, found.words);
+    return { signIn: found.signIn, account: found.account };
   }
 
   /**
@@ -162,12 +149,13 @@ export class LoginRecipeService {
       await this.record(account.id, 'login-recipe-auto', proposal.id, sessionId, signIn.id);
       return { ...answer, state: 'applied' };
     }
+    // Agenda text is every ferret's to read: the card names the place and the sign-in's id, never the account's label.
     const card = await this.ports.agenda.raise(sessionId, {
       sourceRef: proposal.id,
-      subject: `Recipe change for '${account.label}' ${placeWords(signIn.place)}`,
+      subject: `Recipe change ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(signIn.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Accounts › ${account.label} › ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
+      howToResolve: `Approve or decline it in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
     });
     if (!card.ok) return { ...answer, state: 'pending' };
     await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);

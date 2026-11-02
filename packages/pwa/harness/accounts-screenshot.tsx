@@ -46,17 +46,16 @@ const seed = view.startsWith('seed-');
 const stage = 'st_' + 'a'.repeat(24);
 const seedItem = {
   twoFactorSeed: { stage, account: 'GITHUB' },
-  subject: 'Save automatic codes to GitHub · kirinnee?',
+  subject: 'Save automatic codes to your account on github.com?',
   why: 'Asked by fy on kirin-box at 10:02 UTC. If you didn’t just ask for this, Deny.',
   context: [
-    view.includes('mismatch') ? '- The key says it is for Slack · someone@else.test.' : '- The key says it is for GitHub · kirinnee.',
     ...(view.includes('mismatch') ? ['- It does not look like this account’s key; it was staged with “save it here anyway”.'] : []),
     '- Password and code both come from this machine then: together they are one factor.',
   ].join('\\n'),
 };
 const seedAnswer = (call) =>
   call.path.startsWith('/v1/accounts/' + 'GITHUB' + '/factors/seed/')
-    ? { stage, account: 'GITHUB', label: 'Authenticator app', state: view === 'seed-saved' ? 'saved' : 'waiting', expiresAt: '2099-01-01T00:00:00.000Z' }
+    ? { stage, account: 'GITHUB', label: 'Authenticator app', state: view === 'seed-saved' ? 'saved' : 'waiting', expiresAt: '2099-01-01T00:00:00.000Z', ...(view.includes('mismatch') ? { mismatch: true, issuer: 'Slack', accountName: 'someone@else.test' } : { issuer: 'GitHub', accountName: 'kirinnee' }) }
     : answer(world)(call);
 const machine = fakeClient(view === 'fallback' ? () => logins() : seed ? seedAnswer : answer(world));
 

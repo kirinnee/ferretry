@@ -24,7 +24,8 @@
  * `POST /v1/agent/config` is authenticated by the session credential alone, served only over a
  * privileged loopback carrier, and refused unless "What agents may control › Ferretry settings" is on —
  * off by default. Even on, an agent's write that loosens is held. The switch is a kill switch; the
- * confirmation is the guard (docs/config-files.md).
+ * confirmation is the guard (docs/config-files.md). It is an agent's ONLY write door: `PUT /v1/config/file` is
+ * `caller: 'person'` (secrev-1240), so a ferret's credential is refused at the boundary and again in the handler.
  *
  * `noStore` on all five: every answer is a statement about now.
  */
@@ -51,7 +52,11 @@ import {
 } from '@ferretry/protocol';
 import { controlRefusal } from '../../agent-tools/policy.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
+
+/** Where a ferret writes a config file instead of the owner's `PUT /v1/config/file` (C30). */
+const PUT_FERRET_DOOR =
+  'a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -170,15 +175,14 @@ function pathOf(context: RouteContext): string {
 
 async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseBody(context.request, ConfigFilePutRequestSchema, { maxBytes: MAX_PUT_BODY_BYTES });
+  // The second wall: a person's route, so an agent the boundary let through is still refused (its door is config.write).
+  if (isAgentCaller(context))
+    throw new ApiError(403, `${ownerOnlyWords('may use PUT /v1/config/file')}; ${PUT_FERRET_DOOR}`, OWNER_ONLY_CODE);
   const refused = refusedFor(context, request.path, 'configure');
   if (refused !== undefined) return refused;
-  const agent = isAgentCaller(context);
-  if (agent && !(await subsystem.agentControl.allows('settings'))) {
-    throw new ApiError(403, controlRefusal('settings'), 'agent_control_off');
-  }
   const fresh = context.presentation?.freshStepUp === true;
-  // At this machine, or with a passkey proved for this act. Never for an agent.
-  const mayLoosen = !agent && (context.governance?.governed === false || fresh);
+  // At this machine, or with a passkey proved for this act.
+  const mayLoosen = context.governance?.governed === false || fresh;
   try {
     const written = await subsystem.service.write(
       request.path,
@@ -347,7 +351,8 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'PUT',
       path: '/v1/config/file',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
+      ferretDoor: PUT_FERRET_DOOR,
       capability: USE,
       noStore: true,
       handle: async context => await put(subsystem, context),

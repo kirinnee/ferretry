@@ -48,11 +48,12 @@ export interface RuleGrantPorts {
   readonly rules: RuleGrantRules;
   readonly ledger: SignInGrantLedger;
   readonly keys: (account: AccountId) => Promise<AccountKey | undefined>;
-  /** Whether the daemon advertises `sign-in-rules.1`: until the app ships, no rule fills (every raise is a normal card). */
+  /** Whether the daemon reports `sign-in-rules.1` (it does, since R3c-6): while it does not, no rule fills. */
   readonly advertised: () => boolean;
   /**
-   * Whether the daemon reports `sign-in-rules-terminal.1`: until it does, no terminal rule (sudo, su, doas) is offered
-   * to the matcher or holds at the write, whatever the rules file says. Absent: none is.
+   * Whether terminal rules are offered (`terminalRulesOffered`: `sign-in-rules-terminal.1` beside `sign-in-rules.1`):
+   * until they are, no terminal rule (sudo, su, doas) is offered to the matcher or holds at the write, whatever the
+   * rules file says. Absent: none is.
    */
   readonly terminal?: () => boolean;
   /** The session's STAMPED board project, never one resolved from its folder, never Unfiled. */

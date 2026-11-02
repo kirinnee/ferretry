@@ -458,7 +458,9 @@ pairing code, widening a device or any other act takes. Both directions are test
 
 **From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
 prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
-GitHub · kirinnee? Asked by fy on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
+your account on github.com? Asked by fy on kirin-box at 14:02 UTC" — then waits. The card's words name the place only
+(agenda text is every ferret's to read); the app's card names the account and what the key says it is for, read from
+the stage on a route that reads the accounts. Allow it in the app with your passkey and it
 prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
 current session's by default). The CLI has no way to save a seed itself.
 
@@ -472,19 +474,24 @@ The card is answered by its Allow (the passkey ceremony, then the commit) or Den
 saves nothing, so an app from before these cards shows the daemon's words and cannot save.
 
 **The app draws this card itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
-daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). Every sentence is the
+daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). The reference names the
+stage alone: an account's handle is often its label and username, and every ferret and any device reads the agenda, so
+the app reads the stage, and the account it is for, by the stage id (`GET /v1/accounts/seed-stages/:stage`). An older
+daemon's reference also names the account, and the app then reads the stage there. Every sentence is the
 daemon's (subject, why, context); the app adds the one-factor warning with its tick, an amber box and a second tick when
 the stage was staged with "save it here anyway" (the daemon marks that with `TWO_FACTOR_SEED_CARD_MISMATCH_LINE`, one
 shared constant), **Allow** and **Deny**. Allow is the same shared flow as the "Set up automatic codes" panel: the
 `add-2fa-key` passkey bound to THAT stage (`useAddKeyStepUp`), then the commit with no body. A dismissed passkey leaves
 the stage waiting (it expires in two minutes), so the owner can try again or Deny; Deny drops the stage with no passkey. The
-card reads only where the stage stands (`GET …/seed/:stage`) and the account's name; it never holds the key.
+card reads only where the stage stands (`GET /v1/accounts/seed-stages/:stage`) and the account's name; it never holds
+the key.
 
 | Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- |
 | `POST /v1/accounts/:id/factors`                            | add a key with no value (`sms`, `email`, `push`, `security-key`, a `totp` you hold) | no                         |
 | `PATCH` / `DELETE /v1/accounts/:id/factors/:tf`            | relabel; remove (its seed swept)                                                    | never                      |
 | `POST /v1/accounts/:id/factors/seed`                       | stage a seed (memory, two minutes); answers what was read                           | no (it saves nothing)      |
+| `GET /v1/accounts/seed-stages/:stage`                      | where a stage stands, and its account, by the stage id alone (the card's read)      | no                         |
 | `GET` / `DELETE /v1/accounts/:id/factors/seed/:stage`      | where a stage stands; drop it                                                       | no                         |
 | `POST /v1/accounts/:id/factors/seed/:stage/commit`         | save it                                                                             | **yes, bound to `:stage`** |
 | `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app` | put it on the agenda `{ session }` so the owner confirms it                         | no (it saves nothing)      |
@@ -508,11 +515,20 @@ are matched by the screens in the app: the sheet (Accounts › a sign-in › Sta
 sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
 ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
 `fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
-rule's structured flags, never from its words. Every rule card has ONE shape: a plain `does` line, label/value `rows`
-(Types, Who, Until, Uses, plus Machine or Site, Code key and History where they apply), ONE red block, and "How it's
-checked" for the proof, all built by the protocol's `signInRuleWords`. Editing a sign-in's method or recipe says how many rules that
-suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
-device that may not use secrets sees one sentence and the app stops asking.
+rule's structured flags, never from its words. Each is one protocol constant, said the same in the app and `fy rules`:
+
+- One factor (`SIGN_IN_RULE_TOTP_WARNING`, the same `AUTOMATED_CODE_WARNING` a plan line's code tick says): "Ferretry
+  types the password and the 2FA code, so a ferret it fills for has both factors." Its tick needs
+  `AUTOMATED_CODE_ACK_WORDS`: "I understand this makes the sign-in one factor, with no one to approve a code."
+- The automatic recipe (`SIGN_IN_RULE_AUTO_RECIPE_WARNING`, amber): "This sign-in applies its recipe by itself, so the
+  form it fills is one a ferret may have written."
+- "You'll still be asked" (`stillAskedFor('rule')`, one list with the plan card's): push approvals, security keys and
+  passkeys, captchas, a sign-in whose form changed since you approved it, ssh, scp, npm or docker login, gh and any
+  program but `sudo`, `su` and `doas`, and SMS and email codes or a code you did not tick. Every rule card has ONE shape: a plain `does` line, label/value `rows`
+  (Types, Who, Until, Uses, plus Machine or Site, Code key and History where they apply), ONE red block, and "How it's
+  checked" for the proof, all built by the protocol's `signInRuleWords`. Editing a sign-in's method or recipe says how many rules that
+  suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
+  device that may not use secrets sees one sentence and the app stops asking.
 
 ### Only the owner, a fresh passkey every time, bound to the bytes
 
@@ -547,8 +563,8 @@ Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
      challenge the live ceremony verified.
   3. In the service's one-at-a-time queue, it re-reads the accounts and snapshots the pins again. If they differ from
      the staged ones, the answer is `409 conflict` and no rule is made. A resume, renew or widen is also refused
-     (`409`, with the reason) when the rule it replaces was suspended after the stage, so no suspension is ever cleared
-     by a passkey the owner gave without seeing why.
+     (`409 not_this_rule`, with the reason) when the rule it replaces was suspended, narrowed, revoked or approved
+     again after the stage, so no suspension is ever cleared by a passkey the owner gave without seeing why.
   4. Still in the queue, right before the write, it checks the proof: the device is still paired and holds the
      passkey, and the assertion verifies over those bytes. A revocation or a passkey removal that lands during the
      commit is queued behind the write, so it sees the new rule and suspends it.
@@ -575,6 +591,22 @@ stage answers `409` with the reason:
 | `no_history`       | "Sign in yourself twice from the app first".                                                   |
 | `passkey_required` | No passkey has been added on a paired device yet.                                              |
 | `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.                  |
+| `terminal_off`     | sudo, su or doas, on a machine that does not offer terminal rules.                             |
+
+**One rule per sign-in, and each refusal its own code.** A sign-in has at most one rule. A new approval for a sign-in
+that already has one (active, suspended, expired, or scoped to someone else) must name it with `replaces`, as that
+rule's renewal, resume or change; the stage answers `409` with a code that says which next step it is, and each code
+has one sentence in protocol (`SIGN_IN_RULE_REFUSAL_WORDS`) that the daemon, the app and `fy rules` all use:
+
+| Code               | When                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `rule_exists`      | The sign-in already has a rule and the approval did not name it: renew, resume or change it. |
+| `not_this_rule`    | The approval named a rule that is not, or is no longer, the sign-in's rule as staged.        |
+| `clock_moved_back` | This machine's clock moved back between the stage and the commit: start again.               |
+| `conflict`         | The sign-in, its account or a pinned fact changed between the stage and the commit.          |
+
+The app opens a sign-in that has a rule as that rule's renewal or change, never as a second rule, so the owner never
+meets `rule_exists` from a ferret's suggestion or the "Don't ask again" offer.
 
 A terminal rule types the password only: a username or a code ticked for one, or a lifetime over 7 days, is `400`.
 
@@ -671,7 +703,7 @@ itself; under a restricted sudoers it could set a password the ferret then knows
 name in the protocol's daemon features. Nothing reads it from config, the environment, a route or a file. This build
 reports it (owner decision !A226, with the risk below accepted), and a terminal rule still fills only beside
 `sign-in-rules.1`, which this build also reports: a daemon that did not would leave every sign-in a plain card. A build that does not report it refuses
-to stage a sudo, su or doas rule (`409 tool_not_covered`), says the same in the eligibility, and offers no terminal
+to stage a sudo, su or doas rule (`409 terminal_off`), says the same in the eligibility, and offers no terminal
 rule to the matcher, so a terminal rule already in the file never fills there.
 
 **The race that remains, said exactly** (secrev-1301 M1). Between the daemon's last kernel look and tmux's guarded
@@ -744,7 +776,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
 | `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
 | `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)          | `secrets.use`                       |
-| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down; its card closes, a tombstone stays        | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down, on the owner's side only: its card stays  | `secrets.use`                       |
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 

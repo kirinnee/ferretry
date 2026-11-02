@@ -2245,6 +2245,25 @@ describe('a ferret session credential at the boundary', () => {
     should(owner.status).equal(200);
   });
 
+  it('should name a person route’s ferret door in its owner-only refusal, and none where it has none (C30)', async () => {
+    // Arrange
+    const { dispatcher } = served(
+      { ...echo('/v1/door', 'operator'), caller: 'person', ferretDoor: 'a ferret uses its own door' },
+      { ...echo('/v1/plain', 'operator'), caller: 'person' },
+    );
+
+    // Act
+    const door = await dispatcher.dispatch(asSession('/v1/door', S1));
+    const plain = await dispatcher.dispatch(asSession('/v1/plain', S1));
+
+    // Assert
+    should([door.status, jsonBody(door).error]).deepEqual([
+      403,
+      'only a person may use GET /v1/door; a ferret asks the owner instead; a ferret uses its own door',
+    ]);
+    should(jsonBody(plain).error).equal('only a person may use GET /v1/plain; a ferret asks the owner instead');
+  });
+
   it('should refuse the admin token naming a ferret’s session on a person route, and serve it bare', async () => {
     // The honest-client fallback for a pane without its own credential: one predicate, the same refusal.
     // Arrange

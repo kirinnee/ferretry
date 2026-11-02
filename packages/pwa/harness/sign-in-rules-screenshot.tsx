@@ -5,14 +5,16 @@
  *   bun harness/sign-in-rules-screenshot.tsx [out-dir] [states]   # writes sign-in-rules-<state>-<viewport>-<scheme>.png
  *
  * `states` is a comma list of: create-page, create-totp, create-terminal, ineligible, suggestion, passkey, machine,
- * settings, suspended, narrow, site-panel, edit-warning, fallback, history, device-revoke.
+ * settings, suspended, narrow, site-panel, edit-warning, fallback, history, device-revoke, replaces, filled.
  * "create-*" are the owner's sheet (a page rule, a page rule with the code ticked and its red acknowledgement, a sudo
  * rule with the root flag); "ineligible" is the sheet for a sign-in that cannot have a rule; "suggestion" is a
  * ferret's card, nothing ticked; "passkey" is the passkey sheet with the daemon's own words for a root stage;
  * "machine" is a rule staged with `fy rules add`; "settings" is Settings › Secure copy › Standing rules; "suspended"
  * and "narrow" are the rule card; "site-panel" and "edit-warning" are the Accounts site's Rule and Method tabs;
  * "fallback" is the input card for a rule that did not apply; "history" is the closed card of a fill that did;
- * "device-revoke" is Settings › Devices with the rules a device's passkey approved.
+ * "device-revoke" is Settings › Devices with the rules a device's passkey approved; "replaces" is a ferret's suggestion
+ * opened for a sign-in that already has a rule (it renews it, never a second rule); "filled" is the owner's input card
+ * a rule filled, with the place.
  *
  * Fake fixtures only: no real account, no daemon, no value. Every width asserts no sideways scroll and the touch floor
  * on every button and checkbox of the phone.
@@ -178,8 +180,17 @@ const body = () => {
     );
     case 'history': {
       const closed = { ...item, resolvedAt: '2026-11-01T09:42:00.000Z', resolvedBy: 'daemon', resolvedBySession: null,
-        resolvedByName: null, disposition: 'done', resolutionNote: 'Filled under your standing sign-in rule on github.com.' };
+        resolvedByName: null, disposition: 'done', resolutionNote: 'Input request delivered.' };
       return itemView({ settled: <AgendaSettled busy={false} error={null} ferret="Hadi" item={closed} now={NOW} /> }, closed);
+    }
+    case 'replaces': return sheet({ origin: 'suggestion', replacesExisting: true, replacing: pageRule({ status: 'expired' }) });
+    case 'filled': {
+      const page = { kind: 'browser', pageId: 'page-1', origin: 'https://github.com', secure: true, navigationId: 'nav-1',
+        fields: [{ fieldId: 'f1', frameOrigin: 'https://github.com', frameId: 'frame-1', backendNodeId: 7,
+          field: { tag: 'input', type: 'password' }, box: { x: 0, y: 0, w: 200, h: 24 }, visible: true }] };
+      const input = fakeRequest({ state: 'delivered', observed: page, preapproval: { by: 'rule', rule: RULE_ID, revision: 1, outcome: 'filled' } });
+      return itemView({ inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(input)} now={NOW} onDone={quiet} request={input} /> },
+        { ...item, input: { requestId: input.id } });
     }
     case 'fallback': {
       const input = fakeRequest({ preapproval: { by: 'rule', rule: RULE_ID, revision: 1, outcome: 'did-not-apply', reason: 'rate' } });
@@ -237,6 +248,8 @@ const ALL_STATES = [
   'fallback',
   'history',
   'device-revoke',
+  'replaces',
+  'filled',
 ] as const;
 const wanted = process.argv[3]?.split(',');
 const STATES = ALL_STATES.filter(state => wanted === undefined || wanted.includes(state));
@@ -257,6 +270,8 @@ const SURFACE: Readonly<Record<(typeof ALL_STATES)[number], string>> = {
   fallback: '[data-input-plan-miss]',
   history: '[data-agenda-settled]',
   'device-revoke': '[data-device-rules]',
+  replaces: '[data-rule-replaces]',
+  filled: '[data-input-plan-filled]',
 };
 
 const server = Bun.serve({

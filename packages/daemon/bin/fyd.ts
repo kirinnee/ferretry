@@ -68,6 +68,7 @@ import {
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
   daemonFeatureList,
+  terminalRulesOffered,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -1394,7 +1395,7 @@ import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credenti
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
-import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
+import { cutOffResume, resumeUnderCutOff } from '../src/lib/session/resume/cut-off.ts';
 import {
   restoreRestamped,
   settleRejectedRelaunch,
@@ -2998,6 +2999,17 @@ async function restoreCredential(storage: DaemonStorage, id: SessionId): Promise
 }
 
 /**
+ * A restore the resume refused or could not finish: the mark goes back exactly as a cut-off writes it, any credential
+ * the attempt may have rotated in included, so the session stays cut off.
+ */
+async function markCredentialCutOff(storage: DaemonStorage, id: SessionId): Promise<void> {
+  await storage.updateConfig(id, current => {
+    const { sessionCapabilityHash: _revoked, ...rest } = jsonObject(current) ?? {};
+    return { ...rest, credentialRevoked: true };
+  });
+}
+
+/**
  * Cutting one ferret off (`POST /v1/sessions/:sessionId/revoke-credential`): the lifecycle revokes its credential on
  * the session's own queue, so the value its pane holds names nobody from the moment this answers.
  */
@@ -3270,7 +3282,7 @@ function createSessionResumeSubsystem(
   held: Pick<SessionSendService, 'releaseHeld'>,
 ): SessionResumeSubsystem {
   return {
-    resume: async (reference, actor, message, policy) => {
+    resume: async (reference, actor, message, policy, confirmRestore) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
@@ -3283,15 +3295,26 @@ function createSessionResumeSubsystem(
           'refused',
           `a person revoked ${reference}'s credential; only a person can resume it (${CLIENT_NAME} resume ${reference})`,
         );
-      if (cutOff === 'restore') await restoreCredential(storage, id);
-      await service
-        .resume({
-          id,
-          actor,
-          ...(message === undefined ? {} : { message }),
-          ...(policy === undefined ? {} : { policy }),
-        })
-        .catch((error: unknown) => resumeRefusal(error));
+      // A restore is a widen: the route's grant and passkey check, asked now for every caller it governs (secrev-1329b
+      // M2, delta 2), and the mark put back if the resume is refused (delta 1).
+      await resumeUnderCutOff(
+        cutOff,
+        {
+          confirm: confirmRestore,
+          unconfirmed: () => new SessionResumeError('refused', `${reference} cannot be brought back here`),
+          restore: async () => await restoreCredential(storage, id),
+          markAgain: async () => await markCredentialCutOff(storage, id),
+        },
+        async () =>
+          await service
+            .resume({
+              id,
+              actor,
+              ...(message === undefined ? {} : { message }),
+              ...(policy === undefined ? {} : { policy }),
+            })
+            .catch((error: unknown) => resumeRefusal(error)),
+      );
       /**
        * The spawn stamp is brought up to date HERE, between the relaunch and the read-back.
        *
@@ -10832,7 +10855,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // THE OWNER'S STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): on disk, each carrying the
       // owner's passkey assertion over its own bytes, checked again offline at load and whenever a passkey or device
       // goes. Every account change is followed: a pinned fact that drifted suspends its rule. A rule fills only through
-      // the shared grant matcher below, and only once `sign-in-rules.1` is advertised (the app ships first).
+      // the shared grant matcher below, and only while `sign-in-rules.1` is reported (since R3c-6).
       const signInRules = new SignInRuleService({
         store: new FileSignInRuleStore(join(paths.state, 'accounts'), stateFiles),
         accounts: { listing: async () => await accountDirectory.keyedList() },
@@ -10850,7 +10873,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         audit: auditLog,
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
-        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminalRules: () => terminalRulesOffered(daemonFeatureList()),
       });
       // A ferret's suggestion of a rule (account_propose preapprove): RAM only, one card on the agenda, no stage or proof.
       const signInRuleSuggestions = new SignInRuleSuggestions({
@@ -10859,7 +10882,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         redact: async text => await secretRedactor.redact(text),
         audit: auditLog,
         clock: { now: () => Date.now() },
-        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminalRules: () => terminalRulesOffered(daemonFeatureList()),
       });
       setInterval(() => signInRuleSuggestions.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       connectSignInRules(signInRules, {
@@ -10881,7 +10904,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return key.success ? key.data : undefined;
         },
         advertised: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRules),
-        terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminal: () => terminalRulesOffered(daemonFeatureList()),
         stampedProject: async sessionId => await stampedProjectOf(signInRuleSessions, sessionId),
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),

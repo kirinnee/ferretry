@@ -1,6 +1,14 @@
-import { ResumeSessionRequestSchema, type SessionView } from '@ferretry/protocol';
+import {
+  ResumeSessionRequestSchema,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+  type SessionView,
+  type StepUpRequiredBody,
+} from '@ferretry/protocol';
 import { type ApiActor, parseActor } from '../../api/actor.ts';
+import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseOptionalBody } from '../../api/body.ts';
+import { type CapabilityDemand, grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -80,6 +88,11 @@ export interface SessionResumeSubsystem {
     actor: ResumeActor,
     message: string | undefined,
     policy?: ResumePolicy,
+    /**
+     * Asked, at the moment it would happen, before ANY caller brings back a session the owner cut off: it throws the
+     * refusal when the caller may not (C4; secrev-1329-delta 2). Absent: the restore is refused.
+     */
+    confirmRestore?: () => void,
   ): Promise<SessionView>;
 }
 
@@ -114,7 +127,7 @@ function pathSessionId(context: RouteContext): string {
 /**
  * Who asked, in the resume domain's own vocabulary.
  *
- * `resolveApiActor` produces `admin-cli`, `admin-ui`, `peer:<id>` or `warden:<id>`, and the domain
+ * `resolveApiActor` produces `admin-cli`, `admin-ui`, `device:<id>`, `peer:<id>` or `warden:<id>`, and the domain
  * names the KIND only — a policy does not depend on which peer asked. Anything the domain does not
  * recognise, including the absent actor a `public` route would carry, becomes `unknown`.
  */
@@ -123,11 +136,55 @@ export function resumeActorOf(actor: ApiActor | undefined): ResumeActor {
   return parsed.success ? parsed.data : 'unknown';
 }
 
+/** Bringing back a cut-off ferret is a widen: the fleet's `configure` axis, on the operator's grant and the device's. */
+const RESTORE_DEMAND: CapabilityDemand = { capability: 'fleet', axis: 'configure' };
+
+/**
+ * WHAT A CALLER NEEDS TO BRING BACK A FERRET THE OWNER CUT OFF (secrev-1329b M2, delta 2): restoring rotates in a new
+ * credential, so it is a widen. For every caller the grants govern (a paired device, the admin token off loopback),
+ * the grant must allow `fleet.configure`, and a passkey must be proved for this one act (`resume-cut-off`), taken
+ * here in one step so one confirmation restores one session; a caller with no proven device holds none. A caller the
+ * grants do not govern (the CLI and the app on the host) is asked nothing more.
+ */
+function confirmRestore(context: RouteContext): () => void {
+  return () => {
+    // A ferret's own credential reads ungoverned: it never brings back a cut-off session, whatever it claims to be.
+    if (isAgentCaller(context))
+      throw new ApiError(403, ownerOnlyWords('brings back a ferret it cut off'), OWNER_ONLY_CODE);
+    const governance = context.governance;
+    if (governance === undefined)
+      throw new ApiError(
+        403,
+        'this daemon cannot say whether this device may bring back a cut-off ferret',
+        'grant_undetermined',
+      );
+    if (!governance.governed) return;
+    const decision = governance.decide(RESTORE_DEMAND);
+    // The step-up half of the decision is the passkey for this act, asked below.
+    if (!decision.allowed && decision.refusal !== 'step-up-required')
+      throw new ApiError(
+        403,
+        'bringing back a ferret you cut off needs this device to be allowed to change the fleet (fleet configure)',
+        grantRefusalCode(decision.refusal),
+      );
+    if (context.claimFreshStepUp?.(STEP_UP_ACTS.resumeCutOff) !== true)
+      throw new ApiError(
+        403,
+        'bringing back a ferret you cut off needs a passkey confirmation for it, from this device',
+        STEP_UP_REQUIRED_CODE,
+        undefined,
+        { demand: { ...RESTORE_DEMAND, act: STEP_UP_ACTS.resumeCutOff } } satisfies Partial<StepUpRequiredBody>,
+      );
+  };
+}
+
 /** Revives a session, or answers a stated refusal. */
 async function resume(subsystem: SessionResumeSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseOptionalBody(context.request, ResumeSessionRequestSchema);
-  const view = await subsystem.resume(sessionId, resumeActorOf(context.actor), request.message).catch(refuse);
+  const view = await subsystem
+    .resume(sessionId, resumeActorOf(context.actor), request.message, undefined, confirmRestore(context))
+    .catch(refuse);
   return jsonResponse(view);
 }
 
@@ -148,6 +205,8 @@ export function sessionResumeRoutes(subsystem: SessionResumeSubsystem): readonly
       minimum: 'operator',
       caller: 'any',
       noStore: true,
+      // A device's restore of a cut-off ferret asks its own grant question (`confirmRestore`).
+      consultsGrants: true,
       handle: async context => await resume(subsystem, context),
     },
   ];

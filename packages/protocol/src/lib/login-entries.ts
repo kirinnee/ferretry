@@ -93,14 +93,29 @@ export const TotpParametersSchema = z.strictObject({
 export type TotpParameters = z.infer<typeof TotpParametersSchema>;
 
 /**
- * THE SENTENCE the owner reads before a 2FA seed is kept, in the app, the CLI and the docs. It is the
- * reason TOTP is off by default and opted into per entry.
+ * THE SENTENCE the owner reads before a 2FA key is SAVED, in the app, the CLI and the docs. It is the
+ * reason TOTP is off by default and opted into per entry. It is about keeping the key, never about a fill: a ticked
+ * code on a plan line or a standing rule says {@link AUTOMATED_CODE_WARNING}.
  */
 export const LOGIN_TOTP_WARNING =
-  "Keeping the password and the 2FA seed in the same place means one compromise of this machine's vault defeats both factors.";
+  "Keeping the password and the 2FA key in the same place means one compromise of this machine's vault defeats both factors.";
 
 /** The same warning, short, under every "Use code from Ferretry" button on a code card. */
 export const LOGIN_ONE_FACTOR_WARNING = 'Password and code both come from this machine: together they are one factor.';
+
+/**
+ * THE ONE-FACTOR SENTENCE UNDER A TICKED CODE, on a task-plan line and on a standing rule alike, verbatim: Ferretry
+ * fills the code itself, so nobody is asked for it. One red line, short enough for a rule's single red block.
+ */
+export const AUTOMATED_CODE_WARNING =
+  'Ferretry types the password and the 2FA code, so a ferret it fills for has both factors.';
+
+/**
+ * What the owner says they understand before a code is ticked, verbatim: the app's tick beside
+ * {@link AUTOMATED_CODE_WARNING} and the help of the CLI's `--i-understand-one-factor`.
+ */
+export const AUTOMATED_CODE_ACK_WORDS =
+  'I understand this makes the sign-in one factor, with no one to approve a code.';
 
 /** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
 export const MAX_SEEDS_PER_ACCOUNT = 4;
@@ -111,7 +126,7 @@ export const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
 export const TotpSeedSchema = z
   .string()
   .transform(seed => seed.replaceAll(/[\s=-]/gu, '').toUpperCase())
-  .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA seed of 16 to 128 characters'));
+  .pipe(z.string().regex(/^[A-Z2-7]{16,128}$/u, 'a base32 2FA key of 16 to 128 characters'));
 
 /**
  * WHERE THE SIGN-IN HAPPENS: a web host, exactly as a page's origin names it (`app.vercel.com`,

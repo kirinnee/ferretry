@@ -26,6 +26,7 @@ import { PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
 import { RuleSignInGrants } from '../../../src/lib/sign-in-grants/rules.ts';
 import { CombinedSignInGrants } from '../../../src/lib/sign-in-grants/sources.ts';
 import { type RuleListing, SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
+import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 import { approved, DEVICE, FakeProofs, MemoryRuleStore, tappedFact, type World } from '../sign-in-rules/support.ts';
 
@@ -142,6 +143,10 @@ interface Options {
   probes?: boolean;
   /** Whether the fills read terminal rules (`sign-in-rules-terminal.1` reported); the rule service may still stage them. */
   terminal?: boolean;
+  /** Runs as the card is raised, after the raise's own look and before the fill's. */
+  onRaise?: (h: Harness) => void;
+  /** The session's approved task-plan lines, asked on every read. */
+  planLines?: () => readonly ApprovedSignInLine[];
 }
 
 async function harness(options: Options = {}) {
@@ -154,6 +159,7 @@ async function harness(options: Options = {}) {
   const closes: string[] = [];
   const tells: string[] = [];
   const rebuzzes: string[] = [];
+  const linesStopped: string[] = [];
   const audits: AuditEntry[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
   let facts: InputTargetFacts = loginPage();
@@ -222,10 +228,10 @@ async function harness(options: Options = {}) {
   const grants = new CombinedSignInGrants(
     new PlanSignInGrants(
       {
-        signInLines: () => [],
-        signInLineHeld: () => false,
+        signInLines: () => options.planLines?.() ?? [],
+        signInLineHeld: () => options.planLines !== undefined,
         lineUsed: () => undefined,
-        lineStopped: async () => undefined,
+        lineStopped: async (planId, line, because) => void linesStopped.push(`${planId}:${String(line)}: ${because}`),
       },
       keyOf,
       () => true,
@@ -254,6 +260,7 @@ async function harness(options: Options = {}) {
     closes,
     tells,
     rebuzzes,
+    linesStopped,
     audits,
     ruleAudits,
     timers,
@@ -284,6 +291,7 @@ async function harness(options: Options = {}) {
       raise: async (session, raised) => {
         cards.push(raised);
         if (options.actDuringRaise === true) acted = clock.now;
+        options.onRaise?.(h as Harness);
         quietAtRaise.push(service.quietCard(session, raised.requestId));
         return { ok: true, id: `A${card++}` as AgendaId };
       },
@@ -378,7 +386,9 @@ describe('a sign-in a standing rule covers is filled under it, for any ferret (i
     should(view.note).equal('Filled under a rule the owner approved in advance.');
     should(JSON.stringify(view)).not.containEql(rule);
     should(request).be.undefined();
-    should(h.closes).deepEqual(['A1: Filled under your standing rule on github.com.']);
+    // The agenda card closes in a tap fill's words (C26): any ferret can read any agenda, so it never names the rule.
+    should(h.closes).deepEqual(['A1: Input request delivered.']);
+    should(h.closes.join(' ')).not.match(/rule|github\.com/u);
     // The notifier records `<card>: <message>`, and the message names its card itself.
     should(h.tells[0]).equal(
       'A1: A1: Ferretry filled the sign-in on %browser:app under a rule the owner approved in advance. Read the page to continue once its quarantine allows.',
@@ -1279,6 +1289,72 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
     should(h.writes).deepEqual([]);
     should(request?.preapproval).match({ by: 'rule', reason: 'proof-invalid' });
     should(ruleOnDisk(h)?.suspended?.because).equal('passkey-removed');
+  });
+
+  it('should neither redraw the card nor count a failed check when the page changed before a rule’s write (R4, C25)', async () => {
+    // Arrange — the page moves on to another document between the raise and the fill's own look
+    const h = await harness({ onRaise: at => at.setFacts(loginPage({ navigationId: 'loader-9' })) });
+    await ruleFor(h, await github(h));
+
+    // Act
+    const { view, request } = await raised(h);
+    await settled();
+
+    // Assert — the card is the owner's as raised: no redraw, no failed check, nothing typed
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ by: 'rule', outcome: 'did-not-apply' });
+    should(h.audits.map(entry => entry.event)).not.containEql('input.rebound');
+    should(h.audits.map(entry => entry.event)).not.containEql('input.refused');
+  });
+
+  it('should say a plan line’s miss, byte for byte, when a rule tried after it misses at the write (R3, C24)', async () => {
+    // Arrange — a plan line that misses at the raise (its account changed), then a rule that matches and is revoked at
+    // the last step before the write; and the same plan line with no rule at all
+    const planLine = (signIn: SignInId): ApprovedSignInLine => ({
+      planId: 'ab'.repeat(16),
+      sessionId: SESSION,
+      line: 0,
+      kind: 'sign-in',
+      state: 'approved',
+      signIn,
+      fields: ['username', 'password'],
+      remaining: 1,
+      pins: { accountKey: 'not-this-account', placeKeys: ['github.com'], identities: [] } as never,
+      expiresAt: NOW + 60_000,
+    });
+    let signIn: SignInId | undefined;
+    const withRule = await harness({
+      planLines: () => (signIn === undefined ? [] : [planLine(signIn)]),
+      onJournal: async (type, at) => {
+        if (!type.endsWith('delivering')) return;
+        const id = at.rules.fillable()[0]?.body.id;
+        if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
+      },
+    });
+    signIn = await github(withRule);
+    await ruleFor(withRule, signIn);
+    let alone: SignInId | undefined;
+    const planOnly = await harness({ planLines: () => (alone === undefined ? [] : [planLine(alone)]) });
+    alone = await github(planOnly);
+
+    // Act
+    const a = await raised(withRule);
+    const b = await raised(planOnly);
+    await settled();
+
+    // Assert — the plan's words to the owner and the ferret, its line stopped, and nothing else to tell them apart
+    should(withRule.writes).deepEqual([]);
+    should(a.request?.preapproval).match({ by: 'plan', line: 0, outcome: 'did-not-apply', reason: 'sign-in-gone' });
+    should(b.request?.preapproval).match({ by: 'plan', line: 0, outcome: 'did-not-apply', reason: 'sign-in-gone' });
+    should(JSON.stringify(a.view)).equal(JSON.stringify(b.view));
+    should(withRule.notes).deepEqual(planOnly.notes);
+    should(withRule.notes.length).equal(1);
+    should(withRule.tells).deepEqual(planOnly.tells);
+    should(withRule.linesStopped).deepEqual(planOnly.linesStopped);
+    should(JSON.stringify(await withRule.service.agentView(SESSION, a.view.id, 0))).equal(
+      JSON.stringify(await planOnly.service.agentView(SESSION, b.view.id, 0)),
+    );
   });
 
   it('should leave the ferret’s view byte-identical to no rule for misses that suspend or count (L3)', async () => {

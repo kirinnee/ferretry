@@ -46,22 +46,22 @@ const AUTOMATIC: ResumePolicy = { automatic: true, dedupeSharedRecoveryScope: tr
 describe('resume policy resolution', () => {
   it('should treat operator and peer calls as explicit', () => {
     // Act
-    const actual = (['admin-cli', 'admin-ui', 'peer'] as const).map(actor => resolveResumePolicy(actor));
+    const actual = (['admin-cli', 'admin-ui', 'device', 'peer'] as const).map(actor => resolveResumePolicy(actor));
 
     // Assert
-    should(actual).deepEqual([OPERATOR, OPERATOR, EXPLICIT]);
+    should(actual).deepEqual([OPERATOR, OPERATOR, OPERATOR, EXPLICIT]);
   });
 
-  it('should give operator standing to the two admin actors and to nothing else', () => {
+  it('should give operator standing to the person (CLI, the app here, the app on a paired device) and to nothing else', () => {
     // Arrange — `peer` is the one that matters: it is explicit, so `!automatic` would have handed a
     // relaying daemon the right to dismiss a warning meant for the person at the terminal.
-    const actors = ['admin-cli', 'admin-ui', 'peer', 'warden', 'daemon', 'unknown'] as const;
+    const actors = ['admin-cli', 'admin-ui', 'device', 'peer', 'warden', 'daemon', 'unknown'] as const;
 
     // Act
     const actual = actors.map(actor => resolveResumePolicy(actor).humanOperator);
 
     // Assert
-    should(actual).deepEqual([true, true, false, false, false, false]);
+    should(actual).deepEqual([true, true, true, false, false, false, false]);
   });
 
   it('should treat automated and unrecognised callers as automatic, never as operators', () => {

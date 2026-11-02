@@ -31,8 +31,7 @@ describe('a staged 2FA seed card on the real agenda', () => {
     // Act
     const id = await adapter.raise('s1', {
       stage: STAGE,
-      account: 'GITHUB',
-      subject: 'Save automatic codes to GitHub · kirinnee?',
+      subject: 'Save automatic codes to your account on github.com?',
       why: 'Asked by `fy` on kirin-box at 14:02 UTC.',
       context: '- Password and code both come from this machine then.',
       expiresAt: '2026-10-31T12:02:00.000Z',
@@ -46,7 +45,10 @@ describe('a staged 2FA seed card on the real agenda', () => {
     // Assert
     should(answered).match({ ok: false, error: { code: 'use_input_form' } });
     const item = parsed?.entries[0]?.item;
-    should(item?.twoFactorSeed).eql({ stage: STAGE, account: 'GITHUB' });
+    // The stage alone (secrev-1329a M2): an account's handle is often its label and username, and any ferret or device
+    // reading the agenda would read it.
+    should(item?.twoFactorSeed).eql({ stage: STAGE });
+    should(JSON.stringify(item)).not.containEql('GITHUB');
     should(item).match({ kind: 'permission', raisedBy: 'daemon', title: 'Save automatic codes?' });
     should(AgendaItemSchema.safeParse(item).success).be.true();
     should(ledgers.get('s1')?.entries[0]?.lifecycle).not.equal('active');

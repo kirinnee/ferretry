@@ -1,12 +1,17 @@
 import { describe, it } from 'bun:test';
-import { STEP_UP_REQUIRED_CODE, type SignInRuleStageId } from '@ferretry/protocol';
+import { SIGN_IN_RULE_REFUSAL_WORDS, STEP_UP_REQUIRED_CODE, type SignInRuleStageId } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
 import { signInRuleRoutes } from '../../../../src/lib/runtime/mounts/sign-in-rules.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
-import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
+import {
+  SignInRuleService,
+  SignInRuleSuggestionError,
+  SignInRuleSuggestions,
+} from '../../../../src/lib/sign-in-rules/index.ts';
 import {
   ChallengeLedger,
   type PasskeyStore,
@@ -145,7 +150,6 @@ async function served() {
         raised.push(card.ask);
         return { ok: true, id: `A${String(raised.length)}` };
       },
-      isOpen: async () => true,
       close: async () => undefined,
     },
     redact: async text => text,
@@ -306,6 +310,25 @@ describe('a ferret never reaches a rule route (invariant 1)', () => {
       'POST /v1/accounts/:id/sign-in-rules/revoke person secrets.use',
     ]);
   });
+
+  it('should ask no per-act passkey to narrow or revoke, and still ask one to read or stage (C31)', async () => {
+    const s = await served();
+    const askedAgain = Object.fromEntries(
+      s.routes
+        .filter(route => route.capability !== undefined)
+        .map(route => [
+          `${route.method} ${route.path}`,
+          demandNeedsStepUp(route.capability ?? { capability: 'secrets', axis: 'use' }),
+        ]),
+    );
+    should(askedAgain).match({
+      'POST /v1/sign-in-rules/:id/narrow': false,
+      'DELETE /v1/sign-in-rules/:id': false,
+      'POST /v1/accounts/:id/sign-in-rules/revoke': false,
+      'GET /v1/sign-in-rules': true,
+      'POST /v1/sign-in-rules/stages': true,
+    });
+  });
 });
 
 describe('a rule is committed only with the kept proof over its own stage (invariant 3)', () => {
@@ -325,6 +348,65 @@ describe('a rule is committed only with the kept proof over its own stage (invar
     should(jsonBody(made)).containDeep({ status: 'active', approvedWith: { deviceId } });
     should(s.ruleStore.document?.rules).have.length(1);
     should(jsonBody(again).code).equal('stage_not_found');
+  });
+
+  it('should refuse a second rule for a sign-in that has one, in its own code and words, never as a changed sign-in (C1)', async () => {
+    // Arrange — the sign-in already has a standing rule
+    const s = await served();
+    const first = await stage(s);
+    await ceremony(s, 'approve-sign-in-rule', first);
+    const rule = jsonBody(await commit(s.dispatch, first))['id'] as string;
+
+    // Act — a new approval that names no rule, one that names another, and one that names it
+    const bare = await s.dispatch.dispatch(
+      asDevice('POST', '/v1/sign-in-rules/stages', { signIn: GITHUB, fields: ['username', 'password'] }),
+    );
+    const other = await s.dispatch.dispatch(
+      asDevice('POST', '/v1/sign-in-rules/stages', {
+        signIn: GITHUB,
+        fields: ['username', 'password'],
+        replaces: `sr_${'9'.repeat(24)}`,
+      }),
+    );
+    const named = await s.dispatch.dispatch(
+      asDevice('POST', '/v1/sign-in-rules/stages', {
+        signIn: GITHUB,
+        fields: ['username', 'password'],
+        replaces: rule,
+      }),
+    );
+
+    // Assert
+    should([bare.status, jsonBody(bare)['code'], jsonBody(bare)['error']]).eql([
+      409,
+      'rule_exists',
+      SIGN_IN_RULE_REFUSAL_WORDS.rule_exists,
+    ]);
+    should([other.status, jsonBody(other)['code'], jsonBody(other)['error']]).eql([
+      409,
+      'not_this_rule',
+      SIGN_IN_RULE_REFUSAL_WORDS.not_this_rule,
+    ]);
+    should(named.status).equal(201);
+  });
+
+  it('should take a ferret’s suggestion off the owner’s list once its rule is approved, and close no card (C2)', async () => {
+    // Arrange
+    const s = await served();
+    await s.suggestions.suggest('mvv6b4qw-49d0158d', { signIn: GITHUB, why: 'daily' });
+    const before = jsonBody(await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/suggestions')))['suggestions'];
+    const stageId = await stage(s);
+    await ceremony(s, 'approve-sign-in-rule', stageId);
+
+    // Act
+    const made = await commit(s.dispatch, stageId);
+    const after = jsonBody(await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/suggestions')))['suggestions'];
+
+    // Assert
+    should(made.status).equal(201);
+    should(before).have.length(1);
+    should(after).eql([]);
+    should(s.suggestions.waiting('mvv6b4qw-49d0158d', GITHUB)).be.true();
   });
 
   it("should refuse the machine's own token even for the rule it staged: it holds no passkey", async () => {
@@ -672,5 +754,33 @@ describe('the owner on every route', () => {
 
     // Assert
     should([list.status, drop.status]).eql([500, 500]);
+  });
+
+  it('should answer a suggestion refusal in its own words and code, never as a 500 (C28)', async () => {
+    // Arrange — the suggestion service refuses, as it does for a gone sign-in or a store that cannot be read
+    const refusing = {
+      list: () => {
+        throw new SignInRuleSuggestionError('unavailable', 'The suggestions cannot be read right now.');
+      },
+      dismiss: () => {
+        throw new SignInRuleSuggestionError('not_found', 'There is no such suggestion.');
+      },
+    } as never;
+    const dispatch = new ApiDispatcher(
+      new ApiRouter(signInRuleRoutes({} as never, refusing)),
+      {
+        ...CREDENTIALS,
+        devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },
+      },
+      GRANTED,
+    );
+
+    // Act
+    const list = await dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/suggestions'));
+    const dismiss = await dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/suggestions/srg_${'0'.repeat(16)}`));
+
+    // Assert
+    should([list.status, jsonBody(list)['code']]).eql([503, 'unavailable']);
+    should([dismiss.status, jsonBody(dismiss)['code']]).eql([404, 'not_found']);
   });
 });

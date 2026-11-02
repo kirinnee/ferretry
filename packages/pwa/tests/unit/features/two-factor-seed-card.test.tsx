@@ -44,12 +44,13 @@ const accountList = () =>
     signIns: [],
   });
 
-const item = (mismatch = false): ComponentProps<typeof TwoFactorSeedHost>['item'] => ({
-  twoFactorSeed: { stage: STAGE, account: 'GITHUB' },
-  subject: 'Save automatic codes to GitHub · kirinnee?',
+const item = (mismatch = false, legacy = false): ComponentProps<typeof TwoFactorSeedHost>['item'] => ({
+  // This daemon's card names the stage alone (its handle is often the label and username); an older one named it.
+  twoFactorSeed: legacy ? { stage: STAGE, account: 'GITHUB' } : { stage: STAGE },
+  // The daemon's words name the place only: agenda text is every ferret's to read.
+  subject: 'Save automatic codes to your account on github.com?',
   why: 'Asked by fy on kirin-box at 10:00 UTC. If you didn’t just ask for this, Deny.',
   context: [
-    '- The key says it is for GitHub · kirinnee.',
     ...(mismatch ? [`- ${TWO_FACTOR_SEED_CARD_MISMATCH_LINE}`] : []),
     '- Password and code both come from this machine then: together they are one factor.',
   ].join('\n'),
@@ -65,6 +66,8 @@ interface Served {
   readonly flag?: boolean;
   /** A daemon from before the flag existed: the view carries no `mismatch`. */
   readonly omitFlag?: boolean;
+  /** The accounts list no longer holds the staged account. */
+  readonly noAccount?: boolean;
 }
 
 const served = ({
@@ -75,10 +78,11 @@ const served = ({
   failReads = 0,
   flag = false,
   omitFlag = false,
+  noAccount = false,
 }: Served = {}) => {
   let failed = 0;
   const machine = fakeClient((call: Call) => {
-    if (call.path === '/v1/accounts') return accountList();
+    if (call.path === '/v1/accounts') return noAccount ? { ...accountList(), accounts: [] } : accountList();
     if (call.method === 'DELETE') {
       if (failDrop !== undefined) throw failDrop;
       return { stage: STAGE, dropped: true };
@@ -111,6 +115,8 @@ const served = ({
       state,
       expiresAt: AT,
       ...(omitFlag ? {} : { mismatch: flag }),
+      issuer: 'GitHub',
+      accountName: 'kirinnee',
     };
   });
   return machine;
@@ -121,6 +127,7 @@ const draw = async (
     readonly mismatch?: boolean;
     readonly allowKey?: boolean;
     readonly withoutKey?: boolean;
+    readonly legacy?: boolean;
   },
 ) => {
   const machine = served(over);
@@ -137,7 +144,7 @@ const draw = async (
           })}
       connection={connection}
       createClient={async () => machine.client}
-      item={item(over.mismatch)}
+      item={item(over.mismatch, over.legacy)}
     />,
   );
   mounted.push(view);
@@ -152,8 +159,10 @@ describe('the owner card for a staged 2FA seed', () => {
   it('should read the daemon’s words, name the account, and offer Allow only after the warning is ticked', async () => {
     const card = await draw({});
 
+    // The account and what the key says come from the reads, never from the agenda item's text.
     expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to GitHub · kirinnee?');
     expect(card.q('[data-seed-why]')).toBeNull();
+    expect(card.q('[data-seed-lines]')?.textContent).toContain('The key says it is for GitHub · kirinnee.');
     expect(card.q('[data-seed-lines]')?.textContent).toContain('together they are one factor');
     expect(card.q('[data-seed-warning]')?.textContent).toBe(LOGIN_TOTP_WARNING);
     expect(card.q('[data-seed-mismatch]')).toBeNull();
@@ -163,6 +172,25 @@ describe('the owner card for a staged 2FA seed', () => {
 
     await click(card.q('[data-seed-warning-tick]'));
     expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('should keep the daemon’s place-only words when the account cannot be named from the reads (C3)', async () => {
+    const card = await draw({ noAccount: true });
+
+    expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to your account on github.com?');
+    expect(card.q('[data-seed-subject]')?.textContent).not.toContain('kirinnee');
+  });
+
+  it('should read the stage by its id alone, and an older daemon’s card by the account it names (M2)', async () => {
+    const card = await draw({});
+    const legacy = await draw({ legacy: true });
+
+    const reads = (calls: readonly Call[]) =>
+      calls.filter(call => call.method === 'GET' && call.path !== '/v1/accounts');
+    expect(reads(card.calls).map(call => call.path)).toEqual([`/v1/accounts/seed-stages/${STAGE}`]);
+    expect(reads(legacy.calls).map(call => call.path)).toEqual([`/v1/accounts/GITHUB/factors/seed/${STAGE}`]);
+    // The account the stage is for still names the card, from the reads.
+    expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to GitHub · kirinnee?');
   });
 
   it('should ask for the passkey bound to THIS stage, then commit with no body', async () => {

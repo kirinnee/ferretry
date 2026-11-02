@@ -34,6 +34,15 @@ const rebase = inboxCard(
   sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build', focusTask: { id: 'F4' } } as never }),
 );
 
+const suggestionCard = inboxCard(
+  agendaItem('A6', {
+    kind: 'permission',
+    subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+    signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+  } as never),
+  sessionView('sess-4', { config: { teammate: 'pip', name: 'Deploy' } as never }),
+);
+
 const page = (
   fake: FakeInbox,
   cards: readonly InboxCard[],
@@ -120,6 +129,44 @@ describe('the open Inbox item', () => {
     );
     expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
     expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('offers no Snooze and no composer on a ferret’s rule suggestion: the ferret reads its own board (C2)', async () => {
+    const snoozeOf = (root: ParentNode) => root.querySelector('[data-agenda-snooze]');
+    const plain = await mount(
+      page(fakeInbox(), [shipIt], { initialOpen: shipIt.key, renderComposer: () => <textarea /> }),
+    );
+    const offered =
+      snoozeOf(topView(plain)) !== null && plain.container.querySelector('[data-inbox-composer]') !== null;
+    await plain.unmount();
+    const mounted = await mount(
+      page(fakeInbox(), [suggestionCard], {
+        initialOpen: suggestionCard.key,
+        renderComposer: () => <textarea aria-label="Message this session" data-fake-composer="" />,
+      }),
+    );
+    expect(offered).toBe(true);
+    expect(snoozeOf(topView(mounted))).toBeNull();
+    expect(mounted.container.querySelector('[data-inbox-composer]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('offers Skip and no Not needed on a ferret’s rule suggestion: its card’s own Dismiss says no (C2)', async () => {
+    const suggested = inboxCard(
+      agendaItem('A5', {
+        kind: 'permission',
+        subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+        signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+      } as never),
+      sessionView('sess-3', { config: { teammate: 'pip', name: 'Deploy' } as never }),
+    );
+    const mounted = await mount(page(fakeInbox(), [suggested], { initialOpen: suggested.key }));
+    await interact(() =>
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+    );
+    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
     await mounted.unmount();
   });
 

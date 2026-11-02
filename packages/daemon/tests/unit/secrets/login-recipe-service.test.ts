@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type PutLoginEntry, PutLoginEntryRequestSchema } from '@ferretry/protocol';
 import should from 'should';
+import { namesOnCard } from '../../support/names-on-card.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
   cardContext,
@@ -89,8 +90,10 @@ describe('a ferret proposes', () => {
       agendaItemId: 'A1',
     });
     should(w.cards).have.length(1);
-    should(w.cards[0]?.subject).equal("Recipe change for 'Vercel' on vercel.com");
-    should(w.cards[0]?.howToResolve).containEql('Settings › Accounts › Vercel › vercel.com › Recipe');
+    // Agenda text is every ferret's to read: it names the place, never the account's label.
+    should(w.cards[0]?.subject).equal('Recipe change on vercel.com');
+    should(w.cards[0]?.howToResolve).containEql("Settings › Accounts, on the account's vercel.com › Recipe");
+    should(JSON.stringify(w.cards)).not.containEql('Vercel');
     should(w.cards[0]?.context).equal('- Click Log in\n+ Continue with Google\n\nThe ferret says: the button moved');
     should(w.cards[0]?.howToResolve).match(/fy account site recipe approve si_[0-9a-f]{16} rp_0000000000000000/u);
     const [entry] = await w.directory.list();
@@ -118,6 +121,21 @@ describe('a ferret proposes', () => {
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     for (const n of [1, 2, 3, 4]) await w.service.propose('s1', { login: 'VERCEL' }, `steps ${String(n)}`, 'again');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Replaced by a newer recipe proposal.' }]);
+  });
+});
+
+describe('a recipe card names a place, never the account (L8)', () => {
+  it('should put no label, username or handle anywhere on the card', async () => {
+    const w = world();
+    await w.directory.put(
+      'ZEBRA_QUOKKA',
+      change({ label: 'Zebra Label', username: 'quokka-user', match: ['zebra.example'] }),
+    );
+
+    await w.service.propose('s1', { login: 'ZEBRA_QUOKKA' }, 'Open zebra.example\nClick Log in', 'it works');
+
+    should(w.cards).have.length(1);
+    should(namesOnCard(w.cards, ['Zebra Label', 'quokka-user', 'ZEBRA_QUOKKA'])).eql([]);
   });
 });
 
@@ -312,8 +330,9 @@ describe('a proposal is keyed by the SIGN-IN it is for', () => {
     should(proposed).containDeep({ login: 'GITHUB', signIn: w.ssh, state: 'pending' });
     should((await proposalsOf(w, w.ssh)).map(each => each.id)).deepEqual([proposed.id]);
     should(await proposalsOf(w, w.site)).deepEqual([]);
-    should(w.cards[0]?.subject).equal("Recipe change for 'GitHub' on ssh@build.example.com");
-    should(w.cards[0]?.howToResolve).containEql('GitHub › ssh@build.example.com › Recipe');
+    should(w.cards[0]?.subject).equal('Recipe change on ssh@build.example.com');
+    should(w.cards[0]?.howToResolve).containEql('ssh@build.example.com › Recipe');
+    should(JSON.stringify(w.cards)).not.containEql('GitHub');
   });
 
   it('should refuse the older { login } for an account that signs in at several places, filing nothing', async () => {

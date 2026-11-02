@@ -24,6 +24,7 @@
 
 import {
   type AccountList,
+  grantFilledLineFor,
   grantMissLineFor,
   INPUT_LOCK_WORDS,
   type InputRequest,
@@ -120,6 +121,16 @@ export interface InputCardProps {
 const RISK_ICON = { green: ShieldCheck, neutral: Shield, amber: ShieldQuestion, red: ShieldAlert } as const;
 const RISK_TONE = { green: 'text-ok', neutral: 'text-muted', amber: 'text-warn', red: 'text-err' } as const;
 
+/** Where a pre-approval filled the card, for its line: the page's host as the daemon saw it, or nothing. */
+const filledPlace = (request: InputRequest): string | undefined => {
+  if (request.observed?.kind !== 'browser') return undefined;
+  try {
+    return new URL(request.observed.origin).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
+
 const useNow = (fixed: number | undefined): number => {
   const [now, setNow] = useState(() => fixed ?? Date.now());
   useEffect(() => {
@@ -155,12 +166,11 @@ export function InputCard({
   // Why the task plan (or a standing rule) did not fill this card: the owner's view only, one fixed sentence by source,
   // and none for `not-here`.
   const planMissLine = request.preapproval === undefined ? undefined : grantMissLineFor(request.preapproval);
+  // One sentence with the daemon's agenda history line, with the page's host when the card knows it (C9).
   const planFilledLine =
-    request.preapproval?.by === 'plan' && request.preapproval.outcome === 'filled'
-      ? `Filled under your task plan (line ${String(request.preapproval.line + 1)}).`
-      : request.preapproval?.by === 'rule' && request.preapproval.outcome === 'filled'
-        ? 'Filled under your standing sign-in rule.'
-        : undefined;
+    request.preapproval?.outcome === 'filled'
+      ? grantFilledLineFor(request.preapproval, filledPlace(request))
+      : undefined;
   // The FIELDS decide, never the card's own word: a field the daemon upgraded to a secret gets no code title and no panel.
   const asksCode = strongestSensitivity(request.fields) === 'code';
   const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
