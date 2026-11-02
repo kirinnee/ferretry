@@ -2,15 +2,28 @@ import { describe, expect, it } from 'bun:test';
 import {
   addExistingItem,
   type CatalogClient,
+  getSharedItem,
   listSharedItems,
   makeDefault,
+  makeVersionCurrent,
   NO_CATALOG_FEATURES,
   quickAdd,
   readCatalogFeatures,
+  readItemChanges,
+  setVersionRetired,
   undoQuickAdd,
 } from '../../../../src/features/catalogs/catalogs-api.ts';
 import { healthOf } from '../../../support/health.ts';
-import { addedAnswer, CATALOG, DIGEST, ITEM, ownedCatalog, sharedItem, TOKEN } from '../../../support/catalog-views.ts';
+import {
+  addedAnswer,
+  catalogChanges,
+  CATALOG,
+  DIGEST,
+  ITEM,
+  ownedCatalog,
+  sharedItem,
+  TOKEN,
+} from '../../../support/catalog-views.ts';
 
 interface Call {
   readonly path: string;
@@ -89,7 +102,19 @@ describe('the owner calls for the item table and one-tap Add', () => {
 describe('readCatalogFeatures', () => {
   it('reads both flags from the machine', async () => {
     const both = recorder(healthOf('1.0.0', ['catalogs.items.1', 'catalogs.quick-add.1']));
-    expect(await readCatalogFeatures(both.client)).toEqual({ items: true, quickAdd: true });
+    expect(await readCatalogFeatures(both.client)).toEqual({
+      items: true,
+      quickAdd: true,
+      versions: false,
+      versions2: false,
+    });
+    const versioned = recorder(healthOf('1.0.0', ['catalogs.versions.1', 'catalogs.versions.2']));
+    expect(await readCatalogFeatures(versioned.client)).toEqual({
+      items: false,
+      quickAdd: false,
+      versions: true,
+      versions2: true,
+    });
     const older = recorder(healthOf('1.0.0'));
     expect(await readCatalogFeatures(older.client)).toEqual(NO_CATALOG_FEATURES);
   });
@@ -101,5 +126,35 @@ describe('readCatalogFeatures', () => {
       },
     } as unknown as CatalogClient;
     expect(await readCatalogFeatures(client)).toEqual(NO_CATALOG_FEATURES);
+  });
+});
+
+describe('the owner calls for versions', () => {
+  it('reads one item, and what changed between two of its versions', async () => {
+    const one = recorder(sharedItem());
+    expect((await getSharedItem(one.client, ITEM)).itemId).toBe(ITEM);
+    expect(one.calls[0]?.path).toBe(`/v1/catalog-items/${ITEM}`);
+    const diff = recorder(catalogChanges());
+    const changes = await readItemChanges(diff.client, ITEM, 1, 2);
+    expect(diff.calls[0]?.path).toBe(`/v1/catalog-items/${ITEM}/changes?from=1&to=2`);
+    expect(changes.unchanged).toBe(3);
+  });
+
+  it('makes a version current only from the one the person saw', async () => {
+    const { client, calls } = recorder({ itemId: ITEM, itemVersion: 1, current: 1, catalogs: [], item: sharedItem() });
+    await makeVersionCurrent(client, ITEM, 1, 2);
+    expect(calls[0]?.path).toBe(`/v1/catalog-items/${ITEM}/current`);
+    expect(calls[0]?.init?.method).toBe('PUT');
+    expect(bodyOf(calls[0])).toEqual({ version: 1, from: 2 });
+  });
+
+  it('retires and brings back with a PATCH of retired only', async () => {
+    const { client, calls } = recorder({ itemId: ITEM, version: 1, changed: true, catalogs: [] });
+    await setVersionRetired(client, ITEM, 1, true);
+    await setVersionRetired(client, ITEM, 1, false);
+    expect(calls[0]?.path).toBe(`/v1/catalog-items/${ITEM}/versions/1`);
+    expect(calls[0]?.init?.method).toBe('PATCH');
+    expect(bodyOf(calls[0])).toEqual({ retired: true });
+    expect(bodyOf(calls[1])).toEqual({ retired: false });
   });
 });

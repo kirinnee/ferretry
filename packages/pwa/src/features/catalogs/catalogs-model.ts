@@ -20,6 +20,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import { deviceGrantCommand, grantRefusalNotice } from '../../lib/grants.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { plural } from './catalog-review-model.ts';
+import { sameAsVersionSentence } from './versions-model.ts';
 
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -86,13 +87,43 @@ const OWNER_REFUSALS: Readonly<Record<string, string>> = {
   source_ambiguous:
     'This machine shares that more than once, so it cannot tell which one you mean. Pick a catalog below.',
   grant_step_up_required: 'Nothing was changed: the passkey wasn’t confirmed. Try again and confirm it.',
+  same_as_version: 'That is a version you already keep. Make it current instead of publishing it again.',
+  version_current: 'Make another version current first.',
+  version_retired: 'That version is retired. Bring it back first, then make it current.',
+  version_unknown: 'That version is not there any more. The list is out of date; look again.',
 };
+
+/** The daemon's own sentence names the version and the catalogs: `Version 2 of x is not one A, B may serve: …`. */
+const BEFORE_JOIN_DAEMON = /^Version (\d+) of .+? is not one (.+) may serve:/su;
+
+const KEEP_OR_NEWER = 'Keep the current version, or make a newer one current.';
+
+/**
+ * Plain words for a version a catalog that was added later may not offer. The names come out of the daemon's
+ * sentence (the wire carries nothing else); a sentence that does not read that way says the same without them.
+ */
+function beforeJoinSentence(message: string): string {
+  const found = BEFORE_JOIN_DAEMON.exec(message);
+  const version = found?.[1];
+  const named = found?.[2];
+  if (version === undefined || named === undefined)
+    return `A catalog that was added later can't offer that version. ${KEEP_OR_NEWER}`;
+  const names = named.split(', ');
+  const one = names.length === 1;
+  const list = one ? named : `${names.slice(0, -1).join(', ')} and ${names.at(-1) as string}`;
+  return `${list} ${one ? 'was' : 'were'} added after version ${version}, so ${one ? 'it' : 'they'} can't offer version ${version}. ${KEEP_OR_NEWER}`;
+}
 
 export function ownerRefusal(error: unknown): OwnerRefusal {
   if (grantRefusalNotice(error) !== null && !(error instanceof FyHttpError && error.code === 'grant_step_up_required'))
     return { sentence: SHARING_OFF_TITLE, previewAgain: false, sharingOff: true };
   const code = error instanceof FyHttpError ? error.code : undefined;
-  const known = code === undefined ? undefined : OWNER_REFUSALS[code];
+  const known =
+    code === 'version_before_join' && error instanceof FyHttpError
+      ? beforeJoinSentence(error.message)
+      : code === undefined
+        ? undefined
+        : OWNER_REFUSALS[code];
   return {
     sentence: known ?? changeRefusalSentence(error),
     previewAgain: code === 'changed_since_preview' || code === 'current_changed',
@@ -187,12 +218,15 @@ export function previewButtonLabel(plan: PreviewPlan): string {
 export function addState(
   preview: SharedItemPreview | null,
   busy: boolean,
+  canMakeCurrent = false,
 ): { enabled: boolean; reason: string | null } {
   if (preview === null) return { enabled: false, reason: 'Preview it first, so you can read what will be shared.' };
   if (preview.sameAsVersion !== undefined)
     return {
       enabled: false,
-      reason: `This is the same as version ${preview.sameAsVersion}. There is nothing new to publish.`,
+      reason: canMakeCurrent
+        ? sameAsVersionSentence(preview.sameAsVersion)
+        : `This is the same as version ${preview.sameAsVersion}. There is nothing new to publish.`,
     };
   return { enabled: !busy, reason: null };
 }

@@ -13,7 +13,7 @@ import {
   revealHidden,
   type SharedItemPreview,
 } from '@ferretry/protocol';
-import { Share2 } from 'lucide-react';
+import { CircleAlert, Share2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -21,14 +21,17 @@ import { Button } from '../../shell/primitives.tsx';
 import { formatBytes, plural } from './catalog-review-model.ts';
 import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
+import { ChangesView } from './changes-view.tsx';
 import {
   addCatalogItem,
   addExistingItem,
   type CatalogClient,
   type CatalogClientFactory,
   createCatalog,
+  getSharedItem,
   listCatalogs,
   makeDefault,
+  makeVersionCurrent,
   previewCatalogItem,
   publishCatalogVersion,
 } from './catalogs-api.ts';
@@ -42,6 +45,7 @@ import {
   previewButtonLabel,
   previewPlan,
 } from './catalogs-model.ts';
+import { currentDoneSentence, sameAsRetiredSentence } from './versions-model.ts';
 
 /** Which catalog item gets a new version, when this is "Publish update" rather than a first add. */
 interface PublishTarget {
@@ -81,9 +85,19 @@ export interface AddToCatalogSheetProps {
   readonly existing?: ExistingItem;
   /** When given, the last step offers "Share it now" and calls this with the catalog the item landed in. */
   readonly onShareNow?: (catalogId: string) => void;
+  /** What this machine can do with versions; without it the sheet is the one it always was. */
+  readonly versionTools?: VersionTools;
   /** Test and harness seam; the app uses the daemon-bound client. */
   readonly createClient?: CatalogClientFactory;
 }
+
+/** `changes`: show what would change before publishing (`catalogs.versions.1`). `makeCurrent`: offer an older version (`catalogs.versions.2`). */
+interface VersionTools {
+  readonly changes: boolean;
+  readonly makeCurrent: boolean;
+}
+
+const NO_VERSION_TOOLS: VersionTools = { changes: false, makeCurrent: false };
 
 const NOT_LISTED: readonly string[] = [];
 
@@ -112,6 +126,7 @@ export function AddToCatalogSheet({
   asDefault = false,
   existing,
   onShareNow,
+  versionTools = NO_VERSION_TOOLS,
   createClient: injected,
 }: AddToCatalogSheetProps) {
   const routed = useDaemonClient();
@@ -124,6 +139,8 @@ export function AddToCatalogSheet({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<OwnerRefusal | null>(null);
   const [landed, setLanded] = useState<Landed | null>(null);
+  const [madeCurrent, setMadeCurrent] = useState<number | null>(null);
+  const [itemCurrent, setItemCurrent] = useState<number | null>(null);
   const autoPreviewed = useRef(false);
   const pickerId = useId();
   const nameId = useId();
@@ -239,6 +256,41 @@ export function AddToCatalogSheet({
     }
   };
 
+  const sameAs = preview?.sameAsVersion;
+  useEffect(() => {
+    if (!versionTools.makeCurrent || publish === undefined || sameAs === undefined) {
+      setItemCurrent(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const item = await getSharedItem(await createClient(connection), publish.itemId);
+        if (live) setItemCurrent(item.current);
+      } catch {
+        if (live) setItemCurrent(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [versionTools.makeCurrent, publish, sameAs, createClient, connection]);
+
+  const makeSameCurrent = async (): Promise<void> => {
+    if (publish === undefined || sameAs === undefined || itemCurrent === null) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      await makeVersionCurrent(await createClient(connection), publish.itemId, sameAs, itemCurrent);
+      setMadeCurrent(sameAs);
+      onDone?.();
+    } catch (error) {
+      setFailure(ownerRefusal(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (existing === undefined || autoPreviewed.current || choice?.kind !== 'existing' || preview !== null) return;
     autoPreviewed.current = true;
@@ -248,7 +300,13 @@ export function AddToCatalogSheet({
   const plan = draft === null ? null : previewPlan(draft, eligible);
   const readLabel = plan === null ? 'Preview' : previewButtonLabel(plan);
   const previewLabel = preview !== null ? 'Read again' : busy ? 'Reading…' : readLabel;
-  const state = addState(preview, busy);
+  const offerCurrent =
+    versionTools.makeCurrent &&
+    publish !== undefined &&
+    preview?.sameAsVersion !== undefined &&
+    itemCurrent !== null &&
+    itemCurrent !== preview.sameAsVersion;
+  const state = addState(preview, busy, offerCurrent);
   const title =
     publish !== undefined ? 'Publish update' : existing !== undefined ? 'Add to another catalog' : 'Add to catalog';
 
@@ -275,6 +333,13 @@ export function AddToCatalogSheet({
           )}
           <Button type="button" onClick={onClose} data-catalog-done="">
             {onShareNow === undefined ? 'Done' : 'Not now'}
+          </Button>
+        </section>
+      ) : madeCurrent !== null ? (
+        <section className="flex min-w-0 flex-col gap-xs" role="status" data-catalog-made-current="">
+          <p className="m-0 break-words text-cell font-semibold text-ok">{currentDoneSentence(madeCurrent)}</p>
+          <Button type="button" onClick={onClose} data-catalog-done="">
+            Done
           </Button>
         </section>
       ) : read.kind === 'loading' ? (
@@ -383,7 +448,9 @@ export function AddToCatalogSheet({
               {...(failure.previewAgain ? { again: true, onAgain: () => void runPreview() } : {})}
             />
           )}
-          {preview === null ? null : <PreviewBlock preview={preview} />}
+          {preview === null ? null : (
+            <PreviewBlock preview={preview} showChanges={versionTools.changes && publish !== undefined} />
+          )}
           {preview === null ? null : (
             <div className="flex min-w-0 flex-col gap-xs">
               <p className="m-0 text-cell text-muted">{FROZEN_COPY_NOTE}</p>
@@ -392,6 +459,27 @@ export function AddToCatalogSheet({
                   {state.reason}
                 </p>
               )}
+              {offerCurrent && sameAs !== undefined ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => void makeSameCurrent()}
+                  data-catalog-make-current={sameAs}
+                >
+                  {`Make version ${String(sameAs)} current`}
+                </Button>
+              ) : null}
+              {versionTools.changes && publish !== undefined && preview.sameAsRetiredVersion !== undefined ? (
+                <p
+                  className="m-0 flex items-start gap-xs break-words text-cell text-warn"
+                  role="status"
+                  data-catalog-same-as-retired={preview.sameAsRetiredVersion}
+                >
+                  <CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+                  {sameAsRetiredSentence(preview.sameAsRetiredVersion)}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 variant="primary"
@@ -410,7 +498,13 @@ export function AddToCatalogSheet({
 }
 
 /** What would be frozen: where it was read from, what was left out, the warnings and every file. */
-function PreviewBlock({ preview }: { readonly preview: SharedItemPreview }) {
+function PreviewBlock({
+  preview,
+  showChanges,
+}: {
+  readonly preview: SharedItemPreview;
+  readonly showChanges: boolean;
+}) {
   return (
     <section className="flex min-w-0 flex-col gap-sm" aria-label="Preview" data-catalog-preview-block="">
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -424,6 +518,9 @@ function PreviewBlock({ preview }: { readonly preview: SharedItemPreview }) {
         <p className="m-0 text-meta text-faint">{formatBytes(preview.size)}</p>
       </div>
       <WarningList warnings={preview.warnings} />
+      {showChanges && preview.changes !== undefined ? (
+        <ChangesView changes={preview.changes} heading="What changes from the current version" />
+      ) : null}
       {preview.problems.length === 0 ? null : (
         <section className="flex min-w-0 flex-col gap-xs" aria-label="Left out" data-catalog-problems="">
           <h4 className="m-0 text-meta font-semibold uppercase text-muted">Left out, and why</h4>

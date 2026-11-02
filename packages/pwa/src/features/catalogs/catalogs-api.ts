@@ -13,6 +13,8 @@ import {
   type CatalogItemPreview,
   type CatalogItemPreviewRequest,
   CatalogItemPreviewRequestSchema,
+  type CatalogChanges,
+  CatalogChangesSchema,
   CATALOG_ITEMS_PATH,
   DAEMON_FEATURES,
   hasFeature,
@@ -23,15 +25,20 @@ import {
   type ExportCatalogRequest,
   ExportCatalogRequestSchema,
   type IFyApiClient,
+  MakeCurrentRequestSchema,
   type OwnedCatalog,
   type OwnedCatalogList,
   OwnedCatalogListSchema,
   OwnedCatalogSchema,
+  type OwnedSharedItem,
+  OwnedSharedItemSchema,
   type OwnedSharedItemList,
   OwnedSharedItemListSchema,
   PublishCatalogVersionRequestSchema,
   type PublishedCatalogItem,
   PublishedCatalogItemSchema,
+  type PublishedSharedItem,
+  PublishedSharedItemSchema,
   QUICK_ADD_PATH,
   QUICK_ADD_UNDO_PATH,
   type QuickAddAnswer,
@@ -41,6 +48,9 @@ import {
   type QuickAddUndone,
   QuickAddUndoneSchema,
   QuickAddUndoRequestSchema,
+  type RetiredVersion,
+  RetireVersionRequestSchema,
+  RetiredVersionSchema,
   SHARED_CATALOGS_PATH,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
@@ -97,9 +107,18 @@ export interface CatalogFeatures {
   readonly items: boolean;
   /** One-tap Add and its Undo (`catalogs.quick-add.1`). */
   readonly quickAdd: boolean;
+  /** Versions you can read and compare (`catalogs.versions.1`). */
+  readonly versions: boolean;
+  /** Make a version current, retire and unretire (`catalogs.versions.2`). */
+  readonly versions2: boolean;
 }
 
-export const NO_CATALOG_FEATURES: CatalogFeatures = { items: false, quickAdd: false };
+export const NO_CATALOG_FEATURES: CatalogFeatures = {
+  items: false,
+  quickAdd: false,
+  versions: false,
+  versions2: false,
+};
 
 /**
  * Reads the machine's advertised features. A machine that cannot be asked offers nothing, so an app that
@@ -111,6 +130,8 @@ export async function readCatalogFeatures(client: CatalogClient): Promise<Catalo
     return {
       items: hasFeature(health, DAEMON_FEATURES.catalogItems),
       quickAdd: hasFeature(health, DAEMON_FEATURES.catalogQuickAdd),
+      versions: hasFeature(health, DAEMON_FEATURES.catalogVersions),
+      versions2: hasFeature(health, DAEMON_FEATURES.catalogVersions2),
     };
   } catch {
     return NO_CATALOG_FEATURES;
@@ -120,6 +141,52 @@ export async function readCatalogFeatures(client: CatalogClient): Promise<Catalo
 /** Every skill and MCP server this machine shares, once, with the catalogs that list it. Needs `catalogs.items.1`. */
 export async function listSharedItems(client: CatalogClient): Promise<OwnedSharedItemList> {
   return await client.request(CATALOG_ITEMS_PATH, OwnedSharedItemListSchema);
+}
+
+const itemPath = (itemId: string): string => `${CATALOG_ITEMS_PATH}/${encodeURIComponent(itemId)}`;
+
+/** One shared item with every version it keeps and the catalogs that list it. Needs `catalogs.items.1`. */
+export async function getSharedItem(client: CatalogClient, itemId: string): Promise<OwnedSharedItem> {
+  return await client.request(itemPath(itemId), OwnedSharedItemSchema);
+}
+
+/** What a person would read differently in version `to` than in `from`. Needs `catalogs.versions.1`. */
+export async function readItemChanges(
+  client: CatalogClient,
+  itemId: string,
+  from: number,
+  to: number,
+): Promise<CatalogChanges> {
+  return await client.request(
+    `${itemPath(itemId)}/changes?from=${String(from)}&to=${String(to)}`,
+    CatalogChangesSchema,
+  );
+}
+
+/** Makes a kept version the one every live catalog serves, only if `from` is still current. Needs `catalogs.versions.2`. */
+export async function makeVersionCurrent(
+  client: CatalogClient,
+  itemId: string,
+  version: number,
+  from: number,
+): Promise<PublishedSharedItem> {
+  return await client.request(`${itemPath(itemId)}/current`, PublishedSharedItemSchema, {
+    method: 'PUT',
+    ...jsonBody(MakeCurrentRequestSchema.parse({ version, from })),
+  });
+}
+
+/** Retires a version (it stops being offered) or brings it back. Needs `catalogs.versions.2`. */
+export async function setVersionRetired(
+  client: CatalogClient,
+  itemId: string,
+  version: number,
+  retired: boolean,
+): Promise<RetiredVersion> {
+  return await client.request(`${itemPath(itemId)}/versions/${String(version)}`, RetiredVersionSchema, {
+    method: 'PATCH',
+    ...jsonBody(RetireVersionRequestSchema.parse({ retired })),
+  });
 }
 
 /** Makes this catalog the default, where one tap adds. Changes no manifest. Needs `catalogs.items.1`. */

@@ -1,5 +1,6 @@
 import {
   type CatalogInstall,
+  CatalogChangesSchema,
   CatalogInstallPreviewSchema,
   type CatalogItemPreview,
   CatalogItemPreviewSchema,
@@ -141,3 +142,40 @@ export const addedAnswer = (change: Record<string, unknown> = {}) => ({
   undo: { token: TOKEN, expiresAt: AT },
   ...change,
 });
+
+/** What `GET /v1/catalog-items/:id/changes` answers, and a preview's `changes`: one flagged command and one new warning. */
+export const catalogChanges = (change: Record<string, unknown> = {}) =>
+  CatalogChangesSchema.parse({
+    entries: [
+      {
+        label: 'Starts',
+        change: 'changed',
+        document: false,
+        before: 'acme --stdio',
+        after: 'acme --stdio --remote https://evil.example.test',
+        flag: 'command',
+      },
+      {
+        label: 'Skill file SKILL.md',
+        change: 'changed',
+        document: true,
+        hunks: [
+          {
+            beforeStart: 1,
+            beforeLines: 2,
+            afterStart: 1,
+            afterLines: 2,
+            lines: [
+              { kind: 'context', text: '# pdf tools' },
+              { kind: 'remove', text: 'Splits PDFs.' },
+              { kind: 'add', text: 'Splits and merges PDFs.' },
+            ],
+          },
+        ],
+      },
+    ],
+    unchanged: 3,
+    newWarnings: [{ code: 'carries-scripts', text: 'It carries a script.' }],
+    goneWarnings: [],
+    ...change,
+  });

@@ -11,12 +11,12 @@
  *   catalog's Share sheet; in several, a short picker comes first; in none, the add sheet whose last
  *   step offers "Share it now" and carries straight on into the Share sheet for the catalog it landed in.
  * - **⋯** holds Open, Add to another catalog… and, for what a catalog install wrote, Remove, which asks
- *   first as it always has.
+ *   first as it always has, and **Versions…** (when the machine advertises versions) for what a catalog holds.
  */
 
 import type { CatalogInstall, CatalogItemSource, OwnedCatalog } from '@ferretry/protocol';
 import { revealHidden } from '@ferretry/protocol';
-import { Eye, MoreHorizontal, PackagePlus, Share2, Trash2 } from 'lucide-react';
+import { Eye, GitCompare, MoreHorizontal, PackagePlus, Share2, Trash2 } from 'lucide-react';
 import type { SharedItemPreview } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
@@ -46,6 +46,7 @@ import {
   undoneSentence,
 } from './catalogs-model.ts';
 import { ShareSheet } from './share-sheet.tsx';
+import { VersionsSheet } from './versions-sheet.tsx';
 
 interface RowScope {
   readonly label: string;
@@ -112,6 +113,7 @@ export function CatalogItemRow({
   const [picking, setPicking] = useState<readonly OwnedCatalog[] | null>(null);
   const [sharing, setSharing] = useState<OwnedCatalog | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [versionsOf, setVersionsOf] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [tapping, setTapping] = useState(false);
@@ -250,6 +252,14 @@ export function CatalogItemRow({
       label: 'Add to another catalog…',
       icon: <PackagePlus size={16} aria-hidden="true" />,
       onSelect: () => void addAnother(),
+    });
+  const heldItemId = matches[0]?.item.itemId;
+  if (host !== undefined && read?.features.versions === true && heldItemId !== undefined)
+    items.push({
+      key: 'versions',
+      label: 'Versions…',
+      icon: <GitCompare size={16} aria-hidden="true" />,
+      onSelect: () => setVersionsOf(heldItemId),
     });
   for (const install of installs)
     items.push({
@@ -444,6 +454,17 @@ export function CatalogItemRow({
             ? { suggestNewName: defaultCatalogName(host.connection.daemonName), asDefault: true }
             : {})}
           {...(adding === 'share' ? { onShareNow: (catalogId: string) => void shareNow(catalogId) } : {})}
+          {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
+        />
+      )}
+      {host === undefined || versionsOf === null ? null : (
+        <VersionsSheet
+          connection={host.connection}
+          itemId={versionsOf}
+          label={itemName}
+          canWrite={read?.features.versions2 === true}
+          onClose={() => setVersionsOf(null)}
+          onChanged={() => read?.reload()}
           {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
         />
       )}
