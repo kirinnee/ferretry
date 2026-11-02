@@ -52,7 +52,7 @@ describe('WardenVerdicts', () => {
     expect(tree).toContain('Waiting for a status update');
     expect(tree).toContain('2m ago');
     expect(tree).toContain('claude-default · claude-sonnet-4-5 · claude');
-    expect(tree).toContain('switched account');
+    expect(tree).toContain('switched AI login');
     expect(tree).toContain('moved off claude-auto-opus: at quota');
     expect(tree).not.toContain('device-token-a');
   });
@@ -93,7 +93,7 @@ describe('WardenVerdicts', () => {
 
     expect(tree).toContain('needs human');
     expect(tree).toContain('Ran by: unknown (older report)');
-    expect(tree).not.toContain('switched account');
+    expect(tree).not.toContain('switched AI login');
   });
 
   it('names the model hint as the agent default when the report carries no model', () => {

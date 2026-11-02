@@ -1,6 +1,7 @@
 /** The words and the routes behind the task-plan card: nothing here comes from a ferret, and every route is the owner's. */
 
 import { describe, expect, it } from 'bun:test';
+import { AUTOMATED_CODE_WARNING } from '@ferretry/protocol';
 import {
   allowBlockedWords,
   approvalOf,
@@ -16,6 +17,7 @@ import {
   listTaskPlans,
   machineStageWords,
   NO_PASSKEY_TICK_WORDS,
+  planPasskeyWords,
   revokeLines,
   rootBadge,
   rootHost,
@@ -293,5 +295,51 @@ describe('the routes', () => {
 describe('the sudo line is a terminal line', () => {
   it('has a place the tool and host can be read from', () => {
     expect(line(planOf({ lines: [sudoLine(0)] }), 0).kind).toBe('terminal-sign-in');
+  });
+});
+
+describe('the words on the passkey for a task plan', () => {
+  const plan = mixedPlan();
+  const staged = (lines: number[], codes: number[]) => ({
+    lines,
+    codes,
+    summary: lines.map(number => `Line ${String(number + 1)}: summary`),
+  });
+
+  it('warns in red about root for a sudo line and about both factors for an automated code, in the dialog flags', () => {
+    const words = planPasskeyWords(plan, staged([1, 2], [1]));
+    expect(words.does).toBe('Let the ferret use these lines without asking');
+    expect(words.warnings).toHaveLength(2);
+    expect(words.warnings[0]).toContain('kirin-box');
+    expect(words.warnings[1]).toBe(AUTOMATED_CODE_WARNING);
+  });
+
+  it('names the row, not this machine, when a machine-made stage could type at more than one host', () => {
+    const base = sudoLine(0);
+    const two = planOf({
+      lines: [
+        {
+          ...base,
+          candidates: [
+            ...base.candidates,
+            ...base.candidates.map(each => ({
+              ...each,
+              signIn: 'si_00000000000000ab',
+              place: { ...each.place, host: 'other-box' },
+            })),
+          ],
+          preselect: undefined,
+        },
+      ],
+    });
+    const [warning] = planPasskeyWords(two, staged([0], [])).warnings;
+    expect(warning).toContain('root on the host named in the row');
+    expect(warning).not.toContain('this machine');
+  });
+
+  it('adds no warning for a plain line and uses the singular for one line', () => {
+    const words = planPasskeyWords(plan, staged([0], []));
+    expect(words.does).toBe('Let the ferret use this line without asking');
+    expect(words.warnings).toEqual([]);
   });
 });

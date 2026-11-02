@@ -67,11 +67,14 @@ export const SecuritySettingsSchema = z.strictObject({
 });
 export type SecuritySettings = z.infer<typeof SecuritySettingsSchema>;
 
+/** The default of the `stepUpWindowMinutes` setting: the one place its number is written (`STEP_UP_TTL_SECONDS` is this in seconds). */
+export const STEP_UP_DEFAULT_WINDOW_MINUTES = 15 as const;
+
 export const DEFAULT_SECURITY_SETTINGS: SecuritySettings = {
   unlockOnOpen: true,
   unlockValidityHours: 8,
   stepUpOnActions: false,
-  stepUpWindowMinutes: 15,
+  stepUpWindowMinutes: STEP_UP_DEFAULT_WINDOW_MINUTES,
   deviceKeyRotationDays: 30,
   idleExpiryDays: 30,
 };

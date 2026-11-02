@@ -67,9 +67,13 @@ describe('useApproveTaskPlanStepUp', () => {
       </StoreProvider>,
     );
 
-    const answer = ask?.(alpha, `tps_${'a'.repeat(24)}` as never, 'Line 2: sign in to vercel.com');
+    const answer = ask?.(alpha, `tps_${'a'.repeat(24)}` as never, {
+      does: 'Let the ferret use this line without asking',
+      rows: [{ label: 'Line 2', value: 'sign in to vercel.com' }],
+      warnings: [],
+    });
 
-    expect(store.stepUp.snapshot()?.acts).toEqual(['Line 2: sign in to vercel.com']);
+    expect(store.stepUp.snapshot()?.acts).toEqual(['Let the ferret use this line without asking']);
     store.stepUp.dismiss();
     expect(await answer).toBe(false);
     await view.unmount();

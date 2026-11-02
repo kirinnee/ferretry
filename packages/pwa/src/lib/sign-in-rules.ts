@@ -8,18 +8,24 @@
  */
 
 import {
+  AUTOMATED_CODE_ACK_WORDS,
+  DAY_SECONDS,
   type IFyApiClient,
   type Place,
+  SIGN_IN_RULE_AUTO_RECIPE_WARNING,
   SIGN_IN_RULE_ERROR_CODES,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_MAX_USES,
+  SIGN_IN_RULE_MIN_SECONDS,
   SIGN_IN_RULE_REFUSAL_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TOTP_WARNING,
+  type AccountId,
   type SignInId,
+  SignInRuleAccountRevokedSchema,
   type SignInRuleDraft,
   type SignInRuleEligibility,
   SignInRuleEligibilitySchema,
@@ -38,12 +44,17 @@ import {
   type SignInRuleSurface,
   type SignInRuleView,
   SignInRuleViewSchema,
+  SignInRuleRevokedSchema,
+  SignInRuleStageDroppedSchema,
+  SignInRuleSuggestionDismissedSchema,
+  signInRuleDayChoices,
   signInRuleLifetime,
+  signInRuleScopeWords,
   signInRuleSuspensionWords,
+  stillAskedFor,
   signInRuleWords,
   type TwoFactorKeySummary,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 import type { StepUpWords } from './step-up-gate.ts';
 
 export type RuleClient = Pick<IFyApiClient, 'request'>;
@@ -55,10 +66,6 @@ const json = (body: unknown): RequestInit => ({
 });
 
 const stagePath = (stage: SignInRuleStageId): string => `/v1/sign-in-rules/stages/${encodeURIComponent(stage)}`;
-
-const StageDroppedSchema = z.strictObject({ stage: z.string(), dropped: z.literal(true) });
-const RuleRevokedSchema = z.strictObject({ id: z.string(), revoked: z.literal(true) });
-const SuggestionDismissedSchema = z.strictObject({ id: z.string(), dismissed: z.boolean() });
 
 // ── Routes ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -92,7 +99,7 @@ async function commitRuleStage(client: RuleClient, stage: SignInRuleStageId): Pr
 
 /** DROP: nothing was approved. */
 export async function dropRuleStage(client: RuleClient, stage: SignInRuleStageId): Promise<void> {
-  await client.request(stagePath(stage), StageDroppedSchema, { method: 'DELETE' });
+  await client.request(stagePath(stage), SignInRuleStageDroppedSchema, { method: 'DELETE' });
 }
 
 /** NARROW: drop the code, end earlier, lower the cap. No passkey: it only takes away. */
@@ -110,7 +117,17 @@ export async function narrowRule(
 
 /** REVOKE: one tap, no passkey. */
 export async function revokeRule(client: RuleClient, rule: SignInRuleId): Promise<void> {
-  await client.request(`/v1/sign-in-rules/${encodeURIComponent(rule)}`, RuleRevokedSchema, { method: 'DELETE' });
+  await client.request(`/v1/sign-in-rules/${encodeURIComponent(rule)}`, SignInRuleRevokedSchema, { method: 'DELETE' });
+}
+
+/** REVOKE ALL OF ONE ACCOUNT'S RULES: one tap, no passkey (it only takes away). Answers how many were revoked. */
+export async function revokeAccountRules(client: RuleClient, account: AccountId): Promise<number> {
+  const answer = await client.request(
+    `/v1/accounts/${encodeURIComponent(account)}/sign-in-rules/revoke`,
+    SignInRuleAccountRevokedSchema,
+    { method: 'POST' },
+  );
+  return answer.revoked;
 }
 
 export async function listSuggestions(client: RuleClient): Promise<SignInRuleSuggestionList> {
@@ -118,9 +135,13 @@ export async function listSuggestions(client: RuleClient): Promise<SignInRuleSug
 }
 
 export async function dismissSuggestion(client: RuleClient, suggestion: string): Promise<void> {
-  await client.request(`/v1/sign-in-rules/suggestions/${encodeURIComponent(suggestion)}`, SuggestionDismissedSchema, {
-    method: 'DELETE',
-  });
+  await client.request(
+    `/v1/sign-in-rules/suggestions/${encodeURIComponent(suggestion)}`,
+    SignInRuleSuggestionDismissedSchema,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 // ── Words (the daemon's closed lists; nothing here comes from a ferret) ──────────────────────────────
@@ -129,9 +150,7 @@ export async function dismissSuggestion(client: RuleClient, suggestion: string):
 export const RULE_HONEST_LIMIT = SIGN_IN_RULE_HONEST_LIMIT;
 /** The red one-factor warning under a ticked code: one or two short sentences. */
 const RULE_TOTP_WARNING = SIGN_IN_RULE_TOTP_WARNING;
-export const RULE_TOTP_ACK_WORDS = 'I understand this makes the sign-in one factor, with no one to approve a code.';
-const RULE_AUTO_RECIPE_WORDS =
-  'This sign-in applies its recipe by itself, so the form it fills is one a ferret may have written.';
+export const RULE_TOTP_ACK_WORDS = AUTOMATED_CODE_ACK_WORDS;
 export const RULE_NO_ACCOUNTS_DEVICE_WORDS =
   'This device can’t see your accounts, so it can’t show standing rules. Use a device that can.';
 export const RULE_DISMISSED_WORDS =
@@ -146,15 +165,12 @@ export const RULE_DAMAGED_WORDS =
 /** A `#rules/<stage>` link whose stage the daemon no longer lists. */
 export const RULE_LINKED_STAGE_GONE_WORDS = 'That approval timed out or was already answered.';
 
-/** What a rule can't cover, listed on every sheet under "You’ll still be asked". */
-export const RULE_STILL_ASKED: readonly string[] = [
-  'Push approvals (Okta Verify, Duo, a Google prompt): you approve on your phone.',
-  'Security keys and passkeys: handed to you.',
-  'Captchas and human checks: the ferret asks you to do it.',
-  'A sign-in whose form changed since you approved it: the rule stops and asks.',
-  'SMS and email codes, and a code you did not tick: the ferret reads its inbox, or you type it.',
-  'Any program but sudo, su and doas in a terminal, and ssh, scp, npm, docker: the normal card.',
-];
+/** A `#rules/<stage>?machine=…` link for a machine this device is not paired with. */
+export const RULE_LINKED_ELSEWHERE_WORDS =
+  'That approval is not on this machine. Open the link on a device paired with the machine that asked.';
+
+/** What a rule can't cover, listed on every sheet under "You’ll still be asked": the protocol's one list. */
+export const RULE_STILL_ASKED = stillAskedFor('rule');
 
 export const INELIGIBLE_WORDS = SIGN_IN_RULE_INELIGIBLE_WORDS;
 
@@ -222,7 +238,9 @@ export function ruleFlags(facts: {
   return [
     ...(facts.root ? [{ name: 'root', tone: 'err', words: SIGN_IN_RULE_ROOT_WARNING } as const] : []),
     ...(facts.totp ? [{ name: 'one-factor', tone: 'err', words: RULE_TOTP_WARNING } as const] : []),
-    ...(facts.autoRecipe ? [{ name: 'auto-recipe', tone: 'warn', words: RULE_AUTO_RECIPE_WORDS } as const] : []),
+    ...(facts.autoRecipe
+      ? [{ name: 'auto-recipe', tone: 'warn', words: SIGN_IN_RULE_AUTO_RECIPE_WARNING } as const]
+      : []),
   ];
 }
 
@@ -245,19 +263,28 @@ export const viewFlags = (rule: Pick<SignInRuleView, 'flags'>): readonly RuleFla
 export const flagSentences = (flags: readonly RuleFlag[]): readonly string[] =>
   flags.flatMap(flag => (flag.name === 'root' ? [flag.words, SIGN_IN_RULE_TERMINAL_RESIDUAL] : [flag.words]));
 
-/** The kernel-proof detail behind "How it's checked": what the program proof is worth, by kind of rule. */
-export const checkedWords = (root: boolean): string =>
-  root ? SIGN_IN_RULE_TERMINAL_HONEST_LIMIT : SIGN_IN_RULE_HONEST_LIMIT;
+/**
+ * The detail behind "How it's checked", one paragraph per line: a terminal rule says what its program proof is worth
+ * first, and every rule says the honest-client limit, verbatim, as the CLI does.
+ */
+export const checkedWords = (root: boolean): readonly string[] =>
+  root ? [SIGN_IN_RULE_TERMINAL_HONEST_LIMIT, SIGN_IN_RULE_HONEST_LIMIT] : [SIGN_IN_RULE_HONEST_LIMIT];
 
 /**
- * The passkey dialog's body, as STRUCTURE: the daemon's one plain line and its rows, exactly as staged, and the warnings
- * the staged rule's flags give. The rows and the warnings are separate lists, never one text split in two, so a row can
- * never be drawn in the red block.
+ * The passkey dialog's body, as STRUCTURE: the daemon's one plain line and its rows, exactly as staged, the red warnings
+ * the staged rule's flags give and, apart from them, the amber cautions. The lists are separate, never one text split in
+ * two, so a row can never be drawn in the red block and an amber line never is.
  */
 export function passkeyWords(
   staged: Pick<SignInRuleStaged, 'does' | 'rows' | 'root' | 'totp' | 'autoRecipe'>,
 ): StepUpWords {
-  return { does: staged.does, rows: staged.rows, warnings: flagSentences(stagedFlags(staged)) };
+  const flags = stagedFlags(staged);
+  return {
+    does: staged.does,
+    rows: staged.rows,
+    warnings: flagSentences(flags.filter(flag => flag.tone === 'err')),
+    cautions: flagSentences(flags.filter(flag => flag.tone === 'warn')),
+  };
 }
 
 /**
@@ -339,17 +366,8 @@ export function codeKeyLabel(
 
 // ── Where the rule sits ──────────────────────────────────────────────────────────────────────────────
 
-/** "Any ferret on this machine", "One project", "One session". */
-export function scopeWords(scope: SignInRuleScope): string {
-  switch (scope.kind) {
-    case 'any':
-      return 'Any ferret on this machine';
-    case 'project':
-      return 'Ferrets in one project';
-    case 'session':
-      return `One session (${scope.session.slice(-8)})`;
-  }
-}
+/** Who a rule fills for, in the protocol's one wording (the passkey's Who row says the same). */
+export const scopeWords = signInRuleScopeWords;
 
 /** The owner's words for a status. */
 export function statusWords(rule: Pick<SignInRuleView, 'status' | 'suspended' | 'unverified'>): string {
@@ -381,6 +399,35 @@ export const deviceRevokeWarning = (count: number): string =>
 export const rulesApprovedWith = (rules: readonly SignInRuleView[], deviceId: string): number =>
   rules.filter(rule => rule.approvedWith.deviceId === deviceId && rule.status !== 'suspended').length;
 
+// ── Narrowing the end, in days or hours ──────────────────────────────────────────────────────────────
+
+export type EndUnit = 'days' | 'hours';
+
+const HOUR_MS = 3_600_000;
+const UNIT_MS: Readonly<Record<EndUnit, number>> = { days: DAY_SECONDS * 1_000, hours: HOUR_MS };
+/** The fewest hours a rule may last: the protocol's shortest lifetime. */
+const MIN_END_HOURS = SIGN_IN_RULE_MIN_SECONDS / 3_600;
+
+/**
+ * The new end a narrowing owner typed, or why it is not one. Whole days or whole hours from now, at least the shortest a
+ * rule may last and strictly before the end now in force (the daemon refuses anything else, so this says it first).
+ */
+export function narrowEnd(
+  typed: string,
+  unit: EndUnit,
+  expiresAt: string,
+  now: number,
+): { readonly ok: true; readonly at: string } | { readonly ok: false; readonly problem: string } {
+  const count = Number(typed);
+  const at = now + count * UNIT_MS[unit];
+  if (!Number.isInteger(count) || count < (unit === 'hours' ? MIN_END_HOURS : 1) || !(at < Date.parse(expiresAt)))
+    return {
+      ok: false,
+      problem: `End earlier than it does now, in whole ${unit}${unit === 'hours' ? ` (at least ${String(MIN_END_HOURS)})` : ''}.`,
+    };
+  return { ok: true, at: new Date(at).toISOString() };
+}
+
 // ── The sheet: what the owner ticks ──────────────────────────────────────────────────────────────────
 
 /** The owner's ticks on the sheet. Nothing is ticked unless the owner opened it from Accounts or a card. */
@@ -396,12 +443,12 @@ export interface RuleTicks {
 }
 
 /** Where the sheet was opened from: only an owner-opened sheet starts with the usual ticks. */
-export type RuleOrigin = 'owner' | 'suggestion' | 'resume' | 'renew';
+export type RuleOrigin = 'owner' | 'suggestion' | 'resume' | 'renew' | 'widen';
 
-export const lifetimeDaysOptions = (surface: SignInRuleSurface): readonly number[] =>
-  surface === 'terminal' ? [1, 7] : [7, 30, 90];
+export const lifetimeDaysOptions = signInRuleDayChoices;
 
-export const defaultDays = (surface: SignInRuleSurface): number => signInRuleLifetime(surface).defaultSeconds / 86_400;
+export const defaultDays = (surface: SignInRuleSurface): number =>
+  signInRuleLifetime(surface).defaultSeconds / DAY_SECONDS;
 
 /** The sheet's first ticks. A ferret's suggestion ticks NOTHING; a terminal rule is the password alone. */
 export function initialRuleTicks(input: {
@@ -468,7 +515,7 @@ export function draftOf(signIn: SignInId, ticks: RuleTicks, replaces?: SignInRul
     fields: [...(ticks.username ? (['username'] as const) : []), ...(ticks.password ? (['password'] as const) : [])],
     ...(ticks.totp ? { totp: true, totpAcknowledged: true as const } : {}),
     scope: ticks.scope,
-    lifetimeSeconds: ticks.days * 86_400,
+    lifetimeSeconds: ticks.days * DAY_SECONDS,
     ...(ticks.uses === undefined ? {} : { uses: ticks.uses }),
     ...(replaces === undefined ? {} : { replaces }),
   };

@@ -22,7 +22,7 @@ const DO: Readonly<Record<JevAct, string>> = {
   resume: 'resume it',
   restart: 'restart it',
   stop: 'stop it',
-  failover: 'move it to another account',
+  failover: 'move it to another AI login',
 };
 
 const DONE: Readonly<Record<JevAct, string>> = {
@@ -30,7 +30,7 @@ const DONE: Readonly<Record<JevAct, string>> = {
   resume: 'resumed it',
   restart: 'restarted it',
   stop: 'stopped it',
-  failover: 'moved it to another account',
+  failover: 'moved it to another AI login',
 };
 
 /** What Jev made of a flag it checked and passed on, before its cost. */
@@ -46,7 +46,7 @@ const handedOnCause = (jev: WardenJevBefore): string => {
         ? `${sure} sure, not its to do alone`
         : `would ${DO[act]} (${sure}), not its to do alone`;
     case 'cannot_choose_login':
-      return `would move it to another account (${sure}), cannot pick which`;
+      return `would move it to another AI login (${sure}), cannot pick which`;
     case 'no_message':
       return `would nudge it (${sure}), no message it was sure of`;
     case 'not_offered':

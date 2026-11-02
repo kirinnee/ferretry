@@ -116,7 +116,7 @@ function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed, rule
   return (
     <form className="flex min-w-0 flex-col gap-3" data-accounts-panel="method" onSubmit={event => void submit(event)}>
       <p className="m-0 break-words text-cell text-muted">
-        Where it signs in:{' '}
+        {signIn.place.kind === 'site' ? 'Site' : 'Machine'}:{' '}
         {signIn.place.kind === 'site'
           ? signIn.place.domains.join(', ') || 'no login page named'
           : placeTitle(signIn.place)}
@@ -172,7 +172,7 @@ function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed, rule
             onClick={() => setConfirming(true)}
             type="button"
           >
-            <Trash2 aria-hidden="true" size={14} /> Remove this site
+            <Trash2 aria-hidden="true" size={14} /> Remove this sign-in
           </button>
         )}
       </div>

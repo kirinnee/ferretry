@@ -22,6 +22,7 @@ import {
   SECURITY_SETTING_PRESETS,
   type SecuritySettingsClient,
   securityFailureSentence,
+  stepUpStaysSentence,
   UNLOCK_STAYS_FALLBACK,
   unlockStaysSentence,
   widenAtMachineSentence,
@@ -179,5 +180,16 @@ describe('the sentence for a failed change', () => {
       const sentence = securityFailureSentence(reason, command);
       should(sentence).equal('The setting was not changed. Try again.');
     }
+  });
+});
+
+describe('how long a passkey covers', () => {
+  it('should say it covers one change only when the machine asks every time', () => {
+    should(stepUpStaysSentence(0)).equal('This covers this change only. This machine asks again for the next one.');
+  });
+
+  it('should name the number the machine is set to, never a fixed one', () => {
+    should(stepUpStaysSentence(5)).containEql(describeSettingValue('stepUpWindowMinutes', 5));
+    should(stepUpStaysSentence(5)).not.equal(stepUpStaysSentence(15));
   });
 });

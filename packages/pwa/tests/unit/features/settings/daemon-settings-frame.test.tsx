@@ -22,6 +22,7 @@ import {
 } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { needsNewerFerretry, UPDATE_MACHINE_WHERE } from '../../../../src/lib/machine-update-words.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { healthOf } from '../../../support/health.ts';
@@ -188,7 +189,7 @@ describe('daemon settings panel list', () => {
       expect(section.querySelector('[data-daemon-panel-open]')).toBeNull();
 
       const warden = must(section.querySelector<HTMLButtonElement>('[data-daemon-panel="warden"]'), 'Warden row');
-      expect(warden.textContent).toBe('WardenSupervision, account failover, and policy for this daemon.');
+      expect(warden.textContent).toBe('WardenSupervision, AI login failover, and policy for this daemon.');
 
       await interact(() => warden.click());
       await interact(() =>
@@ -319,6 +320,71 @@ describe('daemon settings Secure copy panel', () => {
       expect(lacking.container.querySelector('[aria-label="Loading task plans"]')).toBeNull();
     } finally {
       await lacking.unmount();
+    }
+  });
+});
+
+describe('daemon settings notes for a machine that is too old', () => {
+  const frame = (panel: string) => (
+    <DaemonSettingsFrame
+      connection={alpha}
+      name="Alpha"
+      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+      readWardenStatus={unavailable}
+      createWardenClient={unavailable}
+      createSecretClient={unavailable}
+      onOpenPanel={() => undefined}
+      panel={panel}
+    />
+  );
+  const healthClient = (features: string[]) =>
+    (async () => ({
+      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
+        schema.parse(healthOf('1.0.0', features)),
+    })) as unknown as ComponentProps<typeof DaemonClientProvider>['client'];
+  const settled = () =>
+    interact(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+  const notes = (root: Element): string[] =>
+    [...root.querySelectorAll('[data-machine-needs-update]')].map(node => node.textContent ?? '');
+
+  it('says in one line what Secure copy lacks, with where to update, and says nothing on a machine that has it', async () => {
+    const old = await mount(
+      <DaemonClientProvider client={healthClient([])}>{frame('secure-copy')}</DaemonClientProvider>,
+    );
+    try {
+      await settled();
+      expect(notes(old.container)).toEqual([
+        needsNewerFerretry('Task plans'),
+        needsNewerFerretry('Standing sign-in rules'),
+      ]);
+      expect(notes(old.container)[0]).toContain(UPDATE_MACHINE_WHERE);
+    } finally {
+      await old.unmount();
+    }
+    const current = await mount(
+      <DaemonClientProvider client={healthClient(['task-plan.1', 'sign-in-rules.1'])}>
+        {frame('secure-copy')}
+      </DaemonClientProvider>,
+    );
+    try {
+      await settled();
+      expect(notes(current.container)).toEqual([]);
+    } finally {
+      await current.unmount();
+    }
+  });
+
+  it('says what Accounts lacks on a machine that answered without it', async () => {
+    const old = await mount(<DaemonClientProvider client={healthClient([])}>{frame('accounts')}</DaemonClientProvider>);
+    try {
+      await settled();
+      expect(notes(old.container)).toEqual([
+        needsNewerFerretry('Accounts with their sign-ins, 2FA keys and standing rules'),
+      ]);
+    } finally {
+      await old.unmount();
     }
   });
 });

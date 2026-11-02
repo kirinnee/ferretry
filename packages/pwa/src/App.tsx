@@ -262,7 +262,8 @@ import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
-import { captureRuleDeepLink } from './lib/rule-deep-link.ts';
+import { captureRuleDeepLink, listenForRuleDeepLinks } from './lib/rule-deep-link.ts';
+import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
@@ -2520,6 +2521,9 @@ export function AppShell() {
       captureRuleDeepLink();
     }
   });
+  useEffect(() => listenForRuleDeepLinks(), []);
+  const [ruleLinkNotice, setRuleLinkNotice] = useState<string | null>(null);
+  const dismissRuleLinkNotice = useCallback(() => setRuleLinkNotice(null), []);
   const layout = useLayoutMode();
   const install = useInstallPrompt();
   const installDue = layout === 'drawer' && install !== null && installBanner(install.snapshot) !== null;
@@ -2600,16 +2604,16 @@ export function AppShell() {
   const ruleLinkRecord =
     connectionSnapshot.connections.find(candidate => candidate.daemonId === connectionSnapshot.selectedDaemonId) ??
     connectionSnapshot.connections[0];
-  const ruleLinkMachine = useMemo(
+  const ruleLinkMachines = useMemo(
     () =>
-      ruleLinkRecord === undefined
-        ? null
-        : {
-            secureCopyPath: `${daemonSettingsPath(ruleLinkRecord.daemonId)}${machineItemHash(distinctDaemonName(ruleLinkRecord, connectionSnapshot.connections), 'machine', 'secure-copy')}`,
-          },
-    [connectionSnapshot.connections, ruleLinkRecord],
+      connectionSnapshot.connections.map(record => ({
+        daemonId: record.daemonId,
+        secureCopyPath: `${daemonSettingsPath(record.daemonId)}${machineItemHash(distinctDaemonName(record, connectionSnapshot.connections), 'machine', 'secure-copy')}`,
+      })),
+    [connectionSnapshot.connections],
   );
-  useRuleDeepLink(ruleLinkMachine, connectionSnapshot.connections.length > 0, navigate);
+  const noteRuleLinkElsewhere = useCallback(() => setRuleLinkNotice(RULE_LINKED_ELSEWHERE_WORDS), []);
+  useRuleDeepLink(ruleLinkMachines, ruleLinkRecord?.daemonId, navigate, noteRuleLinkElsewhere);
   const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
@@ -3181,6 +3185,7 @@ export function AppShell() {
           <MotionFollower />
           <ViewportOverlay />
           <AppUpdatedToast />
+          <ActionToast notice={ruleLinkNotice} onDismiss={dismissRuleLinkNotice} />
           {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the
           address bar, and Settings › This device carries the offer at every width. */}

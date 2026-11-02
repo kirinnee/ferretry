@@ -116,7 +116,7 @@ ends it at once.
 fleet and chat with sessions, and terminals, files, the browser, secrets, the warden, pairing and every
 `configure` axis start off. A limited device is widened one capability at a time: by the owner with
 `fy device grant <device> <capability> --use` (the admin token, the only ungoverned caller — B4), or from
-any browser's Settings → Add a device toggles by a device that holds `pairing.configure` and the capability
+any browser's Settings → Devices toggles by a device that holds `pairing.configure` and the capability
 it is giving.
 
 - **A full code from another device is checked.** `POST /v1/pair/code` mints `full` by default; from a
@@ -172,7 +172,7 @@ a local proxy is never told it is at the machine. Since B5 a paired device also 
 OWN grants, which a newly paired device holds unless it was paired `--limited`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
-The app mints from one panel, Settings → ‹machine› → **Add a device**, and opens that same panel from two
+The app mints from one panel, Settings → ‹machine› → **Devices**, and opens that same panel from two
 shortcuts: **Pair a phone with ‹machine›…** in the machine switcher at the top of the sessions bar, and
 the same act in the finder. Both are offered only while `GET /v1/grants` reads this caller's `pairing.use`
 as open or waiting only on a passkey; any other answer, or none, hides them, and Settings still explains

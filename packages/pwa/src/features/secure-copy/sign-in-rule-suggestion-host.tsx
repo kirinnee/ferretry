@@ -14,6 +14,7 @@ import {
   type AccountSummary,
   type AgendaItem,
   DAEMON_FEATURES,
+  type SignInRuleScope,
   type SignInRuleSuggestionView,
   type SignInSummary,
 } from '@ferretry/protocol';
@@ -40,6 +41,10 @@ export interface SignInRuleSuggestionHostProps {
   readonly connection: DaemonConnection;
   readonly item: Pick<AgendaItem, 'signInRuleSuggestion'>;
   readonly agentName?: string;
+  /** The session that asked: the owner may limit the rule to it. */
+  readonly sessionId?: string;
+  /** The board project that session belongs to: the owner may limit the rule to it. */
+  readonly projectId?: string;
   /** Hands in a client in place of the app store's (the harness and tests). */
   readonly createClient?: (connection: DaemonConnection) => Promise<RuleClient>;
   /** Asks for the passkey bound to the stage, in place of the store's step-up (the harness and tests). */
@@ -62,6 +67,8 @@ export function SignInRuleSuggestionHost({
   connection,
   item,
   agentName,
+  sessionId,
+  projectId,
   createClient: injected,
   askPasskey: injectedAsk,
   offered: injectedOffered,
@@ -80,6 +87,14 @@ export function SignInRuleSuggestionHost({
     [askStage, connection, injectedAsk],
   );
 
+  const scopes = useMemo<readonly SignInRuleScope[]>(
+    () => [
+      { kind: 'any' },
+      ...(projectId === undefined ? [] : [{ kind: 'project' as const, project: projectId }]),
+      ...(sessionId === undefined ? [] : [{ kind: 'session' as const, session: sessionId }]),
+    ],
+    [projectId, sessionId],
+  );
   const [found, setFound] = useState<Found | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [sheet, setSheet] = useState(false);
@@ -153,6 +168,7 @@ export function SignInRuleSuggestionHost({
         origin="suggestion"
         place={signIn.place}
         rules={{ client, askPasskey }}
+        scopes={scopes}
         signIn={signIn.id}
         {...(account.username === undefined ? {} : { username: account.username })}
       />

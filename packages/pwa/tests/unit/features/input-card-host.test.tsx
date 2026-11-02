@@ -83,6 +83,16 @@ describe('the input card host', () => {
     expect(view.container.querySelector('[data-input-gone]')?.textContent).toBe('This request is no longer open.');
   });
 
+  it('tells the owner to reload the app, not that it is closed, when the daemon lists a request this build cannot read', async () => {
+    const { client } = clientFor(() => [{ id: REQUEST_ID, from: 'a newer daemon' } as unknown as InputRequest]);
+    const view = await show(Promise.resolve(client));
+
+    expect(view.container.querySelector('[data-input-gone]')).toBeNull();
+    expect(view.container.querySelector('[data-input-unreadable]')?.textContent).toBe(
+      'This request needs a newer version of the app. Reload the app to answer it.',
+    );
+  });
+
   it('says why the client could not be made, whether it threw an error or a bare value', async () => {
     const error = await show(Promise.reject(new Error('no route to the machine')));
     expect(error.container.querySelector('[role="alert"]')?.textContent).toBe(

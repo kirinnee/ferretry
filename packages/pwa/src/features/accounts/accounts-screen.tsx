@@ -88,6 +88,7 @@ export function AccountsScreen(props: AccountsScreenProps): ReactNode {
           onSaved={props.onRefresh}
           onTab={tab => go({ kind: 'account', id: account.id, tab })}
           ops={ops}
+          rules={props.rules}
           signIns={list.signIns.filter(each => each.account === account.id)}
           tab={view.tab}
         />

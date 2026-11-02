@@ -36,6 +36,8 @@ export interface StepUpWords {
   readonly does: string;
   readonly rows: readonly { readonly label: string; readonly value: string }[];
   readonly warnings: readonly string[];
+  /** The amber lines (an auto-applied recipe), drawn apart from the red block; absent when there are none. */
+  readonly cautions?: readonly string[];
 }
 
 /** What the prompt shows: which machine is asking, which acts, and whether the last attempt failed and why. */

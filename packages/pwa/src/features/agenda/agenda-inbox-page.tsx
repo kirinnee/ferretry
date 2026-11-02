@@ -236,7 +236,15 @@ const inputFormFor = (
     };
   if (connection !== undefined && card.item.signInRuleSuggestion !== undefined)
     return {
-      planForm: <SignInRuleSuggestionHost agentName={inboxWho(card).ferret} connection={connection} item={card.item} />,
+      planForm: (
+        <SignInRuleSuggestionHost
+          agentName={inboxWho(card).ferret}
+          connection={connection}
+          item={card.item}
+          sessionId={card.view.config.id}
+          {...(card.view.config.projectId === undefined ? {} : { projectId: card.view.config.projectId })}
+        />
+      ),
     };
   if (connection !== undefined && card.item.copyPlan !== undefined)
     return {

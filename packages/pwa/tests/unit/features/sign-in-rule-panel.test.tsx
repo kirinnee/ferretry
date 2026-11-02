@@ -464,3 +464,38 @@ describe('the warning on the Method and Recipe tabs', () => {
     }
   });
 });
+
+describe('changing a live rule from the Accounts panel', () => {
+  const PROJECT = '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b';
+
+  it('shows what the rule allows now beside the new choices, because the card gives way to the sheet', async () => {
+    const rules = binding({ list: ruleList({ rules: [pageRule()] }) });
+    const mounted = await mount(panel(rules));
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-widen]'));
+      await settle();
+      expect(mounted.container.querySelector('[data-rule]')).toBeNull();
+      expect(q(mounted.container, '[data-rule-sheet]').getAttribute('data-rule-origin')).toBe('widen');
+      expect(q(mounted.container, '[data-rule-replaces]').getAttribute('data-rule-replaces')).toBe('active');
+      expect(q(mounted.container, '[data-rule-replaces-rows]').textContent).toContain('Who');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('keeps the scope the rule has now among the choices, so the picker never shows one scope and sends another', async () => {
+    const rules = binding({ list: ruleList({ rules: [pageRule({ scope: { kind: 'project', project: PROJECT } })] }) });
+    const mounted = await mount(panel(rules));
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-widen]'));
+      await settle();
+      const picker = q<HTMLSelectElement>(mounted.container, '[data-rule-scope]');
+      expect(picker.value).toBe(`project:${PROJECT}`);
+      expect([...picker.options].map(option => option.value)).toEqual(['any', `project:${PROJECT}`]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});

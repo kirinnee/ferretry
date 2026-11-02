@@ -139,7 +139,7 @@ describe('the host', () => {
     const mounted = await mount(
       <TaskPlanHost
         askPasskey={async (_stage, words) => {
-          asked.push(words);
+          asked.push(words.rows.map(row => row.value).join('\n'));
           return false;
         }}
         connection={connection}
@@ -156,7 +156,7 @@ describe('the host', () => {
       await interact(() =>
         must(mounted.container.querySelector<HTMLButtonElement>('[data-task-plan-allow]'), 'allow').click(),
       );
-      expect(asked).toEqual([SUMMARY.join('\n')]);
+      expect(asked).toEqual(['Line 2: sign in to vercel.com as deploy@atomi.cloud, once']);
       expect(calls.some(call => call.method === 'DELETE')).toBe(true);
       expect(calls.some(call => call.path.endsWith('/commit'))).toBe(false);
       expect(mounted.container.textContent).toContain(DISMISSED_PLAN_WORDS);
@@ -180,7 +180,7 @@ describe('the approval', () => {
       {
         client,
         askPasskey: async (stage, words) => {
-          order.push(`passkey ${stage} ${words}`);
+          order.push(`passkey ${stage} ${words.rows.map(row => row.value).join('\n')}`);
           return true;
         },
       },
@@ -247,7 +247,7 @@ describe('the host, around the card', () => {
     const mounted = await mount(
       <TaskPlanHost
         askPasskey={async (_stage, words) => {
-          asked.push(words);
+          asked.push(words.rows.map(row => row.value).join('\n'));
           return true;
         }}
         connection={connection}
@@ -265,7 +265,7 @@ describe('the host, around the card', () => {
         must(mounted.container.querySelector('[data-task-plan-machine-summary]'), 'summary').textContent,
       ).toContain(SUMMARY[0] ?? '');
       await click(mounted.container, '[data-task-plan-machine-confirm]');
-      expect(asked).toEqual([SUMMARY.join('\n')]);
+      expect(asked).toEqual(['sign in to vercel.com as deploy@atomi.cloud, once']);
       expect(calls.some(call => call.path.endsWith('/commit'))).toBe(true);
       expect(mounted.container.querySelector('[data-task-plan-state="approved"]')).not.toBeNull();
       expect(done).toBe(1);

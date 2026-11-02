@@ -6,7 +6,7 @@
  * from asking, but a person can refuse a prompt for an act they did not start. The ceremony starts on the button, never on its own — a passkey sheet nobody asked
  * for is exactly the prompt a person must learn to refuse, and Safari would refuse it anyway.
  *
- * What a confirmation buys is stated once, here: fifteen minutes on this machine, for this open copy of
+ * What a confirmation buys is stated once, here: the window this machine is set to, for this open copy of
  * the app, ended by closing the page. It holds no value — the daemon remembers the step-up, the browser
  * keeps nothing.
  *
@@ -19,9 +19,12 @@ import { useId, useRef, useSyncExternalStore } from 'react';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import type { StepUpGate } from '../../lib/step-up-gate.ts';
 
-/** What one confirmation covers, said where the person decides. */
+/**
+ * What one confirmation covers, said where the person decides, until the machine says its own window
+ * (`stepUpStaysSentence`, read as the prompt opens): no number is written here, because the window is a setting.
+ */
 export const STEP_UP_SCOPE_NOTE =
-  'This covers changes on this machine for 15 minutes, in this open copy of the app. Closing the page ends it.';
+  'This covers changes on this machine for the time it is set to, in this open copy of the app. Closing the page ends it.';
 
 /** What a confirmation bound to one staged thing buys: that thing, once. */
 export const STEP_UP_BOUND_SCOPE_NOTE =
@@ -196,6 +199,16 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
                 ))}
               </div>
             ) : null}
+            {(structured.cautions ?? []).map(line => (
+              <p
+                className="m-0 mt-2 break-words text-meta font-medium leading-base text-warn"
+                data-step-up-caution=""
+                key={line}
+                role="note"
+              >
+                {line}
+              </p>
+            ))}
           </>
         ) : null}
         {listed && structured === undefined ? (

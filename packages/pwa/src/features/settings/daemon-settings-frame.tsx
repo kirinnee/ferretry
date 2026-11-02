@@ -41,7 +41,8 @@ import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { machineOffers } from '../../lib/daemon-health.ts';
+import { machineLacks, machineOffers } from '../../lib/daemon-health.ts';
+import { needsNewerFerretry } from '../../lib/machine-update-words.ts';
 import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { daemonSharingPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
@@ -208,28 +209,51 @@ function AccountsPanel({ connection }: DaemonSettingsTabProps) {
   const createClient = createSecretClient ?? routed;
   // A machine that does not say it has accounts keeps today's saved-logins surface, whatever the reason it is silent.
   if (!machineOffers(health, DAEMON_FEATURES.accountsSignIns))
-    return <LoginsSurface connection={connection} createClient={createClient} />;
+    return (
+      <div className="flex min-w-0 flex-col gap-3">
+        {machineLacks(health, DAEMON_FEATURES.accountsSignIns) ? (
+          <UpdateNote what="Accounts with their sign-ins, 2FA keys and standing rules" />
+        ) : null}
+        <LoginsSurface connection={connection} createClient={createClient} />
+      </div>
+    );
   const withKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
   const withRules = machineOffers(health, DAEMON_FEATURES.signInRules);
+  const lacking = [
+    ...(machineLacks(health, DAEMON_FEATURES.twoFactorKeys) ? ['2FA keys'] : []),
+    ...(machineLacks(health, DAEMON_FEATURES.signInRules) ? ['standing sign-in rules'] : []),
+  ];
   return (
-    <AccountsSurface
-      connection={connection}
-      createClient={createClient}
-      withKeys={withKeys}
-      {...(withRules
-        ? {
-            rules: {
-              askPasskey:
-                requireRule === undefined
-                  ? undefined
-                  : (stage: `srs_${string}`, words: StepUpWords) => requireRule(connection, stage, words),
-            },
-          }
-        : {})}
-      {...(withKeys && requireAddKey !== undefined
-        ? { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) }
-        : {})}
-    />
+    <div className="flex min-w-0 flex-col gap-3">
+      {lacking.length === 0 ? null : <UpdateNote what={lacking.join(' and ')} />}
+      <AccountsSurface
+        connection={connection}
+        createClient={createClient}
+        withKeys={withKeys}
+        {...(withRules
+          ? {
+              rules: {
+                askPasskey:
+                  requireRule === undefined
+                    ? undefined
+                    : (stage: `srs_${string}`, words: StepUpWords) => requireRule(connection, stage, words),
+              },
+            }
+          : {})}
+        {...(withKeys && requireAddKey !== undefined
+          ? { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) }
+          : {})}
+      />
+    </div>
+  );
+}
+
+/** A machine that answered without a feature name: say so in one line, never leave the group silently shorter. */
+function UpdateNote({ what }: { readonly what: string }) {
+  return (
+    <p className="m-0 text-cell text-muted" data-machine-needs-update="" role="status">
+      {needsNewerFerretry(what)}
+    </p>
   );
 }
 
@@ -243,9 +267,13 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
       <CopyRulesSurface connection={connection} createClient={createClient} />
       {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
         <TaskPlansSurface connection={connection} createClient={createClient} />
+      ) : machineLacks(health, DAEMON_FEATURES.taskPlan) ? (
+        <UpdateNote what="Task plans" />
       ) : null}
       {machineOffers(health, DAEMON_FEATURES.signInRules) ? (
         <SignInRulesSurface connection={connection} createClient={createClient} />
+      ) : machineLacks(health, DAEMON_FEATURES.signInRules) ? (
+        <UpdateNote what="Standing sign-in rules" />
       ) : null}
     </div>
   );
@@ -339,7 +367,7 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'warden',
     label: 'Warden',
-    description: 'Supervision, account failover, and policy for this daemon.',
+    description: 'Supervision, AI login failover, and policy for this daemon.',
     Surface: WardenPanel,
   },
   {
@@ -357,7 +385,7 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'secure-copy',
     label: 'Secure copy',
-    description: 'Values moved without a ferret seeing them, and pastes approved in advance.',
+    description: 'Values moved without a ferret seeing them, and paste rules.',
     Surface: SecureCopyPanel,
   },
   {
@@ -375,7 +403,7 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
      * reader can never revoke a device on the daemon they just switched away from.
      */
     id: 'devices',
-    label: 'Add a device',
+    label: 'Devices',
     description: 'Pair another phone or browser with this machine, and revoke one.',
     Surface: DevicesPanel,
   },

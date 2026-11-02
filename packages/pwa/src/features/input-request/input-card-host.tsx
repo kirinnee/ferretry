@@ -43,6 +43,7 @@ type Read =
   | { readonly kind: 'loading' }
   | { readonly kind: 'open'; readonly request: InputRequest }
   | { readonly kind: 'gone' }
+  | { readonly kind: 'unreadable' }
   | { readonly kind: 'failed'; readonly text: string };
 
 export function InputCardHost({
@@ -87,7 +88,13 @@ export function InputCardHost({
     try {
       const request = await readInputRequest(client, sessionId, requestId);
       setRead(previous =>
-        request !== undefined ? { kind: 'open', request } : previous.kind === 'open' ? previous : { kind: 'gone' },
+        request === 'unreadable'
+          ? { kind: 'unreadable' }
+          : request !== undefined
+            ? { kind: 'open', request }
+            : previous.kind === 'open'
+              ? previous
+              : { kind: 'gone' },
       );
     } catch (cause) {
       setRead(previous =>
@@ -133,6 +140,12 @@ export function InputCardHost({
     return (
       <p className="m-0 text-ui text-err" role="alert">
         Could not read this request: {read.text}
+      </p>
+    );
+  if (read.kind === 'unreadable')
+    return (
+      <p className="m-0 text-ui text-warn" data-input-unreadable="" role="status">
+        This request needs a newer version of the app. Reload the app to answer it.
       </p>
     );
   if (read.kind === 'gone')

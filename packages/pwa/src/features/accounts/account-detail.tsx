@@ -1,5 +1,5 @@
 /**
- * ONE ACCOUNT: Details (username, a write-only password), 2FA keys and Sites.
+ * ONE ACCOUNT: Details (username, a write-only password), 2FA keys and Sign-ins.
  *
  * Nothing here can show a value. The password box is a fresh empty field every time and the page only says whether one
  * is saved; a 2FA key is listed by its label and plain facts. A seed is set up by the SAME panel the code card uses,
@@ -36,14 +36,16 @@ import type { InputClient } from '../../lib/input-api.ts';
 import { methodOfDraft, parseDomains, passwordProblem, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { AutomaticCodesPanel } from '../input-request/automatic-codes.tsx';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
+import { AccountRulesRevoke } from './account-rules.tsx';
 import { MethodFields } from './method-fields.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 export type AccountTab = 'details' | 'keys' | 'sites';
 
 const TABS = [
   { id: 'details', label: 'Details' },
   { id: 'keys', label: '2FA keys' },
-  { id: 'sites', label: 'Sites' },
+  { id: 'sites', label: 'Sign-ins' },
 ] as const;
 
 export interface AccountDetailProps {
@@ -54,6 +56,8 @@ export interface AccountDetailProps {
   readonly busy: boolean;
   readonly error: string | null;
   readonly client: InputClient;
+  /** Standing sign-in rules, when this machine reports them. */
+  readonly rules?: RulesBinding | undefined;
   /** Asks for the passkey bound to a staged seed; absent outside the app, where no seed can be saved. */
   readonly addKey: ((stage: TwoFactorStageId, words: string) => Promise<boolean>) | undefined;
   /** False on a machine without 2FA keys: the tab is not offered. */
@@ -90,7 +94,7 @@ export function AccountDetail(props: AccountDetailProps): ReactNode {
   );
 }
 
-function DetailsTab({ account, ops, busy, error, onClosed }: AccountDetailProps): ReactNode {
+function DetailsTab({ account, ops, busy, error, onClosed, rules }: AccountDetailProps): ReactNode {
   const [label, setLabel] = useState(account.label);
   const [username, setUsername] = useState(account.username ?? '');
   const [password, setPassword] = useState('');
@@ -112,92 +116,95 @@ function DetailsTab({ account, ops, busy, error, onClosed }: AccountDetailProps)
   };
 
   return (
-    <form className="flex min-w-0 flex-col gap-3" data-accounts-panel="details" onSubmit={event => void save(event)}>
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        Name
-        <input
-          className={INPUT}
-          data-accounts-label=""
-          disabled={busy}
-          onChange={event => setLabel(event.target.value)}
-          value={label}
-        />
-      </label>
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        Username
-        <input
-          autoCapitalize="off"
-          autoComplete="off"
-          className={INPUT}
-          data-accounts-username=""
-          disabled={busy}
-          onChange={event => setUsername(event.target.value)}
-          spellCheck={false}
-          value={username}
-        />
-      </label>
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        {account.fields.password ? 'Replace the password' : 'Password'}
-        <input
-          autoComplete="new-password"
-          className={INPUT}
-          data-1p-ignore=""
-          data-accounts-password=""
-          data-lpignore="true"
-          disabled={busy}
-          onChange={event => setPassword(event.target.value)}
-          type="password"
-          value={password}
-        />
-        <span className="text-meta font-normal text-muted" data-accounts-password-state="">
-          {account.fields.password
-            ? 'A password is saved. It is write-only: nobody can read it back, ferrets included.'
-            : 'No password saved.'}
-        </span>
-        {problem === undefined ? null : <span className="text-meta font-normal text-err">{problem}</span>}
-      </label>
-      <Refusal error={error} />
-      <div className="flex flex-wrap gap-2">
-        <button
-          className="kt-btn min-h-[44px]"
-          data-accounts-save=""
-          data-variant="primary"
-          disabled={!changed || problem !== undefined || label.trim() === '' || busy}
-          type="submit"
-        >
-          Save
-        </button>
-        {confirming ? (
-          <>
+    <div className="flex min-w-0 flex-col gap-4">
+      <form className="flex min-w-0 flex-col gap-3" data-accounts-panel="details" onSubmit={event => void save(event)}>
+        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+          Name
+          <input
+            className={INPUT}
+            data-accounts-label=""
+            disabled={busy}
+            onChange={event => setLabel(event.target.value)}
+            value={label}
+          />
+        </label>
+        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+          Username
+          <input
+            autoCapitalize="off"
+            autoComplete="off"
+            className={INPUT}
+            data-accounts-username=""
+            disabled={busy}
+            onChange={event => setUsername(event.target.value)}
+            spellCheck={false}
+            value={username}
+          />
+        </label>
+        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+          {account.fields.password ? 'Replace the password' : 'Password'}
+          <input
+            autoComplete="new-password"
+            className={INPUT}
+            data-1p-ignore=""
+            data-accounts-password=""
+            data-lpignore="true"
+            disabled={busy}
+            onChange={event => setPassword(event.target.value)}
+            type="password"
+            value={password}
+          />
+          <span className="text-meta font-normal text-muted" data-accounts-password-state="">
+            {account.fields.password
+              ? 'A password is saved. It is write-only: nobody can read it back, ferrets included.'
+              : 'No password saved.'}
+          </span>
+          {problem === undefined ? null : <span className="text-meta font-normal text-err">{problem}</span>}
+        </label>
+        <Refusal error={error} />
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="kt-btn min-h-[44px]"
+            data-accounts-save=""
+            data-variant="primary"
+            disabled={!changed || problem !== undefined || label.trim() === '' || busy}
+            type="submit"
+          >
+            Save
+          </button>
+          {confirming ? (
+            <>
+              <button
+                className="kt-btn min-h-[44px]"
+                data-accounts-confirm-remove=""
+                data-variant="danger"
+                disabled={busy}
+                onClick={() => void ops.removeAccount(account.id).then(took => took && onClosed())}
+                type="button"
+              >
+                Remove {account.label} and its sign-ins
+              </button>
+              <button className="kt-btn min-h-[44px]" onClick={() => setConfirming(false)} type="button">
+                Keep it
+              </button>
+            </>
+          ) : (
             <button
+              aria-label={`Remove account ${account.label}`}
               className="kt-btn min-h-[44px]"
-              data-accounts-confirm-remove=""
+              data-accounts-remove=""
               data-variant="danger"
               disabled={busy}
-              onClick={() => void ops.removeAccount(account.id).then(took => took && onClosed())}
+              onClick={() => setConfirming(true)}
               type="button"
             >
-              Remove {account.label} and its sign-ins
+              <Trash2 aria-hidden="true" size={14} /> Remove account
             </button>
-            <button className="kt-btn min-h-[44px]" onClick={() => setConfirming(false)} type="button">
-              Keep it
-            </button>
-          </>
-        ) : (
-          <button
-            aria-label={`Remove account ${account.label}`}
-            className="kt-btn min-h-[44px]"
-            data-accounts-remove=""
-            data-variant="danger"
-            disabled={busy}
-            onClick={() => setConfirming(true)}
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={14} /> Remove account
-          </button>
-        )}
-      </div>
-    </form>
+          )}
+        </div>
+      </form>
+      {rules === undefined ? null : <AccountRulesRevoke account={account} rules={rules} />}
+    </div>
   );
 }
 
@@ -470,7 +477,7 @@ function SitesTab({ account, accounts, signIns, ops, busy, error, onOpenSite }: 
           This account does not sign in anywhere yet.
         </p>
       ) : (
-        <ul aria-label="Sites" className="m-0 flex list-none flex-col gap-2 p-0">
+        <ul aria-label="Sign-ins" className="m-0 flex list-none flex-col gap-2 p-0">
           {signIns.map(signIn => (
             <li
               key={signIn.id}
