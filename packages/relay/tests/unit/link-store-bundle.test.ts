@@ -106,6 +106,9 @@ describe('status and delete', () => {
     should(step.response).containEql({ ok: true, kind: 'status' });
     should(step.doc?.row.state).equal('live');
     should(step.envelope).equal('keep');
+    const link = step.response.ok && step.response.kind === 'status' ? step.response.status.links[0] : undefined;
+    should(link).containEql({ state: 'live', storedBytes: doc.bytes });
+    should(doc.bytes).be.above(0);
   });
 
   it('should end a link on delete, release its quota and delete the stored envelope', () => {

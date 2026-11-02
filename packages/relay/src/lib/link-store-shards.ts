@@ -64,7 +64,11 @@ export function joinChunks(chunks: readonly Uint8Array[]): Uint8Array {
 export class SlidingWindows {
   private readonly windows = new Map<string, readonly number[]>();
 
-  constructor(private readonly maxKeys: number) {}
+  private readonly maxKeys: number;
+
+  constructor(maxKeys: number) {
+    this.maxKeys = maxKeys;
+  }
 
   size(): number {
     return this.windows.size;

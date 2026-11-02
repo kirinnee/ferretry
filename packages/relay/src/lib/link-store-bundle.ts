@@ -36,6 +36,8 @@ export interface BundleDoc {
   readonly wrong: readonly number[];
   /** How many envelope rows are stored: zero unless the link is live. */
   readonly chunks: number;
+  /** How many envelope bytes are stored, so a status can say so without reading them. */
+  readonly bytes: number;
 }
 
 export type BundleEvent =
@@ -89,8 +91,9 @@ function settle(
   const { envelope: _bytes, ...stored } = row;
   const live = stored.state === 'live';
   const chunks = written !== null ? chunkEnvelope(written).length : live ? (previous?.chunks ?? 0) : 0;
+  const bytes = written !== null ? written.length : live ? (previous?.bytes ?? 0) : 0;
   return {
-    doc: { row: stored, wrong: state.wrongTokenTimes.get(bundleId) ?? [], chunks },
+    doc: { row: stored, wrong: state.wrongTokenTimes.get(bundleId) ?? [], chunks, bytes },
     envelope: written ?? (live ? 'keep' : null),
     response,
     released: wasLive && !live,
@@ -133,7 +136,10 @@ export function reduceBundle(
           : { type: 'status', daemonId: event.daemonId, bundleIds: [bundleId], now: event.now };
   const [next, response] = reduceLinkStore(state, reducerEvent);
   const written = event.type === 'upload' && response.ok ? event.envelope : null;
-  return settle(bundleId, previous, next, response, written);
+  const step = settle(bundleId, previous, next, response, written);
+  return event.type === 'status' && response.ok && response.kind === 'status'
+    ? { ...step, response: withStoredBytes(response, previous) }
+    : step;
 }
 
 /** What a bundle object reads back from its storage. A document that does not parse is damage, never a link. */
@@ -154,4 +160,20 @@ export const BundleDocSchema = z.strictObject({
   }),
   wrong: z.array(z.number()),
   chunks: z.number().int().min(0),
+  bytes: z.number().int().min(0),
 });
+
+/** The reducer sizes a link from the bytes it is handed, and a status is handed none: say the stored size instead. */
+function withStoredBytes(
+  response: Extract<LinkStoreResponse, { kind: 'status' }>,
+  previous: BundleDoc | null,
+): LinkStoreResponse {
+  const bytes = previous?.row.state === 'live' ? previous.bytes : 0;
+  return {
+    ...response,
+    status: {
+      ...response.status,
+      links: response.status.links.map(link => ('storedBytes' in link ? { ...link, storedBytes: bytes } : link)),
+    },
+  };
+}

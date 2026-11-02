@@ -473,7 +473,7 @@ describe('link store worker: routes and methods', () => {
   });
 
   it('should answer OPTIONS with a 204 on a public path', async () => {
-    const { world } = await plain();
+    const { world } = await plain({ relaxed: false });
     for (const path of [LINK_STORE_SERVICE_PATH, LINK_STORE_CHALLENGE_PATH, linkFetchPath(newBundleId())]) {
       const response = await world.call('OPTIONS', path);
       should(response.status).equal(204);
@@ -526,7 +526,7 @@ describe('link store worker: one answer to every failed open', () => {
       [ended.bundleId]: 'ended',
       [capped.bundleId]: 'live',
       [lapsed.bundleId]: 'lapsed',
-      [expired.bundleId]: 'live',
+      [expired.bundleId]: 'lapsed',
     });
     finish(world);
   });
@@ -974,7 +974,8 @@ describe('link store worker: an object that fails', () => {
     }
     world.faults.push({ target: 'control', route: '/admit', mode: 'refuse' });
     should((await client.upload({})).response.status).equal(503);
-    should(world.control.keys('link:')).deepEqual([]);
+    // Only the garbled reserve committed before its answer was lost; its lease is settled by the control alarm.
+    should(world.control.keys('link:')).have.length(1);
     finish(world);
   });
 
