@@ -2288,6 +2288,37 @@ describe('Agenda state machine reply', () => {
     should(back.item?.history?.map(entry => entry.kind)).containEql('updated');
   });
 
+  it('should refuse the edit of a legacy closed replied item by the ferret without back, and leave it closed', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const legacy: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
+
+    // Act — the whole card refreshed, but no word that the ferret needs something new.
+    const refused = failed(
+      applyAgendaCommand(legacy, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { ...REFRESH, subject: 'Reworded' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).match(/add --back to bring it back/);
+    should(agendaSnapshot(legacy).items).be.empty();
+  });
+
   it('should refuse the edit of a legacy closed replied item into a full board', () => {
     // Arrange
     const closed = succeeded(
