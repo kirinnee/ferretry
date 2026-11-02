@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import should from 'should';
 import { FileAgendaFileStore } from '../../../src/adapters/agenda/file-agenda-file-store.ts';
 import {
+  AGENDA_CACHE_LIMIT,
   FileAgendaLedgerRepository,
   InvalidAgendaLedgerError,
 } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
@@ -78,6 +79,34 @@ describe('the agenda file store, read with its identity', () => {
 });
 
 describe('FileAgendaLedgerRepository', () => {
+  it('should keep serving correct agendas past its cache limit, dropping only the copy read longest ago', async () => {
+    // Arrange
+    const { repository } = await createRepository();
+    const ids = Array.from({ length: AGENDA_CACHE_LIMIT + 1 }, (_, n) => `bounded-${n}`);
+    await Promise.all(
+      ids.map(async id => {
+        await mkdir(dirname(repository.file(id)), { recursive: true });
+        await writeFile(repository.file(id), `${JSON.stringify(emptyAgendaLedger(id, '2026-07-31T10:00:00Z'))}\n`);
+      }),
+    );
+
+    // Act — fill the cache, touch the oldest again, push one more in, then change the oldest on disk.
+    for (const id of ids.slice(0, AGENDA_CACHE_LIMIT)) await repository.read(id);
+    const touched = await repository.read('bounded-0');
+    const pushed = await repository.read(`bounded-${AGENDA_CACHE_LIMIT}`);
+    await writeFile(
+      repository.file('bounded-1'),
+      `${JSON.stringify(emptyAgendaLedger('bounded-1', '2026-07-31T10:05:00Z'))}\n`,
+    );
+    const evicted = await repository.read('bounded-1');
+
+    // Assert
+    should(touched?.sessionId).equal('bounded-0');
+    should(pushed?.sessionId).equal(`bounded-${AGENDA_CACHE_LIMIT}`);
+    should(evicted?.sessionId).equal('bounded-1');
+    should(await repository.read('bounded-0')).equal(touched);
+  });
+
   it('should see a ledger rewritten on disk outside the daemon on the next read, though it read it a moment before', async () => {
     // Arrange
     const { repository } = await createRepository();
