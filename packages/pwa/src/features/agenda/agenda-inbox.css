@@ -1194,8 +1194,10 @@ a.fy-inbox-row:focus-visible {
   width: auto;
   flex: 1 1 0;
 }
-.fy-parked-row__back {
+.fy-parked-row .fy-parked-row__back {
+  min-width: 44px;
   min-height: 44px;
+  padding: 0;
   flex: 0 0 auto;
   align-self: center;
   justify-content: center;

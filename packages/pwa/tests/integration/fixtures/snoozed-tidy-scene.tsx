@@ -53,6 +53,7 @@ function Scene() {
         cards={[open]}
         fake={fake}
         parked={snoozed}
+        parkedWhole
         render={inbox => (
           <AgendaInboxPage clock={fake.clock.now} inbox={inbox} now={NOW} onNavigate={() => undefined} phone={phone} />
         )}

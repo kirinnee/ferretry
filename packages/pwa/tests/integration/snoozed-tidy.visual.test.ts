@@ -109,8 +109,14 @@ describe('Snoozed rows are tidy', () => {
             }),
           );
           expect(rows.length).toBeGreaterThanOrEqual(6);
+          const wrapped = await tab.$$eval(
+            '.fy-parked-row .fy-inbox-row__meta',
+            nodes => nodes.filter(node => node.getBoundingClientRect().height > 24).length,
+          );
+          expect(wrapped, 'the meta line of a short row stays on one line').toBeLessThanOrEqual(1);
           for (const row of rows) {
             expect(row.backWidth, 'the action is small, not full width').toBeLessThan(row.width * 0.4);
+            expect(row.backWidth, 'the action is a compact icon').toBeLessThanOrEqual(48);
             expect(row.box, 'the action sits beside the row, not under it').toBeLessThanOrEqual(row.link + 1);
           }
 
