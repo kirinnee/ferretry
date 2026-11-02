@@ -1,3 +1,14 @@
+## [4.233.0](https://github.com/kirinnee/ferretry/compare/v4.232.0...v4.233.0) (2026-11-02)
+
+### Features
+
+* **pwa:** + Add skills sheet on the Skills tab ([#1348](https://github.com/kirinnee/ferretry/issues/1348)) ([5cbbcdd](https://github.com/kirinnee/ferretry/commit/5cbbcdd208bc4db925112638b0d884eebe3f3bf5))
+
+### Fixes
+
+* **input:** accounts saved for another site go behind a second step ([#1352](https://github.com/kirinnee/ferretry/issues/1352)) ([c33f5ac](https://github.com/kirinnee/ferretry/commit/c33f5acb560e42c755e6d96d7db1f2fe28eb4d23))
+* **pwa:** show a card once in the Inbox when its gate item is parked ([#1350](https://github.com/kirinnee/ferretry/issues/1350)) ([9681a8e](https://github.com/kirinnee/ferretry/commit/9681a8e51036c33016ee47394a21272113a0c78e))
+
 ## [4.232.0](https://github.com/kirinnee/ferretry/compare/v4.231.0...v4.232.0) (2026-11-02)
 
 ### Features

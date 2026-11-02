@@ -1,3 +1,13 @@
+## [4.234.0](https://github.com/kirinnee/ferretry/compare/v4.233.0...v4.234.0) (2026-11-02)
+
+### Features
+
+* **relay:** the hosted link-store Worker and its Durable Objects (catalogs 3f-2) ([#1353](https://github.com/kirinnee/ferretry/issues/1353)) ([344f392](https://github.com/kirinnee/ferretry/commit/344f392ea9b2a47fcb62ec7cf7fd9d87c884aeea))
+
+### Fixes
+
+* **terminal:** close the terminals of finished ferrets and say who holds the slots ([#1349](https://github.com/kirinnee/ferretry/issues/1349)) ([fb06b0a](https://github.com/kirinnee/ferretry/commit/fb06b0ab4d27a1b72c039d275e8f83c2963bfbec))
+
 ## [4.233.0](https://github.com/kirinnee/ferretry/compare/v4.232.0...v4.233.0) (2026-11-02)
 
 ### Features
