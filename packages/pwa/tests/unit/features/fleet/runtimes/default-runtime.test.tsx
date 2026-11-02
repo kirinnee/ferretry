@@ -259,7 +259,7 @@ describe('The Default badge and Make default on the runtimes list', () => {
     ).not.toBeNull();
   });
 
-  it('puts every badge on the name row after the name, so a card is a name row plus one details line', async () => {
+  it('puts the Default and Not agent badges after the name, wrapping under it instead of cutting it, and badges no switched-off runtime', async () => {
     const view = await open();
     const card = (name: string) =>
       must(view.container.querySelector<HTMLElement>(`[data-runtime-card="${name}"]`), name);
@@ -269,15 +269,24 @@ describe('The Default badge and Make default on the runtimes list', () => {
       // The badge shares the name's own row, and follows it.
       expect(element.parentElement).toBe(nameRow);
       expect(nameRow?.firstElementChild?.hasAttribute('data-runtime-name')).toBe(true);
-      expect(nameRow?.className).not.toContain('wrap');
+      expect(nameRow?.hasAttribute('data-runtime-name-row')).toBe(true);
+      expect(nameRow?.className).toContain('flex-wrap');
       return element;
     };
     expect(badgesOn('claude-default', 'data-runtime-default-badge').textContent).toBe('Default');
-    expect(badgesOn('claude-atomi', 'data-runtime-disabled-badge').textContent).toBe('Disabled');
-    expect(badgesOn('claude-plain', 'data-runtime-kind-badge').textContent).toBe('Not an agent');
-    // The name gives way before the badge does.
-    const name = must(card('claude-default').querySelector('[data-runtime-name]'), 'name');
-    expect(name.className).toContain('truncate');
+    expect(badgesOn('claude-plain', 'data-runtime-kind-badge').textContent).toBe('Not agent');
+    // A switched-off runtime carries no badge: the off switch and the off note already say it.
+    expect(card('claude-atomi').querySelector('[data-runtime-disabled-badge]')).toBeNull();
+    expect(card('claude-atomi').textContent).not.toMatch(/disabled/i);
+    // The badge wraps under the name before the name is ever cut: the name never shrinks or truncates.
+    for (const runtime of ['claude-default', 'claude-atomi', 'claude-plain']) {
+      const name = must(card(runtime).querySelector('[data-runtime-name]'), 'name');
+      expect(name.className).toContain('shrink-0');
+      expect(name.className).toContain('max-w-full');
+      expect(name.className).toContain('break-words');
+      expect(name.className).not.toContain('truncate');
+      expect(name.className).not.toContain('ellipsis');
+    }
     expect(card('claude-default').querySelector('[data-runtime-default-badge]')?.className).toContain('shrink-0');
     // The details are one truncated line, whole in its tooltip.
     const details = must(card('claude-default').querySelector<HTMLElement>('[data-runtime-details]'), 'details');
