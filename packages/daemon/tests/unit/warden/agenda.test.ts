@@ -116,6 +116,35 @@ describe('the Warden page reads the Warden’s own cards', () => {
     should(actual.items[0]).not.have.property('teammate');
   });
 
+  it('should attribute a card on an agenda home to the sub-ferret its reference names', () => {
+    // Act
+    const actual = view({
+      sessions: [session('lead'), session('s1', { teammate: 'atlas', label: 'batch-7' })],
+      boards: [board('lead', [card({ sourceRef: 'warden:ask:sus_thinking:s1' })])],
+    });
+
+    // Assert
+    should(actual.items).have.length(1);
+    should(actual.items[0]).match({
+      sessionId: 's1',
+      teammate: 'atlas',
+      label: 'batch-7',
+      anomalyKind: 'sus_thinking',
+    });
+  });
+
+  it('should leave out a card on an agenda home about a sub-ferret that has finished', () => {
+    // Act
+    const actual = view({
+      sessions: [session('lead'), session('s1', {}, 'stopped')],
+      boards: [board('lead', [card({ sourceRef: 'warden:ask:sus_thinking:s1' }), card({ id: 'A2' })])],
+    });
+
+    // Assert
+    should(actual.items.map(each => each.id)).eql(['A2']);
+    should(actual.items[0]?.sessionId).equal('lead');
+  });
+
   it('should leave out an empty context rather than invent one', () => {
     // Arrange
     const { context: _context, ...bare } = card();

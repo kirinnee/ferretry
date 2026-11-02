@@ -159,6 +159,7 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
+import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
@@ -713,7 +714,9 @@ import {
   AgendaReplyBatcher,
   AgendaReplyDelivery,
   AgendaResurfacer,
+  AgendaHomes,
   AgendaService,
+  migrateToAgendaHomes,
   AgendaTurnNudge,
   AgendaWaker,
   type AgentCopyPagesPort,
@@ -4818,6 +4821,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             ? { sessionId, items: listed.value.items, resolved: listed.value.resolved }
             : undefined;
         },
+        homeOf: async sessionId => await parts.attention.homeOf(sessionId),
         raise: async (sessionId, request) => {
           const mutation = await parts.attention
             .raise(
@@ -10179,6 +10183,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
+      let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -10753,6 +10758,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
+      // Where the daemon asks the owner for a sub-ferret: the owner's own ferret at the root of its lineage.
+      const agendaHomes = new AgendaHomes(new StorageHomeSessions(storage), undefined, boardDiagnostics);
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -10796,6 +10803,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           () => attachmentDaemonId,
         ),
+        agendaHomes,
       );
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
@@ -10808,6 +10816,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A card changes hands and its items stay where they were raised: its gate items are looked for on every
         // agenda on this machine, so a gate is asked once whoever has the card.
         sessions: { all: agendaSessionIds },
+        homes: agendaHomes,
         marker: new FileGateItemsMigrationMarker(join(paths.home, 'gate-items-duplicates-migration.json')),
         now: () => clock.now(),
         words: {
@@ -10817,10 +10826,28 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         diagnostics: boardDiagnostics,
       });
-      void gateItems
-        .backfill()
+      // Open items already on a sub-ferret's agenda move to its home first, once; the gates then find them there.
+      const homesMigration = migrateToAgendaHomes({
+        agenda,
+        sessions: { all: agendaSessionIds },
+        subFerrets: new StorageSubFerretDirectory(storage),
+        homes: agendaHomes,
+        marker: new FileGateItemsMigrationMarker(join(paths.home, 'agenda-homes-migration.json')),
+        now: () => clock.now(),
+        diagnostics: boardDiagnostics,
+      })
+        .then(outcome => {
+          if (outcome.moved > 0)
+            process.stderr.write(
+              `agenda: moved ${String(outcome.moved)} item(s) from sub-ferrets to their agenda homes\n`,
+            );
+        })
+        .catch(() => undefined);
+      agendaHomesMigrated = homesMigration;
+      void homesMigration
+        .then(() => gateItems?.backfill())
         .then(raised => {
-          if (raised > 0)
+          if ((raised ?? 0) > 0)
             process.stderr.write(`board: raised ${String(raised)} gate item(s) for cards already waiting\n`);
         })
         .catch((error: unknown) => boardDiagnostics.warn(`the gate items' boot pass failed: ${String(error)}`));
@@ -12595,6 +12622,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         notifications,
         attention: agenda,
         gateItems,
+        agendaHomesMigrated,
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         pins: new PinService(
@@ -14484,8 +14512,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => {
     releasing = true;
   });
-  void subsystems.warden
-    .arm()
+  // After the boot move of sub-ferret items to their homes: a sweep that ran first would clear or re-raise rows
+  // the move is still carrying.
+  void (subsystems.agendaHomesMigrated ?? Promise.resolve())
+    .then(async () => await subsystems.warden.arm())
     .then(disarm => {
       if (releasing) disarm();
       else cleanups.push(disarm);

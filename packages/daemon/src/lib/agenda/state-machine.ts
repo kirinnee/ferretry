@@ -161,7 +161,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly discussion?: true;
   /**
    * The gate item this new one REPLACES on another ferret's agenda, because its card changed hands: the new item
-   * goes on as that one stood (`AgendaCarried`). Only the daemon carries one, and only onto a new gate item.
+   * goes on as that one stood (`AgendaCarried`). Only the daemon carries one (a gate item moved on a hand-over, an item moved to its agenda home).
    */
   readonly carried?: AgendaCarried;
 }
@@ -790,9 +790,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if ((request.gate !== undefined || request.discussion === true) && actor.kind !== 'daemon') {
     return failure('forbidden', 'only the daemon raises a gate item or its follow-up');
   }
-  // A gate item is the daemon's alone (above), so only the daemon ever carries one over.
-  if (request.carried !== undefined && request.gate === undefined) {
-    return failure('invalid', 'only a gate item is carried over to its card’s new ferret');
+  if (request.carried !== undefined && actor.kind !== 'daemon') {
+    return failure('forbidden', 'only the daemon carries an item over to another ferret\u2019s agenda');
   }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);

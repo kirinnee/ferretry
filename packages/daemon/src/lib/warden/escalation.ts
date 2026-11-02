@@ -35,6 +35,11 @@
  * rather than add one each sweep, and keeps fifteen ferrets that lost their monitor at fifteen items — or
  * one, when the fault is the machine's.
  *
+ * A sub-ferret's notification sits on its agenda home (`homes`), where it is `warden:ask:<kind>:<sessionId>`:
+ * the home's own `warden:ask:<kind>` and each sibling's are different rows, and one recovering clears only its
+ * own. The plan looks for a notification on the board it actually lives on, so a standing one is never
+ * cleared as "recovered" for sitting on a board that is not the ferret's.
+ *
  * Reading a notification resolves it, so the board cannot say whether a subject was already told: the
  * sweep keeps that itself (`WardenRuntimeState.notified`). A subject is notified once; while it keeps a
  * reason it is not notified again, however often the owner clears the item; once it has no reason it is
@@ -155,15 +160,18 @@ export function remedyPermitsEscalation(outcome: WardenRemedyOutcome): boolean {
 
 /** The two identities a Warden notification can have, parsed back from its source reference. */
 export type WardenEscalationIdentity =
-  | { readonly scope: 'session'; readonly kind: WardenAnomalyKind }
+  | { readonly scope: 'session'; readonly kind: WardenAnomalyKind; readonly sessionId?: string }
   | { readonly scope: 'fleet'; readonly kind: WardenAnomalyKind; readonly key: string };
 
 const ASK_PREFIX = 'warden:ask:';
 const FLEET_PREFIX = `${ASK_PREFIX}fleet:`;
 
-/** The stable identity of a ferret's notification for one class. */
-export function wardenEscalationSourceRef(kind: WardenAnomalyKind): string {
-  return `${ASK_PREFIX}${kind}`;
+/**
+ * The stable identity of a ferret's notification for one class. One that sits on ANOTHER ferret's board (a
+ * sub-ferret's, raised on its agenda home) names the ferret it is about, so siblings never share a row.
+ */
+export function wardenEscalationSourceRef(kind: WardenAnomalyKind, aboutSessionId?: string): string {
+  return aboutSessionId === undefined ? `${ASK_PREFIX}${kind}` : `${ASK_PREFIX}${kind}:${aboutSessionId}`;
 }
 
 /** The identity of a machine-wide subject: one notification for every ferret the fault names. */
@@ -183,8 +191,13 @@ export function parseWardenEscalationSourceRef(
     const key = rest.slice(separator + 1);
     return separator > 0 && kind !== undefined && key !== '' ? { scope: 'fleet', kind, key } : undefined;
   }
-  const kind = parseWardenAnomalyKind(sourceRef.slice(ASK_PREFIX.length));
-  return kind === undefined ? undefined : { scope: 'session', kind };
+  const rest = sourceRef.slice(ASK_PREFIX.length);
+  const separator = rest.indexOf(':');
+  const kind = parseWardenAnomalyKind(separator < 0 ? rest : rest.slice(0, separator));
+  if (kind === undefined) return undefined;
+  if (separator < 0) return { scope: 'session', kind };
+  const sessionId = rest.slice(separator + 1);
+  return sessionId === '' ? undefined : { scope: 'session', kind, sessionId };
 }
 
 /** Whether a row was raised by the daemon on the escalation source — the only rows this module touches.
@@ -209,12 +222,19 @@ function legacyKindOf(item: WardenEscalationBoardItem): WardenAnomalyKind | unde
 interface Subject {
   /** Its identity across sweeps: what `notified` remembers. */
   readonly key: string;
+  /** Its reference on its own ferret's board; on another ferret's board a ferret's subject is `refOn`. */
   readonly sourceRef: string;
   readonly anomaly: WardenAnomaly;
   /** Every ferret it is about: one for a ferret's own subject, several for a machine one. */
   readonly targets: readonly string[];
   readonly fleet: boolean;
 }
+
+/** The reference a subject carries on `board`: scoped to its ferret when it sits on another ferret's board. */
+const refOn = (subject: Subject, board: string): string =>
+  subject.fleet || board === subject.anomaly.sessionId
+    ? subject.sourceRef
+    : wardenEscalationSourceRef(subject.anomaly.kind, subject.anomaly.sessionId);
 
 /** Whether a flag is about several ferrets rather than one. */
 const isFleetAnomaly = (anomaly: WardenAnomaly): boolean =>
@@ -298,6 +318,10 @@ export interface WardenEscalationInput {
   readonly clientName: string;
   /** Why each standing flag is the owner's, from the Warden's own state (`owner-routes.ts`). */
   readonly routes?: readonly WardenOwnerRoute[];
+  /** The board a ferret's notification sits on when it is not the ferret's own: its agenda home. Absent: its own. */
+  readonly homes?: ReadonlyMap<string, string>;
+  /** Ferrets whose board could not be read: a notification about one that sits elsewhere is neither judged nor cleared. */
+  readonly unreadable?: ReadonlySet<string>;
   /** Subjects already notified that have not cleared since: not notified again. */
   readonly notified?: ReadonlySet<string>;
   /** This machine's name, so a notification read among every machine's says which one it is about. */
@@ -662,18 +686,19 @@ function fleetNotice(input: {
   };
 }
 
-/** The live node that should hold a subject's notification, or nothing when none of its ferrets can. */
+/** The live ferret a subject's notification is raised about, or nothing when none of its ferrets can be. */
 function homeOf(
   subject: Subject,
   nodes: ReadonlyMap<string, WardenEscalationNode>,
   openOn: readonly string[],
+  boardOf: (sessionId: string) => string,
 ): string | undefined {
   const live = (id: string): boolean => {
     const node = nodes.get(id);
     return node !== undefined && !isTerminalStatus(node.state.status);
   };
   // Sticky: one already open stays where the owner first saw it while that ferret still qualifies.
-  const sticky = openOn.find(id => subject.targets.includes(id) && live(id));
+  const sticky = subject.targets.find(id => live(id) && openOn.includes(boardOf(id)));
   if (sticky !== undefined) return sticky;
   return subject.targets.find(live);
 }
@@ -710,6 +735,7 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
   const verdicts = explicitNeedsHumanVerdicts(input.verdicts);
   const routes = new Map((input.routes ?? []).map(route => [flagKey(route.anomaly), route]));
   const notified = input.notified ?? new Set<string>();
+  const boardOf = (sessionId: string): string => input.homes?.get(sessionId) ?? sessionId;
 
   // Where each of our notifications is open, by source reference.
   const openOn = new Map<string, string[]>();
@@ -729,30 +755,40 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
   const standing: string[] = [];
   /** `[board, sourceRef]` pairs a notification stays open on this sweep. */
   const kept = new Set<string>();
+  /** References moved to a new home this sweep: their old row is cleared as moved, not as recovered. */
+  const carriedRefs = new Set<string>();
   if (remedyPermitsEscalation(input.remedy)) {
     for (const subject of subjects.values()) {
       const reason = reasonFor(subject, verdicts, routes);
       if (reason === undefined) continue;
       standing.push(subject.key);
-      const open = openOn.get(subject.sourceRef) ?? [];
-      const home = homeOf(subject, nodesById, open);
+      const ref = refOn(subject, boardOf(subject.anomaly.sessionId));
+      const open = openOn.get(ref) ?? [];
+      const home = homeOf(subject, nodesById, open, boardOf);
       if (home === undefined) continue;
       const node = nodesById.get(home);
       if (node === undefined) continue;
-      const isOpen = open.includes(home);
+      const board = boardOf(home);
+      const isOpen = open.includes(board);
+      // CARRIED. A sub-ferret's notification (a scoped reference) stands on a board that is no longer where its
+      // asks go because its home changed: it moves with its ferret, still told, rather than being cleared for
+      // sitting elsewhere.
+      const carried = !isOpen && open.length > 0 && ref !== subject.sourceRef;
+      if (carried) carriedRefs.add(ref);
       // ALREADY TOLD. The owner was notified about this subject and it has not cleared since: reading the
       // notification closed it, and a new one every sweep would make the Inbox unusable.
-      if (!isOpen && notified.has(subject.key)) continue;
+      if (!isOpen && !carried && notified.has(subject.key)) continue;
       // A ferret waiting on a question its board already asks the owner: a second notification would ask
       // the same thing twice. An investigation that asked for a human is still its own.
       if (
         !isOpen &&
+        !carried &&
         reason.kind !== 'needs_human' &&
         subject.anomaly.kind === 'unattended_question' &&
         (boardsById.get(home)?.items ?? []).some(item => !isWardenEscalationItem(item))
       )
         continue;
-      kept.add(JSON.stringify([home, subject.sourceRef]));
+      kept.add(JSON.stringify([board, ref]));
       const waitingSince = subject.anomaly.since ?? reason.evidenceAt ?? input.at ?? new Date(0).toISOString();
       const notice = subject.fleet
         ? fleetNotice({ subject, nodes: nodesById, reason, remedy: input.remedy, machine: input.machine, waitingSince })
@@ -771,7 +807,7 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
         subjectKey: subject.key,
         source: WARDEN_ESCALATION_SOURCE,
         // NEVER clamped: the reference is the dedupe key, and a truncated key would create a second row.
-        sourceRef: subject.sourceRef,
+        sourceRef: ref,
         ...notice,
       });
     }
@@ -795,19 +831,30 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
       }
       if (!isWardenEscalationItem(item) || kept.has(JSON.stringify([board.sessionId, item.sourceRef]))) continue;
       const identity = parseWardenEscalationSourceRef(item.sourceRef) as WardenEscalationIdentity;
-      const node = nodesById.get(board.sessionId);
-      const current = [...subjects.values()].some(
-        subject =>
-          subject.sourceRef === item.sourceRef && (subject.fleet || subject.anomaly.sessionId === board.sessionId),
+      // The ferret it is about: the one a scoped reference names, else the board it sits on.
+      const about = (identity.scope === 'session' ? identity.sessionId : undefined) ?? board.sessionId;
+      if (about !== board.sessionId && input.unreadable?.has(about) === true) continue;
+      const node = nodesById.get(about);
+      const current = [...subjects.values()].some(subject =>
+        subject.fleet
+          ? subject.sourceRef === item.sourceRef
+          : identity.scope === 'session' &&
+            subject.anomaly.kind === identity.kind &&
+            subject.anomaly.sessionId === about,
       );
+      const movedTo = carriedRefs.has(item.sourceRef)
+        ? raise.find(each => each.sourceRef === item.sourceRef && boardOf(each.sessionId) !== board.sessionId)
+        : undefined;
       const note =
         node === undefined
           ? 'Cleared by the daemon: this node is no longer in the fleet.'
           : isTerminalStatus(node.state.status)
             ? `Cleared by the daemon: this node is ${node.state.status} and is no longer running.`
-            : !current
-              ? `Cleared by the daemon: the node recovered — ${identity.kind} is no longer detected.`
-              : 'Cleared by the Warden: this no longer waits on you — it was left alone, cleared, or is being looked at again.';
+            : movedTo !== undefined
+              ? `Moved by the daemon: this now waits on ${boardOf(movedTo.sessionId)}'s agenda, where its ferret's asks go.`
+              : !current
+                ? `Cleared by the daemon: the node recovered — ${identity.kind} is no longer detected.`
+                : 'Cleared by the Warden: this no longer waits on you — it was left alone, cleared, or is being looked at again.';
       resolve.push({
         sessionId: board.sessionId,
         anomalyKind: identity.kind,

@@ -9,8 +9,15 @@ import type {
   ResolvedAgendaItem,
   TaskRef,
 } from '@ferretry/protocol';
-import { agendaCardKind } from '@ferretry/protocol';
-import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
+import { agendaCardKind, clipAtWord, MAX_AGENDA_TITLE_LENGTH } from '@ferretry/protocol';
+import { type AgendaHomeResolver, handsOnRaise, handsOnSource, SELF_AGENDA_HOME } from './home.ts';
+import {
+  isAncestorOf,
+  isSubFerret,
+  NO_SUB_FERRETS,
+  type SubFerretDirectory,
+  subFerretRefusal,
+} from '../sub-ferret/index.ts';
 import {
   type AgendaActor,
   type AgendaChange,
@@ -141,6 +148,8 @@ export class AgendaService {
     private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
     /** Which cards wait in the to-test lane: a to-do or review on one offers to close it by default. */
     private readonly cards: AgendaCardLanes = NO_AGENDA_CARD_LANES,
+    /** Where the daemon asks the owner for a sub-ferret: its lineage's home (docs/agenda.md § Sub-ferret agenda). */
+    private readonly homes: AgendaHomeResolver = SELF_AGENDA_HOME,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -158,14 +167,42 @@ export class AgendaService {
     return listed.ok ? { ok: true, value: listed.value.count } : listed;
   }
 
+  /**
+   * A daemon raise about a sub-ferret that is not a hands-on card lands on the sub-ferret's agenda home instead
+   * (docs/agenda.md § Sub-ferret agenda); the mutation's snapshot says where it landed.
+   */
   async raise(sessionId: string, request: RaiseAgendaRequest, actor: AgendaActor): Promise<AgendaMutation> {
+    const home = await this.redirected(sessionId, handsOnRaise(request, actor), actor);
     const titled =
       actor.kind === 'daemon' && request.title === undefined
         ? { ...request, title: DAEMON_TITLES[actor.cause] }
         : request;
-    const carded = titled.task === undefined ? await this.withFocusCard(sessionId, titled) : titled;
+    const named =
+      home !== sessionId && actor.kind === 'daemon' && actor.cause === 'warden-escalation'
+        ? {
+            ...titled,
+            title: clipAtWord(
+              `${await this.subFerrets.addressOf(sessionId).catch(() => sessionId)}: ${titled.title ?? ''}`,
+              MAX_AGENDA_TITLE_LENGTH,
+            ),
+          }
+        : titled;
+    // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
+    const carded = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
     const offered = await this.withOfferClose(carded);
-    return this.apply(sessionId, { action: 'raise', actor, request: offered, at: this.clock.now() });
+    return this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
+  }
+
+  /** The session a daemon act about `sessionId` belongs on: its home when it is a sub-ferret and the act is not hands-on. */
+  private async redirected(sessionId: string, handsOn: boolean, actor: AgendaActor): Promise<string> {
+    return actor.kind !== 'daemon' || handsOn ? sessionId : await this.homeOf(sessionId);
+  }
+
+  /** Where the daemon's non-hands-on asks about `sessionId` land: its agenda home when it is a sub-ferret, else itself. */
+  async homeOf(sessionId: string): Promise<string> {
+    if (invalidSession(sessionId) !== null) return sessionId;
+    if (!(await isSubFerret(this.subFerrets, sessionId))) return sessionId;
+    return await this.homes.of(sessionId).catch(() => sessionId);
   }
 
   /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
@@ -323,7 +360,10 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, {
+    // A row that stands on the board the daemon names is cleared there: only a row that is not there is looked for on the home.
+    const here = actor.kind === 'daemon' && (await this.holdsOpenSource(sessionId, source, sourceRef));
+    const home = here ? sessionId : await this.redirected(sessionId, handsOnSource(actor), actor);
+    return this.apply(home, {
       action: 'resolve-source',
       actor,
       source,
@@ -331,6 +371,16 @@ export class AgendaService {
       note,
       at: this.clock.now(),
     });
+  }
+
+  private async holdsOpenSource(sessionId: string, source: AgendaSource, sourceRef: string): Promise<boolean> {
+    if (invalidSession(sessionId) !== null) return false;
+    const ledger = await this.repository.read(sessionId).catch(() => null);
+    return (
+      ledger?.entries.some(
+        entry => entry.lifecycle === 'active' && entry.item.source === source && entry.item.sourceRef === sourceRef,
+      ) ?? false
+    );
   }
 
   private async apply(

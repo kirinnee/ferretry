@@ -183,8 +183,8 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 `FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
 
 ```text
-Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
-If you have a card: link your PR `fy task link <id> --pr <url>` (or `--branch`), progress `fy task note`; it moves itself (start, PR, merge, `fy signal done`). No card? Don't make one. Your final report says how the owner tests it.
+Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; report to your lead: `fy send <lead-callsign> "<message>"`. Only a password, code or approval the daemon asks for reaches the owner from you.
+With a card: link your PR `fy task link <id> --pr <url>` (or `--branch`), progress `fy task note`; it moves itself (start, PR, merge, `fy signal done`). No card? Make none. Your final report says how the owner tests it.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
@@ -738,8 +738,8 @@ The code is `GateItems` (`packages/daemon/src/lib/board/gate-items.ts`); the wir
 
 **Entering.** After every committed write of a card, by any path — a move, a trigger, PR facts, a refile,
 `fy signal done`, a lane edit's relocation — a card the owner asked for (external, below) that sits in a gate lane
-has its one item: raised by the daemon on its ferret's agenda (the assignee's, else the owner ferret's, running or
-stopped), `task` naming the card, kind `choice`, the gate's options as its answers, `sourceRef`
+has its one item: raised by the daemon on its ferret's **agenda home** (the assignee's, else the owner ferret's, running or
+stopped; [agenda.md](agenda.md#the-agenda-home) says what the home is — never a sub-ferret), `task` naming the card, kind `choice`, the gate's options as its answers, `sourceRef`
 `gate:<card>:<lane>:<entry>` where `entry` is the history `seq` of the event that put the card there. The same
 entry is never raised twice, open or closed, so a restart, a second write or the owner's Not needed asks nothing
 again. At boot every card already waiting at a gate gets its item once, in the background. A card none of whose
@@ -750,7 +750,8 @@ it down (`fy new --card`) — and the items already raised stay on the agendas t
 items are looked for on **every** agenda that holds one of them (read once from every session at boot, then kept as
 they are raised), and the "never twice" rule holds across all of them:
 
-- an open item on the card's ferret's agenda (assignee or owner ferret) is the one; any other is closed, its note
+- an open item on the home of the card's ferret (assignee or owner ferret) is the one; two sub-ferrets of one lead share
+  that home, so handing a card from one to the other raises nothing and moves nothing; any other is closed, its note
   naming the one that stands;
 - an open item only on a former ferret's agenda is **moved**: raised on the card's ferret's agenda as it stood — when
   it began waiting, the owner's snooze, whose turn it is, the conversation and edits so far — and closed where it was,
@@ -760,6 +761,9 @@ they are raised), and the "never twice" rule holds across all of them:
 A one-time sweep at boot (`gate-items-duplicates-migration.json` in the daemon's home) closed the duplicates raised
 before this held: each gate open on more than one agenda kept its newest item. It records nothing until every agenda
 was read and every duplicate closed, so a start that could not finish tries again.
+
+A **Not good** follow-up (the conversation the answer starts) is raised on the assignee's home too, so the owner talks
+to the lead, who started the work, and not to a sub-ferret.
 
 **Answering** is the owner's alone: at the machine (the admin token, recorded `admin-token` on the card) or from a
 paired device the `fleet` grant lets use the board — exactly who could have moved the card on the Board. The card

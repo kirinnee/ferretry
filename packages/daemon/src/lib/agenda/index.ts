@@ -4,6 +4,8 @@ export * from './clear-agents.ts';
 export * from './config-confirms.ts';
 export * from './conversation.ts';
 export * from './harness-prompt.ts';
+export * from './home.ts';
+export * from './home-migration.ts';
 export * from './observers.ts';
 export * from './owner-asks.ts';
 export * from './reply-batch.ts';

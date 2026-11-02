@@ -288,7 +288,8 @@ async function notify(
   if (!mutation.ok) return refusal(mutation.error);
   const delivered =
     mutation.change === 'created' && mutation.item !== undefined
-      ? await notifications.agendaDelivered(sessionId, mutation.item.id).catch(() => 0)
+      ? // The item sits where the mutation landed: a sub-ferret's notice goes to its agenda home.
+        await notifications.agendaDelivered(mutation.snapshot.sessionId, mutation.item.id).catch(() => 0)
       : 0;
   return jsonResponse(DirectNotificationResponseSchema.parse({ sessionId, delivered }));
 }

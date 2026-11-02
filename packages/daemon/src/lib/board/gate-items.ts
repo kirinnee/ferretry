@@ -96,6 +96,7 @@ export interface GateItemsDependencies {
   readonly lanes: GateLanes;
   readonly words: GateWords;
   readonly sessions: GateSessions;
+  readonly homes: GateHomes;
   readonly marker: GateItemsMigrationMarker;
   readonly now: () => string;
   readonly diagnostics: { warn(message: string): void };
@@ -156,10 +157,13 @@ interface HeldItems {
   readonly asked: ReadonlySet<string>;
 }
 
-/** The sessions whose agendas a card's gate item belongs on: its assignee's first, then its owner ferret's. */
-const sessionsOf = (task: Pick<BoardTask, 'assignee' | 'owner'>): readonly string[] => [
-  ...new Set([effectiveAssignee(task), task.owner]),
-];
+/**
+ * Where the daemon asks the owner for a session: its agenda home (docs/agenda.md § Sub-ferret agenda), the owner's own
+ * ferret at the root of its lineage — never a sub-ferret.
+ */
+interface GateHomes {
+  of(sessionId: string): Promise<string>;
+}
 
 /** The card a gate item or a follow-up (the daemon's `task` source) is about, else `undefined`. */
 const gateCardOf = (item: AgendaItem): string | undefined => {
@@ -318,6 +322,14 @@ export class GateItems implements CardWriteObserver {
     }
   }
 
+  /** The agendas a card's gate item belongs on: the home of its assignee first, then the home of its owner ferret. */
+  private async sessionsOf(task: Pick<BoardTask, 'assignee' | 'owner'>): Promise<readonly string[]> {
+    const homes = await Promise.all(
+      [effectiveAssignee(task), task.owner].map(async each => await this.ports.homes.of(each).catch(() => each)),
+    );
+    return [...new Set(homes)];
+  }
+
   /** Brings one card's gate items in line with its lane, one pass per card at a time; `true` when it raised one. */
   private async reconcile(card: GateCard): Promise<boolean> {
     return await serially(this.passes, card.task.id, async () => await this.reconcileAlone(card));
@@ -327,7 +339,7 @@ export class GateItems implements CardWriteObserver {
     const { task } = card;
     const gate = gateOf(card, this.ports.lanes);
     const wanted = gate === undefined ? undefined : gateReference(gate);
-    const home = sessionsOf(task);
+    const home = await this.sessionsOf(task);
     const held = await this.held(task.id, home);
     for (const stale of held.gates.filter(each => each.item.sourceRef !== wanted)) {
       await this.ports.agenda.resolve(stale.sessionId, stale.item.id, DAEMON, GATE_MOVED_ON);
@@ -578,7 +590,7 @@ export class GateItems implements CardWriteObserver {
    * the daemon on behalf of the card's ferret. `undefined` when it could not be raised: the reopen goes on.
    */
   private async followup(task: BoardTask, gate: AgendaGate, words: string): Promise<OpenItem | undefined> {
-    const sessionId = effectiveAssignee(task);
+    const sessionId = await this.ports.homes.of(effectiveAssignee(task)).catch(() => effectiveAssignee(task));
     const ref = formatTaskRef(task);
     const mutation = await this.ports.agenda.raise(
       sessionId,

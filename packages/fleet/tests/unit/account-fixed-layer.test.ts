@@ -1103,10 +1103,12 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     // Assert
     should(text.split('\n')).have.length(2);
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
-    should(text).containEql('If you have a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('Never raise agenda items or notify the owner;');
+    should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
+    should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
     should(text).containEql('Your final report says how the owner tests it.');
-    should(text).containEql("it moves itself (start, PR, merge, `zz signal done`). No card? Don't make one.");
+    should(text).containEql('it moves itself (start, PR, merge, `zz signal done`). No card? Make none.');
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });
@@ -1117,7 +1119,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(400);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(460);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

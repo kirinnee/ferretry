@@ -322,9 +322,13 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   descendant acting on its ancestor stay refused; `add`, `progress`, `answer` and the owner's snooze/reply verbs
   are not covered, and the daemon's warden-escalation items are never the lead's to close. A sub-ferret that
   itself started a deeper session holds the same authority over that one.
+- **The daemon asks through the lead's agenda.** What the daemon raises about a sub-ferret (a gate item, a Not good
+  follow-up, a Warden escalation) goes on its **agenda home**, the owner's own ferret, never on the sub-ferret
+  ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
+  on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  report to your lead with `fy send`; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2339 characters** (3277 with Agenda mode on), **sub-ferret 1692**.
+  never raise agenda items or notify the owner, report to your lead with `fy send`; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2339 characters** (3277 with Agenda mode on), **sub-ferret 1748**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, the GitHub watcher's and sweep's) go to its lead.
