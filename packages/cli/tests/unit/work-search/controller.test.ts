@@ -57,8 +57,64 @@ describe('fy search', () => {
     await controller.search(['x'], { session: 'sess-b' });
 
     // Assert
-    should(gateway.searches[0]).eql({ query: { q: 'x', kind: 'task', open: true, limit: 5 }, as: 'sess-a' });
+    should(gateway.searches[0]).eql({
+      query: { q: 'x', kind: 'task', open: true, all: false, limit: 5 },
+      as: 'sess-a',
+    });
     should(gateway.searches[1]?.as).equal('sess-b');
+  });
+
+  it('should ask for the whole history with --all, and say nothing is hidden when it did', async () => {
+    // Arrange
+    const { controller, gateway, output } = build();
+    gateway.answer = { ...response([taskHit()]), olderHidden: 0 };
+
+    // Act
+    await controller.search(['relay'], { all: true });
+
+    // Assert
+    should(gateway.searches[0]?.query).containEql({ q: 'relay', all: true });
+    should(output.lines[0]).not.match(/hidden/u);
+  });
+
+  it('should say how many older closed items were hidden, and the command that shows them', async () => {
+    // Arrange
+    const { controller, gateway, output } = build();
+    gateway.answer = { ...response([taskHit()]), olderHidden: 3 };
+
+    // Act
+    await controller.search(['relay', 'choice'], {});
+
+    // Assert
+    const lines = output.lines[0]?.split('\n') ?? [];
+    should(lines.at(-1)).equal('3 older closed items hidden — fy search --all relay choice');
+  });
+
+  it('should keep the footer when the window left out every match', async () => {
+    // Arrange
+    const { controller, gateway, output } = build();
+    gateway.answer = { ...response([]), olderHidden: 1 };
+
+    // Act
+    await controller.search(['relay'], {});
+
+    // Assert
+    should(output.lines[0]?.split('\n')).eql([
+      'No cards or agenda items match “relay”.',
+      '1 older closed item hidden — fy search --all relay',
+    ]);
+  });
+
+  it('should print no footer for a daemon that does not count', async () => {
+    // Arrange
+    const { controller, gateway, output } = build();
+    gateway.answer = response([taskHit()]);
+
+    // Act
+    await controller.search(['relay'], {});
+
+    // Assert
+    should(output.lines[0]).not.match(/hidden/u);
   });
 
   it('should resolve a project by name', async () => {

@@ -1779,3 +1779,48 @@
     margin-bottom: var(--gap-md);
   }
 }
+
+/* ---- Find across every tab: the state chip on each result ---------------------------------------------- */
+.fy-find-chip {
+  flex-shrink: 0;
+  border: var(--stroke-control, 1px) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2, var(--surface));
+  padding: 1px var(--gap-md);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+}
+.fy-find-chip[data-find-chip='open'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-find-chip[data-find-chip='snoozed'],
+.fy-find-chip[data-find-chip='replied'] {
+  color: var(--fg);
+}
+/* The chip is ONE line at any width; it never wraps and never takes more than the row can spare. */
+.fy-find-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On a phone the chip sits under the title, so a long title is never squeezed beside it. */
+@media (max-width: 480px) {
+  .fy-find-row__top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--gap-xs);
+  }
+  .fy-find-row__top .fy-find-chip {
+    align-self: flex-start;
+  }
+}
+/* Find's own X is the only one: hide the browser's clear mark inside the field. */
+.fy-attn-inbox__find-input::-webkit-search-cancel-button {
+  display: none;
+  appearance: none;
+}

@@ -30,6 +30,8 @@ const searchQueryOf = (context: RouteContext): WorkSearchQuery => {
   }
   const open = queryValue(context.request, 'open');
   if (open !== undefined && open !== '') input.open = open === 'true' ? true : open === 'false' ? false : open;
+  const all = queryValue(context.request, 'all');
+  if (all !== undefined && all !== '') input.all = all === 'true' ? true : all === 'false' ? false : all;
   const limit = queryValue(context.request, 'limit');
   if (limit !== undefined && limit !== '') input.limit = /^[0-9]+$/u.test(limit) ? Number(limit) : limit;
   const parsed = WorkSearchQuerySchema.safeParse(input as WorkSearchQueryInput);

@@ -37,6 +37,22 @@ import { WorkIndex } from './work-index.ts';
 /** How stale a sweep of every ledger and every board's lanes may grow before a search starts the next. */
 export const WORK_SEARCH_SWEEP_MS = 5_000;
 
+/**
+ * How many cards, or how many sessions' ledgers, are indexed between yields to the event loop. Closed work of every
+ * age is indexed (the 30-day window is applied when searching), so a first build over a large fleet is split up
+ * rather than run as one synchronous pass that would stall the daemon.
+ */
+export const WORK_SEARCH_INDEX_CHUNK = 100;
+
+const yieldToLoop = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
+
+/** `items` in runs of at most `size`. */
+const chunksOf = <T>(items: readonly T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let start = 0; start < items.length; start += size) chunks.push(items.slice(start, start + size));
+  return chunks;
+};
+
 /** The board's cards, as the store holds them now. Each card's object changes exactly when the card does. */
 export interface WorkCardSource {
   cards(): Promise<readonly BoardTask[]>;
@@ -93,8 +109,13 @@ export class WorkSearchService {
 
   async search(query: WorkSearchQuery): Promise<WorkSearchResponse> {
     await this.current();
-    const { hits, total } = this.index.search(query, this.ports.now());
-    return { hits: await this.masked(hits), total, indexed: this.index.size };
+    const { hits, total, olderHidden } = this.index.search(query, this.ports.now());
+    return {
+      hits: await this.masked(hits),
+      total,
+      indexed: this.index.size,
+      ...(query.all === undefined ? {} : { olderHidden }),
+    };
   }
 
   async related(request: WorkRelatedRequest): Promise<WorkRelatedResponse> {
@@ -171,17 +192,18 @@ export class WorkSearchService {
     if (changed.length === 0) return;
     for (const projectId of new Set(changed.map(card => card.projectId)))
       if (!this.laneSets.has(projectId)) this.laneSets.set(projectId, await this.ports.cards.laneSet(projectId));
-    const nowMs = this.ports.now();
-    const documents = await this.ports.redaction.batch(scrub =>
-      changed.map(card => ({
-        card,
-        document: cardDocument(card, this.laneSets.get(card.projectId) ?? undefined, scrub, nowMs),
-      })),
-    );
-    for (const { card, document } of documents) {
-      this.seenCards.set(card.id, card);
-      if (document === undefined) this.index.remove(taskKey(card.id));
-      else this.index.put(document);
+    for (const chunk of chunksOf(changed, WORK_SEARCH_INDEX_CHUNK)) {
+      const documents = await this.ports.redaction.batch(scrub =>
+        chunk.map(card => ({
+          card,
+          document: cardDocument(card, this.laneSets.get(card.projectId) ?? undefined, scrub),
+        })),
+      );
+      for (const { card, document } of documents) {
+        this.seenCards.set(card.id, card);
+        this.index.put(document);
+      }
+      await yieldToLoop();
     }
   }
 
@@ -198,16 +220,17 @@ export class WorkSearchService {
         this.ports.warn(`work search could not read the agenda of ${sessionId}: ${message(error)}`);
       }
     }
-    if (read.length === 0) return;
-    const nowMs = this.ports.now();
-    const documents = await this.ports.redaction.batch(scrub =>
-      read.map(({ sessionId, ledger }) => ({
-        sessionId,
-        ledger,
-        documents: ledger === null ? [] : ledgerDocuments(ledger, scrub, nowMs),
-      })),
-    );
-    for (const { sessionId, ledger, documents: found } of documents) this.replaceSession(sessionId, ledger, found);
+    for (const chunk of chunksOf(read, WORK_SEARCH_INDEX_CHUNK)) {
+      const documents = await this.ports.redaction.batch(scrub =>
+        chunk.map(({ sessionId, ledger }) => ({
+          sessionId,
+          ledger,
+          documents: ledger === null ? [] : ledgerDocuments(ledger, scrub),
+        })),
+      );
+      for (const { sessionId, ledger, documents: found } of documents) this.replaceSession(sessionId, ledger, found);
+      await yieldToLoop();
+    }
   }
 
   private replaceSession(sessionId: string, ledger: AgendaLedger | null, documents: readonly WorkDocument[]): void {

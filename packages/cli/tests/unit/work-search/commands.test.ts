@@ -39,6 +39,14 @@ describe('fy search command surface', () => {
     should(gateway.searches[0]).match({ query: { q: 'F303', kind: 'task', open: true, limit: 5 }, as: 's9' });
   });
 
+  it('should pass --all through to the search', async () => {
+    const { parsed, gateway } = run(['search', 'relay', '--all']);
+
+    await parsed;
+
+    should(gateway.searches[0]?.query).containEql({ q: 'relay', all: true });
+  });
+
   it('should look the --project name up before searching', async () => {
     const { parsed, gateway } = run(['search', 'relay', '--project', 'ferretry']);
 

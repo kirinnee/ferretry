@@ -204,9 +204,9 @@ describe('Inbox — cards waiting for a try', () => {
     const { root } = await open();
     const find = await openFind(root);
     await fill(find, 'ferretry');
-    expect(root.querySelectorAll('[data-to-test]')).toHaveLength(2);
+    expect(root.querySelectorAll('[data-find-row] [data-find-chip="card"]')).toHaveLength(2);
     await fill(find, 'no such project');
-    expect(root.querySelector('[data-to-test]')).toBeNull();
+    expect(root.querySelector('[data-find-row]')).toBeNull();
   });
 });
 

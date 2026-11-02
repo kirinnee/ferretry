@@ -20,11 +20,7 @@ import type {
   WorkKind,
   WorkState,
 } from '@ferretry/protocol';
-import { WORK_SEARCH_CLOSED_WINDOW_DAYS } from '@ferretry/protocol';
 import type { AgendaLedger } from '../agenda/state-machine.ts';
-
-const DAY_MS = 86_400_000;
-const CLOSED_WINDOW_MS = WORK_SEARCH_CLOSED_WINDOW_DAYS * DAY_MS;
 
 /** One named piece of a document's text. */
 interface WorkDocumentField {
@@ -66,24 +62,15 @@ const instantMs = (at: string): number => {
   return Number.isFinite(ms) ? ms : 0;
 };
 
-/** Whether closed work is still recent enough to find. */
-const withinWindow = (state: WorkState, updatedAtMs: number, nowMs: number): boolean =>
-  state === 'open' || nowMs - updatedAtMs <= CLOSED_WINDOW_MS;
-
 /**
- * A card as a document, or `undefined` when it closed or dropped longer ago than the window. A card on a
+ * A card as a document. Old closed work is kept: the index decides what the window hides, so a query
+ * can still ask for all of it. A card on a
  * board whose lanes cannot be read stands as open under its lane id: findable beats hidden.
  */
-export const cardDocument = (
-  card: BoardTask,
-  laneSet: LaneSet | undefined,
-  scrub: ScrubText,
-  nowMs: number,
-): WorkDocument | undefined => {
+export const cardDocument = (card: BoardTask, laneSet: LaneSet | undefined, scrub: ScrubText): WorkDocument => {
   const lane = laneSet?.lanes.find(candidate => candidate.id === card.laneId);
   const state: WorkState = card.dropped !== null ? 'dropped' : lane?.category === 'closed' ? 'closed' : 'open';
   const updatedAtMs = instantMs(card.dropped?.at ?? card.history.at(-1)?.at ?? card.createdAt);
-  if (!withinWindow(state, updatedAtMs, nowMs)) return undefined;
   const notes = card.history.flatMap(event => (event.type === 'note' ? [event.text] : []));
   return {
     key: taskKey(card.id),
@@ -143,12 +130,10 @@ const itemDocument = (
   item: AgendaItem | ResolvedAgendaItem,
   resolved: ResolvedAgendaItem | undefined,
   scrub: ScrubText,
-  nowMs: number,
 ): WorkDocument | undefined => {
   if (item.notice === true) return undefined;
   const state: WorkState = resolved === undefined ? 'open' : 'closed';
   const updatedAtMs = resolved === undefined ? lastActivityMs(item) : instantMs(resolved.resolvedAt);
-  if (!withinWindow(state, updatedAtMs, nowMs)) return undefined;
   const title = item.title ?? item.subject;
   return {
     key: agendaKey(sessionId, item.id),
@@ -194,11 +179,11 @@ const itemDocument = (
 };
 
 /** Every findable item of one session's agenda. */
-export const ledgerDocuments = (ledger: AgendaLedger, scrub: ScrubText, nowMs: number): readonly WorkDocument[] =>
+export const ledgerDocuments = (ledger: AgendaLedger, scrub: ScrubText): readonly WorkDocument[] =>
   ledger.entries.flatMap(entry => {
     const document =
       entry.lifecycle === 'active'
-        ? itemDocument(ledger.sessionId, entry.item, undefined, scrub, nowMs)
-        : itemDocument(ledger.sessionId, entry.item, entry.item, scrub, nowMs);
+        ? itemDocument(ledger.sessionId, entry.item, undefined, scrub)
+        : itemDocument(ledger.sessionId, entry.item, entry.item, scrub);
     return document === undefined ? [] : [document];
   });

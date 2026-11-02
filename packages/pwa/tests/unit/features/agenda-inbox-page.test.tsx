@@ -1002,17 +1002,16 @@ describe('AgendaInboxPage Resolved filter', () => {
     await view.unmount();
   });
 
-  it('says nothing matches when Find hides every resolved item, and Show everything brings them back', async () => {
-    const { mounted } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+  it('says nothing matches when the machine hides every resolved item, and Show everything brings them back', async () => {
+    const { mounted } = mountFilter({
+      cards: [threeWay, twoWay],
+      resolved: [row('A1', '2026-08-01T09:00:00.000Z')],
+    } as never);
     const view = await mounted;
     const root = view.container;
     await choose(root, 'resolved');
     expect(root.querySelectorAll('[data-agenda-record]')).toHaveLength(1);
-    const find = await openFind(root);
-    await interact(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'zzz-no-such-thing');
-      find.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await chooseFromMenu(root, 'machine', 'laptop');
     expect(root.querySelectorAll('[data-agenda-record]')).toHaveLength(0);
     expect(root.querySelector('[data-agenda-resolved-empty]')).toBeNull();
     const back = must(root.querySelector<HTMLButtonElement>('[data-agenda-no-match] button'), 'Show everything');

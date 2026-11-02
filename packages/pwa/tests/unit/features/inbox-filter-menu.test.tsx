@@ -120,9 +120,10 @@ describe('FindBox and FindToggle', () => {
       must(view.container.querySelector<HTMLButtonElement>('[data-agenda-find-open]'), 'the icon').click(),
     );
     expect(view.container.querySelector('input')).not.toBeNull();
-    await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[data-agenda-find-close]'), 'close').click(),
-    );
+    const close = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-find-close]'), 'close');
+    expect(close.getAttribute('aria-label')).toBe('Close find');
+    expect(close.title).toBe('Close find');
+    await interact(() => close.click());
     expect(typed).toEqual(['']);
     expect(view.container.querySelector('input')).toBeNull();
     await view.unmount();

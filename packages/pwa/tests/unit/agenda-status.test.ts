@@ -3,6 +3,7 @@ import {
   agendaAuthor,
   agendaStatus,
   clockWords,
+  parkedUntilWords,
   parkedWords,
   neededByWords,
   nextOwnerItem,
@@ -105,6 +106,18 @@ describe('agendaAuthor', () => {
     expect(agendaAuthor({ raisedBy: 'daemon', sourceRef: 'warden:verdict-1' }, 'Johnnie')).toBe('Warden');
     expect(agendaAuthor({ raisedBy: 'daemon', sourceRef: 'push:x' }, 'Johnnie')).toBe('Johnnie');
     expect(agendaAuthor({ raisedBy: 'agent', sourceRef: 'warden:x' }, 'Johnnie')).toBe('Johnnie');
+  });
+});
+
+describe('parkedUntilWords', () => {
+  it('says when a snoozed item wakes, and nothing for one that is not snoozed or has no readable wake', () => {
+    const park = (parked: Record<string, string>) => agendaItem('A1', { parked } as never);
+    expect(parkedUntilWords(park({ reason: 'snoozed', at: at(29, 11), until: at(30, 15) }), NOW)).toBe(
+      'tomorrow 15:00',
+    );
+    expect(parkedUntilWords(park({ reason: 'snoozed', at: at(29, 11), until: 'nope' }), NOW)).toBeNull();
+    expect(parkedUntilWords(park({ reason: 'replied', at: at(29, 11) }), NOW)).toBeNull();
+    expect(parkedUntilWords(agendaItem('A1', {}), NOW)).toBeNull();
   });
 });
 

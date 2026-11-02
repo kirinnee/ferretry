@@ -13,7 +13,7 @@ const indexOf = (...documents: (ReturnType<typeof cardDocument> | readonly Retur
   for (const entry of documents.flat()) if (entry !== undefined) index.put(entry);
   return index;
 };
-const cardDoc = (overrides: Parameters<typeof card>[0]) => cardDocument(card(overrides), LANES, same, NOW_MS);
+const cardDoc = (overrides: Parameters<typeof card>[0]) => cardDocument(card(overrides), LANES, same);
 const ids = (index: WorkIndex, q: string, rest: Partial<WorkSearchQuery> = {}) =>
   index.search(query(q, rest), NOW_MS).hits.map(hit => hit.id);
 
@@ -41,7 +41,7 @@ describe('the work search index', () => {
       why: 'the relay drops sessions after a deploy',
       history: [{ at: at(NOW_MS), kind: 'updated', note: 'checked the cloudflare logs' }],
     });
-    const index = indexOf(ledgerDocuments(ledger('lead', [open]), same, NOW_MS));
+    const index = indexOf(ledgerDocuments(ledger('lead', [open]), same));
 
     // Act
     const byBody = index.search(query('relay drops'), NOW_MS).hits;
@@ -109,7 +109,7 @@ describe('the work search index', () => {
     const index = indexOf(
       cardDoc({ id: 'F1', title: 'Search cards' }),
       cardDoc({ id: 'F2', title: 'Search agenda', laneId: 'closed' }),
-      ledgerDocuments(ledger('lead', [item({ id: 'A1', subject: 'Search everything' })]), same, NOW_MS),
+      ledgerDocuments(ledger('lead', [item({ id: 'A1', subject: 'Search everything' })]), same),
     );
 
     // Act / Assert
@@ -136,26 +136,90 @@ describe('the work search index', () => {
     should(ids(index, 'relay')).eql(['F2', 'F1']);
   });
 
-  it('should leave out work closed longer ago than the window, and keep old open work', () => {
-    // Arrange
+  describe('the closed-work window', () => {
     const long = NOW_MS - 45 * DAY_MS;
     const created = [
       { seq: 1, at: at(long), actor: { kind: 'owner' as const }, type: 'created' as const, laneId: 'closed' },
     ];
+    const old = () =>
+      indexOf(
+        cardDoc({ id: 'F1', title: 'Relay rollout', laneId: 'closed', history: created }),
+        cardDoc({ id: 'F2', title: 'Relay rollout notes', laneId: 'todo', history: created }),
+        ledgerDocuments(
+          ledger('lead', [], [addressed(item({ id: 'A1', subject: 'Relay rollout ask' }), { resolvedAt: at(long) })]),
+          same,
+        ),
+      );
 
-    // Act
-    const closed = cardDocument(card({ id: 'F1', laneId: 'closed', history: created }), LANES, same, NOW_MS);
-    const open = cardDocument(card({ id: 'F2', laneId: 'todo', history: created }), LANES, same, NOW_MS);
-    const resolved = ledgerDocuments(
-      ledger('lead', [], [addressed(item({ id: 'A1' }), { resolvedAt: at(long) })]),
-      same,
-      NOW_MS,
-    );
+    it('should keep old closed work in the index so a query can ask for it', () => {
+      // Arrange
+      const index = old();
 
-    // Assert
-    should(closed).be.undefined();
-    should(open?.identity.state).equal('open');
-    should(resolved).eql([]);
+      // Act
+      const all = index.search(query('relay rollout', { all: true }), NOW_MS);
+
+      // Assert
+      should(all.hits.map(hit => hit.id).sort()).eql(['A1', 'F1', 'F2']);
+    });
+
+    it('should leave out old closed work, keep old open work, and count what it left out', () => {
+      // Arrange
+      const index = old();
+
+      // Act
+      const result = index.search(query('relay rollout'), NOW_MS);
+
+      // Assert
+      should(result.hits.map(hit => hit.id)).eql(['F2']);
+      should(result.total).equal(1);
+      should(result.olderHidden).equal(2);
+    });
+
+    it('should report nothing hidden when the query asks for all', () => {
+      // Arrange
+      const index = old();
+
+      // Act
+      const result = index.search(query('relay rollout', { all: true }), NOW_MS);
+
+      // Assert
+      should(result.olderHidden).equal(0);
+      should(result.total).equal(3);
+    });
+
+    it('should find old closed work by its exact id, in every spelling, without asking for all', () => {
+      // Arrange
+      const index = old();
+
+      // Act
+      const spellings = ['F1', '&F1', 'f1', 'A1', '!A1'].map(text => ids(index, text));
+
+      // Assert
+      should(spellings).eql([['F1'], ['F1'], ['F1'], ['A1'], ['A1']]);
+    });
+
+    it('should not let an exact id drag other old closed work in with it', () => {
+      // Arrange
+      const index = old();
+
+      // Act
+      const result = index.search(query('F1'), NOW_MS);
+
+      // Assert
+      should(result.hits.map(hit => hit.id)).eql(['F1']);
+      should(result.olderHidden).equal(0);
+    });
+
+    it('should still honour the open filter when asked for all', () => {
+      // Arrange
+      const index = old();
+
+      // Act
+      const result = index.search(query('relay rollout', { all: true, open: true }), NOW_MS);
+
+      // Assert
+      should(result.hits.map(hit => hit.id)).eql(['F2']);
+    });
   });
 
   it('should index only the text a card shows, scrubbed, and never a plain notification', () => {
@@ -165,9 +229,8 @@ describe('the work search index', () => {
       card({ id: 'F1', title: 'Login', summary: 'the password is hunter2', terms: [] }),
       LANES,
       scrub,
-      NOW_MS,
     );
-    const notices = ledgerDocuments(ledger('lead', [item({ id: 'A1', notice: true })]), same, NOW_MS);
+    const notices = ledgerDocuments(ledger('lead', [item({ id: 'A1', notice: true })]), same);
 
     // Act
     const index = indexOf(document);
@@ -270,7 +333,7 @@ describe('what an agenda item says once it is addressed', () => {
     const resolved = addressed(asked, { response: response as never });
 
     // Act
-    const index = indexOf(ledgerDocuments(ledger('lead', [], [resolved]), same, NOW_MS));
+    const index = indexOf(ledgerDocuments(ledger('lead', [], [resolved]), same));
 
     // Assert
     should(index.search(query(word), NOW_MS).hits.map(hit => [hit.id, hit.match.field])).eql([['A1', 'resolution']]);
@@ -282,7 +345,7 @@ describe('what an agenda item says once it is addressed', () => {
     const resolved = addressed(asked, { response: { kind: 'permission', decision: 'approve' } as never });
 
     // Act
-    const [document] = ledgerDocuments(ledger('lead', [], [resolved]), same, NOW_MS);
+    const [document] = ledgerDocuments(ledger('lead', [], [resolved]), same);
 
     // Assert
     should(document?.fields.map(field => field.field)).not.containEql('resolution');
@@ -294,7 +357,7 @@ describe('what an agenda item says once it is addressed', () => {
     const done = addressed(item({ id: 'A2', subject: 'Pick a relay' }));
 
     // Act
-    const index = indexOf(ledgerDocuments(ledger('lead', [], [dismissed, done]), same, NOW_MS));
+    const index = indexOf(ledgerDocuments(ledger('lead', [], [dismissed, done]), same));
 
     // Assert
     should(
@@ -356,11 +419,11 @@ describe('the index as it changes', () => {
     should(ids(index, 'carr')).eql(['F1']);
 
     // Act
-    index.put(cardDoc({ id: 'F2', title: 'Carriage return' })!);
+    index.put(cardDoc({ id: 'F2', title: 'Carriage return' }));
     const both = ids(index, 'carr').sort();
     index.remove('task:F1');
     index.remove('task:F2');
-    index.put(cardDoc({ id: 'F3', title: 'Carrot cake' })!);
+    index.put(cardDoc({ id: 'F3', title: 'Carrot cake' }));
 
     // Assert
     should(both).eql(['F1', 'F2']);
@@ -372,7 +435,7 @@ describe('the index as it changes', () => {
     const index = indexOf(
       cardDoc({ id: 'F1', title: 'Relay here' }),
       cardDoc({ id: 'F2', title: 'Relay there', projectId: '22222222-2222-4222-8222-222222222222' }),
-      ledgerDocuments(ledger('lead', [item({ id: 'A1', subject: 'Relay question' })]), same, NOW_MS),
+      ledgerDocuments(ledger('lead', [item({ id: 'A1', subject: 'Relay question' })]), same),
     );
 
     // Act / Assert

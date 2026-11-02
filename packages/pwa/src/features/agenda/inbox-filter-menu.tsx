@@ -154,7 +154,11 @@ export function FindBox({
   );
 }
 
-/** Find behind a search icon: the icon opens the box in the row; closing it clears what was typed. */
+/**
+ * Find behind a search icon: the icon opens the box in the row. ONE button ends it — the X beside the box CLOSES
+ * Find and clears the words with it; the browser's own clear mark inside the field is hidden so there is never a
+ * second X to wonder about. Escape clears the words and keeps Find open.
+ */
 export function FindToggle({ query, onChange }: { readonly query: string; readonly onChange: (next: string) => void }) {
   const [open, setOpen] = useState(false);
   if (!open && query === '') {
@@ -174,13 +178,14 @@ export function FindToggle({ query, onChange }: { readonly query: string; readon
     <span className="fy-filter-menu__finding">
       <FindBox focus={open} onChange={onChange} query={query} />
       <button
-        aria-label="Close Find"
+        aria-label="Close find"
         className="fy-filter-menu__find"
         data-agenda-find-close=""
         onClick={() => {
           onChange('');
           setOpen(false);
         }}
+        title="Close find"
         type="button"
       >
         <X aria-hidden="true" size={18} />

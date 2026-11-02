@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { type BoardTask, WorkSearchQuerySchema } from '@ferretry/protocol';
 import should from 'should';
-import { WORK_SEARCH_SWEEP_MS } from '../../../src/lib/work-search/index.ts';
-import { card, FakeRedaction, FakeSources, item, ledger, NOW_MS, PROJECT, service } from './support.ts';
+import { WORK_SEARCH_INDEX_CHUNK, WORK_SEARCH_SWEEP_MS } from '../../../src/lib/work-search/index.ts';
+import { at, card, DAY_MS, FakeRedaction, FakeSources, item, ledger, NOW_MS, PROJECT, service } from './support.ts';
 
 const q = (text: string, rest: Record<string, unknown> = {}) => WorkSearchQuerySchema.parse({ q: text, ...rest });
 
@@ -19,6 +19,59 @@ describe('the work search service', () => {
 
     // Assert
     should(after.hits.map(hit => hit.id)).eql(['F1']);
+  });
+
+  it('should say how many older closed items the window left out, only to a query that sent `all`', async () => {
+    // Arrange
+    const old = [
+      {
+        seq: 1,
+        at: at(NOW_MS - 45 * DAY_MS),
+        actor: { kind: 'owner' as const },
+        type: 'created' as const,
+        laneId: 'closed',
+      },
+    ];
+    const { search } = service(
+      new FakeSources([card({ id: 'F1', title: 'Relay carrier', laneId: 'closed', history: old })]),
+    );
+
+    // Act
+    const plain = await search.search(q('relay'));
+    const hidden = await search.search(q('relay', { all: false }));
+    const everything = await search.search(q('relay', { all: true }));
+
+    // Assert
+    should(plain).not.have.property('olderHidden');
+    should(hidden.hits).eql([]);
+    should(hidden.olderHidden).equal(1);
+    should(everything.hits.map(hit => hit.id)).eql(['F1']);
+    should(everything.olderHidden).equal(0);
+  });
+
+  it('should index a large board and many ledgers in chunks, yielding to the event loop between them', async () => {
+    // Arrange: one more card and one more ledger than a chunk holds. The fakes answer in microtasks, so an
+    // immediate queued now runs before the search ends only if indexing yields to the event loop.
+    const cards = Array.from({ length: WORK_SEARCH_INDEX_CHUNK + 1 }, (_, index) =>
+      card({ id: `F${String(index + 1)}`, title: `Relay ${String(index + 1)}` }),
+    );
+    const ledgers = Array.from({ length: WORK_SEARCH_INDEX_CHUNK + 1 }, (_, index) =>
+      ledger(`s${String(index)}`, [item({ id: 'A1', subject: `Relay question ${String(index)}` })]),
+    );
+    const redaction = new FakeRedaction();
+    const { search } = service(new FakeSources(cards, ledgers), { redaction });
+    let yielded = false;
+    setImmediate(() => {
+      yielded = true;
+    });
+
+    // Act
+    const found = await search.search(q('relay', { limit: 50 }));
+
+    // Assert: two card chunks, two ledger chunks and the answer's own scrub; the loop ran in between.
+    should(found.hits.length).be.above(0);
+    should(redaction.batches).equal(5);
+    should(yielded).be.true();
   });
 
   it('should re-index only the cards whose object changed', async () => {

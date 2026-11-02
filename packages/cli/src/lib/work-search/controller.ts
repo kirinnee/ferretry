@@ -2,11 +2,12 @@ import { MAX_WORK_SEARCH_LIMIT, type WorkKind, WorkKindSchema } from '@ferretry/
 import { resolveBoardProject } from '../board-lanes/lane-request';
 import { refuse } from '../tasks/errors';
 import type { IWorkSearchGateway, IWorkSearchOutput } from './ports';
-import { renderHits, renderNoMatch } from './render';
+import { renderHits, renderNoMatch, renderOlderHidden } from './render';
 
 export interface WorkSearchFlags {
   readonly kind?: string | undefined;
   readonly open?: boolean | undefined;
+  readonly all?: boolean | undefined;
   readonly project?: string | undefined;
   readonly limit?: string | undefined;
   readonly json?: boolean | undefined;
@@ -57,13 +58,15 @@ export class WorkSearchController {
         q: query,
         ...(kind === undefined ? {} : { kind }),
         open: flags.open === true,
+        all: flags.all === true,
         ...(project === undefined ? {} : { project }),
         ...(limit === undefined ? {} : { limit }),
       },
       as,
     );
     if (flags.json === true) return this.deps.output.success(JSON.stringify(answer, null, 2));
-    if (answer.hits.length === 0) return this.deps.output.success(renderNoMatch(query, kind));
+    const older = renderOlderHidden(answer.olderHidden, `${this.deps.binary} search --all ${words.join(' ')}`);
+    if (answer.hits.length === 0) return this.deps.output.success([renderNoMatch(query, kind), ...older].join('\n'));
     const directory = await this.deps.gateway.sessions();
     const lines = renderHits(answer.hits, { directory, own: as, binary: this.deps.binary });
     const more =
@@ -72,6 +75,6 @@ export class WorkSearchController {
             `Showing ${String(answer.hits.length)} of ${String(answer.total)}; narrow it with --kind, --open or --project, or raise --limit.`,
           ]
         : [];
-    this.deps.output.success([...lines, ...more].join('\n'));
+    this.deps.output.success([...lines, ...more, ...older].join('\n'));
   }
 }
