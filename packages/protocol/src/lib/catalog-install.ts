@@ -30,11 +30,17 @@ import {
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
   SharedCatalogItemSchema,
+  SignedCatalogItemVersionsSchema,
   SignedCatalogManifestSchema,
 } from './shared-catalog.ts';
+import { CatalogChangesSchema } from './shared-catalog-diff.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
 export const CATALOG_INSTALLS_PATH = '/v1/catalog-installs' as const;
+
+/** `PATCH <CATALOG_INSTALLS_PATH>/<scope>/<installId>`: stay on a version or skip one (docs/catalogs.md § Stay or skip). */
+export const catalogInstallPath = (scope: 'project' | 'runtime', installId: string): string =>
+  `${CATALOG_INSTALLS_PATH}/${scope}/${installId}`;
 
 /** The two scopes' own routes: `<CATALOG_INSTALLS_PATH>/project` and `…/runtime`, each with a `/preview`. */
 export const catalogInstallsPath = (scope: 'project' | 'runtime', preview = false): string =>
@@ -94,6 +100,16 @@ export const CatalogInstallPreviewRequestSchema = z.strictObject({
   target: CatalogInstallTargetSchema,
   /** The person chose a version lower than the one installed; the review then says so first. */
   allowOlder: z.literal(true).optional(),
+  /**
+   * The publisher's signed list of the versions it offers for this item. REQUIRED when `item` is not the version the
+   * manifest lists (moving to an older or other offered version), and checked against the manifest. Left out otherwise.
+   */
+  signedVersions: SignedCatalogItemVersionsSchema.optional(),
+  /**
+   * The person saw that files of this install were edited here and chose to replace them. The preview then lists
+   * `edited` and keeps the hashes it saw, so a file edited again before the apply is refused.
+   */
+  replaceEdited: z.literal(true).optional(),
 });
 export type CatalogInstallPreviewRequest = z.infer<typeof CatalogInstallPreviewRequestSchema>;
 
@@ -123,6 +139,17 @@ export const CatalogInstallSecretSchema = z.strictObject({
 });
 export type CatalogInstallSecret = z.infer<typeof CatalogInstallSecretSchema>;
 
+/** What was changed on this machine since the install wrote it, as a Replace would overwrite it. */
+export const CatalogInstallEditedSchema = z.strictObject({
+  /** Files of a skill folder, relative to it. */
+  paths: z.array(z.string().min(1).max(4_096)).max(256),
+  /** The runtime's stored component was edited. */
+  component: z.boolean().optional(),
+  /** The `.mcp.json` entry (the server's name) was edited. */
+  entry: z.string().min(1).max(64).optional(),
+});
+export type CatalogInstallEdited = z.infer<typeof CatalogInstallEditedSchema>;
+
 /** The review: what B verified, and everything the item brings. */
 export const CatalogInstallPreviewSchema = z.strictObject({
   previewId: CatalogInstallPreviewIdSchema,
@@ -138,6 +165,10 @@ export const CatalogInstallPreviewSchema = z.strictObject({
   warnings: z.array(CatalogInstallWarningSchema),
   /** The install this would replace at the same target, when there is one. */
   replaces: z.strictObject({ installId: CatalogInstallIdSchema, version: z.number().int().min(1) }).optional(),
+  /** When it replaces: what changed, from the copy on THIS machine (as installed, local edits included) to this item. */
+  changes: CatalogChangesSchema.optional(),
+  /** `replaceEdited` was asked for: what this machine's edits are that the install will overwrite. */
+  edited: CatalogInstallEditedSchema.optional(),
 });
 export type CatalogInstallPreview = z.infer<typeof CatalogInstallPreviewSchema>;
 
@@ -163,8 +194,24 @@ export const CatalogInstallSchema = z.strictObject({
   destination: z.string().min(1),
   /** Placeholder → the installer's own secret it was bound to, or `null` when left unbound. */
   secretBindings: CatalogSecretBindingsSchema,
+  /** The person chose to stay on this version: the app does not ask about any update. */
+  hold: z.literal(true).optional(),
+  /** The person skipped this version number: the app does not ask about that one. */
+  skippedVersion: z.number().int().min(1).optional(),
 });
 export type CatalogInstall = z.infer<typeof CatalogInstallSchema>;
+
+/**
+ * `PATCH <CATALOG_INSTALLS_PATH>/<scope>/<installId>`: stay or skip. `hold: false` and `skippedVersion: null` clear
+ * what was set. Nothing here is ever automatic and nothing here touches a file.
+ */
+export const CatalogInstallPrefsRequestSchema = z
+  .strictObject({
+    hold: z.boolean().optional(),
+    skippedVersion: z.number().int().min(1).nullable().optional(),
+  })
+  .refine(body => body.hold !== undefined || body.skippedVersion !== undefined, 'say hold, skippedVersion, or both');
+export type CatalogInstallPrefsRequest = z.infer<typeof CatalogInstallPrefsRequestSchema>;
 
 /** What an apply answers: the install as recorded, and anything the person should know about how it landed. */
 export const CatalogInstalledSchema = z.strictObject({
@@ -199,8 +246,10 @@ export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
  * - `catalog_target_unknown`: B does not know that project, runtime or profile.
  * - `catalog_preview_unknown`, `catalog_preview_expired`: apply again from a fresh preview.
  * - `catalog_bindings_invalid`: a placeholder was left out, an extra one named, or an own secret B lacks.
- * - `catalog_install_conflict`: something already sits where the item would land, and B did not write it,
- *   or what B wrote there was edited on this machine since.
+ * - `catalog_install_conflict`: something already sits where the item would land, and B did not write it.
+ * - `catalog_install_edited`: what THIS install wrote there was edited on this machine since. Nothing is
+ *   overwritten until the person asks to replace the edits (`replaceEdited`); a file edited again after
+ *   that review is refused the same way.
  * - `catalog_install_unknown`: B has no install with that id (remove).
  */
 export const CATALOG_INSTALL_REFUSALS = [
@@ -216,6 +265,7 @@ export const CATALOG_INSTALL_REFUSALS = [
   'catalog_preview_expired',
   'catalog_bindings_invalid',
   'catalog_install_conflict',
+  'catalog_install_edited',
   'catalog_install_unknown',
 ] as const;
 export const CatalogInstallRefusalSchema = z.enum(CATALOG_INSTALL_REFUSALS);

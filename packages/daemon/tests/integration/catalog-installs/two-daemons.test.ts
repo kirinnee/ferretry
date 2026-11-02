@@ -6,6 +6,7 @@ import type { CatalogInstallPreviewRequest } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
 import { FileCatalogInstallStore } from '../../../src/adapters/catalog-installs/file-store.ts';
+import { FileCatalogInstallPrefsStore } from '../../../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../../../src/adapters/catalog-installs/project-skill-files.ts';
 import { FileRuntimeSkillAssets } from '../../../src/adapters/catalog-installs/runtime-skill-assets.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
@@ -56,6 +57,7 @@ async function machineB() {
   const inner = new CatalogInstallService({
     crypto,
     store: new FileCatalogInstallStore(paths, new StateFileSystem(paths)),
+    prefs: new FileCatalogInstallPrefsStore(paths, new StateFileSystem(paths)),
     projectRoots: async () => [project],
     mcpFiles: new FileMcpProjectFiles(),
     skillFiles: new FileProjectSkillFiles(),

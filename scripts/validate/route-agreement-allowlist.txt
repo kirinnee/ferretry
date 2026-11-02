@@ -123,3 +123,5 @@ unreached GET /v1/catalog-items/:itemId/versions/:version # CORRECT: daemon-firs
 unreached POST /v1/catalog-items/:itemId/versions/preview # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
 unreached POST /v1/catalog-items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
 unreached GET /v1/shared/catalogs/:catalogId/items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-2); the installer and member app dial the signed version list in a later slice
+unreached PATCH /v1/catalog-installs/project/:installId # CORRECT: daemon-first slice (catalogs 3d-3); the app's update card dials stay and skip in a later slice
+unreached PATCH /v1/catalog-installs/runtime/:installId # CORRECT: daemon-first slice (catalogs 3d-3); the app's update card dials stay and skip in a later slice

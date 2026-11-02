@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CATALOG_INSTALL_REFUSALS,
+  catalogInstallPath,
+  CatalogInstallPrefsRequestSchema,
   catalogInstallsPath,
   CatalogInstallPreviewIdSchema,
   CatalogInstallRequestSchema,
@@ -45,6 +47,19 @@ describe('catalog install wire', () => {
     expect(CatalogInstallPreviewIdSchema.safeParse('cip_short').success).toBe(false);
   });
 
+  it('asks for a hold, a skipped version or both, and lets either be cleared', () => {
+    expect(CatalogInstallPrefsRequestSchema.safeParse({ hold: true }).success).toBe(true);
+    expect(CatalogInstallPrefsRequestSchema.safeParse({ hold: false, skippedVersion: null }).success).toBe(true);
+    expect(CatalogInstallPrefsRequestSchema.safeParse({ skippedVersion: 3 }).success).toBe(true);
+    for (const body of [{}, { skippedVersion: 0 }, { hold: 'yes' }, { other: 1 }]) {
+      expect(CatalogInstallPrefsRequestSchema.safeParse(body).success).toBe(false);
+    }
+  });
+
+  it('names the edited refusal', () => {
+    expect(CATALOG_INSTALL_REFUSALS).toContain('catalog_install_edited');
+  });
+
   it('keeps every refusal distinct', () => {
     expect(new Set(CATALOG_INSTALL_REFUSALS).size).toBe(CATALOG_INSTALL_REFUSALS.length);
   });
@@ -54,5 +69,9 @@ describe('catalog install paths', () => {
   it('names each scope’s apply route and its preview route', () => {
     expect(catalogInstallsPath('project')).toBe('/v1/catalog-installs/project');
     expect(catalogInstallsPath('runtime', true)).toBe('/v1/catalog-installs/runtime/preview');
+  });
+
+  it('names the route that stays or skips one install', () => {
+    expect(catalogInstallPath('runtime', 'cin_x')).toBe('/v1/catalog-installs/runtime/cin_x');
   });
 });
