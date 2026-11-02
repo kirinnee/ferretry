@@ -157,7 +157,9 @@ function trips(text: string): boolean {
 export function mayHoldSecret(text: string): boolean {
   if (text.length > MAX_SCANNED) return true;
   if (trips(text) || hasLongWord(text) || hasUserInfo(text) || hasCredentialFlag(text)) return true;
-  const joined = text.replace(INVISIBLE, '').replace(LINE_BREAKS, '');
+  const unmarked = text.replace(INVISIBLE, '');
+  if (unmarked.length !== text.length && hasLongWord(unmarked)) return true;
+  const joined = unmarked.replace(LINE_BREAKS, '');
   return joined.length !== text.length && trips(joined);
 }
 
@@ -178,11 +180,16 @@ const safeWarning = (warning: CatalogInstallWarning): CatalogInstallWarning =>
 const reviewTexts = (item: SharedCatalogItem): Map<string, string> =>
   new Map(catalogItemReview(item).map(entry => [entry.label, entry.text]));
 
+/** A server's start line quotes an argument with a line break in it (it reads as \n), so each raw argument is read too. */
+const startsHoldSecret = (item: SharedCatalogItem): boolean =>
+  item.kind === 'mcp' && item.mcp.transport === 'command' && item.mcp.args.some(arg => mayHoldSecret(arg));
+
 /** Labels whose text on either side may hold a secret; every server environment value is one, tripped or not. */
 function hiddenLabels(onDisk: SharedCatalogItem, offered: SharedCatalogItem): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const side of [reviewTexts(onDisk), reviewTexts(offered)])
     for (const [label, text] of side) if (label.startsWith(ENV_LABEL) || mayHoldSecret(text)) hidden.add(label);
+  if (startsHoldSecret(onDisk) || startsHoldSecret(offered)) hidden.add('Starts');
   return hidden;
 }
 

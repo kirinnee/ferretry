@@ -806,9 +806,11 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   `${…}` expansion (`${X:-default}` included); any run of 24 or more base64, base64url or hex-like characters; and
   credentials in an address (`scheme://user:pw@host`, `user:pw@host`); and a short flag that takes a credential (`-u`,
   `-p`, `-a` followed by a word, or `-p` with its value attached: `curl -u bob:pw`, `mysql -phunter2`,
-  `redis-cli -a hunter2`). The names, prefixes and `${` are tried again with invisible format characters, the
-  `⟨U+00AD⟩` marks the review writes for them, and line breaks (a lone carriage return too) taken out, so a name or
-  token split by one is still seen, in the text a person reads as well as in raw text. **A server's environment
+  `redis-cli -a hunter2`). The long-word rule is tried again with invisible format characters and the
+  `⟨U+00AD⟩` marks the review writes for them taken out, and the names, prefixes and `${` with line breaks (a lone
+  carriage return too) taken out as well, so a name or token split by one is still seen, in the text a person reads as
+  well as in raw text. A server's arguments are also read one by one as they were written, because the `Starts` line
+  quotes an argument with a line break in it. **A server's environment
   values are never shown**: a changed one is only "changed" (hidden), whatever it holds. A new or old warning that
   carries a value (an address, a registry, a package) and trips the detector reads "Hidden: this may hold a secret".
   **Over-hiding is the accepted cost**: a file that merely says "token" or "key" is hidden whole, and a plain file

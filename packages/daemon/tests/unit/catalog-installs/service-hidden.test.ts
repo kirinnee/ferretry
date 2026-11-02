@@ -191,6 +191,18 @@ describe('see changes never carries text that may be a secret', () => {
     should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
   });
 
+  it('should hide a server argument whose name has a line break inside it, in the whole answer', async () => {
+    const r = rig();
+    await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
+    typedInto(r, {}, ['--stdio', '--pa\nssword', 'hunter2']);
+    const preview = await r.service.preview(
+      'runtime',
+      await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
+    );
+    should(wire(preview)).not.match(/hunter2/u);
+    should(hiddenEntry(preview)?.label).equal('Starts');
+  });
+
   it.each([
     ['a trailing space', `notes\ngh \np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
     ['carriage returns only', 'notes\rgh\rp_abcdefghijklmnopqrstuvwxyz0123456789\r'],
@@ -232,6 +244,8 @@ describe('see changes never carries text that may be a secret', () => {
     ['user info with no name', 'git clone https://bob:tok3nvalue99@example.com/r.git\n'],
     ['a soft hyphen inside a name', `pa${SOFT_HYPHEN}ss: hunter2\n`],
     ['a zero-width space inside a name', `to${ZERO_WIDTH_SPACE}ken=hunter2\n`],
+    ['a soft hyphen inside a nameless base64 word', `value: c2VjcmV0cGFz${SOFT_HYPHEN}c3dvcmQxMjM0NTY3OA\n`],
+    ['a zero-width space inside a nameless hex word', `0123456789abcdef01${ZERO_WIDTH_SPACE}23456789abcdef0123\n`],
     ['a lone carriage return inside a name', 'pa\rss: hunter2\n'],
     ['a lone carriage return inside a name, then more text', 'x\npa\rss: hunter2\nmore\n'],
     ['a user and password after curl -u', 'curl -u bob:hunter2 https://example.com/\n'],
@@ -241,7 +255,7 @@ describe('see changes never carries text that may be a secret', () => {
   ])('should hide a file with %s, in the whole answer', async (_label, text) => {
     const preview = await skillPreview(text);
     should(wire(preview)).not.match(
-      /p_abcdefghijkl|abcdefghijklmnopqrst|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy|zyxwvutsrqpon|tok3nvalue99|ghp_aaaa|sk-qqqq|AKIAIOSF/u,
+      /p_abcdefghijkl|abcdefghijklmnopqrst|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy|zyxwvutsrqpon|tok3nvalue99|ghp_aaaa|sk-qqqq|AKIAIOSF|0123456789abcdef01/u,
     );
     should(hiddenEntry(preview)?.label).equal('Skill file SKILL.md');
   });
