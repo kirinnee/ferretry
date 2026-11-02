@@ -1,3 +1,9 @@
+## [4.245.0](https://github.com/kirinnee/ferretry/compare/v4.244.0...v4.245.0) (2026-11-02)
+
+### Features
+
+* **daemon:** clone-base record, clonedFromKey stamping, GC (no UX change) ([#1371](https://github.com/kirinnee/ferretry/issues/1371)) ([ea7a4b9](https://github.com/kirinnee/ferretry/commit/ea7a4b90c5e8765af0e68fdbf35deeabe6227c66))
+
 ## [4.244.0](https://github.com/kirinnee/ferretry/compare/v4.243.0...v4.244.0) (2026-11-02)
 
 ### Features

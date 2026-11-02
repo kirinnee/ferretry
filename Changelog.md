@@ -1,3 +1,9 @@
+## [4.246.0](https://github.com/kirinnee/ferretry/compare/v4.245.0...v4.246.0) (2026-11-02)
+
+### Features
+
+* **daemon:** download links, owner side (catalogs 3f-4) ([#1359](https://github.com/kirinnee/ferretry/issues/1359)) ([fed21fa](https://github.com/kirinnee/ferretry/commit/fed21fa61d03cdde9a835dee30fb9b1995146944))
+
 ## [4.245.0](https://github.com/kirinnee/ferretry/compare/v4.244.0...v4.245.0) (2026-11-02)
 
 ### Features
