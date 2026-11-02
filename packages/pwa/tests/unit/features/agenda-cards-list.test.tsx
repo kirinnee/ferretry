@@ -93,10 +93,10 @@ describe('the cards of a notice', () => {
     expect(buttons?.querySelectorAll('button')).toHaveLength(3);
   });
 
-  it('does not repeat the line of a lone card, which the notice above it already says', async () => {
+  it('shows the line of a lone card too: the notice no longer says it above the list', async () => {
     const list = await draw(ONE);
 
-    expect(list.q('B1', '[data-agenda-card-line]')).toBeNull();
+    expect(list.q('B1', '[data-agenda-card-line]')?.textContent).toBe(ONE[0]?.line);
     expect(list.q('B1', '[data-agenda-card-open]')?.textContent).toBe('Open');
   });
 
@@ -128,12 +128,27 @@ describe('the cards of a notice', () => {
     await settle();
 
     expect(list.q('B1', '[data-agenda-card-start]')).toBeNull();
-    expect(list.q('B1', '[data-agenda-card-held]')?.textContent).toBe('A ferret is already working on this card.');
+    expect(list.q('B1', '[data-agenda-card-held]')).toBeNull();
+    const line = list.q('B1', '[data-agenda-card-line]');
+    expect(line?.textContent).toBe('&B1 Fix simcha Loge 502 — a ferret has picked it up.');
+    expect(line?.textContent).not.toContain('no ferret is assigned');
+    expect(line?.getAttribute('role')).toBe('status');
     const chat = list.q('B1', '[data-agenda-card-chat]');
     expect(chat?.textContent).toBe('Open its chat');
     expect(chat?.getAttribute('aria-label')).toBe('Open the chat of the ferret on &B1');
     await click(chat);
     expect(list.calls).toEqual(['chat:worker']);
+  });
+
+  it('says the card’s ref when a line has no "is waiting in" tail to cut', async () => {
+    const list = await draw([{ task: { id: 'B9' as BoardTaskId }, line: 'Something else entirely.' }], {
+      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
+    });
+
+    await click(list.q('B9', '[data-agenda-card-start]'));
+    await settle();
+
+    expect(list.q('B9', '[data-agenda-card-line]')?.textContent).toBe('&B9 — a ferret has picked it up.');
   });
 
   it('shows the daemon’s refusal on the row and keeps the buttons', async () => {

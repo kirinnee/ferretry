@@ -262,6 +262,22 @@ describe('starting a ferret on a card', () => {
     should(started).have.length(1);
   });
 
+  it('should hand a retry with the same key the held answer even after the holder finished', async () => {
+    // Arrange: a live ferret holds the card, the first reply is lost, the holder completes.
+    const { ports, started, alive } = world({ assignee: 'holder' });
+    alive.set('holder', ID);
+    const first = await startOnCard(ports, ID, OWNER, 'click-1');
+    alive.delete('holder');
+
+    // Act
+    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+
+    // Assert
+    should(first).eql({ task: 'F1', sessionId: 'holder', started: false });
+    should(retry).eql(first);
+    should(started).have.length(0);
+  });
+
   it('should start new work for a new click once the first ferret has finished', async () => {
     // Arrange
     const { ports, started, alive } = world();
@@ -371,7 +387,72 @@ describe('starting a ferret on a card', () => {
     should((failure as BoardError).code).equal('invalid');
     should((failure as BoardError).message).equal('No ferret was started on &F1: tmux could not open a window');
     should((unreasoned as BoardError).message).equal('No ferret was started on &F1: it did not launch');
+    should(stopped.map(entry => entry.sessionId)).eql(['dead']);
+  });
+
+  it('should stop the pane of a launch that failed AFTER its first turn was delivered, so a retry never runs two', async () => {
+    // Arrange: delivery succeeded and settling threw, so the record says failed while the pane is up.
+    let attempts = 0;
+    const panes = new Set<string>();
+    let most = 0;
+    const { ports, edit, stopped } = world(
+      {},
+      {
+        start: async () => {
+          attempts += 1;
+          const sessionId = `w${attempts}`;
+          panes.add(sessionId);
+          most = Math.max(most, panes.size);
+          edit({ assignee: sessionId, laneId: 'plan' });
+          return attempts === 1
+            ? { sessionId, status: 'failed', reason: 'settle threw' }
+            : { sessionId, status: 'running' };
+        },
+        stop: async sessionId => {
+          panes.delete(sessionId);
+        },
+      },
+    );
+
+    // Act
+    const first = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const retry = await startOnCard(ports, ID, OWNER, 'click-1');
+
+    // Assert
+    should(first).be.instanceOf(BoardError);
+    should(retry).eql({ task: 'F1', sessionId: 'w2', started: true });
+    should(most).equal(1);
+    should([...panes]).eql(['w2']);
     should(stopped).eql([]);
+  });
+
+  it('should not call the start failed, nor start another, when the failed pane cannot be stopped', async () => {
+    // Arrange
+    const { ports } = world(
+      {},
+      {
+        start: async () => ({ sessionId: 'stuck', status: 'failed', reason: 'settle threw' }),
+        stop: async () => {
+          throw new Error('the pane refused to die');
+        },
+      },
+    );
+
+    // Act
+    const failure = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
+    const plain = await startOnCard(
+      world({}, { start: async () => ({ sessionId: 's', status: 'failed' }), stop: async () => Promise.reject('gone') })
+        .ports,
+      ID,
+      OWNER,
+    ).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as BoardError).code).equal('invalid');
+    should((failure as BoardError).message).equal(
+      'No ferret was started on &F1: settle threw. It could not be stopped (the pane refused to die), so check it before starting another.',
+    );
+    should((plain as BoardError).message).containEql('It could not be stopped (gone)');
   });
 
   it('should not remember a failed start, so the same click may try again', async () => {

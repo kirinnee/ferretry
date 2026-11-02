@@ -177,6 +177,29 @@ describe('the Machine group in the Inbox', () => {
     expect(text).not.toContain('Nothing to decide');
   });
 
+  test('says the line of a lone card once, in its row, and not again above the list', async () => {
+    // Arrange
+    const line = '&B1 Fix it is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.';
+    const orphan = agendaItem('M5', {
+      notice: true,
+      title: 'A card has nobody working on it',
+      kind: 'info',
+      subject: line,
+      sourceRef: 'warden:orphans',
+      cards: [{ task: { id: 'B1' }, line }],
+      waitingSince: '2026-08-01T10:00:00.000Z',
+    } as never);
+    const card = inboxCard(orphan, must(machineView, 'the machine view'));
+
+    // Act
+    await open([card], card.key, true);
+
+    // Assert
+    const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
+    expect(view?.container.querySelector('[data-agenda-card-line]')?.textContent).toBe(line);
+    expect(text.split(line).length).toBe(2);
+  });
+
   test('links its item to the Inbox, not to a conversation', () => {
     expect(agendaConversationPath(daemonId('studio'), 'machine-agenda', 'M1')).not.toContain('/session/');
     expect(agendaConversationPath(daemonId('studio'), 'sess-1', 'A1')).toContain('/session/sess-1');

@@ -467,6 +467,7 @@ export function AgendaItemCard({
           {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
         >
           {askLine === '' ||
+          cardsForm !== undefined ||
           (gated && body !== null) ||
           shape === 'answers' ||
           shape === 'input' ||

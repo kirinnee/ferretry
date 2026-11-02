@@ -149,7 +149,11 @@ export async function startOnCard(
     const ref = formatTaskRef(task);
     if (closed(task, laneSet)) throw new BoardError('invalid', GONE);
     const holder = heldBy(task, laneSet, await ports.live());
-    if (holder !== undefined) return { task: task.id, sessionId: holder, started: false };
+    if (holder !== undefined) {
+      const held = { task: task.id, sessionId: holder, started: false };
+      if (kept !== undefined) ports.remember(kept, held);
+      return held;
+    }
     const folder = await ports.folderOf(task);
     if (folder === undefined) {
       throw new BoardError(
@@ -171,10 +175,24 @@ export async function startOnCard(
       throw error;
     }
     const { sessionId } = ferret;
-    // The launch failed once the session existed: say why, and start nothing. The card stays as the start left it,
-    // assigned to a ferret that is not running, so the Warden names it again.
-    if (ferret.status === 'failed')
-      throw new BoardError('invalid', `No ferret was started on ${ref}: ${ferret.reason ?? 'it did not launch'}`);
+    // The launch failed once the session existed: say why, and start nothing. A failed record is not proof that
+    // nothing runs (the lifecycle can fail AFTER it typed the first turn, and leaves the pane up), and a failed
+    // session is not live, so a retry would start a second ferret beside it: the pane is stopped first, and only a
+    // stopped one lets the start be called failed. The card stays as the start left it, assigned to a ferret that
+    // is not running, so the Warden names it again.
+    if (ferret.status === 'failed') {
+      const why = ferret.reason ?? 'it did not launch';
+      try {
+        await ports.stop(sessionId, `${ref}: the ferret failed to launch`);
+      } catch (error) {
+        const stuck = error instanceof Error ? error.message : String(error);
+        throw new BoardError(
+          'invalid',
+          `No ferret was started on ${ref}: ${why}. It could not be stopped (${stuck}), so check it before starting another.`,
+        );
+      }
+      throw new BoardError('invalid', `No ferret was started on ${ref}: ${why}`);
+    }
     // A close that raced the start wins, wherever in the start it landed: before the assignment it refuses the card,
     // after it the drop or the move to a closed lane leaves the assignee in place, so the card is read again whole.
     const after = await ports.task(id);

@@ -338,7 +338,8 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
       the card, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
       (kept across a retry when no answer came back), so a lost response cannot start a second ferret.
     - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
-      (`started: false`) and the row swaps **Start a ferret** for **Open its chat**.
+      (`started: false`); the row swaps **Start a ferret** for **Open its chat**, and its line reads "… — a ferret has
+      picked it up." in place of "no ferret is assigned".
     - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.
   - `warden:input-stuck` — one item naming every ferret idle with a message of Ferretry's own typed in its box and
     never submitted, after the Warden's Enter did not submit it (the `input_stuck` flag,

@@ -4,11 +4,12 @@
  * will happen); the buttons are the owner's, and each goes through the same authorization as the board's own
  * (`AgendaCardsHost`). Got it is not here: it dismisses the whole notice and stays on the answer row.
  *
- * One card is already named by the notice's own words above the buttons, so its line is shown only when there are
- * several: each line then says which card its buttons are for.
+ * The notice does not repeat its subject above the list: every card's line is here, so each says which card its
+ * buttons are for.
  *
- * A card a live ferret already holds is not started a second time: the daemon answers with that ferret and the row
- * swaps Start for "Open its chat", which goes to that ferret.
+ * A card a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's
+ * line says so in place of "no ferret is assigned" (which would now be untrue), and Start becomes "Open its chat",
+ * which goes to that ferret.
  *
  * Close asks first, in the row: the card leaves the board, so the owner sees what is about to happen, may edit the
  * reason the daemon will record, and must say yes. A refusal is shown on the row in the daemon's words and the
@@ -36,6 +37,14 @@ export interface AgendaCardsActions {
 }
 
 /** What the owner's Close records when they do not say more. */
+const NOBODY_TAIL = /\s+is waiting in .*, but no ferret is assigned, so nothing will happen to it\.$/u;
+
+/** The row's line once a live ferret holds the card: the daemon's words about the card, minus "nobody is on it". */
+const heldLine = (line: string, ref: string): string => {
+  const head = line.replace(NOBODY_TAIL, '').trim();
+  return `${head === line.trim() || head === '' ? ref : head} — a ferret has picked it up.`;
+};
+
 export const CLOSE_CARD_REASON = 'Closed by the owner: no ferret was working on it.';
 
 type RowState =
@@ -50,17 +59,15 @@ function CardRow({
   card,
   actions,
   renderProse,
-  showLine,
 }: {
   readonly card: AgendaCardRow;
   readonly actions: AgendaCardsActions;
   readonly renderProse: (text: string) => ReactNode;
-  readonly showLine: boolean;
 }) {
   const id = card.task.id;
   const [state, setState] = useState<RowState>(IDLE);
   const [problem, setProblem] = useState<string | null>(null);
-  const [held, setHeld] = useState<{ readonly ferret: string; readonly note: string } | null>(null);
+  const [held, setHeld] = useState<{ readonly ferret: string } | null>(null);
   const ref = formatTaskRef({ id });
 
   const run = async (what: 'start' | 'close', go: () => Promise<AgendaCardOutcome>): Promise<void> => {
@@ -68,7 +75,7 @@ function CardRow({
     setState({ step: 'working', what });
     const outcome = await go();
     if (outcome.ok && outcome.ferret !== undefined) {
-      setHeld({ ferret: outcome.ferret, note: outcome.note });
+      setHeld({ ferret: outcome.ferret });
       setState(IDLE);
       return;
     }
@@ -83,11 +90,13 @@ function CardRow({
   const working = state.step === 'working';
   return (
     <li className="flex min-w-0 flex-col gap-2" data-agenda-card-row={id}>
-      {showLine ? (
-        <div className="min-w-0 break-words text-ui text-fg" data-agenda-card-line="">
-          {renderProse(card.line)}
-        </div>
-      ) : null}
+      <div
+        className="min-w-0 break-words text-ui text-fg"
+        data-agenda-card-line=""
+        {...(held === null ? {} : { role: 'status' })}
+      >
+        {renderProse(held === null ? card.line : heldLine(card.line, ref))}
+      </div>
       {state.step === 'done' ? (
         <p className="m-0 text-ui text-muted" data-agenda-card-done="" role="status">
           {state.note}
@@ -181,11 +190,6 @@ function CardRow({
           </button>
         </div>
       )}
-      {held === null ? null : (
-        <p className="m-0 text-ui text-muted" data-agenda-card-held="" role="status">
-          {held.note}
-        </p>
-      )}
       {problem === null ? null : (
         <p className="m-0 text-ui text-err" data-agenda-card-problem="" role="alert">
           {problem}
@@ -207,13 +211,7 @@ export function AgendaCardsList({
   return (
     <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-4 p-0" data-agenda-cards="">
       {cards.map(card => (
-        <CardRow
-          actions={actions}
-          card={card}
-          key={card.task.id}
-          renderProse={renderProse}
-          showLine={cards.length > 1}
-        />
+        <CardRow actions={actions} card={card} key={card.task.id} renderProse={renderProse} />
       ))}
     </ul>
   );

@@ -999,10 +999,14 @@ The owner can start work on a card that has nobody working on it, from the Warde
   into a closed lane is refused by `assignTo` as well ("reopen it before you …").
 - **A launch that failed is refused in words.** The session service returns a failed view, not an error, once the
   session record exists; the start reads that view and answers `invalid` with "No ferret was started on &X:
-  <reason>", never `started: true`.
+  <reason>", never `started: true`. A failed view is not proof nothing runs (the lifecycle can fail AFTER delivering
+  the first turn), so the start stops that session's pane first; if the pane will not stop, the refusal says so and
+  asks the owner to check it before starting another. A retry therefore never runs two panes.
 - **A card a live ferret holds is not started again.** Its assignee, its owner (unless the card is unclaimed in the
   backlog), or any live ferret whose focus it is, counts. The answer is `200` with that ferret and `started: false`,
-  and the notice swaps its button for **Open its chat**.
+  and the notice swaps its button for **Open its chat**; its line reads "&B1 … — a ferret has picked it up."
+  That answer is remembered per key like any other, so a lost reply followed by the holder finishing still gets
+  the same answer on retry, and no new ferret.
 - **One action key per click.** The PWA sends a key with each Start click as `x-fy-request-id`, and sends the SAME
   key on a retry of a click that got no answer. The daemon remembers the result per card and key (a bounded
   in-memory map, separate from liveness) and returns it: a retry after a lost response gets the first start's answer
