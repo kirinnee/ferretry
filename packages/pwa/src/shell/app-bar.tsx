@@ -196,6 +196,7 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
     case 'home':
     case 'sessions':
     case 'session':
+    case 'add-skills':
     case 'new-session':
       return 'sessions';
     case 'attention':

@@ -84,13 +84,13 @@ import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.t
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { healthOf } from '../support/health.ts';
 import { MemoryMemberKeyStore, testSubscription } from '../support/member-keys.ts';
-import { FAKE_FRAGMENT } from '../support/shared-screens.ts';
-import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
+import { FAKE_FRAGMENT } from '../support/shared-screens.ts';
 import { agendaItem, wardenAgenda, wardenInvestigation, wardenStatus } from '../support/warden.ts';
 
 /** A connection-health clock whose timers never fire: a suite drives recovery by sending requests. */
@@ -2643,6 +2643,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/queue`, 'Home, Queue'],
       [`/d/${ALPHA}/history`, 'Home, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Home, one'],
+      [`/d/${ALPHA}/session/one/skills`, 'Home, one, Add skills'],
     ] as const) {
       await popTo(path);
       await settle();

@@ -43,13 +43,13 @@ import { SessionWorkspace } from '../../src/features/workspace/session-workspace
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
-import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
-import { daemonSessionPath, daemonSharingPath } from '../../src/lib/pages/routes.ts';
+import { daemonAddSkillsPath, daemonSessionPath } from '../../src/lib/pages/routes.ts';
 import {
   type SessionAgendaModel,
   type SessionChatClient,
@@ -4266,7 +4266,7 @@ describe('SessionChatPage Info and Actions', () => {
       await flush();
       expect(bare.root.findByType(SessionInfo).props.about.switches).toBeUndefined();
       // With nowhere to navigate, Skills draws no "+ Add skills".
-      expect(bare.root.findByType(SessionInfo).props.ports.folder.addSkills).toBeUndefined();
+      expect(bare.root.findByType(SessionInfo).props.ports.folder.onAddSkills).toBeUndefined();
     } finally {
       run(() => bare.unmount());
     }
@@ -4328,12 +4328,9 @@ describe('SessionChatPage Info and Actions', () => {
       run(() => ports.folder.onAddMcp());
       expect(page.root.findByType(ActionsMenu).props.form).toBe('add-mcp');
 
-      // Skills › "+ Add skills" knows the machine and the session's folder, and Subscribe opens Sharing.
-      expect(ports.folder.addSkills.machineName).toBe('alpha box');
-      expect(ports.folder.addSkills.connection.daemonId).toBe(alpha.daemonId);
-      expect(ports.folder.addSkills.cwd).toBe('/work/shared');
-      run(() => ports.folder.addSkills.onSubscribe());
-      expect(navigated.at(-1)).toBe(daemonSharingPath(alpha.daemonId, 'shared'));
+      // Skills › "+ Add skills" opens this session's Add skills page.
+      run(() => ports.folder.onAddSkills());
+      expect(navigated.at(-1)).toBe(daemonAddSkillsPath(alpha.daemonId, 'shared'));
 
       // Info › Runtime carries the host's model and effort pickers.
       run(() => info().props.placement.setTab('runtime'));

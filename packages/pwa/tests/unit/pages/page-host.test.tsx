@@ -56,6 +56,10 @@ describe('PageHost', () => {
       Projects: daemonPage('projects'),
       ProjectDetail,
       SessionChat,
+      AddSkills: ({ connection: actual, sessionId }) => {
+        received.push(actual);
+        return <div data-page="add-skills">add-skills:{sessionId}</div>;
+      },
       Sharing: ({ connection: actual, tab }) => {
         received.push(actual);
         return <div data-page="sharing">sharing:{tab ?? 'none'}</div>;
@@ -74,6 +78,7 @@ describe('PageHost', () => {
       '/d/daemon-a/projects',
       '/d/daemon-a/projects/11111111-1111-4111-8111-111111111111',
       '/d/daemon-a/session/session-one',
+      '/d/daemon-a/session/session-one/skills',
       '/d/daemon-a/sharing/people',
       '/d/daemon-a/settings',
       '/d/daemon-a/warden',
@@ -96,6 +101,7 @@ describe('PageHost', () => {
       '<div data-page="projects">projects</div>',
       '<div data-page="project-detail">project-detail</div>',
       '<div data-page="session">session</div>',
+      '<div data-page="add-skills">add-skills:session-one</div>',
       '<div data-page="sharing">sharing:people</div>',
       '<div data-page="settings">settings</div>',
       '<div data-page="warden">warden</div>',
