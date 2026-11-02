@@ -27,6 +27,7 @@
 import { type AgendaItem, boardOk, type SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createAppStore, StoreProvider } from '../src/lib/store.tsx';
 import { AgendaInboxComposer } from '../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
@@ -501,7 +502,18 @@ const TO_TEST_HOST: ToTestHost = {
       return boardOk(boardCard('F61'));
     },
   } as unknown as ToTestHost['actions'],
-  ports: {},
+  // The machine takes files with a Not good; a pick "uploads" at once, so the box shows them as it does live.
+  ports: {
+    answerFiles: async () => true,
+    uploadAttachment: async (_daemon, _session, file) => ({
+      id: `att_${'c'.repeat(64)}`,
+      filename: file.name,
+      mime: file.type,
+      size: file.size,
+      sha256: '0'.repeat(64),
+      createdAt: '2026-10-29T08:00:00.000Z',
+    }),
+  },
   connectionOf: () => boardLaptop,
 };
 // A send is accepted and waits in the ferret's queue: that is what makes Undo able to take it back.
@@ -626,7 +638,35 @@ function Inbox({
 const view = new URLSearchParams(location.search).get('view') ?? 'sections';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
-createRoot(root).render(
+// `voice=1`: an app store is provided, so the composers draw their mic as they do with Settings › Voice on.
+class Memory {
+  readonly values = new Map<string, string>();
+  getItem(key: string) {
+    return this.values.get(key) ?? null;
+  }
+  setItem(key: string, value: string) {
+    this.values.set(key, value);
+  }
+  async load(key: string) {
+    return this.getItem(key);
+  }
+  async save(key: string, value: string) {
+    this.setItem(key, value);
+  }
+}
+const voice = new URLSearchParams(location.search).get('voice') === '1';
+const offline = async () => {
+  throw new TypeError('Failed to fetch');
+};
+const store = voice
+  ? await createAppStore({
+      repository: new Memory() as never,
+      connectClient: async () => ({}) as never,
+      fetcher: offline as never,
+      outboxBackend: null,
+    })
+  : null;
+const page = (
   <Inbox
     from={view === 'warden' ? 'warden' : null}
     phone={window.innerWidth < 768}
@@ -641,5 +681,6 @@ createRoot(root).render(
             : OPENED[view]?.key
     }
     extra={OPENED[view]}
-  />,
+  />
 );
+createRoot(root).render(store === null ? page : <StoreProvider store={store}>{page}</StoreProvider>);

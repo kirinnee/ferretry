@@ -104,6 +104,10 @@ interface Faults {
   readonly homes?: Readonly<Record<string, string>>;
   /** The instant the gates read as now; the agenda's own clock stays at NOW. */
   readonly gatesNow?: string;
+  /** This daemon cannot carry files with an answer (no carrier is wired). */
+  readonly noCarrier?: boolean;
+  /** Carrying a file throws. */
+  readonly carryThrows?: boolean;
 }
 
 /** The duplicates sweep's marker, in memory. */
@@ -129,9 +133,18 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const store = new MemoryBoardStore(cards);
   const reopen = new FakeReopen();
   const done = new FakeDone();
+  const carried: Array<readonly [string, string, readonly string[]]> = [];
   let gates: GateItems | undefined;
   const board = new BoardService(
-    world({ store, reopen, done, gates: { written: async id => await gates?.written(id) } }),
+    world({
+      store,
+      reopen,
+      done,
+      gates: { written: async id => await gates?.written(id) },
+      attachments: {
+        describe: async (_session, ids) => ids.map(id => ({ id, filename: `${id}.png`, mime: 'image/png' })),
+      },
+    }),
   );
   const homes = {
     of: async (sessionId: string) => {
@@ -192,6 +205,17 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
         return [...new Set([...SESSIONS, ...ledgers.ledgers.keys()])];
       },
     },
+    ...(faults.noCarrier === true
+      ? {}
+      : {
+          files: {
+            carry: async (from: string, to: string, ids: readonly string[]) => {
+              if (faults.carryThrows === true) throw new Error('the copy failed');
+              carried.push([from, to, ids]);
+              return ids;
+            },
+          },
+        }),
     marker,
     now: () => faults.gatesNow ?? NOW,
     words: {
@@ -242,6 +266,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     store,
     reopen,
     done,
+    carried,
     warnings,
     told,
     open,
@@ -923,6 +948,138 @@ describe('when a port fails', () => {
       "the owner's words on &F1 were not kept: &F1 was not moved: the board refused the clarify",
       "could not tell &F1's ferret: nobody to tell",
     ]);
+  });
+});
+
+describe('a Not good with files', () => {
+  const PICTURE = `att_${'c'.repeat(64)}`;
+  const files = (from: string) => ({ attachments: { from, ids: [PICTURE] } });
+  const atGate = async (faults: Faults = {}, overrides: Partial<BoardTask> = {}, laneId = 'tested') => {
+    const world = fixture([external({ laneId, ...overrides })], faults);
+    await world.gates.backfill();
+    return { world, item: world.open(overrides.assignee === 'gone' ? 'child' : 'grandchild')[0] as AgendaItem };
+  };
+
+  it('moves the files to the card’s ferret, then reopens naming them where the ferret holds them', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), { note: 'still flickers', ...files('grandchild') });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.carried).eql([['grandchild', 'grandchild', [PICTURE]]]);
+    should(world.stored().laneId).equal('implement');
+    should(world.reopen.notices[0]?.attachments).eql({ from: 'grandchild', ids: [PICTURE] });
+  });
+
+  it('carries files from the agenda the item is on to a card’s ferret on another session', async () => {
+    // Arrange — the assignee is gone, so the item sits on the owner ferret's agenda
+    const { world, item } = await atGate({}, { assignee: 'gone' });
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      sessionId: 'child',
+      note: 'still flickers',
+      ...files('child'),
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.carried).eql([['child', 'gone', [PICTURE]]]);
+    should(world.reopen.notices[0]?.attachments).eql({ from: 'gone', ids: [PICTURE] });
+  });
+
+  it('takes the owner’s own words as a Not good that brings files', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, { kind: 'other', answer: 'it flickers' }, files('grandchild'));
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.reopen.notices[0]?.attachments).eql({ from: 'grandchild', ids: [PICTURE] });
+  });
+
+  it('refuses files on any answer that is not a Not good, and moves nothing', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Done'), files('grandchild'));
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(world.stored().laneId).equal('tested');
+    should(world.carried).be.empty();
+    should(world.open().map(each => each.id)).eql([item.id]);
+  });
+
+  it('refuses files on a Not yet, which stays file-less', async () => {
+    // Arrange
+    const { world, item } = await atGate({}, {}, 'plan');
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not yet'), { note: 'later', ...files('grandchild') });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(world.carried).be.empty();
+  });
+
+  it('refuses files uploaded to some other session than the one the item is on', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), { note: 'still flickers', ...files('stranger') });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should(world.carried).be.empty();
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('refuses files where this daemon has no way to carry them', async () => {
+    // Arrange
+    const { world, item } = await atGate({ noCarrier: true });
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), { note: 'still flickers', ...files('grandchild') });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'invalid' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('cannot carry files');
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('leaves the card and the item alone when a file cannot be carried', async () => {
+    // Arrange
+    const { world, item } = await atGate({ carryThrows: true });
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), { note: 'still flickers', ...files('grandchild') });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('the copy failed');
+    should(world.stored().laneId).equal('tested');
+    should(world.reopen.notices).be.empty();
+    should(world.open().map(each => each.id)).eql([item.id]);
+  });
+
+  it('is unchanged without files: nothing is carried and the reopen names none', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    await world.answer(item.id, choose('Not good'), { note: 'still flickers' });
+
+    // Assert
+    should(world.carried).be.empty();
+    should(world.reopen.notices[0]?.attachments).be.undefined();
   });
 });
 

@@ -6,7 +6,7 @@
  * device the `fleet` grant lets use the board, exactly the caller who could have moved the card on the Board. A
  * ferret, a lead over its sub-ferret and the daemon are refused, here and again in the state machine.
  */
-import type { AgendaId, AgendaResponse } from '@ferretry/protocol';
+import type { AgendaId, AgendaResponse, BoardReopenAttachments } from '@ferretry/protocol';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiActor } from '../../api/actor.ts';
@@ -86,6 +86,7 @@ export async function answerGate(
     readonly note?: string | undefined;
     readonly actor: AgendaActor;
     readonly gate?: true | undefined;
+    readonly attachments?: BoardReopenAttachments | undefined;
   },
 ): Promise<AgendaMutation | undefined> {
   const outcome = await gates.answer({

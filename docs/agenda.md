@@ -828,9 +828,15 @@ Inbox then drops the _synthesized_ to-test rows those items replace. A machine t
 card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates, so no card
 waiting on the owner is ever lost between the two lists.
 
-**GAP — attachments.** The board's Not good takes pictures and files. The agenda's resolve carries a choice and a note but no
-attachment ids, so **Not good from the Inbox is words only**; the composer draws no "+" for pictures. Sending pictures with
-it needs the resolve contract to carry attachment ids; until then the owner opens the card on the Board for that.
+**Not good takes pictures and files.** The resolve request carries optional `attachments: { from, ids }` — the same shape as
+the board's move back (`docs/board.md`) — and only on the answer to a gate item. The app uploads each file to the **item's own
+session** (`from` is that session; the daemon refuses any other), then names the ids with the answer. The daemon carries
+them to the card's ferret (its assignee, else its owner ferret) **before the board is touched**, so a file that cannot be
+carried leaves the card where it is and the item open, saying so; it then reopens the card with `{ from: <that ferret>, ids }`,
+and the ferret reads them as it does on the Board. Only a Not good takes files: "Not yet" and the forward option are
+refused with them, and the Inbox draws no "+" on "Not yet". A resolve with files on anything that is not a gate item is
+refused `400 invalid` rather than dropping them. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
+takes them; the app draws the "+" only there, and an older machine keeps Not good as words alone.
 
 ### What the side panel's Cards view shows
 

@@ -45,6 +45,14 @@ describe('boardPorts', () => {
     expect(await answering(undefined).sendBackFiles(laptop)).toBe(false);
   });
 
+  it('says a machine takes files with a gate answer only when its health lists that feature', async () => {
+    const answering = (features: readonly string[] | undefined) =>
+      boardPorts(async () => ({ health: async () => (features === undefined ? {} : { features }) }) as never, carrier);
+    expect(await answering([DAEMON_FEATURES.agendaGateAttachments]).answerFiles(laptop)).toBe(true);
+    expect(await answering([DAEMON_FEATURES.boardReopenAttachments]).answerFiles(laptop)).toBe(false);
+    expect(await answering(undefined).answerFiles(laptop)).toBe(false);
+  });
+
   it("uploads a file to the ferret's session on the card's machine", async () => {
     const uploads: unknown[] = [];
     const ports = boardPorts(

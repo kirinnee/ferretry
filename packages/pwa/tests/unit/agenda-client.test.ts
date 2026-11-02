@@ -232,6 +232,20 @@ describe('DaemonAgendaClient', () => {
     should(actions).deepEqual([{ action: 'resolve', id: 'A2', response: choice, note: 'ok', gate: true }]);
   });
 
+  it('sends the files of a Not good with its answer, and none when there are none', async () => {
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+      actions.push(JSON.parse(String(init?.body)));
+      return response(snapshot('same/session'));
+    });
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Not good' };
+    const attachments = { from: 'same', ids: [`att_${'a'.repeat(64)}`] };
+
+    await client.respond(daemonA, scopeA, 'A2', choice, 'blank', undefined, attachments);
+
+    should(actions).deepEqual([{ action: 'resolve', id: 'A2', response: choice, note: 'blank', attachments }]);
+  });
+
   it('sends a snooze with its instant and an unsnooze alone', async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

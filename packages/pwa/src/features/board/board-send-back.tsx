@@ -30,6 +30,8 @@ import { UPDATE_MACHINE_WHERE } from '../../lib/machine-update-words.ts';
 export interface SendBackPorts {
   /** Whether the machine takes files with a move back (`board.reopen.attachments.1` on its health). */
   readonly sendBackFiles?: (daemon: DaemonConnection) => Promise<boolean>;
+  /** Whether the machine takes files with the answer to a gate item (`agenda.gate.attachments.1` on its health). */
+  readonly answerFiles?: (daemon: DaemonConnection) => Promise<boolean>;
   /** Uploads one file to a ferret's session on the machine. */
   readonly uploadAttachment?: (daemon: DaemonConnection, sessionId: string, file: File) => Promise<AttachmentView>;
 }

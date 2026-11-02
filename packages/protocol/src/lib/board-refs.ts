@@ -113,3 +113,27 @@ export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret wi
 
 /** What every surface says for an `admin-token` board actor in a sentence: the token, and what it may be. */
 export const ADMIN_TOKEN_ACTOR_WORDS = `the admin token (${ADMIN_TOKEN_ACTOR_NOTE})`;
+
+/** Files one move back, or one answer to a card's gate, may carry to the card's ferret (the owner's "Not good" composer). */
+export const MAX_BOARD_REOPEN_ATTACHMENTS = 10;
+
+/** A stored attachment's id: the content address the attachment store gives every file it keeps. */
+export const BoardAttachmentIdSchema = z.string().regex(/^att_[0-9a-f]{64}$/u);
+
+/**
+ * The files the "Not good" composer carries to the card's ferret, in a board move back (`move`, `reopen`) and in an
+ * answer to a card's gate. They are uploaded first, through the ordinary attachment route, to `from`; the daemon
+ * carries them on to the ferret that is told. A board move back takes them only from the card's assignee or owner
+ * ferret; a gate answer, only from the agenda's own session. Sent only to a daemon that reports
+ * `board.reopen.attachments.1` (the move back) or `agenda.gate.attachments.1` (the gate answer); an older one
+ * refuses the field.
+ */
+export const BoardReopenAttachmentsSchema = z.strictObject({
+  from: z.string().min(1),
+  ids: z
+    .array(BoardAttachmentIdSchema)
+    .min(1)
+    .max(MAX_BOARD_REOPEN_ATTACHMENTS)
+    .refine(ids => new Set(ids).size === ids.length, 'an attachment is named once'),
+});
+export type BoardReopenAttachments = z.infer<typeof BoardReopenAttachmentsSchema>;

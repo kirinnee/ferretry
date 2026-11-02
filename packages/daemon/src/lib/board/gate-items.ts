@@ -33,6 +33,7 @@ import {
   type AgendaItem,
   type AgendaResponse,
   type AgendaSnapshot,
+  type BoardReopenAttachments,
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskId,
@@ -87,6 +88,11 @@ interface GateWords {
   told(task: BoardTask, message: string, key: string): Promise<void>;
 }
 
+/** Where the files an answer carries are moved to the card's ferret, answering their ids as they are THERE; rejects when one cannot be carried. */
+interface GateFiles {
+  carry(from: string, to: string, ids: readonly string[]): Promise<readonly string[]>;
+}
+
 /** Every session on this machine whose agenda may hold a card's gate item: a card changes hands, its items do not. */
 interface GateSessions {
   all(): Promise<readonly string[]>;
@@ -104,6 +110,8 @@ export interface GateItemsDependencies {
   readonly board: GateBoard;
   readonly lanes: GateLanes;
   readonly words: GateWords;
+  /** Absent where this daemon cannot carry files: an answer that brings some is refused. */
+  readonly files?: GateFiles;
   readonly sessions: GateSessions;
   readonly homes: GateHomes;
   readonly marker: GateItemsMigrationMarker;
@@ -129,6 +137,8 @@ export interface GateAnswer {
   readonly id: AgendaId;
   readonly response: AgendaResponse;
   readonly note?: string | null | undefined;
+  /** Files the owner brings with a Not good, uploaded to THIS agenda's session (`from` is `sessionId`). */
+  readonly attachments?: BoardReopenAttachments | undefined;
   readonly actor: AgendaActor;
   /** Who the board records the move as: the owner's app, or the admin token at the machine. */
   readonly caller: BoardCaller;
@@ -375,6 +385,8 @@ export class GateItems implements CardWriteObserver {
     if (denied !== undefined) return refused('forbidden', denied);
     const decision = decide(gate, answer);
     if ('code' in decision) return { handled: true, refused: decision };
+    const unfit = this.filesRefusal(answer, decision);
+    if (unfit !== undefined) return { handled: true, refused: unfit };
     const card = await this.ports.board.card(gate.cardId);
     const here = card === undefined ? undefined : gateOf(card, this.ports.lanes);
     if (card === undefined || here === undefined || gateReference(here) !== gateReference(gate)) {
@@ -710,6 +722,8 @@ export class GateItems implements CardWriteObserver {
       );
     }
     const words = decision.words ?? '';
+    const carried = await this.carried(task, answer);
+    if (carried !== undefined && 'code' in carried) return carried;
     const refusal = await this.act(
       task.id,
       {
@@ -717,6 +731,7 @@ export class GateItems implements CardWriteObserver {
         to: target.lane.id,
         reason: clipAtWord(words, MAX_BOARD_REASON_LENGTH),
         ask: { text: words, source: `owner (Inbox, !${answer.id})` },
+        ...(carried === undefined ? {} : { attachments: carried }),
       },
       answer,
       expect,
@@ -724,6 +739,46 @@ export class GateItems implements CardWriteObserver {
     // Only a card that really went back gets its conversation: a refused Not good opens none, and uses none up.
     if (refusal === undefined) await this.followup(task, gate, words);
     return refusal;
+  }
+
+  /** Files come only with a Not good, from this agenda's own session, and only where this daemon can carry them. */
+  private filesRefusal(answer: GateAnswer, decision: Decision): GateRefusal | undefined {
+    const files = answer.attachments;
+    if (files === undefined) return undefined;
+    if (decision.kind !== 'option' || decision.option.outcome !== 'reopen-with-agenda') {
+      return { code: 'invalid', message: `only a Not good takes files, and ${answer.id} was answered otherwise` };
+    }
+    if (files.from !== answer.sessionId) {
+      return { code: 'invalid', message: `the files for ${answer.id} must be uploaded to the session it is on` };
+    }
+    if (this.ports.files === undefined) {
+      return {
+        code: 'invalid',
+        message: 'this daemon cannot carry files with an answer (update it: fy daemon update)',
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * The answer's files, moved to the card's ferret BEFORE the board is touched, so a file that cannot be carried
+   * leaves the card where it is. The reopen then names them where the ferret holds them.
+   */
+  private async carried(
+    task: BoardTask,
+    answer: GateAnswer,
+  ): Promise<BoardReopenAttachments | GateRefusal | undefined> {
+    const files = answer.attachments;
+    if (files === undefined || this.ports.files === undefined) return undefined;
+    const to = effectiveAssignee(task);
+    try {
+      return { from: to, ids: [...(await this.ports.files.carry(files.from, to, files.ids))] };
+    } catch (error) {
+      return {
+        code: 'not-moved',
+        message: `${formatTaskRef(task)} was not moved: a file could not be carried to its ferret: ${errorText(error)}`,
+      };
+    }
   }
 
   /** "Not yet" with words: kept on the card as the owner's, and told to its ferret. The card stays where it is. */
