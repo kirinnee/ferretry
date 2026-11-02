@@ -286,15 +286,33 @@ export class LoginDirectory {
    * existing one (its label kept). The place it was typed at is added when the account does not sign in there yet: to
    * its website for a web host (as a saved login's `match` grew), else as a sign-in of its own. The username and the
    * password of one login card are kept together or not at all.
+   *
+   * `mode` is the owner's choice, checked UNDER THE STORE LOCK so a card raised before another saved cannot write over
+   * it: `new` refuses a handle an account already has, `update` refuses one no account has, and refuses another person:
+   * a username that is not the account's own, or a page (`pageUsername`, what the ferret typed there) signing in someone
+   * the account is not — including an account with no username saved, which nothing says is the same person. Absent
+   * `mode`: either, as before (the input service always names one; the CLI and Settings write accounts their own way).
    */
   async saveFields(
     id: LoginEntryId,
     label: string,
     match: string | undefined,
     fields: LoginFieldValues,
+    mode?: 'new' | 'update',
+    pageUsername?: string,
   ): Promise<LoginEntrySummary> {
     return await this.accounts.transact(async draft => {
       const existing = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      if (mode === 'new' && existing !== undefined)
+        throw new LoginEntryError('login_exists', `${id} is already an account's CLI name`);
+      if (mode === 'update' && existing === undefined)
+        throw new LoginEntryError('unknown_login', `there is no account ${id} to update`);
+      const had = existing?.username?.trim().toLowerCase();
+      const otherBox =
+        fields.username !== undefined && had !== undefined && had !== fields.username.trim().toLowerCase();
+      const otherPage = pageUsername !== undefined && had !== pageUsername.trim().toLowerCase();
+      if (mode === 'update' && (otherBox || otherPage))
+        throw new LoginEntryError('invalid_change', `${id} is someone else; save it as a new account`);
       const account = await this.accounts.applyAccount(draft, id, {
         ...(existing === undefined ? { label } : {}),
         ...(fields.username === undefined ? {} : { username: fields.username }),

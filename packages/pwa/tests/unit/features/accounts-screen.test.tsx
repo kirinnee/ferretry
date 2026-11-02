@@ -178,6 +178,16 @@ describe('the list', () => {
 });
 
 describe('an account’s Details', () => {
+  it('should show the username an account keeps, and its name in the terminal as what it is (&B137)', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB');
+
+    expect((screen.q('[data-accounts-username]') as HTMLInputElement).value).toBe('kirinnee');
+    const cli = screen.q('[data-accounts-cli-name]')?.textContent ?? '';
+    expect(cli).toContain('Name in the terminal GITHUB');
+    expect(cli).toContain('not an environment variable');
+  });
+
   it('should keep the password write-only: never in the page, and only sent when typed', async () => {
     const screen = await open();
     await screen.openAccount('GITHUB');
@@ -668,9 +678,9 @@ describe('what the add form and an empty recipe say', () => {
     await click(screen.q('[data-accounts-add-open]'));
 
     await typeInto(screen.q('[data-accounts-new-handle]'), '9bad');
-    expect(screen.text()).toContain('A handle is capital letters');
+    expect(screen.text()).toContain('A name in the terminal is capital letters');
     await typeInto(screen.q('[data-accounts-new-handle]'), 'github');
-    expect(screen.text()).toContain('already saved');
+    expect(screen.text()).toContain('already has that name in the terminal');
     await typeInto(screen.q('[data-accounts-new-site]'), 'not a host!');
     expect(screen.q('[data-accounts-add] [role="alert"]')).not.toBeNull();
   });

@@ -111,11 +111,12 @@ export function InputCardHost({
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // A code card reads them for its keys; any other card with saved accounts, to name whose sign-in it is in its title.
+  // The listing is secrets-gated (`GET /v1/accounts` needs `secrets.use`): a device refused it keeps the place-only title.
   const wantsAccounts =
-    offersKeys &&
     read.kind === 'open' &&
-    strongestSensitivity(read.request.fields) === 'code' &&
-    read.request.saved !== undefined;
+    read.request.saved !== undefined &&
+    (strongestSensitivity(read.request.fields) === 'code' ? offersKeys : true);
   useEffect(() => {
     if (!wantsAccounts || client === null) {
       setAccounts(undefined);

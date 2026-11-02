@@ -79,7 +79,10 @@ export function AccountDetail(props: AccountDetailProps): ReactNode {
     >
       <header className="flex min-w-0 flex-col gap-0.5">
         <h3 className="m-0 min-w-0 break-words text-row font-semibold text-fg">{accountTitle(account)}</h3>
-        <p className="m-0 text-meta text-faint">{account.id}</p>
+        <p className="m-0 min-w-0 break-words text-meta text-faint" data-accounts-cli-name="">
+          Name in the terminal <span className="mono">{account.id}</span> · how <span className="mono">fy account</span>{' '}
+          names it, not an environment variable
+        </p>
       </header>
       <Tabs
         label={`${account.label} sections`}

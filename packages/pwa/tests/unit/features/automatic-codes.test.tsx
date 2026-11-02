@@ -703,13 +703,14 @@ describe('the code card host', () => {
     expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
   });
 
-  it('should not read accounts for a card whose field the daemon made a secret, even if the card says code', async () => {
+  it('should draw no code panel or code title for a card whose field the daemon made a secret, even if it says code', async () => {
     const machine = served([DAEMON_FEATURES.twoFactorKeys], { ...codeCard(), fields: [field('secret')] });
 
     const view = await host(machine);
 
-    expect(machine.paths).not.toContain('/v1/accounts');
+    // The accounts are read (secrets-gated) only to name whose sign-in it is in the title (&B137), never for keys.
     expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
+    expect(view.container.querySelector('[data-input-code-key]')).toBeNull();
   });
 
   it('should draw the plain card, no panel, when the accounts cannot be read', async () => {

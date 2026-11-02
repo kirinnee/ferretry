@@ -13,6 +13,7 @@ import {
   type ActablePage,
   BROWSER_ACT_TIMEOUT_MS,
   browserElementOf,
+  identifierFieldHost,
   isPasswordField,
 } from './page-acts.ts';
 
@@ -69,6 +70,11 @@ const POINTER_KINDS: ReadonlySet<string> = new Set<PointerKind>([
 /** What a pointer act found worth telling the agent. */
 export interface PointerOutcome {
   readonly passwordField: boolean;
+  /**
+   * A fill-form act: the fields (by their place in the act) that were identifier boxes (an email or username box,
+   * `identifierFieldHost`), each with its document's host. Absent: none was.
+   */
+  readonly identifiers?: readonly { readonly index: number; readonly host: string }[];
 }
 
 /** The outline an agent paints around an element: loud, and clear of the page's own styling. */
@@ -111,7 +117,7 @@ export async function performPointerAct(page: PointerPage, act: PointerAct): Pro
       await (await field(page, elementOf(act))).setChecked(act.checked, timeout);
       return { passwordField: false };
     case 'fill-form':
-      return { passwordField: await fillForm(page, act) };
+      return await fillForm(page, act);
     case 'highlight':
       await highlight(page, act);
       return { passwordField: false };
@@ -187,18 +193,23 @@ async function scroll(page: PointerPage, act: Extract<PointerAct, { action: 'scr
   );
 }
 
-async function fillForm(page: PointerPage, act: Extract<PointerAct, { action: 'fill-form' }>): Promise<boolean> {
+async function fillForm(page: PointerPage, act: Extract<PointerAct, { action: 'fill-form' }>): Promise<PointerOutcome> {
   let passwordField = false;
-  for (const entry of act.fields) {
+  const identifiers: { index: number; host: string }[] = [];
+  for (const [index, entry] of act.fields.entries()) {
     const element = await field(page, elementOf(entry));
     if (entry.checked !== undefined) await element.setChecked(entry.checked, timeout);
     else if (entry.option !== undefined) await element.selectOption([entry.option], timeout);
     else {
       if (await isPasswordField(element)) passwordField = true;
+      else {
+        const host = await identifierFieldHost(element);
+        if (host !== undefined) identifiers.push({ index, host });
+      }
       await element.fill(entry.text ?? entry.value ?? '', timeout);
     }
   }
-  return passwordField;
+  return { passwordField, ...(identifiers.length === 0 ? {} : { identifiers }) };
 }
 
 async function highlight(page: PointerPage, act: Extract<PointerAct, { action: 'highlight' }>): Promise<void> {

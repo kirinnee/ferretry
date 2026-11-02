@@ -17,3 +17,4 @@ export * from './session-lock.ts';
 export * from './target-router.ts';
 export * from './terminal-modes.ts';
 export * from './terminal-target.ts';
+export * from './typed-identities.ts';

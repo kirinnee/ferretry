@@ -55,6 +55,7 @@ import {
   type BrowserPageAction,
   BrowserSessionError,
   type BrowserSubsystem,
+  NON_TYPING_KEYS,
   pendingDialogOf,
 } from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
@@ -182,6 +183,17 @@ export interface AgentToolPorts {
    * submit (the page moving on, the screen not echoing) is only kept as a fact when the ferret did nothing meanwhile.
    */
   readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
+  /**
+   * Told what an agent's `browser.type` put into an identifier field (an email or username box), and the host each
+   * act left a page on: who a page is signing in, for the owner's card (input-requests/typed-identities.ts). Plain
+   * text the agent typed itself; it only ever removes a one-tap or pre-fills a username. Absent: nothing is kept.
+   */
+  readonly typedIdentities?: {
+    typed(sessionId: string, pageId: string, host: string, text: string): void;
+    seen(sessionId: string, pageId: string, host: string | undefined): void;
+    cleared(sessionId: string, pageId: string): void;
+    forget(sessionId: string): void;
+  };
   /**
    * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
    * and again where it ended: a standing rule fills for every ferret in one shared browser profile, so a script on its
@@ -987,12 +999,19 @@ export class AgentToolService {
     reference: string,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
-    const answer: BrowserActionResult = await this.ports.browser.actOnPage(
-      caller.sessionId,
-      surface.id,
-      pageActionOf(call),
-      this.browserGuard(caller, surface, call.tool),
-    );
+    let answer: BrowserActionResult;
+    try {
+      answer = await this.ports.browser.actOnPage(
+        caller.sessionId,
+        surface.id,
+        pageActionOf(call),
+        this.browserGuard(caller, surface, call.tool),
+      );
+    } catch (error) {
+      // An act that failed partway may still have moved the page or typed into it (the browser runtime clears too).
+      this.ports.typedIdentities?.cleared(caller.sessionId, surface.id);
+      throw error;
+    }
     const page: {
       readonly url?: string;
       readonly text?: unknown;
@@ -1012,6 +1031,8 @@ export class AgentToolService {
       humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
     const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
     if (secret !== '') facts.detail = { ...facts.detail, passwordField: true };
+    if ('result' in answer)
+      this.noteIdentity(caller.sessionId, surface.id, call, answer.result, caller.kind === 'agent');
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -1031,6 +1052,38 @@ export class AgentToolService {
         ...(page.screenshotFormat === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
       };
     return { summary: `Done on ${reference}${at}.${secret}${check}` };
+  }
+
+  /**
+   * WHO THE PAGE IS SIGNING IN (input-requests/typed-identities.ts), from what the daemon saw this act do. Kept: the
+   * agent's type or fill into ONE identifier box (never beside a password field), or its click on an element that showed
+   * one email. Kept as it was: an act that cannot change who signs in (a read, a hover, Enter or Tab), unless the page is
+   * now on another host. CLEARED: everything else that could — a navigation, typing anything else, a key that types, raw
+   * mouse moves, a click at a bare point — and any act by a person. A missing record is the safe state.
+   */
+  private noteIdentity(
+    sessionId: string,
+    /**
+     * The DAEMON's id of the page acted on (the runtime's, as `browser.status` lists it), never the worker's word: the same
+     * id the input target checks a card's facts against (`PageInputTarget`), so the two sides cannot drift apart.
+     */
+    pageId: string,
+    call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
+    result: {
+      readonly url?: string | undefined;
+      readonly identifierHost?: string | undefined;
+      readonly identifierFields?: readonly { readonly index: number; readonly host: string }[] | undefined;
+      readonly clickedIdentity?: { readonly host: string; readonly username: string } | undefined;
+      readonly passwordField?: true | undefined;
+    },
+    byAgent: boolean,
+  ): void {
+    const identities = this.ports.typedIdentities;
+    if (identities === undefined) return;
+    const next = identityAfter(call, result, byAgent);
+    if (next === 'keep') identities.seen(sessionId, pageId, pageHostOf(result.url));
+    else if (next === 'clear') identities.cleared(sessionId, pageId);
+    else identities.typed(sessionId, pageId, next.host, next.username);
   }
 
   /**
@@ -1071,6 +1124,8 @@ export class AgentToolService {
           // after: secrev-1282a M2), and the host it is about to run on is tainted for the rules at once.
           finished = scripts?.running?.();
           scripts?.scriptedOn(await page.host?.().catch(() => undefined));
+          // A script can type or choose an account on any page of the session: who they sign in is no longer known.
+          this.ports.typedIdentities?.forget(caller.sessionId);
           ran = true;
         },
       );
@@ -2338,6 +2393,67 @@ function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: reado
       return ` A download started: ${name}, ${sizeWords(notice.size ?? 0)} — save it with browser_download (id ${notice.id}).`;
     })
     .join('');
+}
+
+/** What a page act did to who the page signs in: named someone, changed nothing, or may have changed it unseen. */
+type IdentityAfter = 'keep' | 'clear' | { readonly host: string; readonly username: string };
+
+/** The rules {@link AgentToolService.noteIdentity} applies, decided from the call and what the browser saw it do. */
+function identityAfter(
+  call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
+  result: {
+    readonly identifierHost?: string | undefined;
+    readonly identifierFields?: readonly { readonly index: number; readonly host: string }[] | undefined;
+    readonly clickedIdentity?: { readonly host: string; readonly username: string } | undefined;
+    readonly passwordField?: true | undefined;
+  },
+  byAgent: boolean,
+): IdentityAfter {
+  if (LEAVES_SIGN_IN.has(call.tool)) return 'keep';
+  if (!byAgent) return 'clear';
+  const password = result.passwordField === true;
+  switch (call.tool) {
+    case 'browser.type':
+      return result.identifierHost === undefined || password
+        ? 'clear'
+        : { host: result.identifierHost, username: call.text };
+    case 'browser.fill_form': {
+      const [only, ...more] = result.identifierFields ?? [];
+      const entry = only === undefined ? undefined : call.fields[only.index];
+      const text = entry?.text ?? entry?.value;
+      return password || only === undefined || more.length > 0 || text === undefined
+        ? 'clear'
+        : { host: only.host, username: text };
+    }
+    case 'browser.click':
+      if (result.clickedIdentity !== undefined) return result.clickedIdentity;
+      return call.ref === undefined && call.selector === undefined ? 'clear' : 'keep';
+    case 'browser.press':
+      return call.keys.every(key => NON_TYPING_KEYS.has(key)) ? 'keep' : 'clear';
+    default:
+      return 'clear';
+  }
+}
+
+/** The page acts that cannot change who a page signs in: it is kept through them (typed-identities.ts). */
+const LEAVES_SIGN_IN: ReadonlySet<string> = new Set([
+  'browser.read',
+  'browser.screenshot',
+  'browser.hover',
+  'browser.scroll',
+  'browser.highlight',
+  'browser.select',
+  'browser.check',
+]);
+
+/** A page URL's host, lowercase, or `undefined` when there is none to read. */
+function pageHostOf(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).host.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The element fields of a page tool's call, if it carries any. */

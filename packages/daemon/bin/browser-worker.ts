@@ -955,14 +955,17 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'click': {
       const page = targetPage(params.pageId);
-      await clickOn(page, requiredTarget(params), {
+      const clicked = await clickOn(page, requiredTarget(params), {
         ...(isButton(params.button) ? { button: params.button } : {}),
         ...(params.double === true ? { double: true } : {}),
         ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
       });
       // A click that starts a download hears of it a moment later; the act should be able to say so.
       await downloads.awaitStart(pageId(page), 250);
-      return await acted(page);
+      return await acted(
+        page,
+        clicked.clickedIdentity === undefined ? {} : { clickedIdentity: clicked.clickedIdentity },
+      );
     }
     case 'type': {
       const page = targetPage(params.pageId);
@@ -972,7 +975,14 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ...(params.submit === true ? { submit: true } : {}),
         ...(params.slowly === true ? { slowly: true } : {}),
       });
-      return await acted(page, typed.passwordField ? { passwordField: true } : {});
+      return await acted(
+        page,
+        typed.passwordField
+          ? { passwordField: true }
+          : typed.identifierHost === undefined
+            ? {}
+            : { identifierHost: typed.identifierHost },
+      );
     }
     case 'copyRead': {
       const page = targetPage(params.pageId);
@@ -1036,7 +1046,14 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));
-      return await acted(page, outcome.passwordField ? { passwordField: true } : {});
+      return await acted(
+        page,
+        outcome.passwordField
+          ? { passwordField: true }
+          : outcome.identifiers === undefined
+            ? {}
+            : { identifierFields: outcome.identifiers },
+      );
     }
     case 'read': {
       const page = targetPage(params.pageId);

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import { INPUT_ERROR_CODES, unpadInputValue } from '@ferretry/protocol';
+import { type AccountList, INPUT_ERROR_CODES, unpadInputValue } from '@ferretry/protocol';
 import {
+  accountTitleWords,
   alwaysUseFor,
+  cardAccountWords,
+  differentAccountWords,
+  editSaveLabel,
+  editSaveUsername,
+  switchSaveMode,
+  updateChoiceWords,
+  updateWords,
+  usernameLocked,
   CAPTCHA_WARNING,
   chainWords,
   choiceReasonWords,
@@ -557,9 +566,9 @@ describe('what the daemon saw in a browser', () => {
 describe('the save fields', () => {
   it('say what is wrong with a label or a handle, and nothing when saving is off', () => {
     expect(saveDraftProblem(draft({ enabled: false, label: '' }))).toBeUndefined();
-    expect(saveDraftProblem(draft({ label: ' ' }))).toBe('Give it a label.');
-    expect(saveDraftProblem(draft({ label: 'x'.repeat(81) }))).toBe('A label is at most 80 characters.');
-    expect(saveDraftProblem(draft({ id: 'sudo kirin box' }))).toContain('uppercase letters, digits');
+    expect(saveDraftProblem(draft({ label: ' ' }))).toBe('Give the account a name.');
+    expect(saveDraftProblem(draft({ label: 'x'.repeat(81) }))).toBe('A name is at most 80 characters.');
+    expect(saveDraftProblem(draft({ id: 'sudo kirin box' }))).toContain('capital letters, digits');
     expect(saveDraftProblem(draft())).toBeUndefined();
   });
 });
@@ -670,5 +679,269 @@ describe('the reason, Pick one and Always use words', () => {
     expect(alwaysUseFor(at, offer({ id: 'HOME' }))).toBeUndefined();
     expect(alwaysUseFor(at, primaryOffer({ why: 'project', project: 'ferretry' }))).toBeUndefined();
     expect(alwaysUseFor(saved({ match: 'NOT A KEY', project }), tapped)).toBeUndefined();
+  });
+});
+
+/**
+ * &B137, THE OWNER'S SCENARIO: kirinnee97@gmail.com's Google password is saved; the page is signing in ernest@atomi.tech
+ * (the ferret typed it). The daemon took the one-tap away; Save as must start on a NEW account for ernest, never
+ * update kirinnee97, and the title names ernest only from the secrets-gated accounts listing.
+ */
+describe('a second person on one site', () => {
+  const KIRIN = { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com', username: 'kirinnee97@gmail.com' };
+  const ernestCard = () =>
+    saved({
+      match: 'accounts.google.com',
+      suggest: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+      newAccount: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+      typedUsername: 'ernest@atomi.tech',
+      differentFrom: KIRIN,
+      offers: [offer({ ...KIRIN, signIn: 'si_0123456789abcdef' })],
+    });
+  const listing = (): AccountList =>
+    ({
+      v: 1,
+      accounts: [
+        {
+          id: KIRIN.id,
+          label: KIRIN.label,
+          username: KIRIN.username,
+          fields: { password: true, totp: false },
+          factors: [],
+          signIns: [],
+          createdAt: '2026-11-02T00:00:00.000Z',
+          updatedAt: '2026-11-02T00:00:00.000Z',
+        },
+      ],
+      signIns: [],
+    }) as unknown as AccountList;
+
+  it('should start Save as on a NEW account for ernest, with his username, never on kirinnee97', () => {
+    const draft = initialSaveDraft(ernestCard());
+
+    expect(draft).toMatchObject({
+      mode: 'new',
+      label: 'Google · ernest@atomi.tech',
+      id: 'GOOGLE_ERNEST',
+      username: 'ernest@atomi.tech',
+    });
+    expect(differentAccountWords(ernestCard())).toBe(
+      'This looks like a different account. The page is signing in ernest@atomi.tech, not accounts.google.com (kirinnee97@gmail.com).',
+    );
+  });
+
+  it('should send a new account with its username, and name the account in the app title only from the accounts listing', () => {
+    const value = withSaved(ernestCard(), { target: { kind: 'browser', key: 'gper2' } });
+    const built = typedBody({
+      request: value,
+      field: must(fieldsOf(value)[0], 'the field'),
+      value: 'ernest-UNIQUE-pw-2',
+      submit: false,
+      save: { ...initialSaveDraft(ernestCard()), enabled: true },
+      deliveryId: 'd1',
+    });
+
+    expect(built.ok && built.body.save).toEqual({
+      entry: 'GOOGLE_ERNEST',
+      label: 'Google · ernest@atomi.tech',
+      mode: 'new',
+      username: 'ernest@atomi.tech',
+    });
+    // Without the secrets-gated listing (a device without secrets.use): the place-only title, no person.
+    expect(accountTitleWords(value, 'Hadi', undefined)).toBeUndefined();
+    // With it: never the demoted kirinnee97 as the card's account; the page's person, said as the ferret's word.
+    expect(cardAccountWords(ernestCard(), listing())).toBeUndefined();
+    expect(accountTitleWords(value, 'Hadi', listing())).toBe(
+      '!A7 · Hadi needs a password, signing in ernest@atomi.tech as typed on the page',
+    );
+  });
+
+  it('should start on NEW even when the username is the account’s own: Update is only the owner’s pick (secrev-1331-delta N1)', () => {
+    const same = saved({
+      match: 'accounts.google.com',
+      update: KIRIN,
+      newAccount: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
+      typedUsername: 'kirinnee97@gmail.com',
+      offers: [primaryOffer({ ...KIRIN })],
+    });
+
+    expect(initialSaveDraft(same)).toMatchObject({
+      mode: 'new',
+      id: 'GOOGLE_KIRINNEE97',
+      username: KIRIN.username,
+    });
+    expect(usernameLocked(same, initialSaveDraft(same))).toBe(false);
+    // The owner picks Update: the account's own, its username locked.
+    const picked = switchSaveMode(same, initialSaveDraft(same), 'update');
+    expect(picked).toMatchObject({ mode: 'update', id: KIRIN.id, username: KIRIN.username });
+    expect(usernameLocked(same, picked)).toBe(true);
+    expect(updateChoiceWords(same)).toBe('Update accounts.google.com (same username, kirinnee97@gmail.com)');
+    expect(cardAccountWords(same, listing())).toBe('accounts.google.com (kirinnee97@gmail.com)');
+    expect(accountTitleWords(withSaved(same), 'Hadi', listing())).toBe(
+      '!A7 · Hadi needs a password for accounts.google.com (kirinnee97@gmail.com)',
+    );
+  });
+
+  it('should never send an update for a stale record: it says kirinnee97, the page has moved on to ernest', () => {
+    // The ferret typed kirinnee97, then the page moved to ernest's sign-in by a path that read nobody: the card still
+    // carries the old record, the same username as the only account here.
+    const stale = saved({
+      match: 'accounts.google.com',
+      update: KIRIN,
+      newAccount: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
+      typedUsername: 'kirinnee97@gmail.com',
+      offers: [primaryOffer({ ...KIRIN })],
+    });
+    const value = withSaved(stale);
+    // The owner types ernest's password, ticks Save to Accounts and sends on the default.
+    const built = typedBody({
+      request: value,
+      field: must(fieldsOf(value)[0], 'the field'),
+      value: 'ernest-UNIQUE-pw-2',
+      submit: false,
+      save: { ...initialSaveDraft(stale), enabled: true },
+      deliveryId: 'd1',
+    });
+
+    // A second account, never kirinnee97's password replaced.
+    expect(built.ok && built.body.save).toMatchObject({ entry: 'GOOGLE_KIRINNEE97', mode: 'new' });
+    expect(built.ok && built.body.save?.entry).not.toBe(KIRIN.id);
+  });
+
+  it('should never carry another username on an update: Update takes the account’s own', () => {
+    const card = saved({
+      match: 'accounts.google.com',
+      update: KIRIN,
+      newAccount: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+      offers: [primaryOffer({ ...KIRIN })],
+    });
+    // The owner typed instead of the one-tap, then changed the Username, then chose Update after all.
+    const typedOver = editSaveUsername(card, { ...initialSaveDraft(card), enabled: true }, 'ernest@atomi.tech');
+    expect(typedOver.mode).toBe('new');
+    const updating = switchSaveMode(card, typedOver, 'update');
+    const value = withSaved(card);
+    const built = typedBody({
+      request: value,
+      field: must(fieldsOf(value)[0], 'the field'),
+      value: 'ernest-UNIQUE-pw-2',
+      submit: false,
+      save: updating,
+      deliveryId: 'd1',
+    });
+
+    expect(updating.username).toBe('kirinnee97@gmail.com');
+    expect(built.ok && built.body.save).toEqual({ entry: KIRIN.id, label: KIRIN.label, mode: 'update' });
+    expect(switchSaveMode(card, updating, 'new')).toMatchObject({ mode: 'new', username: '' });
+    // An account with no username saved takes the one the owner confirms.
+    const bare = saved({ match: 'x.com', update: { id: 'X', label: 'x' }, newAccount: { id: 'X_2', label: 'x.com' } });
+    const filled = switchSaveMode(
+      bare,
+      editSaveUsername(bare, { ...initialSaveDraft(bare), enabled: true }, 'e@x.com'),
+      'update',
+    );
+    const sent = typedBody({
+      request: withSaved(bare),
+      field: must(fieldsOf(withSaved(bare))[0], 'the field'),
+      value: 'ernest-UNIQUE-pw-2',
+      submit: false,
+      save: filled,
+      deliveryId: 'd2',
+    });
+    expect(sent.ok && sent.body.save).toEqual({ entry: 'X', label: 'x', mode: 'update', username: 'e@x.com' });
+  });
+
+  it('should name a new account after its username until the owner names it, and its terminal name after its name', () => {
+    const card = ernestCard();
+    const typed = editSaveUsername(card, initialSaveDraft(card), 'e.ng@atomi.tech');
+    expect(typed).toMatchObject({ label: 'Google · e.ng@atomi.tech', id: 'GOOGLE_E_NG_ATOMI_TECH' });
+
+    const named = editSaveLabel(card, typed, 'Work Google');
+    expect(named).toMatchObject({ label: 'Work Google', id: 'WORK_GOOGLE' });
+    expect(editSaveUsername(card, named, 'x@y.z')).toMatchObject({ label: 'Work Google', username: 'x@y.z' });
+    // A name in the terminal another account has is never suggested.
+    expect(editSaveLabel(card, typed, 'accounts google com').id).toBe('ACCOUNTS_GOOGLE_COM_2');
+  });
+
+  it('should never start on Update when who the page signs in is unknown, whatever the account holds (M4)', () => {
+    const unknown = saved({
+      match: 'accounts.google.com',
+      update: KIRIN,
+      newAccount: { id: 'GOOGLE', label: 'Google' },
+      offers: [primaryOffer({ ...KIRIN })],
+    });
+    const sudo = saved({
+      update: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
+      newAccount: { id: 'SUDO_KIRIN_BOX_2', label: 'sudo on kirin-box' },
+    });
+
+    expect(initialSaveDraft(unknown)).toMatchObject({ mode: 'new', username: '' });
+    // Update, chosen by hand, takes that account's own username.
+    expect(switchSaveMode(unknown, initialSaveDraft(unknown), 'update').username).toBe(KIRIN.username);
+    expect(initialSaveDraft(sudo).mode).toBe('new');
+  });
+
+  it('should keep a terminal name the owner edited when the username changes, and change nothing it cannot switch to', () => {
+    const card = ernestCard();
+    const edited = { ...initialSaveDraft(card), id: 'MINE', idEdited: true };
+    expect(editSaveUsername(card, edited, 'x@y.z')).toMatchObject({ id: 'MINE', label: 'Google · x@y.z' });
+    // No account to update (the daemon sent none): Update changes nothing.
+    expect(switchSaveMode(card, edited, 'update')).toBe(edited);
+    // On Update of an account with no username, the box is the owner's: it changes the username and names nothing.
+    const updating = { ...edited, mode: 'update' as const, label: 'google', id: 'G' };
+    expect(editSaveUsername(card, updating, 'e@x.com')).toEqual({ ...updating, username: 'e@x.com' });
+  });
+
+  it('should say plainly that Update sets the username of an account that has none (secrev-1331-delta N3)', () => {
+    // Who the page signs in is unknown; the only account here has no username. The owner picks Update and types one.
+    const bare = saved({
+      match: 'accounts.google.com',
+      update: { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' },
+      newAccount: { id: 'ACCOUNTS_GOOGLE_COM_2', label: 'accounts.google.com' },
+    });
+    const picked = editSaveUsername(
+      bare,
+      switchSaveMode(bare, { ...initialSaveDraft(bare), enabled: true }, 'update'),
+      'ernest@atomi.tech',
+    );
+
+    expect(picked).toMatchObject({ mode: 'update', username: 'ernest@atomi.tech' });
+    expect(updateWords({ id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' }, picked.username)).toBe(
+      'accounts.google.com has no username saved. This sets its username to ernest@atomi.tech and replaces its password.',
+    );
+  });
+
+  it('should word an account plainly, with or without a username saved', () => {
+    expect(updateChoiceWords(saved({ update: { id: 'G', label: 'google' } }))).toBe('Update google');
+    const labelled = { id: 'G', label: 'Google · a@x.com', username: 'a@x.com' };
+    expect(updateChoiceWords(saved({ update: labelled, typedUsername: 'A@x.com' }))).toBe(
+      'Update Google · a@x.com (same username)',
+    );
+    // Who the page signs in is unknown: no sameness is claimed, the username is said plainly.
+    expect(updateChoiceWords(saved({ update: { ...labelled, label: 'google' } }))).toBe('Update google (a@x.com)');
+    expect(updateChoiceWords(saved())).toBeUndefined();
+    expect(updateWords({ id: 'G', label: 'google' })).toBe('Replaces the saved password of google.');
+    expect(updateWords({ id: 'G', label: 'google' }, '  ')).toBe('Replaces the saved password of google.');
+    // An account with a username keeps it: the line is the same whatever the box holds.
+    expect(updateWords({ id: 'G', label: 'Google · a@x.com', username: 'a@x.com' }, 'a@x.com')).toBe(
+      'Replaces the saved password of Google · a@x.com.',
+    );
+    expect(
+      differentAccountWords(
+        saved({ typedUsername: 'b@x.com', differentFrom: { id: 'G', label: 'google' }, offers: [] }),
+      ),
+    ).toBe(
+      'This looks like a different account. The page is signing in b@x.com, and google has no username saved, so pick it only if it is the same one.',
+    );
+  });
+
+  it('should say what is wrong with a username, or a new terminal name another account has', () => {
+    const card = ernestCard();
+    const draft = { ...initialSaveDraft(card), enabled: true };
+    expect(saveDraftProblem({ ...draft, username: 'a\nb' }, card)).toBe(
+      'That username cannot be kept: one line, at most 256 characters.',
+    );
+    expect(saveDraftProblem({ ...draft, id: KIRIN.id }, card)).toBe(
+      'Another account is already called ACCOUNTS_GOOGLE_COM in the terminal: change it under More.',
+    );
   });
 });

@@ -167,6 +167,7 @@ describe('what a card offers', () => {
     should(savedFor('secret', 'sudo@box', EMPTY)).deepEqual({
       match: 'sudo@box',
       suggest: { id: 'SUDO_BOX', label: 'sudo on box' },
+      newAccount: { id: 'SUDO_BOX', label: 'sudo on box' },
       saves: 'password',
       offers: [],
     });
@@ -476,5 +477,100 @@ describe('the account a code card is titled from', () => {
     );
     should(codeCardKeys('github.com', world, {})).be.undefined();
     should(codeCardKeys('github.com', world, { hint: 'B' })?.account.id).equal('B');
+  });
+});
+
+/**
+ * &B137: TWO PEOPLE ON ONE SITE. The owner signed a work Google account in while a personal one was saved for the same
+ * page: the card one-tapped the personal password onto the work sign-in. The username the ferret typed on the page is
+ * the daemon's record of the ferret's word: it can only TAKE a one-tap away and name a new account, never pick one.
+ */
+describe('who the page is signing in', () => {
+  const GOOGLE = 'accounts.google.com';
+  const kirin = () =>
+    account('ACCOUNTS_GOOGLE_COM', { label: 'accounts.google.com', username: 'kirinnee97@gmail.com' });
+
+  it('should offer no one-tap of kirinnee97 to a page signing in ernest@atomi, and say so (the owner scenario)', () => {
+    const saved = savedFor('secret', GOOGLE, listing([kirin()], [site('ACCOUNTS_GOOGLE_COM', [GOOGLE])]), {
+      typedUsername: 'ernest@atomi.tech',
+    });
+
+    should(saved.offers.some(offer => offer.primary === true)).be.false();
+    should(offersOf(saved)).deepEqual([['ACCOUNTS_GOOGLE_COM', true, undefined]]);
+    should(saved.differentFrom).deepEqual({
+      id: 'ACCOUNTS_GOOGLE_COM',
+      label: 'accounts.google.com',
+      username: 'kirinnee97@gmail.com',
+    });
+    should(saved.typedUsername).equal('ernest@atomi.tech');
+    // Save as suggests a NEW account named for who is signing in, never the saved one.
+    should(saved.newAccount).deepEqual({ id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' });
+    should(saved.suggest).deepEqual(saved.newAccount);
+  });
+
+  it('should keep the one-tap when the page signs in the saved account’s own username, whatever its case', () => {
+    const saved = savedFor('secret', GOOGLE, listing([kirin()], [site('ACCOUNTS_GOOGLE_COM', [GOOGLE])]), {
+      typedUsername: '  KirinNee97@gmail.com ',
+    });
+
+    should(offersOf(saved)).deepEqual([['ACCOUNTS_GOOGLE_COM', true, 'only']]);
+    should(saved.differentFrom).be.undefined();
+    should(saved.suggest).deepEqual({ id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' });
+  });
+
+  it('should take the one-tap away from an account with no username saved: nothing says it is the same person', () => {
+    const saved = savedFor('secret', GOOGLE, listing([account('G', { label: 'google' })], [site('G', [GOOGLE])]), {
+      typedUsername: 'b@gmail.com',
+    });
+
+    should(offersOf(saved)).deepEqual([['G', true, undefined]]);
+    should(saved.differentFrom).deepEqual({ id: 'G', label: 'google' });
+    // Nor is it offered for Update: only the owner adding the username in Settings first makes it that person.
+    should(saved.update).be.undefined();
+    should(saved.newAccount).deepEqual({ id: 'GOOGLE_B', label: 'Google · b@gmail.com' });
+  });
+
+  it('should never PROMOTE an account by its username: two sign in here, the typed one matches one, still no one-tap', () => {
+    const saved = savedFor(
+      'secret',
+      GOOGLE,
+      listing(
+        [
+          account('A', { username: 'a@x.com' }),
+          account('B', { username: 'b@x.com' }),
+          account('HAND', { username: 'h@x.com' }),
+        ],
+        [site('A', [GOOGLE]), site('B', [GOOGLE])],
+      ),
+      { typedUsername: 'b@x.com' },
+    );
+
+    should(saved.offers.some(offer => offer.primary === true)).be.false();
+    should(saved.differentFrom).be.undefined();
+    // Typing a hand-pickable account's username never matches it here either.
+    should(saved.offers.find(offer => offer.id === 'HAND')).match({ matched: false });
+    should(saved.offers.find(offer => offer.id === 'HAND')?.primary).be.undefined();
+    // Nor does it choose which one Save as may update: nothing chose one, so none is offered (secrev-1331 L3).
+    should(saved.update).be.undefined();
+  });
+
+  it('should demote a ferret’s hint or a default exactly as the only one, and never move it to another account', () => {
+    const a = site('A', [GOOGLE]);
+    const saved = savedFor(
+      'secret',
+      GOOGLE,
+      listing([account('A', { username: 'a@x.com' }), account('B', { username: 'b@x.com' })], [a, site('B', [GOOGLE])]),
+      { hint: 'A', typedUsername: 'c@x.com' },
+    );
+
+    should(saved.offers.some(offer => offer.primary === true)).be.false();
+    should(saved.differentFrom).match({ id: 'A' });
+    should(saved.update).be.undefined();
+  });
+
+  it('should give a new account a CLI name no account has', () => {
+    const saved = savedFor('secret', GOOGLE, listing([account('GOOGLE_B')], []), { typedUsername: 'b@y.com' });
+
+    should(saved.newAccount).deepEqual({ id: 'GOOGLE_B_2', label: 'Google · b@y.com' });
   });
 });

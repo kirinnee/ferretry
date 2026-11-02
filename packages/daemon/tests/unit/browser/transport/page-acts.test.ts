@@ -38,6 +38,10 @@ class FakePage implements ActablePage {
   failMouse = false;
   /** The `type` attribute each selector's element carries; none for an unlisted one. */
   readonly types = new Map<string, string>();
+  /** Every other attribute, per selector. */
+  readonly attributes = new Map<string, Readonly<Record<string, string>>>();
+  /** The host of the document a text field is in; absent: the element is a button or a file field. */
+  host: string | undefined;
   text = 'Welcome back';
   snapshot = SNAPSHOT;
   /** Whether the element is a file input. */
@@ -68,7 +72,8 @@ class FakePage implements ActablePage {
       press: async key => {
         page.calls.push(`press ${selector} ${key}`);
       },
-      getAttribute: async name => (name === 'type' ? (page.types.get(selector) ?? null) : null),
+      getAttribute: async name =>
+        name === 'type' ? (page.types.get(selector) ?? null) : (page.attributes.get(selector)?.[name] ?? null),
       innerText: async () => {
         page.calls.push(`innerText ${selector}`);
         return page.text;
@@ -87,7 +92,11 @@ class FakePage implements ActablePage {
       // The real page function runs, on an element that is a file field or a button.
       evaluate: async (pageFunction, arg) =>
         (pageFunction as (element: unknown, arg: string) => unknown)(
-          page.fileInput ? { tagName: 'INPUT', type: 'file' } : { tagName: 'BUTTON', type: 'submit' },
+          page.host !== undefined
+            ? { tagName: 'INPUT', ownerDocument: { location: { host: page.host } } }
+            : page.fileInput
+              ? { tagName: 'INPUT', type: 'file' }
+              : { tagName: 'BUTTON', type: 'submit' },
           arg,
         ),
       scrollIntoViewIfNeeded: async () => {
@@ -150,10 +159,11 @@ describe('browser page acts — click', () => {
     const page = new FakePage();
 
     // Act
-    await clickOn(page, { kind: 'selector', selector: '#go' });
+    const outcome = await clickOn(page, { kind: 'selector', selector: '#go' });
 
-    // Assert
-    should(page.calls).deepEqual(['click #go {"timeout":30000,"button":"left","clickCount":1}']);
+    // Assert: the element's text is read first (an account tile names its email), then it is clicked once.
+    should(page.calls).deepEqual(['innerText #go', 'click #go {"timeout":30000,"button":"left","clickCount":1}']);
+    should(outcome).deepEqual({});
   });
 
   it('should click a ref through its aria-ref, double and with modifiers held', async () => {
@@ -165,7 +175,36 @@ describe('browser page acts — click', () => {
 
     // Assert
     should(page.calls).deepEqual([
+      'innerText aria-ref=e2',
       'click aria-ref=e2 {"timeout":30000,"button":"right","clickCount":2,"modifiers":["Shift"]}',
+    ]);
+  });
+
+  it('should name the account a click chose when the element shows exactly one email, and nothing otherwise (&B137)', async () => {
+    // Arrange: Google's chooser tile, a tile with two emails, a Next button, and a tile whose host cannot be read.
+    const tile = new FakePage();
+    tile.host = 'Accounts.Google.com';
+    tile.text = 'Ernest Ng\nErnest@Atomi.tech\nSigned out';
+    const two = new FakePage();
+    two.host = 'accounts.google.com';
+    two.text = 'a@x.com or b@x.com';
+    const next = new FakePage();
+    next.host = 'accounts.google.com';
+    next.text = 'Next';
+    const blind = new FakePage();
+    blind.text = 'a@x.com';
+
+    // Act
+    const outcomes = await Promise.all(
+      [tile, two, next, blind].map(async page => await clickOn(page, { kind: 'selector', selector: '#tile' })),
+    );
+
+    // Assert
+    should(outcomes).deepEqual([
+      { clickedIdentity: { host: 'accounts.google.com', username: 'ernest@atomi.tech' } },
+      {},
+      {},
+      {},
     ]);
   });
 
@@ -247,6 +286,45 @@ describe('browser page acts — type', () => {
     // Assert
     should(secret).deepEqual({ passwordField: true });
     should(plain).deepEqual({ passwordField: false });
+  });
+
+  it('should name the host of an email or username box it typed into, and of nothing else (&B137)', async () => {
+    // Arrange: Google's email box, GitHub's login box, Microsoft's, a search box and a password box.
+    const page = new FakePage();
+    page.host = 'Accounts.Google.com';
+    page.types.set('#google', 'email');
+    page.attributes.set('#google', { autocomplete: 'username webauthn', name: 'identifier', id: 'identifierId' });
+    page.types.set('#github', 'text');
+    page.attributes.set('#github', { autocomplete: 'username', name: 'login' });
+    page.types.set('#microsoft', 'email');
+    page.attributes.set('#microsoft', { name: 'loginfmt' });
+    page.types.set('#named', 'text');
+    page.attributes.set('#named', { name: 'user_name' });
+    page.types.set('#search', 'text');
+    page.attributes.set('#search', { name: 'q' });
+    page.types.set('#pw', 'password');
+    page.attributes.set('#pw', { autocomplete: 'username' });
+    page.types.set('#check', 'checkbox');
+    page.attributes.set('#check', { name: 'username' });
+    // Look-alikes that hold something else: a token, a key, a code box that says what it is by its autocomplete.
+    page.types.set('#token', 'text');
+    page.attributes.set('#token', { name: 'user_token' });
+    page.types.set('#key', 'text');
+    page.attributes.set('#key', { name: 'account_key', id: 'login' });
+    page.types.set('#otp', 'text');
+    page.attributes.set('#otp', { name: 'username', autocomplete: 'one-time-code' });
+
+    // Act
+    const typed = async (selector: string) => await typeInto(page, { kind: 'selector', selector }, 'x');
+
+    // Assert
+    for (const selector of ['#google', '#github', '#microsoft', '#named'])
+      should(await typed(selector)).deepEqual({ passwordField: false, identifierHost: 'accounts.google.com' });
+    should(await typed('#search')).deepEqual({ passwordField: false });
+    should(await typed('#pw')).deepEqual({ passwordField: true });
+    should(await typed('#check')).deepEqual({ passwordField: false });
+    for (const selector of ['#token', '#key', '#otp'])
+      should(await typed(selector)).deepEqual({ passwordField: false });
   });
 });
 

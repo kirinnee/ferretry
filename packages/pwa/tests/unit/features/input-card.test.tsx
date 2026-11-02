@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
-import type { InputRequest } from '@ferretry/protocol';
+import type { AccountList, InputRequest } from '@ferretry/protocol';
 import { unpadInputValue } from '@ferretry/protocol';
 import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { fieldsOf, REOBSERVING, SAVE_TOO_SHORT } from '../../../src/lib/input-card.ts';
@@ -334,6 +334,8 @@ describe('first time: typing and saving', () => {
 
     await click(view.q('[data-input-save-tick]'));
     expect(view.q('[data-input-save-reason]')?.textContent).toBe(SAVE_TOO_SHORT);
+    // Said plainly, on the button too: this Send does not save.
+    expect(view.q('[data-input-send]')?.textContent).toBe('Send without saving');
     await click(view.q('[data-input-send]'));
     await settle();
 
@@ -502,7 +504,7 @@ describe('when the daemon refuses', () => {
     await click(view.q('[data-input-save-tick]'));
     await typeInto(view.q('[data-input-save-label]'), '');
 
-    expect(view.q('[data-input-save] [role="alert"]')?.textContent).toBe('Give it a label.');
+    expect(view.q('[data-input-save] [role="alert"]')?.textContent).toBe('Give the account a name.');
   });
 });
 
@@ -1022,5 +1024,224 @@ describe('a saved login that signs in through a provider', () => {
   it('says nothing extra for a plain password login', async () => {
     const { q } = await show(withSaved(saved({ offers: [] })));
     expect(q('[data-input-sign-in]')).toBeNull();
+  });
+});
+
+/**
+ * &B137, THE OWNER'S SCENARIO (!A245): kirinnee97@gmail.com's Google password is saved; the page is signing in
+ * ernest@atomi.tech. The card must offer no one-tap of kirinnee97, say it looks like a different account, name ernest
+ * in its title (from the secrets-gated accounts listing only), and Save as must start a new account for ernest.
+ */
+describe('a second person on one site', () => {
+  const KIRIN = { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com', username: 'kirinnee97@gmail.com' };
+  const ernest = (): InputRequest =>
+    withSaved(
+      saved({
+        match: 'accounts.google.com',
+        suggest: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+        newAccount: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+        typedUsername: 'ernest@atomi.tech',
+        differentFrom: KIRIN,
+        offers: [offer({ ...KIRIN, signIn: 'si_0123456789abcdef' })],
+      }),
+    );
+  const accounts = {
+    v: 1,
+    accounts: [
+      {
+        ...KIRIN,
+        fields: { password: true, totp: false },
+        factors: [],
+        signIns: [],
+        createdAt: '2026-11-02T00:00:00.000Z',
+        updatedAt: '2026-11-02T00:00:00.000Z',
+      },
+    ],
+    signIns: [],
+  } as unknown as AccountList;
+  const open = async (withAccounts: boolean, value: InputRequest = ernest()) => {
+    const fake = fakeClient(answerDelivered);
+    const view = await mount(
+      <InputCard
+        agentName="Hadi"
+        client={fake.client}
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        request={value}
+        {...(withAccounts ? { accounts } : {})}
+      />,
+    );
+    mounted.push(view);
+    const q = <T extends Element = HTMLElement>(selector: string): T | null =>
+      view.container.querySelector<T>(selector);
+    return { ...fake, view, q };
+  };
+
+  it('should offer no one-tap of kirinnee97, say why, and name ernest in the title only with the accounts listing', async () => {
+    const card = await open(true);
+
+    expect(card.q('[data-input-offer][data-variant="primary"]')).toBeNull();
+    expect(card.view.container.textContent).not.toContain('Use saved');
+    expect(card.q('[data-input-different-account]')?.textContent).toContain('The page is signing in ernest@atomi.tech');
+    expect(card.q('[data-input-title]')?.textContent).toBe(
+      '!A7 · Hadi needs a password, signing in ernest@atomi.tech as typed on the page',
+    );
+    // The owner types: the field is open from the start, and EMPTY — nothing of kirinnee97's is in it, and Send has
+    // nothing to send until the owner types.
+    expect(card.q<HTMLInputElement>('[data-input-value]')?.value).toBe('');
+    expect(card.q<HTMLButtonElement>('[data-input-send]')?.disabled).toBe(true);
+
+    const placeOnly = await open(false);
+    expect(placeOnly.q('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a password');
+  });
+
+  it('should start Save as on a new account for ernest, in plain words, and send it so', async () => {
+    const card = await open(true);
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+
+    expect(card.q<HTMLInputElement>('[data-input-save-username]')?.value).toBe('ernest@atomi.tech');
+    // kirinnee97's account is not offered for Update at all: the daemon sent no `update` for another person, and the
+    // card says in one plain line which it is.
+    expect(card.q('[data-input-save-update]')).toBeNull();
+    expect(card.q('[data-input-save-new-only]')?.textContent).toBe('Saves as a new account');
+    expect(card.q<HTMLInputElement>('[data-input-save-label]')?.value).toBe('Google · ernest@atomi.tech');
+    expect(card.q('[data-input-save-more] summary')?.textContent).toBe('More');
+    const words = card.q('[data-input-save]')?.textContent ?? '';
+    expect(words).toContain('Name in the terminal');
+    expect(words.toLowerCase()).not.toContain('label');
+    expect(words.toLowerCase()).not.toContain('handle');
+    expect(card.q('[data-input-save-updates]')).toBeNull();
+
+    await click(card.q('[data-input-send]'));
+    await settle();
+    const body = deliver(card.calls).body as { save?: unknown };
+    expect(body.save).toEqual({
+      entry: 'GOOGLE_ERNEST',
+      label: 'Google · ernest@atomi.tech',
+      mode: 'new',
+      username: 'ernest@atomi.tech',
+    });
+  });
+
+  it('should start on New even for the same username, say plainly what Update replaces once picked, and keep that account’s username', async () => {
+    const card = await open(
+      true,
+      withSaved(
+        saved({
+          match: 'accounts.google.com',
+          update: KIRIN,
+          newAccount: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
+          typedUsername: KIRIN.username,
+          offers: [primaryOffer({ ...KIRIN })],
+        }),
+      ),
+    );
+    expect(card.q('[data-input-title]')?.textContent).toBe(
+      '!A7 · Hadi needs a password for accounts.google.com (kirinnee97@gmail.com)',
+    );
+    await click(card.q('[data-input-type-instead]'));
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+    // Typed instead of the one-tap: it starts on a new account, and the owner picks Update by hand. With a choice
+    // drawn, the one-line "Saves as a new account" is not.
+    expect(card.q<HTMLInputElement>('[data-input-save-new]')?.checked).toBe(true);
+    expect(card.q('[data-input-save-new-only]')).toBeNull();
+    await click(card.q('[data-input-save-update]'));
+
+    expect(card.q('[data-input-save-updates]')?.textContent).toBe(
+      'Replaces the saved password of accounts.google.com (kirinnee97@gmail.com).',
+    );
+    expect(card.q<HTMLInputElement>('[data-input-save-username]')?.readOnly).toBe(true);
+    expect(card.q<HTMLInputElement>('[data-input-save-username]')?.value).toBe('kirinnee97@gmail.com');
+
+    await click(card.q('[data-input-send]'));
+    await settle();
+    expect((deliver(card.calls).body as { save?: unknown }).save).toEqual({
+      entry: 'ACCOUNTS_GOOGLE_COM',
+      label: 'accounts.google.com',
+      mode: 'update',
+    });
+  });
+
+  it('should send a stale record’s card as a new account by default: it never starts on Update (secrev-1331-delta N1)', async () => {
+    // The record says kirinnee97 (the only account here, by that username); the page has moved on to ernest. Nothing
+    // is a one-tap here, so the owner types ernest's password straight away and ticks Save to Accounts.
+    const card = await open(
+      true,
+      withSaved(
+        saved({
+          match: 'accounts.google.com',
+          update: KIRIN,
+          newAccount: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
+          typedUsername: KIRIN.username,
+          offers: [],
+        }),
+      ),
+    );
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+
+    expect(card.q<HTMLInputElement>('[data-input-save-new]')?.checked).toBe(true);
+    expect(card.q<HTMLInputElement>('[data-input-save-update]')?.checked).toBe(false);
+    expect(card.q('[data-input-save-updates]')).toBeNull();
+    await click(card.q('[data-input-send]'));
+    await settle();
+    expect((deliver(card.calls).body as { save?: { entry?: string; mode?: string } }).save).toMatchObject({
+      entry: 'GOOGLE_KIRINNEE97',
+      mode: 'new',
+    });
+  });
+
+  it('should say before Send that Update sets the username of an account that has none (secrev-1331-delta N3)', async () => {
+    // Who the page signs in is unknown; the only account here has no username saved (the owner's real store).
+    const bare = { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' };
+    const card = await open(
+      true,
+      withSaved(
+        saved({
+          match: 'accounts.google.com',
+          update: bare,
+          newAccount: { id: 'ACCOUNTS_GOOGLE_COM_2', label: 'accounts.google.com' },
+          offers: [],
+        }),
+      ),
+    );
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+    await click(card.q('[data-input-save-update]'));
+    expect(card.q('[data-input-save-updates]')?.textContent).toBe(
+      'Replaces the saved password of accounts.google.com.',
+    );
+    await typeInto(card.q('[data-input-save-username]'), 'ernest@atomi.tech');
+
+    expect(card.q('[data-input-save-updates]')?.textContent).toBe(
+      'accounts.google.com has no username saved. This sets its username to ernest@atomi.tech and replaces its password.',
+    );
+    await click(card.q('[data-input-send]'));
+    await settle();
+    expect((deliver(card.calls).body as { save?: unknown }).save).toEqual({
+      entry: 'ACCOUNTS_GOOGLE_COM',
+      label: 'accounts.google.com',
+      mode: 'update',
+      username: 'ernest@atomi.tech',
+    });
+  });
+
+  it('should say whose password a one-tap types: the username, or plainly that none is saved (M4)', async () => {
+    const page = { target: { kind: 'browser' as const, key: 'app' } };
+    const none = await open(true, withSaved(saved({ offers: [primaryOffer()] }), page));
+    const named = await open(
+      true,
+      withSaved(saved({ offers: [primaryOffer({ username: 'kirinnee97@gmail.com' })] }), page),
+    );
+
+    expect(none.q('[data-input-offer][data-variant="primary"] [data-input-offer-username]')?.textContent).toBe(
+      'no username saved',
+    );
+    expect(named.q('[data-input-offer][data-variant="primary"] [data-input-offer-username]')?.textContent).toBe(
+      'kirinnee97@gmail.com',
+    );
   });
 });

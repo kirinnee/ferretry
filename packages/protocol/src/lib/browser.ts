@@ -328,12 +328,41 @@ export const BrowserDownloadNoticeSchema = z.strictObject({
 });
 export type BrowserDownloadNotice = z.infer<typeof BrowserDownloadNoticeSchema>;
 
+/** A document's host as a page reports it: lowercase, with a port when it has one. */
+export const BrowserFieldHostSchema = z
+  .string()
+  .max(260)
+  .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u);
+
+/** A fill-form act's identifier box: the field's place in the act and its document's host. */
+export const BrowserIdentifierFieldSchema = z.strictObject({
+  index: z.number().int().min(0).max(63),
+  host: BrowserFieldHostSchema,
+});
+export type BrowserIdentifierField = z.infer<typeof BrowserIdentifierFieldSchema>;
+
+/** A click on an element that showed exactly one email (an account chooser's tile): that email, and its document's host. */
+export const BrowserClickedIdentitySchema = z.strictObject({
+  host: BrowserFieldHostSchema,
+  username: z.string().min(3).max(254),
+});
+export type BrowserClickedIdentity = z.infer<typeof BrowserClickedIdentitySchema>;
+
 export const BrowserPageActionSnapshotSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
   /** Downloads the page started since the last act reported any. Absent when there are none. */
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
   /** The act typed into a password field — a real secret never belongs in a tool call. */
   passwordField: z.literal(true).optional(),
+  /**
+   * A `type` act put text in an identifier field (an email or username box): the host of the document that field is
+   * in. The daemon keeps what was typed as who this page is signing in (docs/input-requests.md, "Who is signing in").
+   */
+  identifierHost: BrowserFieldHostSchema.optional(),
+  /** A fill-form act put text in these identifier boxes (never beside a password field). */
+  identifierFields: z.array(BrowserIdentifierFieldSchema).min(1).max(64).optional(),
+  /** A click chose this account tile. */
+  clickedIdentity: BrowserClickedIdentitySchema.optional(),
 });
 export type BrowserPageActionSnapshot = z.infer<typeof BrowserPageActionSnapshotSchema>;
 
@@ -517,6 +546,9 @@ const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
   passwordField: z.literal(true).optional(),
+  identifierHost: BrowserFieldHostSchema.optional(),
+  identifierFields: z.array(BrowserIdentifierFieldSchema).min(1).max(64).optional(),
+  clickedIdentity: BrowserClickedIdentitySchema.optional(),
 });
 
 /** Actual action responses carry status plus an optional shape-specific result. */

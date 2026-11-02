@@ -803,7 +803,13 @@ any other (older, silent, or one whose health read failed) keeps the saved-login
   each row naming the account, which fields EXIST ("password ✓", never a value) and its 2FA keys. Accounts with no
   sign-in sit under "No site yet". A damaged store is said to be damaged, never drawn as an empty list.
 - **Account** — _Details_ (name, username, a write-only password: the box is empty every time and the page only says
-  one is saved), _2FA keys_ and _Sites_.
+  one is saved), _2FA keys_ and _Sites_. Under its name it shows its **name in the terminal** (its handle,
+  `GOOGLE_A`): the name `fy account` uses. It has the shape of a secret name for history's sake, but it is **not an
+  environment variable** and `${secret:…}` cannot reach it; the app never calls it a handle.
+- **A card's "Save to Accounts"** keeps an account as a username and a password together: a **new** account named
+  "Google · a@gmail.com" by default, or an explicit **Update** of the same person's account, never one with another
+  username ([Save as](input-requests.md#the-first-time-save-as)). The username kept is the one the owner confirmed on the
+  card, so the Accounts list shows it.
 - **2FA keys** — each key by its label and plain facts with a usage record: _Last code worked on <date>_,
   _Not used yet_ or _Last code did not work on <date>_ (red, the only one drawn as a warning). It is a record of what the
   daemon saw, which a ferret can steer, and not a check that the key belongs to the account, so it is never drawn as a

@@ -426,7 +426,7 @@ function AddAccountForm({
         />
       </label>
       <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        Handle
+        Name in the terminal
         <input
           autoCapitalize="characters"
           autoComplete="off"
@@ -443,12 +443,12 @@ function AddAccountForm({
       </label>
       {handle !== '' && !id.success ? (
         <p className="m-0 text-meta text-err" role="alert">
-          A handle is capital letters, digits and underscores, starting with a letter.
+          A name in the terminal is capital letters, digits and underscores, starting with a letter.
         </p>
       ) : null}
       {taken ? (
         <p className="m-0 text-meta text-err" role="alert">
-          An account with that handle is already saved.
+          Another account already has that name in the terminal.
         </p>
       ) : null}
       <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">

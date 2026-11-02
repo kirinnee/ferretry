@@ -30,6 +30,7 @@ import type { BrowserUploadMode } from '../transport/page-acts.ts';
 import type { PageScript } from '../transport/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
+import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from './sign-in-watch.ts';
 
 export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 800 };
 
@@ -280,6 +281,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly launcher: BrowserSessionLauncher,
     private readonly now: () => number,
     private readonly idle?: BrowserIdlePolicy,
+    /** Told when an act may have changed who a page signs in, whoever made it (sign-in-watch.ts). */
+    private readonly signIns?: BrowserSignInWatch,
   ) {}
 
   async status(sessionId: string): Promise<BrowserStatus> {
@@ -294,6 +297,7 @@ export class BrowserSessionService implements BrowserSubsystem {
   async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
     if (action.action === 'stop') {
+      this.signIns?.forget(sessionId);
       await this.releaseSession(sessionId);
       return { status: await this.status(sessionId) };
     }
@@ -310,7 +314,15 @@ export class BrowserSessionService implements BrowserSubsystem {
       }
       if (action.action === 'start' || action.url === undefined) return { status: this.project(run, sessionId) };
       const url = action.url;
-      return await this.onPage(run, viewed, async () => await run.driver.navigate(viewed, url), sessionId);
+      return await this.onPage(
+        run,
+        viewed,
+        async () => {
+          this.signIns?.cleared(sessionId, viewed);
+          return await run.driver.navigate(viewed, url);
+        },
+        sessionId,
+      );
     }
     const run = this.requireRunning();
     if (action.action === 'activate-page' || action.action === 'close-page') {
@@ -319,12 +331,23 @@ export class BrowserSessionService implements BrowserSubsystem {
         await this.view(run, sessionId, page.id);
         return { status: await this.status(sessionId), result: { ...run.snapshot, actedPageId: page.id } };
       }
+      this.signIns?.cleared(sessionId, page.id);
       await this.closeIn(run, sessionId, page.id);
       return { status: await this.status(sessionId) };
     }
     const viewed = this.viewedPage(run, sessionId);
     if (viewed === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
-    return await this.onPage(run, viewed, async () => await this.perform(run, viewed, action), sessionId);
+    // Who posted it is not known (the owner's address bar or a ferret's `fy browser`): anything but a read clears who
+    // the page signs in, before it runs, so an act that fails partway leaves nothing behind either.
+    return await this.onPage(
+      run,
+      viewed,
+      async () => {
+        if (!toolbarActLeavesSignIn(action)) this.signIns?.cleared(sessionId, viewed);
+        return await this.perform(run, viewed, action);
+      },
+      sessionId,
+    );
   }
 
   async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
@@ -349,7 +372,17 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
       await guard?.(this.guardPage(run, page.id));
-      const result = await this.perform(run, page.id, action);
+      // Cleared BEFORE an act that may change who the page signs in, and after ANY act that failed partway (a fill that
+      // typed the email and then broke, an Enter that timed out after the page moved): the agent tools put a record
+      // back only from what they saw a finished act do.
+      if (!pageActLeavesSignIn(action)) this.signIns?.cleared(sessionId, page.id);
+      let result: BrowserPageActionSnapshot;
+      try {
+        result = await this.perform(run, page.id, action);
+      } catch (error) {
+        this.signIns?.cleared(sessionId, page.id);
+        throw error;
+      }
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result };
@@ -400,6 +433,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const page = this.requirePage(run, sessionId, key);
     const perform = async (): Promise<BrowserLifecycleOutcome> => {
+      // Answering a dialog may let the page leave (a beforeunload) or hand it a typed answer (a prompt).
+      if (request.op === 'dialog') this.signIns?.cleared(sessionId, page.id);
       const answered = await run.driver.lifecycle(page.id, request);
       run.snapshot = pageOf(answered);
       if (request.op === 'emulate') {
@@ -476,6 +511,8 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
       await guard?.(this.guardPage(run, page.id));
+      // A script can type or choose an account on any page of the session: who they sign in is no longer known.
+      this.signIns?.forget(sessionId);
       const { text, scriptOrigin, ...result } = await run.driver.evaluate(page.id, script);
       run.snapshot = pageOf(result);
       this.touch(run);
@@ -540,6 +577,9 @@ export class BrowserSessionService implements BrowserSubsystem {
     const run = this.requireRunning();
     const pageId = this.viewedPage(run, sessionId);
     if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    // A person typing or pressing in the live view (an account tile in a chooser, the "pick the account" hand-off) may be
+    // signing someone else in: who the session's pages sign in is no longer known. A move, a wheel or a release is not.
+    if (input.kind !== 'mouse' || input.type === 'mousePressed') this.signIns?.forget(sessionId);
     await run.driver.dispatchInput(pageId, input);
   }
 

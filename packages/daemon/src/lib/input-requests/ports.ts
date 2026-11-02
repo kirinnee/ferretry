@@ -328,13 +328,17 @@ export interface InputLoginPort {
   /**
    * Keeps typed values in an entry in ONE change: a new entry labelled `label` matching `match`, or the
    * existing one (its label kept, `match` added). The username and password of one card go together. The
-   * whole read-merge-write runs under the store-wide lock, so concurrent saves and edits never lose one.
+   * whole read-merge-write runs under the store-wide lock, so concurrent saves and edits never lose one. `mode`, the
+   * owner's "New account" or "Update", is checked under that lock (`LoginDirectory.saveFields`).
    */
   save(
     id: LoginEntryId,
     label: string,
     match: string | undefined,
     fields: { readonly username?: string; readonly password?: string },
+    mode?: 'new' | 'update',
+    /** Who the page is signing in, as the ferret typed it: an update into an account that is not them is refused. */
+    pageUsername?: string,
   ): Promise<void>;
 }
 
