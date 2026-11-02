@@ -87,6 +87,8 @@ export interface SignInGrant {
 export interface ScriptedOriginsView {
   readonly hosts: ReadonlyMap<string, number>;
   readonly everywhere?: number;
+  /** An agent script is running somewhere now, so the host it really runs on is not known yet (a page card's lock). */
+  readonly running?: boolean;
 }
 
 /** No page script has run anywhere. */

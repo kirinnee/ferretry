@@ -138,6 +138,65 @@ export interface CodeDelivery {
   readonly deliveredAt: number;
 }
 
+/**
+ * A page one act of the ferret touched, as the agent tools resolved it (agent-tools/service.ts): its id, whether it
+ * keeps its own cookies and storage (`incognito`), the page that opened it (a popup shares its opener's), and the hosts
+ * it was on around the act, before it ran and where it ended. `hosts` absent: it may have been on any.
+ */
+export interface ActedPage {
+  readonly id: string;
+  readonly incognito?: true;
+  readonly openerId?: string;
+  readonly hosts?: readonly string[];
+}
+
+/**
+ * One act, told BEFORE it runs ({@link LoginObserver.acted}). Until `placed` says which page it was, it counts as an act
+ * on every page of the session; `placed(undefined)` (the page was never known) keeps it so.
+ */
+export interface ActNote {
+  placed(page: ActedPage | undefined): void;
+}
+
+/** The card's page, as {@link LoginObserver.pageSteer} asks about it: its id and the host it is on. */
+export interface SteerablePage {
+  readonly id: string;
+  readonly host: string | undefined;
+}
+
+/** Why a page's proof is void ({@link LoginObserver.pageSteer}); the lock's `PageSteer` (lock.ts). */
+export type PageSteerReason = 'scripted' | 'acted';
+
+/** What the observer keeps of one session's page acts and scripts, per page. */
+interface PageMarks {
+  /** Acts told but not placed yet: each counts as an act, or a script, on every page. */
+  readonly open: Map<symbol, { readonly at: number; readonly script: boolean }>;
+  /** The last act per page and host (`page\0host`, `page\0*` for any host, `*` for any page). */
+  readonly acts: Map<string, number>;
+  /** What each page an act touched is, for whether it shares a card page's storage. */
+  readonly pages: Map<string, Pick<ActedPage, 'incognito' | 'openerId'>>;
+  /** Pages and hosts a script ran on, ever, and whether one ran somewhere that could not be told. */
+  readonly scriptedPages: Set<string>;
+  readonly scriptedHosts: Set<string>;
+  scriptedAnywhere: boolean;
+}
+
+const ANY = '*';
+
+/**
+ * Whether two pages may share cookies and storage: the same page; two of the shared agent profile; or either unknown,
+ * or a popup (it lives in its opener's context, whichever that is). Two different incognito pages, or an incognito page
+ * and a profile page, share nothing.
+ */
+function mayShare(
+  card: Pick<ActedPage, 'incognito' | 'openerId'> | undefined,
+  acted: Pick<ActedPage, 'incognito' | 'openerId'> | undefined,
+): boolean {
+  if (card === undefined || acted === undefined) return true;
+  if (card.openerId !== undefined || acted.openerId !== undefined) return true;
+  return card.incognito !== true && acted.incognito !== true;
+}
+
 /** A password submit still waiting to see its second factor. */
 interface Awaiting {
   readonly delivery: LoginDelivery;
@@ -220,16 +279,105 @@ export class LoginObserver {
   private readonly scripted = new Set<string>();
   /** Password submits waiting for a code, per session. */
   private readonly awaiting = new Map<string, Awaiting[]>();
+  /** Per session, which PAGE each act and script was on: what a page card's lock reads ({@link pageSteer}). */
+  private readonly marks = new Map<string, PageMarks>();
 
   constructor(private readonly ports: LoginObserverPorts) {}
 
   /**
    * The ferret is about to do something that may change a surface of `kind` (every tool but the read-only ones), or
-   * run a page script: what is seen after a submit there is no longer the site's alone.
+   * run a page script: what is seen after a submit there is no longer the site's alone. For a page, the answer is
+   * placed on the page it touched once that is known ({@link ActNote}); until then it counts on every page.
    */
-  acted(sessionId: string, kind: SurfaceKind, script = false): void {
-    this.drove.set(`${sessionId}\u0000${kind}`, this.ports.now());
+  acted(sessionId: string, kind: SurfaceKind, script = false): ActNote {
+    const at = this.ports.now();
+    this.drove.set(`${sessionId}\u0000${kind}`, at);
     if (script) this.scripted.add(sessionId);
+    if (kind !== 'browser') return { placed: () => undefined };
+    const marks = this.marksOf(sessionId);
+    const token = Symbol('act');
+    marks.open.set(token, { at, script });
+    return {
+      placed: page => {
+        if (!marks.open.delete(token)) return;
+        this.place(marks, at, script, page);
+      },
+    };
+  }
+
+  private marksOf(sessionId: string): PageMarks {
+    const known = this.marks.get(sessionId);
+    if (known !== undefined) return known;
+    const made: PageMarks = {
+      open: new Map(),
+      acts: new Map(),
+      pages: new Map(),
+      scriptedPages: new Set(),
+      scriptedHosts: new Set(),
+      scriptedAnywhere: false,
+    };
+    this.marks.set(sessionId, made);
+    return made;
+  }
+
+  /** Files one act on the page it touched: on every page when that is unknown, on every host when those are. */
+  private place(marks: PageMarks, at: number, script: boolean, page: ActedPage | undefined): void {
+    const later = (key: string): void => {
+      if ((marks.acts.get(key) ?? Number.NEGATIVE_INFINITY) < at) marks.acts.set(key, at);
+    };
+    if (page === undefined) {
+      later(ANY);
+      if (script) marks.scriptedAnywhere = true;
+      return;
+    }
+    marks.pages.set(page.id, {
+      ...(page.incognito === true ? { incognito: true } : {}),
+      ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
+    });
+    const hosts = page.hosts === undefined || page.hosts.length === 0 ? undefined : page.hosts;
+    for (const host of hosts ?? [ANY]) later(`${page.id}\u0000${host}`);
+    if (!script) return;
+    marks.scriptedPages.add(page.id);
+    if (hosts === undefined) marks.scriptedAnywhere = true;
+    else for (const host of hosts) marks.scriptedHosts.add(host);
+  }
+
+  /**
+   * WHETHER THE FERRET COULD HAVE STEERED WHAT THIS ONE PAGE SHOWS, for a page card's lock (lock.ts): judged per page,
+   * never per session, so an act on another tab or a terminal does not lengthen this card's lock.
+   *
+   * - `scripted`: at any time, this session ran a page script on this page, on any page while it was at this page's
+   *   host, or where the page or host could not be told; or a script of this session is running now. (Another ferret's
+   *   script on this host is the machine-wide taint, asked by the input service.)
+   * - `acted`: at or after `since`, this session acted on this page, on an unknown page, or on another page that may
+   *   share its cookies and storage while it was at this page's host (or an unknown one), or such an act is running
+   *   now. An unreadable `since` counts as acted; `since` = +∞ asks about scripts only.
+   */
+  pageSteer(sessionId: string, page: SteerablePage, since: number): PageSteerReason | undefined {
+    const marks = this.marks.get(sessionId);
+    if (marks === undefined) return Number.isNaN(since) ? 'acted' : undefined;
+    const open = [...marks.open.values()];
+    if (open.some(act => act.script)) return 'scripted';
+    if (
+      marks.scriptedAnywhere ||
+      marks.scriptedPages.has(page.id) ||
+      (page.host === undefined ? marks.scriptedHosts.size > 0 : marks.scriptedHosts.has(page.host))
+    )
+      return 'scripted';
+    if (Number.isNaN(since)) return 'acted';
+    if (open.some(act => act.at >= since)) return 'acted';
+    const card = marks.pages.get(page.id);
+    for (const [key, at] of marks.acts) {
+      if (at < since) continue;
+      if (key === ANY) return 'acted';
+      const split = key.indexOf('\u0000');
+      const id = key.slice(0, split);
+      const host = key.slice(split + 1);
+      if (id === page.id) return 'acted';
+      const hostMatches = host === ANY || page.host === undefined || host === page.host;
+      if (hostMatches && mayShare(card, marks.pages.get(id))) return 'acted';
+    }
+    return undefined;
   }
 
   /**
@@ -249,6 +397,7 @@ export class LoginObserver {
       ...new Set([
         ...this.awaiting.keys(),
         ...this.scripted,
+        ...this.marks.keys(),
         ...[...this.drove.keys()].map(key => key.slice(0, key.indexOf('\u0000'))),
       ]),
     ];
@@ -258,6 +407,7 @@ export class LoginObserver {
   forget(sessionId: string): void {
     this.awaiting.delete(sessionId);
     this.scripted.delete(sessionId);
+    this.marks.delete(sessionId);
     for (const kind of ['browser', 'terminal']) this.drove.delete(`${sessionId}\u0000${kind}`);
   }
 

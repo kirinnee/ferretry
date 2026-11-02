@@ -404,13 +404,28 @@ The owner chose an **adaptive** lock (!A149). The card shows its length and why 
 after typing. …"), from `request.lock` (`InputLockSchema`: `seconds` and a fixed `reason`); the agent learns the
 seconds (`lockSeconds`). It is decided only from what the daemon observed (`packages/daemon/src/lib/input-requests/lock.ts`):
 
-| Reason            | Lock  | When                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hidden-terminal` | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified card are never short. |
-| `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                                |
-| `probed-field`    | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                               |
-| `code`            | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                           |
-| `not-proven`      | 120 s | Anything else, every probe that did not run cleanly, an unreadable login store, a ferret that could have steered the page.                                                                                                                                                                                                                                            |
+| Reason               | Lock  | When                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hidden-terminal`    | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified card are never short. |
+| `proven-field`       | 10 s  | Exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise; for a value Ferretry SUBMITS, or one it does not when one of those records is the owner's own tap that moved the page on (`tapped`).  |
+| `probed-field`       | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                               |
+| `code`               | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                           |
+| `terminal-shows`     | 120 s | Any other terminal: "Ferretry couldn't prove this is a local sudo, su, doas or passwd prompt with typing hidden."                                                                                                                                                                                                                                                     |
+| `scripted`           | 120 s | A page script ran on this page or on its site (see [what the ferret did](#what-the-ferret-did-judged-per-page)): "A ferret ran a script on this page or this site."                                                                                                                                                                                                   |
+| `steered`            | 120 s | The ferret used this page, or a tab sharing its storage on its site, after the card was raised: "The ferret used this page, or another tab on this site, after asking you."                                                                                                                                                                                           |
+| `not-password-field` | 120 s | A secret field that does not qualify (below): "This is not a plain password box on a secure page."                                                                                                                                                                                                                                                                    |
+| `did-not-move-on`    | 120 s | A record for this field says it was not masked, showed the value or did not move on: "Last time here, the page didn't move on or it showed the value."                                                                                                                                                                                                                |
+| `not-submitted`      | 120 s | The facts hold but Ferretry is not pressing Enter and no owner's own tap is on record: "Ferretry won't press Enter, and your own sign-in here hasn't moved the page on yet."                                                                                                                                                                                          |
+| `probe-shown`        | 120 s | The probe found its throwaway value: "A test value Ferretry typed showed in the page's text."                                                                                                                                                                                                                                                                         |
+| `probe-stopped`      | 120 s | The probe did not finish cleanly: "Ferretry's quick test of this page didn't finish cleanly."                                                                                                                                                                                                                                                                         |
+| `first-time`         | 120 s | No facts for this field and no probe ran: "First time on this page: Ferretry hasn't seen it hide a password yet."                                                                                                                                                                                                                                                     |
+| `not-proven`         | 120 s | Nothing could be checked: no observer is wired, or the login store can't be read. (An older daemon's one word for every long lock.)                                                                                                                                                                                                                                   |
+
+The card shows the reason's sentence after "Hidden from the ferret for … after typing." The sentences are fixed
+(`INPUT_LOCK_WORDS`), never page or terminal text. While a card waits, the lock it shows is the lock Send would give
+now: once the ferret uses the card's page, or a script taints it, the card says "2 minutes" and why before the owner
+presses Send. New reasons need no feature gate: the app ships before the daemon (Architecture, "The app ships
+before the daemon"), so the app that knows them is out before any daemon sends one.
 
 A page field qualifies when every secret field is a visible, uncovered `input type=password` on a secure page, in the
 page's own origin, with no human check showing.
@@ -422,8 +437,15 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
   lock early or reveal.
 - **A card never shortens at the write.** The lock is decided again from the facts seen at Send and the longer of
   that and the card's is used. A card redrawn onto a re-rendered field drops its probe result.
-- **The ferret's own steering voids a page's proof**: a session that ever ran a page script never gets a short page
-  lock and is never probed, and at Send any act of the ferret on a page since the card was raised voids it.
+- **The ferret's own steering voids a page's proof, judged per page** (below): a page a script ran on, or whose site
+  one ran on, never gets a short lock and is never probed, and at Send an act of the ferret on THAT page since the card
+  was raised voids it. An act on another tab or a terminal does not.
+- **The owner's own tap earns the history proof for a value Ferretry does not submit.** `proven-field` asks about what
+  happens after a submit. A value Ferretry types without Enter sits in a visible, uncovered password box the write saw,
+  exactly as after a clean probe (which never needed a submit), so the field's facts may prove it too, but only once
+  one of them is `tapped`: the owner's own paired-device tap there went through on a page that moved on, unsteered.
+  A plan fill, a rule fill or the admin token never writes `tapped`. Facts are still kept only after a submit Ferretry
+  pressed and nobody steered, so a ferret that clicks Next itself never adds one.
 - **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name). Only the
   card's own facts do, and only when every process of the foreground group is a setuid-root password program.
 - **The dummy probe** runs on a page card only, for exactly ONE secret field, after the field picture and before the
@@ -449,6 +471,36 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
   - GAP: once a page's hold ends while the page still shows the document the value was typed into, a page script
     (`browser_eval`, when the owner allows scripts) can read the field and transform the value past masking. The
     short lock makes that sooner; the full lock never closed it.
+
+#### What the ferret did, judged per page
+
+A page card's lock reads only what could have changed what THAT page shows (`LoginObserver.pageSteer`, and the
+input service's `steerOf`):
+
+- **Scripts, ever.** A page script this session ran on the card's page, or on any page while it was at the card's host,
+  or where the page or host could not be told; a script of this session still running; and, from any caller in any
+  session, a script on the card's host, on a host that couldn't be read, or one running anywhere now (the machine-wide
+  taint the standing rules keep, [below](#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)). Any of
+  these: `scripted`, no probe, the full lock.
+- **Acts, since the card was raised** (at Send, and on the card while it waits): an act of this session on the card's
+  page (a click, a key, a navigation, a close), or on another page that may share its cookies and storage (two pages of
+  the shared agent profile, or a popup, which lives in its opener's context) while that page was at the card's host.
+  An incognito page shares nothing with any other page, so an act on one never counts for another.
+- **Not counted**: an act on a tab of another site, on any incognito tab but the card's own, or on a terminal; a
+  script on another site's page. The owner's two Google tabs (one profile, one incognito) no longer lengthen each
+  other's lock.
+- **How an act is placed.** The agent tools tell the observer before an act runs. Until the call is over it counts
+  on EVERY page; then it is placed on the page it touched, with every host that page was on around the act: where it
+  was when it was looked up, where it is now, and where its popups are now. A page that can't be looked up leaves the
+  act on every page; a host that can't be read leaves it on every host of that page. A card's page the observer never
+  saw an act on may share storage with any page.
+- **Limits.**
+  - Only the hosts before and after an act are known: a page that went through a third host on the way (a redirect
+    chain) is not seen at that host.
+  - Another session's non-script acts are not counted, as before: every ferret's profile pages share sign-ins and
+    storage, and only scripts are tainted machine-wide.
+  - The facts a sign-in keeps (`navigatedAway`, `tapped`, ...) are still dropped for ANY act of the session on a page
+    since the card was raised (below), so a standing rule's history is unchanged.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,

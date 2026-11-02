@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import type { InputRequestField, InputTargetFacts, LoginObserved } from '@ferretry/protocol';
+import {
+  INPUT_LOCK_WORDS,
+  type InputRequestField,
+  type InputTargetFacts,
+  type LoginObserved,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   heldFromView,
@@ -8,10 +13,12 @@ import {
   longerLock,
   lookAlike,
   matchable,
+  pageHistory,
   passwordTarget,
   pageFieldsQualify,
   probeable,
   provenByFacts,
+  steeredLock,
   terminalHides,
 } from '../../../src/lib/input-requests/lock.ts';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
@@ -66,7 +73,7 @@ const field = (id: string, sensitivity: InputRequestField['sensitivity']): Input
   ({ id, sensitivity }) as unknown as InputRequestField;
 const SECRET = [field('password', 'secret')];
 const flag = (value = true) => ({ value, observedAt: '2026-10-31T09:00:00.000Z', count: 2 });
-const QUIET: LockContext = { observed: [], probed: false, submitted: true, steered: false };
+const QUIET: LockContext = { observed: [], probed: false, submitted: true };
 
 const proven = (facts: InputTargetFacts, extra: Partial<LoginObserved> = {}): LoginObserved => ({
   at: 'accounts.example.test',
@@ -97,7 +104,7 @@ describe('a terminal', () => {
       sudo({}, 'psql'),
       sudo({}, 'gpg'),
     ])
-      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'terminal-shows' });
     should(terminalHides(page())).be.false();
   });
 
@@ -108,7 +115,7 @@ describe('a terminal', () => {
       sudo({ program: 'bash' }),
       sudo({ program: undefined, trustedProgram: undefined }),
     ])
-      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'terminal-shows' });
   });
 });
 
@@ -144,14 +151,96 @@ describe('a page field', () => {
 
   it('should be short for a clean probe, and long when it did not run cleanly', () => {
     should(lockFor(page(), SECRET, { ...QUIET, probed: true })).deepEqual({ seconds: 10, reason: 'probed-field' });
-    should(lockFor(page(), SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(lockFor(page(), SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'first-time' });
+    should(lockFor(page(), SECRET, { ...QUIET, probe: 'shown' })).deepEqual({ seconds: 120, reason: 'probe-shown' });
+    should(lockFor(page(), SECRET, { ...QUIET, probe: 'aborted' })).deepEqual({
+      seconds: 120,
+      reason: 'probe-stopped',
+    });
+  });
+
+  it("should prove a delivery Ferretry does not submit only by the owner's own tap that moved the page on", () => {
+    // Arrange — the same field's facts, once with an owner's device tap on record and once without.
+    const facts = page();
+    const tapped = proven(facts, { tapped: flag() });
+    const unsubmitted = { ...QUIET, submitted: false };
+
+    // Act / Assert
+    should(lockFor(facts, SECRET, { ...unsubmitted, observed: [tapped] })).deepEqual({
+      seconds: 10,
+      reason: 'proven-field',
+    });
+    should(lockFor(facts, SECRET, { ...unsubmitted, observed: [proven(facts)] })).deepEqual({
+      seconds: 120,
+      reason: 'not-submitted',
+    });
+    should(pageHistory(facts, [proven(facts, { tapped: flag(false) })], false)).equal('unsubmitted');
+    // A tap on record never outweighs a record that says the page showed the value or stayed.
+    should(
+      lockFor(facts, SECRET, {
+        ...unsubmitted,
+        observed: [tapped, proven(facts, { navigatedAway: flag(false) })],
+      }),
+    ).deepEqual({ seconds: 120, reason: 'did-not-move-on' });
+    // Nor does a tap at another field or place.
+    should(pageHistory(facts, [proven(facts, { tapped: flag(), at: 'other.example.test' })], false)).equal('none');
+  });
+
+  it('should say why it is long in a sentence of its own for every cause, never "not proven"', () => {
+    // Arrange — one context per cause.
+    const facts = page();
+    const causes: [LockContext, string][] = [
+      [{ ...QUIET, steered: 'scripted' }, 'scripted'],
+      [{ ...QUIET, steered: 'acted' }, 'steered'],
+      [QUIET, 'first-time'],
+      [{ ...QUIET, observed: [proven(facts, { noEchoAfterSubmit: flag(false) })] }, 'did-not-move-on'],
+      [{ ...QUIET, submitted: false, observed: [proven(facts)] }, 'not-submitted'],
+      [{ ...QUIET, probe: 'shown' }, 'probe-shown'],
+      [{ ...QUIET, probe: 'aborted' }, 'probe-stopped'],
+    ];
+
+    // Act / Assert
+    for (const [context, reason] of causes) should(lockFor(facts, SECRET, context).reason).equal(reason);
+    should(lockFor(page([pageField({}, { type: 'text' })]), SECRET, QUIET).reason).equal('not-password-field');
+    should(lockFor(sudo({ echo: 'on' }), SECRET, QUIET).reason).equal('terminal-shows');
+    should(lockFor(facts, SECRET, { ...QUIET, unread: true }).reason).equal('not-proven');
+    should(steeredLock('unknown')).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(INPUT_LOCK_WORDS.scripted).equal('A ferret ran a script on this page or this site.');
+    should(INPUT_LOCK_WORDS['first-time']).equal(
+      "First time on this page: Ferretry hasn't seen it hide a password yet.",
+    );
+    should(INPUT_LOCK_WORDS['did-not-move-on']).equal(
+      "Last time here, the page didn't move on or it showed the value.",
+    );
+    const sentences = new Set(causes.map(([, reason]) => INPUT_LOCK_WORDS[reason as keyof typeof INPUT_LOCK_WORDS]));
+    should(sentences.size).equal(causes.length);
   });
 
   it('should be long, whatever proves it, when the ferret could have steered the page', () => {
     const facts = page();
-    should(lockFor(facts, SECRET, { ...QUIET, observed: [proven(facts)], probed: true, steered: true }).seconds).equal(
-      120,
-    );
+    should(lockFor(facts, SECRET, { ...QUIET, observed: [proven(facts)], probed: true, steered: 'acted' })).deepEqual({
+      seconds: 120,
+      reason: 'steered',
+    });
+  });
+
+  it('should let nothing shorten the lock on a page the ferret has scripted', () => {
+    // Arrange — every proof at once: facts, an owner's tap, a submit and a clean probe.
+    const facts = page();
+    const all: LockContext = {
+      observed: [proven(facts, { tapped: flag() })],
+      probed: true,
+      submitted: true,
+      steered: 'scripted',
+    };
+
+    // Act / Assert
+    should(lockFor(facts, SECRET, all)).deepEqual({ seconds: 120, reason: 'scripted' });
+    should(probeable(facts, SECRET, { ...QUIET, steered: 'scripted' })).be.false();
+    should(longerLock({ seconds: 10, reason: 'proven-field' }, steeredLock('scripted'))).deepEqual({
+      seconds: 120,
+      reason: 'scripted',
+    });
   });
 
   it('should be long for any page field the card would not draw green', () => {
@@ -177,6 +266,9 @@ describe('a page field', () => {
     const long = { seconds: 120, reason: 'not-proven' } as const;
     should(longerLock(short, long)).equal(long);
     should(longerLock(long, short)).equal(long);
+    // Of two as long, the one seen at the write says why.
+    const steered = { seconds: 120, reason: 'steered' } as const;
+    should(longerLock(long, steered)).equal(steered);
   });
 });
 
@@ -184,7 +276,7 @@ describe('when the dummy probe may run', () => {
   it('should run only on one qualifying password field not already proven, in a session that ran no page script', () => {
     should(probeable(page(), SECRET, QUIET)).be.true();
     should(probeable(page(), SECRET, { ...QUIET, observed: [proven(page())] })).be.false();
-    should(probeable(page(), SECRET, { ...QUIET, steered: true })).be.false();
+    should(probeable(page(), SECRET, { ...QUIET, steered: 'acted' })).be.false();
     should(probeable(sudo(), SECRET, QUIET)).be.false();
     should(probeable(page([pageField({}, { type: 'text' })]), SECRET, QUIET)).be.false();
     const two = page([pageField(), pageField({ fieldId: 'confirm', backendNodeId: 2 }, { name: 'confirm' })]);
@@ -231,7 +323,7 @@ describe('a one-time code (`code`)', () => {
 
     // Act / Assert
     should(lockFor(facts, fields, { ...QUIET, observed })).deepEqual({ seconds: 10, reason: 'proven-field' });
-    should(lockFor(facts, fields, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(lockFor(facts, fields, QUIET)).deepEqual({ seconds: 120, reason: 'first-time' });
     should(probeable(facts, fields, QUIET)).be.false();
     // A private value on the card keeps today's full lock, as before.
     should(lockFor(facts, [field('password', 'secret'), field('code', 'private')], { ...QUIET, observed })).deepEqual({

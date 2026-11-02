@@ -2,7 +2,9 @@ import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } fr
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
-import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { InputRequestService, type InputRequestServiceDependencies } from '../../../src/lib/input-requests/service.ts';
+import type { ScriptedOriginsView } from '../../../src/lib/sign-in-grants/matcher.ts';
+import type { SignInGrantSource } from '../../../src/lib/sign-in-grants/plans.ts';
 
 export const SESSION = 'mvv6b4qw-49d0158d';
 
@@ -44,6 +46,10 @@ export function inputRequestService(
     readonly logins?: InputLoginPort;
     /** Whether the ferret steered a page (the login observer); absent: no observer, so every page counts as steered. */
     readonly steered?: (since: number) => boolean;
+    /** A whole login observer (the real one, say), in place of `steered`. */
+    readonly observer?: InputRequestServiceDependencies['observer'];
+    /** Where page scripts ran across the machine, as the standing rules keep it; with no grant that ever fills. */
+    readonly scriptedOrigins?: () => ScriptedOriginsView;
     /** The agenda the cards are raised on; absent: a board that takes every card and says nothing. */
     readonly agenda?: InputAgendaPort;
   } = {},
@@ -99,15 +105,26 @@ export function inputRequestService(
     quarantine,
     redact: async text => values.scrubAll(text),
     ...(options.logins === undefined ? {} : { logins: options.logins }),
-    ...(options.steered === undefined
+    ...(options.scriptedOrigins === undefined
       ? {}
       : {
-          observer: {
-            delivered: async () => undefined,
-            tainted: (_session: string, _kind: string, since: number) =>
-              (options.steered as NonNullable<typeof options.steered>)(since),
-          },
+          grants: {
+            enabled: () => false,
+            of: () => [],
+            scriptedOrigins: options.scriptedOrigins,
+          } as unknown as SignInGrantSource,
         }),
+    ...(options.observer !== undefined
+      ? { observer: options.observer }
+      : options.steered === undefined
+        ? {}
+        : {
+            observer: {
+              delivered: async () => undefined,
+              tainted: (_session: string, _kind: string, since: number) =>
+                (options.steered as NonNullable<typeof options.steered>)(since),
+            },
+          }),
   });
   return { service, writes, events, quarantine };
 }

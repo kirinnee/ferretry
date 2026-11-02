@@ -46,7 +46,6 @@ import {
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
-  type LoginObserved,
   MAX_AGENDA_TITLE_LENGTH,
   observerByOf,
   type PushSubject,
@@ -71,15 +70,18 @@ import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
 import {
   heldFromView,
+  type LockContext,
   lockFor,
   longerLock,
   lookAlike,
   matchable,
+  type PageSteer,
   passwordTarget,
   probeable,
   spellsPassword,
+  steeredLock,
 } from './lock.ts';
-import type { LoginDelivery, LoginObserver } from './login-observer.ts';
+import { type LoginDelivery, type LoginObserver, placeOf } from './login-observer.ts';
 import type {
   InputAgendaPort,
   InputAgentNotifier,
@@ -283,7 +285,8 @@ export interface InputRequestServiceDependencies {
    * (docs/input-requests.md, "Login recipes") come only from here, and so does whether a code Ferretry made went
    * through (`codeTyped`). Absent: no facts are kept.
    */
-  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'> & Partial<Pick<LoginObserver, 'codeTyped'>>;
+  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'> &
+    Partial<Pick<LoginObserver, 'codeTyped' | 'pageSteer'>>;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -388,25 +391,34 @@ export class InputRequestService {
     // The dummy probe runs after the picture, so the picture shows the page as it was.
     // A card of plain values and one-time codes is kept from nobody (lock.ts, heldFromView): no facts, probe or lock.
     const kept = heldFromView(fields) && target.kind !== 'secret';
-    const observedFacts = kept ? await this.observedFacts(seen.facts) : [];
-    // At the raise only a page script the ferret ever ran counts: acts before the card are the ferret's own business.
+    // At the raise only a page script counts (on this page or its site): acts before the card are the ferret's own
+    // business.
+    const steered = kept ? this.steerOf(sessionId, seen.facts, Number.POSITIVE_INFINITY) : undefined;
     const context = {
-      observed: observedFacts,
+      ...(kept ? await this.lockFacts(seen.facts) : { observed: [] }),
       submitted: raise.submit !== 'agent',
-      steered: this.tainted(sessionId, Number.POSITIVE_INFINITY),
+      ...(steered === undefined ? {} : { steered }),
     };
-    const probed =
+    // A target that cannot probe says nothing about the page; a probe that throws did not finish cleanly.
+    const outcome =
       kept && probeable(seen.facts, fields, context)
-        ? (await this.deps.target
+        ? await this.deps.target
             .probe?.(
               sessionId,
               target,
               seen.facts,
               fields.filter(f => f.sensitivity === 'secret').map(f => f.id),
             )
-            .catch(() => 'aborted' as const)) === 'hidden'
-        : false;
-    const lock = kept ? lockFor(seen.facts, fields, { ...context, probed }) : undefined;
+            .catch(() => 'aborted' as const)
+        : undefined;
+    const probed = outcome === 'hidden';
+    const lock = kept
+      ? lockFor(seen.facts, fields, {
+          ...context,
+          probed,
+          ...(outcome === undefined || outcome === 'hidden' ? {} : { probe: outcome }),
+        })
+      : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     const title =
@@ -1066,7 +1078,14 @@ export class InputRequestService {
       })),
     );
     const saved = await this.savedView(held);
-    const withSaved = saved === undefined ? { ...request, prompt, fields } : { ...request, prompt, fields, saved };
+    const lock = this.liveLock(request);
+    const withSaved = {
+      ...request,
+      prompt,
+      fields,
+      ...(saved === undefined ? {} : { saved }),
+      ...(lock === undefined ? {} : { lock }),
+    };
     if (facts === undefined) return withSaved;
     return { ...withSaved, observed: await this.project(request.sessionId, facts, held.names) };
   }
@@ -1808,12 +1827,14 @@ export class InputRequestService {
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
       if (heldFromView(fields) && request.target.kind !== 'secret') {
-        // At the write, any act of the ferret on a page since the card was raised voids a page's proof as well.
+        // At the write, an act of the ferret on THIS page (or a tab sharing its storage at its site) since the card was
+        // raised voids a page's proof as well; an act on another tab or a terminal does not (login-observer.ts).
+        const steered = this.steerOf(request.sessionId, seen.facts, Date.parse(request.raisedAt));
         const now = lockFor(seen.facts, fields, {
-          observed: await this.observedFacts(seen.facts),
+          ...(await this.lockFacts(seen.facts)),
           probed: held.probed === true,
           submitted,
-          steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+          ...(steered === undefined ? {} : { steered }),
         });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);
         held.request = { ...held.request, lock };
@@ -2092,21 +2113,78 @@ export class InputRequestService {
 
   /**
    * Whether the ferret could have steered a page: it ran a page script in this session, or drove a page since `since`.
-   * With no observer wired nothing is known, so every page counts as steered (the lock stays long).
+   * With no observer wired nothing is known, so every page counts as steered (the lock stays long). What a grant fill
+   * and its ledger read; a page card's LOCK reads {@link steerOf}, per page.
    */
   private tainted(sessionId: string, since: number): boolean {
     return this.deps.observer?.tainted(sessionId, 'browser', since) ?? true;
   }
 
   /**
-   * The facts the lock may read for this target: the UNION of every sign-in the daemon matched to it, of any account
-   * (each keeps its own, so two accounts on one host are two sets read together). None when the store cannot be read
-   * or nothing matches (the lock stays long).
+   * WHY THE FERRET COULD HAVE STEERED THIS PAGE, for its lock (docs/input-requests.md, "How long the lock lasts"):
+   *
+   * - a page script ANY caller ran on this page's host, on a host that couldn't be read, or one running anywhere now
+   *   (the machine-wide taint the standing rules keep);
+   * - this session's own acts and scripts on this very page (login-observer.ts `pageSteer`): a script on it or at its
+   *   host ever, an act on it, or on a tab that shares its cookies and storage at its host, at or after `since`.
+   *
+   * Never an act on another tab, another site's tab in the same profile, an incognito tab, or a terminal. `unknown`
+   * with no observer wired. Nothing is asked of a terminal: its lock never reads the ferret's acts.
    */
-  private async observedFacts(facts: InputTargetFacts): Promise<readonly LoginObserved[]> {
+  private steerOf(sessionId: string, facts: InputTargetFacts, since: number): PageSteer | undefined {
+    if (facts.kind !== 'browser') return undefined;
+    const host = placeOf(facts, undefined);
+    const machine = this.deps.grants?.scriptedOrigins();
+    if (
+      machine !== undefined &&
+      (machine.running === true ||
+        machine.everywhere !== undefined ||
+        (host === undefined ? machine.hosts.size > 0 : machine.hosts.has(host)))
+    )
+      return 'scripted';
+    const observer = this.deps.observer;
+    if (observer === undefined) return 'unknown';
+    // An observer that keeps no pages answers for the whole session: stricter, never looser.
+    if (observer.pageSteer === undefined)
+      return observer.tainted(sessionId, 'browser', since)
+        ? since === Number.POSITIVE_INFINITY
+          ? 'scripted'
+          : 'acted'
+        : undefined;
+    return observer.pageSteer(sessionId, { id: facts.pageId, host }, since);
+  }
+
+  /** {@link steerOf} as the part of a {@link LockContext} it fills. */
+  private steeredSince(sessionId: string, facts: InputTargetFacts, since: number): Pick<LockContext, 'steered'> {
+    const steered = this.steerOf(sessionId, facts, since);
+    return steered === undefined ? {} : { steered };
+  }
+
+  /**
+   * The lock a pending page card says NOW: the one it was raised with, or the full lock and its reason once the ferret
+   * acted on this page or a script tainted it after the raise, so the owner reads, before Send, the lock Send will
+   * give (a card never shortens, `longerLock`). Only what the observer holds in memory is read: no store, no page.
+   */
+  private liveLock(request: InputRequest): InputRequest['lock'] {
+    const { lock, observed } = request;
+    if (lock === undefined || request.state !== 'pending' || observed?.kind !== 'browser') return lock;
+    const steered = this.steerOf(request.sessionId, observed, Date.parse(request.raisedAt));
+    return steered === undefined ? lock : longerLock(lock, steeredLock(steered));
+  }
+
+  /**
+   * The facts the lock may read for this target: the UNION of every sign-in the daemon matched to it, of any account
+   * (each keeps its own, so two accounts on one host are two sets read together). None when nothing matches, and
+   * `unread` when the store cannot be read (the lock stays long either way).
+   */
+  private async lockFacts(facts: InputTargetFacts): Promise<Pick<LockContext, 'observed' | 'unread'>> {
     const listing = await this.deps.logins?.listing().catch(() => undefined);
-    if (listing === undefined) return [];
-    return signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(signIn => signIn.observed ?? []);
+    if (listing === undefined) return { observed: [], ...(this.deps.logins === undefined ? {} : { unread: true }) };
+    return {
+      observed: signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(
+        signIn => signIn.observed ?? [],
+      ),
+    };
   }
 
   /**
@@ -2406,10 +2484,10 @@ export class InputRequestService {
       request.lock === undefined
         ? undefined
         : lockFor(seen.facts, request.fields, {
-            observed: await this.observedFacts(seen.facts),
+            ...(await this.lockFacts(seen.facts)),
             probed: false,
             submitted: request.submit !== 'agent',
-            steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+            ...this.steeredSince(request.sessionId, seen.facts, Date.parse(request.raisedAt)),
           });
     const { pictured: _pictured, ...rest } = request;
     held.request = {

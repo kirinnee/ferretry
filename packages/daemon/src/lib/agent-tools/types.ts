@@ -80,6 +80,10 @@ export interface ResolvedSurface {
   readonly incognito?: true;
   /** A popup: the page that opened it. */
   readonly openerId?: string;
+  /** A browser page: where it was when it was looked up, for the login observer (`actedPage`). */
+  readonly url?: string;
+  /** A browser page this very call opened: it was on no host before. */
+  readonly opened?: true;
 }
 
 /**

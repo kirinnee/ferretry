@@ -198,7 +198,7 @@ describe('what is seen after a submit', () => {
       sink: { observeSignIn: async (_id, observation) => void seen.push(observation) },
       probe: { shows: async () => false, where: async () => undefined },
       now: () => Date.now(),
-      sleep: async () => observer.acted('s1', 'terminal'),
+      sleep: async () => void observer.acted('s1', 'terminal'),
     });
     await observer.delivered(
       delivery({
@@ -423,6 +423,111 @@ describe('whether the ferret could have steered a surface, for the lock', () => 
     w.observer.acted('s1', 'browser', true);
     should(w.observer.tainted('s1', 'browser', Number.POSITIVE_INFINITY)).be.true();
     should(w.observer.tainted('s1', 'terminal', Number.POSITIVE_INFINITY)).be.false();
+  });
+});
+
+describe("whether the ferret could have steered this one page, for a page card's lock", () => {
+  /** A clock the test moves, and the observer on it. */
+  const at = () => {
+    let now = RAISED;
+    const observer = new LoginObserver({
+      sink: { observeSignIn: async () => undefined },
+      probe: { shows: async () => undefined, where: async () => undefined },
+      now: () => now,
+      sleep: async () => undefined,
+    });
+    return { observer, to: (ms: number) => (now = ms) };
+  };
+  const CARD = { id: 'page-1', host: 'accounts.google.com' };
+
+  it('should not count an act on another tab: another site, an incognito tab on this site, or a terminal', () => {
+    // Arrange — the card's page is a profile page the ferret opened.
+    const { observer, to } = at();
+    observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com'] });
+    to(DELIVERED);
+
+    // Act
+    observer.acted('s1', 'browser').placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    observer.acted('s1', 'browser').placed({ id: 'page-3', incognito: true, hosts: ['accounts.google.com'] });
+    observer.acted('s1', 'terminal').placed(undefined);
+
+    // Assert
+    should(observer.pageSteer('s1', CARD, DELIVERED)).be.undefined();
+    // The session-wide answer other callers read is unchanged.
+    should(observer.tainted('s1', 'browser', DELIVERED)).be.true();
+  });
+
+  it('should count an act on this page, or on a tab that may share its storage at its host, since the time', () => {
+    // Arrange
+    const { observer, to } = at();
+    observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com'] });
+    to(DELIVERED);
+
+    // Act / Assert — before the time: not counted; this page after it: counted.
+    should(observer.pageSteer('s1', CARD, DELIVERED)).be.undefined();
+    observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com', 'myaccount.google.com'] });
+    should(observer.pageSteer('s1', CARD, DELIVERED)).equal('acted');
+    // A profile tab that was at this host, a popup anywhere, and a tab whose hosts are unknown.
+    for (const tab of [
+      { id: 'page-2', hosts: ['docs.example.test', 'accounts.google.com'] },
+      { id: 'page-4', openerId: 'page-9', incognito: true as const, hosts: ['accounts.google.com'] },
+      { id: 'page-5' },
+    ]) {
+      const fresh = at();
+      fresh.observer.acted('s1', 'browser').placed({ id: 'page-1', hosts: ['accounts.google.com'] });
+      fresh.to(DELIVERED);
+      fresh.observer.acted('s1', 'browser').placed(tab);
+      should(fresh.observer.pageSteer('s1', CARD, DELIVERED)).equal('acted');
+    }
+  });
+
+  it('should count an act on every page until it is placed, an unplaced act always, and an unreadable time', () => {
+    // Arrange
+    const { observer } = at();
+
+    // Act / Assert
+    const running = observer.acted('s1', 'browser');
+    should(observer.pageSteer('s1', CARD, RAISED)).equal('acted');
+    running.placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    should(observer.pageSteer('s1', CARD, RAISED)).be.undefined();
+    should(observer.pageSteer('s1', CARD, Number.NaN)).equal('acted');
+    observer.acted('s1', 'browser').placed(undefined);
+    should(observer.pageSteer('s1', CARD, RAISED)).equal('acted');
+    should(observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).be.undefined();
+  });
+
+  it('should count a script on this page or at this host for good, and one on another site not at all', () => {
+    // Arrange
+    const { observer, to } = at();
+    observer.acted('s1', 'browser', true).placed({ id: 'page-2', hosts: ['docs.example.test'] });
+    to(DELIVERED);
+
+    // Act / Assert — scripts are asked about whatever the time (+∞: scripts only).
+    should(observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).be.undefined();
+    const onPage = at();
+    onPage.observer.acted('s1', 'browser', true).placed({ id: 'page-1', hosts: ['elsewhere.test'] });
+    should(onPage.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
+    const atHost = at();
+    atHost.observer
+      .acted('s1', 'browser', true)
+      .placed({ id: 'page-7', incognito: true, hosts: ['accounts.google.com'] });
+    should(atHost.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
+    const unknown = at();
+    unknown.observer.acted('s1', 'browser', true).placed({ id: 'page-7' });
+    should(unknown.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
+    const running = at();
+    running.observer.acted('s1', 'browser', true);
+    should(running.observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).equal('scripted');
+    // Another session's script is not this session's (the machine-wide taint covers it, in the input service).
+    should(atHost.observer.pageSteer('s2', CARD, Number.POSITIVE_INFINITY)).be.undefined();
+  });
+
+  it('should forget a session', () => {
+    const { observer } = at();
+    observer.acted('s1', 'browser', true).placed(undefined);
+    observer.forget('s1');
+    should(observer.pageSteer('s1', CARD, Number.POSITIVE_INFINITY)).be.undefined();
+    should(observer.sessions()).deepEqual([]);
   });
 });
 
