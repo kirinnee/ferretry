@@ -822,6 +822,7 @@ for (const build of [directCarrier, relayCarrier]) {
       const minted = await rig.members.mint({
         ...MINT,
         member: { kind: 'existing', memberId: response.memberId },
+        newPasskey: true,
       });
       const joiner = await carrier.open();
       await sendJoin(joiner, second, minted.code);
