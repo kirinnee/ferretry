@@ -12,7 +12,7 @@ export const AUTO_MOVE_FAILED_REF = 'warden:auto-move-failed';
 
 /** Where a ferret is now, or `undefined` when it is stopped or gone: either one needs no move. */
 export interface AutoMoveFacts {
-  current(sessionId: string): Promise<{ readonly agent: string } | undefined>;
+  current(sessionId: string): Promise<{ readonly agent: string; readonly name?: string } | undefined>;
 }
 
 const MAX_LISTED = 12;
@@ -50,15 +50,18 @@ export class AutoMoveFailures {
   private async refresh(quiet = false): Promise<void> {
     const held = await this.store.read();
     const kept: Record<string, readonly string[]> = {};
+    const names = new Map<string, string>();
     for (const [id, entry] of Object.entries(held)) {
       const now = await this.facts.current(id);
-      if (now !== undefined && now.agent === entry[0]) kept[id] = entry;
+      if (now === undefined || now.agent !== entry[0]) continue;
+      kept[id] = entry;
+      if (now.name !== undefined) names.set(id, now.name);
     }
     if (Object.keys(kept).length !== Object.keys(held).length) await this.store.write(kept);
     const ids = Object.keys(kept).sort();
     if (ids.length === 0)
       return await this.machine.resolve(AUTO_MOVE_FAILED_REF, 'Every ferret is moved, stopped or gone.');
-    const lines = ids.slice(0, MAX_LISTED).map(id => `${id}: ${kept[id]?.[1] ?? ''}`);
+    const lines = ids.slice(0, MAX_LISTED).map(id => `${names.get(id) ?? id} (${id}): ${kept[id]?.[1] ?? ''}`);
     const more = ids.length > MAX_LISTED ? [`…and ${ids.length - MAX_LISTED} more.`] : [];
     const subject = ids.length === 1 ? `${ids[0]} could not be moved` : `${ids.length} ferrets could not be moved`;
     await this.machine.raiseOrUpdate(
@@ -70,7 +73,8 @@ export class AutoMoveFailures {
           'The Warden moves a ferret whose login hit a limit to another login, as warden.yaml (autoMigrate) allows. ' +
           'These stayed where they are.',
         context: clipAtWord([...lines, ...more].join('\n'), MAX_AGENDA_DETAIL_LENGTH),
-        howToResolve: 'Move one yourself with: fy migrate <id> -a <runtime>, or wait for its login to reset.',
+        howToResolve:
+          'Move a ferret yourself with the command beside its name (pick the runtime to move it onto), or wait for its login to reset.',
         waitingSince: new Date().toISOString(),
         premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
         notice: true,

@@ -522,6 +522,10 @@
   flex-direction: column;
   gap: var(--gap-sm);
   margin: var(--gap-sm) 0;
+  padding: var(--pad-panel) var(--gap-md);
+  border: var(--stroke-control, 1px) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
   color: var(--fg);
   font-size: var(--text-sm);
 }
@@ -1861,4 +1865,28 @@ a.fy-inbox-row:focus-visible {
 .fy-attn-inbox__find-input::-webkit-search-cancel-button {
   display: none;
   appearance: none;
+}
+.fy-inbox-machine-notes__moves {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: var(--gap-xs) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-inbox-machine-notes__moves li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-inbox-machine-notes__ferret {
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-machine-notes__moves code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 12px);
 }

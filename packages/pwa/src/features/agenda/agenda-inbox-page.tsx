@@ -120,7 +120,7 @@ import { BoardSendBack } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
-import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { browserClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
 import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
@@ -411,6 +411,7 @@ function OpenItem({
           formKey={card.key}
           history={history}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
+          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={card.item}
           onAct={act}
           onClose={place.onClose}
@@ -432,10 +433,18 @@ function OpenItem({
 }
 
 /**
- * What a machine notice says that the item view has no place for: why it was raised and what to do about it (the
- * command that fixes it). The ferrets it lists, each with its reason, are the item's context, drawn by the view.
- */
+/** The ferrets a machine notice lists, as `name (id): reason` lines; a line of any other shape is not one. */
+const FERRET_LINE = /^(.+) \(([^()\s]+)\): (.*)$/;
+
+const ferretsOf = (context: string | null | undefined): readonly { readonly name: string; readonly id: string }[] =>
+  (context ?? '').split('\n').flatMap(line => {
+    const match = FERRET_LINE.exec(line);
+    return match === null ? [] : [{ name: match[1] ?? '', id: match[2] ?? '' }];
+  });
+
+/** Why a machine notice was raised and what to do about it: the owner's command per listed ferret, tap to copy. */
 function MachineNotes({ item }: { readonly item: InboxCard['item'] }) {
+  const ferrets = ferretsOf(item.context);
   return (
     <div className="fy-inbox-machine-notes" data-inbox-machine-notes="">
       <section>
@@ -445,11 +454,24 @@ function MachineNotes({ item }: { readonly item: InboxCard['item'] }) {
       <section>
         <h3 className="fy-inbox-machine-notes__title">What to do</h3>
         <p data-inbox-machine-fix="">{item.howToResolve}</p>
+        {ferrets.length === 0 ? null : (
+          <ul className="fy-inbox-machine-notes__moves" data-inbox-machine-moves="">
+            {ferrets.map(ferret => {
+              const command = `fy migrate ${ferret.id} -a <runtime>`;
+              return (
+                <li data-inbox-machine-move={ferret.id} key={ferret.id}>
+                  <span className="fy-inbox-machine-notes__ferret">{ferret.name}</span>
+                  <code>{command}</code>
+                  <CopyButton label={`Copy the move command for ${ferret.name}`} text={command} write={copyWriter} />
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
     </div>
   );
 }
-
 /** A gate item's one quiet line: what it is (the lane's verb), the project, the ferret, and the way to its chat. */
 function GateMeta({
   card,

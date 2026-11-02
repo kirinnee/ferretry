@@ -10854,7 +10854,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               const view = await sessions.get(sessionId).catch(() => undefined);
               return view === undefined || HYPERMEDIA_NOT_RUNNING.has(view.state.status)
                 ? undefined
-                : { agent: view.config.agent };
+                : { agent: view.config.agent, name: view.config.name };
             },
           },
         ),
@@ -10865,46 +10865,55 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
       // The old notices are folded in first and quietly; only then does the minute timer or the Warden's sweep touch
       // the lists, so nothing writes a list while the folding is still reading it.
-      const machineFolded = foldNoticesIntoMachineAgenda({
-        agenda,
-        sessions: { all: agendaSessionIds },
-        seed: {
-          autoMoveFailed: async (sessionId, item) => await wardenLists.autoMove.note(sessionId, item.subject, true),
-          orphan: async item => {
-            if (item.task === undefined || item.task === null) return;
-            await wardenLists.orphans.add(
-              {
-                sourceRef: item.sourceRef ?? '',
-                task: item.task,
-                title: item.title ?? item.subject,
-                subject: item.subject,
-                why: item.why,
-                premise: item.premise ?? '',
-                context: item.context ?? '',
-                howToResolve: item.howToResolve,
-                waitingSince: item.waitingSince,
+      // Folding moves ferrets, so it waits for the sub-ferrets' items to reach their agenda homes: a move mid-fold could not resolve.
+      let homesSettled: () => void = () => undefined;
+      const homesGate = new Promise<void>(settle => {
+        homesSettled = settle;
+      });
+      const machineFolded = homesGate
+        .then(() =>
+          foldNoticesIntoMachineAgenda({
+            agenda,
+            sessions: { all: agendaSessionIds },
+            seed: {
+              autoMoveFailed: async (sessionId, item) => await wardenLists.autoMove.note(sessionId, item.subject, true),
+              orphan: async item => {
+                if (item.task === undefined || item.task === null) return;
+                await wardenLists.orphans.add(
+                  {
+                    sourceRef: item.sourceRef ?? '',
+                    task: item.task,
+                    title: item.title ?? item.subject,
+                    subject: item.subject,
+                    why: item.why,
+                    premise: item.premise ?? '',
+                    context: item.context ?? '',
+                    howToResolve: item.howToResolve,
+                    waitingSince: item.waitingSince,
+                  },
+                  true,
+                );
               },
-              true,
-            );
-          },
-          budget: async (sourceRef, item) => {
-            await machineAgenda.raiseOrUpdate(sourceRef, {
-              title: item.title ?? item.subject,
-              subject: item.subject,
-              why: item.why,
-              ...(item.premise === undefined ? {} : { premise: item.premise }),
-              ...(item.context === undefined || item.context === null ? {} : { context: item.context }),
-              howToResolve: item.howToResolve,
-              waitingSince: item.waitingSince,
-              notice: true,
-              kind: 'info',
-            });
-          },
-        },
-        marker: new FileMachineMigrationMarker(join(paths.home, 'machine-agenda-notices-migration.json')),
-        now: () => clock.now(),
-        diagnostics: boardDiagnostics,
-      }).catch((error: unknown) => boardDiagnostics.warn(`the machine agenda's folding failed: ${String(error)}`));
+              budget: async (sourceRef, item) => {
+                await machineAgenda.raiseOrUpdate(sourceRef, {
+                  title: item.title ?? item.subject,
+                  subject: item.subject,
+                  why: item.why,
+                  ...(item.premise === undefined ? {} : { premise: item.premise }),
+                  ...(item.context === undefined || item.context === null ? {} : { context: item.context }),
+                  howToResolve: item.howToResolve,
+                  waitingSince: item.waitingSince,
+                  notice: true,
+                  kind: 'info',
+                });
+              },
+            },
+            marker: new FileMachineMigrationMarker(join(paths.home, 'machine-agenda-notices-migration.json')),
+            now: () => clock.now(),
+            diagnostics: boardDiagnostics,
+          }),
+        )
+        .catch((error: unknown) => boardDiagnostics.warn(`the machine agenda's folding failed: ${String(error)}`));
       const wardenMachine = { ...wardenLists, folded: machineFolded };
       void machineFolded.then(() => {
         setInterval(() => void wardenLists.autoMove.reconcile().catch(() => undefined), 60_000).unref();
@@ -10955,6 +10964,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })
         .catch(() => undefined);
       agendaHomesMigrated = homesMigration;
+      void homesMigration.finally(homesSettled);
       void homesMigration
         .then(() => gateItems?.backfill())
         .then(raised => {

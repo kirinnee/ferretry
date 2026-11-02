@@ -134,8 +134,24 @@ describe('the Inbox’s Machine group', () => {
                 .map(open => open.textContent ?? '')
                 .find(text => text.includes('durian')) ?? '',
           );
-          expect(detail).toContain('durian: Not moved: no other login could take it.');
-          expect(detail).toContain('fy migrate <id> -a <runtime>');
+          expect(detail).toContain('durian (7f3a91c2): Not moved: no other login could take it.');
+          expect(detail).toContain('fy migrate 7f3a91c2 -a <runtime>');
+          expect(detail).toContain('fy migrate b04e55d8 -a <runtime>');
+          expect(detail).toContain('fy migrate e29c1a60 -a <runtime>');
+          expect(detail).not.toContain('fy migrate <id>');
+          const laid = await tab.evaluate(() => {
+            const notes = document.querySelector('[data-inbox-machine-notes]');
+            const title = document.querySelector('[data-inbox-open] [data-agenda-title]');
+            const text = title?.querySelector('.fy-item-view__title-text');
+            return {
+              pad: notes === null ? 0 : Number.parseFloat(getComputedStyle(notes).paddingLeft),
+              copies: document.querySelectorAll('[data-inbox-machine-move] [data-onboarding-copy]').length,
+              titleCut: title === null || text === null ? true : title.scrollHeight > title.clientHeight + 1,
+            };
+          });
+          expect(laid.pad).toBeGreaterThanOrEqual(8);
+          expect(laid.copies).toBe(3);
+          expect(laid.titleCut).toBe(false);
           const chat = await tab.evaluate(() =>
             [...document.querySelectorAll('[data-inbox-open]')]
               .filter(open => (open.textContent ?? '').includes('durian'))

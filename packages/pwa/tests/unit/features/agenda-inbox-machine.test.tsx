@@ -100,8 +100,8 @@ describe('the Machine group in the Inbox', () => {
       notice: true,
       subject: '2 ferrets could not be moved',
       why: 'The Warden moves a ferret whose login hit a limit.',
-      context: 'durian: Not moved: no login could take it.\nkai: Not moved: cap.',
-      howToResolve: 'Move one yourself with: fy migrate <id> -a <runtime>',
+      context: 'durian (s-1): Not moved: no login could take it.\nkai (s-2): Not moved: cap.',
+      howToResolve: 'Move a ferret yourself with the command beside its name.',
       sourceRef: 'warden:auto-move-failed',
       waitingSince: '2026-08-01T10:00:00.000Z',
     } as never);
@@ -114,9 +114,21 @@ describe('the Machine group in the Inbox', () => {
 
     // Assert
     const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
-    expect(text).toContain('durian: Not moved: no login could take it.');
-    expect(text).toContain('fy migrate <id> -a <runtime>');
+    expect(text).toContain('durian (s-1): Not moved: no login could take it.');
+    expect(text).toContain('fy migrate s-1 -a <runtime>');
+    expect(text).toContain('fy migrate s-2 -a <runtime>');
+    expect(text).not.toContain('fy migrate <id>');
     expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
+  });
+
+  test('lets the detail title wrap, and draws no moves for a notice that lists no ferret', async () => {
+    // Arrange
+    const card = inboxCard(moved, must(machineView, 'the machine view'));
+    await open([card], card.key);
+
+    // Assert
+    expect(view?.container.querySelector('[data-agenda-title][data-wrap]')).not.toBeNull();
+    expect(view?.container.querySelector('[data-inbox-machine-moves]')).toBeNull();
   });
 
   test('links its item to the Inbox, not to a conversation', () => {

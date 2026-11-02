@@ -42,7 +42,7 @@ describe('the auto-move failures item', () => {
     should(last.ref).equal(AUTO_MOVE_FAILED_REF);
     should(last.members).eql(['a', 'b']);
     should(last.request.title).equal('2 ferrets could not be moved');
-    should(last.request.context).containEql('a: Not moved: no login could take it.');
+    should(last.request.context).containEql('a (a): Not moved: no login could take it.');
   });
 
   it('should keep every ferret when notes and reconciles run at the same time', async () => {

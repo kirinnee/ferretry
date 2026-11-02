@@ -24,8 +24,9 @@ const moved = agendaItem('M1', {
   subject: '3 ferrets could not be moved',
   why: 'The Warden moves a ferret whose login hit a limit to another login, as warden.yaml (autoMigrate) allows. These stayed where they are.',
   context:
-    'durian: Not moved: no other login could take it.\nkai: Not moved: every other login is over its cap.\npiper: Not moved: it is mid-turn.',
-  howToResolve: 'Move one yourself with: fy migrate <id> -a <runtime>, or wait for its login to reset.',
+    'durian (7f3a91c2): Not moved: no other login could take it.\nkai (b04e55d8): Not moved: every other login is over its cap.\npiper (e29c1a60): Not moved: it is mid-turn.',
+  howToResolve:
+    'Move a ferret yourself with the command beside its name (pick the runtime to move it onto), or wait for its login to reset.',
   waitingSince: '2026-08-01T10:00:00.000Z',
   sourceRef: 'warden:auto-move-failed',
 } as never);
