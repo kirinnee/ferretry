@@ -74,6 +74,9 @@ const daemonOver = (home: string) => {
     agenda,
     board: new BoardGateCards(board, { project: async () => ({ name: 'Ferretry' }) }),
     lanes: stageGateLanes,
+    sessions: { all: async () => [...SESSIONS] },
+    marker: { ran: async () => true, record: async () => undefined },
+    now: () => NOW,
     words: { told: async () => undefined },
     diagnostics: { warn: () => undefined },
   });
