@@ -1,6 +1,7 @@
 /**
  * Settings controls for how the composer EDITS text: the Markdown
- * syntax-highlight overlay, and optional Vim-style modal keys.
+ * syntax-highlight overlay, and optional Vim-style modal keys — and how the
+ * phone composer lays out its buttons (`lib/composer-dock-layout.ts`).
  *
  * Ported from kteam `ui/src/components/MarkdownComposerSettings.tsx`. The
  * original deliberately keeps this separate from the contended settings page;
@@ -16,6 +17,11 @@
  * surface reads both and owns neither.
  */
 import { cn } from '../../lib/class-names.ts';
+import {
+  type ComposerDockLayout,
+  useComposerDockLayout,
+  writeComposerDockLayout,
+} from '../../lib/composer-dock-layout.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
@@ -31,6 +37,17 @@ const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: st
   },
   { pref: 'off', label: 'Plain text box', detail: 'No formatting and no list continuation' },
 ];
+
+/** How the phone composer lays out attach and the mic, Interrupt & send and Send. */
+const DOCK_LAYOUTS: readonly { readonly value: ComposerDockLayout; readonly label: string; readonly detail: string }[] =
+  [
+    { value: 'stacked', label: 'Stacked', detail: 'Buttons in a column each side, always — the most room to type' },
+    { value: 'row', label: 'One row', detail: 'Buttons side by side, always — a one-line box while the text is' },
+    { value: 'auto', label: 'Auto', detail: 'Side by side while empty, stacked once you type' },
+  ];
+
+export const DOCK_LAYOUT_EXPLANATION =
+  'On a phone, attach and the mic sit on the left of the box, Send on the right. Stacked and One row never move as you start or stop typing; Auto switches between them, so the buttons move when the first letter goes in. A desktop always keeps them in one row. Kept on this device.';
 
 export const VIM_COMPOSER_EXPLANATION =
   'Modal Vim keys — normal and insert — in every editor style, with the mode shown under the message box. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard (the mode indicator also switches modes).';
@@ -87,6 +104,7 @@ export function MarkdownComposerSettings({
   readonly onChangeVim: (enabled: boolean) => void;
 }) {
   const pref = useMdComposePref();
+  const dockLayout = useComposerDockLayout();
 
   return (
     <div className="flex flex-col gap-4">
@@ -118,6 +136,37 @@ export function MarkdownComposerSettings({
           ))}
         </fieldset>
         <p className="m-0 text-cell leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
+      </div>
+      <div className="flex flex-col gap-2">
+        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+          <legend className="mb-1 text-ui font-semibold text-fg">Button layout</legend>
+          {DOCK_LAYOUTS.map(layout => (
+            <label
+              className={cn(
+                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
+                dockLayout === layout.value
+                  ? 'border-accent bg-accent-soft'
+                  : 'border-border bg-surface-2 hover:border-accent',
+              )}
+              data-dock-layout={layout.value}
+              key={layout.value}
+            >
+              <input
+                checked={dockLayout === layout.value}
+                className="mt-1"
+                name="composer-dock-layout"
+                onChange={() => writeComposerDockLayout(layout.value)}
+                type="radio"
+                value={layout.value}
+              />
+              <span className="min-w-0">
+                <span className="block text-ui font-semibold text-fg">{layout.label}</span>
+                <span className="mt-0.5 block text-meta leading-base text-muted">{layout.detail}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="m-0 text-cell leading-base text-muted">{DOCK_LAYOUT_EXPLANATION}</p>
       </div>
       <div className="flex flex-col gap-2">
         <ComposerSwitch

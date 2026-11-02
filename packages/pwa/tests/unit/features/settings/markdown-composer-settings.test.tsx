@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { MD_COMPOSE_KEY, writeMdComposePref } from '../../../../src/lib/md-compose.ts';
 import {
+  DOCK_LAYOUT_EXPLANATION,
   MARKDOWN_COMPOSER_EXPLANATION,
   MarkdownComposerSettings,
   VIM_COMPOSER_EXPLANATION,
 } from '../../../../src/features/settings/markdown-composer-settings.tsx';
+import { COMPOSER_DOCK_LAYOUT_KEY } from '../../../../src/lib/composer-dock-layout.ts';
+import { MD_COMPOSE_KEY, writeMdComposePref } from '../../../../src/lib/md-compose.ts';
 import { render, run } from '../../../support/react.ts';
 
 class MemoryStorage {
@@ -84,6 +86,34 @@ describe('MarkdownComposerSettings', () => {
       expect(storage.getItem(MD_COMPOSE_KEY)).toBe('rich');
       run(() => styles()[0]?.props.onChange());
       expect(storage.getItem(MD_COMPOSE_KEY)).toBe('on');
+      run(() => renderer.unmount());
+    });
+  });
+
+  it('offers the phone button layouts as radios, Stacked by default, and changes the live preference', () => {
+    withBrowser(storage => {
+      const renderer = render(surface());
+      const layouts = () =>
+        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-dock-layout');
+      const tree = () => JSON.stringify(renderer.toJSON());
+
+      expect(tree()).toContain('Button layout');
+      expect(layouts().map(layout => [layout.props.value, layout.props.checked])).toEqual([
+        ['stacked', true],
+        ['row', false],
+        ['auto', false],
+      ]);
+      expect(DOCK_LAYOUT_EXPLANATION).toContain('never move');
+      expect(tree()).toContain(DOCK_LAYOUT_EXPLANATION);
+
+      run(() => layouts()[1]?.props.onChange());
+      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('row');
+      expect(layouts()[1]?.props.checked).toBe(true);
+      run(() => layouts()[2]?.props.onChange());
+      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('auto');
+      run(() => layouts()[0]?.props.onChange());
+      expect(storage.getItem(COMPOSER_DOCK_LAYOUT_KEY)).toBe('stacked');
+      expect(layouts()[0]?.props.checked).toBe(true);
       run(() => renderer.unmount());
     });
   });

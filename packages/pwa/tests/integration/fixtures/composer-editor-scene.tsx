@@ -12,6 +12,8 @@
  *   ?vim=1                Vim keys on
  *   ?compact=1            the phone composer
  *   ?mic=1                the dictation mic beside attach, as the chat and the Inbox draw it
+ *   ?dock=stacked|row|auto the phone composer's button layout (Settings › Composer › Button layout)
+ *   ?settings=1           Settings › Composer itself (editor style, button layout, Vim) instead of the composer
  *   ?draft=<text>         a saved draft to open with
  *   ?layout=chat          a phone chat page: a transcript above the composer, sized by the app's own
  *                         viewport hook, so a (faked) keyboard shrinks it exactly as in the app
@@ -55,6 +57,8 @@ import { Transcript } from '../../../src/components/transcript.tsx';
 import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
 import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
 import { LocationShareContext } from '../../../src/hooks/use-location-share.ts';
+import { MarkdownComposerSettings } from '../../../src/features/settings/markdown-composer-settings.tsx';
+import { parseComposerDockLayout, writeComposerDockLayout } from '../../../src/lib/composer-dock-layout.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
@@ -67,6 +71,7 @@ import { DEFAULT_STT_SETTINGS } from '../../../src/lib/stt/stt-settings.ts';
 const parameters = new URLSearchParams(location.search);
 const editor = parameters.get('editor');
 writeMdComposePref(editor === 'rich' ? 'rich' : editor === 'off' ? 'off' : 'on');
+writeComposerDockLayout(parseComposerDockLayout(parameters.get('dock')));
 document.documentElement.setAttribute('data-theme', parameters.get('theme') ?? 'studio-light');
 
 const sent: unknown[] = [];
@@ -343,7 +348,11 @@ const composer = (
 );
 
 const scene =
-  parameters.get('layout') === 'chat' ? (
+  parameters.get('settings') === '1' ? (
+    <div className="bg-bg p-4 text-fg">
+      <MarkdownComposerSettings onChangeVim={() => undefined} vimEnabled={false} />
+    </div>
+  ) : parameters.get('layout') === 'chat' ? (
     <ChatPage>{composer}</ChatPage>
   ) : parameters.get('entries') === '1' ? (
     <ReferenceSurfaceProvider

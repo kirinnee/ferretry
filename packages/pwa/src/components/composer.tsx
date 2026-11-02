@@ -22,6 +22,7 @@ import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from 
 import { referencesOf } from '../lib/answer-chip.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
 import { formatAttachmentSize } from '../lib/attachments.ts';
+import { useComposerDockLayout } from '../lib/composer-dock-layout.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
@@ -234,11 +235,11 @@ export interface ComposerProps {
  * Growth is capped for the opposite reason — a pasted essay must not swallow
  * the conversation it is about.
  *
- * THE PHONE COMPOSER IS ONE LINE WHEN EMPTY (owner, 2026-10-30: an empty one took
- * about 260px of the screen), and ITS CONTROLS NEVER MOVE (owner, 2026-11-02: stacking them
- * once there was a draft "makes an awkward jump"): each side's controls are one row
- * (`.fy-composer-dock`) on the bottom line in every state, and the field takes the width
- * between — `[data-composer-layout='phone']` in session-screens.css.
+ * THE PHONE COMPOSER'S BUTTONS ARE LAID OUT AS THE READER CHOSE (Settings › Composer › Button
+ * layout, `lib/composer-dock-layout.ts`): stacked in a column on each side by default, so nothing
+ * moves on focus or as typing starts (owner, 2026-11-02, !A237); one row on each side; or auto,
+ * a row while empty and stacked once there is a draft. The field takes the width between —
+ * `[data-composer-layout='phone']` in session-screens.css.
  * It grows as the owner types, to ten lines at rest, and while the keyboard is up its
  * ceiling drops to six: with ~430px of visible viewport the turn being answered has to stay
  * readable above the box (the status line also steps aside then; see
@@ -494,6 +495,8 @@ export function Composer({
   // A reader preference, not daemon data: it changes only how this browser
   // edits a draft, so a daemon switch must not change the editor chrome.
   const editorStyle = useMdComposePref();
+  /** How the phone composer lays out its buttons (Settings › Composer › Button layout). */
+  const dockLayout = useComposerDockLayout();
   /** Markdown (Notion-style) and Rich text both edit through the live editor; Plain is a textarea. */
   const formatting = editorStyle !== 'off';
   const rich = editorStyle === 'rich';
@@ -1351,6 +1354,7 @@ export function Composer({
       data-composer-dropping={dropping ? '' : undefined}
       data-composer-empty={draft.trim() === '' ? '' : undefined}
       data-composer-layout={compact ? 'phone' : undefined}
+      data-composer-dock-layout={compact ? dockLayout : undefined}
       data-composer-style={editorStyle}
       onDragLeave={() => setDropping(false)}
       onDragOver={event => {
@@ -1447,7 +1451,7 @@ export function Composer({
       ) : null}
       <div className="fy-composer-row">
         {/* THE PHONE ROW: attach and the mic on the LEFT, Interrupt & send and Send on the RIGHT, the field
-            between them — one row each in every state, so nothing moves when writing starts.
+            between them — laid out as Settings › Composer › Button layout says (`data-composer-dock-layout`).
             The interrupt's slot is held empty while the agent is idle, so the field never resizes when a
             turn starts or ends. A desktop keeps its one inline row. */}
         {compact ? (

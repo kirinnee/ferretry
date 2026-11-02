@@ -37,6 +37,7 @@
 
 import { join } from 'node:path';
 import type { Browser, BrowserContextOptions, Page } from 'playwright-core';
+import { COMPOSER_DOCK_LAYOUT_KEY } from '../src/lib/composer-dock-layout.ts';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { timed } from './walk-timing.ts';
 
@@ -432,31 +433,73 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         .locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])')
         .first()
         .evaluate(node => (node instanceof HTMLTextAreaElement ? node.value : (node.textContent ?? '')));
-      // EMPTY, THE PHONE COMPOSER IS ONE LINE (owner: an empty one took about 260px): attach, the mic,
-      // the field and Send side by side, the row (inside the theme's own inset) no taller than one 44px control.
-      const field = page
-        .locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])')
-        .first();
-      await field.click();
-      await page.keyboard.press('ControlOrMeta+A');
-      await page.keyboard.press('Backspace');
-      await page.locator('[data-session-input] form[data-composer-empty]').waitFor();
-      if (process.env.FY_EMPTY_COMPOSER_SHOT !== undefined)
-        await page.screenshot({ path: `${process.env.FY_EMPTY_COMPOSER_SHOT}-${family}.png` });
-      const row = await page.locator('[data-session-input] .fy-composer-row').boundingBox();
-      const attach = await page.locator('[data-session-input] [data-composer-dock="start"]').boundingBox();
-      const send = await page.locator('[data-session-input] [data-composer-dock=""]').boundingBox();
-      if (row === null || attach === null || send === null) fail(`${where}: the empty phone composer is not drawn`);
-      const inner = await page.locator('[data-session-input] .fy-composer-row').evaluate(node => {
-        const style = getComputedStyle(node);
-        return node.clientHeight - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom);
+      // THE PHONE COMPOSER'S BUTTONS, EMPTY AND WRITING, in each layout Settings › Composer › Button layout
+      // offers (owner, 2026-11-02, !A237: inline while empty and stacked once there was a draft was "an awkward
+      // jump"). Stacked (the default) and One row never move as the first word goes in; Auto is that old switch,
+      // kept on purpose: one line while empty, stacked once there is a draft.
+      const field = () =>
+        page.locator('[data-session-input] .fy-composer-input-layer :is(textarea, [contenteditable])').first();
+      const controls = async () => ({
+        row: await page.locator('[data-session-input] .fy-composer-row').boundingBox(),
+        attach: await page.locator('[data-session-input] [data-composer-attach]').boundingBox(),
+        send: await page.locator('[data-session-input] [data-composer-send]').boundingBox(),
       });
-      if (inner > 44) fail(`${where}: the empty phone composer is ${Math.round(inner)}px tall inside, not one line`);
-      if (attach.height > 44 || send.height > 44 || !near(attach.y + attach.height, send.y + send.height))
-        fail(`${where}: the empty phone composer's controls are not on one line`);
-      await page.keyboard.insertText(kept);
-      await page.locator('[data-session-input] form:not([data-composer-empty])').waitFor();
-      await page.waitForTimeout(800);
+      type Box = { x: number; y: number; width: number; height: number };
+      const same = (a: Box, b: Box): boolean =>
+        near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
+      for (const layout of ['stacked', 'row', 'auto'] as const) {
+        const at = `${where} (${layout})`;
+        if (layout !== 'stacked') {
+          await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+            key: COMPOSER_DOCK_LAYOUT_KEY,
+            value: layout,
+          });
+          await page.reload();
+          await field().waitFor();
+        }
+        await field().click();
+        await page.keyboard.press('ControlOrMeta+A');
+        await page.keyboard.press('Backspace');
+        await page.locator('[data-session-input] form[data-composer-empty]').waitFor();
+        if (process.env.FY_EMPTY_COMPOSER_SHOT !== undefined)
+          await page.screenshot({ path: `${process.env.FY_EMPTY_COMPOSER_SHOT}-${family}-${layout}.png` });
+        const empty = await controls();
+        await page.keyboard.insertText('hi');
+        await page.locator('[data-session-input] form:not([data-composer-empty])').waitFor();
+        const writing = await controls();
+        const { row, attach, send } = empty;
+        if (row === null || attach === null || send === null || writing.row === null)
+          fail(`${at}: the empty phone composer is not drawn`);
+        if (writing.attach === null || writing.send === null) fail(`${at}: the writing phone composer is not drawn`);
+        const stacked = (box: { attach: Box; send: Box }): boolean =>
+          box.send.y >= box.attach.y + box.attach.height - EPSILON;
+        const inline = (box: { attach: Box; send: Box }): boolean =>
+          near(box.send.y + box.send.height, box.attach.y + box.attach.height);
+        if (layout === 'auto') {
+          if (!inline({ attach, send })) fail(`${at}: an empty Auto composer's controls are not on one line`);
+          if (!stacked({ attach: writing.attach, send: writing.send }))
+            fail(`${at}: a writing Auto composer's controls are not stacked`);
+        } else {
+          if (!(layout === 'stacked' ? stacked : inline)({ attach, send }))
+            fail(
+              `${at}: the empty phone composer's controls are not ${layout === 'stacked' ? 'stacked' : 'on one line'}`,
+            );
+          for (const [name, before, after] of [
+            ['the row', row, writing.row],
+            ['attach', attach, writing.attach],
+            ['Send', send, writing.send],
+          ] as const)
+            if (!same(before, after))
+              fail(
+                `${at}: ${name} moved when the first word was typed (${JSON.stringify(before)} → ${JSON.stringify(after)})`,
+              );
+        }
+        await page.keyboard.press('ControlOrMeta+A');
+        await page.keyboard.press('Backspace');
+        await page.keyboard.insertText(kept);
+        await page.locator('[data-session-input] form:not([data-composer-empty])').waitFor();
+        await page.waitForTimeout(800);
+      }
     });
   };
 
