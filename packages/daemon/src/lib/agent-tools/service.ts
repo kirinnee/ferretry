@@ -190,6 +190,8 @@ export interface AgentToolPorts {
   readonly typedIdentities?: {
     typed(sessionId: string, pageId: string, host: string, text: string): void;
     seen(sessionId: string, pageId: string, host: string | undefined): void;
+    cleared(sessionId: string, pageId: string): void;
+    forget(sessionId: string): void;
   };
   /**
    * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
@@ -1021,7 +1023,8 @@ export class AgentToolService {
       humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
     const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
     if (secret !== '') facts.detail = { ...facts.detail, passwordField: true };
-    if (caller.kind === 'agent' && 'result' in answer) this.noteIdentity(caller.sessionId, call, answer.result);
+    if ('result' in answer)
+      this.noteIdentity(caller.sessionId, surface.id, call, answer.result, caller.kind === 'agent');
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -1044,26 +1047,35 @@ export class AgentToolService {
   }
 
   /**
-   * WHO THE PAGE IS SIGNING IN: the agent's own type into an identifier field is kept for that page and the host of
-   * the field's document; any act that leaves the page on another host forgets it. Never into a password field.
+   * WHO THE PAGE IS SIGNING IN (input-requests/typed-identities.ts), from what the daemon saw this act do. Kept: the
+   * agent's type or fill into ONE identifier box (never beside a password field), or its click on an element that showed
+   * one email. Kept as it was: an act that cannot change who signs in (a read, a hover, Enter or Tab), unless the page is
+   * now on another host. CLEARED: everything else that could — a navigation, typing anything else, a key that types, raw
+   * mouse moves, a click at a bare point — and any act by a person. A missing record is the safe state.
    */
   private noteIdentity(
     sessionId: string,
+    /**
+     * The DAEMON's id of the page acted on (the runtime's, as `browser.status` lists it), never the worker's word: the same
+     * id the input target checks a card's facts against (`PageInputTarget`), so the two sides cannot drift apart.
+     */
+    pageId: string,
     call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
     result: {
-      readonly actedPageId?: string | undefined;
       readonly url?: string | undefined;
       readonly identifierHost?: string | undefined;
+      readonly identifierFields?: readonly { readonly index: number; readonly host: string }[] | undefined;
+      readonly clickedIdentity?: { readonly host: string; readonly username: string } | undefined;
       readonly passwordField?: true | undefined;
     },
+    byAgent: boolean,
   ): void {
     const identities = this.ports.typedIdentities;
-    const pageId = result.actedPageId;
-    if (identities === undefined || pageId === undefined) return;
-    const identifier = result.identifierHost;
-    if (call.tool === 'browser.type' && identifier !== undefined && result.passwordField !== true)
-      identities.typed(sessionId, pageId, identifier, call.text);
-    else identities.seen(sessionId, pageId, pageHostOf(result.url));
+    if (identities === undefined) return;
+    const next = identityAfter(call, result, byAgent);
+    if (next === 'keep') identities.seen(sessionId, pageId, pageHostOf(result.url));
+    else if (next === 'clear') identities.cleared(sessionId, pageId);
+    else identities.typed(sessionId, pageId, next.host, next.username);
   }
 
   /**
@@ -1104,6 +1116,8 @@ export class AgentToolService {
           // after: secrev-1282a M2), and the host it is about to run on is tainted for the rules at once.
           finished = scripts?.running?.();
           scripts?.scriptedOn(await page.host?.().catch(() => undefined));
+          // A script can type or choose an account on any page of the session: who they sign in is no longer known.
+          this.ports.typedIdentities?.forget(caller.sessionId);
           ran = true;
         },
       );
@@ -2372,6 +2386,72 @@ function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: reado
     })
     .join('');
 }
+
+/** What a page act did to who the page signs in: named someone, changed nothing, or may have changed it unseen. */
+type IdentityAfter = 'keep' | 'clear' | { readonly host: string; readonly username: string };
+
+/** The rules {@link AgentToolService.noteIdentity} applies, decided from the call and what the browser saw it do. */
+function identityAfter(
+  call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
+  result: {
+    readonly identifierHost?: string | undefined;
+    readonly identifierFields?: readonly { readonly index: number; readonly host: string }[] | undefined;
+    readonly clickedIdentity?: { readonly host: string; readonly username: string } | undefined;
+    readonly passwordField?: true | undefined;
+  },
+  byAgent: boolean,
+): IdentityAfter {
+  if (LEAVES_SIGN_IN.has(call.tool)) return 'keep';
+  if (!byAgent) return 'clear';
+  const password = result.passwordField === true;
+  switch (call.tool) {
+    case 'browser.type':
+      return result.identifierHost === undefined || password
+        ? 'clear'
+        : { host: result.identifierHost, username: call.text };
+    case 'browser.fill_form': {
+      const [only, ...more] = result.identifierFields ?? [];
+      const entry = only === undefined ? undefined : call.fields[only.index];
+      const text = entry?.text ?? entry?.value;
+      return password || only === undefined || more.length > 0 || text === undefined
+        ? 'clear'
+        : { host: only.host, username: text };
+    }
+    case 'browser.click':
+      if (result.clickedIdentity !== undefined) return result.clickedIdentity;
+      return call.ref === undefined && call.selector === undefined ? 'clear' : 'keep';
+    case 'browser.press':
+      return call.keys.every(key => NON_TYPING_KEYS.has(key)) ? 'keep' : 'clear';
+    default:
+      return 'clear';
+  }
+}
+
+/** The page acts that cannot change who a page signs in: it is kept through them (typed-identities.ts). */
+const LEAVES_SIGN_IN: ReadonlySet<string> = new Set([
+  'browser.read',
+  'browser.screenshot',
+  'browser.hover',
+  'browser.scroll',
+  'browser.highlight',
+  'browser.select',
+  'browser.check',
+]);
+/** The keys that submit or move focus and type nothing: pressing them keeps who a page signs in. */
+const NON_TYPING_KEYS: ReadonlySet<string> = new Set([
+  'Enter',
+  'Tab',
+  'Shift+Tab',
+  'Escape',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
+]);
 
 /** A page URL's host, lowercase, or `undefined` when there is none to read. */
 function pageHostOf(url: string | undefined): string | undefined {

@@ -19,7 +19,7 @@ import { InputRequestError } from '../../input-requests/errors.ts';
 import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
 import type { InputCaller } from '../../input-requests/ports.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
-import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S ROUTES FOR INPUT REQUESTS (docs/input-requests.md).
@@ -103,12 +103,26 @@ function sealed(service: InputRequestService, request: InputRequest): InputReque
   };
 }
 
+/**
+ * A request as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`, the demand `GET /v1/accounts`
+ * makes): no `saved` at all. Every part of it names an account or a person — offers' labels and usernames, the account
+ * Update would write, the new account's name and CLI name, who the page is signing in — so there is no name-free half
+ * worth keeping. The card is still answered by typing; a saved account is neither offered nor kept from it.
+ */
+function nameless(request: InputRequest): InputRequest {
+  const { saved: _names, ...rest } = request;
+  return rest;
+}
+
 async function list(service: InputRequestService, context: RouteContext, all: boolean): Promise<ApiResponse> {
   const caller = ownerOf(context);
   const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
+  const names = refusedAccountNames(context, 'read the accounts a card names') === undefined;
   // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
   const spell = (): ApiResponse => {
-    const body: InputRequestList = { requests: requests.map(request => sealed(service, request)) };
+    const body: InputRequestList = {
+      requests: requests.map(request => sealed(service, names ? request : nameless(request))),
+    };
     return jsonResponse(body);
   };
   return { ...spell(), late: spell };
@@ -174,8 +188,14 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
             : undefined;
         if (refused !== undefined) return refused;
         const body = await parseBody(context.request, InputDeliverBodySchema);
+        // Typing a saved account uses what `GET /v1/accounts` lists (`secrets.use`); keeping a typed value in one
+        // changes the account store (`secrets.configure`, as every other account write), so each asks for it too.
+        const accounts =
+          (body.entry === undefined ? undefined : refusedAccountNames(context, 'type a saved account')) ??
+          (body.save === undefined ? undefined : refusedSecretWrite(context, 'save a value to Accounts'));
+        if (accounts !== undefined) return accounts;
         const result = await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered);
-        if (intoStore) spentSecretWrite(context);
+        if (intoStore || body.save !== undefined) spentSecretWrite(context);
         return jsonResponse(result);
       },
     },

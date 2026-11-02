@@ -271,7 +271,11 @@ export interface InputRequestServiceDependencies {
   /** This machine's host name, for a terminal target's key (`sudo@<host>`). */
   readonly hostName?: string;
   /** Who a page is signing in, as the ferret typed it (typed-identities.ts). Absent: never known. */
-  readonly identities?: { at(sessionId: string, pageId: string, host: string | undefined): string | undefined };
+  readonly identities?: {
+    at(sessionId: string, pageId: string, host: string | undefined): string | undefined;
+    /** A password went into the page: the sign-in moved on, so who it was signing in is no longer known. */
+    cleared?(sessionId: string, pageId: string): void;
+  };
   /** Secure copies a paste types from (docs/secure-copy.md). Absent: a paste is refused. */
   readonly sealed?: InputSealedPort;
   /** The owner's pre-approval rules. Absent: every paste waits for the owner. */
@@ -551,7 +555,7 @@ export class InputRequestService {
         ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
         ...(matchKey === undefined ? {} : { matchKey }),
         ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
-        ...typedUsernameAt(this.deps.identities, sessionId, seen.facts, matchKey),
+        ...(await this.redactedTypedUsername(sessionId, seen.facts, matchKey)),
         deliveries: new Map(),
         waiters: new Set(),
         ...(shot === undefined ? {} : { shot }),
@@ -1894,6 +1898,7 @@ export class InputRequestService {
       if (outcome === 'uncertain' || outcome === 'reader_changed') {
         await this.settle(hold);
         hold = undefined;
+        this.signInMovedOn(request, seen.facts);
         // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
         // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
         if (grant !== undefined) {
@@ -1951,6 +1956,7 @@ export class InputRequestService {
       }
       await this.settle(hold);
       hold = undefined;
+      this.signInMovedOn(request, seen.facts);
       if (clear !== undefined)
         grant?.typed(
           clear,
@@ -2011,6 +2017,30 @@ export class InputRequestService {
   }
 
   /**
+   * A password went (or may have gone) into a page: the sign-in moved past the step that said who it signs in, so the
+   * page's typed username is forgotten (typed-identities.ts). The next card there knows no one until the ferret says again.
+   */
+  /**
+   * Who the page is signing in, as the ferret typed it, through the redactor like every other word of the ferret's on the
+   * card (its prompt, its labels): a value the redactor would change is no username, and is dropped whole.
+   */
+  private async redactedTypedUsername(
+    sessionId: string,
+    facts: InputTargetFacts,
+    matchKey: string | undefined,
+  ): Promise<Pick<Held, 'typedUsername'>> {
+    const typed = typedUsernameAt(this.deps.identities, sessionId, facts, matchKey).typedUsername;
+    if (typed === undefined) return {};
+    const shown = await this.deps.redact(typed).catch(() => undefined);
+    return shown === typed ? { typedUsername: typed } : {};
+  }
+
+  private signInMovedOn(request: InputRequest, facts: InputTargetFacts): void {
+    if (facts.kind !== 'browser' || !request.fields.some(field => field.sensitivity === 'secret')) return;
+    this.deps.identities?.cleared?.(request.sessionId, facts.pageId);
+  }
+
+  /**
    * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
    * Send with nothing typed rather than typing and then failing to keep it.
    */
@@ -2018,7 +2048,7 @@ export class InputRequestService {
     held: Held,
     typed: ReadonlyMap<string, string>,
     save: NonNullable<InputDeliverBody['save']>,
-  ): Promise<LoginFieldValues> {
+  ): Promise<CheckedSave> {
     const { request } = held;
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no accounts; send without saving');
@@ -2058,8 +2088,7 @@ export class InputRequestService {
         );
       kept.username = save.username;
     }
-    await this.guardSaveMode(save, kept, held.typedUsername);
-    return kept;
+    return { fields: kept, mode: await this.guardSaveMode(held, save, kept) };
   }
 
   /**
@@ -2068,36 +2097,52 @@ export class InputRequestService {
    * an account that is not there or is someone else (another username). Nothing is typed when it would not hold.
    */
   private async guardSaveMode(
+    held: Held,
     save: NonNullable<InputDeliverBody['save']>,
     kept: LoginFieldValues,
-    typedUsername: string | undefined,
-  ): Promise<void> {
-    if (save.mode === undefined) return;
+  ): Promise<'new' | 'update'> {
     const listing = await this.deps.logins?.listing().catch(() => undefined);
     if (listing === undefined)
       throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
     const account = listing.accounts.find(each => each.id === save.entry);
-    if (save.mode === 'new' && account !== undefined)
-      throw new InputRequestError(
-        'conflict',
-        `${save.entry} is already the CLI name of ${account.label}: choose Update, or give the new account another CLI name. Nothing was typed`,
-      );
-    if (save.mode === 'update' && account === undefined)
+    // No choice sent (an older app): only a NEW account. Writing into an existing one takes the owner's explicit Update.
+    if (save.mode !== 'update') {
+      if (account !== undefined)
+        throw new InputRequestError(
+          'conflict',
+          save.mode === 'new'
+            ? `${save.entry} is already the CLI name of ${account.label}: choose Update, or give the new account another CLI name. Nothing was typed`
+            : `${account.label} is already saved: update the app, which asks whether to update it or save a new account. Nothing was typed`,
+        );
+      return 'new';
+    }
+    if (account === undefined)
       throw new InputRequestError(
         'not_found',
         `there is no account ${save.entry} to update: save it as a new account. Nothing was typed`,
       );
-    // An account with no username saved takes the one confirmed here; one with another username is another person,
-    // whether the owner's box or the page (what the ferret typed there) names them.
+    // Only the account this card offers to update, decided again now from the store and the page (never any handle).
+    const offered = savedForFields(held.request.fields, held.matchKey, listing, {
+      ...(await this.choiceOf(held.request.sessionId)),
+      ...(held.typedUsername === undefined ? {} : { typedUsername: held.typedUsername }),
+    }).update;
+    if (offered?.id !== account.id)
+      throw new InputRequestError(
+        'bad_request',
+        `${account.label} is not the account this card can update: save it as a new account. Nothing was typed`,
+      );
+    // Another person: the page signs in someone the account is not (or the account has no username to say it is), or
+    // the owner's box names another username than the one saved. Checked again under the store lock.
+    const page = held.typedUsername;
     if (
-      save.mode === 'update' &&
-      account?.username !== undefined &&
-      [kept.username, typedUsername].some(name => name !== undefined && someoneElse(name, account))
+      (page !== undefined && someoneElse(page, account)) ||
+      (account.username !== undefined && kept.username !== undefined && someoneElse(kept.username, account))
     )
       throw new InputRequestError(
         'conflict',
-        `${account.label} is saved with another username: save it as a new account. Nothing was typed`,
+        `the page is signing in someone else than ${account.label}: save it as a new account. Nothing was typed`,
       );
+    return 'update';
   }
 
   /**
@@ -2294,13 +2339,13 @@ export class InputRequestService {
   private async save(
     held: Held,
     save: NonNullable<InputDeliverBody['save']>,
-    kept: LoginFieldValues,
+    kept: CheckedSave,
     by: InputActor,
   ): Promise<NonNullable<InputDeliverResult['saved']>> {
     const logins = this.deps.logins;
     if (logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, kept, save.mode);
+      await logins.save(save.entry, save.label, held.matchKey, kept.fields, kept.mode, held.typedUsername);
     } catch (error) {
       // The store changed between the check and the save (another card saved first): said plainly, never written over.
       const raced =
@@ -2318,7 +2363,7 @@ export class InputRequestService {
       };
     }
     for (const field of ['username', 'password'] as const) {
-      if (kept[field] === undefined) continue;
+      if (kept.fields[field] === undefined) continue;
       await this.deps.audit
         .saved({ sessionId: held.request.sessionId, requestId: held.request.id, actor: by, entry: save.entry, field })
         .catch(() => undefined);
@@ -3027,6 +3072,12 @@ function codesHere(facts: InputTargetFacts | undefined, fields: readonly InputRe
  * Who the page a card is raised on is signing in: what the ferret typed into an identifier field of THAT page (by the
  * browser's page id) in a document on the card's own host. Nothing for a terminal, another page, or another host.
  */
+/** What "Save as" keeps once the value is typed, as `guardSave` checked it: the fields and the owner's choice. */
+interface CheckedSave {
+  readonly fields: LoginFieldValues;
+  readonly mode: 'new' | 'update';
+}
+
 function typedUsernameAt(
   identities: InputRequestServiceDependencies['identities'],
   sessionId: string,

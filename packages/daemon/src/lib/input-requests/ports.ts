@@ -337,6 +337,8 @@ export interface InputLoginPort {
     match: string | undefined,
     fields: { readonly username?: string; readonly password?: string },
     mode?: 'new' | 'update',
+    /** Who the page is signing in, as the ferret typed it: an update into an account that is not them is refused. */
+    pageUsername?: string,
   ): Promise<void>;
 }
 

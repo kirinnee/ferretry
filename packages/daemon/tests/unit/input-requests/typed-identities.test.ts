@@ -50,6 +50,19 @@ describe('who a page is signing in, as the ferret typed it', () => {
     should(identities.at(SESSION, 'page-1', GOOGLE)).be.undefined();
   });
 
+  it('should forget one page when it is cleared, keeping the session’s other pages', () => {
+    const { identities } = store();
+    identities.typed(SESSION, 'page-1', GOOGLE, 'ernest@atomi.tech');
+    identities.typed(SESSION, 'page-2', GOOGLE, 'kirin@x.com');
+    identities.cleared(SESSION, 'page-1');
+    identities.cleared('nobody', 'page-2');
+
+    should(identities.at(SESSION, 'page-1', GOOGLE)).be.undefined();
+    should(identities.at(SESSION, 'page-2', GOOGLE)).equal('kirin@x.com');
+    identities.cleared(SESSION, 'page-2');
+    should(identities.sessions()).deepEqual([]);
+  });
+
   it('should forget it when an act leaves no host to read', () => {
     const { identities } = store();
     identities.typed(SESSION, 'page-1', GOOGLE, 'ernest@atomi.tech');

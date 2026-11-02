@@ -221,6 +221,20 @@ describe('browser worker snapshots', () => {
     }
     const both = typed('accounts.google.com', true);
     should(both.ok && 'identifierHost' in both.value).be.false();
+
+    // A fill's identifier boxes and a click's chosen tile: kept when well formed, dropped (never the act) otherwise.
+    const act = (extra: Record<string, unknown>) =>
+      normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', ...extra });
+    const filled = act({ identifierFields: [{ index: 1, host: 'login.example.com' }] });
+    const badFill = act({ identifierFields: [{ index: -1, host: 'login.example.com' }] });
+    const fillWithPassword = act({ identifierFields: [{ index: 0, host: 'x.com' }], passwordField: true });
+    const tile = act({ clickedIdentity: { host: 'accounts.google.com', username: 'e@x.com' } });
+    const badTile = act({ clickedIdentity: { host: 'Accounts.google.com', username: 'e@x.com' } });
+    should(filled.ok && filled.value.identifierFields).deepEqual([{ index: 1, host: 'login.example.com' }]);
+    should(badFill.ok && 'identifierFields' in badFill.value).be.false();
+    should(fillWithPassword.ok && 'identifierFields' in fillWithPassword.value).be.false();
+    should(tile.ok && tile.value.clickedIdentity).deepEqual({ host: 'accounts.google.com', username: 'e@x.com' });
+    should(badTile.ok && 'clickedIdentity' in badTile.value).be.false();
   });
 
   it('should refuse a snapshot with no usable or no matching active page', () => {

@@ -748,11 +748,11 @@ describe('a second person on one site', () => {
       username: 'ernest@atomi.tech',
     });
     // Without the secrets-gated listing (a device without secrets.use): the place-only title, no person.
-    expect(cardAccountWords(ernestCard(), undefined)).toBeUndefined();
-    // With it: the page's person, never the demoted kirinnee97.
-    expect(cardAccountWords(ernestCard(), listing())).toBe('ernest@atomi.tech');
-    expect(accountTitleWords(value, 'Hadi', 'ernest@atomi.tech')).toBe(
-      '!A7 · Hadi needs a password for ernest@atomi.tech',
+    expect(accountTitleWords(value, 'Hadi', undefined)).toBeUndefined();
+    // With it: never the demoted kirinnee97 as the card's account; the page's person, said as the ferret's word.
+    expect(cardAccountWords(ernestCard(), listing())).toBeUndefined();
+    expect(accountTitleWords(value, 'Hadi', listing())).toBe(
+      '!A7 · Hadi needs a password, signing in ernest@atomi.tech as typed on the page',
     );
   });
 
@@ -767,8 +767,11 @@ describe('a second person on one site', () => {
 
     expect(initialSaveDraft(same)).toMatchObject({ mode: 'update', id: KIRIN.id, username: KIRIN.username });
     expect(usernameLocked(same, initialSaveDraft(same))).toBe(true);
-    expect(updateChoiceWords(KIRIN)).toBe('Update accounts.google.com (same username, kirinnee97@gmail.com)');
+    expect(updateChoiceWords(same)).toBe('Update accounts.google.com (same username, kirinnee97@gmail.com)');
     expect(cardAccountWords(same, listing())).toBe('accounts.google.com (kirinnee97@gmail.com)');
+    expect(accountTitleWords(withSaved(same), 'Hadi', listing())).toBe(
+      '!A7 · Hadi needs a password for accounts.google.com (kirinnee97@gmail.com)',
+    );
     // Pressing "Type a different one" over the one-tap starts a NEW account, whatever was saved.
     expect(initialSaveDraft(same, { typedInstead: true }).mode).toBe('new');
   });
@@ -831,19 +834,44 @@ describe('a second person on one site', () => {
     expect(editSaveLabel(card, typed, 'accounts google com').id).toBe('ACCOUNTS_GOOGLE_COM_2');
   });
 
+  it('should never start on Update when who the page signs in is unknown, whatever the account holds (M4)', () => {
+    const unknown = saved({
+      match: 'accounts.google.com',
+      update: KIRIN,
+      newAccount: { id: 'GOOGLE', label: 'Google' },
+      offers: [primaryOffer({ ...KIRIN })],
+    });
+    const sudo = saved({
+      update: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
+      newAccount: { id: 'SUDO_KIRIN_BOX_2', label: 'sudo on kirin-box' },
+    });
+
+    expect(initialSaveDraft(unknown)).toMatchObject({ mode: 'new', username: '' });
+    // Update, chosen by hand, takes that account's own username.
+    expect(switchSaveMode(unknown, initialSaveDraft(unknown), 'update').username).toBe(KIRIN.username);
+    expect(initialSaveDraft(sudo).mode).toBe('new');
+  });
+
   it('should keep a terminal name the owner edited when the username changes, and change nothing it cannot switch to', () => {
     const card = ernestCard();
     const edited = { ...initialSaveDraft(card), id: 'MINE', idEdited: true };
     expect(editSaveUsername(card, edited, 'x@y.z')).toMatchObject({ id: 'MINE', label: 'Google · x@y.z' });
     // No account to update (the daemon sent none): Update changes nothing.
     expect(switchSaveMode(card, edited, 'update')).toBe(edited);
+    // On Update of an account with no username, the box is the owner's: it changes the username and names nothing.
+    const updating = { ...edited, mode: 'update' as const, label: 'google', id: 'G' };
+    expect(editSaveUsername(card, updating, 'e@x.com')).toEqual({ ...updating, username: 'e@x.com' });
   });
 
   it('should word an account plainly, with or without a username saved', () => {
-    expect(updateChoiceWords({ id: 'G', label: 'google' })).toBe('Update google');
-    expect(updateChoiceWords({ id: 'G', label: 'Google · a@x.com', username: 'a@x.com' })).toBe(
+    expect(updateChoiceWords(saved({ update: { id: 'G', label: 'google' } }))).toBe('Update google');
+    const labelled = { id: 'G', label: 'Google · a@x.com', username: 'a@x.com' };
+    expect(updateChoiceWords(saved({ update: labelled, typedUsername: 'A@x.com' }))).toBe(
       'Update Google · a@x.com (same username)',
     );
+    // Who the page signs in is unknown: no sameness is claimed, the username is said plainly.
+    expect(updateChoiceWords(saved({ update: { ...labelled, label: 'google' } }))).toBe('Update google (a@x.com)');
+    expect(updateChoiceWords(saved())).toBeUndefined();
     expect(updateWords({ id: 'G', label: 'google' })).toBe('Replaces the saved password of google.');
     expect(
       differentAccountWords(

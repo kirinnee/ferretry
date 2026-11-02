@@ -159,10 +159,11 @@ describe('browser page acts — click', () => {
     const page = new FakePage();
 
     // Act
-    await clickOn(page, { kind: 'selector', selector: '#go' });
+    const outcome = await clickOn(page, { kind: 'selector', selector: '#go' });
 
-    // Assert
-    should(page.calls).deepEqual(['click #go {"timeout":30000,"button":"left","clickCount":1}']);
+    // Assert: the element's text is read first (an account tile names its email), then it is clicked once.
+    should(page.calls).deepEqual(['innerText #go', 'click #go {"timeout":30000,"button":"left","clickCount":1}']);
+    should(outcome).deepEqual({});
   });
 
   it('should click a ref through its aria-ref, double and with modifiers held', async () => {
@@ -174,7 +175,36 @@ describe('browser page acts — click', () => {
 
     // Assert
     should(page.calls).deepEqual([
+      'innerText aria-ref=e2',
       'click aria-ref=e2 {"timeout":30000,"button":"right","clickCount":2,"modifiers":["Shift"]}',
+    ]);
+  });
+
+  it('should name the account a click chose when the element shows exactly one email, and nothing otherwise (&B137)', async () => {
+    // Arrange: Google's chooser tile, a tile with two emails, a Next button, and a tile whose host cannot be read.
+    const tile = new FakePage();
+    tile.host = 'Accounts.Google.com';
+    tile.text = 'Ernest Ng\nErnest@Atomi.tech\nSigned out';
+    const two = new FakePage();
+    two.host = 'accounts.google.com';
+    two.text = 'a@x.com or b@x.com';
+    const next = new FakePage();
+    next.host = 'accounts.google.com';
+    next.text = 'Next';
+    const blind = new FakePage();
+    blind.text = 'a@x.com';
+
+    // Act
+    const outcomes = await Promise.all(
+      [tile, two, next, blind].map(async page => await clickOn(page, { kind: 'selector', selector: '#tile' })),
+    );
+
+    // Assert
+    should(outcomes).deepEqual([
+      { clickedIdentity: { host: 'accounts.google.com', username: 'ernest@atomi.tech' } },
+      {},
+      {},
+      {},
     ]);
   });
 
@@ -276,6 +306,13 @@ describe('browser page acts — type', () => {
     page.attributes.set('#pw', { autocomplete: 'username' });
     page.types.set('#check', 'checkbox');
     page.attributes.set('#check', { name: 'username' });
+    // Look-alikes that hold something else: a token, a key, a code box that says what it is by its autocomplete.
+    page.types.set('#token', 'text');
+    page.attributes.set('#token', { name: 'user_token' });
+    page.types.set('#key', 'text');
+    page.attributes.set('#key', { name: 'account_key', id: 'login' });
+    page.types.set('#otp', 'text');
+    page.attributes.set('#otp', { name: 'username', autocomplete: 'one-time-code' });
 
     // Act
     const typed = async (selector: string) => await typeInto(page, { kind: 'selector', selector }, 'x');
@@ -286,6 +323,8 @@ describe('browser page acts — type', () => {
     should(await typed('#search')).deepEqual({ passwordField: false });
     should(await typed('#pw')).deepEqual({ passwordField: true });
     should(await typed('#check')).deepEqual({ passwordField: false });
+    for (const selector of ['#token', '#key', '#otp'])
+      should(await typed(selector)).deepEqual({ passwordField: false });
   });
 });
 

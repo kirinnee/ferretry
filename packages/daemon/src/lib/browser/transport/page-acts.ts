@@ -142,23 +142,65 @@ export async function browserElementOf(page: ActablePage, target: BrowserElement
   return element;
 }
 
+/** What a click found worth telling the daemon: an account tile it chose, by the one email it shows. */
+export interface BrowserClickOutcome {
+  readonly clickedIdentity?: { readonly host: string; readonly username: string };
+}
+
+/** An email address as an account chooser shows one. */
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/gu;
+/** How much of a clicked element's text is looked at: an account tile, never a page. */
+const CLICKED_TEXT_CHARS = 400;
+
+/** The host of the document an element is in, lowercase, or `undefined` when it cannot be read. */
+async function documentHostOf(element: ActableLocator, inputOnly: boolean): Promise<string | undefined> {
+  const host = await element
+    .evaluate(
+      (
+        field: {
+          readonly tagName?: string;
+          readonly ownerDocument?: { readonly location?: { readonly host?: string } };
+        },
+        only: string,
+      ) => (only === 'input' && field.tagName !== 'INPUT' ? '' : (field.ownerDocument?.location?.host ?? '')),
+      inputOnly ? 'input' : 'any',
+    )
+    .catch(() => '');
+  return typeof host === 'string' && host !== '' ? host.toLowerCase() : undefined;
+}
+
+/**
+ * The account a click chose, when the element clicked shows exactly ONE email (an account chooser's tile, "Continue as
+ * a@x.com"), with the host of its document; `undefined` otherwise. Page text: it only ever names who a page is signing
+ * in, never chooses an account.
+ */
+export async function clickedIdentityOf(element: ActableLocator): Promise<BrowserClickOutcome['clickedIdentity']> {
+  const text = await element.innerText({ timeout: BROWSER_PROBE_TIMEOUT_MS }).catch(() => '');
+  const emails = [...new Set((text.slice(0, CLICKED_TEXT_CHARS).match(EMAIL) ?? []).map(each => each.toLowerCase()))];
+  const [only] = emails;
+  if (emails.length !== 1 || only === undefined) return undefined;
+  const host = await documentHostOf(element, false);
+  return host === undefined ? undefined : { host, username: only };
+}
+
 export async function clickOn(
   page: ActablePage,
   target: BrowserTarget,
   options: BrowserClickOptions = {},
-): Promise<void> {
+): Promise<BrowserClickOutcome> {
   const clickCount = options.double === true ? 2 : 1;
   const button = options.button ?? 'left';
   if (target.kind !== 'point') {
-    await (
-      await browserElementOf(page, target)
-    ).click({
+    const element = await browserElementOf(page, target);
+    // Read before the click: the click may take the tile away.
+    const clickedIdentity = await clickedIdentityOf(element);
+    await element.click({
       timeout: BROWSER_ACT_TIMEOUT_MS,
       button,
       clickCount,
       ...(options.modifiers === undefined ? {} : { modifiers: [...options.modifiers] }),
     });
-    return;
+    return clickedIdentity === undefined ? {} : { clickedIdentity };
   }
   // A point has no element to hold modifiers for it: the keys go down around the click, and always up.
   const held: BrowserModifier[] = [];
@@ -171,6 +213,7 @@ export async function clickOn(
   } finally {
     for (const modifier of held.reverse()) await page.keyboard.up(modifier).catch(() => undefined);
   }
+  return {};
 }
 
 /**
@@ -183,15 +226,17 @@ export async function isPasswordField(element: Pick<ActableLocator, 'getAttribut
 }
 
 /** The words in a field's `name` or `id` that make a text box an identifier box ("identifier", "loginfmt", "username"). */
-const IDENTIFIER_NAME =
-  /(?:^|[^a-z])(?:identifier|user(?:name|id)?|login(?:fmt|_?id|name)?|e-?mail|account)(?:$|[^a-z])/iu;
+const IDENTIFIER_NAME = /(?:^|[^a-z])(?:identifier|user(?:name|id)?|login(?:fmt|_?id|name)?|e-?mail)(?:$|[^a-z])/iu;
+/** Words that make a name an identifier box's look-alike holding something else (`user_token`, `login_code`). */
+const NOT_IDENTIFIER = /token|key|secret|code|otp|pin|pass|search|query/iu;
 /** The input types a username or an email is typed into. */
 const IDENTIFIER_TYPES: ReadonlySet<string> = new Set(['', 'text', 'email']);
 
 /**
  * The host of the document an IDENTIFIER field is in (an email or username box), or `undefined` for any other field
  * or one the check cannot read. An identifier box is an `input` of type email, or of type text with an autocomplete of
- * `username` or `email`, or a name or id that says so. Only names who a page is signing in; it unlocks nothing.
+ * `username` or `email`; only a text box whose autocomplete says nothing falls back to a name or id that says so, and
+ * never one that names a token, key, code or the like. Only names who a page is signing in; it unlocks nothing.
  */
 export async function identifierFieldHost(element: ActableLocator): Promise<string | undefined> {
   const read = async (name: string): Promise<string> =>
@@ -200,20 +245,16 @@ export async function identifierFieldHost(element: ActableLocator): Promise<stri
       .toLowerCase();
   const type = await read('type');
   if (!IDENTIFIER_TYPES.has(type)) return undefined;
-  const autocomplete = (await read('autocomplete')).split(/\s+/u);
-  const named = IDENTIFIER_NAME.test(await read('name')) || IDENTIFIER_NAME.test(await read('id'));
+  const said = await read('autocomplete');
+  const autocomplete = said.split(/\s+/u);
+  const names = [await read('name'), await read('id')];
+  const named =
+    (said === '' || said === 'off' || said === 'on') &&
+    names.some(name => IDENTIFIER_NAME.test(name)) &&
+    !names.some(name => NOT_IDENTIFIER.test(name));
   if (type !== 'email' && !autocomplete.includes('username') && !autocomplete.includes('email') && !named)
     return undefined;
-  const host = await element
-    .evaluate(
-      (field: {
-        readonly tagName?: string;
-        readonly ownerDocument?: { readonly location?: { readonly host?: string } };
-      }) => (field.tagName === 'INPUT' ? (field.ownerDocument?.location?.host ?? '') : ''),
-      '',
-    )
-    .catch(() => '');
-  return typeof host === 'string' && host !== '' ? host.toLowerCase() : undefined;
+  return await documentHostOf(element, true);
 }
 
 /** What typing into a field found worth telling the agent. */

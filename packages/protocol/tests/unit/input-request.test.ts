@@ -221,6 +221,20 @@ describe('a card of several fields', () => {
     should(worstRisk([undefined])).be.undefined();
   });
 
+  it('should keep a confirmed username only with the owner’s new-or-update choice (secrev-1331 M2)', () => {
+    const head = { deliveryId: DELIVERY, observedDigest: DIGEST, submit: true, padded: padInputValue('a-password-1') };
+    const save = { entry: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' };
+
+    should(
+      InputDeliverBodySchema.safeParse({ ...head, save: { ...save, username: 'ernest@atomi.tech' } }).success,
+    ).be.false();
+    for (const mode of ['new', 'update'])
+      should(
+        InputDeliverBodySchema.safeParse({ ...head, save: { ...save, mode, username: 'e@x.com' } }).success,
+      ).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...head, save: { ...save, mode: 'replace' } }).success).be.false();
+  });
+
   it('should deliver each typed field padded on its own, a saved login for the rest, and never a bare padded beside them', () => {
     const typed = { field: 'email', padded: padInputValue('me@example.com') };
     const head = { deliveryId: DELIVERY, observedDigest: DIGEST, submit: true };

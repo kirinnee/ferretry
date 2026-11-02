@@ -32,7 +32,8 @@ export class InputLoginAdapter implements InputLoginPort {
     match: string | undefined,
     fields: LoginFieldValues,
     mode?: 'new' | 'update',
+    pageUsername?: string,
   ): Promise<void> {
-    await this.directory.saveFields(id, label, match, fields, mode);
+    await this.directory.saveFields(id, label, match, fields, mode, pageUsername);
   }
 }

@@ -1084,7 +1084,9 @@ describe('a second person on one site', () => {
     expect(card.q('[data-input-offer][data-variant="primary"]')).toBeNull();
     expect(card.view.container.textContent).not.toContain('Use saved');
     expect(card.q('[data-input-different-account]')?.textContent).toContain('The page is signing in ernest@atomi.tech');
-    expect(card.q('[data-input-title]')?.textContent).toBe('!A7 · Hadi needs a password for ernest@atomi.tech');
+    expect(card.q('[data-input-title]')?.textContent).toBe(
+      '!A7 · Hadi needs a password, signing in ernest@atomi.tech as typed on the page',
+    );
     // The owner types: the field is open from the start, and EMPTY — nothing of kirinnee97's is in it, and Send has
     // nothing to send until the owner types.
     expect(card.q<HTMLInputElement>('[data-input-value]')?.value).toBe('');
@@ -1161,5 +1163,21 @@ describe('a second person on one site', () => {
       label: 'accounts.google.com',
       mode: 'update',
     });
+  });
+
+  it('should say whose password a one-tap types: the username, or plainly that none is saved (M4)', async () => {
+    const page = { target: { kind: 'browser' as const, key: 'app' } };
+    const none = await open(true, withSaved(saved({ offers: [primaryOffer()] }), page));
+    const named = await open(
+      true,
+      withSaved(saved({ offers: [primaryOffer({ username: 'kirinnee97@gmail.com' })] }), page),
+    );
+
+    expect(none.q('[data-input-offer][data-variant="primary"] [data-input-offer-username]')?.textContent).toBe(
+      'no username saved',
+    );
+    expect(named.q('[data-input-offer][data-variant="primary"] [data-input-offer-username]')?.textContent).toBe(
+      'kirinnee97@gmail.com',
+    );
   });
 });

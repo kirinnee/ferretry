@@ -466,13 +466,17 @@ export const initialSaveDraft = (
     };
   const update = saved.update;
   const typedInstead = options.typedInstead === true;
-  const username =
-    saved.typedUsername ?? (typedInstead || saved.differentFrom !== undefined ? '' : (update?.username ?? ''));
+  // Only who the page said it signs in: a new account is never pre-filled with another account's username.
+  const username = saved.typedUsername ?? '';
+  // Update is the start ONLY when the page said who it signs in and that is the account's own username: an unknown
+  // identity never starts on Update, whatever the account holds.
   const updates =
     update !== undefined &&
+    update.username !== undefined &&
+    saved.typedUsername !== undefined &&
     !typedInstead &&
     saved.differentFrom === undefined &&
-    sameUsername(username, update.username);
+    sameUsername(saved.typedUsername, update.username);
   if (updates) return { ...blank, mode: 'update', label: update.label, id: update.id, username };
   const draft: SaveDraft = { ...blank, mode: 'new', label: '', id: '', username };
   return { ...draft, ...freshNames(saved, draft, username) };
@@ -523,12 +527,19 @@ export const updateWords = (update: NonNullable<InputSaved['update']>): string =
   `Replaces the saved password of ${named(update)}.`;
 
 /** The "Update" choice's words: the account, and that it is the same person. */
-export const updateChoiceWords = (update: NonNullable<InputSaved['update']>): string =>
-  update.username === undefined
-    ? `Update ${update.label}`
-    : update.label.includes(update.username)
-      ? `Update ${update.label} (same username)`
-      : `Update ${update.label} (same username, ${update.username})`;
+export const updateChoiceWords = (saved: InputSaved | undefined): string | undefined => {
+  const update = saved?.update;
+  if (update === undefined) return undefined;
+  // "(same username)" only when the page said who it signs in and it is that account's: never a sameness nobody saw.
+  const same =
+    update.username !== undefined &&
+    saved?.typedUsername !== undefined &&
+    sameUsername(saved.typedUsername, update.username);
+  if (!same) return `Update ${named(update)}`;
+  return update.label.includes(update.username as string)
+    ? `Update ${update.label} (same username)`
+    : `Update ${update.label} (same username, ${update.username as string})`;
+};
 
 /** An account as a sentence names it: its name, and its username when the name does not already say it. */
 const named = (account: { readonly label: string; readonly username?: string | undefined }): string =>
@@ -559,19 +570,31 @@ export const cardAccountWords = (
   saved: InputSaved | undefined,
   accounts: AccountList | undefined,
 ): string | undefined => {
-  if (accounts === undefined || saved === undefined) return undefined;
-  const id =
-    saved.differentFrom === undefined
-      ? (saved.offers.find(offer => offer.primary === true)?.id ?? saved.update?.id)
-      : undefined;
+  if (accounts === undefined || saved === undefined || saved.differentFrom !== undefined) return undefined;
+  const id = saved.offers.find(offer => offer.primary === true)?.id ?? saved.update?.id;
   const account = id === undefined ? undefined : accounts.accounts.find(each => each.id === id);
-  if (account !== undefined) return named(account);
-  return saved.typedUsername;
+  return account === undefined ? undefined : named(account);
 };
 
-/** `!A7 · Hadi needs a password for Google · a@gmail.com`: the title naming the account, when the device may know it. */
-export const accountTitleWords = (request: InputRequest, agentName: string, account: string): string =>
-  `${titleWords(request, agentName)} for ${account}`;
+/**
+ * The card's title naming whose sign-in it is, for a device that may read accounts (`accounts`, the secrets-gated
+ * listing): `!A7 · Hadi needs a password for Google · a@gmail.com` from the listing, or, when the page said who it signs
+ * in and no account is the card's, `… needs a password, signing in b@x.com as typed on the page` — the ferret's word,
+ * said as such. `undefined` without the listing: the place-only title.
+ */
+export const accountTitleWords = (
+  request: InputRequest,
+  agentName: string,
+  accounts: AccountList | undefined,
+): string | undefined => {
+  if (accounts === undefined) return undefined;
+  const account = cardAccountWords(request.saved, accounts);
+  if (account !== undefined) return `${titleWords(request, agentName)} for ${account}`;
+  const typed = request.saved?.typedUsername;
+  return typed === undefined
+    ? undefined
+    : `${titleWords(request, agentName)}, signing in ${typed} as typed on the page`;
+};
 
 /** Save is drawn only when a typed value of this kind is ever kept (a one-time code is not). */
 const offersSave = (field: InputCardField): boolean => field.saved?.saves !== undefined;

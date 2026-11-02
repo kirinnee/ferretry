@@ -207,6 +207,9 @@ raise naming `code`, and the agent is told so.
 ## Who may do what
 
 - **Raise**: only an agent, through `/v1/agent/tools`, on a surface it opened or was handed.
+- **Read a card's accounts**: a card's `saved` (offers, Save as, who the page signs in) goes only to a caller with
+  `secrets.use`; any other reads the card without it. Typing a saved account needs `secrets.use`, and Save to
+  Accounts `secrets.configure` ([grants](grants.md)).
 - **Answer or cancel**: the owner only. The route refuses an agent caller (`peer:`, `warden:`) before
   it reads the body, and the service refuses again **before anything else** (`cancel` included: an
   agent's cancel is forbidden and has no side effects) unless the actor is `admin-cli`, `admin-ui` or a
@@ -766,27 +769,38 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 The owner types the value on the card and ticks **Save to Accounts**. An account IS a username and a password, so the
 card shows, in this order:
 
-- **Username**, pre-filled with [who the page is signing in](#who-is-signing-in) (what the ferret typed in its email
-  box) or the account the card is about, and editable. A card that types a username itself keeps that one instead.
-- **Save as a new account** or **Update `<account>` (same username)** — an explicit choice, drawn when an account
-  could be updated (`InputSaved.update`). It starts on **new** unless the Username is that account's own (two absent
-  usernames, as for a sudo password, count as the same), and always on new after "Type a different one" over a
-  one-tap, or when the page is signing in someone else. "Update" says plainly "Replaces the saved password of …" and
-  keeps the account's own username (read-only); an account with no username takes the one typed.
+- **Username**, pre-filled only with [who the page is signing in](#who-is-signing-in) (what the ferret typed or chose
+  there), and editable. Never another account's username. A card that types a username itself keeps that one instead.
+- **Save as a new account** or **Update `<account>`** — an explicit choice, drawn only when the daemon offers an
+  account to update (`InputSaved.update`); otherwise one plain line, "Saves as a new account". It starts on **Update**
+  ONLY when the page said who it signs in and that is the account's own username, and then says "(same username)";
+  with an unknown identity it starts on new and claims no sameness. "Update" says plainly "Replaces the saved password
+  of …" and keeps the account's own username (read-only).
 - **Name** (new only), from the provider and the username: "Google · a@gmail.com" (`suggestedNewAccount`; a fixed
   provider list — Google, Microsoft, an Okta tenant — else the host, `github.com · kirinnee`).
 - **More › Name in the terminal** (new only): the account's handle, the name `fy account` uses (`GOOGLE_A`), derived
   from the Name until edited and never one an account already has (`_2`, `_3`…). It is not an environment
   variable; the card never calls it a label or a handle.
 
-The daemon sends `InputSaved.update` (the account that signs in here whose username IS the typed one, else the one the
-card's primary is chosen as, `chosenSignIn` without the ferret's hint; two or more and nothing chooses one: none) and
-`newAccount` (the name and terminal name above). `suggest` stays for an older app: `update` unless the page signs in
-someone else, else `newAccount`. The deliver's `save.mode` is the owner's choice and is enforced twice, before
-anything is typed and again under the store lock (`LoginDirectory.saveFields`): **`new` never lands on a terminal name
-an account has**, **`update` never on an account that is not there or has another username** — each refused with nothing
-typed, or, when another card saved first in between, "typed, but not saved" with nothing overwritten. An older app sends
-no `mode` and saves as `entry` says, as before.
+The daemon sends `InputSaved.update` — the account the card's primary is chosen as (`chosenSignIn` without the
+ferret's hint; two or more and nothing chooses one: none), and **never** when the page is signing in someone that
+account is not (another username, or none saved: the owner adds the username in Settings › Accounts first) — and
+`newAccount` (the name and terminal name above). The typed username never chooses the account to update. `suggest`
+stays for an older app: `update`, else `newAccount`.
+
+The deliver's `save` is enforced twice, before anything is typed and again under the store lock
+(`LoginDirectory.saveFields`, which is handed the page's typed username too):
+
+- **No `mode`** (an older app) saves only a NEW account; an `entry` that is an account is refused, nothing typed. A
+  `username` is accepted only with a `mode`.
+- **`new`** never lands on a terminal name an account has.
+- **`update`** only into the account the card offers to update, decided again at Send; never one that is not there,
+  never another person (the owner's box or the page naming another username, or the page naming anyone when the
+  account has none).
+- Each is refused with nothing typed, or, when another card saved first in between, "typed, but not saved" with
+  nothing overwritten.
+- **Saving needs `secrets.configure`** from a governed device, as every other write to the accounts does; typing a
+  saved account needs `secrets.use` ([who may do what](#who-may-do-what)).
 
 - **The save is checked before anything is typed.** A one-time code is never saved (add the 2FA seed in
   Settings instead), and a password shorter than `LOGIN_PASSWORD_MIN_LENGTH` (8, a masking limit, not a
@@ -821,31 +835,44 @@ no `mode` and saves as `entry` says, as before.
 ### Who is signing in
 
 A ferret types the email itself on a two-step sign-in (it fills every non-secret field), so the password card would
-not know whose password it asks for. When an agent's `browser.type` lands in an **identifier field** — an `input` of
-type email, or text with `autocomplete` username/email, or a name or id like `identifier`, `login`, `username`,
-`email`, `loginfmt` (the browser worker classifies the field it typed into, `identifierFieldHost`; never a password
-field) — the daemon keeps that text for **that page id and the host of the field's document**
-(`TypedIdentities`, memory only). A later act that leaves the page on another host forgets it, as do 15 minutes, a
-newer type and the session ending. A card raised on the same page and host reads it **at raise** as
-`InputSaved.typedUsername`.
+not know whose password it asks for. The daemon keeps who a page is signing in (`TypedIdentities`, memory only), per
+**page** — the daemon's own page id, the same one the input target checks a card's facts against — and the host of
+the field's document, from the ferret's own acts as the browser saw them:
 
-It is plain text the ferret held and typed, so it is the **ferret's word, never proof**, and it may only take things
-away:
+- a `browser.type` into an **identifier field**: an `input` of type email, or text with `autocomplete` username or
+  email; only a text box whose autocomplete says nothing falls back to a name or id like `identifier`, `login`,
+  `username`, `email`, `loginfmt`, and never one that names a token, key, code or the like (`identifierFieldHost`;
+  never a password field);
+- a `browser.fill_form` that put text in exactly ONE such field (and no password field);
+- a click on an element that shows exactly one email: an account chooser's tile (`clickedIdentityOf`).
+
+**A missing record is the safe state**, so the record is CLEARED by anything that may change who the page signs in
+without the daemon reading who: a navigation, typing or filling anything else, a key press that types (Enter, Tab and
+arrows keep it), raw mouse moves, a click at a bare point, a page script (every page of the session), any act by a
+person — the API or typing in the live view — and a password delivered into the page (the sign-in moved on). It is also
+forgotten when the page is seen on another host, after 15 minutes, and when the session ends. A card raised on the same
+page and host reads it **at raise**, through the redactor like the ferret's prompt (a value the redactor would change
+is dropped), as `InputSaved.typedUsername`.
+
+It is the **ferret's word (or the page's), never proof**, and it may only take things away:
 
 - **It removes a one-tap, never makes one.** When the account that would be the one-tap (only, default or hint) has
   another username, or none saved, there is **no one-tap**; `differentFrom` names it and the card says "This looks like
   a different account. The page is signing in b@…, not …". The account stays pickable by hand; nothing is ever
   promoted or moved to another account, and a username matching a by-hand or second account chooses nothing.
+- **It removes an Update**: the account it is not is never offered or accepted for one (above).
 - **It pre-fills the Username under Save as**, which the owner reads ("What the ferret typed on the page. Check it is
   right.") and can change, and names a new account.
-- **The app names whose sign-in it is in the card's title** ("… needs a password for b@…"), but only from the
-  secrets-gated accounts listing (`GET /v1/accounts`, `secrets.use`): a device that cannot read accounts sees the
-  place-only title. The **agenda** text (title, ask, prompt) names no account or person, ever (secrev-1261 L4): ferrets
-  and devices without `secrets.use` read it.
+- **When it is unknown**, the one-tap says whose password it types: the account's username, or "no username saved".
+- **The app's title** names the card's account only from the secrets-gated accounts listing (`GET /v1/accounts`,
+  `secrets.use`), and says the typed name as what it is: "… needs a password, signing in b@… as typed on the page". A
+  device without `secrets.use` sees the place-only title, and gets no `saved` at all from the card routes (it names
+  accounts and people). The **agenda** text (title, ask, prompt) names no account or person, ever (secrev-1261 L4).
 
 Honest limits: a card restored after a daemon restart has no typed username (it was in memory), so its one-tap is
-decided as before. A ferret that clicks an account tile instead of typing leaves nothing to compare. A typed username
-does not stop a task-plan or standing-rule fill; those are already pinned to the sign-in the owner approved.
+decided as before. A navigation the page makes by itself on the same host (no ferret act) does not clear the record;
+the delivered password, the next ferret act and the 15 minutes do. A typed username does not stop a task-plan or
+standing-rule fill; those are already pinned to the sign-in the owner approved.
 
 ### The next time: one tap
 

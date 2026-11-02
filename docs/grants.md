@@ -412,6 +412,12 @@ confirming a selection demand `terminal.configure` (plus `browser.use` for a pag
 demand `terminal.use`; revoking never asks for a passkey. Every one that answers a plan or a stage's summary also
 needs `secrets.use`, as `GET /v1/accounts` does, because a plan names the owner's accounts.
 
+**Input-request cards** (`/v1/input-requests`, [input-requests.md](input-requests.md#saved-logins)) are `terminal.use`
+routes, but a card's `saved` names accounts and people (offers, the account Update would write, the new account's
+name, who the page is signing in). A caller without `secrets.use` gets every card **without `saved`**; it still answers
+by typing. On the deliver route, typing a saved account (`entry`) also needs `secrets.use`, and keeping a typed value
+("Save to Accounts", `save`) needs `secrets.configure` (and spends the step-up), as every other account write does.
+
 **Standing sign-in rules** (`/v1/sign-in-rules`, [secrets.md](secrets.md#standing-sign-in-rules)) are `caller:
 'person'` on every route, so a ferret's credential is refused `owner_only` before a body is read. Reading the list,
 the eligibility and a staged rule, dropping a stage, narrowing and revoking (one rule, or

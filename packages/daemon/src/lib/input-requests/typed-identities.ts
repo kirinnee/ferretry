@@ -12,8 +12,12 @@ import { LOGIN_USERNAME_MAX_LENGTH } from '@ferretry/protocol';
  * pre-fill the owner's editable "Username" under "Save as" and to REMOVE a one-tap whose account is someone else.
  * Nothing here ever chooses, promotes or fills an account.
  *
- * It is forgotten when the page is seen on another host, after {@link TYPED_IDENTITY_TTL_MS}, when a later type
- * replaces it, and when the session ends. It lives in memory only.
+ * Kept from the ferret's `browser.type` or `browser.fill_form` into ONE identifier box, or its click on an element that
+ * shows exactly one email (an account chooser's tile). A missing record is the safe state, so it is CLEARED by anything
+ * that may have changed who the page signs in without the daemon reading who: a navigation, a key press that types, a
+ * page script, typing or filling anything else on the page, a click at a bare point, a password delivered into the page
+ * (the sign-in moved on), and a person typing in the live view. It is also forgotten when the page is seen on another
+ * host, after {@link TYPED_IDENTITY_TTL_MS}, and when the session ends. It lives in memory only.
  */
 
 /** How long a typed username stays the page's: long enough for a slow owner, short enough not to name a later sign-in. */
@@ -49,6 +53,14 @@ export class TypedIdentities {
     while (own.size > MAX_PAGES_PER_SESSION) own.delete(own.keys().next().value as string);
     if (own.size === 0) this.pages.delete(sessionId);
     else this.pages.set(sessionId, own);
+  }
+
+  /** Who page `pageId` signs in is no longer known: something may have changed it that the daemon cannot read. */
+  cleared(sessionId: string, pageId: string): void {
+    const own = this.pages.get(sessionId);
+    if (own === undefined) return;
+    own.delete(pageId);
+    if (own.size === 0) this.pages.delete(sessionId);
   }
 
   /** The page was seen on `host` after an act: what was typed on another host is not who it signs in now. */

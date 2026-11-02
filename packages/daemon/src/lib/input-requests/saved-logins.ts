@@ -288,15 +288,16 @@ export function someoneElse(typed: string | undefined, account: Pick<AccountSumm
 /**
  * WHERE "SAVE AS" COULD KEEP A TYPED VALUE:
  *
- * - `update`: the account that signs in here whose saved username IS the one typed on the page (exactly one), else the
- *   one {@link chosenSignIn} picks among EVERY sign-in matched here (whatever fields it holds; the ferret's hint is not
- *   asked). Two or more sign in here and nothing chose one: no `update`, so a password never lands on "the first".
+ * - `update`: the account {@link chosenSignIn} picks among EVERY sign-in matched here (whatever fields it holds; the
+ *   ferret's hint is not asked). Two or more sign in here and nothing chose one: none, so a password never lands on
+ *   "the first". The typed username never CHOOSES it; it only takes it away: when the page is signing in someone the
+ *   account is not ({@link someoneElse}, which an account with no username saved always is), there is no `update` and
+ *   the daemon refuses one (the owner can add the username in Settings › Accounts first).
  * - `newAccount`: a new one named from the place and the typed username ({@link suggestedNewAccount}), whose CLI name
  *   no account has.
  *
- * Neither saves anything: the owner picks "Save as a new account" or "Update" on the card. An account whose saved
- * username is not the one typed on the page is never `update`, and the daemon refuses an update into it. `suggest` is what an older app pre-fills: `update` unless the page is
- * signing in someone else ({@link someoneElse}), or there is none; then `newAccount`.
+ * Neither saves anything: the owner picks "Save as a new account" or "Update" on the card. `suggest` is what an older
+ * app pre-fills: `update`, else `newAccount` (two or more here, nothing chosen and no one typed: nothing, as before).
  */
 function suggestFor(
   matchKey: string | undefined,
@@ -305,35 +306,21 @@ function suggestFor(
 ): Pick<InputSaved, 'suggest' | 'update' | 'newAccount'> {
   if (matchKey === undefined) return {};
   const atKey = signInsAt(matchKey, listing);
-  const accountsHere = listing.accounts.filter(each => atKey.some(signIn => signIn.account === each.id));
   const typed = context.typedUsername;
-  const sameName =
-    typed === undefined ? [] : accountsHere.filter(each => each.username !== undefined && !someoneElse(typed, each));
   const choice = atKey.length === 0 ? undefined : chosenSignIn(matchKey, atKey, { ...context, hint: undefined });
-  const chosen =
-    choice === undefined
-      ? undefined
-      : accountsHere.find(each => atKey.some(signIn => signIn.id === choice.signIn && signIn.account === each.id));
-  // Never another person's: an account whose saved username is not the one typed on the page is not offered for update.
-  const candidate = sameName.length === 1 ? sameName[0] : chosen;
-  const account =
-    candidate !== undefined && candidate.username !== undefined && someoneElse(typed, candidate)
-      ? undefined
-      : candidate;
+  const signIn = choice === undefined ? undefined : atKey.find(each => each.id === choice.signIn);
+  const chosen = signIn === undefined ? undefined : listing.accounts.find(each => each.id === signIn.account);
+  const account = chosen !== undefined && !someoneElse(typed, chosen) ? chosen : undefined;
   const newAccount = suggestedNewAccount(matchKey, typed, new Set(listing.accounts.map(each => each.id)));
-  const update = account === undefined ? undefined : refOf(account);
-  // Two or more sign in here and nothing chose one: an older app is suggested nothing, as before, unless the page is
-  // signing in a person none of them is (then a new account is plainly what is typed).
-  const nobodyHere = typed !== undefined && sameName.length === 0;
   const suggest =
-    account !== undefined && !someoneElse(typed, account)
+    account !== undefined
       ? { id: account.id, label: account.label }
-      : atKey.length > 0 && account === undefined && !nobodyHere
+      : atKey.length > 0 && chosen === undefined && typed === undefined
         ? undefined
         : newAccount;
   return {
     ...(suggest === undefined ? {} : { suggest }),
-    ...(update === undefined ? {} : { update }),
+    ...(account === undefined ? {} : { update: refOf(account) }),
     newAccount,
   };
 }

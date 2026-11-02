@@ -723,9 +723,10 @@ export const InputDeliverBodySchema = z
      * handle (its label then stays). Saved only once it has been typed; a one-time code is never saved.
      *
      * `mode` is the owner's choice on the card: `new` keeps it ONLY in a new account (a CLI name that is already an
-     * account's is refused, nothing typed), `update` ONLY in the existing account `entry` names, replacing what it
-     * holds. Absent (an older app): either, as `entry` says. `username` is the owner-confirmed username kept with it
-     * (the "Username" box, pre-filled from what the ferret typed); never on a card that types a username itself.
+     * account's is refused, nothing typed), `update` ONLY in the account the card offers to update (`saved.update`),
+     * never another person's. Absent (an older app): a new account only; an existing one is refused, nothing typed.
+     * `username` is the owner-confirmed username kept with it (the "Username" box), only with a `mode`, and never on a
+     * card that types a username itself.
      */
     save: z
       .strictObject({
@@ -777,6 +778,13 @@ export const InputDeliverBodySchema = z
       ((body.padded === undefined && body.fields === undefined) || body.entry !== undefined)
     ) {
       context.addIssue({ code: 'custom', message: 'save keeps values you typed, not a saved login', path: ['save'] });
+    }
+    if (body.save?.username !== undefined && body.save.mode === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a username is kept only with the owner’s choice: send mode new or update',
+        path: ['save', 'username'],
+      });
     }
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;

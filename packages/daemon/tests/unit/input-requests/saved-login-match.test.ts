@@ -525,7 +525,8 @@ describe('who the page is signing in', () => {
 
     should(offersOf(saved)).deepEqual([['G', true, undefined]]);
     should(saved.differentFrom).deepEqual({ id: 'G', label: 'google' });
-    should(saved.update).deepEqual({ id: 'G', label: 'google' });
+    // Nor is it offered for Update: only the owner adding the username in Settings first makes it that person.
+    should(saved.update).be.undefined();
     should(saved.newAccount).deepEqual({ id: 'GOOGLE_B', label: 'Google · b@gmail.com' });
   });
 
@@ -549,8 +550,8 @@ describe('who the page is signing in', () => {
     // Typing a hand-pickable account's username never matches it here either.
     should(saved.offers.find(offer => offer.id === 'HAND')).match({ matched: false });
     should(saved.offers.find(offer => offer.id === 'HAND')?.primary).be.undefined();
-    // Save as may UPDATE the account whose username it is, by the owner's explicit choice only.
-    should(saved.update).deepEqual({ id: 'B', label: 'b', username: 'b@x.com' });
+    // Nor does it choose which one Save as may update: nothing chose one, so none is offered (secrev-1331 L3).
+    should(saved.update).be.undefined();
   });
 
   it('should demote a ferret’s hint or a default exactly as the only one, and never move it to another account', () => {

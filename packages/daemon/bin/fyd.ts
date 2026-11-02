@@ -6433,7 +6433,7 @@ function createAgentToolsSubsystem(input: {
   readonly ruleSuggestions: Pick<SignInRuleSuggestions, 'suggest'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
   /** Who a page is signing in: what the agent typed into an identifier field, for the owner's card only. */
-  readonly typedIdentities: Pick<TypedIdentities, 'typed' | 'seen'>;
+  readonly typedIdentities: Pick<TypedIdentities, 'typed' | 'seen' | 'cleared' | 'forget'>;
   /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
   readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
 }): MountedSubsystems['agentTools'] {
@@ -11798,7 +11798,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         status: browserService.status.bind(browserService),
         act: browserService.act.bind(browserService),
         attachViewer: browserService.attachViewer.bind(browserService),
-        dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
+        // A person typing in the live view may be signing someone else in: who the session's pages were signing in, as
+        // the ferret typed it, is no longer known (typed-identities.ts). A missing record is the safe state.
+        dispatchHumanInput: async (sessionId, input) => {
+          if (input.kind !== 'mouse') typedIdentities.forget(sessionId);
+          await browserService.dispatchHumanInput(sessionId, input);
+        },
         releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),

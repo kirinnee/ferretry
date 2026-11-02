@@ -39,15 +39,18 @@ import { NOW, browserField, fakeClient, offer, requestOf, saved } from '../../te
 const view = new URLSearchParams(location.search).get('view') ?? 'different';
 const AT = '2026-11-02T03:14:00.000Z';
 const SIGN_IN = 'si_0123456789abcdef';
-const KIRIN = { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com', username: 'kirinnee97@gmail.com' };
+const same = view === 'update' || view === 'one-tap';
+// The owner's REAL store (secrev-1331 M3): kirinnee97's account has no username saved. The same-person views save it.
+const KIRIN = same
+  ? { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com', username: 'kirinnee97@gmail.com' }
+  : { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' };
 const accounts = AccountListSchema.parse({
   v: 1,
   health: 'ready',
   accounts: [{ ...KIRIN, fields: { password: true, totp: false }, factors: [], signIns: [SIGN_IN], createdAt: AT, updatedAt: AT }],
   signIns: [{ id: SIGN_IN, account: KIRIN.id, place: { kind: 'site', domains: ['accounts.google.com'], match: [] }, method: { kind: 'password' }, createdAt: AT, updatedAt: AT }],
 });
-const same = view === 'update' || view === 'one-tap';
-const who = same ? KIRIN.username : 'ernest@atomi.tech';
+const who = same ? 'kirinnee97@gmail.com' : 'ernest@atomi.tech';
 const request = requestOf('secret', {
   risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
   agendaItemId: 'A251',

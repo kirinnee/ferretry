@@ -1064,49 +1064,147 @@ describe('AgentToolService — pointer and keys', () => {
     ]);
   });
 
-  it('should keep what the agent typed into an email box as who the page signs in, and never a password (&B137)', async () => {
-    // Arrange
-    const typed: string[] = [];
-    const seen: string[] = [];
-    const world = agentToolWorld({
-      typedIdentities: {
-        typed: (sessionId, pageId, host, text) => void typed.push(`${sessionId}|${pageId}|${host}|${text}`),
-        seen: (sessionId, pageId, host) => void seen.push(`${sessionId}|${pageId}|${host ?? '-'}`),
-      },
-    });
-    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
-    world.browser.identifierHost = 'accounts.google.com';
+  describe('who a page is signing in (&B137, secrev-1331 M4)', () => {
+    /** A world whose identity store records every call, in order, by what it did and with what. */
+    async function signingIn() {
+      const events: string[] = [];
+      const world = agentToolWorld({
+        typedIdentities: {
+          typed: (_session, pageId, host, text) => void events.push(`typed ${pageId} ${host} ${text}`),
+          seen: (_session, pageId, host) => void events.push(`seen ${pageId} ${host ?? '-'}`),
+          cleared: (_session, pageId) => void events.push(`cleared ${pageId}`),
+          forget: () => void events.push('forget'),
+        },
+      });
+      await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+      const listed = await world.service.call(agent, { tool: 'browser.list' });
+      const pageId = (listed.surfaces ?? [])[0]?.id as string;
+      return { world, events, pageId };
+    }
 
-    // Act
-    await world.service.call(agent, {
-      tool: 'browser.type',
-      name: 'app',
-      selector: '#identifierId',
-      text: 'ernest@atomi.tech',
-    });
-    world.browser.passwordField = true;
-    await world.service.call(agent, { tool: 'browser.type', name: 'app', selector: '#pw', text: 'not-a-username' });
-    world.browser.passwordField = false;
-    await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
-    // A person typing on the page is not the ferret: nothing is kept for it.
-    await world.service.call(person, {
-      tool: 'browser.type',
-      name: 'app',
-      selector: '#identifierId',
-      text: 'owner@x.com',
+    it('should keep a type into an email box, keyed by the DAEMON’s page id, and clear on a type anywhere else', async () => {
+      // Arrange
+      const { world, events, pageId } = await signingIn();
+      world.browser.identifierHost = 'accounts.google.com';
+
+      // Act
+      await world.service.call(agent, {
+        tool: 'browser.type',
+        name: 'app',
+        selector: '#id',
+        text: 'ernest@atomi.tech',
+      });
+      world.browser.identifierHost = undefined;
+      await world.service.call(agent, { tool: 'browser.type', name: 'app', selector: '#q', text: 'search' });
+      world.browser.passwordField = true;
+      await world.service.call(agent, { tool: 'browser.type', name: 'app', selector: '#pw', text: 'not-a-username' });
+
+      // Assert: the same id browser.list gives (the one the input target checks a card's facts against)
+      should(events).deepEqual([
+        `typed ${pageId} accounts.google.com ernest@atomi.tech`,
+        `cleared ${pageId}`,
+        `cleared ${pageId}`,
+      ]);
     });
 
-    // Assert
-    should(typed).have.length(1);
-    should(typed[0]).match(/\|accounts\.google\.com\|ernest@atomi\.tech$/u);
-    should(typed.join()).not.containEql('not-a-username');
-    should(typed.join()).not.containEql('owner@x.com');
-    // Every other agent act tells where the page now is, so a page that left the site forgets who it was signing in.
-    should(seen).have.length(2);
-    // An address that cannot be read is no host at all: the page forgets.
-    world.browser.actedUrl = 'not a url';
-    await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
-    should(seen.at(-1)).match(/\|-$/u);
+    it('should keep a fill into ONE identifier box, and clear on two, on a password, or on none', async () => {
+      // Arrange
+      const { world, events, pageId } = await signingIn();
+      const fill = async (fields: { selector: string; text: string }[]) =>
+        await world.service.call(agent, { tool: 'browser.fill_form', name: 'app', fields });
+
+      // Act
+      world.browser.identifierFields = [{ index: 1, host: 'login.example.com' }];
+      await fill([
+        { selector: '#name', text: 'Ernest' },
+        { selector: '#email', text: 'e@x.com' },
+      ]);
+      world.browser.identifierFields = [
+        { index: 0, host: 'login.example.com' },
+        { index: 1, host: 'login.example.com' },
+      ];
+      await fill([
+        { selector: '#a', text: 'a@x.com' },
+        { selector: '#b', text: 'b@x.com' },
+      ]);
+      world.browser.identifierFields = undefined;
+      await fill([{ selector: '#name', text: 'Ernest' }]);
+
+      // Assert
+      should(events).deepEqual([`typed ${pageId} login.example.com e@x.com`, `cleared ${pageId}`, `cleared ${pageId}`]);
+    });
+
+    it('should keep the account tile a click chose, keep a plain click, and clear a click at a bare point', async () => {
+      // Arrange
+      const { world, events, pageId } = await signingIn();
+
+      // Act
+      world.browser.clickedIdentity = { host: 'accounts.google.com', username: 'ernest@atomi.tech' };
+      await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#tile' });
+      world.browser.clickedIdentity = undefined;
+      world.browser.actedUrl = 'https://accounts.google.com/v3/signin/challenge/pwd';
+      await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
+      await world.service.call(agent, { tool: 'browser.click', name: 'app', x: 10, y: 10 });
+
+      // Assert
+      should(events).deepEqual([
+        `typed ${pageId} accounts.google.com ernest@atomi.tech`,
+        `seen ${pageId} accounts.google.com`,
+        `cleared ${pageId}`,
+      ]);
+    });
+
+    it('should keep through Enter, a read or a scroll, and clear on a key that types, a navigation or raw mouse', async () => {
+      // Arrange
+      const { world, events, pageId } = await signingIn();
+      world.browser.actedUrl = 'not a url';
+
+      // Act
+      await world.service.call(agent, { tool: 'browser.press', name: 'app', keys: ['Enter'] });
+      await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+      await world.service.call(agent, { tool: 'browser.press', name: 'app', keys: ['Tab', 'a'] });
+      await world.service.call(agent, {
+        tool: 'browser.navigate',
+        name: 'app',
+        url: 'https://accounts.google.com/AddSession',
+      });
+      await world.service.call(agent, { tool: 'browser.mouse', name: 'app', action: 'move', x: 1, y: 1 });
+
+      // Assert: an address that cannot be read is no host, so even a kept act forgets on it.
+      should(events).deepEqual([
+        `seen ${pageId} -`,
+        `seen ${pageId} -`,
+        `cleared ${pageId}`,
+        `cleared ${pageId}`,
+        `cleared ${pageId}`,
+      ]);
+    });
+
+    it('should forget every page of the session when a page script runs: it may have typed anywhere', async () => {
+      // Arrange
+      const { world, events } = await signingIn();
+      world.browser.scriptAnswer = '1';
+
+      // Act
+      await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+
+      // Assert
+      should(events).deepEqual(['forget']);
+    });
+
+    it('should clear for a PERSON’s act on the page, whatever it typed, and keep through their read', async () => {
+      // Arrange
+      const { world, events, pageId } = await signingIn();
+      world.browser.identifierHost = 'accounts.google.com';
+
+      // Act
+      await world.service.call(person, { tool: 'browser.type', name: 'app', selector: '#id', text: 'owner@x.com' });
+      await world.service.call(person, { tool: 'browser.read', name: 'app' });
+
+      // Assert
+      should(events[0]).equal(`cleared ${pageId}`);
+      should(events.join()).not.containEql('owner@x.com');
+    });
   });
 
   it('should say a password field was filled, tell the agent to hand secrets to the owner, and audit the flag', async () => {

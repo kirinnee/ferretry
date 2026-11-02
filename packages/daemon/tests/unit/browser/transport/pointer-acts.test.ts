@@ -12,6 +12,10 @@ import {
 
 /** A page that records every Playwright call a pointer act makes, in order, one line each. */
 class FakePage implements PointerPage {
+  /** Attributes other than `type`, per selector. */
+  readonly attributes = new Map<string, Readonly<Record<string, string>>>();
+  /** The host of the document the fields are in; absent: it cannot be read. */
+  host: string | undefined;
   readonly calls: string[] = [];
   readonly refs = new Set(['e1', 'e2', 'e3']);
   readonly types = new Map<string, string>();
@@ -36,7 +40,7 @@ class FakePage implements PointerPage {
       press: async key => log(`press ${key}`),
       getAttribute: async name => {
         if (name === 'data-selector') return selector;
-        return name === 'type' ? (page.types.get(selector) ?? null) : null;
+        return name === 'type' ? (page.types.get(selector) ?? null) : (page.attributes.get(selector)?.[name] ?? null);
       },
       innerText: async () => '',
       ariaSnapshot: async () => '',
@@ -58,7 +62,14 @@ class FakePage implements PointerPage {
       },
       // The file acts' slice of the port: no pointer act reaches it.
       setInputFiles: async () => log('setInputFiles'),
-      evaluate: async () => false,
+      // An identifier check asks the field's document host: answered only for a page given one.
+      evaluate: async (pageFunction, arg) =>
+        page.host === undefined
+          ? false
+          : (pageFunction as (element: unknown, arg: string) => unknown)(
+              { tagName: 'INPUT', ownerDocument: { location: { host: page.host } } },
+              arg,
+            ),
       boundingBox: async () => null,
     };
     return locator;
@@ -354,11 +365,48 @@ describe('browser pointer acts', () => {
     // Assert
     should(plain).deepEqual({ passwordField: false });
     should(secret).deepEqual({ passwordField: true });
+
     should(page.calls.slice(0, 3)).deepEqual([
       'fill "hadi" @aria-ref=e1',
       'setChecked true @aria-ref=e3',
       'selectOption ["uk"] @#c',
     ]);
+  });
+
+  it('should name the identifier boxes a fill put text in, by their place in the act and their host (&B137)', async () => {
+    // Arrange
+    const page = new FakePage();
+    page.host = 'login.example.com';
+    page.types.set('aria-ref=e1', 'text');
+    page.types.set('aria-ref=e2', 'email');
+    page.attributes.set('aria-ref=e2', { autocomplete: 'username' });
+    page.types.set('aria-ref=e3', 'password');
+
+    // Act
+    const one = await performPointerAct(
+      page,
+      act({
+        action: 'fill-form',
+        fields: [
+          { ref: 'e1', text: 'Ernest' },
+          { ref: 'e2', text: 'e@x.com' },
+        ],
+      }),
+    );
+    const withPassword = await performPointerAct(
+      page,
+      act({
+        action: 'fill-form',
+        fields: [
+          { ref: 'e2', text: 'e@x.com' },
+          { ref: 'e3', text: 'x' },
+        ],
+      }),
+    );
+
+    // Assert: the name box is not an identifier; the email box is, at index 1. A password field is never one.
+    should(one).deepEqual({ passwordField: false, identifiers: [{ index: 1, host: 'login.example.com' }] });
+    should(withPassword).deepEqual({ passwordField: true, identifiers: [{ index: 0, host: 'login.example.com' }] });
   });
 
   it('should fill a value field with its value', async () => {

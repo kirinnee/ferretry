@@ -47,7 +47,6 @@ import {
   type AlwaysUse,
   accountTitleWords,
   alwaysUseFor,
-  cardAccountWords,
   cardOffersSave,
   cardSaveBlock,
   chainWords,
@@ -188,13 +187,11 @@ export function InputCard({
   const codeFor = accounts?.accounts.find(each => each.id === startAt?.id);
   // Whose sign-in this is, named ONLY from the secrets-gated accounts listing (`accounts`): a device that may not read
   // accounts, and the agenda text every reader sees, say the place only (secrev-1261 L4).
-  const forAccount = asksCode ? undefined : cardAccountWords(request.saved, accounts);
+  const forAccount = asksCode ? undefined : accountTitleWords(request, agentName, accounts);
   const title =
     asksCode && codeFor !== undefined
       ? codeTitleWords(request, agentName, codeFor)
-      : forAccount !== undefined
-        ? accountTitleWords(request, agentName, forAccount)
-        : titleWords(request, agentName);
+      : (forAccount ?? titleWords(request, agentName));
   const setup =
     addKey !== undefined && codeAccounts.length > 0 && request.state === 'pending' ? (
       <AutomaticCodesPanel
@@ -950,7 +947,16 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         type="button"
       >
         <span className="min-w-0 break-words">{primaryTap ? savedButtonWords(offer) : offer.label}</span>
-        {username === undefined ? null : <span className="text-meta font-normal opacity-80">{username}</span>}
+        {username !== undefined ? (
+          <span className="text-meta font-normal opacity-80" data-input-offer-username="">
+            {username}
+          </span>
+        ) : primaryTap && offer.username === undefined && request.target.kind === 'browser' ? (
+          // Whose password the one tap types, said plainly: a page sign-in with no username saved says so.
+          <span className="text-meta font-normal opacity-80" data-input-offer-username="">
+            no username saved
+          </span>
+        ) : null}
         {offer.hinted === true ? (
           <span className="text-meta font-normal opacity-80" data-input-hinted="">
             the ferret suggested this
@@ -1102,7 +1108,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
                   onChange={() => setSave(current => switchSaveMode(request.saved, current, 'update'))}
                   type="radio"
                 />
-                <span className="min-w-0 break-words">{updateChoiceWords(update)}</span>
+                <span className="min-w-0 break-words">{updateChoiceWords(request.saved)}</span>
               </label>
             </fieldset>
           ) : null}

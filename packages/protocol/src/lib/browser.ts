@@ -334,6 +334,20 @@ export const BrowserFieldHostSchema = z
   .max(260)
   .regex(/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::[0-9]{1,5})?$/u);
 
+/** A fill-form act's identifier box: the field's place in the act and its document's host. */
+export const BrowserIdentifierFieldSchema = z.strictObject({
+  index: z.number().int().min(0).max(63),
+  host: BrowserFieldHostSchema,
+});
+export type BrowserIdentifierField = z.infer<typeof BrowserIdentifierFieldSchema>;
+
+/** A click on an element that showed exactly one email (an account chooser's tile): that email, and its document's host. */
+export const BrowserClickedIdentitySchema = z.strictObject({
+  host: BrowserFieldHostSchema,
+  username: z.string().min(3).max(254),
+});
+export type BrowserClickedIdentity = z.infer<typeof BrowserClickedIdentitySchema>;
+
 export const BrowserPageActionSnapshotSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
   /** Downloads the page started since the last act reported any. Absent when there are none. */
@@ -345,6 +359,10 @@ export const BrowserPageActionSnapshotSchema = BrowserPageSnapshotSchema.safeExt
    * in. The daemon keeps what was typed as who this page is signing in (docs/input-requests.md, "Who is signing in").
    */
   identifierHost: BrowserFieldHostSchema.optional(),
+  /** A fill-form act put text in these identifier boxes (never beside a password field). */
+  identifierFields: z.array(BrowserIdentifierFieldSchema).min(1).max(64).optional(),
+  /** A click chose this account tile. */
+  clickedIdentity: BrowserClickedIdentitySchema.optional(),
 });
 export type BrowserPageActionSnapshot = z.infer<typeof BrowserPageActionSnapshotSchema>;
 
@@ -529,6 +547,8 @@ const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
   passwordField: z.literal(true).optional(),
   identifierHost: BrowserFieldHostSchema.optional(),
+  identifierFields: z.array(BrowserIdentifierFieldSchema).min(1).max(64).optional(),
+  clickedIdentity: BrowserClickedIdentitySchema.optional(),
 });
 
 /** Actual action responses carry status plus an optional shape-specific result. */
