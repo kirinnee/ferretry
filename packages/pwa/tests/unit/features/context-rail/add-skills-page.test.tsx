@@ -16,7 +16,7 @@ import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { crypto } from '../../../support/catalog-files.ts';
 import { installRecord } from '../../../support/catalog-views.ts';
-import { mount } from '../../../support/dom.ts';
+import { interact, mount } from '../../../support/dom.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
 import {
@@ -129,7 +129,9 @@ describe('the subscriptions list', () => {
     expect(q('[data-add-skills-catalog]')?.textContent).toContain('from Studio · 1 skill');
     expect(rows()[0]?.textContent).toContain('v1');
     expect(q('[data-add-skills-install]')?.textContent).toContain('Install');
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This project (every session in this folder)');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain(
+      'Installs into this project (every session in this folder).',
+    );
     await view.unmount();
   });
 
@@ -176,7 +178,8 @@ describe('the subscriptions list', () => {
     });
     const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const { view } = await open(host);
-    expect(q('[data-add-skills-locked]')?.textContent).toContain('Studio is locked.');
+    expect(q('[data-add-skills-publisher] h2')?.textContent).toBe('Studio');
+    expect(q('[data-add-skills-publisher] [data-add-skills-locked]')?.textContent).toContain('Locked. Unlock it');
     expect(rows()).toHaveLength(0);
     await click(q('[data-add-skills-unlock]'));
     await settle();
@@ -202,7 +205,7 @@ describe('the subscriptions list', () => {
     expect(q('[data-add-skills-unlock]')?.textContent).toBe('Working…');
     hold.resolve(refusedAttempt());
     await settle();
-    expect(q('[data-add-skills-refused]')?.textContent).toContain('Studio refused this browser');
+    expect(q('[data-add-skills-refused]')?.textContent).toContain('Refused this browser');
     await view.unmount();
 
     outcome = 'failed';
@@ -226,7 +229,7 @@ describe('the subscriptions list', () => {
     const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const { view } = await open(host);
     expect(q('[data-add-skills-offline]')?.textContent).toContain(ONLINE_ONLY);
-    expect(q('[data-add-skills-refused]')?.textContent).toContain('Sleeping lab refused this browser');
+    expect(q('[data-add-skills-refused]')?.textContent).toContain('Refused this browser');
     expect(q('[data-add-skills-failed]')?.textContent).toContain('Odd answer.');
     up = true;
     await click(q('[data-add-skills-again]'));
@@ -268,7 +271,9 @@ describe('the subscriptions list', () => {
     const { view } = await open(host);
     await typeInto(q('[data-add-skills-search]'), 'zzz');
     expect(q('[data-add-skills-none]')).toBeNull();
-    expect(text()).toContain('Locked guild: Reading your subscriptions…');
+    expect(q(`[data-add-skills-publisher="${lockedSub.daemonId}"]`)?.textContent).toContain(
+      'Locked guildReading your subscriptions…',
+    );
     wait.resolve(okAttempt({ ...shared.browse, catalogs: [] }));
     await settle();
     await view.unmount();
@@ -395,7 +400,7 @@ describe('Refresh', () => {
     expect(browsed).toBe(2);
     expect(rows()).toHaveLength(2);
     expect(text()).toContain('ocr-tools');
-    expect(q('[data-add-skills-refreshed]')?.textContent).toBe('Up to date.');
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated just now');
     expect(q('[data-add-skills-refresh]')?.textContent).toBe('Refresh');
     await view.unmount();
   });
@@ -458,13 +463,240 @@ describe('Refresh', () => {
   });
 });
 
+const touch = (type: string, y: number): Event => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: [{ clientY: y }] });
+  return event;
+};
+
+const comeBack = async (state: 'visible' | 'hidden'): Promise<void> => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+  await settle();
+  await settle();
+};
+
+describe('a skill the publisher adds while the page is open', () => {
+  const growing = () => {
+    let added = false;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () =>
+        okAttempt({ ...shared.browse, catalogs: added ? [shared.view, otherCatalogView(shared)] : [shared.view] }),
+    });
+    return { members, add: () => (added = true) };
+  };
+
+  it('is read again when the person comes back to the tab, with no button pressed', async () => {
+    const { members, add } = growing();
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(rows()).toHaveLength(1);
+    add();
+    await comeBack('hidden');
+    expect(rows()).toHaveLength(1);
+    await comeBack('visible');
+    expect(rows()).toHaveLength(2);
+    expect(text()).toContain('ocr-tools');
+    await view.unmount();
+  });
+
+  it('is not read a second time on top of a read that is still under way', async () => {
+    const hold = deferred<ReturnType<typeof okAttempt<typeof shared.browse>>>();
+    let browsed = 0;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => {
+        browsed += 1;
+        return browsed === 1 ? await browseOk() : await hold.promise;
+      },
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    await click(q('[data-add-skills-refresh]'));
+    await comeBack('visible');
+    expect(browsed).toBe(2);
+    hold.resolve(await browseOk());
+    await settle();
+    await view.unmount();
+  });
+
+  it('is read again when the page opens, because nothing from an earlier visit is kept', async () => {
+    const { members, add } = growing();
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const first = await open(host);
+    expect(rows()).toHaveLength(1);
+    await first.view.unmount();
+    add();
+    const second = await open(host);
+    expect(rows()).toHaveLength(2);
+    await second.view.unmount();
+  });
+});
+
+describe('the lock notice and the other notes sit in their own section', () => {
+  it('names the publisher in a section of its own, in the order of the subscriptions, and hides it while a catalog is chosen', async () => {
+    const { members } = fakeMembers({
+      list: async () => [studio, lockedSub],
+      browse: async sub =>
+        sub.daemonId === studio.daemonId
+          ? okAttempt({ ...shared.browse, catalogs: [shared.view, otherCatalogView(shared)] })
+          : failedAttempt('locked', 'Unlock first.'),
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    const sections = all('[data-add-skills-catalogs] > section').map(
+      section => section.querySelector('h2')?.textContent,
+    );
+    expect(sections).toEqual(["Kirin's catalog", 'Design catalog', 'Locked guild']);
+    const locked = q(`[data-add-skills-publisher="${lockedSub.daemonId}"]`);
+    expect(locked?.querySelector('[data-add-skills-unlock]')).not.toBeNull();
+    expect(text()).not.toContain('Locked guild is locked');
+    await click(q(chipOf(shared.view.catalogId)));
+    expect(q('[data-add-skills-publisher]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('Refresh says what it did', () => {
+  const clockAt = (start: number) => {
+    let at = start;
+    return {
+      set: (next: number) => (at = next),
+      clock: { now: () => new Date(at), ticker: () => () => undefined },
+    };
+  };
+
+  it('says Updated just now, then how long ago, beside the button', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { set, clock } = clockAt(Date.parse('2026-11-01T10:00:00Z'));
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) }, { clock });
+    const { view } = await open(host);
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated just now');
+    set(Date.parse('2026-11-01T10:04:00Z'));
+    await click(q('[data-add-skills-refresh]'));
+    await settle();
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated just now');
+    await view.unmount();
+  });
+
+  it('shows the age once time has passed since the last read', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    let tick: () => void = () => undefined;
+    let at = Date.parse('2026-11-01T10:00:00Z');
+    const clock = {
+      now: () => new Date(at),
+      ticker: (onTick: () => void) => {
+        tick = onTick;
+        return () => undefined;
+      },
+    };
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) }, { clock });
+    const { view } = await open(host);
+    at += 5 * 60_000;
+    await interact(() => tick());
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated 5m ago');
+    await view.unmount();
+  });
+
+  it('shows a spinner and no status text while it reads', async () => {
+    const hold = deferred<ReturnType<typeof okAttempt<typeof shared.browse>>>();
+    let browsed = 0;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => (++browsed === 1 ? await browseOk() : await hold.promise),
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    await click(q('[data-add-skills-refresh]'));
+    expect(q('[data-add-skills-refresh] svg')?.getAttribute('class')).toContain('animate-spin');
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('');
+    hold.resolve(await browseOk());
+    await settle();
+    expect(q('[data-add-skills-refresh] svg')?.getAttribute('class') ?? '').not.toContain('animate-spin');
+    await view.unmount();
+  });
+
+  it('says in plain words which publisher did not answer, and keeps the skills it had', async () => {
+    let up = true;
+    const { members } = fakeMembers({
+      list: async () => [studio, downSub, lockedSub],
+      browse: async sub => {
+        if (sub.daemonId === studio.daemonId) return up ? await browseOk() : failedAttempt('unreachable', 'Down.');
+        if (sub.daemonId === downSub.daemonId)
+          return up ? failedAttempt('locked', 'Locked.') : failedAttempt('other', 'Odd.');
+        return up ? failedAttempt('locked', 'Locked.') : failedAttempt('unreachable', 'Down.');
+      },
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated just now');
+    up = false;
+    await click(q('[data-add-skills-refresh]'));
+    await settle();
+    expect(q('[data-add-skills-updated]')?.textContent).toBe(
+      'Could not reach Studio, Sleeping lab and Locked guild, so the list may be out of date.',
+    );
+    expect(rows()).toHaveLength(1);
+    await view.unmount();
+  });
+});
+
+describe('pull to refresh', () => {
+  const pull = async (scroller: HTMLElement, distance: number): Promise<void> => {
+    await interact(() => scroller.dispatchEvent(touch('touchstart', 100)));
+    await interact(() => scroller.dispatchEvent(touch('touchmove', 100 + distance)));
+  };
+
+  it('shows a hint while pulling and runs the same refresh when pulled far enough', async () => {
+    let browsed = 0;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => {
+        browsed += 1;
+        return await browseOk();
+      },
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    const body = q('[data-add-skills-body]') as HTMLElement;
+    await pull(body, 20);
+    expect(q('[data-add-skills-pull]')?.getAttribute('data-add-skills-pull')).toBe('pulling');
+    expect(q('[data-add-skills-pull]')?.textContent).toBe('Pull down to refresh');
+    await interact(() => body.dispatchEvent(touch('touchend', 0)));
+    expect(browsed).toBe(1);
+    await pull(body, 80);
+    expect(q('[data-add-skills-pull]')?.getAttribute('data-add-skills-pull')).toBe('armed');
+    expect(q('[data-add-skills-pull]')?.textContent).toBe('Release to refresh');
+    await interact(() => body.dispatchEvent(touch('touchend', 0)));
+    await settle();
+    await settle();
+    expect(browsed).toBe(2);
+    expect(q('[data-add-skills-pull]')).toBeNull();
+    expect(q('[data-add-skills-updated]')?.textContent).toBe('Updated just now');
+    await view.unmount();
+  });
+});
+
+describe('the search box', () => {
+  it('has a search icon and the placeholder Search skills', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(q('[data-add-skills-search]')?.getAttribute('placeholder')).toBe('Search skills');
+    expect(q('[data-add-skills-search]')?.parentElement?.querySelector('svg')).not.toBeNull();
+    expect(q('label[for]')?.textContent).toBe('Search skills');
+    await view.unmount();
+  });
+});
+
 describe('Install from the sheet', () => {
   const installsSequence = (...lists: CatalogInstall[][]) => {
     let at = 0;
     return () => ({ installs: lists[Math.min(at++, lists.length - 1)] ?? [] });
   };
 
-  it('opens the review, seeds This project, and says where it landed when closed', async () => {
+  it('opens the review, seeds this project, and says where it landed when closed', async () => {
     const { members } = fakeMembers({
       list: async () => [studio],
       browse: browseOk,
@@ -489,7 +721,7 @@ describe('Install from the sheet', () => {
     await settle();
     expect(q('[data-add-skills-page]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
-      `Installed pdf-tools in This project (every session in this folder). ${CLAUDE_LIVE}`,
+      `Installed pdf-tools in this project (every session in this folder). ${CLAUDE_LIVE}`,
     );
     expect(events).toEqual([]);
     expect(q('[data-add-skills-installed]')).not.toBeNull();
@@ -555,7 +787,7 @@ describe('Install from the sheet', () => {
     await view.unmount();
   });
 
-  it('seeds This account when the session has no folder in a project', async () => {
+  it('seeds this account when the session has no folder in a project', async () => {
     const { members } = fakeMembers({
       list: async () => [studio],
       browse: browseOk,
@@ -567,7 +799,9 @@ describe('Install from the sheet', () => {
       { cwd: '/tmp/elsewhere' },
     );
     const { view } = await open(host);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This account (every session on claude-work)');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain(
+      'Installs into this account (every session on claude-work).',
+    );
     await click(q('[data-add-skills-install]'));
     await settle();
     await click(q('[data-shared-install-button]'));
@@ -645,7 +879,7 @@ describe('the app store as the default source', () => {
     await settle();
     await settle();
     expect(rows()).toHaveLength(1);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This project');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this project');
     await view.unmount();
   });
 
@@ -669,7 +903,7 @@ describe('the app store as the default source', () => {
     await settle();
     await settle();
     expect(rows()).toHaveLength(1);
-    expect(q('[data-add-skills-scope]')?.textContent).toContain('This account');
+    expect(q('[data-add-skills-scope]')?.textContent).toContain('this account');
     await view.unmount();
   });
 });

@@ -11,9 +11,10 @@
  */
 
 import type { CatalogInstall, SessionSkillsInventory } from '@ferretry/protocol';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useKnownProjects } from '../../hooks/use-projects.ts';
+import { usePullToSearch } from '../../hooks/use-pull-to-search.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { FleetProject } from '../../lib/fleet-grouping.ts';
 import type { MemberSubscription } from '../../lib/member-keys.ts';
@@ -31,6 +32,7 @@ import { installedNames } from '../shared/shared-installs.ts';
 import { type OpenedSharedItem, SharedItemSheet } from '../shared/shared-item-sheet.tsx';
 import { ONLINE_ONLY, publisherLine, UNLOCK_BUTTON } from '../shared/shared-model.ts';
 import { type CardState, cardState, isRefused, TRY_AGAIN, WORKING } from '../shared/shared-screens-model.ts';
+import { secondTicker, type Ticker, useClock } from '../shared/use-clock.ts';
 import {
   ADD_SKILLS_BACK,
   ADD_SKILLS_SEARCH_LABEL,
@@ -49,7 +51,6 @@ import {
   newInstalls,
   READING_SUBSCRIPTIONS,
   REFRESH_BUTTON,
-  REFRESHED,
   REFRESHING,
   type RuntimeChoice,
   type SessionPlace,
@@ -57,6 +58,8 @@ import {
   SUBSCRIBE_WITH_LINK,
   scopeLine,
   skillRows,
+  unreachableLine,
+  updatedLine,
 } from './add-skills-model.ts';
 import { ContextFilterChips } from './context-rail-parts.tsx';
 
@@ -79,7 +82,11 @@ export interface AddSkillsPageProps {
   readonly members?: SharedPort;
   /** Replaces the read of the session's skills. A test and harness seam. */
   readonly loadInventory?: () => Promise<SessionSkillsInventory>;
+  /** Replaces the wall clock and its once-a-second tick behind "Updated … ago". A test and harness seam. */
+  readonly clock?: { readonly now: () => Date; readonly ticker: Ticker };
 }
+
+const WALL_CLOCK = { now: () => new Date(), ticker: secondTicker };
 
 export function AddSkillsPage(props: AddSkillsPageProps) {
   const { members, install } = props;
@@ -117,6 +124,7 @@ function AddSkillsBody({
   onNavigate,
   install: installHost,
   loadInventory,
+  clock = WALL_CLOCK,
   members,
   projects,
 }: AddSkillsPageProps & { readonly members: SharedPort; readonly projects: readonly FleetProject[] }) {
@@ -135,10 +143,16 @@ function AddSkillsBody({
   const [failure, setFailure] = useState<string | null>(null);
   const [landed, setLanded] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshed, setRefreshed] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [unreached, setUnreached] = useState<readonly string[]>([]);
   const [shown, setShown] = useState<Shown | null>(null);
   const before = useRef<readonly CatalogInstall[] | null>(null);
   const live = useRef(true);
+  // True while any read of every list is under way, so a tab coming back never starts a second one on top of it.
+  const reading = useRef(true);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const now = useClock(clock.now, clock.ticker, updatedAt !== null);
 
   useEffect(() => {
     live.current = true;
@@ -175,33 +189,50 @@ function AddSkillsBody({
     if (live.current) setStates(previous => ({ ...previous, [sub.daemonId]: state }));
   }, []);
 
-  // A publisher already on screen keeps its skills while it is read again; only a first read says "reading".
+  // A publisher already on screen keeps its skills while it is read again, and when it cannot be reached.
   const browse = useCallback(
-    async (sub: MemberSubscription, again: boolean): Promise<void> => {
+    async (sub: MemberSubscription, again: boolean): Promise<CardState> => {
       if (!again) setState(sub, { kind: 'loading' });
-      setState(sub, cardState(await members.browse(sub)));
+      const next = cardState(await members.browse(sub));
+      const lost = again && (next.kind === 'offline' || next.kind === 'failed');
+      if (live.current)
+        setStates(previous =>
+          lost && previous[sub.daemonId]?.kind === 'ok' ? previous : { ...previous, [sub.daemonId]: next },
+        );
+      return next;
     },
     [members, setState],
   );
 
+  /** Reads every subscription; answers the names of the publishers that did not answer. */
   const load = useCallback(
-    async (again: boolean): Promise<void> => {
+    async (again: boolean): Promise<readonly string[]> => {
       const list = await members.list();
-      if (!live.current) return;
+      if (!live.current) return [];
       setSubs(list);
-      await Promise.all(
+      const outcomes = await Promise.all(
         list.map(async sub => {
-          if (isRefused(sub)) setState(sub, { kind: 'refused' });
-          else await browse(sub, again);
+          if (isRefused(sub)) {
+            setState(sub, { kind: 'refused' });
+            return [];
+          }
+          const state = await browse(sub, again);
+          return state.kind === 'offline' || state.kind === 'failed' ? [publisherLine(sub).label] : [];
         }),
       );
+      return outcomes.flat();
     },
     [members, browse, setState],
   );
 
   useEffect(() => {
-    void load(false);
-  }, [load]);
+    void load(false).then(names => {
+      reading.current = false;
+      if (!live.current) return;
+      setUnreached(names);
+      setUpdatedAt(clock.now().getTime());
+    });
+  }, [load, clock]);
 
   useEffect(() => {
     void readInstalls().then(read => {
@@ -230,15 +261,33 @@ function AddSkillsBody({
   }, [createClient, connection]);
 
   const refresh = async (): Promise<void> => {
+    if (reading.current) return;
+    reading.current = true;
     setRefreshing(true);
-    setRefreshed(false);
-    const [, read, session] = await Promise.all([load(true), readInstalls(), readInventory()]);
+    const [names, read, session] = await Promise.all([load(true), readInstalls(), readInventory()]);
+    reading.current = false;
     if (!live.current) return;
     if (read !== null) setInstalls(read);
     if (session !== null) setInventory(session);
+    setUnreached(names);
+    setUpdatedAt(clock.now().getTime());
     setRefreshing(false);
-    setRefreshed(true);
   };
+  refreshRef.current = refresh;
+
+  // A tab left open while a publisher adds a skill reads the lists again the moment the person comes back to it.
+  useEffect(() => {
+    const comeBack = (): void => {
+      if (document.visibilityState === 'visible') void refreshRef.current?.();
+    };
+    document.addEventListener('visibilitychange', comeBack);
+    return () => document.removeEventListener('visibilitychange', comeBack);
+  }, []);
+
+  const pull = usePullToSearch(bodyRef, {
+    enabled: subs !== null && !refreshing,
+    onTrigger: () => void refreshRef.current?.(),
+  });
 
   const unlock = async (sub: MemberSubscription): Promise<void> => {
     setBusy(sub.daemonId);
@@ -292,10 +341,7 @@ function AddSkillsBody({
   // A catalog that no longer lists anything (after a refresh) reads as All.
   const active = chips.some(entry => entry.key === chip) ? chip : ALL_CHIP;
   const catalogs = groupByCatalog(kept, active);
-  const subOf = (row: SkillRow): MemberSubscription | undefined =>
-    groups.find(group => group.rows.some(candidate => candidate.key === row.key))?.sub;
   const settled = groups.every(group => group.state.kind !== 'loading');
-  const notes = groups.flatMap(({ sub, label, state }) => (state.kind === 'ok' ? [] : [{ sub, label, state }]));
   const canInstall = inventory !== null;
 
   return (
@@ -313,6 +359,19 @@ function AddSkillsBody({
           {ADD_SKILLS_BACK}
         </Button>
         <div className="ml-auto flex items-center gap-2">
+          <p
+            className={`m-0 text-meta ${unreached.length === 0 ? 'text-muted' : 'text-err'}`}
+            role="status"
+            data-add-skills-updated=""
+          >
+            {refreshing
+              ? ''
+              : unreached.length > 0
+                ? unreachableLine(unreached)
+                : updatedAt === null
+                  ? ''
+                  : updatedLine(updatedAt, now.getTime())}
+          </p>
           <Button
             type="button"
             size="sm"
@@ -330,7 +389,21 @@ function AddSkillsBody({
           <PageThemeSwitch />
         </div>
       </div>
-      <div className={`min-h-0 flex-1 overflow-y-auto scroll-thin py-3 ${GUTTER_CLASS}`} data-add-skills-body="">
+      <div
+        ref={bodyRef}
+        className={`min-h-0 flex-1 overflow-y-auto overscroll-y-contain scroll-thin py-3 ${GUTTER_CLASS}`}
+        data-add-skills-body=""
+      >
+        {pull.distance <= 0 ? null : (
+          <div
+            className="flex items-center justify-center overflow-hidden text-muted"
+            style={{ height: Math.min(pull.distance, 64) }}
+            data-add-skills-pull={pull.armed ? 'armed' : 'pulling'}
+          >
+            <RefreshCw size={16} aria-hidden style={{ transform: `rotate(${Math.round(pull.progress * 270)}deg)` }} />
+            <span className="sr-only">{pull.armed ? 'Release to refresh' : 'Pull down to refresh'}</span>
+          </div>
+        )}
         <div className={`${COLUMN_CLASS} flex min-w-0 flex-col gap-md`}>
           <header className="flex min-w-0 flex-col gap-1">
             <h1 className="m-0 text-lg font-semibold text-fg">{ADD_SKILLS_TITLE}</h1>
@@ -346,9 +419,6 @@ function AddSkillsBody({
             </p>
           )}
           {failure === null ? null : <FailureLine sentence={failure} />}
-          <p className="sr-only" role="status" data-add-skills-refreshed="">
-            {refreshed ? REFRESHED : ''}
-          </p>
           {subs === null ? (
             <p className="m-0 text-cell text-muted" role="status">
               {READING_SUBSCRIPTIONS}
@@ -360,62 +430,82 @@ function AddSkillsBody({
           ) : (
             <>
               <div className="flex min-w-0 flex-col gap-xs">
-                <label htmlFor={searchId} className="text-meta font-semibold text-muted">
+                <label htmlFor={searchId} className="sr-only">
                   {ADD_SKILLS_SEARCH_LABEL}
                 </label>
-                <input
-                  id={searchId}
-                  type="search"
-                  className="kt-input"
-                  value={query}
-                  onChange={event => setQuery(event.target.value)}
-                  data-add-skills-search=""
-                />
+                <div className="relative min-w-0">
+                  <Search
+                    size={14}
+                    aria-hidden
+                    className="pointer-events-none absolute left-control-x top-1/2 -translate-y-1/2 text-muted"
+                  />
+                  <input
+                    id={searchId}
+                    type="search"
+                    className="kt-input w-full !pl-9"
+                    placeholder={ADD_SKILLS_SEARCH_LABEL}
+                    value={query}
+                    onChange={event => setQuery(event.target.value)}
+                    data-add-skills-search=""
+                  />
+                </div>
                 {chips.length === 0 ? null : (
                   <ContextFilterChips label={CATALOG_FILTER_LABEL} chips={chips} value={active} onChange={setChip} />
                 )}
               </div>
-              {notes.length === 0 ? null : (
-                <div className="flex min-w-0 flex-col gap-xs" data-add-skills-notes="">
-                  {notes.map(({ sub, label, state }) => (
-                    <section key={sub.daemonId} data-add-skills-publisher={sub.daemonId}>
-                      <PublisherNote
-                        label={label}
-                        state={state}
-                        busy={busy === sub.daemonId}
-                        onUnlock={() => void unlock(sub)}
-                        onAgain={() => void browse(sub, false)}
-                      />
-                    </section>
-                  ))}
-                </div>
-              )}
               <div className="flex min-w-0 flex-col gap-md" data-add-skills-catalogs="">
-                {catalogs.map(group => (
-                  <section key={group.key} className="flex min-w-0 flex-col gap-xs" data-add-skills-catalog={group.key}>
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                      <h2 className="m-0 min-w-0 break-words text-cell font-semibold text-fg">{group.name}</h2>
-                      <span className="min-w-0 break-words text-meta text-muted">
-                        from {group.publisher} · {group.rows.length} {group.rows.length === 1 ? 'skill' : 'skills'}
-                      </span>
-                    </div>
-                    <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label={`Skills in ${group.name}`}>
-                      {group.rows.map(row => (
-                        <li key={row.key} className="min-w-0">
-                          <SkillRowView
-                            row={row}
-                            busy={busy === row.key}
-                            canInstall={canInstall}
-                            onInstall={() => {
-                              const sub = subOf(row);
-                              if (sub !== undefined) void install(sub, row);
-                            }}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
+                {groups.flatMap(({ sub, label, state }) =>
+                  state.kind === 'ok'
+                    ? catalogs
+                        .filter(group => group.publisherId === sub.daemonId)
+                        .map(group => (
+                          <section
+                            key={group.key}
+                            className="flex min-w-0 flex-col gap-xs"
+                            data-add-skills-catalog={group.key}
+                          >
+                            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                              <h2 className="m-0 min-w-0 break-words text-cell font-semibold text-fg">{group.name}</h2>
+                              <span className="min-w-0 break-words text-meta text-muted">
+                                from {group.publisher} · {group.rows.length}{' '}
+                                {group.rows.length === 1 ? 'skill' : 'skills'}
+                              </span>
+                            </div>
+                            <ul
+                              className="m-0 flex list-none flex-col gap-xs p-0"
+                              aria-label={`Skills in ${group.name}`}
+                            >
+                              {group.rows.map(row => (
+                                <li key={row.key} className="min-w-0">
+                                  <SkillRowView
+                                    row={row}
+                                    busy={busy === row.key}
+                                    canInstall={canInstall}
+                                    onInstall={() => void install(sub, row)}
+                                  />
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        ))
+                    : active !== ALL_CHIP
+                      ? []
+                      : [
+                          <section
+                            key={sub.daemonId}
+                            className="flex min-w-0 flex-col gap-xs"
+                            data-add-skills-publisher={sub.daemonId}
+                          >
+                            <h2 className="m-0 min-w-0 break-words text-cell font-semibold text-fg">{label}</h2>
+                            <PublisherNote
+                              state={state}
+                              busy={busy === sub.daemonId}
+                              onUnlock={() => void unlock(sub)}
+                              onAgain={() => void browse(sub, false)}
+                            />
+                          </section>,
+                        ],
+                )}
               </div>
               {catalogs.length > 0 || !settled || !groups.some(group => group.state.kind === 'ok') ? null : (
                 <p className="m-0 text-cell text-muted" data-add-skills-none="">
@@ -452,15 +542,13 @@ function AddSkillsBody({
   );
 }
 
-/** The one line a publisher that lists nothing says: reading, locked, offline, refused or failed. */
+/** What a catalog section says when its publisher lists nothing: reading, locked, offline, refused or failed. */
 function PublisherNote({
-  label,
   state,
   busy,
   onUnlock,
   onAgain,
 }: {
-  readonly label: string;
   readonly state: Exclude<CardState, { readonly kind: 'ok' }>;
   readonly busy: boolean;
   readonly onUnlock: () => void;
@@ -470,13 +558,13 @@ function PublisherNote({
     case 'loading':
       return (
         <p className="m-0 text-cell text-muted" role="status">
-          {label}: {READING_SUBSCRIPTIONS}
+          {READING_SUBSCRIPTIONS}
         </p>
       );
     case 'locked':
       return (
         <div className="flex min-w-0 flex-wrap items-center gap-xs" data-add-skills-locked="">
-          <p className="m-0 min-w-0 flex-1 break-words text-cell text-fg">{label} is locked.</p>
+          <p className="m-0 min-w-0 flex-1 break-words text-cell text-fg">Locked. Unlock it to see its skills.</p>
           <Button
             type="button"
             size="sm"
@@ -492,9 +580,7 @@ function PublisherNote({
     case 'offline':
       return (
         <div className="flex min-w-0 flex-wrap items-center gap-xs" data-add-skills-offline="">
-          <p className="m-0 min-w-0 flex-1 break-words text-cell text-fg">
-            {label}: {ONLINE_ONLY}
-          </p>
+          <p className="m-0 min-w-0 flex-1 break-words text-cell text-fg">{ONLINE_ONLY}</p>
           <Button type="button" size="sm" onClick={onAgain} data-add-skills-again="">
             {TRY_AGAIN}
           </Button>
@@ -503,13 +589,13 @@ function PublisherNote({
     case 'refused':
       return (
         <p className="m-0 break-words text-cell text-err" data-add-skills-refused="">
-          {label} refused this browser. Open Sharing › Subscriptions to try again.
+          Refused this browser. Open Sharing › Subscriptions to try again.
         </p>
       );
     case 'failed':
       return (
         <p className="m-0 break-words text-cell text-err" data-add-skills-failed="">
-          {label}: {state.sentence}
+          {state.sentence}
         </p>
       );
   }

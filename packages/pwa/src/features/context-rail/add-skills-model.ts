@@ -12,6 +12,7 @@ import {
   type SessionSkillsInventory,
   type SharedCatalogManifestEntry,
 } from '@ferretry/protocol';
+import { relativeInstantLabel } from '../../lib/account-health-view.ts';
 import { type FleetProject, normalizeProjectPath } from '../../lib/fleet-grouping.ts';
 import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
 import type { SharedCatalogView } from '../shared/shared-controller.ts';
@@ -20,12 +21,11 @@ import type { CardState } from '../shared/shared-screens-model.ts';
 export const ADD_SKILLS_BUTTON = '+ Add skills';
 export const ADD_SKILLS_TITLE = 'Add skills';
 export const ADD_SKILLS_BACK = 'Back to the session';
-export const ADD_SKILLS_SEARCH_LABEL = 'Search subscribed skills';
+export const ADD_SKILLS_SEARCH_LABEL = 'Search skills';
 export const CATALOG_FILTER_LABEL = 'Filter by catalog';
 const ALL_CATALOGS = 'All catalogs';
 export const REFRESH_BUTTON = 'Refresh';
 export const REFRESHING = 'Refreshing…';
-export const REFRESHED = 'Up to date.';
 export const SUBSCRIBE_WITH_LINK = 'Subscribe with a link…';
 export const INSTALL_BUTTON = 'Install';
 export const INSTALLED_LABEL = 'Installed';
@@ -60,8 +60,8 @@ export interface InstallPlan {
   readonly runtimeId?: string;
 }
 
-export const PROJECT_SENTENCE = 'This project (every session in this folder)';
-export const accountSentence = (runtime: string): string => `This account (every session on ${runtime})`;
+export const PROJECT_SENTENCE = 'this project (every session in this folder)';
+export const accountSentence = (runtime: string): string => `this account (every session on ${runtime})`;
 
 /** The registered project that holds `cwd`, the longest path winning, so a nested folder finds its own. */
 export function projectHolding(cwd: string, projects: readonly FleetProject[]): FleetProject | undefined {
@@ -116,6 +116,7 @@ export interface SkillRow {
   readonly name: string;
   readonly summary: string;
   /** Which catalog it is in, across publishers: the filter and the group heading use it. */
+  readonly publisherId: string;
   readonly catalogKey: string;
   readonly catalogName: string;
   readonly publisher: string;
@@ -146,6 +147,7 @@ export function skillRows(
             view: block.view,
             name: revealHidden(item.entry.name),
             summary: item.summary,
+            publisherId,
             catalogKey: catalogKey(publisherId, block.catalogId),
             catalogName: block.name,
             publisher: publisherLabel,
@@ -201,15 +203,21 @@ export interface CatalogGroup {
   readonly key: string;
   readonly name: string;
   readonly publisher: string;
+  readonly publisherId: string;
   readonly rows: readonly SkillRow[];
 }
 
 /** The rows of the chosen catalog (all of them for All), grouped by catalog in the order they came. */
 export function groupByCatalog(rows: readonly SkillRow[], chip: string): readonly CatalogGroup[] {
-  const groups = new Map<string, { name: string; publisher: string; rows: SkillRow[] }>();
+  const groups = new Map<string, { name: string; publisher: string; publisherId: string; rows: SkillRow[] }>();
   for (const row of rows) {
     if (chip !== ALL_CHIP && row.catalogKey !== chip) continue;
-    const group = groups.get(row.catalogKey) ?? { name: row.catalogName, publisher: row.publisher, rows: [] };
+    const group = groups.get(row.catalogKey) ?? {
+      name: row.catalogName,
+      publisher: row.publisher,
+      publisherId: row.publisherId,
+      rows: [],
+    };
     group.rows.push(row);
     groups.set(row.catalogKey, group);
   }
@@ -275,3 +283,13 @@ export function landedSentence(
         : CLAUDE_LIVE;
   return `Installed ${name} in ${where}. ${activation}`;
 }
+
+/** Beside Refresh: when the lists were last read, in words that stay true as the minutes pass. */
+export const updatedLine = (at: number, now: number): string => `Updated ${relativeInstantLabel(at, now)}`;
+
+const joinNames = (names: readonly string[]): string =>
+  names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/** Beside Refresh when a publisher did not answer: which, and that the list on screen is the earlier read. */
+export const unreachableLine = (names: readonly string[]): string =>
+  `Could not reach ${joinNames(names)}, so the list may be out of date.`;

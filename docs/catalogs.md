@@ -1389,19 +1389,24 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 - **From your subscriptions**: every skill of every catalog this browser subscribes to, **grouped under the catalog it
   is from**. Each group has the catalog's name, "from ‹publisher›" and its skill count; each row has the name, the
   version and **Install** (or **Installed**, read from the machine's install records by the publisher and item id). A
-  search field narrows by every word typed. When more than one catalog lists a skill, a **filter chip per catalog**
+  search field (a search icon, "Search skills") narrows by every word typed. When more than one catalog lists a skill, a **filter chip per catalog**
   (All catalogs first, each with the count the search kept) narrows to one; two catalogs of the same name are told apart
-  by their publisher. A locked publisher is one line plus **Unlock with passkey**; an unreachable one says so in one
-  line with **Try again**; a refused or failed one says why. Only the skills of a catalog that verified are listed.
+  by their publisher. A publisher that cannot be read takes the place of its catalogs, in the list, under its own name: a
+  locked one says so with **Unlock with passkey** inside that section (its catalog name is unknown while it is locked,
+  so the heading is the publisher's); an unreachable one says so with **Try again**; a refused or failed one says why. Only the skills of a catalog that verified are listed.
 - **Refresh** reads the subscriptions, every catalog and the machine's install records again, so a skill a catalog added
   after the page opened shows up. The rows already on screen stay while it reads, a filter on a catalog that vanished
-  falls back to All, and the result is announced ("Refreshed."). Nothing is polled: the page changes only when the
-  person presses it or installs something.
+  falls back to All. Beside the button the page says "Updated just now" (then "5m ago" and so on), or, when a
+  publisher did not answer, "Could not reach ‹names›, so the list may be out of date." (the earlier rows stay), and the
+  icon spins while it reads. On a phone, pulling the list down from the top runs the same Refresh with the same
+  words. Nothing is polled. No stale cache serves the list: the members' reads are never cached, and the page reads
+  again when it opens and **whenever the person comes back to its tab or app** (the page used to read only once, so
+  a skill added while it sat in the background never showed).
 - **Subscribe with a link…** opens Sharing › Shared with me, where an invite is pasted. The page never pastes a link.
 - **Install** goes through the existing review and hand-off (`SharedItemSheet` → `InstallFromFileSheet`, the same
   passkey and the same `/v1/catalog-installs` routes). The only new behaviour is the **default place**:
-  **This project (every session in this folder)** when the session's folder is inside a registered project (the
-  deepest one wins), otherwise **This account (every session on ‹runtime›)**, by the runtime the skills inventory
+  **this project (every session in this folder)** when the session's folder is inside a registered project (the
+  deepest one wins), otherwise **this account (every session on ‹runtime›)**, by the runtime the skills inventory
   names. When neither can be told the page says so and the person picks. The person can always change it.
 - **After an install** the Skills list re-reads and the page says where it went, in two sentences:
   - Claude: "It is active in this session now." When the session saw no skill of that kind before, so its skills
