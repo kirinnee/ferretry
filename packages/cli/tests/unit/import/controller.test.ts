@@ -262,7 +262,7 @@ describe('ContinueSessionController.run', () => {
 
     // Assert
     should(out.exitCode).equal(1);
-    should(out.errors[0]).containEql('turn on Keep in sync in Settings › Machine › Conversations');
+    should(out.errors[0]).containEql('turn on Keep in sync in Settings › Machine › Agents › Conversations');
   });
 
   it('should continue a conversation that is only on this computer like any other', async () => {

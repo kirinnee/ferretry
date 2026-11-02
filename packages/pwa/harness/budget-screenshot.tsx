@@ -129,23 +129,23 @@ interface Surface {
 const SURFACES: readonly Surface[] = [
   {
     name: 'login-list',
-    hash: '#machines/studio-mac/credentials',
+    hash: '#machines/studio-mac/sign-ins',
     ready: '[data-credential-row="codex"] [data-credential-budget-badge]',
   },
   {
     name: 'login-page',
-    hash: '#machines/studio-mac/credentials/claude-personal',
+    hash: '#machines/studio-mac/sign-ins/claude-personal',
     ready: '[data-budget-editor="claude-personal"]',
   },
   {
     name: 'editor-open',
-    hash: '#machines/studio-mac/credentials/claude-personal',
+    hash: '#machines/studio-mac/sign-ins/claude-personal',
     ready: '[data-budget-editor="claude-personal"]',
     fill: ['dailyTrigger', '25'],
   },
   {
     name: 'held-confirm',
-    hash: '#machines/studio-mac/credentials/claude-personal',
+    hash: '#machines/studio-mac/sign-ins/claude-personal',
     ready: '[data-budget-editor="claude-personal"]',
     fill: ['dailyHard', '90'],
     save: true,

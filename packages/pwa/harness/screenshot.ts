@@ -145,7 +145,7 @@ const AGENDA_ONLY = process.argv.includes('--agenda-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent triggers, nothing else. */
 const WARDEN_ONLY = process.argv.includes('--warden-only');
-/** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
+/** Signing in to a remote MCP server: the Components section's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 /** Info › Context's MCP and Skills sub-tabs (every scope, Check, Sign in, Open), and the Components MCP rows. */
 const CONTEXT_TOOLS_ONLY = process.argv.includes('--context-tools-only');
@@ -2366,6 +2366,8 @@ const server = Bun.serve({
       });
     // Served from `public/` rather than copied into `out/`: it is unbundled by design, so the shipped file IS the build.
     if (path === '/pre-paint.js') return new Response(Bun.file(join(packageDir, 'public/pre-paint.js')));
+    // The CSS names its faces `../assets/fonts/…`; without this route every shot drew in the system fallback font.
+    if (path.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', path)));
     // The MCP sign-in callback page, served as Pages serves it: the rewrite `public/_redirects` names, under
     // the site's whole app-wide policy, so its words on screen prove its same-origin script ran.
     if (path.startsWith('/oauth/mcp-callback/'))
@@ -3125,7 +3127,7 @@ try {
             const machinesSurface = await openMachine('harness-daemon');
             await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
             await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
-            for (const tab of ['credentials', 'profiles', 'components', 'browser', 'machine'] as const) {
+            for (const tab of ['sign-ins', 'profiles', 'browser', 'machine'] as const) {
               await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
               await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
               if (tab === 'browser') {
@@ -3281,14 +3283,17 @@ try {
               await page.locator('[data-runtime-dialog-cancel]').click();
               await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
             };
-            await runtimesPanel.locator('[data-runtime-rename="claude-work"]').click();
+            await runtimesPanel.locator('[data-runtime-actions="claude-work"]').click();
+            await page.locator('[role="menu"] [data-menu-key="rename"]').click();
             await page.locator('[data-runtime-rename-input]').fill('claude-office');
             await dialogShot('runtime-rename', 'Rename runtime');
-            await runtimesPanel.locator('[data-runtime-remove="codex-default"]').click();
+            await runtimesPanel.locator('[data-runtime-actions="codex-default"]').click();
+            await page.locator('[role="menu"] [data-menu-key="remove"]').click();
             await page.locator('[data-runtime-running]').waitFor({ state: 'visible' });
             await page.locator('[data-runtime-move-target]').selectOption('claude-agent');
             await dialogShot('runtime-remove', 'Remove runtime');
-            await runtimesPanel.locator('[data-runtime-remove="claude-default"]').click();
+            await runtimesPanel.locator('[data-runtime-actions="claude-default"]').click();
+            await page.locator('[role="menu"] [data-menu-key="remove"]').click();
             await page.locator('[data-runtime-default-picker]').waitFor({ state: 'visible' });
             await dialogShot('runtime-remove-default', 'Remove the default runtime');
             // ADD A RUNTIME IS ONE FORM: login, profile and name on one page, each frame scrolled to its part.
@@ -3319,10 +3324,10 @@ try {
             await runtimesPanel.locator('[data-add-runtime-new-login-close]').click();
             await runtimesPanel.locator('[data-page-back]').click();
 
-            await machinesSurface.locator('[data-machine-tab="credentials"]').click();
-            const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
+            await machinesSurface.locator('[data-machine-tab="sign-ins"]').click();
+            const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="sign-ins"]');
             await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
-            await accountShot('credentials', 'Credentials list');
+            await accountShot('sign-ins', 'Sign-ins list');
             // An environment login's own page, with the quota its provider reported (docs/provider-quotas.md).
             await credentialsPanel.locator('[data-credential-row="glm-env"]').click();
             await credentialsPanel.locator('[data-provider-quota="endpoint"]').waitFor({ state: 'visible' });
@@ -3540,8 +3545,8 @@ try {
             await accountShot('profile-new', 'new profile built by drag and drop');
             await profilesPanel.locator('[data-profile-cancel]').click();
 
-            await machinesSurface.locator('[data-machine-tab="components"]').click();
-            const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
+            await machinesSurface.locator('[data-machine-tab="profiles"]').click();
+            const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
             await componentsPanel.locator('[data-component-kind="mcp"]').waitFor({ state: 'visible' });
             await accountShot('components', 'Components kinds');
             await componentsPanel.locator('[data-component-kind="mcp"]').click();

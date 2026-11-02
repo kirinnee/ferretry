@@ -81,25 +81,26 @@ const pageWith = async (overrides: Partial<FleetRuntimeView> & { name: string },
   await page(overrides.name, { routes: reads([runtime(overrides)]), ...options });
 
 describe('Runtimes tab list', () => {
-  it('lists every runtime with its login, profile and default model, and marks the agent one', async () => {
+  it('lists every runtime with its login, profile and default model, and marks only the exceptions', async () => {
     const view = await open();
     expect(text(view.container, '[data-runtimes-count]')).toBe('5 runtimes on studio-mac');
     expect(view.container.querySelectorAll('[data-runtime-row]')).toHaveLength(5);
-    expect(text(view.container, '[data-runtime-row="claude-default"]')).toContain(
+    expect(text(view.container, '[data-runtime-card="claude-default"]')).toContain(
       'you@example.com (personal) · Default profile · Sonnet 5.5',
     );
-    expect(text(view.container, '[data-runtime-row="codex-default"]')).toContain(
+    expect(text(view.container, '[data-runtime-card="codex-default"]')).toContain(
       'you@example.com · Default profile · GPT-6',
     );
-    expect(text(view.container, '[data-runtime-row="claude-review"]')).toContain('Harness default');
+    expect(text(view.container, '[data-runtime-card="claude-review"]')).toContain('Harness default');
     expect(view.container.querySelector('[data-runtime-row="claude-default"]')?.getAttribute('href')).toBe(
       '#machines/studio-mac/runtimes/claude-default',
     );
-    const badges = (name: string) =>
-      view.container.querySelector(`[data-runtime-row="${name}"]`)?.querySelectorAll('[data-tone="accent"]');
-    expect(badges('claude-agent')).toHaveLength(1);
-    expect(badges('claude-agent')?.[0]?.textContent).toBe('Agent');
-    expect(badges('claude-default')).toHaveLength(0);
+    const card = (name: string) =>
+      must(view.container.querySelector<HTMLElement>(`[data-runtime-card="${name}"]`), name);
+    // "Agent" says nothing on a list of agent runtimes; only the exceptions are marked.
+    expect(card('claude-agent').textContent).not.toMatch(/\bAgent\b(?! work)/);
+    expect(card('claude-agent').querySelector('[data-runtime-kind-badge]')).toBeNull();
+    expect(card('claude-default').querySelector('[data-runtime-kind-badge]')?.textContent).toBe('Not an agent');
     expect(view.container.querySelector('[data-runtime-missing-harness]')).toBeNull();
     expect(text(view.container, '[data-add-runtime]')).toBe('Add runtime');
     await view.unmount();
@@ -112,7 +113,7 @@ describe('Runtimes tab list', () => {
     });
     const view = await open({ routes: reads([orphan]) });
     expect(text(view.container, '[data-runtimes-count]')).toBe('1 runtime on studio-mac');
-    expect(text(view.container, '[data-runtime-row="orphan"]')).toContain('Unknown login · Default profile');
+    expect(text(view.container, '[data-runtime-card="orphan"]')).toContain('Unknown login · Default profile');
     await view.unmount();
   });
 
@@ -261,7 +262,7 @@ describe('a runtime’s own page', () => {
     expect(text(view.container, '[data-runtime-page] p')).toContain('Ready');
     expect(text(view.container, '[data-runtime-page] p')).not.toContain('Agent runtime');
     const login = must(view.container.querySelector('[data-runtime-credential]'), 'login link');
-    expect(login.getAttribute('href')).toBe('#machines/studio-mac/credentials/claude-personal');
+    expect(login.getAttribute('href')).toBe('#machines/studio-mac/sign-ins/claude-personal');
     expect(login.textContent).toContain('you@example.com (personal)');
     expect(login.textContent).toContain('Claude Code');
     const profile = must(view.container.querySelector('[data-runtime-profile]'), 'profile link');
@@ -310,7 +311,7 @@ describe('a runtime’s own page', () => {
     expect(note.textContent).toContain('This login needs sign-in');
     expect(note.textContent).toContain('Sign in once and every runtime that uses it can launch.');
     expect(note.querySelector('[data-runtime-sign-in]')?.getAttribute('href')).toBe(
-      '#machines/studio-mac/credentials/claude-work',
+      '#machines/studio-mac/sign-ins/claude-work',
     );
     expect(view.container.querySelector('[data-runtime-note="refresh"]')).toBeNull();
     await view.unmount();
@@ -570,12 +571,14 @@ describe('Runtimes tab › items the provisioner skipped', () => {
     await view.unmount();
   });
 
-  it('puts the line under the runtime’s rows and above Rename and Remove', async () => {
+  it('starts the line at the same left edge as the details line, under the name', async () => {
     const view = await open({ routes: reads(skippedRuntime(['skills/review'])) });
     const card = must(view.container.querySelector<HTMLElement>('[data-runtime-card="claude-default"]'), 'card');
     const line = must(card.querySelector<HTMLElement>('[data-runtime-skipped]'), 'line');
-    const actions = must(card.querySelector<HTMLElement>('[data-runtime-actions]'), 'the actions');
-    expect(line.compareDocumentPosition(actions) & window.Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    const details = must(card.querySelector<HTMLElement>('[data-runtime-details]'), 'the details line');
+    expect(details.compareDocumentPosition(line) & window.Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(line.className).toContain('pl-6');
+    expect(details.className).toContain('pl-6');
     await view.unmount();
   });
 

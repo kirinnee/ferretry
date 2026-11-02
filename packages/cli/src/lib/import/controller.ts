@@ -229,7 +229,7 @@ export class ContinueSessionController {
       this.out.error(
         `no conversations matched; try a different search, or start fresh with \`fy start\`.${
           listing.computerListed === false
-            ? ' Conversations on this computer are hidden: turn on Keep in sync in Settings › Machine › Conversations.'
+            ? ' Conversations on this computer are hidden: turn on Keep in sync in Settings › Machine › Agents › Conversations.'
             : ''
         }`,
       );

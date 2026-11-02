@@ -8,7 +8,7 @@
  */
 
 import type { FleetAccountChange, FleetLayeredProfileView } from '@ferretry/protocol';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { type AccountCatalog, useAccountCatalog } from '../components/account-catalog.ts';
 import {
@@ -23,7 +23,7 @@ import {
   Section,
 } from '../components/catalog-ui.tsx';
 import { counted, listed, profileScopeBadge, profileScopeWord } from '../components/component-model.ts';
-import { itemHref, useHashItem } from '../components/machine-links.ts';
+import { isComponentReference, itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { ProfileEditor } from './profile-editor.tsx';
@@ -31,8 +31,8 @@ import { includedBy, profileUseLine, runtimesReaching } from './profile-model.ts
 
 type Page = { readonly kind: 'list' } | { readonly kind: 'detail'; readonly name: string } | { readonly kind: 'new' };
 
-export function ProfilesTab(props: MachineTabProps) {
-  const { connection, machineName, createClient } = props;
+export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atList: boolean) => void }) {
+  const { connection, machineName, createClient, onAtList } = props;
   const { read, reload } = useAccountCatalog(connection, createClient);
   const [page, setPage] = useState<Page>({ kind: 'list' });
   const [saved, setSaved] = useState<string | undefined>(undefined);
@@ -40,7 +40,13 @@ export function ProfilesTab(props: MachineTabProps) {
     setSaved(undefined);
     setPage(next);
   };
-  useHashItem('profiles', name => open({ kind: 'detail', name }));
+  // A component's address on the shared Profiles tab sends this section back to its list.
+  useHashItem('profiles', name => open(isComponentReference(name) ? { kind: 'list' } : { kind: 'detail', name }));
+  const known = read.kind === 'loading' || read.kind === 'failed' ? undefined : read.catalog.profiles.profiles;
+  const showingList =
+    page.kind === 'list' ||
+    (page.kind === 'detail' && known?.some(candidate => candidate.name === page.name) === false);
+  useEffect(() => onAtList?.(showingList), [onAtList, showingList]);
 
   if (read.kind === 'loading')
     return (

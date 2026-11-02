@@ -237,7 +237,7 @@ export function machineView(
   };
 }
 
-/** The six kinds, in the order the Components tab lists them, with their one-line description. */
+/** The six kinds, in the order the Components section lists them, with their one-line description. */
 const KIND_GROUPS: readonly { readonly kind: ComponentKind; readonly label: string; readonly description: string }[] = [
   { kind: 'instructions', label: 'Instructions', description: 'Guidance every session reads first.' },
   { kind: 'mcp', label: 'MCP servers', description: 'Tools a session can call.' },

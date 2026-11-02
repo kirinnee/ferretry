@@ -273,7 +273,7 @@ parks the item as replied (the ferret does the work and closes it with `done`, `
   the launch environment variable `FY_AGENDA=1|0` (`AGENDA_ENV`), and it is what sets `agendaMode` on the
   session summary, so with the switch off the summary carries no `agendaMode` and the chat draws no agenda
   line or drawer.
-- **The machine default** is `agendaMode` in `machine.yaml` (**on** unless you turn it off; the Machine tab's
+- **The machine default** is `agendaMode` in `machine.yaml` (**on** unless you turn it off; the Agents tab's
   **Agenda mode** section, `fy machine set agenda-mode on|off`, or the `machine.settings` change). A ferret
   that is started or imported records it ONCE as `config.agenda: true` (the same adoption step Pack mode's
   machine switch uses, run for `fy new`, the app's start, pack sub-ferrets and a continued conversation), and

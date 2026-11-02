@@ -39,7 +39,7 @@ import { harnessCatalogAnswer } from '../account-model-catalog.ts';
 import { overlay } from '../disable-switch-overlay.ts';
 
 const params = new URLSearchParams(location.search);
-const tab = params.get('tab') ?? 'credentials';
+const tab = params.get('tab') ?? 'sign-ins';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 location.hash = params.get('hash') ?? '';
@@ -119,20 +119,20 @@ const VIEWPORTS = {
 const SURFACES = [
   {
     name: 'login-list',
-    tab: 'credentials',
-    hash: '#machines/studio-mac/credentials',
+    tab: 'sign-ins',
+    hash: '#machines/studio-mac/sign-ins',
     ready: '[data-disable-switch="claude-work"]',
   },
   {
     name: 'login-page',
-    tab: 'credentials',
-    hash: '#machines/studio-mac/credentials/claude-work',
+    tab: 'sign-ins',
+    hash: '#machines/studio-mac/sign-ins/claude-work',
     ready: '[data-credential-switch] [data-disable-switch]',
   },
   {
     name: 'login-switch-off-form',
-    tab: 'credentials',
-    hash: '#machines/studio-mac/credentials/claude-personal',
+    tab: 'sign-ins',
+    hash: '#machines/studio-mac/sign-ins/claude-personal',
     ready: '[data-credential-switch] [data-disable-switch]',
     open: '[data-credential-switch] [role="switch"]',
   },
@@ -184,9 +184,7 @@ try {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${where} scrolls sideways by ${overflow}px`);
           for (const control of await page
-            .locator(
-              '[data-runtime-rename], [data-runtime-remove], [data-credential-remove], [data-disable-login-link]',
-            )
+            .locator('[data-runtime-actions], [data-credential-remove], [data-disable-login-link]')
             .all()) {
             await control
               .click({ trial: true, timeout: 3000 })

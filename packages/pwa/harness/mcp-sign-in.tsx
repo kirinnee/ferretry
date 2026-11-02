@@ -121,7 +121,7 @@ export function McpSignInFrameHarness({ frame }: { readonly frame: McpSignInFram
   useAppViewport();
   // The tab opens the page its address names, exactly as a link from Settings does.
   useState(() => {
-    window.history.replaceState(null, '', `${window.location.search}${itemHref(MACHINE, 'components', 'mcp/linear')}`);
+    window.history.replaceState(null, '', `${window.location.search}${itemHref(MACHINE, 'profiles', 'mcp/linear')}`);
     return null;
   });
   const [createClient] = useState(() => clientFor(frame));

@@ -3951,7 +3951,11 @@ describe('the settings route composition', () => {
   });
 
   it('mounts Settings › Learning for the selected machine, reading through its carrier', async () => {
-    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], SET_UP_SHELL);
+    const { carrierRequests, view } = await renderShell(
+      `/d/${ALPHA}/settings#machines/${encodeURIComponent(alpha.baseUrl)}/agents`,
+      [alpha.daemonId],
+      SET_UP_SHELL,
+    );
     await settle();
 
     await openPanel(view, 'learning', 'Learning tab');

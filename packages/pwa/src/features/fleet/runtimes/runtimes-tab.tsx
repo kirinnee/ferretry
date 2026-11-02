@@ -26,7 +26,12 @@ import { AddRuntime } from './add-runtime.tsx';
 import { DefaultRuntimeControl } from './default-runtime.tsx';
 import { isDefaultRuntime } from './default-runtime-model.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
-import { RemoveRuntimeDialog, RenameRuntimeDialog, RuntimeActionButtons } from './runtime-actions.tsx';
+import {
+  RemoveRuntimeDialog,
+  RenameRuntimeDialog,
+  RuntimeActionButtons,
+  RuntimeActionsMenu,
+} from './runtime-actions.tsx';
 import { runtimeActionRefusal } from './runtime-actions-model.ts';
 import {
   harnessInstalled,
@@ -102,6 +107,9 @@ interface RuntimePageProps {
   readonly reload: () => Promise<unknown>;
 }
 
+/** A card's second and later lines start under the name: the status glyph's width (w-4) plus the gap (gap-2). */
+const ROW_INDENT = 'pl-6';
+
 /** The switch on a runtime: its own, or its login's when that is what holds it off. */
 function RuntimeSwitch({
   runtime,
@@ -110,6 +118,7 @@ function RuntimeSwitch({
   changes,
   reload,
   compact,
+  detailsClassName,
   children,
 }: {
   readonly runtime: FleetRuntimeView;
@@ -118,15 +127,17 @@ function RuntimeSwitch({
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
   readonly compact?: boolean;
+  readonly detailsClassName?: string;
   readonly children?: (parts: DisableSwitchParts) => React.ReactNode;
 }) {
   return (
     <DisableSwitch
       {...(compact === undefined ? {} : { compact })}
+      {...(detailsClassName === undefined ? {} : { className: detailsClassName })}
       {...(children === undefined ? {} : { children })}
       target={{ kind: 'runtime', name: runtime.name }}
       disabled={runtime.disabled}
-      login={{ id: runtime.credential.id, href: machineDetailHash(machineName, 'credentials', runtime.credential.id) }}
+      login={{ id: runtime.credential.id, href: machineDetailHash(machineName, 'sign-ins', runtime.credential.id) }}
       machineName={machineName}
       online={online}
       changes={changes}
@@ -208,7 +219,7 @@ function RuntimePage({
           </p>
           <p className="m-0 text-cell text-muted">Sign in once and every runtime that uses it can launch.</p>
           <a
-            href={machineDetailHash(machineName, 'credentials', runtime.credential.id)}
+            href={machineDetailHash(machineName, 'sign-ins', runtime.credential.id)}
             className="text-cell font-semibold text-accent underline"
             data-runtime-sign-in=""
           >
@@ -227,7 +238,7 @@ function RuntimePage({
 
       <Section title="Credential">
         <a
-          href={machineDetailHash(machineName, 'credentials', runtime.credential.id)}
+          href={machineDetailHash(machineName, 'sign-ins', runtime.credential.id)}
           className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-credential={runtime.credential.id}
         >
@@ -396,14 +407,20 @@ function RuntimeRow({
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
 }) {
+  const showMakeDefault =
+    onMakeDefault !== undefined &&
+    runtime.agent &&
+    runtime.disabled === undefined &&
+    !isDefaultRuntime(machine, runtime);
   return (
     <div className="flex flex-col gap-1">
       <div
-        className="kt-panel relative flex min-w-0 flex-col gap-2 p-panel has-[a:hover]:border-accent"
+        className="kt-panel relative flex min-w-0 flex-col gap-1 p-panel has-[a:hover]:border-accent"
         data-runtime-card={runtime.name}
       >
         <RuntimeSwitch
           compact
+          detailsClassName={`${ROW_INDENT} empty:hidden`}
           runtime={runtime}
           machineName={machineName}
           online={online}
@@ -412,58 +429,55 @@ function RuntimeRow({
         >
           {({ toggle, details }) => (
             <>
-              <div className="flex min-w-0 items-start gap-3">
+              <div className="flex min-w-0 items-center gap-2">
                 <a
                   href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="flex min-h-control min-w-0 flex-1 items-start gap-3 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                  className="flex min-h-control min-w-0 flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
                   data-runtime-row={runtime.name}
                 >
-                  <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className="truncate font-mono text-row font-semibold text-fg">{runtime.name}</span>
-                    <span className="break-words text-cell text-muted">
-                      <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
-                      {runtimeDefaultModel(runtime)}
+                  <AccountStatus
+                    word={runtimeWord(runtime)}
+                    className="min-h-[calc(var(--control-h)-0.5rem)] w-4 shrink-0 justify-center"
+                  />
+                  <span className="flex min-w-0 flex-1 flex-wrap content-center items-center gap-x-2 gap-y-1 min-h-[calc(var(--control-h)-0.5rem)]">
+                    <span className="min-w-0 break-all font-mono text-row font-semibold text-fg" data-runtime-name="">
+                      {runtime.name}
                     </span>
-                    {runtime.agent || runtime.disabled !== undefined ? (
-                      <span className="flex flex-wrap gap-1">
-                        {runtime.agent ? <Badge tone="accent">Agent</Badge> : null}
-                        {isDefaultRuntime(machine, runtime) ? (
-                          <Badge tone="ok" data-runtime-default-badge="">
-                            Default
-                          </Badge>
-                        ) : null}
-                        {runtime.disabled === undefined ? null : (
-                          <Badge tone="warn" data-runtime-disabled-badge="">
-                            Disabled
-                          </Badge>
-                        )}
-                      </span>
+                    {isDefaultRuntime(machine, runtime) ? (
+                      <Badge tone="ok" className="shrink-0" data-runtime-default-badge="">
+                        Default
+                      </Badge>
                     ) : null}
+                    {runtime.disabled === undefined ? null : (
+                      <Badge tone="warn" className="shrink-0" data-runtime-disabled-badge="">
+                        Disabled
+                      </Badge>
+                    )}
+                    {runtime.agent ? null : (
+                      <Badge className="shrink-0" data-runtime-kind-badge="">
+                        Not an agent
+                      </Badge>
+                    )}
                   </span>
                 </a>
                 {toggle}
-                <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
+                <RuntimeActionsMenu
+                  runtime={runtime}
+                  refusal={refusal}
+                  onRename={() => onAct({ kind: 'rename', name: runtime.name })}
+                  onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+                  {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
+                />
               </div>
+              <span className={`${ROW_INDENT} break-words text-cell text-muted`} data-runtime-details="">
+                <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
+                {runtimeDefaultModel(runtime)}
+              </span>
               {details}
             </>
           )}
         </RuntimeSwitch>
-        <SkippedLine name={runtime.name} items={skippedItems(runtime)} />
-        <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
-          <RuntimeActionButtons
-            runtime={runtime}
-            refusal={refusal}
-            onRename={() => onAct({ kind: 'rename', name: runtime.name })}
-            onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
-            {...(onMakeDefault === undefined ||
-            !runtime.agent ||
-            runtime.disabled !== undefined ||
-            isDefaultRuntime(machine, runtime)
-              ? {}
-              : { onMakeDefault: () => onMakeDefault(runtime.name) })}
-          />
-        </div>
+        <SkippedLine name={runtime.name} items={skippedItems(runtime)} className={ROW_INDENT} />
       </div>
       {harnessInstalled(machine, runtime.harness) ? null : (
         <MissingHarness runtime={runtime} machineName={machineName} />

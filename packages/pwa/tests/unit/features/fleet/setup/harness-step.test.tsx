@@ -398,8 +398,8 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
         link.getAttribute('href'),
       ]);
       expect(hrefs).toEqual([
-        ['Sign in for claude-default', '#machines/studio-mac/credentials/claude-host'],
-        ['Sign in for claude-work', '#machines/studio-mac/credentials/claude-work'],
+        ['Sign in for claude-default', '#machines/studio-mac/sign-ins/claude-host'],
+        ['Sign in for claude-work', '#machines/studio-mac/sign-ins/claude-work'],
       ]);
     } finally {
       await s.view.unmount();

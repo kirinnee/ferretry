@@ -3,6 +3,7 @@ import type { FleetMachineView, FleetRunningSession, IFyApiClient } from '@ferre
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount as mountView, must, pressKey } from '../../../../support/dom.ts';
+import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu-support.ts';
 import {
   type Call,
   CHANGE_ID,
@@ -157,17 +158,45 @@ const submit = (container: ParentNode): HTMLButtonElement =>
   );
 
 describe('Runtime actions: the buttons', () => {
-  it('puts Rename and a destructive Remove on every runtime row', async () => {
+  it('puts a ⋯ menu on every runtime row, with Rename and a destructive Remove inside', async () => {
     // Act
     const view = await open();
 
     // Assert
-    expect(view.container.querySelectorAll('[data-runtime-actions]')).toHaveLength(5);
-    const remove = must(view.container.querySelector('[data-runtime-remove="codex-default"]'), 'remove');
-    expect(remove.getAttribute('data-variant')).toBe('danger');
-    expect(remove.getAttribute('aria-label')).toBe('Remove codex-default');
-    expect(text(view.container, '[data-runtime-rename="codex-default"]')).toBe('Rename');
+    expect(view.container.querySelectorAll('[data-runtime-card] [data-runtime-actions]')).toHaveLength(5);
+    expect(view.container.querySelector('[data-runtime-card] [data-runtime-rename]')).toBeNull();
+    const trigger = menuButton(view.container, 'codex-default');
+    expect(trigger.getAttribute('aria-label')).toBe('Actions for codex-default');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    const items = await openRuntimeMenu(view.container, 'codex-default');
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(items.get('rename')?.textContent).toBe('Rename');
+    expect(items.get('remove')?.textContent).toBe('Remove');
+    expect(items.get('remove')?.className).toContain('text-err');
+    expect(items.has('make-default')).toBe(false);
     expect(view.container.querySelector('[data-runtime-actions-refused]')).toBeNull();
+  });
+
+  it('opens the menu from the keyboard, moves with the arrows and closes on Escape with focus back on the button', async () => {
+    // Arrange
+    const view = await open();
+    const trigger = menuButton(view.container, 'codex-default');
+
+    // Act
+    await interact(() => trigger.focus());
+    await interact(() => trigger.click());
+    await settle();
+    const first = must(document.querySelector<HTMLElement>('[role="menu"] [role="menuitem"]'), 'first item');
+    expect(document.activeElement).toBe(first);
+    await interact(() => pressKey(first, 'ArrowDown'));
+    expect(document.activeElement?.getAttribute('data-menu-key')).toBe('remove');
+    await interact(() => pressKey(document.activeElement as HTMLElement, 'Escape'));
+    await settle();
+
+    // Assert
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('puts both on a runtime’s own page too', async () => {
@@ -185,9 +214,9 @@ describe('Runtime actions: the buttons', () => {
 
     // Act + Assert — the list first: the page below moves the location every mounted tab follows.
     const list = await open({ routes: refused });
-    const rename = must(list.container.querySelector<HTMLButtonElement>('[data-runtime-rename]'), 'rename');
-    expect(rename.disabled).toBe(true);
-    expect(rename.title.length).toBeGreaterThan(0);
+    const trigger = menuButton(list.container, 'codex-default');
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.title).toStartWith('The operator of this machine switched off');
     expect(text(list.container, '[data-runtime-actions-refused]')).toStartWith('Rename and Remove are off here: ');
     await list.unmount();
     mounted.splice(mounted.indexOf(list), 1);
@@ -205,7 +234,7 @@ describe('Runtime actions: Rename', () => {
     const view = await open();
 
     // Act
-    await click(view.container, '[data-runtime-rename="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
 
     // Assert
     expect(text(view.container, '[data-runtime-dialog="rename"] h2')).toBe('Rename codex-default');
@@ -220,7 +249,7 @@ describe('Runtime actions: Rename', () => {
   it('checks the new name as it is typed, offering one that fits', async () => {
     // Arrange
     const view = await open();
-    await click(view.container, '[data-runtime-rename="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
 
     // Act + Assert
     await type(renameInput(view.container), 'claude-agent');
@@ -262,7 +291,7 @@ describe('Runtime actions: Rename', () => {
       code: 'fleet_change_refused',
     });
     const view = await open({ routes: { [PROPOSE]: refusal } });
-    await click(view.container, '[data-runtime-rename="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
     await type(renameInput(view.container), 'old-name');
 
     // Act
@@ -280,10 +309,10 @@ describe('Runtime actions: Rename', () => {
     const view = await open({ calls });
 
     // Act + Assert
-    await click(view.container, '[data-runtime-rename="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
     await click(view.container, '[data-runtime-dialog-cancel]');
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
-    await click(view.container, '[data-runtime-rename="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'rename');
     await interact(() => pressKey(must(view.container.querySelector('[data-runtime-dialog]'), 'dialog'), 'Escape'));
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
     expect(proposed(calls)).toEqual([]);
@@ -297,7 +326,7 @@ describe('Runtime actions: Remove', () => {
     const view = await open({ calls, routes: { [PROPOSE]: removalStaged() } });
 
     // Act
-    await click(view.container, '[data-runtime-remove="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
 
     // Assert
     expect(proposed(calls)).toEqual([{ kind: 'runtime.remove', name: 'codex-default' }]);
@@ -319,7 +348,7 @@ describe('Runtime actions: Remove', () => {
     // Arrange
     const calls: Call[] = [];
     const view = await open({ calls, routes: { [PROPOSE]: removalStaged([]), [APPLY]: COMMITTED } });
-    await click(view.container, '[data-runtime-remove="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
 
     // Act
     await interact(() => submit(view.container).click());
@@ -347,7 +376,7 @@ describe('Runtime actions: Remove', () => {
   it('offers no move when the client cannot move a ferret', async () => {
     // Act
     const view = await open({ routes: { [PROPOSE]: removalStaged() } });
-    await click(view.container, '[data-runtime-remove="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
 
     // Assert
     expect(view.container.querySelector('[data-runtime-move-target]')).toBeNull();
@@ -364,7 +393,7 @@ describe('Runtime actions: Remove', () => {
       migrate: () => ({}),
       routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED },
     });
-    await click(view.container, '[data-runtime-remove="claude-work"]');
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     const select = must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target');
 
     // Act
@@ -403,7 +432,7 @@ describe('Runtime actions: Remove', () => {
       migrate: () => ({}),
       routes: { [PROPOSE]: removalStaged([FERRETS[0] as FleetRunningSession]), [APPLY]: COMMITTED },
     });
-    await click(view.container, '[data-runtime-remove="claude-work"]');
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
 
     // Act
     await choose(
@@ -426,7 +455,7 @@ describe('Runtime actions: Remove', () => {
       migrate: ([id]) => (id === 's-2' ? new Error('The session is mid-turn.') : {}),
       routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED },
     });
-    await click(view.container, '[data-runtime-remove="claude-work"]');
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
       must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
       'claude-review',
@@ -461,7 +490,7 @@ describe('Runtime actions: Remove', () => {
         [APPLY]: COMMITTED,
       },
     });
-    await click(view.container, '[data-runtime-remove="claude-agent"]');
+    await chooseRuntimeAction(view.container, 'claude-agent', 'remove');
 
     // Assert — nothing is staged until a default is picked; only agent runtimes are offered.
     expect(text(view.container, '[data-runtime-remove-default]')).toBe(
@@ -497,7 +526,7 @@ describe('Runtime actions: Remove', () => {
         },
       },
     });
-    await click(view.container, '[data-runtime-remove="claude-default"]');
+    await chooseRuntimeAction(view.container, 'claude-default', 'remove');
     expect(text(view.container, '[data-runtime-dialog] [data-change-submit]')).toBe('Make codex-default the default');
 
     // Act
@@ -547,7 +576,7 @@ describe('Runtime actions: Remove', () => {
     reachable = false;
 
     // Act
-    await click(view.container, '[data-runtime-remove="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
 
     // Assert
     expect(view.container.querySelector('[data-runtime-remove-refused]')).not.toBeNull();
@@ -559,7 +588,7 @@ describe('Runtime actions: Remove', () => {
     const view = await open({ routes: { [PROPOSE]: new Error('the machine is asleep') } });
 
     // Act
-    await click(view.container, '[data-runtime-remove="codex-default"]');
+    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
 
     // Assert
     expect(view.container.querySelector('[data-runtime-remove-refused]')).not.toBeNull();

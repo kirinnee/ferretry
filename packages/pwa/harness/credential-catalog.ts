@@ -1,6 +1,6 @@
 /**
  * The logins and runtimes the harness's set-up machine answers (the prototype's studio-mac), for the
- * Runtimes and Credentials tabs: a login shared with the terminal, two logins on one email told apart
+ * Runtimes and Sign-ins tabs: a login shared with the terminal, two logins on one email told apart
  * by label (E26), one whose refresh is due, an empty slot a clone made (E31), an agent runtime with its
  * fixed layer (E24), a model the login cannot use (E23) and a harness that is not installed (E29).
  *

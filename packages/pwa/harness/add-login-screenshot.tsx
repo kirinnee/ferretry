@@ -1,5 +1,5 @@
 /**
- * Settings › Machines › Credentials › **Add a login**: the one screen that picks a provider and asks only
+ * Settings › Machines › Sign-ins › **Add a login**: the one screen that picks a provider and asks only
  * for what that provider needs — a Claude Code sign-in with its link, an API-key provider with its key, and
  * the same provider refused — on a phone and a desktop, light and dark.
  *

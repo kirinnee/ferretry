@@ -1,5 +1,9 @@
 /**
- * Settings owned by one paired daemon, shown inside that machine's Machine tab.
+ * Settings owned by one paired daemon, shown inside the tab each belongs to (Agents, Sign-ins, Machine).
+ *
+ * The frame draws one thing at a time: an open panel, or ONE GROUP of panels as a list of navigation
+ * rows. A tab asks for the group it holds (`machine-panels.ts` is the table), so no panel is listed
+ * under a tab it does not belong to.
  *
  * Browser settings deliberately do not enter this frame.  Every child receives
  * the selected connection, so a request for one host cannot be reused after a
@@ -21,7 +25,6 @@ import {
   Gauge,
   GraduationCap,
   KeyRound,
-  Library,
   Lock,
   PawPrint,
   Radar,
@@ -35,7 +38,7 @@ import {
   UserRound,
   Zap,
 } from 'lucide-react';
-import { type ComponentType, createContext, type ReactNode, useContext, useMemo } from 'react';
+import { type ComponentType, createContext, type ReactNode, useContext, useId, useMemo } from 'react';
 import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
@@ -49,12 +52,10 @@ import {
   useApproveSignInRuleStepUp,
   useDaemonClient,
 } from '../../lib/store.tsx';
-import { daemonSharingPath } from '../../lib/pages/routes.ts';
-import { useOptionalRouter } from '../../lib/router.tsx';
 import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { RouteLink } from '../../shell/route-link.tsx';
+import { PANEL_NAMES } from '../fleet/shell/machine-panels.ts';
 import { AccountsSurface } from '../accounts/accounts-surface.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
@@ -103,7 +104,6 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   secrets: <KeyRound size={16} aria-hidden="true" />,
   accounts: <UserRound size={16} aria-hidden="true" />,
   'secure-copy': <ClipboardPaste size={16} aria-hidden="true" />,
-  catalogs: <Library size={16} aria-hidden="true" />,
   // A phone, because the panel's subject is the other device — the thing being added, not this one.
   devices: <Smartphone size={16} aria-hidden="true" />,
   // A lock, because this panel is where a refused control is explained — the one glyph that reads as
@@ -292,24 +292,6 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
   );
 }
 
-/** Catalogs live on the Sharing page now; this tab id stays so an old link still lands on a sentence that says so. */
-function CatalogsPanel({ connection }: DaemonSettingsTabProps) {
-  const router = useOptionalRouter();
-  const to = daemonSharingPath(connection.daemonId, 'catalogs');
-  return (
-    <p className="m-0 text-cell text-muted" data-catalogs-moved="">
-      <RouteLink
-        to={to}
-        {...(router === null ? {} : { onNavigate: router.navigate })}
-        className="text-accent underline"
-      >
-        Catalogs moved to Sharing
-      </RouteLink>
-      . Sharing is where you make, share and read them now.
-    </p>
-  );
-}
-
 function DevicesPanel({ connection }: DaemonSettingsTabProps) {
   const { createPairingClient } = useFrameLive();
   const health = useDaemonHealth(connection);
@@ -402,12 +384,6 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
     Surface: SecureCopyPanel,
   },
   {
-    id: 'catalogs',
-    label: 'Catalogs',
-    description: 'Moved: catalogs are on the Sharing page now.',
-    Surface: CatalogsPanel,
-  },
-  {
     /**
      * Adding a device, immediately after the two panels that own this machine's own configuration.
      *
@@ -485,8 +461,10 @@ export interface DaemonSettingsFrameProps {
   readonly panel?: string | undefined;
   /** Open a panel, or go back to the list (`null`). The page turns this into an address. */
   readonly onOpenPanel: (panel: string | null) => void;
-  /** The words on the way back from an open panel. */
+  /** The words on the way back from an open panel: the tab it opened from. */
   readonly backLabel?: string;
+  /** Draw only these panels, as one titled list, instead of every panel. */
+  readonly group?: { readonly label: string; readonly panels: readonly string[] };
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -521,6 +499,7 @@ export function DaemonSettingsFrame({
   panel,
   onOpenPanel,
   backLabel = 'Machine',
+  group,
   additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
@@ -531,6 +510,7 @@ export function DaemonSettingsFrame({
   onRenameDaemon,
   onRemoveDaemon,
 }: DaemonSettingsFrameProps) {
+  const headingId = useId();
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
     () => [...LEADING_TABS, ...additionalTabs, ...TRAILING_TABS],
     [additionalTabs],
@@ -608,41 +588,95 @@ export function DaemonSettingsFrame({
     );
   }
 
+  const shown =
+    group === undefined
+      ? tabs
+      : group.panels.flatMap(id => {
+          const tab = tabs.find(candidate => candidate.id === id);
+          return tab === undefined ? [] : [tab];
+        });
+  if (group !== undefined && shown.length === 0) return null;
+  const heading = group === undefined ? 'Connection and security' : group.label;
+
   return (
     <section
       className="flex min-w-0 flex-col gap-2"
       data-daemon-settings-frame={String(connection.daemonId)}
-      aria-labelledby="daemon-settings-heading"
+      {...(group === undefined ? {} : { 'data-daemon-panel-group': group.label })}
+      aria-labelledby={headingId}
     >
       <div>
-        <h4 id="daemon-settings-heading" className="m-0 text-meta font-semibold uppercase text-muted">
-          Connection and security
+        <h4 id={headingId} className="m-0 text-meta font-semibold uppercase text-muted">
+          {heading}
         </h4>
-        <p className="mb-0 mt-0.5 text-meta leading-base text-muted">
-          This machine: shared by every device paired to {name}. Appearance and behaviour stay on each device.
-        </p>
+        {group === undefined ? (
+          <p className="mb-0 mt-0.5 text-meta leading-base text-muted">
+            This machine: shared by every device paired to {name}. Appearance and behaviour stay on each device.
+          </p>
+        ) : null}
       </div>
-      <ul className="kt-groupcard m-0 list-none p-0" aria-label={`${name} connection and security`}>
-        {tabs.map(tab => (
-          <li key={tab.id}>
-            <button
-              type="button"
-              className="kt-grouprow"
-              data-daemon-panel={tab.id}
-              onClick={() => onOpenPanel(tab.id)}
-            >
-              <span className="flex w-5 shrink-0 justify-center text-muted" aria-hidden="true">
-                {PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="text-ui font-semibold text-fg">{tab.label}</span>
-                <span className="text-meta leading-tight text-muted">{tab.description}</span>
-              </span>
-              <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-            </button>
-          </li>
-        ))}
+      <ul className="kt-groupcard m-0 list-none p-0" aria-label={`${name} ${heading.toLowerCase()}`}>
+        {shown.map(tab =>
+          group === undefined ? (
+            <li key={tab.id}>
+              <button
+                type="button"
+                className="kt-grouprow"
+                data-daemon-panel={tab.id}
+                onClick={() => onOpenPanel(tab.id)}
+              >
+                <span className="flex w-5 shrink-0 justify-center text-muted" aria-hidden="true">
+                  {PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-ui font-semibold text-fg">{tab.label}</span>
+                  <span className="text-meta leading-tight text-muted">{tab.description}</span>
+                </span>
+                <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
+              </button>
+            </li>
+          ) : (
+            <li key={tab.id}>
+              <button
+                type="button"
+                className="kt-grouprow min-h-11 items-center"
+                data-daemon-panel={tab.id}
+                title={tab.description}
+                onClick={() => onOpenPanel(tab.id)}
+              >
+                <span className="flex w-5 shrink-0 justify-center text-muted" aria-hidden="true">
+                  {PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">
+                  {PANEL_NAMES[tab.id] ?? tab.label}
+                </span>
+                {panelValue(tab.id, carrier) === undefined ? null : (
+                  <span className="shrink-0 text-meta text-muted" data-daemon-panel-value={tab.id}>
+                    {panelValue(tab.id, carrier)}
+                  </span>
+                )}
+                <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
+              </button>
+            </li>
+          ),
+        )}
       </ul>
     </section>
   );
+}
+
+const CARRIER_WORDS: Readonly<Record<string, string>> = {
+  direct: 'Direct',
+  webrtc: 'WebRTC',
+  tunnel: 'Tunnel',
+  relay: 'Relay',
+};
+
+/**
+ * What a row can say on its right without asking the daemon anything: only the Connection row, from the
+ * carrier this browser already measured. There is no per-panel health read, so no other row claims a state.
+ */
+function panelValue(panel: string, carrier: ConnectionChoice | undefined): string | undefined {
+  if (panel !== 'carrier' || carrier === undefined || !carrier.ok) return undefined;
+  return CARRIER_WORDS[carrier.method.kind];
 }

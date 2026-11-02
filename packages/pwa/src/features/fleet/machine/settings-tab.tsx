@@ -1,17 +1,19 @@
 /**
- * The Machine tab (docs/design/account-model.md §4.2, §3.6 F4–F5, §4.3, §4.7, E32): what this
- * machine does for every runtime on it.
+ * The Machine tab (docs/design/account-model.md §4.2, §3.6 F4–F5, §4.3, §4.7, E32), and the agent
+ * settings the Agents tab draws (`agents-tab.tsx`).
  *
- * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
- *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
- * - **Auto-resume after restart** — On (the default) or Off, and what the last restart resumed.
- * - **Agenda mode** — On (the default) or Off for ferrets started from now on (docs/agenda.md).
+ * The Machine tab holds what is about the computer itself, in sections a person looks for:
+ * - **Devices & access**, **Health**, **Tools** (the agent CLIs' panel) and **Advanced** — the paired daemon's
+ *   own panels, one titled list each (`machine-panels.ts` says which panel is where).
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
- * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Clone from
- *   another machine**.
- * - **Connection and security** — the paired daemon's own panels (Warden, Secrets, devices, security…),
- *   which used to be a separate Daemons section; one place per machine now.
- * - **About this machine** — its name, whether it answers, how many runtimes it has, and its format.
+ * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Copy settings
+ *   from another machine**; **Export settings**.
+ * - **This machine** — its name, whether it answers, how many runtimes it has and its format; **About** opens
+ *   the version and updates panel.
+ *
+ * The agent settings — permissions, what agents may control, auto-resume, agenda mode and conversations —
+ * are written here and drawn by the Agents tab. Two choices become an inline segmented pick; on/off
+ * settings are one-line switches. Each saves through the same preview-and-apply panel as before.
  *
  * The shared browser (mode, proxy, "Test proxy") is the Browser tab's, not this one's (`browser-tab.tsx`).
  *
@@ -21,20 +23,23 @@
 
 import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
+import { Toggle } from '../../settings/notification-settings.tsx';
+import { Segmented } from '../conversations/conversation-picker.tsx';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
-import { type SetupAccess, useSetupAccess } from '../setup/setup-access.ts';
-import { CheckChoices, RadioChoices, SetupNote, SetupRow, SetupSection } from '../setup/setup-ui.tsx';
+import type { SetupAccess } from '../setup/setup-access.ts';
+import { SetupNote, SetupSection } from '../setup/setup-ui.tsx';
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import type { PanelGroupId } from '../shell/machine-panels.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { machineSettings } from './machine-settings.ts';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
@@ -85,6 +90,7 @@ export interface MachineSettingsTabProps extends MachineTabProps {
   readonly browser?: Window;
 }
 
+/** One compact row in a list of ways in: its name, a chevron, and the longer explanation on hover. */
 function NavRow({
   title,
   detail,
@@ -97,20 +103,26 @@ function NavRow({
   readonly name: string;
 }) {
   return (
-    <button
-      type="button"
-      data-settings-action={name}
-      onClick={onClick}
-      className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left transition-colors hover:border-accent"
-    >
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{title}</span>
-        <span className="[overflow-wrap:anywhere] text-cell text-muted">{detail}</span>
-      </span>
-      <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-    </button>
+    <li>
+      <button
+        type="button"
+        data-settings-action={name}
+        title={detail}
+        onClick={onClick}
+        className="kt-grouprow min-h-11 items-center"
+      >
+        <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{title}</span>
+        <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
+      </button>
+    </li>
   );
 }
+
+/** The words on each segment of the permissions pick; the full name is its tooltip. */
+const AGENT_PERMISSION_SEGMENTS: Readonly<Record<AgentPermissions, string>> = {
+  auto: 'Auto mode',
+  skip: 'Skip all checks',
+};
 
 export function AgentPermissionsSection({
   machine,
@@ -138,28 +150,25 @@ export function AgentPermissionsSection({
   };
   return (
     <SetupSection title="Agent permissions" name="agent-permissions">
-      <RadioChoices
-        legend="Agent permissions"
-        legendHidden
+      <Segmented
+        label="Agent permissions"
         name="agent-permissions"
         value={draft}
         onChoose={value => {
           setDraft(value);
           changes.clear();
         }}
-        options={[
-          {
-            id: 'auto',
-            title: AGENT_PERMISSION_WORDS.auto,
-            detail: 'Agents work on their own and stop to ask before anything that looks risky.',
-          },
-          {
-            id: 'skip',
-            title: AGENT_PERMISSION_WORDS.skip,
-            detail: `Agents never stop to ask. They can change any file and run any command on ${machineName}.`,
-          },
-        ]}
+        options={(['auto', 'skip'] as const).map(id => ({
+          id,
+          label: AGENT_PERMISSION_SEGMENTS[id],
+          title: AGENT_PERMISSION_WORDS[id],
+        }))}
       />
+      <p className="m-0 text-cell leading-base text-muted" data-agent-permissions-detail="">
+        {draft === 'auto'
+          ? 'Agents work on their own and stop to ask before anything that looks risky.'
+          : `Agents never stop to ask. They can change any file and run any command on ${machineName}.`}
+      </p>
       {old !== null && old !== draft && machine.runningSessions > 0 ? (
         <SetupNote tone="warn" name="agent-permissions-running" title="Applies to new sessions.">
           <span>{runningSessionsSentence(machine.runningSessions, old)}</span>
@@ -218,17 +227,21 @@ export function AgentControlSection({
   };
   return (
     <SetupSection title="What agents may control" name="agent-control">
-      <CheckChoices
-        legend="What agents may control"
-        legendHidden
-        name="agent-control"
-        values={AGENT_CONTROL_KINDS.filter(kind => draft[kind])}
-        onToggle={(kind, on) => {
-          setDraft({ ...draft, [kind]: on });
-          changes.clear();
-        }}
-        options={AGENT_CONTROL_KINDS.map(kind => ({ id: kind, ...AGENT_CONTROL_WORDS[kind] }))}
-      />
+      <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-agent-control="">
+        <legend className="sr-only">What agents may control</legend>
+        {AGENT_CONTROL_KINDS.map(kind => (
+          <Toggle
+            key={kind}
+            checked={draft[kind]}
+            label={AGENT_CONTROL_WORDS[kind].title}
+            description={AGENT_CONTROL_WORDS[kind].detail}
+            onChange={on => {
+              setDraft({ ...draft, [kind]: on });
+              changes.clear();
+            }}
+          />
+        ))}
+      </fieldset>
       <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
         Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
       </p>
@@ -301,24 +314,13 @@ export function ConversationsSection({
 
   return (
     <SetupSection title="Conversations" name="conversations">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
+      <Toggle
+        checked={on}
+        label="Keep in sync"
+        description={KEEP_IN_SYNC_EXPLANATION}
         disabled={busy}
-        data-keep-in-sync=""
-        onClick={toggle}
-        className={cn(
-          'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-          on ? 'border-accent bg-accent-soft text-accent' : 'border-border-strong bg-surface-2 text-fg',
-        )}
-      >
-        <span className="text-ui font-semibold">Keep in sync</span>
-        <span className="text-meta">{on ? 'On' : 'Off'}</span>
-      </button>
-      <p className="m-0 text-meta leading-base text-muted" data-keep-in-sync-hint="">
-        {KEEP_IN_SYNC_EXPLANATION}
-      </p>
+        onChange={toggle}
+      />
       {note === null ? null : (
         <p
           role="status"
@@ -375,16 +377,14 @@ export function AutoResumeSection({
   if (machine.autoResume === undefined) return null;
   return (
     <SetupSection title="Auto-resume after restart" name="auto-resume">
-      <RadioChoices
-        legend="Auto-resume after restart"
-        legendHidden
-        name="auto-resume"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
+      <Toggle
+        checked={draft === 'on'}
+        label="Resume ferrets after a restart"
+        description={AUTO_RESUME_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
           changes.clear();
         }}
-        options={(['on', 'off'] as const).map(choice => ({ id: choice, ...AUTO_RESUME_WORDS[choice] }))}
       />
       {last === null ? null : (
         <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
@@ -453,16 +453,14 @@ export function AgendaModeSection({
   if (machine.agendaMode === undefined) return null;
   return (
     <SetupSection title="Agenda mode" name="agenda-mode">
-      <RadioChoices
-        legend="Agenda mode for new ferrets"
-        legendHidden
-        name="agenda-mode"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
+      <Toggle
+        checked={draft === 'on'}
+        label="Agenda mode for new ferrets"
+        description={AGENDA_MODE_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
           changes.clear();
         }}
-        options={(['on', 'off'] as const).map(choice => ({ id: choice, ...AGENDA_MODE_WORDS[choice] }))}
       />
       {pending ? (
         <ChangeApplyPanel
@@ -482,18 +480,17 @@ export function AgendaModeSection({
   );
 }
 
+/** Sections side by side from the desktop width, one column on a phone. */
+const MACHINE_COLUMNS = 'grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-5 lg:grid-cols-2';
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
-  const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
-  // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
-  // "Checking…" and back, which unmounted what the person was editing and moved the page under them.
-  const onSaved = props.onRefresh ?? onRetry;
+  const { machine, machineName, online, checking, connection, createClient, sources, browser } = props;
   const route = useSettingsFlow(machineName, browser);
-  const access = useSetupAccess({ connection, createClient });
   const leave = (): void => route.open(null);
   const toRuntimes = (): void => route.goTo('runtimes');
   const flow: SettingsFlow | null = route.flow;
   const { daemonPanels } = props;
-  const panels = daemonPanels === undefined ? null : daemonPanels(undefined, route.openPanel);
+  const group = (id: PanelGroupId): ReactNode => daemonPanels?.(undefined, route.openPanel, id);
 
   // New machine setup is a full screen of its own; an old in-tab address points there.
   if (flow === 'setup' || flow === 'import')
@@ -539,108 +536,87 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         <p role="status" className="m-0 text-cell text-muted" data-machine-settings-waiting="">
           {checking ? `Checking ${machineName}…` : `${machineName}’s settings show once it answers.`}
         </p>
-        {panels}
+        <div className={MACHINE_COLUMNS}>
+          {group('devices-access')}
+          {group('health')}
+        </div>
       </div>
     );
 
   return (
-    <div className="flex min-w-0 flex-col gap-5" data-machine-settings="">
-      <AgentPermissionsSection
-        key={machine.agentPermissions}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
+    <div className={cn(MACHINE_COLUMNS, 'gap-y-5')} data-machine-settings="">
+      {group('devices-access')}
+      {group('health')}
 
-      <AgentControlSection
-        key={AGENT_CONTROL_KINDS.map(kind => machine.agentControl[kind]).join(',')}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
+      <section className="flex min-w-0 flex-col gap-2" data-setup-section="tools">
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Tools on {machineName}</h4>
+        <ul className="kt-groupcard m-0 list-none p-0" aria-label={`Tools on ${machineName}`}>
+          {machine.tools.map(tool => (
+            <li key={tool.harness} data-setup-row={`tool-${tool.harness}`}>
+              <div className="kt-grouprow min-h-11 items-center">
+                <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{tool.label}</span>
+                <span className="shrink-0 text-meta text-muted">{tool.installed ? 'Installed' : 'Not installed'}</span>
+                {tool.installed ? null : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-tool-install={tool.harness}
+                    disabled={!online}
+                    onClick={() => route.open(tool.harness === 'claude' ? 'install-claude' : 'install-codex')}
+                  >
+                    Install
+                  </Button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3">{group('tools')}</div>
+      </section>
 
-      <AutoResumeSection
-        key={String(machine.autoResume)}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
-      <AgendaModeSection
-        key={`agenda-${String(machine.agendaMode)}`}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
-      <ConversationsSection daemonId={connection.daemonId} access={access} />
-
-      <SetupSection title={`Tools on ${machineName}`} name="tools">
-        {machine.tools.map(tool => (
-          <SetupRow
-            key={tool.harness}
-            name={`tool-${tool.harness}`}
-            status={tool.installed ? 'ready' : 'needs_sign_in'}
-            statusLabel={tool.installed ? 'Installed' : 'Not installed'}
-            title={tool.label}
-            detail={tool.installed ? 'Installed' : 'Not installed'}
-          >
-            {tool.installed ? null : (
-              <Button
-                type="button"
-                size="sm"
-                data-tool-install={tool.harness}
-                disabled={!online}
-                onClick={() => route.open(tool.harness === 'claude' ? 'install-claude' : 'install-codex')}
-              >
-                Install
-              </Button>
-            )}
-          </SetupRow>
-        ))}
-      </SetupSection>
-
-      <SetupSection title="Setup" name="setup">
-        {/* New machine setup is revisitable: every step skipped the first time is one tap away here. */}
-        <NavRow
-          name="setup"
-          title={machine.setUp ? 'New machine setup' : `Set up ${machineName}`}
-          detail={
-            machine.setUp
-              ? 'Walk through Claude Code, Codex, speed-ups, voice, the Warden, learning and agent controls again.'
-              : 'Pair, start fresh or copy another machine, then Claude Code, Codex, speed-ups and the Warden.'
-          }
-          // The setup is a full screen of its own: one rail, every step on it.
-          onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
-        />
-        {machine.setUp ? (
+      <section className="flex min-w-0 flex-col gap-2" data-setup-section="setup">
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Setup</h4>
+        <ul className="kt-groupcard m-0 list-none p-0" aria-label={`Set up ${machineName}`}>
+          {/* New machine setup is revisitable: every step skipped the first time is one tap away here. */}
           <NavRow
-            name="import"
-            title="Import again"
-            detail={`Read Claude Code and Codex on ${machineName} again and add anything new.`}
-            onClick={() => (props.onSetUp === undefined ? route.open('import') : props.onSetUp('claude'))}
+            name="setup"
+            title={machine.setUp ? 'New machine setup' : `Set up ${machineName}`}
+            detail={
+              machine.setUp
+                ? 'Walk through Claude Code, Codex, speed-ups, voice, the Warden, learning and agent controls again.'
+                : 'Pair, start fresh or copy another machine, then Claude Code, Codex, speed-ups and the Warden.'
+            }
+            // The setup is a full screen of its own: one rail, every step on it.
+            onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
           />
-        ) : null}
-        <NavRow
-          name="clone"
-          title="Copy settings from another machine…"
-          detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets come only when you pick them; logins never travel."
-          onClick={() => route.open('clone')}
-        />
-        <NavRow
-          name="export"
-          title="Export settings"
-          detail="A zip of this machine’s configuration files, without secrets."
-          onClick={() => route.open('export')}
-        />
-      </SetupSection>
+          {machine.setUp ? (
+            <NavRow
+              name="import"
+              title="Import again"
+              detail={`Read Claude Code and Codex on ${machineName} again and add anything new.`}
+              onClick={() => (props.onSetUp === undefined ? route.open('import') : props.onSetUp('claude'))}
+            />
+          ) : null}
+          <NavRow
+            name="clone"
+            title="Copy settings from another machine…"
+            detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets come only when you pick them; logins never travel."
+            onClick={() => route.open('clone')}
+          />
+          <NavRow
+            name="export"
+            title="Export settings"
+            detail="A zip of this machine’s configuration files, without secrets."
+            onClick={() => route.open('export')}
+          />
+        </ul>
+      </section>
 
-      {panels}
+      {group('advanced')}
 
-      <SetupSection title="About this machine" name="facts">
-        <dl className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-cell">
+      <section className="flex min-w-0 flex-col gap-2" data-setup-section="facts">
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">This machine</h4>
+        <dl className="kt-panel m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-1 p-panel text-cell">
           <dt className="text-muted">Name</dt>
           <dd className="m-0 min-w-0 break-all font-mono text-fg">{machine.name}</dd>
           <dt className="text-muted">Status</dt>
@@ -650,7 +626,9 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
           <dt className="text-muted">Format</dt>
           <dd className="m-0 text-fg">{FORMAT_WORDS[machine.format]}</dd>
         </dl>
-      </SetupSection>
+      </section>
+
+      {group('about')}
     </div>
   );
 }

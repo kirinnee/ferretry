@@ -1,6 +1,6 @@
 /**
  * One machine in Settings: its name and status, then its six views as underlined tabs —
- * Runtimes, Credentials, Profiles, Components, Browser and Machine (docs/design/account-model.md §4.2).
+ * Runtimes, Agents, Sign-ins, Profiles, Browser and Machine (docs/design/account-model.md §4.2).
  *
  * WHICH machine is open is chosen one level up: the Settings sidebar on a desktop and the Machines card
  * on a phone both list every paired machine with its status. This surface used to carry its own
@@ -15,7 +15,7 @@
  */
 
 import type { FleetMachineView } from '@ferretry/protocol';
-import { Boxes, Globe, KeyRound, Layers, Play, SlidersHorizontal } from 'lucide-react';
+import { Globe, KeyRound, Layers, PawPrint, Play, SlidersHorizontal } from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
@@ -25,13 +25,19 @@ import { daemonDisplayName, distinctDaemonName, replacedPairing } from '../../se
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from './account-status.tsx';
 import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
+import type { PanelGroupId } from './machine-panels.ts';
 import { MACHINE_TABS, type MachineTabId } from './machine-route.ts';
 
 /**
- * The paired daemon's own panels — Warden, Secrets, devices, security and the rest — drawn inside the
- * Machine tab. `panel` is the one the address opens, or `undefined` for the list of them.
+ * The paired daemon's own panels — Warden, Secrets, devices, security and the rest — each drawn by the
+ * tab it belongs to. `panel` is the one the address opens (drawn whole, with a way back), or `undefined`
+ * for the list: just the rows of `group`, so a tab asks for its own group and no other.
  */
-export type DaemonPanelsRenderer = (panel: string | undefined, onOpen: (panel: string | null) => void) => ReactNode;
+export type DaemonPanelsRenderer = (
+  panel: string | undefined,
+  onOpen: (panel: string | null) => void,
+  group?: PanelGroupId,
+) => ReactNode;
 
 /** What every tab surface is handed: the machine, whether it answers, and the way to ask it things. */
 export interface MachineTabProps {
@@ -64,9 +70,9 @@ export type MachineTabSurfaces = Readonly<Partial<Record<MachineTabId, Component
 /** One glyph per tab, from the set the rest of Settings draws from. */
 const TAB_ICONS: Readonly<Record<MachineTabId, ReactNode>> = {
   runtimes: <Play size={15} aria-hidden="true" />,
-  credentials: <KeyRound size={15} aria-hidden="true" />,
+  agents: <PawPrint size={15} aria-hidden="true" />,
+  'sign-ins': <KeyRound size={15} aria-hidden="true" />,
   profiles: <Layers size={15} aria-hidden="true" />,
-  components: <Boxes size={15} aria-hidden="true" />,
   browser: <Globe size={15} aria-hidden="true" />,
   machine: <SlidersHorizontal size={15} aria-hidden="true" />,
 };

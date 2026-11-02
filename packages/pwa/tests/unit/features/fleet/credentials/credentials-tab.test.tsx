@@ -30,7 +30,7 @@ const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 const LOGIN = 'POST /v1/fleet/login';
 const FLOW = '/v1/fleet/login/flow-1';
 const LIST = 'GET /v1/fleet/credentials';
-const HASH = '#machines/studio-mac/credentials';
+const HASH = '#machines/studio-mac/sign-ins';
 
 afterEach(() => {
   window.location.hash = '';
@@ -133,7 +133,7 @@ describe('CredentialsTab · the list', () => {
     ).toEqual(['claude-personal', 'claude-work']);
 
     const personal = must(c.querySelector<HTMLElement>('[data-credential-row="claude-personal"]'), 'personal row');
-    expect(personal.getAttribute('href')).toBe('#machines/studio-mac/credentials/claude-personal');
+    expect(personal.getAttribute('href')).toBe('#machines/studio-mac/sign-ins/claude-personal');
     expect(personal.textContent).toContain('you@example.com');
     expect(personal.querySelector('[data-credential-badges]')?.textContent).toBe(
       'Claude onlypersonalShared with claude in your terminal',
@@ -316,7 +316,7 @@ describe('CredentialsTab · a login’s page', () => {
     expect(links[0]?.textContent).toContain('Default profile');
     expect(links[1]?.textContent).toContain('Agent work profile');
 
-    await click(c.querySelector('[data-page-back]'), 'Credentials');
+    await click(c.querySelector('[data-page-back]'), 'Sign-ins');
     expect(window.location.hash).toBe(HASH);
     expect(c.querySelector('[data-credential-page]')).toBeNull();
     expect(c.querySelectorAll('[data-credential-row]')).toHaveLength(3);
@@ -457,7 +457,7 @@ describe('CredentialsTab · Check now', () => {
     expect(view.container.querySelector('[data-credential-notice]')).toBeNull();
     expect(view.container.querySelector('[data-credential-page]')).not.toBeNull();
 
-    await click(view.container.querySelector('[data-page-back]'), 'Credentials');
+    await click(view.container.querySelector('[data-page-back]'), 'Sign-ins');
     expect(text(view.container, '[data-credentials-tab] > p[role="alert"]')).toBe(
       'This machine could not list its logins.',
     );

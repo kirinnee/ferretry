@@ -240,7 +240,7 @@ export function ContextToolsHarness({ frame }: { readonly frame: ContextToolsFra
   const [createClient] = useState(() => clientFor(frame));
   useState(() => {
     if (frame === 'components-mcp')
-      window.history.replaceState(null, '', `${window.location.search}${itemHref(MACHINE, 'components', '')}`);
+      window.history.replaceState(null, '', `${window.location.search}${itemHref(MACHINE, 'profiles', '')}`);
     return null;
   });
   if (frame === 'components-mcp')

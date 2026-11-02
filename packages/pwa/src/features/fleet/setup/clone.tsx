@@ -853,7 +853,7 @@ function DoneStep({
           const slot = slotFor(need);
           return slot === undefined ? null : (
             <a
-              href={machineItemHash(machineName, 'credentials', slot.id)}
+              href={machineItemHash(machineName, 'sign-ins', slot.id)}
               className="inline-flex min-h-control items-center gap-1 font-semibold text-accent underline"
               data-clone-need-sign-in={slot.id}
             >
@@ -868,7 +868,7 @@ function DoneStep({
           {result.slots.map(slot => (
             <a
               key={slot.id}
-              href={machineItemHash(machineName, 'credentials', slot.id)}
+              href={machineItemHash(machineName, 'sign-ins', slot.id)}
               data-clone-slot={slot.id}
               className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent"
             >
@@ -913,7 +913,7 @@ function DoneStep({
         </Button>
         {busiest === undefined ? null : (
           <a
-            href={machineItemHash(machineName, 'credentials', busiest.id)}
+            href={machineItemHash(machineName, 'sign-ins', busiest.id)}
             data-clone-sign-in={busiest.id}
             className="kt-btn"
             data-variant="primary"

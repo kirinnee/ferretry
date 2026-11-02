@@ -982,7 +982,7 @@ function loginNote(harness: HarnessKind, login: HostLogin): string {
     case 'not-signed-in':
       return `${label} isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.`;
     case 'unreadable':
-      return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Credentials tab.`;
+      return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Sign-ins tab.`;
     default:
       return `Your ${label} login can't be shared in place (${login.reason ?? 'it is not kept in a file'}), so this login needs its own sign-in.`;
   }

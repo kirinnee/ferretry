@@ -1,5 +1,5 @@
 /**
- * What the Credentials tab SAYS — the pure half (docs/design/account-model.md §3.2, §4.2, §4.6).
+ * What the Sign-ins tab SAYS — the pure half (docs/design/account-model.md §3.2, §4.2, §4.6).
  *
  * The daemon owns the facts: the status word and its sentence, the usage windows, who uses a login and
  * what signing it out would do. This module owns only the prose around them, so every sentence a person
@@ -145,7 +145,7 @@ export const usageBarText = (usage: UsageBar): string =>
 export const credentialsOf = (list: FleetCredentialList, harness: HarnessKind): readonly FleetCredentialView[] =>
   list.credentials.filter(credential => credentialHarnesses(credential).includes(harness));
 
-/** One group of the Credentials tab: the logins of one CLI, or the ones that drive both. */
+/** One group of the Sign-ins tab: the logins of one CLI, or the ones that drive both. */
 export interface CredentialGroup {
   readonly scope: LoginScope;
   readonly title: string;
@@ -153,7 +153,7 @@ export interface CredentialGroup {
 }
 
 /**
- * The Credentials tab's groups, each login listed ONCE: Claude Code, Codex, then "Claude Code + Codex"
+ * The Sign-ins tab's groups, each login listed ONCE: Claude Code, Codex, then "Claude Code + Codex"
  * for the logins that drive both. An empty group is left out.
  */
 export const credentialGroups = (list: FleetCredentialList): readonly CredentialGroup[] =>
