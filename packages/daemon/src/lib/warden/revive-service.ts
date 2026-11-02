@@ -39,6 +39,7 @@ import {
   reviveMessage,
 } from './revive.ts';
 import type { WardenFocusCard } from './focus-card.ts';
+import { fitOwnerNotice } from './owner-notice.ts';
 import { instantMs, isoFromMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';
 
@@ -130,8 +131,10 @@ export class WardenReviveService {
         await this.ports.notifyOwner({
           sessionId: subject.id,
           title: 'Auto-revive paused',
-          subject: `Auto-revive is paused until ${tripped.until}: ${tripped.why}.`,
-          why: `Ferretry started sessions again after they died, and they died again (${tripped.why}). It will not revive anything else until ${tripped.until}. Turn auto-revive off in config/warden.yaml (revive.enabled: false) to stop it altogether.`,
+          ...fitOwnerNotice({
+            subject: `Auto-revive is paused until ${tripped.until}: ${tripped.why}.`,
+            why: `Ferretry started sessions again after they died, and they died again (${tripped.why}). It will not revive anything else until ${tripped.until}. Turn auto-revive off in config/warden.yaml (revive.enabled: false) to stop it altogether.`,
+          }),
         });
     }
 

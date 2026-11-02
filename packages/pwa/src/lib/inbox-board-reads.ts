@@ -12,9 +12,55 @@
  * and asked again on a backoff. A retry is quiet — a failed board stays failed until a read lands — so a machine
  * that is down does not flash "Updating" every few seconds. Everything else is the agenda store's to say: a board
  * it holds is read, and one it does not hold and that has not failed is still on its first read.
+ *
+ * A FAILED BOARD SAYS WHY, in one short clause: "Couldn't read 3 items" alone sent the owner to a machine whose
+ * daemon answered every other request in a second, when the boards were in fact refused with a 500 for a file
+ * the daemon could not read. The clause is the last failed read's, so a board that fails differently says so.
  */
 
 import type { DeferredTimers } from './agenda-inbox.ts';
+import { MachineDeadlineError } from './machine-deadline.ts';
+import { DaemonResponseError } from './runtime-models.ts';
+
+/**
+ * Why a board's last read settled without it. `unsettled` is a read that ended without an error — the machine
+ * was unpaired or paired again while it ran — and has nothing to say beyond "Couldn't read".
+ */
+export type BoardReadFailure =
+  | 'error'
+  | 'busy'
+  | 'refused'
+  | 'not-found'
+  | 'timed-out'
+  | 'unexpected'
+  | 'no-answer'
+  | 'unsettled';
+
+/** What each failure says after "Couldn't read N items on <machine> —"; `unsettled` says nothing more. */
+export const BOARD_READ_FAILURE_WORDS: Readonly<Record<BoardReadFailure, string | undefined>> = {
+  error: 'the machine hit an error',
+  busy: 'the machine is busy',
+  refused: 'refused',
+  'not-found': 'not found',
+  'timed-out': 'timed out',
+  unexpected: 'unexpected answer',
+  'no-answer': 'no answer',
+  unsettled: undefined,
+};
+
+/** The failure a read's rejection is: the machine's own status when it answered, else how it did not. */
+export const boardReadFailure = (cause: unknown): BoardReadFailure => {
+  if (cause instanceof DaemonResponseError) {
+    if (cause.status >= 500) return 'error';
+    if (cause.status === 429) return 'busy';
+    if (cause.status === 401 || cause.status === 403) return 'refused';
+    return cause.status === 404 ? 'not-found' : 'unexpected';
+  }
+  if (cause instanceof MachineDeadlineError || (cause instanceof Error && cause.name === 'TimeoutError'))
+    return 'timed-out';
+  // The board's schema refused what the machine sent: it answered, with something this app cannot read.
+  return cause instanceof Error && cause.name === 'ZodError' ? 'unexpected' : 'no-answer';
+};
 
 /** One board the inbox wants held: its identity, the summary it is wanted for, and how to read it. */
 export interface InboxBoardWant {
@@ -41,15 +87,17 @@ interface Tracked {
   readonly run: number;
   /** Reads in a row that settled without the board. */
   readonly failures: number;
+  /** Why the last of them did; kept through a retry, so a board stays said the same way until a read lands. */
+  readonly failure?: BoardReadFailure;
   readonly retry: unknown;
 }
 
-const NONE: ReadonlySet<string> = new Set();
+const NONE: ReadonlyMap<string, BoardReadFailure> = new Map();
 
 export class InboxBoardReads {
   readonly #tracked = new Map<string, Tracked>();
   readonly #listeners = new Set<() => void>();
-  #failed: ReadonlySet<string> = NONE;
+  #failed: ReadonlyMap<string, BoardReadFailure> = NONE;
   #runs = 0;
 
   constructor(private readonly timers: DeferredTimers) {}
@@ -59,8 +107,8 @@ export class InboxBoardReads {
     return () => this.#listeners.delete(listener);
   };
 
-  /** The boards whose last read settled without them. Identity-stable while that set holds still. */
-  readonly getSnapshot = (): ReadonlySet<string> => this.#failed;
+  /** The boards whose last read settled without them, and why. Identity-stable while that map holds still. */
+  readonly getSnapshot = (): ReadonlyMap<string, BoardReadFailure> => this.#failed;
 
   /**
    * Makes the wanted boards the tracked ones: a board wanted for a summary it was not read for is read now, and
@@ -75,7 +123,7 @@ export class InboxBoardReads {
       const tracked = this.#tracked.get(want.id);
       if (tracked?.want.key === want.key) continue;
       if (tracked !== undefined) this.#cancel(tracked);
-      this.#start(want, tracked?.failures ?? 0);
+      this.#start(want, tracked?.failures ?? 0, tracked?.failure);
     }
     for (const [id, tracked] of [...this.#tracked]) {
       if (seen.has(id)) continue;
@@ -92,28 +140,37 @@ export class InboxBoardReads {
     this.#publish();
   }
 
-  #start(want: InboxBoardWant, failures: number): void {
+  #start(want: InboxBoardWant, failures: number, failure: BoardReadFailure | undefined): void {
     this.#runs += 1;
     const run = this.#runs;
-    this.#tracked.set(want.id, { want, run, failures, retry: undefined });
-    void want
-      .read()
-      .catch(() => undefined)
-      .then(() => this.#settled(want.id, run));
+    this.#tracked.set(want.id, {
+      want,
+      run,
+      failures,
+      ...(failure === undefined ? {} : { failure }),
+      retry: undefined,
+    });
+    void want.read().then(
+      () => this.#settled(want.id, run, 'unsettled'),
+      (cause: unknown) => this.#settled(want.id, run, boardReadFailure(cause)),
+    );
   }
 
-  #settled(id: string, run: number): void {
+  #settled(id: string, run: number, failure: BoardReadFailure): void {
     const tracked = this.#tracked.get(id);
     if (tracked?.run !== run) return;
     if (tracked.want.held()) {
-      this.#tracked.set(id, { ...tracked, failures: 0 });
+      const { failure: _failure, ...rest } = tracked;
+      this.#tracked.set(id, { ...rest, failures: 0 });
     } else {
       const failures = tracked.failures + 1;
+      // A read that only ended says nothing, so it never overwrites a reason an earlier read gave.
+      const said = failure === 'unsettled' ? (tracked.failure ?? failure) : failure;
       const retry = this.timers.setTimeout(() => {
         if (this.#tracked.get(id)?.run !== run) return;
-        this.#start(tracked.want, failures);
+        this.#start(tracked.want, failures, said);
       }, retryDelay(failures));
-      this.#tracked.set(id, { ...tracked, failures, retry });
+      this.#tracked.set(id, { ...tracked, failures, failure: said, retry });
     }
     this.#publish();
   }
@@ -123,9 +180,12 @@ export class InboxBoardReads {
   }
 
   #publish(): void {
-    const failed = [...this.#tracked].filter(([, tracked]) => tracked.failures > 0).map(([id]) => id);
-    if (failed.length === this.#failed.size && failed.every(id => this.#failed.has(id))) return;
-    this.#failed = failed.length === 0 ? NONE : new Set(failed);
+    const failed = [...this.#tracked].flatMap(([id, tracked]): [string, BoardReadFailure][] =>
+      tracked.failures > 0 && tracked.failure !== undefined ? [[id, tracked.failure]] : [],
+    );
+    if (failed.length === this.#failed.size && failed.every(([id, failure]) => this.#failed.get(id) === failure))
+      return;
+    this.#failed = failed.length === 0 ? NONE : new Map(failed);
     for (const listener of [...this.#listeners]) listener();
   }
 }

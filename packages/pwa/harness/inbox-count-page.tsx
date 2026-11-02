@@ -16,6 +16,7 @@ import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
 import { AgendaWireDirectory } from '../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../src/lib/daemon-scope.ts';
+import { DaemonResponseError } from '../src/lib/runtime-models.ts';
 import { type ToTestCard, toTestCards, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { SessionsBarAgenda } from '../src/shell/sessions-bar-agenda.tsx';
@@ -150,7 +151,8 @@ const client = {
     if (daemon.daemonId === laptop.daemonId) {
       await after(400);
       store.fail(scope);
-      throw new Error('did not answer within 20s');
+      // What a daemon answers for a board it cannot read (&F408): the line says so.
+      throw new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error');
     }
     await after(150);
     const value = BOARDS.get(`${daemon.daemonId}/${scope.sessionId}`);

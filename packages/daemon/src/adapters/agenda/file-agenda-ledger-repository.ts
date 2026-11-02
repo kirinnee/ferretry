@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   AGENDA_FILES,
+  agendaLedgerDocument,
   type AgendaFileStore,
   isAgendaSessionId,
   parseAgendaLedger,
@@ -109,7 +110,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
 
   private async write(sessionId: string, ledger: AgendaLedger): Promise<void> {
     try {
-      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, `${JSON.stringify(ledger, null, 2)}\n`);
+      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, agendaLedgerDocument(ledger));
     } finally {
       // After the disk, whether or not it landed: the next read asks the file. A read racing this write may
       // keep the old copy, but against the old file's identity, which the next read no longer finds.

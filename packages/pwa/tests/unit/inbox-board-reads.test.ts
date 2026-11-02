@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { DeferredTimers } from '../../src/lib/agenda-inbox.ts';
+import { MachineDeadlineError } from '../../src/lib/machine-deadline.ts';
+import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import {
+  BOARD_READ_FAILURE_WORDS,
+  boardReadFailure,
   InboxBoardReads,
   type InboxBoardWant,
   RETRY_FIRST_MS,
@@ -33,7 +37,7 @@ const manualTimers = () => {
 
 /** A board the test settles by hand: how many reads it saw, and whether the store would hold it. */
 const board = (id: string, key = 'k1') => {
-  const state = { reads: 0, held: false, settle: (_held: boolean, _fail?: boolean): void => undefined };
+  const state = { reads: 0, held: false, settle: (_held: boolean, _fail?: boolean | Error): void => undefined };
   const want = (summary = key): InboxBoardWant => ({
     id,
     key: summary,
@@ -42,7 +46,8 @@ const board = (id: string, key = 'k1') => {
         state.reads += 1;
         state.settle = (held, fail = false) => {
           state.held = held;
-          if (fail) reject(new Error('did not answer within 20s'));
+          if (fail instanceof Error) reject(fail);
+          else if (fail) reject(new MachineDeadlineError(20_000));
           else resolve();
         };
       }),
@@ -84,14 +89,14 @@ describe('InboxBoardReads', () => {
 
     down.state.settle(false, true);
     await flush();
-    expect([...reads.getSnapshot()]).toEqual(['down']);
+    expect([...reads.getSnapshot().keys()]).toEqual(['down']);
     expect(told).toBe(1);
     expect([...armed.values()].map(timer => timer.after)).toEqual([RETRY_FIRST_MS]);
 
     // The retry is quiet: the board stays failed while it is read again.
     fire();
     expect(down.state.reads).toBe(2);
-    expect([...reads.getSnapshot()]).toEqual(['down']);
+    expect([...reads.getSnapshot().keys()]).toEqual(['down']);
     down.state.settle(false);
     await flush();
     expect([...armed.values()].map(timer => timer.after)).toEqual([RETRY_FIRST_MS * 2]);
@@ -117,7 +122,7 @@ describe('InboxBoardReads', () => {
     // The pending retry gave way to the read the new summary started.
     expect(armed.size).toBe(0);
     expect(down.state.reads).toBe(2);
-    expect([...reads.getSnapshot()]).toEqual(['down']);
+    expect([...reads.getSnapshot().keys()]).toEqual(['down']);
     down.state.settle(true);
     await flush();
     expect(reads.getSnapshot().size).toBe(0);
@@ -191,6 +196,63 @@ describe('InboxBoardReads', () => {
     reads.sync([down.want(), up.want()]);
     expect(down.state.reads).toBe(2);
     expect(up.state.reads).toBe(2);
+  });
+
+  test('should say why a board failed, keep saying it through a quiet retry, and change when the reason does', async () => {
+    const { timers, fire } = manualTimers();
+    const reads = new InboxBoardReads(timers);
+    let told = 0;
+    reads.subscribe(() => {
+      told += 1;
+    });
+    const down = board('down');
+    reads.sync([down.want()]);
+    down.state.settle(
+      false,
+      new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error'),
+    );
+    await flush();
+    expect([...reads.getSnapshot()]).toEqual([['down', 'error']]);
+
+    fire();
+    expect(reads.getSnapshot().get('down')).toBe('error');
+    down.state.settle(false, new DaemonResponseError(500, 'again'));
+    await flush();
+    fire();
+    down.state.settle(false);
+    await flush();
+    expect(reads.getSnapshot().get('down')).toBe('error');
+    expect(told).toBe(1);
+
+    reads.sync([down.want('k2')]);
+    expect(reads.getSnapshot().get('down')).toBe('error');
+    down.state.settle(false, true);
+    await flush();
+    expect(reads.getSnapshot().get('down')).toBe('timed-out');
+    expect(told).toBe(2);
+  });
+
+  test.each([
+    [new DaemonResponseError(500, 'boom'), 'error'],
+    [new DaemonResponseError(502, 'daemon returned another session'), 'error'],
+    [new DaemonResponseError(429, 'too many requests'), 'busy'],
+    [new DaemonResponseError(409, 'conflict'), 'unexpected'],
+    [new DaemonResponseError(401, 'unauthorized'), 'refused'],
+    [new DaemonResponseError(403, 'not granted'), 'refused'],
+    [new DaemonResponseError(404, 'unknown session'), 'not-found'],
+    [new DaemonResponseError(400, 'bad'), 'unexpected'],
+    [new MachineDeadlineError(20_000), 'timed-out'],
+    [new DOMException('signal timed out', 'TimeoutError'), 'timed-out'],
+    [Object.assign(new Error('schema'), { name: 'ZodError' }), 'unexpected'],
+    [new TypeError('Failed to fetch'), 'no-answer'],
+    ['not even an error', 'no-answer'],
+  ] as const)('should read %p as %s', (cause, failure) => {
+    expect(boardReadFailure(cause)).toBe(failure);
+  });
+
+  test('should say every failure in a short clause, except a read that only ended', () => {
+    expect(BOARD_READ_FAILURE_WORDS.error).toBe('the machine hit an error');
+    expect(BOARD_READ_FAILURE_WORDS.unsettled).toBeUndefined();
   });
 
   test('should double the wait after each failure, up to five minutes', () => {

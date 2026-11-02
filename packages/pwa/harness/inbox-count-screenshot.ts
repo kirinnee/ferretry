@@ -86,6 +86,9 @@ for (const form of ['phone', 'desktop'] as const) {
     await page.waitForTimeout(300);
     const where = `${form} ${theme}`;
     if (errors.length > 0) problems.push(`${where}: ${errors.join('; ')}`);
+    const unreadable = (await page.locator('[data-agenda-unreadable]').textContent()) ?? '';
+    if (!unreadable.includes(' — the machine hit an error. Trying again.'))
+      problems.push(`${where}: the unreadable line does not say why: ${unreadable}`);
     if ((await page.locator('[data-agenda-updating], [data-agenda-reading]').count()) > 0)
       problems.push(`${where}: still says Updating after every read settled`);
     const counts = await page.evaluate(() =>
