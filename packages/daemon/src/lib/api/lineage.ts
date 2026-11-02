@@ -1,3 +1,5 @@
+import { agentSessionOf } from './agent-caller.ts';
+import { tryParseSessionId } from '../session-id.ts';
 import { ApiError } from './error.ts';
 import type { RouteContext } from './route.ts';
 
@@ -5,27 +7,30 @@ import type { RouteContext } from './route.ts';
 const PARENT_MISMATCH_CODE = 'parent_mismatch';
 
 /**
- * WHO A NEW SESSION'S PARENT IS, for a caller on a ferret's OWN session credential: that ferret, always
+ * WHO A NEW SESSION'S PARENT IS, for any caller that names a ferret's session: that ferret, always
  * (docs/pack-mode.md § Parent and child). The one rule every route that starts a session on a ferret's
  * behalf applies — `POST /v1/sessions` and `POST /v1/pack/new` — so the two can never disagree.
  *
  * - A `parent` naming another session is refused `403 parent_mismatch`: that session would gain lineage
- *   over the child, and its sub-ferret limits would be the ones charged.
- * - An absent `parent` is filled in from the credential, so a ferret can never start a parent-less,
- *   top-level session: every session it starts is its child, counted against its limits and its depth.
+ *   over the child, its sub-ferret limits would be the ones charged, and the Inbox would name the child's
+ *   items by that session's root.
+ * - An absent `parent` is filled in from the caller's session, so a ferret can never start a parent-less,
+ *   top-level session.
  *
- * Any other caller is unchanged. The owner (the admin token at the machine, a paired device) may start a
- * session for any parent or none, and the admin token naming a ferret in `x-ferretry-session-id` stays the
- * honest-client fallback it always was: the parent it names is the body's, exactly as before.
+ * The caller's session is its own credential's, or — for the honest-client admin token — the one named in
+ * `x-ferretry-session-id` (`agentSessionOf`). The owner (the admin token with no session header, a paired
+ * device) names no session and is unchanged: it may start a session for any parent or none.
  */
 export function lineageOf<T extends { readonly parent?: string | undefined }>(context: RouteContext, request: T): T {
-  const credential = context.credential;
-  if (credential?.tokenClass !== 'session') return request;
-  if (request.parent !== undefined && request.parent !== credential.sessionId)
+  const sessionId = agentSessionOf(context);
+  if (sessionId === undefined) return request;
+  if (tryParseSessionId(sessionId) === undefined)
+    throw new ApiError(400, 'the session id this request carries is not a session id', 'invalid_session_id');
+  if (request.parent !== undefined && request.parent !== sessionId)
     throw new ApiError(
       403,
-      'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your credential',
+      'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your session',
       PARENT_MISMATCH_CODE,
     );
-  return { ...request, parent: credential.sessionId };
+  return { ...request, parent: sessionId };
 }

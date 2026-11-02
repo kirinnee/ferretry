@@ -657,6 +657,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           guard: subsystems.grants,
           knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
           ...(subsystems.stateHomes === undefined ? {} : { stateHomes: subsystems.stateHomes }),
+          sessionExists: async sessionId => (await subsystems.sessions.get(sessionId)) !== undefined,
         }),
         // Beside the stop it is the gentler counterpart of: a one-segment pattern under `/v1/sessions/:sessionId`
         // with its own final literal, so it neither shadows nor is shadowed by the deeper per-session routes.

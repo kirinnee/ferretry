@@ -436,6 +436,28 @@ describe('POST /v1/pack/new', () => {
     should(subsystem.started).be.empty();
   });
 
+  it('should make the admin token plus session header a child of that session, refusing a foreign parent', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+    const { parent: _none, ...orphan } = body;
+    const headed = (payload: unknown) =>
+      request({
+        method: 'POST',
+        path: '/v1/pack/new',
+        headers: agentIn(FERRET_SESSION),
+        body: JSON.stringify(payload),
+      });
+
+    // Act
+    const filled = await dispatcher(subsystem).dispatch(headed(orphan));
+    const foreign = await dispatcher(subsystem).dispatch(headed({ ...body, parent: 'someone-else' }));
+
+    // Assert
+    should(filled.status).equal(201);
+    should([foreign.status, jsonBody(foreign).code]).deepEqual([403, 'parent_mismatch']);
+    should(subsystem.started.map(started => started.parent)).deepEqual([FERRET_SESSION]);
+  });
+
   it('should let a caller at the machine name the sub-ferret’s folder', async () => {
     // Arrange
     const subsystem = new FakePack();

@@ -271,6 +271,8 @@ export interface SessionLaunchGate {
   readonly knownRoots: () => Promise<readonly string[]>;
   /** The daemon's own directories: a ferret starts no session in them. Absent: a ferret names no cwd. */
   readonly stateHomes?: StateHomeReach;
+  /** Whether a session of this id exists. Absent: a start's parent is not checked. */
+  readonly sessionExists?: (sessionId: string) => Promise<boolean>;
 }
 
 const TERMINAL_USE: CapabilityDemand = { capability: 'terminal', axis: 'use' };
@@ -340,6 +342,8 @@ async function start(
   // A ferret's start is its own child, whatever the body says (`lineageOf`): never a top-level session past the
   // sub-ferret limits, and never another session's child. The payload stays the bytes sent, for the recovery read.
   const request = lineageOf(context, parseStart(payload));
+  if (request.parent !== undefined && gate.sessionExists !== undefined && !(await gate.sessionExists(request.parent)))
+    throw new ApiError(404, `there is no session ${request.parent} to start a child of`, 'unknown_parent');
   // The Warden's own label marks a session as the Warden's tree: exempt from the sub-ferret limits, resource caps
   // and supervision. Only the daemon's own Warden spawner sets it; a ferret asking for it is refused.
   if (request.label?.trim() === WARDEN_LABEL && isAgentCaller(context))
