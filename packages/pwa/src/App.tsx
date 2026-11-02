@@ -54,6 +54,7 @@ import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
+import { AddSkillsPage } from './features/context-rail/add-skills-page.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
@@ -92,9 +93,6 @@ import { usePackSessionActions } from './features/pack/pack-session-actions.tsx'
 import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
-import { JoinScreen } from './features/shared/join-screen.tsx';
-import { SharedEntry } from './features/shared/shared-entry.tsx';
-import { SharedWithMe } from './features/shared/shared-with-me.tsx';
 import { LaneEditorPage } from './features/projects/lane-editor.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
@@ -126,10 +124,14 @@ import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { performanceSettingsTab } from './features/settings/performance-settings.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
-import { terminalSlotsSettingsTab } from './features/settings/terminal-slots-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
+import { terminalSlotsSettingsTab } from './features/settings/terminal-slots-settings.tsx';
 import { ViewportOverlay } from './features/settings/viewport-details.tsx';
+import { JoinScreen } from './features/shared/join-screen.tsx';
+import { SharedEntry } from './features/shared/shared-entry.tsx';
+import { SharedWithMe } from './features/shared/shared-with-me.tsx';
+import { SharingPage } from './features/sharing/sharing-page.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
@@ -141,9 +143,8 @@ import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
-import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
-import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
+import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
@@ -172,8 +173,8 @@ import {
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
 import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
-import { useRuleDeepLink } from './hooks/use-rule-deep-link.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
+import { useRuleDeepLink } from './hooks/use-rule-deep-link.ts';
 import { useSendView } from './hooks/use-send-view.ts';
 import {
   canRegister,
@@ -189,6 +190,7 @@ import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { useWorkProjectNames } from './hooks/use-work-project-names.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
+import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
 import { agendaConversationPath, agendaTargetFromSearch, inboxTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.tsx';
@@ -217,6 +219,7 @@ import type {
 } from './lib/notify.ts';
 import { installPortraitLock } from './lib/orientation-lock.ts';
 import {
+  type AddSkillsPageProps,
   type BoardPageProps,
   type DaemonPageProps,
   PageHost,
@@ -235,6 +238,7 @@ import {
   daemonLearningPath,
   daemonProjectPath,
   daemonQueuePath,
+  daemonSessionPath,
   daemonSettingsPath,
   daemonWardenPath,
   isDaemonless,
@@ -264,11 +268,11 @@ import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { captureRuleDeepLink, listenForRuleDeepLinks } from './lib/rule-deep-link.ts';
-import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
+import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import {
   type AppStore,
   createAppStore,
@@ -297,7 +301,6 @@ import {
 import { AppUpdatedToast } from './shell/app-updated-toast.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
-import { SharingPage } from './features/sharing/sharing-page.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import {
@@ -508,6 +511,12 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       ];
     case 'session':
       return [{ href: home, label: 'Home' }, { label: route.sessionId }];
+    case 'add-skills':
+      return [
+        { href: home, label: 'Home' },
+        { href: daemonSessionPath(route.daemonId, route.sessionId), label: route.sessionId },
+        { label: 'Add skills' },
+      ];
     case 'attention':
       return [{ href: home, label: 'Home' }, { label: 'Inbox' }];
     case 'board':
@@ -1900,6 +1909,25 @@ function SharingRoute({ connection, tab }: SharingPageProps) {
   );
 }
 
+/** /d/:daemon/session/:session/skills: the subscribed catalogs' skills, to install into that session. */
+function AddSkillsRoute({ connection, sessionId }: AddSkillsPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
+  const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
+  const fleet = useSyncExternalStore(subscribe, snapshot);
+  const cwd = fleet.daemons.get(connection.daemonId)?.byId.get(sessionId)?.config.cwd;
+  return (
+    <AddSkillsPage
+      connection={connection}
+      machineName={daemonDisplayName(connection)}
+      sessionId={sessionId}
+      {...(cwd === undefined ? {} : { cwd })}
+      onNavigate={navigate}
+    />
+  );
+}
+
 function SettingsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const lockedMachines = useLockedMachines(store.unlockGate);
@@ -2475,6 +2503,7 @@ const PAGE_SLOTS: PageHostSlots = {
   ProjectDetail: ProjectDetailRoute,
   ProjectLanes: ProjectLanesRoute,
   SessionChat: SessionRoute,
+  AddSkills: AddSkillsRoute,
   Sharing: SharingRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,

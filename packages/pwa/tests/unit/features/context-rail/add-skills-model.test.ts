@@ -1,27 +1,35 @@
 import { beforeAll, describe, expect, it } from 'bun:test';
 import type { CatalogInstall } from '@ferretry/protocol';
 import {
+  ALL_CHIP,
   accountSentence,
   CLAUDE_LIVE,
   CLAUDE_RELOAD,
   CODEX_NEXT,
+  catalogChips,
   filterRows,
+  groupByCatalog,
   installPlan,
   landedSentence,
   likelyNewFolder,
-  newInstalls,
   NOT_HERE,
+  newInstalls,
   PICK_A_PLACE,
   PROJECT_SENTENCE,
   projectHolding,
-  readsPlace,
   type RuntimeChoice,
+  readsPlace,
   scopeLine,
   skillRows,
 } from '../../../../src/features/context-rail/add-skills-model.ts';
 import { cardState } from '../../../../src/features/shared/shared-screens-model.ts';
 import { installRecord } from '../../../support/catalog-views.ts';
-import { type SharedItemFixture, okAttempt, sharedItemFixture } from '../../../support/shared-screens.ts';
+import {
+  okAttempt,
+  otherCatalogView,
+  type SharedItemFixture,
+  sharedItemFixture,
+} from '../../../support/shared-screens.ts';
 import { SKILLS, skill } from './context-rail-fixtures.ts';
 
 const projects = [
@@ -128,6 +136,68 @@ describe('the skills of a subscription', () => {
     expect(filterRows(rows, 'PDF')).toHaveLength(1);
     expect(filterRows(rows, 'ocr studio kirin')).toHaveLength(1);
     expect(filterRows(rows, 'pdf nothing')).toHaveLength(0);
+  });
+});
+
+describe('which catalog a skill is from', () => {
+  const rowsOf = (...views: ReturnType<typeof otherCatalogView>[]) => {
+    const state = cardState(okAttempt({ ...shared.browse, catalogs: views }));
+    if (state.kind !== 'ok') throw new Error('expected an ok card');
+    return skillRows(state, 'pub', 'Studio', new Map());
+  };
+
+  it('keeps the catalog on each row, apart from the publisher', () => {
+    expect(rowsOf(shared.view)[0]).toMatchObject({
+      catalogKey: `pub/${shared.view.catalogId}`,
+      catalogName: "Kirin's catalog",
+      publisher: 'Studio',
+    });
+  });
+
+  it('offers All and one chip per catalog, counting what the search kept', () => {
+    const all = rowsOf(shared.view, otherCatalogView(shared));
+    expect(catalogChips(all, all).map(chip => [chip.key === ALL_CHIP ? 'all' : chip.label, chip.count])).toEqual([
+      ['all', 2],
+      ["Kirin's catalog", 1],
+      ['Design catalog', 1],
+    ]);
+    expect(catalogChips(all, filterRows(all, 'ocr-tools')).map(chip => chip.count)).toEqual([1, 0, 1]);
+  });
+
+  it('offers no chips for one catalog, and names two catalogs of one name with their publisher', () => {
+    expect(catalogChips(rowsOf(shared.view), rowsOf(shared.view))).toEqual([]);
+    const same = [
+      ...rowsOf(shared.view),
+      ...skillRows(
+        (() => {
+          const state = cardState(
+            okAttempt({ ...shared.browse, catalogs: [otherCatalogView(shared, "Kirin's catalog")] }),
+          );
+          if (state.kind !== 'ok') throw new Error('expected an ok card');
+          return state;
+        })(),
+        'other',
+        'Guild',
+        new Map(),
+      ),
+    ];
+    expect(catalogChips(same, same).map(chip => chip.label)).toEqual([
+      'All catalogs',
+      "Kirin's catalog (Studio)",
+      "Kirin's catalog (Guild)",
+    ]);
+  });
+
+  it('groups rows by catalog in order, or narrows to the one chosen', () => {
+    const all = rowsOf(shared.view, otherCatalogView(shared));
+    expect(groupByCatalog(all, ALL_CHIP).map(group => [group.name, group.publisher, group.rows.length])).toEqual([
+      ["Kirin's catalog", 'Studio', 1],
+      ['Design catalog', 'Studio', 1],
+    ]);
+    expect(groupByCatalog(all, `pub/${otherCatalogView(shared).catalogId}`).map(group => group.name)).toEqual([
+      'Design catalog',
+    ]);
+    expect(groupByCatalog([], ALL_CHIP)).toEqual([]);
   });
 });
 

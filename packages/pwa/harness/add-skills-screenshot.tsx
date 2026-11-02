@@ -1,15 +1,14 @@
 /**
- * "+ Add skills" (docs/catalogs.md "Add skills to this session", &B131 A2): the Skills tab with its + Add skills
- * button, the sheet listing the skills of the catalogs this browser subscribes to (one Installed, the rest Install,
- * one publisher locked), and the install review opened from a row with the place already chosen as This project.
- * On a phone and a desktop, light and dark.
+ * The Add skills page (docs/catalogs.md "Add skills to this session", &B131): skills grouped under the catalog they
+ * are from, a filter chip per catalog, Refresh picking up a skill a catalog added since the page opened, one
+ * publisher locked, and the install review opened from a row. On a phone and a desktop, light and dark.
  *
  *   bun harness/add-skills-screenshot.tsx      # writes harness/out/add-skills-*.png
  *
- * It renders the REAL `ContextRailBody` (and through it `AddSkillsSheet`, `SharedItemSheet` and
- * `InstallFromFileSheet`) against fake members, an invented machine and one catalog signed in the page with a
- * throwaway key, so the verification the app runs is the real one. All names, folders and ids are invented. It
- * fails if any frame scrolls sideways or a button in the sheet is shorter than 44px on the phone.
+ * It renders the REAL `AddSkillsPage` (and through it `SharedItemSheet`) against fake members, an invented machine
+ * and catalogs signed in the page with a throwaway key, so the verification the app runs is the real one. All names,
+ * folders and ids are invented. It fails if any frame scrolls sideways or a button on the page is shorter than 44px
+ * on the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -33,7 +32,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
+import { AddSkillsPage } from '../../src/features/context-rail/add-skills-page.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { crypto } from '../../tests/support/catalog-files.ts';
 import { installPreview, installRecord } from '../../tests/support/catalog-views.ts';
@@ -63,17 +62,25 @@ const FLOOP = entryNamed(FLOOP_ID, 'floop', 'Review, fix and re-review until the
 const withItems = (view, items, change = {}) => ({ ...view, ...change, manifest: { ...view.manifest, ...change, items } });
 const view = fixture.view;
 
+const DESIGN = withItems(view, [
+  entryNamed('itm_' + 'd'.repeat(22), 'brand-voice', 'Keep copy in the brand voice', 1),
+], { catalogId: 'cat_' + 'd'.repeat(22), name: 'Design catalog' });
+const STUDIO_ITEMS = [
+  entryNamed('itm_' + 'r'.repeat(22), 'review-pr', 'Walk a pull request the way the team does', 2),
+  entryNamed('itm_' + 't'.repeat(22), 'commit-style', 'Write commit messages in the house style', 1),
+];
+window.__publishNew = () => {
+  STUDIO_ITEMS.push(entryNamed('itm_' + 'n'.repeat(22), 'release-notes', 'Draft release notes from merged pull requests', 1));
+};
+
 const BROWSE = {
-  [KIRIN.daemonId]: { kind: 'ok', value: { ...fixture.browse, catalogs: [withItems(view, [skillEntry, FLOOP, mcpEntry])] } },
+  [KIRIN.daemonId]: { kind: 'ok', value: { ...fixture.browse, catalogs: [withItems(view, [skillEntry, FLOOP, mcpEntry]), DESIGN] } },
   [INES.daemonId]: {
     kind: 'ok',
     value: {
       ...fixture.browse,
       catalogs: [
-        withItems(view, [
-          entryNamed('itm_' + 'r'.repeat(22), 'review-pr', 'Walk a pull request the way the team does', 2),
-          entryNamed('itm_' + 't'.repeat(22), 'commit-style', 'Write commit messages in the house style', 1),
-        ], { catalogId: 'cat_' + 'r'.repeat(22), name: 'Studio skills' }),
+        withItems(view, STUDIO_ITEMS, { catalogId: 'cat_' + 'r'.repeat(22), name: 'Studio skills' }),
       ],
     },
   },
@@ -118,35 +125,20 @@ const SKILLS = {
   ],
 };
 
-const addSkills = {
-  connection: CONNECTION,
-  machineName: MACHINE,
-  cwd: '/work/app/src',
-  onSubscribe: () => undefined,
-  install: { createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] },
-  members,
-};
-
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  <main style={{ margin: '0 auto', maxWidth: 440, padding: '12px 0' }}>
-    <section data-frame="" className="flex flex-col overflow-hidden rounded border border-border-soft bg-surface">
-      <ContextRailBody
-        sessionId="harness-session"
+  <main style={{ margin: '0 auto', maxWidth: 1100, padding: '8px 0' }}>
+    <section data-frame="" className="flex flex-col overflow-hidden rounded border border-border-soft bg-surface" style={{ height: 'min(900px, 100vh)' }}>
+      <AddSkillsPage
+        connection={CONNECTION}
         machineName={MACHINE}
-        loadMcp={async () => ({ problems: [], servers: [] })}
-        loadSkills={async () => SKILLS}
-        loadSkillFile={async path => ({ path, content: '# Skill' })}
-        loadDocs={async () => []}
-        onInsertSkill={() => undefined}
-        onOpenFile={() => undefined}
-        catalogs={{ connection: CONNECTION, createClient }}
-        addSkills={addSkills}
-        tabs={['skills', 'mcp']}
-        tab="skills"
-        label="Context sections"
-        now={() => NOW}
+        sessionId="harness-session"
+        cwd="/work/app/src"
+        onNavigate={() => undefined}
+        install={{ createClient, crypto, projects: [{ name: 'app', path: '/work/app' }] }}
+        members={members}
+        loadInventory={async () => SKILLS}
       />
     </section>
   </main>,
@@ -199,7 +191,7 @@ const PHONE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
 const VIEWPORTS = {
-  phone: { viewport: { width: 390, height: 1400 }, isMobile: true, hasTouch: true, userAgent: PHONE_UA },
+  phone: { viewport: { width: 390, height: 900 }, isMobile: true, hasTouch: true, userAgent: PHONE_UA },
   desktop: { viewport: { width: 1280, height: 1100 } },
 } as const;
 
@@ -238,32 +230,39 @@ const shot = async (page: Page, name: string, theme: string, vp: string, around:
 const open = async (page: Page, theme: string): Promise<void> => {
   await page.goto(`${server.url}?theme=${theme}`);
   await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
-  await page.locator('[data-context-add-skills]').waitFor({ state: 'visible' });
+  await page.locator('[data-add-skills-installed]').waitFor({ state: 'visible' });
+  await page.locator('[data-add-skills-locked]').waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
 };
 
-const SHEET = ['[role="dialog"]'];
+const FRAME = ['[data-frame]'];
 
 const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await open(page, theme);
-  await shot(page, 'tab', theme, vp, ['[data-frame]']);
-
-  await page.locator('[data-context-add-skills]').click();
-  await page.locator('[data-add-skills-installed]').waitFor({ state: 'visible' });
-  await page.locator('[data-add-skills-locked]').waitFor({ state: 'visible' });
   if (vp === 'phone') {
-    for (const button of await page.locator('[role="dialog"] button').all()) {
+    for (const button of await page.locator('[data-frame] button').all()) {
       const box = await button.boundingBox();
-      if (box !== null && box.height < 44) fail(`a button in the sheet is ${box.height}px tall on the phone`);
+      if (box !== null && box.height < 44) fail(`a button on the page is ${box.height}px tall on the phone`);
     }
   }
-  await shot(page, 'sheet', theme, vp, SHEET);
+  await shot(page, 'page', theme, vp, FRAME);
+
+  await page.locator('[data-context-chip]', { hasText: 'Design catalog' }).click();
+  await page.waitForTimeout(200);
+  await shot(page, 'filtered', theme, vp, FRAME);
+  await page.locator('[data-context-chip="all"]').click();
+
+  await page.evaluate(() => (window as unknown as { __publishNew: () => void }).__publishNew());
+  await page.locator('[data-add-skills-refresh]').click();
+  await page.locator('[data-add-skills-row]', { hasText: 'release-notes' }).waitFor({ state: 'visible' });
+  await page.waitForTimeout(300);
+  await shot(page, 'refreshed', theme, vp, FRAME);
 
   await page.locator('[data-add-skills-row]', { hasText: 'pdf-tools' }).locator('[data-add-skills-install]').click();
   await page.locator('[data-shared-install-button]').click();
   await page.locator('[data-catalog-scope]').waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
-  await shot(page, 'target', theme, vp, SHEET);
+  await shot(page, 'target', theme, vp, ['[role="dialog"]']);
 };
 
 try {
@@ -287,7 +286,7 @@ try {
       }
     }
   }
-  process.stdout.write('✅ + Add skills does not scroll sideways, and its buttons are 44px tall on a phone\n');
+  process.stdout.write('✅ The Add skills page does not scroll sideways, and its buttons are 44px tall on a phone\n');
 } finally {
   await browser.close();
   server.stop();

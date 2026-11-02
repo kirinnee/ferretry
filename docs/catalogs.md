@@ -1380,23 +1380,30 @@ ACTIVE in this session … the add button is too overloaded").
   A `skills/` folder that did not exist when the session started needs `/reload-skills`
   ([Claude Code skills](https://code.claude.com/docs/en/skills)). Codex: see the finding below.
 
-### + Add skills, the sheet (&B131 A2)
+### + Add skills, the page (&B131 A2)
 
-The Skills tab has one **+ Add skills** button by its "N active in this session" line
-(`features/context-rail/add-skills-sheet.tsx`). It opens **Add skills to this session**:
+The Skills tab has one **+ Add skills** button by its "N active in this session" line. It goes to a page of its own,
+**Add skills** at `/d/<daemon>/session/<id>/skills` (`features/context-rail/add-skills-page.tsx`), with **Back to the
+session** and **Refresh** at the top; the install review stays a sheet over it. The page:
 
-- **From your subscriptions**: every skill of every catalog this browser subscribes to, one row each with the name,
-  "publisher · catalog", the version and **Install** (or **Installed**, read from the machine's install records by the
-  publisher and item id). A search field narrows by every word typed. A locked publisher is one line plus **Unlock with
-  passkey**; an unreachable one says so in one line with **Try again**; a refused or failed one says why. Only the
-  skills of a catalog that verified are listed.
-- **Subscribe with a link…** opens Sharing › Shared with me, where an invite is pasted. The sheet never pastes a link.
+- **From your subscriptions**: every skill of every catalog this browser subscribes to, **grouped under the catalog it
+  is from**. Each group has the catalog's name, "from ‹publisher›" and its skill count; each row has the name, the
+  version and **Install** (or **Installed**, read from the machine's install records by the publisher and item id). A
+  search field narrows by every word typed. When more than one catalog lists a skill, a **filter chip per catalog**
+  (All catalogs first, each with the count the search kept) narrows to one; two catalogs of the same name are told apart
+  by their publisher. A locked publisher is one line plus **Unlock with passkey**; an unreachable one says so in one
+  line with **Try again**; a refused or failed one says why. Only the skills of a catalog that verified are listed.
+- **Refresh** reads the subscriptions, every catalog and the machine's install records again, so a skill a catalog added
+  after the page opened shows up. The rows already on screen stay while it reads, a filter on a catalog that vanished
+  falls back to All, and the result is announced ("Refreshed."). Nothing is polled: the page changes only when the
+  person presses it or installs something.
+- **Subscribe with a link…** opens Sharing › Shared with me, where an invite is pasted. The page never pastes a link.
 - **Install** goes through the existing review and hand-off (`SharedItemSheet` → `InstallFromFileSheet`, the same
   passkey and the same `/v1/catalog-installs` routes). The only new behaviour is the **default place**:
   **This project (every session in this folder)** when the session's folder is inside a registered project (the
   deepest one wins), otherwise **This account (every session on ‹runtime›)**, by the runtime the skills inventory
-  names. When neither can be told the sheet says so and the person picks. The person can always change it.
-- **After an install** the Skills list re-reads and the sheet says where it went, in two sentences:
+  names. When neither can be told the page says so and the person picks. The person can always change it.
+- **After an install** the Skills list re-reads and the page says where it went, in two sentences:
   - Claude: "It is active in this session now." When the session saw no skill of that kind before, so its skills
     folder was probably just created: "It may need /reload-skills in this session…". The daemon does not say whether it
     created the folder, so that line is a hint, worded as one.
@@ -1404,10 +1411,10 @@ The Skills tab has one **+ Add skills** button by its "N active in this session"
   - An install the session does not read (another project, another account) says "This session does not read that
     place, so it is not active here."
 
-**Codex finding (A2, 2026-11-02): hot reload is not verified, so the sheet promises the next session.** The Codex
+**Codex finding (A2, 2026-11-02): hot reload is not verified, so the page promises the next session.** The Codex
 0.156.1 binary contains a skills watcher (`skills_watcher.rs`), a `skills/changed` notification and the
 `.agents/skills` folder name, which suggests a running session may notice a new skill. Confirming that a _running
-session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the sheet claims
+session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
 ## Links (catalogs 3f)

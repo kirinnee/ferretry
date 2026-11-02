@@ -313,3 +313,6 @@ packages/pwa/src/features/catalogs/publish-skills-model.ts # which skills the Pu
 
 # The store row's installed version and its acts (&B131 B4), reached only from the .tsx app tree.
 packages/pwa/src/features/shared/store-row-model.ts # the store row status, Update/Move requests and wording, used by store-row-actions.tsx and update-install-sheet.tsx ← shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+
+# What the shared catalog installs mean for a row, reached only from the .tsx app tree.
+packages/pwa/src/features/shared/shared-installs.ts # which skills and MCP servers a publisher's catalogs have installed, used by shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx and by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

@@ -1,16 +1,16 @@
 /**
- * "+ Add skills": what the sheet says and decides, as pure functions.
+ * "+ Add skills": what the page says and decides, as pure functions.
  *
- * The sheet installs through the existing review and hand-off, so the only decisions made here are the
+ * The page installs through the existing review and hand-off, so the only decisions made here are the
  * default place (this project when the session has a folder, else this account), which skills to list,
  * and the sentence that says where an install landed and whether the running session already sees it.
  */
 
 import {
   type CatalogInstall,
+  revealHidden,
   type SessionSkillsInventory,
   type SharedCatalogManifestEntry,
-  revealHidden,
 } from '@ferretry/protocol';
 import { type FleetProject, normalizeProjectPath } from '../../lib/fleet-grouping.ts';
 import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
@@ -18,10 +18,14 @@ import type { SharedCatalogView } from '../shared/shared-controller.ts';
 import type { CardState } from '../shared/shared-screens-model.ts';
 
 export const ADD_SKILLS_BUTTON = '+ Add skills';
-export const ADD_SKILLS_TITLE = 'Add skills to this session';
-export const ADD_SKILLS_CLOSE = 'Close Add skills';
+export const ADD_SKILLS_TITLE = 'Add skills';
+export const ADD_SKILLS_BACK = 'Back to the session';
 export const ADD_SKILLS_SEARCH_LABEL = 'Search subscribed skills';
-export const FROM_SUBSCRIPTIONS = 'From your subscriptions';
+export const CATALOG_FILTER_LABEL = 'Filter by catalog';
+const ALL_CATALOGS = 'All catalogs';
+export const REFRESH_BUTTON = 'Refresh';
+export const REFRESHING = 'Refreshing…';
+export const REFRESHED = 'Up to date.';
 export const SUBSCRIBE_WITH_LINK = 'Subscribe with a link…';
 export const INSTALL_BUTTON = 'Install';
 export const INSTALLED_LABEL = 'Installed';
@@ -111,11 +115,18 @@ export interface SkillRow {
   readonly view: SharedCatalogView;
   readonly name: string;
   readonly summary: string;
+  /** Which catalog it is in, across publishers: the filter and the group heading use it. */
+  readonly catalogKey: string;
+  readonly catalogName: string;
+  readonly publisher: string;
   /** "publisher · catalog". */
   readonly from: string;
   readonly version: string;
   readonly installed: boolean;
 }
+
+/** The key one catalog goes by on the page: the publisher's id and the catalog's, so two publishers never collide. */
+const catalogKey = (publisherId: string, catalogId: string): string => `${publisherId}/${catalogId}`;
 
 /** Every skill a publisher's verified catalogs list. A catalog that did not verify lists nothing. */
 export function skillRows(
@@ -135,6 +146,9 @@ export function skillRows(
             view: block.view,
             name: revealHidden(item.entry.name),
             summary: item.summary,
+            catalogKey: catalogKey(publisherId, block.catalogId),
+            catalogName: block.name,
+            publisher: publisherLabel,
             from: `${publisherLabel} · ${block.name}`,
             version: `v${item.entry.version}`,
             installed: installed.has(item.entry.itemId),
@@ -153,6 +167,53 @@ export function filterRows(rows: readonly SkillRow[], query: string): readonly S
     const text = `${row.name} ${row.summary} ${row.from}`.toLowerCase();
     return words.every(word => text.includes(word));
   });
+}
+
+/** One catalog the page can narrow to: All, then each catalog that lists a skill. */
+export interface CatalogChip {
+  readonly key: string;
+  readonly label: string;
+  readonly count: number;
+}
+
+export const ALL_CHIP = 'all';
+
+/**
+ * The catalog filter: All, then each catalog that lists a skill, in the order the publishers listed them. `kept` is
+ * the rows the search already kept, so every count says how many skills that chip would show. A catalog whose name
+ * another shares is named with its publisher.
+ */
+export function catalogChips(all: readonly SkillRow[], kept: readonly SkillRow[]): readonly CatalogChip[] {
+  const catalogs = new Map<string, SkillRow>();
+  for (const row of all) if (!catalogs.has(row.catalogKey)) catalogs.set(row.catalogKey, row);
+  const named = new Map<string, number>();
+  for (const row of catalogs.values()) named.set(row.catalogName, (named.get(row.catalogName) ?? 0) + 1);
+  const chips = [...catalogs.values()].map(row => ({
+    key: row.catalogKey,
+    label: (named.get(row.catalogName) ?? 0) > 1 ? `${row.catalogName} (${row.publisher})` : row.catalogName,
+    count: kept.filter(candidate => candidate.catalogKey === row.catalogKey).length,
+  }));
+  return catalogs.size < 2 ? [] : [{ key: ALL_CHIP, label: ALL_CATALOGS, count: kept.length }, ...chips];
+}
+
+/** A catalog's skills, under the catalog's name and who publishes it. */
+export interface CatalogGroup {
+  readonly key: string;
+  readonly name: string;
+  readonly publisher: string;
+  readonly rows: readonly SkillRow[];
+}
+
+/** The rows of the chosen catalog (all of them for All), grouped by catalog in the order they came. */
+export function groupByCatalog(rows: readonly SkillRow[], chip: string): readonly CatalogGroup[] {
+  const groups = new Map<string, { name: string; publisher: string; rows: SkillRow[] }>();
+  for (const row of rows) {
+    if (chip !== ALL_CHIP && row.catalogKey !== chip) continue;
+    const group = groups.get(row.catalogKey) ?? { name: row.catalogName, publisher: row.publisher, rows: [] };
+    group.rows.push(row);
+    groups.set(row.catalogKey, group);
+  }
+  return [...groups].map(([key, group]) => ({ key, ...group }));
 }
 
 /** The installs that are new since `before`, newest last as the machine lists them. */

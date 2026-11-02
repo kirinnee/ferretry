@@ -8,7 +8,7 @@ import {
   NO_SUBSCRIPTIONS,
   PICK_A_PLACE,
 } from '../../../../src/features/context-rail/add-skills-model.ts';
-import { type AddSkillsHost, AddSkillsSheet } from '../../../../src/features/context-rail/add-skills-sheet.tsx';
+import { AddSkillsPage, type AddSkillsPageProps } from '../../../../src/features/context-rail/add-skills-page.tsx';
 import { ONLINE_ONLY } from '../../../../src/features/shared/shared-model.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import type { MemberSubscription } from '../../../../src/lib/member-keys.ts';
@@ -16,8 +16,8 @@ import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { crypto } from '../../../support/catalog-files.ts';
 import { installRecord } from '../../../support/catalog-views.ts';
-import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
+import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { testSubscription } from '../../../support/member-keys.ts';
 import {
   deferred,
@@ -25,11 +25,14 @@ import {
   fakeMembers,
   type Members,
   okAttempt,
+  otherCatalogView,
   refusedAttempt,
   type SharedItemFixture,
   sharedItemFixture,
 } from '../../../support/shared-screens.ts';
 import { SKILLS, skill } from './context-rail-fixtures.ts';
+
+type AddSkillsHost = Omit<AddSkillsPageProps, 'onNavigate' | 'loadInventory'>;
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -59,6 +62,8 @@ const entry = () => {
   return found;
 };
 
+const chipOf = (catalogId: string): string => `[data-context-chip="${studio.daemonId}/${catalogId}"]`;
+
 /** The record the machine holds once the skill is installed from Studio. */
 const studioInstall = (target: CatalogInstall['target'], installId = `cin_${'a'.repeat(22)}`): CatalogInstall => {
   const base = installRecord('skill', 'pdf-tools');
@@ -76,21 +81,19 @@ const hostWith = (
   members: Members,
   routes: Parameters<typeof fakeClient>[0],
   extra: Partial<AddSkillsHost> = {},
-): { host: AddSkillsHost; calls: ReturnType<typeof fakeClient>['calls']; events: string[] } => {
+): { host: AddSkillsHost; calls: ReturnType<typeof fakeClient>['calls'] } => {
   const fake = fakeClient({
     'GET /v1/fleet/runtimes': () => ({ runtimes: [{ id: 'rt-work', wrapper: 'claude-work', profile: 'default' }] }),
     'GET /v1/secrets': () => ({ v: 1, health: 'ready', secrets: [], references: [] }),
     ...routes,
   });
-  const events: string[] = [];
   return {
     calls: fake.calls,
-    events,
     host: {
       connection,
       machineName: 'alpha box',
+      sessionId: 'sess-1',
       cwd: '/work/app/src',
-      onSubscribe: () => events.push('subscribe'),
       install: { createClient: fake.factory, crypto, projects: PROJECTS },
       members,
       ...extra,
@@ -101,12 +104,7 @@ const hostWith = (
 const open = async (host: AddSkillsHost, inventory = SKILLS) => {
   const events: string[] = [];
   const view = await mount(
-    <AddSkillsSheet
-      host={host}
-      inventory={inventory}
-      onInstalled={() => events.push('installed')}
-      onClose={() => events.push('closed')}
-    />,
+    <AddSkillsPage {...host} loadInventory={async () => inventory} onNavigate={to => events.push(to)} />,
   );
   await settle();
   await settle();
@@ -117,7 +115,7 @@ const browseOk = async () => okAttempt(shared.browse);
 const rows = () => all('[data-add-skills-row]');
 
 describe('the subscriptions list', () => {
-  it('lists each skill with its publisher, catalog and version, Installed or Install', async () => {
+  it('lists each skill under its catalog and publisher, with its version, Installed or Install', async () => {
     const { members } = fakeMembers({
       list: async () => [studio, lockedSub],
       browse: async sub =>
@@ -125,9 +123,10 @@ describe('the subscriptions list', () => {
     });
     const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const { view } = await open(host);
-    expect(q('[data-catalog-sheet="add-skills"] h3')?.textContent).toBe(ADD_SKILLS_TITLE);
+    expect(q('[data-add-skills-page] h1')?.textContent).toBe(ADD_SKILLS_TITLE);
     expect(rows()).toHaveLength(1);
-    expect(rows()[0]?.textContent).toContain("Studio · Kirin's catalog");
+    expect(q('[data-add-skills-catalog] h2')?.textContent).toBe("Kirin's catalog");
+    expect(q('[data-add-skills-catalog]')?.textContent).toContain('from Studio · 1 skill');
     expect(rows()[0]?.textContent).toContain('v1');
     expect(q('[data-add-skills-install]')?.textContent).toContain('Install');
     expect(q('[data-add-skills-scope]')?.textContent).toContain('This project (every session in this folder)');
@@ -275,13 +274,151 @@ describe('the subscriptions list', () => {
     await view.unmount();
   });
 
-  it('leads to Sharing › Subscriptions: closes the sheet, then goes', async () => {
+  it('leads to Sharing › Subscriptions', async () => {
     const { members } = fakeMembers({ list: async () => [] });
-    const { host, events: hostEvents } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
     const { view, events } = await open(host);
     await click(q('[data-add-skills-subscribe]'));
-    expect(events).toEqual(['closed']);
-    expect(hostEvents).toEqual(['subscribe']);
+    expect(events).toEqual(['/d/alpha/sharing/shared']);
+    await view.unmount();
+  });
+
+  it('goes back to the session it was opened from', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view, events } = await open(host);
+    await click(q('[data-add-skills-back]'));
+    expect(events).toEqual(['/d/alpha/session/sess-1']);
+    await view.unmount();
+  });
+});
+
+describe('which catalog a skill is from', () => {
+  const twoCatalogs = () => okAttempt({ ...shared.browse, catalogs: [shared.view, otherCatalogView(shared)] });
+  const chips = () => all('[data-context-chip]').map(chip => chip.textContent);
+
+  it('groups the skills under each catalog, and filters to one with a chip', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: async () => twoCatalogs() });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(all('[data-add-skills-catalog] h2').map(heading => heading.textContent)).toEqual([
+      "Kirin's catalog",
+      'Design catalog',
+    ]);
+    expect(rows()).toHaveLength(2);
+    expect(chips()).toEqual(['All catalogs2', "Kirin's catalog1", 'Design catalog1']);
+
+    await click(q(chipOf(shared.view.catalogId)));
+    expect(all('[data-add-skills-catalog] h2').map(heading => heading.textContent)).toEqual(["Kirin's catalog"]);
+    expect(rows()).toHaveLength(1);
+    expect(q('[data-context-chip="all"]')?.getAttribute('aria-pressed')).toBe('false');
+
+    await click(q('[data-context-chip="all"]'));
+    expect(rows()).toHaveLength(2);
+    await view.unmount();
+  });
+
+  it('counts each chip by what the search kept, and names a catalog that is nowhere else with its publisher', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: async () => twoCatalogs() });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    await typeInto(q('[data-add-skills-search]'), 'ocr-tools');
+    expect(chips()).toEqual(['All catalogs1', "Kirin's catalog0", 'Design catalog1']);
+    await typeInto(q('[data-add-skills-search]'), 'pdf-tools');
+    expect(chips()).toEqual(['All catalogs1', "Kirin's catalog1", 'Design catalog0']);
+    await view.unmount();
+  });
+
+  it('draws no catalog filter when only one catalog lists skills', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(q('[data-context-chips]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('Refresh', () => {
+  it('reads every subscription again and shows a skill the publisher added since', async () => {
+    let browsed = 0;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => {
+        browsed += 1;
+        return browsed === 1
+          ? await browseOk()
+          : okAttempt({ ...shared.browse, catalogs: [shared.view, otherCatalogView(shared)] });
+      },
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    expect(rows()).toHaveLength(1);
+    expect(q('[data-add-skills-refresh]')?.textContent).toBe('Refresh');
+    await click(q('[data-add-skills-refresh]'));
+    await settle();
+    await settle();
+    expect(browsed).toBe(2);
+    expect(rows()).toHaveLength(2);
+    expect(text()).toContain('ocr-tools');
+    expect(q('[data-add-skills-refreshed]')?.textContent).toBe('Up to date.');
+    expect(q('[data-add-skills-refresh]')?.textContent).toBe('Refresh');
+    await view.unmount();
+  });
+
+  it('keeps the skills on screen and says Refreshing… while it reads', async () => {
+    const hold = deferred<ReturnType<typeof okAttempt<typeof shared.browse>>>();
+    let browsed = 0;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => {
+        browsed += 1;
+        return browsed === 1 ? await browseOk() : await hold.promise;
+      },
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    await click(q('[data-add-skills-refresh]'));
+    expect(q('[data-add-skills-refresh]')?.textContent).toBe('Refreshing…');
+    expect((q('[data-add-skills-refresh]') as HTMLButtonElement).disabled).toBe(true);
+    expect(rows()).toHaveLength(1);
+    expect(text()).not.toContain('Reading your subscriptions…');
+    hold.resolve(await browseOk());
+    await settle();
+    expect(q('[data-add-skills-refresh]')?.textContent).toBe('Refresh');
+    await view.unmount();
+  });
+
+  it('shows a skill installed since as Installed', async () => {
+    const { members } = fakeMembers({ list: async () => [studio], browse: browseOk });
+    let installed = false;
+    const { host } = hostWith(members, {
+      'GET /v1/catalog-installs': () => ({ installs: installed ? [studioInstall(PROJECT_TARGET)] : [] }),
+    });
+    const { view } = await open(host);
+    expect(q('[data-add-skills-install]')).not.toBeNull();
+    installed = true;
+    await click(q('[data-add-skills-refresh]'));
+    await settle();
+    expect(q('[data-add-skills-installed]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('falls back to All when a refresh drops the catalog the filter was on', async () => {
+    let both = true;
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () =>
+        okAttempt({ ...shared.browse, catalogs: both ? [shared.view, otherCatalogView(shared)] : [shared.view] }),
+    });
+    const { host } = hostWith(members, { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const { view } = await open(host);
+    await click(q(chipOf(otherCatalogView(shared).catalogId)));
+    expect(rows()).toHaveLength(1);
+    both = false;
+    await click(q('[data-add-skills-refresh]'));
+    await settle();
+    expect(rows()).toHaveLength(1);
+    expect(text()).toContain('pdf-tools');
     await view.unmount();
   });
 });
@@ -306,7 +443,6 @@ describe('Install from the sheet', () => {
     await click(q('[data-add-skills-install]'));
     await settle();
     expect(q('[data-catalog-sheet="shared-item"] h3')?.textContent).toBe('pdf-tools');
-    expect(q('[data-catalog-sheet="add-skills"]')).toBeNull();
 
     await click(q('[data-shared-install-button]'));
     await settle();
@@ -316,11 +452,11 @@ describe('Install from the sheet', () => {
     await click(q('button[aria-label="Close Install on a machine"]'));
     await click(q('button[aria-label="Close pdf-tools"]'));
     await settle();
-    expect(q('[data-catalog-sheet="add-skills"]')).not.toBeNull();
+    expect(q('[data-add-skills-page]')).not.toBeNull();
     expect(q('[data-add-skills-landed]')?.textContent).toBe(
       `Installed pdf-tools in This project (every session in this folder). ${CLAUDE_LIVE}`,
     );
-    expect(events).toEqual(['installed']);
+    expect(events).toEqual([]);
     expect(q('[data-add-skills-installed]')).not.toBeNull();
     await view.unmount();
   });
@@ -468,7 +604,7 @@ describe('the app store as the default source', () => {
     } as unknown as AppStore;
     const view = await mount(
       <StoreProvider store={store}>
-        <AddSkillsSheet host={storeHost} inventory={SKILLS} onInstalled={() => undefined} onClose={() => undefined} />
+        <AddSkillsPage {...storeHost} loadInventory={async () => SKILLS} onNavigate={() => undefined} />
       </StoreProvider>,
     );
     await settle();
@@ -487,11 +623,11 @@ describe('the app store as the default source', () => {
     } as unknown as AppStore;
     const view = await mount(
       <StoreProvider store={store}>
-        <AddSkillsSheet
-          host={{ ...host, install: { ...host.install, projects: undefined } }}
-          inventory={SKILLS}
-          onInstalled={() => undefined}
-          onClose={() => undefined}
+        <AddSkillsPage
+          {...host}
+          install={{ ...host.install, projects: undefined }}
+          loadInventory={async () => SKILLS}
+          onNavigate={() => undefined}
         />
       </StoreProvider>,
     );

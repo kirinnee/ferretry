@@ -32,6 +32,11 @@ export interface SharingPageProps extends DaemonPageProps {
   readonly tab: SharingTab | undefined;
 }
 
+export interface AddSkillsPageProps extends DaemonPageProps {
+  /** The session the skills are for, taken from the route. */
+  readonly sessionId: string;
+}
+
 export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
   /** First-run setup. Connection-free: it exists precisely because there is none yet. */
@@ -47,6 +52,8 @@ export interface PageHostSlots {
   readonly ProjectDetail?: ComponentType<ProjectDetailPageProps>;
   readonly ProjectLanes?: ComponentType<ProjectDetailPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
+  /** Add skills: the subscribed catalogs' skills, to install into one session. */
+  readonly AddSkills?: ComponentType<AddSkillsPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
   readonly Analytics: ComponentType<DaemonPageProps>;
@@ -120,6 +127,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
           scope={daemonSessionScope(matchedConnection, route.sessionId)}
         />
       );
+    case 'add-skills':
+      if (slots.AddSkills === undefined) throw new Error('the add skills route is not mounted');
+      return <slots.AddSkills connection={matchedConnection} sessionId={route.sessionId} />;
     case 'settings':
       return <slots.Settings connection={matchedConnection} />;
     case 'warden':

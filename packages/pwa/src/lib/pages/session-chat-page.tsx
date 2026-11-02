@@ -5,6 +5,7 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
+import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
@@ -18,7 +19,6 @@ import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../compon
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { PackSessionsProvider } from '../../components/pack-call.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
-import { CardPullRequestsProvider } from '../card-pull-requests.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -32,7 +32,6 @@ import { SessionTopBar, sessionDisplayName } from '../../components/session-top-
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
-import { ChatSearch, type ChatSearchPort } from '../../components/chat-search.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import type { TranscriptHistoryControl } from '../../components/transcript-history-row.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
@@ -97,15 +96,15 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
-import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
-import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
-import type { ChatTasksView } from '../board-chat-url.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
+import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
+import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
 import { useMachineTaskIds } from '../../hooks/use-machine-task-ids.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
+import { useWorkProjectNames } from '../../hooks/use-work-project-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
@@ -116,18 +115,18 @@ import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
-import { useWorkProjectNames } from '../../hooks/use-work-project-names.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
+import type { ChatTasksView } from '../board-chat-url.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
+import { CardPullRequestsProvider } from '../card-pull-requests.tsx';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
 import type { ConnectionHealthState } from '../connection-health.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
-import { sessionTaskNames } from '../to-test-inbox.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import { answerHarnessDialog } from '../harness-dialogs.ts';
@@ -142,11 +141,12 @@ import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
+import { sessionTaskNames } from '../to-test-inbox.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath, daemonSharingPath } from './routes.ts';
+import { daemonAddSkillsPath, daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -1363,7 +1363,6 @@ export function SessionChatPage({
     );
   const infoControls = infoRuntimeControls ?? runtimePickers(true) ?? undefined;
 
-  const sessionCwd = session.config.cwd;
   const canNavigate = onNavigate !== undefined;
   const navigateRef = useRef(onNavigate);
   navigateRef.current = onNavigate;
@@ -1401,17 +1400,10 @@ export function SessionChatPage({
         onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
         ...(!canNavigate
           ? {}
-          : {
-              addSkills: {
-                connection,
-                machineName: contextDependencies.machineName,
-                ...(sessionCwd === undefined ? {} : { cwd: sessionCwd }),
-                onSubscribe: () => navigateRef.current?.(daemonSharingPath(connection.daemonId, 'shared')),
-              },
-            }),
+          : { onAddSkills: () => navigateRef.current?.(daemonAddSkillsPath(connection.daemonId, scope.sessionId)) }),
       },
     };
-  }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate, sessionCwd]);
+  }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate]);
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   boardFullRef.current = tasksFull;
   collapseBoardRef.current = () => tasks.setExpanded(false);
