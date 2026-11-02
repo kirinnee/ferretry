@@ -166,13 +166,27 @@ describe('hideSecrets: leftovers', () => {
 
   it('should cut a short password after its name, on the same line or the next', () => {
     should(one('password: hunter2\nrest')).equal(`password: ${HIDDEN}\nrest`);
-    should(one('password:\nhunter2\nrest')).equal(HIDDEN);
+    should(one('password:\nhunter2\nrest')).equal(`password:\n${HIDDEN}\nrest`);
   });
 
   it('should keep a file whose key line is followed by a key of its own, and hide one followed by a value', () => {
     should(one('auth:\n  login_page: https://example.com\n')).equal('auth:\n  login_page: https://example.com\n');
     should(one('password:\n$PASSWORD\n')).equal('password:\n$PASSWORD\n');
-    should(one('password:\n"hunter2"\n')).equal(HIDDEN);
+    should(one('password:\n"hunter2"\n')).equal(`password:\n"${HIDDEN}"\n`);
+    should(one('password =\nhunter2\n')).equal(`password =\n${HIDDEN}\n`);
+    should(one('password :\n  hunter2 tail\n')).equal(`password :\n  ${HIDDEN} tail\n`);
+    should(one('password:\n\n\nhunter2')).equal(`password:\n\n\n${HIDDEN}`);
+    should(one('password:')).equal('password:');
+    should(one('password:\n"')).equal('password:\n"');
+  });
+
+  it('should cut a block value after a name that announces a secret, line by line, and stop at the next key', () => {
+    should(one('password: |\n  hunter2\n  second\n\n  third\nnext: x\n')).equal(
+      `password: |\n  ${HIDDEN}\n  ${HIDDEN}\n\n  ${HIDDEN}\nnext: x\n`,
+    );
+    should(one('password: >-\n  hunter2hunter2xyz\n')).equal(`password: >-\n  ${HIDDEN}\n`);
+    should(one('mode: |\n  plain text\n')).equal('mode: |\n  plain text\n');
+    should(one('password: |\n')).equal('password: |\n');
   });
 
   it('should hide PASS and DB_PASS values and the argument after --pass, and leave -p alone', () => {

@@ -1813,6 +1813,33 @@ describe('redactText: where a name and its value are', () => {
     should(redactText(text)).deepEqual({ text: expected, redacted: true });
   });
 
+  it.each([
+    ['a value on the next line', 'password:\nhunter2hunter2xyz', 'password:\n‹hidden›'],
+    ['a name with a trailing underscore', 'TOKEN_:\nhunter2hunter2xyz', 'TOKEN_:\n‹hidden›'],
+    ['a space before the separator', 'password =\nhunter2hunter2xyz', 'password =\n‹hidden›'],
+    ['blank lines between', 'password :\r\n\r\n  "hunter2hunter2xyz" tail', 'password :\r\n\r\n  "‹hidden›" tail'],
+    ['a block scalar', 'password: |\n  hunter2hunter2xyz\n  more\nnext: 1', 'password: |\n  ‹hidden›\n  more\nnext: 1'],
+    ['a folded block scalar', 'password: >-\n  hunter2hunter2xyz', 'password: >-\n  ‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it('should leave a block or a next line alone when the name says nothing or the next line is a key', () => {
+    should(redactText('mode: |\n  hunter2hunter2xyz').redacted).equal(false);
+    should(redactText('password:\nuser_name: hunter2hunter2xyz').text).not.match(/^password:\n‹hidden›/u);
+    should(redactText('password: |').redacted).equal(false);
+    should(redactText('password:').redacted).equal(false);
+  });
+
+  it('should finish on very many name lines, blank lines and block lines', () => {
+    const started = performance.now();
+    redactText('a:\n'.repeat(100_000));
+    redactText(`password:${'\n'.repeat(200_000)}x`);
+    redactText(`password: |${'\n  x'.repeat(100_000)}`);
+    redactText('a'.repeat(200_000) + ':');
+    should(performance.now() - started).be.below(5000);
+  });
+
   it('should not take the next line as the value of a name at the end of a line', () => {
     should(redactText('auth:\nlogin_page: https://example.com/signin').redacted).equal(false);
   });

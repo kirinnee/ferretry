@@ -313,6 +313,55 @@ const ASSIGNMENT =
 /** One bare word of text, for a value whose own shape says it is a token. */
 const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
 
+/** A line that ends in a name and its separator (`password =`), or opens a block value (`password: |`, `token: >-`). */
+const OPENS_VALUE = /(?:^|[\s"'(\[{,])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=]([ \t]*[|>][-+0-9]*)?[ \t]*$/u;
+const BLOCK_INDICATOR = /^[|>][-+0-9]*$/u;
+const LINE_BREAKS = /(\r\n|\r|\n)/u;
+const FIRST_VALUE = /^([ \t]*["']?)([^\s"'`,;)}\]]+)/u;
+const ENDS_IN_SEPARATOR = /[:=]["']?$/u;
+const indentOf = (line: string): number => line.length - line.trimStart().length;
+
+/**
+ * The value of a name that ends its line, on the lines after it (`password:⏎hunter2`, `password =⏎x`, and a block
+ * `password: |⏎  x`). A next line that is a key of its own is read on its own. One pass over the lines, each read
+ * once: a hidden block is skipped as a whole.
+ */
+function redactNextLines(
+  text: string,
+  isSecret: (name: string, value: string) => boolean,
+): { readonly text: string; readonly redacted: boolean } {
+  const parts = text.split(LINE_BREAKS);
+  let redacted = false;
+  for (let index = 0; index < parts.length; index += 2) {
+    const opens = OPENS_VALUE.exec(parts[index] ?? '');
+    const name = opens?.[1];
+    if (name === undefined) continue;
+    if (opens?.[2] === undefined) {
+      let next = index + 2;
+      while (next < parts.length && (parts[next] ?? '').trim() === '') next += 2;
+      const line = parts[next] ?? '';
+      const value = FIRST_VALUE.exec(line);
+      if (value === null || ENDS_IN_SEPARATOR.test(value[2] ?? '') || !isSecret(name, value[2] ?? '')) continue;
+      parts[next] = `${value[1]}${HIDDEN_TEXT}${line.slice(value[0].length)}`;
+      redacted = true;
+      continue;
+    }
+    const indent = indentOf(parts[index] ?? '');
+    let last = index;
+    for (let next = index + 2; next < parts.length; next += 2) {
+      const line = parts[next] ?? '';
+      if (line.trim() === '') continue;
+      if (indentOf(line) <= indent) break;
+      if (!isSecret(name, line.trim())) continue;
+      parts[next] = `${line.slice(0, indentOf(line))}${HIDDEN_TEXT}`;
+      redacted = true;
+      last = next;
+    }
+    index = last;
+  }
+  return { text: parts.join(''), redacted };
+}
+
 /**
  * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
  * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
@@ -323,7 +372,7 @@ export function redactText(
 ): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
   const named = text.replace(ASSIGNMENT, (whole, lead: string, name: string, separator: string, value: string) => {
-    if (!isSecret(name, value)) return whole;
+    if (BLOCK_INDICATOR.test(value) || !isSecret(name, value)) return whole;
     redacted = true;
     return `${lead}${name}${separator}${HIDDEN_TEXT}`;
   });
@@ -332,7 +381,8 @@ export function redactText(
     redacted = true;
     return HIDDEN_TEXT;
   });
-  return { text: bare, redacted };
+  const lines = redactNextLines(bare, isSecret);
+  return { text: lines.text, redacted: redacted || lines.redacted };
 }
 
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
