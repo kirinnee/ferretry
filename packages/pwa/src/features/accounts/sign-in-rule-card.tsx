@@ -11,6 +11,7 @@ import { useId, useState } from 'react';
 import {
   canRenew,
   canResume,
+  RULE_TERMINAL_RESIDUAL,
   rootBadge,
   scopeWords,
   statusWords,
@@ -96,6 +97,11 @@ export function SignInRuleCard({
           </span>
         </span>
       ))}
+      {flags.some(flag => flag.name === 'root') ? (
+        <span className="text-meta text-err" data-rule-terminal-residual="">
+          {RULE_TERMINAL_RESIDUAL}
+        </span>
+      ) : null}
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-meta text-muted">
         <dt>Types</dt>
         <dd className="m-0 min-w-0 break-words text-fg" data-rule-fields="">

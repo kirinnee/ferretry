@@ -685,7 +685,7 @@ before anything is checked again. What a rule adds is that the swap is SEEN and 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
 audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
 
-**Accepted risk (owner, 2026-11-01).** The owner switched sudo rules on knowing this: in the split second between
+**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`).** The owner switched sudo rules on knowing this: in the split second between
 Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
 and that program could read the password once. Ferretry then notices, stops the rule and tells the owner, so the same
 approval can never be used to try again. A sudo rule also means every ferret can get root on this machine while the rule

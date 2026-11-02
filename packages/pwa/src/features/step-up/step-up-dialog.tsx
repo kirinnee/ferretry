@@ -94,8 +94,11 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
       : prompt.shared === true && stepUp
         ? sharedBoundNote(prompt.scope ?? STEP_UP_SCOPE_NOTE)
         : (prompt.scope ?? copy.scope);
-  // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own words).
-  const lines = prompt.acts.flatMap(act => act.split('\n'));
+  // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own
+  // words). After a blank line come warnings, which stand apart from the list so it reads as what is approved.
+  const sections = prompt.acts.map(act => act.split('\n\n'));
+  const lines = sections.flatMap(([approved]) => (approved ?? '').split('\n'));
+  const warnings = sections.flatMap(([, ...rest]) => rest.join('\n').split('\n')).filter(line => line !== '');
   const listed = prompt.bound === true && stepUp;
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
@@ -174,6 +177,19 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
               </li>
             ))}
           </ul>
+        ) : null}
+        {listed && warnings.length > 0 ? (
+          <div
+            className="mt-2 flex flex-col gap-1 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-meta leading-base text-err"
+            data-step-up-warnings=""
+            role="note"
+          >
+            {warnings.map(line => (
+              <p className="m-0 break-words" key={line}>
+                {line}
+              </p>
+            ))}
+          </div>
         ) : null}
         {scope === null ? null : (
           <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">

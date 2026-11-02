@@ -28,6 +28,7 @@ import {
   RULE_ROOT_WARNING,
   RULE_STILL_ASKED,
   RULE_TERMINAL_LIMIT,
+  RULE_TERMINAL_RESIDUAL,
   RULE_TOTP_ACK_WORDS,
   RULE_TOTP_WARNING,
   type RuleOrigin,
@@ -110,6 +111,9 @@ export function RuleRootBlock({ place, username }: { readonly place: Place; read
       <span className="text-meta text-err">{rootRuleWords(place, username)}</span>
       <span className="text-meta text-muted" data-rule-terminal-limit="">
         {RULE_TERMINAL_LIMIT}
+      </span>
+      <span className="text-meta text-err" data-rule-terminal-residual="">
+        {RULE_TERMINAL_RESIDUAL}
       </span>
     </div>
   );

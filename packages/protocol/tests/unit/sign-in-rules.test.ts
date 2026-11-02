@@ -15,6 +15,7 @@ import {
   SIGN_IN_RULE_SUSPENSIONS,
   SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
   type SignInRuleBody,
   SignInRuleBodySchema,
@@ -529,6 +530,9 @@ describe('standing sign-in rules: the wire', () => {
     );
     should(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT).equal(
       'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.',
+    );
+    should(SIGN_IN_RULE_TERMINAL_RESIDUAL).equal(
+      "In the split second between Ferretry's last check and the moment it types, a ferret could swap in its own program and read the password once; Ferretry then stops the rule and tells you.",
     );
   });
 

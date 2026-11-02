@@ -142,6 +142,13 @@ export const SIGN_IN_RULE_ROOT_WARNING =
 export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
   'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';
 
+/**
+ * The residual risk the owner accepted for terminal rules (!A226, 2026-11-01), verbatim, beside
+ * {@link SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}: said wherever the red root flag is, so nobody approves a sudo rule without it.
+ */
+export const SIGN_IN_RULE_TERMINAL_RESIDUAL =
+  "In the split second between Ferretry's last check and the moment it types, a ferret could swap in its own program and read the password once; Ferretry then stops the rule and tells you.";
+
 /** Whether a rule is for a page sign-in or a terminal one (sudo, su, doas). */
 export const SignInRuleSurfaceSchema = z.enum(['page', 'terminal']);
 export type SignInRuleSurface = z.infer<typeof SignInRuleSurfaceSchema>;

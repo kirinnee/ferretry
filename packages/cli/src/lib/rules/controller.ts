@@ -8,6 +8,7 @@ import {
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_STAGE_TTL_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SignInIdSchema,
   type SignInRuleDraft,
   type SignInRuleNarrow,
@@ -87,7 +88,9 @@ export function ruleWarnings(
   red: (text: string) => string,
 ): readonly string[] {
   return [
-    ...(rule.root ? [red(SIGN_IN_RULE_ROOT_WARNING), SIGN_IN_RULE_TERMINAL_HONEST_LIMIT] : []),
+    ...(rule.root
+      ? [red(SIGN_IN_RULE_ROOT_WARNING), SIGN_IN_RULE_TERMINAL_HONEST_LIMIT, SIGN_IN_RULE_TERMINAL_RESIDUAL]
+      : []),
     ...(rule.totp ? [red(LOGIN_ONE_FACTOR_WARNING)] : []),
     ...(rule.autoRecipe ? [AUTO_RECIPE_WARNING] : []),
     SIGN_IN_RULE_HONEST_LIMIT,

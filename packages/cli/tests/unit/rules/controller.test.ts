@@ -5,6 +5,7 @@ import {
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   type SignInRuleDraft,
   type SignInRuleEligibility,
   type SignInRuleNarrow,
@@ -189,6 +190,7 @@ describe('fy rules (controller)', () => {
     should(text).containEql(RULE).and.containEql('github.com');
     should(text).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
     should(text).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
+    should(text).containEql(SIGN_IN_RULE_TERMINAL_RESIDUAL);
     should(text).containEql(SIGN_IN_RULE_HONEST_LIMIT);
   });
 
@@ -196,6 +198,7 @@ describe('fy rules (controller)', () => {
     const lines = ruleWarnings({ root: true, totp: false, autoRecipe: false }, RED);
     should(lines).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
     should(lines).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
+    should(lines).containEql(SIGN_IN_RULE_TERMINAL_RESIDUAL);
     should(ruleWarnings({ root: false, totp: false, autoRecipe: false }, RED)).eql([SIGN_IN_RULE_HONEST_LIMIT]);
   });
 
@@ -210,6 +213,7 @@ describe('fy rules (controller)', () => {
     const text = said.join('\n');
     should(text).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
     should(text).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
+    should(text).containEql(SIGN_IN_RULE_TERMINAL_RESIDUAL);
   });
 
   it('should drop a terminal stage and stage nothing while the daemon does not report terminal rules', async () => {

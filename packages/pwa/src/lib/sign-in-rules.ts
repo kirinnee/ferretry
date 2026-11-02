@@ -15,6 +15,7 @@ import {
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   type SignInId,
   type SignInRuleDraft,
@@ -122,8 +123,10 @@ export async function dismissSuggestion(client: RuleClient, suggestion: string):
 export const RULE_HONEST_LIMIT = SIGN_IN_RULE_HONEST_LIMIT;
 /** Red, on every terminal (sudo, su, doas) rule, drawn from the structured root flag. */
 export const RULE_ROOT_WARNING = SIGN_IN_RULE_ROOT_WARNING;
-/** Beside the root line: what the program proof is worth, and the residual (owner decision !A226). */
+/** Beside the root line: what the program proof is worth. */
 export const RULE_TERMINAL_LIMIT = SIGN_IN_RULE_TERMINAL_HONEST_LIMIT;
+/** Beside the program-proof limit: the race the owner accepted (!A226), from the structured root flag. */
+export const RULE_TERMINAL_RESIDUAL = SIGN_IN_RULE_TERMINAL_RESIDUAL;
 /** The red one-factor warning under a ticked code. */
 export const RULE_TOTP_WARNING = LOGIN_TOTP_WARNING;
 export const RULE_TOTP_ACK_WORDS = 'I understand this makes the sign-in one factor, with no one to approve a code.';
@@ -249,12 +252,15 @@ export const viewFlags = (rule: Pick<SignInRuleView, 'flags'>): readonly RuleFla
     autoRecipe: rule.flags.includes('auto-recipe'),
   });
 
-/** The passkey dialog's body: the daemon's summary lines, then each structured flag's sentence. */
+/**
+ * The passkey dialog's body: what is approved (the daemon's summary lines, which end with when it stops and how many
+ * uses), then a blank line and the warnings, each drawn from a structured flag, so the dialog can set them apart.
+ */
 export function passkeyWords(staged: Pick<SignInRuleStaged, 'summary' | 'root' | 'totp' | 'autoRecipe'>): string {
-  return [
-    ...staged.summary,
-    ...stagedFlags(staged).flatMap(flag => (flag.name === 'root' ? [flag.words, RULE_TERMINAL_LIMIT] : [flag.words])),
-  ].join('\n');
+  const warnings = stagedFlags(staged).flatMap(flag =>
+    flag.name === 'root' ? [flag.words, RULE_TERMINAL_LIMIT, RULE_TERMINAL_RESIDUAL] : [flag.words],
+  );
+  return warnings.length === 0 ? staged.summary.join('\n') : `${staged.summary.join('\n')}\n\n${warnings.join('\n')}`;
 }
 
 // ── Where the rule sits ──────────────────────────────────────────────────────────────────────────────

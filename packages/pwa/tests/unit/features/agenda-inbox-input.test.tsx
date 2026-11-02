@@ -266,3 +266,45 @@ describe('a standing sign-in rule card in the Inbox', () => {
     expect(view.container.querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
+
+describe('a sign-in rule suggestion card in the Inbox', () => {
+  const REF = { suggestion: 'srg_aaaaaaaaaaaaaaaa' };
+  const suggestion = (ref: boolean) =>
+    inboxCard(
+      agendaItem('A11', {
+        kind: 'info',
+        ask: undefined,
+        raisedBy: 'agent',
+        subject: 'Make a standing rule for GitHub?',
+        ...(ref ? { signInRuleSuggestion: REF } : {}),
+      } as never),
+    );
+
+  const draw = async (ref: boolean, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[suggestion(ref)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('is answered by the suggestion form only from the daemon’s own reference, on a machine paired here', async () => {
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw(false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

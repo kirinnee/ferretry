@@ -11,6 +11,7 @@ import {
   type SignInRuleView,
   SignInRuleViewSchema,
 } from '@ferretry/protocol';
+import { stagedSummary } from '../../../daemon/src/lib/sign-in-rules/words.ts';
 
 export const RULE_ID = `sr_${'a'.repeat(24)}`;
 const RULE_ID_2 = `sr_${'b'.repeat(24)}`;
@@ -73,16 +74,18 @@ export const terminalRule = (extra: Partial<SignInRuleView> = {}): SignInRuleVie
 export const suspendedRule = (): SignInRuleView =>
   pageRule({ status: 'suspended', suspended: { at: '2026-10-31T09:00:00.000Z', because: 'place-changed' } });
 
-/** A stage whose 240-character summary is clipped before it reaches the flag: the booleans carry the truth. */
-export const stagedRule = (extra: Partial<SignInRuleStaged> = {}): SignInRuleStaged =>
-  SignInRuleStagedSchema.parse({
+/**
+ * A stage as the daemon makes it: its summary is the daemon's own `stagedSummary` of the same fields, so it ends with
+ * when the rule stops and how many uses it has. A test that wants a clipped or odd summary passes one.
+ */
+export const stagedRule = (extra: Partial<SignInRuleStaged> = {}): SignInRuleStaged => {
+  const base = {
     stage: STAGE_ID,
     rule: RULE_ID,
     revision: 1,
     signIn: SITE_SIGN_IN,
     account: { id: 'GITHUB_WORK', label: 'github work' },
     place: sitePlace,
-    summary: [`Ferretry types the password into github work for any ferret${'.'.repeat(160)}`],
     fields: ['password'],
     totp: false,
     root: false,
@@ -91,8 +94,14 @@ export const stagedRule = (extra: Partial<SignInRuleStaged> = {}): SignInRuleSta
     expiresAt: EXPIRES,
     stageExpiresAt: STAGE_EXPIRES,
     ...extra,
+  } as const;
+  return SignInRuleStagedSchema.parse({
+    ...base,
+    summary: extra.summary ?? stagedSummary(base),
   });
+};
 
+/** A terminal stage lasts a day, the most a daemon stages for sudo without a longer pick, and never past 7. */
 export const machineStage = (extra: Partial<SignInRuleStaged> = {}): SignInRuleStaged =>
   stagedRule({
     signIn: SUDO_SIGN_IN,
@@ -100,7 +109,7 @@ export const machineStage = (extra: Partial<SignInRuleStaged> = {}): SignInRuleS
     place: sudoPlace,
     fields: ['password'],
     root: true,
-    summary: ['Ferretry types the password into sudo on kirin-box for any ferret'],
+    expiresAt: '2026-11-02T09:55:00.000Z',
     machine: { askedAt: '2026-11-01T09:55:00.000Z' },
     ...extra,
   });

@@ -7,13 +7,14 @@ import {
   passkeyWords,
   RULE_ROOT_WARNING,
   RULE_TERMINAL_LIMIT,
+  RULE_TERMINAL_RESIDUAL,
   RULE_TOTP_WARNING,
   ruleFlags,
   runRuleApproval,
   stagedFlags,
   ticksProblem,
   viewFlags,
-} from '../../src/lib/sign-in-rules.ts';
+} from '../../../src/lib/sign-in-rules.ts';
 import {
   codeRule,
   machineStage,
@@ -23,13 +24,17 @@ import {
   STAGE_ID,
   stagedRule,
   terminalRule,
-} from '../support/sign-in-rule-fixtures.ts';
+} from '../../support/sign-in-rule-fixtures.ts';
 
 const ticked = { username: true, password: true, totp: true, totpAcknowledged: true } as const;
 
 describe('flags come from the structured fields', () => {
   it('shows the one-factor warning for a staged rule whose clipped summary never says so', () => {
-    const staged = stagedRule({ totp: true, fields: ['password', 'totp'] });
+    const staged = stagedRule({
+      totp: true,
+      fields: ['password', 'totp'],
+      summary: [`Ferretry types the password for any ferret${'.'.repeat(160)}`],
+    });
     expect(staged.summary.join(' ')).not.toContain('code');
     expect(stagedFlags(staged).map(flag => flag.name)).toEqual(['one-factor']);
     expect(passkeyWords(staged)).toContain(RULE_TOTP_WARNING);
@@ -39,6 +44,25 @@ describe('flags come from the structured fields', () => {
     const words = passkeyWords(machineStage());
     expect(words).toContain(RULE_ROOT_WARNING);
     expect(words).toContain(RULE_TERMINAL_LIMIT);
+  });
+
+  it('says the accepted residual risk, from the root flag, apart from what is approved', () => {
+    const words = passkeyWords(machineStage());
+    const [approved = '', warnings = ''] = words.split('\n\n');
+    expect(warnings.split('\n')).toEqual([RULE_ROOT_WARNING, RULE_TERMINAL_LIMIT, RULE_TERMINAL_RESIDUAL]);
+    expect(approved).not.toContain(RULE_TERMINAL_RESIDUAL);
+    expect(RULE_TERMINAL_RESIDUAL).toBe(
+      "In the split second between Ferretry's last check and the moment it types, a ferret could swap in its own program and read the password once; Ferretry then stops the rule and tells you.",
+    );
+  });
+
+  it('says when the rule ends and how many uses it has in what is approved', () => {
+    expect(passkeyWords(machineStage())).toContain('until 2026-11-02, with no use limit');
+    expect(passkeyWords(stagedRule({ uses: 3 }))).toContain('at most 3 times');
+  });
+
+  it('puts no residual sentence on a page rule', () => {
+    expect(passkeyWords(stagedRule())).not.toContain(RULE_TERMINAL_RESIDUAL);
   });
 
   it('draws no flag from summary words when the booleans are false', () => {

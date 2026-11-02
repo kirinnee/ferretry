@@ -91,7 +91,7 @@ const client = {
 const eligible = { signIn: SITE_SIGN_IN, eligible: true };
 const sheet = (extra = {}) => (
   <div className="fy-card" data-harness-card="">
-    <SignInRuleSheet accountName="github work" autoRecipe={false} canUsePasskey codeAvailable eligibility={eligible}
+    <SignInRuleSheet accountName={view === 'create-terminal' ? 'sudo on kirin-box' : 'github work'} autoRecipe={false} canUsePasskey codeAvailable eligibility={eligible}
       onApprove={quiet} onCancel={quiet} origin="owner" phase={{ kind: 'idle' }} place={sitePlace}
       scopes={[{ kind: 'any' }]} username="kirin@atomi.cloud" {...extra} />
   </div>

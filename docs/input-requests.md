@@ -1440,7 +1440,7 @@ What it does NOT do, said plainly:
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
 - **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, red on every terminal
-  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`): what
+  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`, then the accepted race `SIGN_IN_RULE_TERMINAL_RESIDUAL`): what
   reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
   could start another such program (`passwd`, say) as `sudo`:
 
