@@ -1,3 +1,14 @@
+## [4.249.0](https://github.com/kirinnee/ferretry/compare/v4.248.0...v4.249.0) (2026-11-02)
+
+### Features
+
+* pinned agents at the top of the sidebar ([#1385](https://github.com/kirinnee/ferretry/issues/1385)) ([cb91750](https://github.com/kirinnee/ferretry/commit/cb91750ad2da2987fd890edad3aeb4b464f0c83b))
+* **pwa:** Not good uses the chat's composer, as wide as its card ([#1378](https://github.com/kirinnee/ferretry/issues/1378)) ([f776ef2](https://github.com/kirinnee/ferretry/commit/f776ef229b6eb617fcaefc1b8f814623bbec5939))
+
+### Fixes
+
+* **send:** never leave a ferret stuck behind its own unsent message (B144) ([#1387](https://github.com/kirinnee/ferretry/issues/1387)) ([639c970](https://github.com/kirinnee/ferretry/commit/639c9705294339262d76eff7b41da0e0a51c60bd))
+
 ## [4.248.0](https://github.com/kirinnee/ferretry/compare/v4.247.0...v4.248.0) (2026-11-02)
 
 ### Features
