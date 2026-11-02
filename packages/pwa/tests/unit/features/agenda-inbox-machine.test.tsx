@@ -4,7 +4,7 @@ import { agendaConversationPath, type InboxCard } from '../../../src/lib/agenda-
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import { machineSessionView } from '../../../src/lib/machine-agenda.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { type Mounted, mount, must } from '../../support/dom.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
@@ -27,7 +27,7 @@ afterEach(async () => {
   view = null;
 });
 
-const open = async (cards: readonly InboxCard[]) => {
+const open = async (cards: readonly InboxCard[], initialOpen?: string) => {
   const fake = fakeInbox();
   const navigated: string[] = [];
   view = await mount(
@@ -38,6 +38,7 @@ const open = async (cards: readonly InboxCard[]) => {
         <AgendaInboxPage
           clock={fake.clock.now}
           inbox={inbox}
+          initialOpen={initialOpen}
           now={NOW}
           onNavigate={to => navigated.push(to)}
           phone={false}
@@ -58,8 +59,15 @@ describe('the Machine group in the Inbox', () => {
     expect(head.textContent).toContain('Machine');
     expect(view?.container.querySelector('[data-agenda-group-link]')).toBeNull();
     expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
-    await interact(() => must(view?.container.querySelector<HTMLElement>('[data-agenda-row]'), 'the item').click());
+  });
+
+  test('opens with no conversation link and no composer', async () => {
+    const card = inboxCard(moved, must(machineView, 'the machine view'));
+    await open([card], card.key);
+
     expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
+    expect(view?.container.querySelector('[data-composer]')).toBeNull();
+    expect(view?.container.textContent).toContain('3 ferrets could not be moved');
   });
 
   test('names its machine only when several are paired', async () => {
