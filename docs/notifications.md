@@ -259,7 +259,7 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,250 characters, capped at 1,300 by a
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,240 characters, capped at 1,300 by a
 test; the shipped prompt as a whole has its own cap, so a new rule here is paid for by tightening words) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
 action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
 and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
