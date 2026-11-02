@@ -143,6 +143,29 @@ export const kindOfAsk = (ask: AgendaAsk | undefined): AgendaKind => {
 export const agendaCardKind = (item: Pick<AgendaCardSource, 'kind' | 'ask'>): AgendaKind =>
   item.kind ?? kindOfAsk(item.ask);
 
+/**
+ * The chip each kind wears, in plain words for what the OWNER does with the card (docs/agenda.md, "The kind chip").
+ * The one map every surface reads — the card's pill, the Inbox chip, the header and the row's meta line.
+ */
+export const AGENDA_KIND_LABELS: Readonly<Record<AgendaKind, string>> = {
+  reply: 'Question',
+  choice: 'Decision',
+  yesno: 'Decision',
+  task: 'To do',
+  permission: 'Approve',
+  info: 'FYI',
+  review: 'Review',
+  form: 'Fill in',
+  input: 'Type in',
+};
+
+/** The chip of a card waiting for the owner to try the work (a gate in a verify lane): it is a choice, but it asks for a test. */
+export const TEST_KIND_LABEL = 'Test';
+
+/** The chip word of an item or a request: the kind's plain word. */
+export const agendaKindLabel = (item: Pick<AgendaCardSource, 'kind' | 'ask'>): string =>
+  AGENDA_KIND_LABELS[agendaCardKind(item)];
+
 /** The ask each kind is raised with; `choice` and `yesno` need their options, `info` asks nothing. */
 export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[] = []): AgendaAsk | undefined => {
   switch (kind) {

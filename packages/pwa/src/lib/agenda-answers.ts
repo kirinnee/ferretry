@@ -28,12 +28,11 @@ import {
   type AgendaCardSource,
   type AgendaDirection,
   type AgendaItem,
-  type AgendaKind,
   type AgendaResponse,
   type AgendaUndeliveredReply,
   agendaCanDiscuss,
   agendaCardAnswers,
-  agendaCardKind,
+  agendaKindLabel,
   agendaInDiscussion,
   agendaShape,
   isDefaultAnswerLabel,
@@ -208,21 +207,9 @@ export const answerActions = (item: AnswerSource, reply = ''): readonly InboxAct
   return [...swiped, ...unswipedChoices(item).map(option => optionAction(option, reply))];
 };
 
-const KIND_WORDS: Readonly<Record<AgendaKind, string>> = {
-  task: 'Task',
-  yesno: 'Yes / no',
-  permission: 'Permission',
-  choice: 'Choice',
-  review: 'Review',
-  info: 'Info',
-  reply: 'Reply',
-  form: 'Form',
-  input: 'Input',
-};
-
 /** The card's kind in the word its header says. */
 export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
-  item.notice === true ? 'Notification' : KIND_WORDS[agendaCardKind(item)];
+  item.notice === true ? 'Notification' : agendaKindLabel(item);
 
 /**
  * Whether the card is answered in words alone: an open question, several questions, or a question mixed with steps

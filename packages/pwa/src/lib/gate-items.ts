@@ -11,7 +11,14 @@
  * - which synthesized to-test rows a gate item REPLACES, on a machine that advertises `board.gate-items.1`.
  */
 
-import { type AgendaGate, type AgendaItem, gateAnswers, gateAskOptions } from '@ferretry/protocol';
+import {
+  AGENDA_KIND_LABELS,
+  type AgendaGate,
+  type AgendaItem,
+  gateAnswers,
+  gateAskOptions,
+  TEST_KIND_LABEL,
+} from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import type { InboxAction } from './agenda-answers.ts';
 import type { ToTestCard } from './to-test-inbox.ts';
@@ -19,8 +26,9 @@ import type { ToTestCard } from './to-test-inbox.ts';
 /** An item that is a gate: it carries the card, lane and options. */
 export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 
-/** What a gate item is, in the lane's verb: a card to try, or a plan to approve. */
-export const gateVerb = (item: AgendaItem): string => (item.subject.startsWith('OK to build') ? 'Approve' : 'Try it');
+/** What a gate item is, in the owner's verb: a card to test, or a plan to approve. */
+export const gateVerb = (item: Pick<AgendaItem, 'subject'>): string =>
+  item.subject.startsWith('OK to build') ? AGENDA_KIND_LABELS.permission : TEST_KIND_LABEL;
 
 export const isGateItem = (item: AgendaItem): item is GateItem => item.gate !== undefined;
 

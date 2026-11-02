@@ -257,13 +257,13 @@ describe('an old item migrates to the same controls', () => {
 
 describe('the card’s kind', () => {
   it('names each kind in the word its header says', () => {
-    expect(kindWord({ ask: { kind: 'task' } })).toBe('Task');
-    expect(kindWord({ kind: 'yesno' })).toBe('Yes / no');
-    expect(kindWord({ ask: { kind: 'permission' } })).toBe('Permission');
-    expect(kindWord({ ask: choices('A', 'B') })).toBe('Choice');
+    expect(kindWord({ ask: { kind: 'task' } })).toBe('To do');
+    expect(kindWord({ kind: 'yesno' })).toBe('Decision');
+    expect(kindWord({ ask: { kind: 'permission' } })).toBe('Approve');
+    expect(kindWord({ ask: choices('A', 'B') })).toBe('Decision');
     expect(kindWord({ kind: 'review' })).toBe('Review');
-    expect(kindWord({})).toBe('Info');
-    expect(kindWord({ ask: { kind: 'open-question' } })).toBe('Reply');
+    expect(kindWord({})).toBe('FYI');
+    expect(kindWord({ ask: { kind: 'open-question' } })).toBe('Question');
   });
 
   it('calls an open question, several questions and a mix text-only, whatever answers they were stored with', () => {

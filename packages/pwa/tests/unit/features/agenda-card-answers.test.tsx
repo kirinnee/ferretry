@@ -42,7 +42,7 @@ describe('the card says what it is, at a glance', () => {
       context: 'The board needs somewhere to keep its tasks.',
     });
     const { root } = await card(item);
-    expect(root.querySelector('[data-agenda-kind]')?.textContent).toBe('Choice');
+    expect(root.querySelector('[data-agenda-kind]')?.textContent).toBe('Decision');
     expect(root.querySelector('[data-agenda-title]')?.textContent).toBe('Which database should the board use?');
     expect(root.querySelector('[data-agenda-ask]')).toBeNull();
     const tagged = root.querySelector('[data-agenda-option="SQLite"] [data-agenda-recommended]');

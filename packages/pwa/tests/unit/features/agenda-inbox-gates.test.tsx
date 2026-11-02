@@ -100,7 +100,7 @@ describe('a gate item in the Inbox', () => {
   it('says the gate and the project on ONE quiet line, and shows the card’s How to test as the body', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key }));
     const line = must(mounted.container.querySelector('[data-inbox-gate]'), 'the gate line');
-    expect(line.querySelector('[data-inbox-gate-stage]')?.textContent).toBe('Try it');
+    expect(line.querySelector('[data-card-kind="task"]')?.textContent).toBe('Test');
     expect(line.querySelector('[data-inbox-gate-project]')?.textContent).toBe('Ferretry');
     expect(line.querySelector('[data-inbox-open-chat]')?.textContent).toContain('Open chat');
     expect(mounted.container.querySelectorAll('[data-inbox-who]').length).toBe(1);
@@ -114,7 +114,7 @@ describe('a gate item in the Inbox', () => {
       sessionView('sess-h', { config: { teammate: 'judson', name: 'Plan' } as never }),
     );
     const mounted = await mount(page(fakeInbox(), [approve], { initialOpen: approve.key }));
-    expect(mounted.container.querySelector('[data-inbox-gate-stage]')?.textContent).toBe('Approve');
+    expect(mounted.container.querySelector('[data-card-kind="task"]')?.textContent).toBe('Approve');
     await mounted.unmount();
   });
 
@@ -130,7 +130,7 @@ describe('a gate item in the Inbox', () => {
       sessionView('sess-h', { config: { teammate: 'judson', name: 'Plan' } as never }),
     );
     const mounted = await mount(page(fakeInbox(), [gate, approve], { initialOpen: gate.key }));
-    expect(mounted.container.querySelector('.fy-attn-deck__top [data-inbox-gate-stage]')?.textContent).toBe('Try it');
+    expect(mounted.container.querySelector('.fy-attn-deck__top [data-card-kind="task"]')?.textContent).toBe('Test');
     expect(mounted.container.querySelector('.fy-attn-deck__top .fy-card__type')).toBeNull();
     expect(mounted.container.querySelector('.fy-attn-deck__top')?.textContent).not.toContain('Pick one option');
     await mounted.unmount();

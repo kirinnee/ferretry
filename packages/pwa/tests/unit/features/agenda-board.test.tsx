@@ -355,10 +355,10 @@ describe('AgendaBoard', () => {
         onAction={() => undefined}
       />,
     );
-    expect(container.textContent).toContain('Permission');
-    expect(container.textContent).toContain('Pick one');
-    expect(container.textContent).toContain('Review answer');
-    expect(container.textContent).toContain('Open question');
+    expect(container.textContent).toContain('Approve');
+    expect(container.textContent).toContain('Decision');
+    expect(container.textContent).toContain('Review');
+    expect(container.textContent).toContain('Question');
     expect(Array.from(container.querySelectorAll('[data-agenda-action]')).map(node => node.textContent)).toEqual([
       'Approve or reject.',
       'Choose an answer.',

@@ -5,8 +5,8 @@
  */
 
 import type { AgendaItem } from '@ferretry/protocol';
-import { agendaCardKind } from '@ferretry/protocol';
-import { isGateItem } from './gate-items.ts';
+import { agendaKindLabel, TEST_KIND_LABEL } from '@ferretry/protocol';
+import { gateVerb, isGateItem } from './gate-items.ts';
 
 type CardKindFamily = 'task' | 'agenda';
 
@@ -15,28 +15,13 @@ export interface CardKind {
   readonly word: string;
 }
 
-export const TASK_CARD_KIND: CardKind = { family: 'task', word: 'Task' };
+/** A board card waiting to be tried (the to-test rows): the owner's job is to test it. */
+export const TASK_CARD_KIND: CardKind = { family: 'task', word: TEST_KIND_LABEL };
 
-/** The word an agenda item carries: Question, Decision, Info, or a to-do the owner does by hand. */
-export const agendaWord = (item: Pick<AgendaItem, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string => {
-  if (item.notice === true) return 'Info';
-  switch (agendaCardKind(item)) {
-    case 'info':
-      return 'Info';
-    case 'yesno':
-    case 'permission':
-    case 'choice':
-    case 'review':
-      return 'Decision';
-    case 'task':
-      return 'To do';
-    case 'reply':
-    case 'form':
-    case 'input':
-      return 'Question';
-  }
-};
+/** The word an agenda item carries: the protocol's plain word for its kind (a notice is FYI). */
+export const agendaWord = (item: Pick<AgendaItem, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
+  agendaKindLabel(item.notice === true ? { kind: 'info' } : item);
 
-/** An Inbox item's kind: a gate is the owner's go-ahead on a task; everything else is the agenda's. */
+/** An Inbox item's kind: a gate is the owner's go-ahead on a task (Test or Approve); everything else is the agenda's. */
 export const itemCardKind = (item: AgendaItem): CardKind =>
-  isGateItem(item) ? TASK_CARD_KIND : { family: 'agenda', word: agendaWord(item) };
+  isGateItem(item) ? { family: 'task', word: gateVerb(item) } : { family: 'agenda', word: agendaWord(item) };
