@@ -3342,12 +3342,24 @@ describe('Agenda state machine: snooze, unsnooze and wake', () => {
     should(result.changed).be.false();
   });
 
+  it('should let the daemon’s own system actor unsnooze', () => {
+    // Arrange
+    const asleep = snoozed();
+
+    // Act
+    const woken = succeeded(apply(asleep.ledger, { action: 'unsnooze', actor: SYSTEM, id: 'A1', at: THIRD }));
+
+    // Assert
+    should(woken.change).equal('unparked');
+    should(woken.item?.parked).be.undefined();
+  });
+
   it('should refuse to unsnooze for anyone but the owner, and for a missing item', () => {
     // Arrange
     const asleep = snoozed();
 
     // Act + Assert
-    for (const actor of [AGENT, DAEMON, SYSTEM]) {
+    for (const actor of [AGENT, DAEMON, WARDEN]) {
       should(failed(apply(asleep.ledger, { action: 'unsnooze', actor, id: 'A1', at: THIRD })).error.code).equal(
         'forbidden',
       );

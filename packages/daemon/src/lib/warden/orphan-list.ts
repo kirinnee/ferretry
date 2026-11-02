@@ -5,6 +5,7 @@ import {
   MAX_AGENDA_SUBJECT_LENGTH,
 } from '@ferretry/protocol';
 import type { MachineAgendaPort, MachineMembersStore } from '../agenda/machine-agenda.ts';
+import { SerialQueue } from '../agenda/serial-queue.ts';
 import type { WardenCardNotice } from './orphans.ts';
 
 /** The ref of the one machine item every card with nobody on it is listed on. */
@@ -18,26 +19,33 @@ const MAX_LISTED = 12;
  * list is empty. Each card is kept with its title and subject so the item can name it after a restart.
  */
 export class OrphanList {
+  private readonly queue = new SerialQueue();
+
   constructor(
     private readonly store: MachineMembersStore,
     private readonly machine: MachineAgendaPort,
   ) {}
 
-  async add(notice: WardenCardNotice): Promise<void> {
-    const held = await this.store.read();
-    await this.store.write({ ...held, [notice.task.id]: [notice.title, notice.subject, notice.waitingSince] });
-    await this.reconcile();
+  /** `quiet` raises without a push (the boot folding). */
+  add(notice: WardenCardNotice, quiet = false): Promise<void> {
+    return this.queue.run(async () => {
+      const held = await this.store.read();
+      await this.store.write({ ...held, [notice.task.id]: [notice.title, notice.subject, notice.waitingSince] });
+      await this.refresh(quiet);
+    });
   }
 
-  async remove(taskId: string): Promise<void> {
-    const held = await this.store.read();
-    if (held[taskId] === undefined) return;
-    const { [taskId]: _gone, ...rest } = held;
-    await this.store.write(rest);
-    await this.reconcile();
+  remove(taskId: string): Promise<void> {
+    return this.queue.run(async () => {
+      const held = await this.store.read();
+      if (held[taskId] === undefined) return;
+      const { [taskId]: _gone, ...rest } = held;
+      await this.store.write(rest);
+      await this.refresh();
+    });
   }
 
-  private async reconcile(): Promise<void> {
+  private async refresh(quiet = false): Promise<void> {
     const held = await this.store.read();
     const ids = Object.keys(held).sort();
     if (ids.length === 0) return await this.machine.resolve(ORPHANS_REF, 'A ferret is on every card again.');
@@ -64,7 +72,7 @@ export class OrphanList {
           'Open the card, then resume its ferret, hand the card to another ferret, or drop it. A card leaves this list once a ferret is on it again.',
         waitingSince: since,
         notice: true,
-        ping: true,
+        ...(quiet ? {} : { ping: true as const }),
         kind: 'info',
       },
       ids,

@@ -39,7 +39,8 @@ const NOTE = 'folded into the machine agenda, where this cause is one item';
  * orphaned card and a hard-limit notice were each raised on a ferret's own agenda, so they piled up. Every open one is
  * carried into its machine item (the same cause lands on the same item, so duplicates keep one) and closed where it
  * was raised. The marker is written only when every agenda was read and every item folded; a start that finds it
- * does nothing, and a failed one is tried again next start.
+ * does nothing, and a failed one is tried again next start. The seeds are quiet (no push for an old notice), and a
+ * budget notice whose window already reset is closed without a machine item.
  */
 export async function foldNoticesIntoMachineAgenda(ports: MachineMigrationPorts): Promise<void> {
   if (await ports.marker.ran()) return;
@@ -54,7 +55,7 @@ export async function foldNoticesIntoMachineAgenda(ports: MachineMigrationPorts)
     for (const item of listed.value.items) {
       const ref = item.sourceRef;
       if (ref === null || ref === undefined) continue;
-      const folded = await fold(ports.seed, sessionId, ref, item).catch(() => false);
+      const folded = await fold(ports, sessionId, ref, item).catch(() => false);
       if (!folded) {
         if (isCause(ref)) complete = false;
         continue;
@@ -72,10 +73,19 @@ export async function foldNoticesIntoMachineAgenda(ports: MachineMigrationPorts)
 const isCause = (ref: string): boolean =>
   ref === AUTO_MOVE_REF || ref.startsWith(ORPHAN_PREFIX) || ref.startsWith(BUDGET_PREFIX);
 
-async function fold(seed: MachineSeed, sessionId: string, ref: string, item: AgendaItem): Promise<boolean> {
+/** The window a budget ref names ends at its trailing ISO instant; a ref without one is treated as still open. */
+const budgetWindowEnded = (ref: string, nowMs: number): boolean => {
+  const end = /\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.exec(ref)?.[0];
+  return end !== undefined && Date.parse(end) <= nowMs;
+};
+
+async function fold(ports: MachineMigrationPorts, sessionId: string, ref: string, item: AgendaItem): Promise<boolean> {
+  const { seed } = ports;
   if (ref === AUTO_MOVE_REF) await seed.autoMoveFailed(sessionId, item);
   else if (ref.startsWith(ORPHAN_PREFIX)) await seed.orphan(item);
-  else if (ref.startsWith(BUDGET_PREFIX)) await seed.budget(ref, item);
-  else return false;
+  else if (ref.startsWith(BUDGET_PREFIX)) {
+    // A window that already reset has nothing left to tell: the old item is closed and no machine item is made.
+    if (!budgetWindowEnded(ref, Date.parse(ports.now()))) await seed.budget(ref, item);
+  } else return false;
   return true;
 }

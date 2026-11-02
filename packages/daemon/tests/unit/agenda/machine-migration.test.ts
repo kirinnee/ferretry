@@ -13,6 +13,7 @@ function fixture(
     seedFails?: boolean;
     throws?: boolean;
     listThrows?: boolean;
+    budgetRef?: string;
   } = {},
 ) {
   const closed: string[] = [];
@@ -31,7 +32,7 @@ function fixture(
                 items: [
                   item(`${sessionId}-1`, 'warden-auto-migrate'),
                   item(`${sessionId}-2`, 'warden-orphan:F1'),
-                  item(`${sessionId}-3`, 'budget:login:daily:x'),
+                  item(`${sessionId}-3`, options.budgetRef ?? 'budget:login:daily:x'),
                   item(`${sessionId}-4`, 'other'),
                   item(`${sessionId}-5`, null),
                 ],
@@ -70,6 +71,29 @@ describe('folding notices into the machine agenda', () => {
     should(closed).have.length(6);
     should(recorded).have.length(1);
     should(recorded[0]).have.length(6);
+  });
+
+  it('should close a budget notice whose window already reset without making a machine item', async () => {
+    // Arrange
+    const { ports, closed, seeded } = fixture({ budgetRef: 'budget:login:daily:2026-01-01T00:00:00.000Z' });
+
+    // Act
+    await foldNoticesIntoMachineAgenda({ ...ports, now: () => '2026-07-31T10:00:00Z' });
+
+    // Assert
+    should(seeded.filter(entry => entry.startsWith('budget:'))).be.empty();
+    should(closed).containEql('s1/s1-3');
+  });
+
+  it('should carry a budget notice whose window is still open', async () => {
+    // Arrange
+    const { ports, seeded } = fixture({ budgetRef: 'budget:login:daily:2026-08-01T00:00:00.000Z' });
+
+    // Act
+    await foldNoticesIntoMachineAgenda({ ...ports, now: () => '2026-07-31T10:00:00Z' });
+
+    // Assert
+    should(seeded).containEql('budget:budget:login:daily:2026-08-01T00:00:00.000Z');
   });
 
   it('should do nothing once the marker is written', async () => {

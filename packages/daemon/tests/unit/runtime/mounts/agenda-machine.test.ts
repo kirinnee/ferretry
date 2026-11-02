@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
@@ -7,7 +8,6 @@ import {
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
-  MACHINE_AGENDA_ID,
 } from '../../../../src/lib/agenda/index.ts';
 import { agendaMachineRoutes } from '../../../../src/lib/runtime/mounts/agenda-machine.ts';
 import { jsonBody, request } from '../../api/support.ts';

@@ -5,6 +5,7 @@ import {
   MAX_AGENDA_SUBJECT_LENGTH,
 } from '@ferretry/protocol';
 import type { MachineAgendaPort, MachineMembersStore } from '../agenda/machine-agenda.ts';
+import { SerialQueue } from '../agenda/serial-queue.ts';
 
 /** The ref of the one machine item every ferret the Warden could not move is listed on. */
 export const AUTO_MOVE_FAILED_REF = 'warden:auto-move-failed';
@@ -22,23 +23,31 @@ const MAX_LISTED = 12;
  * closes when the list is empty. A stopped ferret is never listed.
  */
 export class AutoMoveFailures {
+  private readonly queue = new SerialQueue();
+
   constructor(
     private readonly store: MachineMembersStore,
     private readonly machine: MachineAgendaPort,
     private readonly facts: AutoMoveFacts,
   ) {}
 
-  /** The Warden could not move `sessionId`; `detail` says why. */
-  async note(sessionId: string, detail: string): Promise<void> {
-    const now = await this.facts.current(sessionId);
-    if (now === undefined) return;
-    const held = await this.store.read();
-    await this.store.write({ ...held, [sessionId]: [now.agent, detail] });
-    await this.reconcile();
+  /** The Warden could not move `sessionId`; `detail` says why. `quiet` raises without a push (the boot folding). */
+  note(sessionId: string, detail: string, quiet = false): Promise<void> {
+    return this.queue.run(async () => {
+      const now = await this.facts.current(sessionId);
+      if (now === undefined) return;
+      const held = await this.store.read();
+      await this.store.write({ ...held, [sessionId]: [now.agent, detail] });
+      await this.refresh(quiet);
+    });
   }
 
   /** Drop what no longer needs a move, then raise, refresh or close the item. */
-  async reconcile(): Promise<void> {
+  reconcile(): Promise<void> {
+    return this.queue.run(async () => await this.refresh());
+  }
+
+  private async refresh(quiet = false): Promise<void> {
     const held = await this.store.read();
     const kept: Record<string, readonly string[]> = {};
     for (const [id, entry] of Object.entries(held)) {
@@ -65,7 +74,7 @@ export class AutoMoveFailures {
         waitingSince: new Date().toISOString(),
         premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
         notice: true,
-        ping: true,
+        ...(quiet ? {} : { ping: true as const }),
         kind: 'info',
       },
       ids,

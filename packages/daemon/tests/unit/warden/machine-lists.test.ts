@@ -45,6 +45,45 @@ describe('the auto-move failures item', () => {
     should(last.request.context).containEql('a: Not moved: no login could take it.');
   });
 
+  it('should keep every ferret when notes and reconciles run at the same time', async () => {
+    // Arrange
+    const { port, raised } = machine();
+    const store = new Members();
+    const slow = {
+      read: async () => {
+        const held = await store.read();
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return held;
+      },
+      write: async (members: Readonly<Record<string, readonly string[]>>) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        await store.write(members);
+      },
+    };
+    const failures = new AutoMoveFailures(slow, port, facts);
+
+    // Act
+    await Promise.all([failures.note('a', 'x'), failures.reconcile(), failures.note('b', 'y'), failures.reconcile()]);
+
+    // Assert
+    should(Object.keys(store.value).sort()).eql(['a', 'b']);
+    should(raised.at(-1)?.members).eql(['a', 'b']);
+  });
+
+  it('should raise quietly when told to, as the boot folding does', async () => {
+    // Arrange
+    const { port, raised } = machine();
+    const failures = new AutoMoveFailures(new Members(), port, facts);
+
+    // Act
+    await failures.note('a', 'x', true);
+    await failures.note('b', 'y');
+
+    // Assert
+    should(raised[0]?.request.ping).be.undefined();
+    should(raised[1]?.request.ping).be.true();
+  });
+
   it('should name a single ferret in the title', async () => {
     const { port, raised } = machine();
     await new AutoMoveFailures(new Members(), port, facts).note('a', 'x');
@@ -106,6 +145,32 @@ describe('the orphaned cards item', () => {
     await list.add(notice('F2', '&F2 has nobody on it'));
     should(raised[1]?.request.title).equal('2 cards have nobody on them');
     should(raised[1]?.request.waitingSince).equal('2026-07-01T00:00:00Z');
+  });
+
+  it('should keep every card when adds and removes run at the same time, and raise quietly when told to', async () => {
+    // Arrange
+    const { port, raised } = machine();
+    const store = new Members();
+    const slow = {
+      read: async () => {
+        const held = await store.read();
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return held;
+      },
+      write: async (members: Readonly<Record<string, readonly string[]>>) => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        await store.write(members);
+      },
+    };
+    const list = new OrphanList(slow, port);
+
+    // Act
+    await Promise.all([list.add(notice('F1', 'a'), true), list.add(notice('F2', 'b')), list.remove('F9')]);
+
+    // Assert
+    should(Object.keys(store.value).sort()).eql(['F1', 'F2']);
+    should(raised[0]?.request.ping).be.undefined();
+    should(raised[1]?.request.ping).be.true();
   });
 
   it('should close the item when the last card leaves, and ignore a card it never held', async () => {

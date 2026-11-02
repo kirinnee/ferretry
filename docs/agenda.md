@@ -291,15 +291,22 @@ reference it. `ping: true` asks for the phone to buzz and is only valid on a not
 
 Some notices belong to no ferret's thread: the Warden could not move a ferret, a card has nobody on it, a login
 hit its budget. They are held on **one daemon-owned board** — the machine agenda — instead of on whichever
-ferret's agenda they concern, and the Inbox shows them as their own **Machine** group (tag `@machine`), counted,
-searchable (`/v1/search`) and notified like any other item.
+ferret's agenda they concern, and the Inbox shows them as their own **Machine** group (a stand-in conversation named
+"Machine", with a small machine icon), counted, searchable and notified like any other item. The ledger's id,
+`MACHINE_AGENDA_ID` (`machine-agenda`), is owned by `@ferretry/protocol`; the daemon and the app both import it, and
+a contract test reads the daemon route's real snapshot with the app's client. A push for a machine item, and a search
+hit on one, open the **Inbox** item, never a `/session/<id>` page.
 
 - **Who writes, who answers.** Only the daemon raises (`{kind:'daemon',cause:'system'}`); no ferret can address it
-  — the session agenda routes do not accept its id. Only the owner answers, and only by **dismissing** (the board
-  holds notices, which are read, never snoozed or replied to).
-- **Routes.** `GET /v1/machine/agenda` lists, `POST /v1/machine/agenda` dismisses. Both are owner-only
-  (`minimum: 'operator'`, `caller: 'person'`) and take no grant — the `clear-agents` rule in
-  [grants.md](grants.md).
+  — the session agenda routes do not accept its id. Only the owner answers, and never with a reply (the board holds
+  notices, which are read).
+- **Routes.** `GET /v1/machine/agenda` lists; `POST /v1/machine/agenda` takes exactly four owner verbs:
+  **dismiss** (the app's Clear), **snooze**, **unsnooze** and **resolve** without a reply. Anything else, or a
+  `resolve` that carries a reply, is a 400. Both routes are owner-only (`minimum: 'operator'`, `caller: 'person'`)
+  and take no grant — the `clear-agents` rule in [grants.md](grants.md).
+- **Visible to search.** Machine items are indexed for `/v1/search` and the `search_work` tool like a session's
+  agenda items, so any caller who may search work can read their text. That is the same exposure session items
+  already have; it is not an extra privilege, and the owner-only `GET` stays the only route that lists the board.
 - **One item per cause.** The same `sourceRef` refreshes in place:
   - `warden:auto-move-failed` — "N ferrets could not be moved", listing each (up to 12, then "…and N more."). A
     ferret that stops, is gone, or moved to another login drops off; the item resolves when the list is empty. A
@@ -309,14 +316,19 @@ searchable (`/v1/search`) and notified like any other item.
   - `budget:<login>:<window>` — one per login per budget window. (It used to double because the notice was
     de-duplicated only inside the agenda of the ferret it was anchored to, and the anchor differed.)
 - **Waking.** A machine item's member list is kept beside it. An update that **adds** a member to an item the owner
-  parked wakes it; one that only shrinks it does not. Once the owner dismisses an item, the same members do not
-  raise it again.
+  parked wakes it, as the daemon (never as the owner); one that only shrinks it does not. Once the owner dismisses an
+  item, the same members do not raise it again, and the list the item holds is kept current while it is dismissed,
+  so a member that leaves and later comes back counts as new and raises it again.
+- **Serial.** Each cause's member list (`AutoMoveFailures`, `OrphanList`) and the machine agenda itself run their
+  writes one at a time, so a note, a reconcile and the boot folding never overwrite each other. The Warden's sweep
+  and the one-minute reconcile start only after the folding has finished.
 - **Port.** Other daemon code uses `MachineAgenda`: `raiseOrUpdate(ref, request, members?)`, `resolve(ref, note?)`
   and `list()`. Only notice-type items belong here; gate items and Not-good follow-ups never do.
 - **Migration.** On first start after this shipped, the daemon folds the old per-ferret notices (`warden-auto-move`,
   `warden-orphan:*`, `budget:*`) into their machine item and closes the originals. It writes
   `machine-agenda-notices-migration.json` only when every agenda was read and every item folded; otherwise it tries
-  again next start.
+  again next start. The folding is quiet — it raises without a push, so an old notice does not buzz the phone again —
+  and it closes, without a machine item, a budget notice whose window has already reset.
 
 ## Lane proposals
 

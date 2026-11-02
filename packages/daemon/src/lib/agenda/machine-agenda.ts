@@ -1,13 +1,8 @@
-import type { AgendaId, AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
+import { type AgendaId, type AgendaItem, type AgendaSnapshot, MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import type { AgendaActor, RaiseAgendaRequest } from './state-machine.ts';
 import { agendaSnapshot, emptyAgendaLedger } from './state-machine.ts';
 import type { AgendaService } from './service.ts';
-
-/**
- * The id the machine agenda's ledger goes by. It is grammar-valid so the one agenda service handles it, yet no
- * ferret can hold it: sessions are minted by the daemon from hex, and this instance has its own ledger directory.
- */
-export const MACHINE_AGENDA_ID = 'machine-agenda';
+import { SerialQueue } from './serial-queue.ts';
 
 /** The only writer: the daemon. Nothing a ferret or the CLI sends reaches this ledger. */
 const DAEMON: AgendaActor = { kind: 'daemon', cause: 'system' };
@@ -36,7 +31,7 @@ export type MachineRaise = Omit<RaiseAgendaRequest, 'source' | 'sourceRef'>;
  * already seen.
  */
 export class MachineAgenda implements MachineAgendaPort {
-  private tail: Promise<unknown> = Promise.resolve();
+  private readonly queue = new SerialQueue();
 
   constructor(
     private readonly service: AgendaService,
@@ -51,12 +46,16 @@ export class MachineAgenda implements MachineAgendaPort {
   }
 
   raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<void> {
-    return this.serial(async () => {
+    return this.queue.run(async () => {
       if (members?.length === 0) return await this.close(ref, undefined);
       const open = await this.open(ref);
       const known = (await this.members.read())[ref];
       const seen = known !== undefined && members !== undefined && members.every(member => known.includes(member));
-      if (open === undefined && seen) return;
+      if (open === undefined && seen) {
+        // The list may have shrunk: remember who is there NOW, so a member that leaves and comes back counts as new.
+        if (members.length !== known.length) await this.remember(ref, members);
+        return;
+      }
       const raised = await this.service.raise(
         MACHINE_AGENDA_ID,
         { ...request, source: 'agent-raised', sourceRef: ref },
@@ -66,12 +65,16 @@ export class MachineAgenda implements MachineAgendaPort {
       if (members === undefined) return;
       const added = known === undefined || members.some(member => !known.includes(member));
       if (open?.parked?.reason === 'snoozed' && added) await this.wake(open.id);
-      await this.members.write({ ...(await this.members.read()), [ref]: members });
+      await this.remember(ref, members);
     });
   }
 
+  private async remember(ref: string, members: readonly string[]): Promise<void> {
+    await this.members.write({ ...(await this.members.read()), [ref]: members });
+  }
+
   resolve(ref: string, note?: string): Promise<void> {
-    return this.serial(async () => await this.close(ref, note));
+    return this.queue.run(async () => await this.close(ref, note));
   }
 
   private async close(ref: string, note: string | undefined): Promise<void> {
@@ -89,15 +92,9 @@ export class MachineAgenda implements MachineAgendaPort {
     return (await this.list()).items.find(item => item.source === 'agent-raised' && item.sourceRef === ref);
   }
 
-  /** The owner's own unsnooze is the one verb that clears the park; the daemon wakes it by the owner's leave. */
+  /** A member the owner has not seen ends the snooze: the daemon says so itself, in the item's history. */
   private async wake(id: AgendaId): Promise<void> {
-    const woke = await this.service.unsnooze(MACHINE_AGENDA_ID, id, { kind: 'human' });
+    const woke = await this.service.unsnooze(MACHINE_AGENDA_ID, id, DAEMON);
     if (!woke.ok) throw new Error(woke.error.message);
-  }
-
-  private serial(work: () => Promise<void>): Promise<void> {
-    const next = this.tail.then(work, work);
-    this.tail = next.catch(() => undefined);
-    return next;
   }
 }

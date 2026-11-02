@@ -109,6 +109,7 @@ import {
   type TranscriptProvenance,
   type WardenGuardConfig,
   type DuplicateAsk,
+  MACHINE_AGENDA_ID,
 } from '@ferretry/protocol';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
@@ -731,7 +732,6 @@ import {
   AgendaService,
   migrateToAgendaHomes,
   foldNoticesIntoMachineAgenda,
-  MACHINE_AGENDA_ID,
   MachineAgenda,
   AgendaTurnNudge,
   AgendaWaker,
@@ -4459,8 +4459,16 @@ interface WardenParts {
    * resolved anything.
    */
   readonly attention: AgendaService;
-  /** The machine items the Warden keeps: ferrets it could not move, cards with nobody on them. */
-  readonly machine: { readonly autoMove: AutoMoveFailures; readonly orphans: OrphanList };
+  /**
+   * The machine items the Warden keeps: ferrets it could not move, cards with nobody on them. `folded` settles when
+   * the boot folding of the old per-ferret notices has finished: the sweep waits for it, so a sweep and the folding
+   * never write the same list at once.
+   */
+  readonly machine: {
+    readonly autoMove: AutoMoveFailures;
+    readonly orphans: OrphanList;
+    readonly folded: Promise<void>;
+  };
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort & Partial<RuntimeNamesPort>;
   /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
@@ -4946,6 +4954,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     lastSweepAt: async () => await service.lastSweepAt(),
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {
+      await parts.machine.folded;
       parts.supervision.intervalMs = await service.intervalMs();
       const disarm = await loop.arm();
       // The timer is evidence only after the scheduler accepted it. The instant lets health classify
@@ -10836,7 +10845,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // The Warden's two list items: ferrets it could not move, and cards with nobody on them. Each is kept in a
       // small file so a restart still names them; a stopped or moved ferret leaves the first by itself.
-      const wardenMachine = {
+      const wardenLists = {
         autoMove: new AutoMoveFailures(
           new FileMachineMembers(stateFiles, join(paths.state, 'warden-auto-move-failed.json')),
           machineAgenda,
@@ -10854,25 +10863,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           machineAgenda,
         ),
       };
-      setInterval(() => void wardenMachine.autoMove.reconcile().catch(() => undefined), 60_000).unref();
-      void foldNoticesIntoMachineAgenda({
+      // The old notices are folded in first and quietly; only then does the minute timer or the Warden's sweep touch
+      // the lists, so nothing writes a list while the folding is still reading it.
+      const machineFolded = foldNoticesIntoMachineAgenda({
         agenda,
         sessions: { all: agendaSessionIds },
         seed: {
-          autoMoveFailed: async (sessionId, item) => await wardenMachine.autoMove.note(sessionId, item.subject),
+          autoMoveFailed: async (sessionId, item) => await wardenLists.autoMove.note(sessionId, item.subject, true),
           orphan: async item => {
             if (item.task === undefined || item.task === null) return;
-            await wardenMachine.orphans.add({
-              sourceRef: item.sourceRef ?? '',
-              task: item.task,
-              title: item.title ?? item.subject,
-              subject: item.subject,
-              why: item.why,
-              premise: item.premise ?? '',
-              context: item.context ?? '',
-              howToResolve: item.howToResolve,
-              waitingSince: item.waitingSince,
-            });
+            await wardenLists.orphans.add(
+              {
+                sourceRef: item.sourceRef ?? '',
+                task: item.task,
+                title: item.title ?? item.subject,
+                subject: item.subject,
+                why: item.why,
+                premise: item.premise ?? '',
+                context: item.context ?? '',
+                howToResolve: item.howToResolve,
+                waitingSince: item.waitingSince,
+              },
+              true,
+            );
           },
           budget: async (sourceRef, item) => {
             await machineAgenda.raiseOrUpdate(sourceRef, {
@@ -10884,7 +10897,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               howToResolve: item.howToResolve,
               waitingSince: item.waitingSince,
               notice: true,
-              ping: true,
               kind: 'info',
             });
           },
@@ -10893,6 +10905,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         now: () => clock.now(),
         diagnostics: boardDiagnostics,
       }).catch((error: unknown) => boardDiagnostics.warn(`the machine agenda's folding failed: ${String(error)}`));
+      const wardenMachine = { ...wardenLists, folded: machineFolded };
+      void machineFolded.then(() => {
+        setInterval(() => void wardenLists.autoMove.reconcile().catch(() => undefined), 60_000).unref();
+      });
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
       // daemon starts get theirs once, in the background (docs/board.md § Gates ask the owner).

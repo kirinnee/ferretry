@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
-  MACHINE_AGENDA_ID,
   MachineAgenda,
   type MachineMembersStore,
 } from '../../../src/lib/agenda/index.ts';
@@ -117,6 +117,79 @@ describe('the machine agenda', () => {
     should((await open(machine))[0]?.parked?.reason).equal('snoozed');
     await machine.raiseOrUpdate('warden:orphans', asks('three'), ['F1', 'F3']);
     should((await open(machine))[0]?.parked).be.undefined();
+  });
+
+  it('should raise again when a member that left comes back after the owner dismissed the item', async () => {
+    // Arrange
+    const { machine, service } = fixture();
+    await machine.raiseOrUpdate('warden:orphans', request('both'), ['a', 'b']);
+    const [item] = await open(machine);
+    await service.dismiss(MACHINE_AGENDA_ID, item!.id, { kind: 'human' });
+
+    // Act: a leaves, the owner's dismissal still stands, then a fails again.
+    await machine.raiseOrUpdate('warden:orphans', request('only b'), ['b']);
+    should(await open(machine)).be.empty();
+    await machine.raiseOrUpdate('warden:orphans', request('a is back'), ['a', 'b']);
+
+    // Assert
+    should((await open(machine)).map(found => found.subject)).eql(['a is back']);
+  });
+
+  it('should wake a snoozed item as the daemon itself, never as the owner', async () => {
+    // Arrange
+    const { machine, service } = fixture();
+    const actors: unknown[] = [];
+    const unsnooze = service.unsnooze.bind(service);
+    service.unsnooze = async (...args: Parameters<typeof service.unsnooze>) => {
+      actors.push(args[2]);
+      return await unsnooze(...args);
+    };
+    const { notice: _notice, ...asks } = request('one');
+    await machine.raiseOrUpdate('warden:orphans', asks, ['F1']);
+    const [item] = await open(machine);
+    await service.snooze(MACHINE_AGENDA_ID, item!.id, '2026-08-01T10:00:00Z', { kind: 'human' });
+
+    // Act
+    await machine.raiseOrUpdate('warden:orphans', { ...asks, subject: 'two' }, ['F1', 'F2']);
+
+    // Assert
+    should(actors).eql([{ kind: 'daemon', cause: 'system' }]);
+    should((await open(machine))[0]?.parked).be.undefined();
+  });
+
+  it('should keep two homes’ notices of one cause as ONE item holding both, when they arrive at the same time', async () => {
+    // Arrange
+    const { machine, members } = fixture();
+    const noticeOf = (home: string) => request(`${home} could not move its ferret`);
+
+    // Act: two homes tell the same cause at once, each listing only its own ferret plus what it already knew.
+    await Promise.all([
+      machine.raiseOrUpdate('warden:auto-move-failed', noticeOf('home-a'), ['a']),
+      machine.raiseOrUpdate('warden:auto-move-failed', noticeOf('home-b'), ['a', 'b']),
+    ]);
+
+    // Assert: one item, and the members file holds the latest list, not a half-written one.
+    const items = await open(machine);
+    should(items).have.length(1);
+    should(items[0]?.subject).equal('home-b could not move its ferret');
+    should(members.value['warden:auto-move-failed']).eql(['a', 'b']);
+  });
+
+  it('should keep one item per login per window however many anchors tell it', async () => {
+    // Arrange
+    const { machine } = fixture();
+    const ref = 'budget:claude-1:daily:2026-08-01T00:00:00.000Z';
+
+    // Act: two anchored ferrets, two notices for the same login and window; the next window is another item.
+    await Promise.all([
+      machine.raiseOrUpdate(ref, request('claude-1 hit its daily limit')),
+      machine.raiseOrUpdate(ref, request('claude-1 hit its daily limit')),
+    ]);
+    await machine.raiseOrUpdate('budget:claude-1:daily:2026-08-02T00:00:00.000Z', request('again tomorrow'));
+
+    // Assert
+    const items = await open(machine);
+    should(items.map(found => found.sourceRef).sort()).eql([ref, 'budget:claude-1:daily:2026-08-02T00:00:00.000Z']);
   });
 
   it('should say so when the ledger refuses a raise', async () => {
