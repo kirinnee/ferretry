@@ -73,8 +73,8 @@ import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { LOCATION_FENCE_LANGUAGE, parseLocationBlock } from '../lib/location-share.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
-  type AgentReferenceResolver,
   type AgendaReferenceResolver,
+  type AgentReferenceResolver,
   type CodeReference,
   findReferences,
   parseReferenceHref,
@@ -219,6 +219,11 @@ export interface MarkdownProps {
    * Exactly one production call site sets it, and a unit test holds it to one.
    */
   readonly enableFyRender?: boolean;
+  /**
+   * Draws a Markdown heading (`#` … `######`) as bold body text, never as an h1–h6. For prose that sits inside a
+   * card's own structure (an agenda segment), where a pasted heading would out-shout the card's labels. Off by default.
+   */
+  readonly demoteHeadings?: boolean;
   /** Puts a Copy button on every code fence and inline code span, writing through this clipboard. Off by default. */
   readonly copyable?: ClipboardWriter;
   /**
@@ -440,10 +445,30 @@ const MARKDOWN_COMPONENTS: Components = {
   th: ({ node: _node, ...rest }: ElementProps<'th'>) => <th scope="col" {...rest} />,
 };
 
+/** A heading drawn as bold body text: a paragraph holding a `strong`, so no h1–h6 outline is made by pasted prose. */
+function DemotedHeading({ node: _node, children }: ComponentProps<'h1'> & ExtraProps) {
+  return (
+    <p data-demoted-heading="">
+      <strong>{children}</strong>
+    </p>
+  );
+}
+
+const DEMOTED_HEADING_COMPONENTS: Components = {
+  ...MARKDOWN_COMPONENTS,
+  h1: DemotedHeading,
+  h2: DemotedHeading,
+  h3: DemotedHeading,
+  h4: DemotedHeading,
+  h5: DemotedHeading,
+  h6: DemotedHeading,
+};
+
 export const Markdown = memo(function Markdown({
   text,
   className,
   enableFyRender = false,
+  demoteHeadings = false,
   copyable,
   readWorkspaceMedia,
   agentReferenceResolver,
@@ -594,7 +619,7 @@ export const Markdown = memo(function Markdown({
     <div className={`md min-w-0 max-w-full ${className ?? ''}`}>
       <MarkdownRenderingContext.Provider value={rendering}>
         <ReactMarkdown
-          components={MARKDOWN_COMPONENTS}
+          components={demoteHeadings ? DEMOTED_HEADING_COMPONENTS : MARKDOWN_COMPONENTS}
           // remarkTableLabels stamps each body cell with its column header as
           // `data-label`, which the mobile stacked-card layout prints. It must run
           // after remark-gfm has produced the table nodes.

@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { RouteLink } from '../../shell/route-link.tsx';
 
 type Hooks = Readonly<Record<`data-${string}`, string>>;
@@ -32,10 +32,29 @@ export function CardMetaLine({
   );
 }
 
-export function MetaDot() {
+function MetaDot() {
   return (
     <span aria-hidden="true" className="fy-meta-line__dot">
       ·
     </span>
   );
 }
+
+/** A part that draws something: not null, undefined, a boolean, or a blank string. */
+const present = (part: ReactNode): boolean =>
+  part !== null && part !== undefined && typeof part !== 'boolean' && !(typeof part === 'string' && part.trim() === '');
+
+/** The parts of a meta line with a dot between each pair that DRAWS something: never a leading, trailing or doubled dot. */
+export function joinMeta(...parts: ReactNode[]): ReactNode {
+  return parts.filter(present).map((part, index) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: the parts are a fixed, ordered list of slots
+    <Fragment key={index}>
+      {index === 0 ? null : <MetaDot />}
+      {part}
+    </Fragment>
+  ));
+}
+
+/** Whether a name or label says anything: a meta part is only drawn (and only gets a dot) when it does. */
+export const hasWords = (text: string | null | undefined): text is string =>
+  text !== null && text !== undefined && text.trim() !== '';

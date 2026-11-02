@@ -35,12 +35,24 @@ beforeEach(() => {
   observers = [];
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => BOX });
   proto.getBoundingClientRect = function (this: HTMLElement) {
+    if (this.classList.contains('fy-item-view__title-probe'))
+      return { width: (this.textContent ?? '').length * 10 } as DOMRect;
     return { width: this.classList.contains('fy-item-view__title-text') ? textWidth : BOX } as DOMRect;
   };
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = FakeObserver;
 });
 
+const realMatchMedia = globalThis.matchMedia;
+const reduceMotion = (reduce: boolean): void => {
+  (globalThis as { matchMedia?: unknown }).matchMedia = () => ({
+    matches: reduce,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  });
+};
+
 afterEach(async () => {
+  (globalThis as { matchMedia?: unknown }).matchMedia = realMatchMedia;
   await view?.unmount();
   view = null;
   if (realClientWidth === undefined) Reflect.deleteProperty(proto, 'clientWidth');
@@ -104,5 +116,46 @@ describe('the one-line title', () => {
     await draw('A title that is far too long for the row');
     expect(heading().hasAttribute('data-marquee')).toBe(true);
     expect(observers).toHaveLength(0);
+  });
+});
+
+describe('the title where motion is reduced', () => {
+  // The fake probe makes every character 10px, and the box is 120px: twelve characters.
+  const LONG = 'Three answers for the catalog before I can finish';
+
+  test('ends at the last whole word with "…", never mid-word, and keeps the whole title for a reader', async () => {
+    reduceMotion(true);
+    await draw(LONG);
+    const cut = must(view?.container.querySelector('.fy-item-view__title-cut'), 'the cut title');
+    expect(cut.textContent).toBe('Three…');
+    expect(cut.getAttribute('aria-hidden')).toBe('true');
+    expect(heading().hasAttribute('data-cut')).toBe(true);
+    expect(must(heading().querySelector('.fy-item-view__title-text'), 'full text').textContent).toBe(LONG);
+  });
+
+  test('shows the whole title on a tap, and the cut one again on a second', async () => {
+    reduceMotion(true);
+    await draw(LONG);
+    await click();
+    expect(heading().hasAttribute('data-expanded')).toBe(true);
+    await click();
+    expect(heading().hasAttribute('data-expanded')).toBe(false);
+    expect(heading().hasAttribute('data-cut')).toBe(true);
+  });
+
+  test('draws no cut when a title fits, when its first word is wider than the box, or when motion is not reduced', async () => {
+    reduceMotion(true);
+    textWidth = 100;
+    await draw('Short');
+    expect(heading().hasAttribute('data-cut')).toBe(false);
+    await view?.unmount();
+    textWidth = 300;
+    await draw('Supercalifragilistic and more words');
+    expect(heading().hasAttribute('data-cut')).toBe(false);
+    await view?.unmount();
+    reduceMotion(false);
+    await draw(LONG);
+    expect(heading().hasAttribute('data-cut')).toBe(false);
+    expect(view?.container.querySelector('.fy-item-view__title-probe')).toBeNull();
   });
 });
