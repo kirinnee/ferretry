@@ -33,12 +33,14 @@ listed. `docs/relay-protocol.md` §§9, 11 and 13 define both operating modes an
 
 ## Layout
 
-| Path                   | What                                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `src/lib/`             | The protocol itself: framing, handshake, record layer, flow control, rendezvous rules |
-| `src/adapters/`        | WebCrypto binding, and the Worker + Durable Object                                    |
-| `wrangler.jsonc`       | Deployment configuration for **your** account                                         |
-| `wrangler.hosted.json` | Ferretry's separately metered and capped hosted deployment                            |
+| Path                              | What                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| `src/lib/`                        | The protocol itself: framing, handshake, record layer, flow control, rendezvous rules |
+| `src/adapters/`                   | WebCrypto binding, and the Worker + Durable Object                                    |
+| `wrangler.jsonc`                  | Deployment configuration for **your** account                                         |
+| `wrangler.hosted.json`            | Ferretry's separately metered and capped hosted deployment                            |
+| `wrangler.link-store.jsonc`       | Deployment configuration for **your** link store (optional)                           |
+| `wrangler.link-store.hosted.json` | Ferretry's hosted link store, a separate Worker (`workers_dev: false`)                |
 
 `src/lib/rendezvous.ts` is the whole rendezvous as a pure state machine; the Durable Object around it
 moves bytes and reads clocks and decides nothing.
@@ -47,6 +49,26 @@ reclaim, the operator view) and `src/lib/tunnel-provisioner.ts` (the call order,
 `CloudflareTunnelApi` port and a `TunnelStore` port) decide; `src/adapters/hosted-tunnel-control.ts`
 (the `TUNNEL_CONTROL` Durable Object), `hosted-tunnel-routes.ts` and `cloudflare-tunnel-api.ts` move
 bytes.
+
+## The link store
+
+A second, separate Worker, `ferretry-link-store`, keeps the sealed envelopes behind catalog links so a
+skill can reach someone with no connection to the publisher's machine. It is its own deployment so that
+shipping it never restarts the relay's rendezvous objects.
+
+- `src/lib/link-store.ts` is the wire contract; `src/lib/link-store-reducer.ts` is every rule as one pure function.
+- `src/adapters/link-store-worker.ts` is the Worker and its three SQLite-backed Durable Objects:
+  `LinkBundleDurableObject` (one per link; envelope in rows of at most 512 KiB, an alarm at its end),
+  `LinkOwnerDurableObject` (one per daemon; nonces, quota leases) and `LinkStoreControlDurableObject` (the
+  singleton; operator switches, limits, global counters, the registry of known ids and the per-IP windows).
+- `task link-store:check` rehearses; `task link-store:deploy` publishes your own and **refuses to run in CI or
+  unattended** without `LINK_STORE_DEPLOY_UNATTENDED=1`. The hosted one is deployed only by the manual
+  `.github/workflows/link-store-hosted.yaml`; there is no automatic deploy.
+- Operator switches and limits: `GET|PUT /v1/operator/link-store`, behind the `LINK_STORE_OPERATOR_TOKEN` Worker secret.
+
+**Nothing routes to it yet**: the hosted relay Worker has no binding to it and no daemon or app discovers it
+(slice 3f-3). The contract, the limits and the honest gaps are `docs/relay-protocol.md` §17; running your own is
+"Your own link store" in [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md).
 
 ## Deploying one of your own (expert)
 

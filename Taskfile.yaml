@@ -92,6 +92,23 @@ tasks:
       # Wrangler comes from the flake-locked Nix shell rather than an ambient global installation.
       - wrangler deploy
 
+  link-store:check:
+    desc: 'Expert: compile the link-store Worker (both shapes) and print its bindings without deploying anything'
+    dir: '{{.RELAY_PKG}}'
+    cmds:
+      # The rehearsal for link-store:deploy. `--dry-run` publishes nothing, needs no Cloudflare
+      # credentials, and compiles your wrangler.link-store.jsonc plus the hosted configuration.
+      - wrangler deploy --dry-run --config wrangler.link-store.jsonc
+      - wrangler deploy --dry-run --config wrangler.link-store.hosted.json
+
+  link-store:deploy:
+    desc: 'Expert: deploy the link store to your own Cloudflare account (refuses CI and unattended runs)'
+    cmds:
+      # An opt-in expert path (docs/cloudflare-relay-self-hosting.md, "Your own link store"). Fill in
+      # LINK_STORE_DAEMON_IDS in wrangler.link-store.jsonc first: an empty list serves nobody. The
+      # script refuses to run in CI or without a terminal unless LINK_STORE_DEPLOY_UNATTENDED=1.
+      - ./scripts/local/link-store-deploy.sh
+
   deadcode:
     desc: Review strict and LLM-assisted dead-code findings
     cmds:

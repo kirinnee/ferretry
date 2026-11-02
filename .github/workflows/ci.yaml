@@ -127,6 +127,8 @@ jobs:
             bun install --frozen-lockfile
             wrangler deploy --dry-run --config wrangler.jsonc
             wrangler deploy --dry-run --config wrangler.hosted.json
+            wrangler deploy --dry-run --config wrangler.link-store.jsonc
+            wrangler deploy --dry-run --config wrangler.link-store.hosted.json
           '
       # The same gate the Pages deploy runs — but that workflow only fires on a push to `main`, so
       # until now the first thing to notice that the generated `fy-render` sandbox shell and its two

@@ -292,6 +292,63 @@ fi
 [[ "$(jq -c '.global.bytesRelayed' <<<"${metrics_summary}")" == '123' ]] ||
   fail "the metrics projection must still report the account-wide meter"
 
+# ─── the link store: manual-only deploy, three SQLite classes, one operator route ─────────────
+
+ls_hosted_config="packages/relay/wrangler.link-store.hosted.json"
+ls_byo_config="packages/relay/wrangler.link-store.jsonc"
+ls_workflow=".github/workflows/link-store-hosted.yaml"
+ls_worker="packages/relay/src/adapters/link-store-worker.ts"
+ls_contract="packages/relay/src/lib/link-store.ts"
+
+jq -e '.vars.LINK_STORE_MODE == "hosted" and (.vars | has("LINK_STORE_DAEMON_IDS") | not)' "${ls_hosted_config}" >/dev/null 2>&1 ||
+  fail "${ls_hosted_config}: must be LINK_STORE_MODE hosted and carry no LINK_STORE_DAEMON_IDS"
+jq -e '.workers_dev == false and .main == "src/adapters/link-store-worker.ts"' "${ls_hosted_config}" >/dev/null 2>&1 ||
+  fail "${ls_hosted_config}: workers_dev must be false and main the link-store Worker entry"
+jq -e '
+  ([.durable_objects.bindings[] | {name, class_name}] | sort_by(.name)) == [
+    {name: "LINK_BUNDLE", class_name: "LinkBundleDurableObject"},
+    {name: "LINK_OWNER", class_name: "LinkOwnerDurableObject"},
+    {name: "LINK_STORE_CONTROL", class_name: "LinkStoreControlDurableObject"}
+  ] and
+  ([.migrations[].new_sqlite_classes // []] | flatten | sort)
+    == ["LinkBundleDurableObject", "LinkOwnerDurableObject", "LinkStoreControlDurableObject"] and
+  ([.migrations[] | keys[]] | index("new_classes") | not)
+' "${ls_hosted_config}" >/dev/null 2>&1 ||
+  fail "${ls_hosted_config}: bind exactly the three link-store classes and declare them as new_sqlite_classes"
+if rg -q '"rate_limit|ratelimits|unsafe' "${ls_hosted_config}"; then
+  fail "${ls_hosted_config}: per-IP limits are a control-object bucket so they stay operator-configurable; add no rate-limit binding"
+fi
+for class_name in LinkBundleDurableObject LinkOwnerDurableObject LinkStoreControlDurableObject; do
+  rg -q "\b${class_name}\b" "${ls_worker}" ||
+    fail "${ls_worker} does not export ${class_name}, which ${ls_hosted_config} deploys"
+  rg -q "\b${class_name}\b" "${ls_byo_config}" ||
+    fail "${ls_byo_config} does not deploy ${class_name}"
+done
+rg -q '"LINK_STORE_DAEMON_IDS"' "${ls_byo_config}" ||
+  fail "${ls_byo_config} must keep LINK_STORE_DAEMON_IDS; it is the whole upload access control of a self-hosted store"
+rg -q '"LINK_STORE_MODE": "self-hosted"' "${ls_byo_config}" ||
+  fail "${ls_byo_config} must say LINK_STORE_MODE self-hosted"
+
+# A deploy restarts the store, so the workflow runs only when an operator starts it: no push, schedule
+# or workflow_run trigger, ever.
+[[ "$(yq -o=json '.on' "${ls_workflow}" | jq -c 'if type == "object" then keys else [.] end')" == '["workflow_dispatch"]' ]] ||
+  fail "${ls_workflow} must trigger on workflow_dispatch and nothing else"
+rg -qF -- '--config wrangler.link-store.hosted.json' "${ls_workflow}" ||
+  fail "${ls_workflow} must deploy against ${ls_hosted_config}"
+rg -qF -- "inputs.confirm_deploy == true" "${ls_workflow}" ||
+  fail "${ls_workflow} must require confirm_deploy before it publishes"
+mask_count="$(rg -cF -- '::add-mask::$operator_token' "${ls_workflow}" || true)"
+[[ ${mask_count} -ge 2 ]] ||
+  fail "${ls_workflow} must mask the derived operator bearer in both the deploy and control jobs"
+ls_operator_path="$(rg -o "LINK_STORE_OPERATOR_PATH = '[^']*'" "${ls_contract}" | sed "s/.*'\\(.*\\)'/\\1/" | head -n 1)"
+[[ -n ${ls_operator_path} ]] || fail "${ls_contract} no longer declares LINK_STORE_OPERATOR_PATH"
+rg -qF -- "${ls_operator_path}" "${ls_workflow}" ||
+  fail "${ls_workflow} does not address ${ls_operator_path}, the route LINK_STORE_OPERATOR_PATH declares"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.jsonc' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the self-hosted link-store configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.hosted.json' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the hosted link-store configuration"
+
 # ─── what a protocol merge can do to the hosted Worker ────────────────────────────────────────
 
 # A DEPLOY DROPS EVERY LIVE SESSION, and the fingerprint skip only helps if unrelated code stays out
