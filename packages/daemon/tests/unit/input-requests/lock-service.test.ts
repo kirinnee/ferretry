@@ -448,13 +448,20 @@ describe("what the ferret did, as the lock reads it: this card's page only", () 
   });
 
   /** The field's facts prove it after a submit; Ferretry does not press Enter this time. */
-  const unsubmitted = async (arms: boolean) => {
+  const unsubmitted = async (arms: boolean, probe?: () => Promise<'hidden' | 'shown' | 'aborted'>) => {
     const held: Listing = {
       accounts: [account('EXAMPLE')],
       signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [{ ...proof(), tapped: flag }])],
     };
-    const w = inputRequestService({ observer: observer(), facts: PAGE, logins: logins(() => held), arms });
+    const w = inputRequestService({
+      observer: observer(),
+      facts: PAGE,
+      logins: logins(() => held),
+      arms,
+      ...(probe === undefined ? {} : { probe }),
+    });
     const { request } = await raised(w, { ...PAGE_RAISE, submit: 'agent' } as InputRaise);
+    const raisedLock = request.lock;
     await w.service.deliver(
       SESSION,
       request.id,
@@ -466,7 +473,7 @@ describe("what the ferret did, as the lock reads it: this card's page only", () 
       } as never,
       HOST,
     );
-    return { w, request };
+    return { w, request, raisedLock };
   };
 
   it('should hold a value Ferretry did not submit while the page shows its document, never 10 s (secrev-1333 M1)', async () => {
@@ -481,6 +488,81 @@ describe("what the ferret did, as the lock reads it: this card's page only", () 
       documents: ['loader-1'],
       documentsOnly: true,
     });
+  });
+
+  it('should give a page whose probe showed the value the plain hold and the probe reason, at raise and at Send (L4)', async () => {
+    for (const [probe, reason] of [
+      [async () => 'shown' as const, 'probe-shown'],
+      [async () => 'aborted' as const, 'probe-stopped'],
+    ] as const) {
+      // Act — the facts hold for the field, Ferretry does not press Enter, and the probe found trouble.
+      const { w, raisedLock } = await unsubmitted(true, probe);
+
+      // Assert — the card says the probe's reason, and the write (which cannot probe again) does not relax it into
+      // 'until-moved-on': with the pagehide clear armed, only that reason would make the hold follow its document.
+      should(raisedLock).deepEqual({ seconds: 120, reason });
+      should(w.service.pageHeld(SESSION, ['app'])).deepEqual({ until: NOW + 120_000, documents: ['loader-1'] });
+    }
+  });
+
+  it('should let only the until-moved-on reason follow its document: first-time, scripted and steered holds stay plain', async () => {
+    // Arrange — the browser arms its clear every time, and the facts would earn 'until-moved-on' if nothing else applied.
+    const held: Listing = {
+      accounts: [account('EXAMPLE')],
+      signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [{ ...proof(), tapped: flag }])],
+    };
+    const page = { id: 'page-1', hosts: ['accounts.example.test'] };
+    const scriptedOn = observer();
+    scriptedOn.acted(SESSION, 'browser', true).placed(page);
+    const actedAtSend = observer();
+    let act = false;
+    const cases: [string, ReturnType<typeof inputRequestService>, string][] = [
+      ['first-time', inputRequestService({ observer: observer(), facts: PAGE, arms: true }), 'first-time'],
+      [
+        'scripted',
+        inputRequestService({ observer: scriptedOn, facts: PAGE, logins: logins(() => held), arms: true }),
+        'scripted',
+      ],
+      [
+        'steered',
+        inputRequestService({
+          observer: actedAtSend,
+          facts: PAGE,
+          logins: logins(() => held),
+          arms: true,
+          journalled: event => {
+            if (!act || !JSON.stringify(event).includes('delivering')) return;
+            act = false;
+            actedAtSend.acted(SESSION, 'browser').placed(page);
+          },
+        }),
+        'until-moved-on',
+      ],
+    ];
+
+    for (const [label, w, raisedReason] of cases) {
+      // Act
+      const { request } = await raised(w, { ...PAGE_RAISE, submit: 'agent' } as InputRaise);
+      act = label === 'steered';
+      await w.service.deliver(
+        SESSION,
+        request.id,
+        {
+          deliveryId: crypto.randomUUID(),
+          observedDigest: request.observedDigest as string,
+          fields: [{ field: 'password', padded: padInputValue('hunter2-UNIQUE-pw') }],
+          submit: false,
+        } as never,
+        HOST,
+      );
+
+      // Assert — the hold is the plain full window: pictures never come back early on a moved-on page.
+      should([label, request.lock?.reason]).eql([label, raisedReason]);
+      should([label, w.service.pageHeld(SESSION, ['app'])]).eql([
+        label,
+        { until: NOW + 120_000, documents: ['loader-1'] },
+      ]);
+    }
   });
 
   it('should keep pictures out for the whole window when the pagehide clear could not be armed', async () => {

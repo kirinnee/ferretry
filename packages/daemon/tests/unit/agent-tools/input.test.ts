@@ -839,6 +839,24 @@ describe('AgentToolService — a page hold that follows its document (secrev-133
     should(await shoot(world)).equal('conflict');
   });
 
+  it('should tell the ferret pictures come back with the page moving on only for a hold that follows its document', async () => {
+    const said = async (documentsOnly: boolean) => {
+      const input = new FakeInput();
+      input.held = { until: UNTIL, documents: ['loader-1'], ...(documentsOnly ? { documentsOnly } : {}) };
+      const world = await pageWorld(input);
+      world.browser.document = 'loader-1';
+      input.document = 'loader-1';
+      return await world.service.call(agent, { tool: 'browser.screenshot', name: 'app' }).then(
+        () => '',
+        (failure: unknown) => (failure as AgentToolError).message,
+      );
+    };
+
+    should(await said(true)).containEql('text reads and pictures come back once the page has moved on');
+    should(await said(true)).not.containEql('pictures after that time');
+    should(await said(false)).containEql('pictures after that time');
+  });
+
   it('should keep pictures out for the whole window for any other hold, or a page whose document cannot be told', async () => {
     const input = new FakeInput();
     input.held = { until: UNTIL, documents: ['loader-1'] };

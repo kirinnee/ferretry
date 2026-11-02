@@ -177,6 +177,13 @@ describe('a page field', () => {
       seconds: 10,
       reason: 'probed-field',
     });
+    // A probe that showed the test value, or stopped, wins over the relaxed hold: the plain hold, the probe's reason.
+    for (const [probe, reason] of [
+      ['shown', 'probe-shown'],
+      ['aborted', 'probe-stopped'],
+    ] as const)
+      for (const observed of [[proven(facts)], [proven(facts, { tapped: flag() })]])
+        should(lockFor(facts, SECRET, { ...unsubmitted, observed, probe })).deepEqual({ seconds: 120, reason });
     // A record that says the page showed the value or stayed wins.
     should(
       lockFor(facts, SECRET, {
