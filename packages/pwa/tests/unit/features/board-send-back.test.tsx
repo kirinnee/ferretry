@@ -21,6 +21,7 @@ import { MemoryOutboxBackend } from '../../../src/lib/send-outbox.ts';
 import { createAppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { deferred, flush, laptop, workstation } from '../board-support.ts';
+import { mouseIsLastPointer } from './send-back-support.ts';
 
 // The box is the chat's composer; the Plain textarea is the editor these suites drive, as the composer's own do.
 beforeEach(() => writeMdComposePref('off'));
@@ -105,6 +106,7 @@ const composer = async (props: Partial<Parameters<typeof BoardSendBack>[0]> = {}
       {...props}
     />,
   );
+  await mouseIsLastPointer();
   const root = view.container;
   const submit = must(root.querySelector<HTMLButtonElement>('button[data-composer-send]'), 'Send back');
   return { root, submit, sent, log };
@@ -293,6 +295,7 @@ describe('BoardSendBack — voice, and nothing of the chat', () => {
         />
       </StoreProvider>,
     );
+    await mouseIsLastPointer();
     return { store, chats, sent, root: view.container };
   };
 
@@ -350,6 +353,7 @@ describe('Composer — detached', () => {
         sessionId="child-1"
       />,
     );
+    await mouseIsLastPointer();
     const input = await typeReason(view.container, 'words only');
     await interact(() => flush());
     expect(storage.values.size).toBe(0);

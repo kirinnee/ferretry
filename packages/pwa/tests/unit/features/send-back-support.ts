@@ -3,6 +3,13 @@ import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
 import { interact, must } from '../../support/dom.ts';
 import { flush } from '../board-support.ts';
 
+/** The input-modality store is shared by the whole process: a touch in another suite would stop Enter sending here. */
+export const mouseIsLastPointer = async (): Promise<void> => {
+  const mouse = new Event('pointerdown');
+  Object.defineProperty(mouse, 'pointerType', { value: 'mouse' });
+  await interact(() => window.dispatchEvent(mouse));
+};
+
 /** Draws the send-back box's composer as a plain textarea, the editor these suites drive; call once per file. */
 export const plainSendBackEditor = (): void => {
   beforeEach(() => writeMdComposePref('off'));
