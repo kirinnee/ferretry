@@ -464,6 +464,18 @@ const sessionCases: SchemaCase[] = [
 const serviceCases: SchemaCase[] = [
   { name: 'health', schema: service.HealthViewSchema, value: healthView },
   {
+    name: 'duplicate ask',
+    schema: service.DuplicateAskSchema,
+    value: {
+      kind: 'card',
+      members: [
+        { sessionId: 's1', id: 'A1' },
+        { sessionId: 's2', id: 'A2' },
+      ],
+      why: 'not closed: a hands-on card',
+    },
+  },
+  {
     name: 'legacy wire use',
     schema: service.LegacyWireUseSchema,
     value: {
