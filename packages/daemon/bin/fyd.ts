@@ -623,6 +623,7 @@ import {
   GateItems,
   LivenessActivityDeriver,
   type OwnerWords,
+  type BoardThreads,
   ReopenDeliveryLadder,
   rungsOf,
   stageGateLanes,
@@ -2210,6 +2211,8 @@ function createBoardWorld(
   gates: CardWriteObserver,
   /** One ferret's answered agenda items, for the owner's Yes a card on a board that is off rests on; read lazily. */
   agendaResolved: (sessionId: string) => Promise<readonly ResolvedAgendaItem[]>,
+  /** Links a ferret's open thread to the card made to carry it out (`fy task create --thread`); read lazily. */
+  linkThread: BoardThreads['link'],
   /** The board a `fy new --cwd` child will work on, resolved as its start will resolve it. */
   starts: Pick<SessionProjects, 'projectForStart'>,
 ): BoardWorld {
@@ -2275,8 +2278,11 @@ function createBoardWorld(
       nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId,
       answered: async (sessionId, id) => (await agendaResolved(sessionId)).find(item => item.id === id),
     },
-    // `fy task create --thread !A12`: the item must be the caller's own, open.
-    threads: { open: async (sessionId, id) => (await agendaItems(sessionId)).find(item => item.id === id) },
+    // `fy task create --thread !A12`: the item must be the caller's own, open; the card only links to it.
+    threads: {
+      open: async (sessionId, id) => (await agendaItems(sessionId)).find(item => item.id === id),
+      link: linkThread,
+    },
   });
   const cards = new SessionCards({
     board,
@@ -10232,6 +10238,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
           return listed.value.resolved;
+        },
+        async (sessionId, id, card) => {
+          const linked = await agenda.linkTask(sessionId, id, card);
+          return linked.ok ? { ok: true } : { ok: false, message: linked.error.message };
         },
         new SessionProjects(
           new StorageSessionFacts(storage),

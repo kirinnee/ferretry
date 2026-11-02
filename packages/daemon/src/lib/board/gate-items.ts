@@ -40,6 +40,7 @@ import {
   gateChoice,
   gateFollowupReference,
   gateReference,
+  gatesAnsweredOn,
   gateReopenOption,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
@@ -59,7 +60,7 @@ interface GateAgenda {
   list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>>;
   raise(sessionId: string, request: RaiseAgendaRequest, actor: AgendaActor): Promise<AgendaMutation>;
   resolve(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation>;
-  attachGate(sessionId: string, id: AgendaId, gate: AgendaGate | null): Promise<AgendaMutation>;
+  attachGate(sessionId: string, id: AgendaId, gate: AgendaGate | null, answered?: AgendaGate): Promise<AgendaMutation>;
   answer(
     sessionId: string,
     id: AgendaId,
@@ -172,10 +173,13 @@ interface HeldItems {
   readonly followups: readonly OpenItem[];
   /**
    * The `gate:` references of the card's gate items the OWNER closed (answered, or said Not needed) and of the gates
-   * the OWNER closed a thread carrying: each of those gates has been asked. One the daemon (moved, a duplicate) or a
-   * ferret closed is not an answer, so it never stops one.
+   * the OWNER answered on a thread that has since closed (its `gate-answered` history): each of those gates has been
+   * asked. One the daemon (moved, a duplicate) or a ferret closed, or a thread closed without the gate's answer, is
+   * not an answer, so it never stops one.
    */
   readonly asked: ReadonlySet<string>;
+  /** The gates the owner answered ("Not yet") on a thread that is still open: still asked, and still carried there. */
+  readonly answeredOnThread: ReadonlySet<string>;
 }
 
 /**
@@ -206,9 +210,17 @@ const isThreadOf = (item: AgendaItem, task: Pick<BoardTask, 'id' | 'machineId'>)
   item.task.id === task.id &&
   (item.task.machineId === undefined || item.task.machineId === task.machineId);
 
-/** Whether a thread still stands in for its card's gate item: the owner's turn, or the ferret's for under a day. */
+/**
+ * Whether a thread still stands in for its card's gate item: it is not parked (an owner's reply or a snooze puts it
+ * out of the owner's sight), and it is on the owner's turn, or on the ferret's for under a day.
+ */
 const countsAsThread = (item: AgendaItem, now: number): boolean =>
-  item.waitingOn === undefined || now - Date.parse(item.askedAt ?? item.waitingSince) <= THREAD_GRACE_MS;
+  item.parked === undefined &&
+  (item.waitingOn === undefined || now - Date.parse(item.askedAt ?? item.waitingSince) <= THREAD_GRACE_MS);
+
+/** Whether the owner has started talking a gate item through (asked for more, or to discuss it, or replied). */
+const beingDiscussed = (item: AgendaItem): boolean =>
+  (item.history ?? []).some(each => each.kind === 'needs-info' || each.kind === 'discuss' || each.kind === 'replied');
 
 /** The thread that carries the gate: the one on the owner's turn, else the newest. */
 const carrierOf = (threads: readonly OpenItem[]): OpenItem | undefined => {
@@ -219,6 +231,10 @@ const carrierOf = (threads: readonly OpenItem[]): OpenItem | undefined => {
 
 const sameGate = (one: AgendaGate | undefined, other: AgendaGate | undefined): boolean =>
   JSON.stringify(one ?? null) === JSON.stringify(other ?? null);
+
+/** The references of this card's gates the owner answered on `item`, as its history records them. */
+const answeredGatesOf = (item: Pick<AgendaItem, 'history'>, cardId: BoardTaskId): string[] =>
+  gatesAnsweredOn(item).filter(reference => parseGateReference(reference)?.cardId === cardId);
 
 /** The newer of two items of one gate: the one raised (or woken) later, the later session on a tie. */
 const newer = (one: OpenItem, other: OpenItem): OpenItem => {
@@ -373,9 +389,13 @@ export class GateItems implements CardWriteObserver {
       const applied = await this.apply(card, gate, decision, answer);
       if (applied !== undefined) return { handled: true, refused: applied };
       if (attached) {
-        // The thread stays open for its own question; the gate leaves it only when the card really moved on.
+        // The thread stays open for its own question; the gate leaves it only when the card really moved on. Either
+        // way the owner answered this gate here: the thread's history says so, whatever becomes of the thread.
         const left = decision.kind === 'not-yet' ? gate : null;
-        return { handled: true, mutation: await this.ports.agenda.attachGate(answer.sessionId, answer.id, left) };
+        return {
+          handled: true,
+          mutation: await this.ports.agenda.attachGate(answer.sessionId, answer.id, left, gate),
+        };
       }
       const mutation = await this.ports.agenda.answer(
         answer.sessionId,
@@ -412,9 +432,15 @@ export class GateItems implements CardWriteObserver {
     const held = await this.held(task, home);
     // A gate asks once on every agenda: one the owner answered (or set aside) anywhere is never asked again.
     const asked = wanted !== undefined && held.asked.has(wanted);
+    const settled = asked || (wanted !== undefined && held.answeredOnThread.has(wanted));
     const now = Date.parse(this.ports.now());
+    // A gate item the owner is mid-discussion on is not quietly closed for a thread that turns up: it stays, and the
+    // thread (raised unlinked, with its own question) does not carry the gate.
+    const underway = held.gates.some(each => each.item.sourceRef === wanted && beingDiscussed(each.item));
     const carrier =
-      gate === undefined || asked ? undefined : carrierOf(held.threads.filter(each => countsAsThread(each.item, now)));
+      gate === undefined || asked || underway
+        ? undefined
+        : carrierOf(held.threads.filter(each => countsAsThread(each.item, now)));
     for (const stale of held.gates.filter(each => carrier !== undefined || each.item.sourceRef !== wanted)) {
       const note = carrier === undefined ? GATE_MOVED_ON : `the gate is now asked on !${carrier.item.id}`;
       await this.ports.agenda.resolve(stale.sessionId, stale.item.id, DAEMON, note);
@@ -428,7 +454,7 @@ export class GateItems implements CardWriteObserver {
     const asking = held.gates.filter(each => each.item.sourceRef === wanted);
     let raised = false;
     if (asking.length > 0) await this.keepOne(task, gate, home, asking);
-    else if (!asked) raised = await this.raise(task, gate, home);
+    else if (!settled) raised = await this.raise(task, gate, home);
     await this.closeEarlierRounds(task, gate, held.followups);
     return raised;
   }
@@ -562,23 +588,25 @@ export class GateItems implements CardWriteObserver {
     const threads: OpenItem[] = [];
     const followups: OpenItem[] = [];
     const asked = new Set<string>();
+    const answeredOnThread = new Set<string>();
     for (const sessionId of new Set([...home, ...(this.holders.get(cardId) ?? [])])) {
       const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
       if (listed === undefined || !listed.ok) continue;
       for (const item of listed.value.items) {
         if (isThreadOf(item, card)) threads.push({ sessionId, item });
+        for (const reference of answeredGatesOf(item, cardId)) answeredOnThread.add(reference);
         if (gateCardOf(item) !== cardId) continue;
         if (item.gate !== undefined) gates.push({ sessionId, item });
         else followups.push({ sessionId, item });
       }
       for (const item of listed.value.resolved) {
+        for (const reference of answeredGatesOf(item, cardId)) asked.add(reference);
         if (item.resolvedBy !== 'human') continue;
-        if (item.gateAttached?.cardId === cardId) asked.add(gateReference(item.gateAttached));
         if (item.gate !== undefined && item.sourceRef !== null && gateCardOf(item) === cardId)
           asked.add(item.sourceRef);
       }
     }
-    return { gates, threads, followups, asked };
+    return { gates, threads, followups, asked, answeredOnThread };
   }
 
   /** Every agenda read once for the cards whose items it holds; a pass that could not list them is tried again. */

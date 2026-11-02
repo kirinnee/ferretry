@@ -387,6 +387,7 @@ export class BoardService {
     });
     const thread = await this.requireThread(caller, request.thread);
     const id = await this.ports.store.allocateId(request.kind);
+    await this.linkThread(thread, { id, machineId });
     const card = await this.insert(id, request, {
       machineId,
       caller,
@@ -395,7 +396,6 @@ export class BoardService {
       laneSet,
       index,
       approval,
-      thread,
     });
     await this.afterWrite(caller, card, [card.projectId], true);
     return await this.view(await this.ports.store.read(), id);
@@ -725,8 +725,6 @@ export class BoardService {
       readonly index: BoardIndex;
       /** The owner's Yes the card rests on, when that is what let a ferret make it. */
       readonly approval?: AgendaRef;
-      /** The caller's open thread the card carries out (docs/board.md § Thread cards are internal). */
-      readonly thread?: AgendaRef;
     },
   ): Promise<BoardTask> {
     const made = newCard(request, {
@@ -745,7 +743,6 @@ export class BoardService {
       ...made,
       askedBy: await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true),
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
-      ...(facts.thread === undefined ? {} : { thread: facts.thread }),
     });
     await this.ports.store.write(id, async current => {
       if (current !== undefined)
@@ -857,9 +854,7 @@ export class BoardService {
    * Who a card's gates ask (`cardAudience`): the session that wrote it is read for whether a ferret started it, and a
    * read that fails reads as the owner's.
    */
-  async audienceOf(
-    card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'> & Partial<Pick<BoardTask, 'thread' | 'approval'>>,
-  ): Promise<CardAudience> {
+  async audienceOf(card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>): Promise<CardAudience> {
     const writer = card.createdBy.kind === 'ferret' ? card.createdBy.sessionId : undefined;
     const parent = writer === undefined ? undefined : await this.ports.parents.parentOf(writer).catch(() => undefined);
     return cardAudience(card, parent !== undefined);
@@ -920,8 +915,8 @@ export class BoardService {
   }
 
   /**
-   * The thread a new card carries out, when it names one: an OPEN item on the CALLER's own agenda that the caller
-   * raised, and neither a gate item nor a notice (those are the daemon's, or context). Throws the refusal.
+   * The thread a new card is made to carry out, when it names one: an OPEN item on the CALLER's own agenda that the
+   * caller raised, neither a gate item nor a notice, and not linked to a card already. Throws the refusal.
    */
   private async requireThread(caller: BoardCaller, named: AgendaId | undefined): Promise<AgendaRef | undefined> {
     if (named === undefined) return undefined;
@@ -937,7 +932,19 @@ export class BoardService {
     if (item.gate !== undefined || item.notice === true) {
       throw new BoardError('invalid', `${ref} is not a thread: a gate item or a notice carries no card`);
     }
+    if (item.task !== undefined && item.task !== null) {
+      throw new BoardError('invalid', `${ref} is already linked to ${formatTaskRef(item.task)}: one thread, one card`);
+    }
     return { sessionId: caller.sessionId, id: named };
+  }
+
+  /** The thread becomes the new card's own: linked, nothing else (the card stays as external as any other). */
+  private async linkThread(thread: AgendaRef | undefined, card: TaskRef): Promise<void> {
+    if (thread === undefined || this.ports.threads === undefined) return;
+    const linked = await this.ports.threads.link(thread.sessionId, thread.id, card).catch(() => undefined);
+    if (linked !== undefined && linked.ok) return;
+    const why = linked === undefined ? 'its agenda could not be read' : linked.message;
+    throw new BoardError('invalid', `!${thread.id} was not linked to the new card: ${why}`);
   }
 
   /**

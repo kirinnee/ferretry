@@ -604,14 +604,22 @@ export const MAX_AGENDA_HISTORY = 20;
  * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
  * updated it (`updated`), the item left discussion for the queue (`surfaced`, the why as its note), or the
  * owner replied and it was PARKED as replied (`replied`, their words as its note; the ferret's `surface` or
- * `edit` brings it back, its `done` closes it).
+ * `edit` brings it back, its `done` closes it); or the owner answered the CARD GATE asked on this thread
+ * (`gate-answered`, the gate's `gate:` reference as its note, docs/agenda.md § One ask per thing), which keeps that
+ * gate asked for good, whichever way the thread is closed after.
  */
 export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied']),
+  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied', 'gate-answered']),
   note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
+
+/** The `gate:` references of the card gates the owner answered on this item, as its history records them. */
+export const gatesAnsweredOn = (item: { readonly history?: readonly AgendaHistoryEntry[] | undefined }): string[] =>
+  (item.history ?? []).flatMap(entry =>
+    entry.kind === 'gate-answered' && entry.note !== undefined ? [entry.note] : [],
+  );
 
 /**
  * WHY AN OPEN ITEM IS PARKED — off the owner's queue for now, with its way back (docs/agenda.md § Parked items):
@@ -919,6 +927,8 @@ export const AgendaGateSchema = z.strictObject({
   entry: PositiveIntegerSchema,
   projectId: z.string().min(1).max(128),
   projectName: z.string().min(1).max(120).optional(),
+  /** The card's title, so a thread carrying this gate can name the card: "Badge colour is ready to test". */
+  cardTitle: z.string().min(1).max(MAX_AGENDA_TITLE_LENGTH).optional(),
   options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;

@@ -63,8 +63,13 @@ export const HealthViewSchema = z.object({
   io: IoPressureViewSchema.optional(),
   /** The older wire names clients still used, by route; absent from an older daemon and empty when none was used. */
   legacyWire: z.array(LegacyWireUseSchema).optional(),
-  /** The possible duplicate asks the last sweep left open; absent from an older daemon, empty when there are none. */
+  /**
+   * The possible duplicate asks the last sweep left open, with the sessions and items they name: sent only to a
+   * request that arrived on this machine's privileged loopback carrier. Absent from an older daemon.
+   */
   duplicateAsks: z.array(DuplicateAskSchema).optional(),
+  /** How many possible duplicate asks there are: all an unauthenticated caller is told. Absent from an older daemon. */
+  duplicateAskCount: z.number().int().nonnegative().optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;

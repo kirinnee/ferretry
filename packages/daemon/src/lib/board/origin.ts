@@ -149,17 +149,11 @@ export const decideAskedBy = async (
  * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no
  * person asked for it (`askedBy`). `startedByFerret` answers for `createdBy`'s session alone. Anything else — a
  * top-level ferret's card, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
- *
- * One more way to be internal: a THREAD card (`thread`: made to carry out an open agenda thread of the creating ferret),
- * with no `approval` (the owner never said Yes to tracking it) and no person asking. The thread already has the owner;
- * the card is the ferret's own errand, wherever the ferret sits in the lineage.
  */
 export const cardAudience = (
-  card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'> & Partial<Pick<BoardTask, 'thread' | 'approval'>>,
+  card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>,
   startedByFerret: boolean,
 ): CardAudience => {
-  const asked = (card.askedBy ?? cardAskedBy(card)) === 'person';
-  if (card.thread !== undefined && card.approval === undefined && !asked) return 'internal';
   const own = card.createdBy.kind === 'daemon' || (card.createdBy.kind === 'ferret' && startedByFerret);
-  return own && !asked ? 'internal' : 'external';
+  return own && (card.askedBy ?? cardAskedBy(card)) !== 'person' ? 'internal' : 'external';
 };

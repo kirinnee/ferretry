@@ -3,6 +3,7 @@ import type { AgendaItem } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  attachedGateLead,
   attachedGateView,
   gateAnswerAction,
   gateAsksWords,
@@ -145,6 +146,14 @@ describe('a gate attached to a thread', () => {
     });
     const labels = Object.values(swipeTargets(view as AgendaItem)).map(target => target.label);
     expect(labels.sort()).toEqual(['Done', 'Not good']);
+  });
+
+  test('leads with the card title: ready to test when its options reopen it, else the lane', () => {
+    expect(attachedGateLead({ ...twoOptions, cardTitle: 'Badge colour' })).toBe('Badge colour is ready to test.');
+    expect(attachedGateLead(twoOptions)).toBe('is ready to test.');
+    const review = { ...twoOptions, laneName: 'Review', options: [{ ...twoOptions.options[0], outcome: 'advance' }] };
+    expect(attachedGateLead({ ...review, cardTitle: 'Badge colour' } as never)).toBe('Badge colour is at Review.');
+    expect(attachedGateLead(review as never)).toBe('is at Review.');
   });
 
   test('is nothing for an item with no attachment, a gate item or a notice', () => {

@@ -4,7 +4,6 @@ import should from 'should';
 import {
   askSessionOf,
   BoardIndex,
-  cardAudience,
   cardAskedBy,
   cardOrigin,
   humanParentOf,
@@ -133,20 +132,5 @@ describe('cardAskedBy: an agent made it', () => {
     const own = by(ferret(LEAD), `session:${LEAD}`);
     should(cardOrigin(own, facts)).equal('human');
     should(cardAskedBy(own)).equal('agent');
-  });
-});
-
-describe('cardAudience: a thread card is the ferret’s own errand', () => {
-  const thread = { sessionId: 'lead', id: 'A12' } as const;
-  const top = (extra: Partial<BoardTask> = {}) => by(ferret(LEAD), `session:${LEAD}`, { askedBy: 'agent', ...extra });
-
-  it('is internal wherever the ferret sits, when it carries out a thread', () => {
-    should(cardAudience(top(), false)).equal('external');
-    should(cardAudience(top({ thread }), false)).equal('internal');
-  });
-
-  it('stays external when the owner said Yes to it (an approval) or a person asked for it', () => {
-    should(cardAudience(top({ thread, approval: { sessionId: 'lead', id: 'A3' } }), false)).equal('external');
-    should(cardAudience(top({ thread, askedBy: 'person' }), false)).equal('external');
   });
 });

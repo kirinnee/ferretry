@@ -128,7 +128,9 @@ function view(
     ...(sessionWorkers === undefined ? {} : { sessionWorkers }),
     ...(io === undefined ? {} : { io }),
     ...(legacyWire === undefined ? {} : { legacyWire: [...legacyWire] }),
-    ...(duplicateAsks === undefined ? {} : { duplicateAsks: [...duplicateAsks] }),
+    // WHO may read which: an unauthenticated caller learns HOW MANY, never which asks or whose sessions.
+    ...(duplicateAsks === undefined ? {} : { duplicateAskCount: duplicateAsks.length }),
+    ...(duplicateAsks === undefined || !sessionBearerResolves ? {} : { duplicateAsks: [...duplicateAsks] }),
     // Stated by the protocol, which owns the names, so the app and this daemon cannot disagree about one.
     // EXCEPT the ferret session credential, which is offered only to a request that arrived where a session
     // bearer could resolve (this machine's privileged loopback carrier). A client that sees it presents the

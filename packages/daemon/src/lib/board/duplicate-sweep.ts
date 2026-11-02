@@ -11,7 +11,7 @@ import {
   type DuplicateAgenda,
   type PossibleDuplicate,
 } from '../agenda/index.ts';
-import { gateReference, type DuplicateAsk } from '@ferretry/protocol';
+import { gateReference, gatesAnsweredOn, type DuplicateAsk } from '@ferretry/protocol';
 
 const DAEMON: AgendaActor = { kind: 'daemon', cause: 'system' };
 
@@ -59,10 +59,11 @@ export class DuplicateSweep {
         continue;
       }
       for (const item of listed.value.resolved) {
-        if (item.resolvedBy !== 'human') continue;
-        if (item.gate !== undefined) answeredGates.add(gateReference(item.gate));
-        if (item.gateAttached !== undefined) answeredGates.add(gateReference(item.gateAttached));
+        for (const reference of gatesAnsweredOn(item)) answeredGates.add(reference);
+        if (item.resolvedBy === 'human' && item.gate !== undefined) answeredGates.add(gateReference(item.gate));
       }
+      for (const item of listed.value.items)
+        for (const reference of gatesAnsweredOn(item)) answeredGates.add(reference);
       agendas.push({
         sessionId,
         home: await this.ports.homes.of(sessionId).catch(() => sessionId),

@@ -54,6 +54,8 @@ export interface AgendaQuickRepliesProps {
   readonly options?: readonly AgendaAskOption[];
   /** A gate item names its buttons by label, never by letter: its few options are short by contract. */
   readonly plainLabels?: boolean;
+  /** Every answer is tapped only: no arrow is drawn and none is a swipe (the row beside a thread's own pair). */
+  readonly tapOnly?: boolean;
   /** What each swipe sends, by direction. */
   readonly map: SwipeMap;
   readonly busy: boolean;
@@ -165,6 +167,7 @@ export function AgendaQuickReplies({
   model,
   options = [],
   plainLabels = false,
+  tapOnly = false,
   map,
   busy,
   error,
@@ -290,6 +293,7 @@ export function AgendaQuickReplies({
             lettered={lettered}
             recommended={recommended}
             swipeable={swipeable}
+            tapOnly={tapOnly}
             {...(reply.onTap === undefined ? {} : { onTap: reply.onTap })}
           />
         ))}
@@ -312,6 +316,7 @@ function AnswerChip({
   lettered,
   recommended,
   swipeable,
+  tapOnly,
   onTap,
 }: {
   readonly answer: AgendaCardAnswer;
@@ -321,12 +326,13 @@ function AnswerChip({
   readonly lettered: boolean;
   readonly recommended: string | undefined;
   readonly swipeable: boolean;
+  readonly tapOnly: boolean;
   /** A button with its own handling: tapped only, so it says no swipe direction. */
   readonly onTap?: (() => void) | undefined;
 }) {
   return (
     <Chip
-      arrow={onTap === undefined ? answer.direction : undefined}
+      arrow={onTap === undefined && !tapOnly ? answer.direction : undefined}
       busy={busy}
       label={answer.label}
       letter={letter}

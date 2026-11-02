@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AgendaGate, AgendaItem } from '@ferretry/protocol';
+import { type AgendaGate, type AgendaItem, gateReference } from '@ferretry/protocol';
 import should from 'should';
 import { DuplicateSweep } from '../../../src/lib/board/duplicate-sweep.ts';
 
@@ -71,10 +71,10 @@ const TWINS = {
 };
 
 describe('DuplicateSweep', () => {
-  it('closes the older twin with a note that names the kept ask', async () => {
+  it('closes the newer twin with a note that names the kept ask', async () => {
     const { sweep, closed } = build({ open: TWINS });
     should(await sweep.run()).equal(1);
-    should(closed).deepEqual([['lead', 'A1', 'duplicate of !A2']]);
+    should(closed).deepEqual([['kid', 'A2', 'duplicate of !A1']]);
     should(sweep.possible()).deepEqual([]);
   });
 
@@ -92,36 +92,40 @@ describe('DuplicateSweep', () => {
       {
         kind: 'card',
         members: [
-          { sessionId: 'kid', id: 'A2' },
           { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'kid', id: 'A2' },
         ],
         why: 'not closed: an agenda could not be read',
       },
     ]);
   });
 
-  it('never closes a gate the owner answered, on either field', async () => {
+  it('never closes a gate the owner answered, however the answer was kept', async () => {
     const open = {
       lead: [item('A1', { task: { id: 'F1' }, gate, raisedBy: 'daemon', waitingOn: 'ferret' })],
       kid: [item('A2', { task: { id: 'F1' }, waitingSince: '2026-10-01T11:00:00.000Z' })],
     };
-    for (const field of ['gate', 'gateAttached']) {
-      const { sweep, closed } = build({
+    const answered = [{ at: '2026-10-01T12:00:00.000Z', kind: 'gate-answered', note: gateReference(gate) }];
+    const worlds: World[] = [
+      {
         open,
-        resolved: {
-          kid: [{ resolvedBy: 'human', [field]: gate }, { resolvedBy: 'ferret', gate }, { resolvedBy: 'human' }],
-        },
-      });
+        resolved: { kid: [{ resolvedBy: 'human', gate }, { resolvedBy: 'ferret', gate }, { resolvedBy: 'human' }] },
+      },
+      { open, resolved: { kid: [{ history: answered }] } },
+      { open: { ...open, other: [item('A9', { history: answered })] } },
+    ];
+    for (const world of worlds) {
+      const { sweep, closed } = build(world);
       should(await sweep.run()).equal(0);
       should(closed).deepEqual([]);
       should(sweep.possible().map(each => each.why)).deepEqual(['not closed: a gate the owner answered']);
     }
   });
 
-  it('falls back to the session itself when its home cannot be read', async () => {
+  it('falls back to the session itself when its home cannot be read: two lineages, nothing closed', async () => {
     const { sweep, closed } = build({ open: TWINS, homeThrows: true });
-    should(await sweep.run()).equal(1);
-    should(closed.length).equal(1);
+    should(await sweep.run()).equal(0);
+    should(closed).deepEqual([]);
   });
 
   it('never rejects: a failure is a warning and zero closed', async () => {

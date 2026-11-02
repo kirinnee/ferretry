@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { gateReference, gatesAnsweredOn } from '@ferretry/protocol';
 import type {
   AgendaLedger,
   AgendaLedgerRepository,
@@ -637,15 +638,28 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     ]);
   });
 
-  it('takes the focus card as before when it is not asking, and survives a failing lookup', async () => {
+  it('takes the focus card as before when it is not asking', async () => {
     const quiet = withGates(async () => undefined, { focusOf: async () => ({ id: 'F18' }) });
     const first = await quiet.service.raise(SESSION, request, AGENT);
     should(first.ok && first.item?.task).deepEqual({ id: 'F18' });
     should(first.ok && first.notes).be.undefined();
+  });
 
-    const broken = withGates(async () => Promise.reject(new Error('down')), { focusOf: async () => ({ id: 'F18' }) });
-    const second = await broken.service.raise(SESSION, request, AGENT);
-    should(second.ok && second.item?.task).deepEqual({ id: 'F18' });
+  it('fails closed when the gate cannot be read: raised WITHOUT the card, with a warning, for either kind of add', async () => {
+    const down = () => Promise.reject(new Error('down'));
+    const focus = withGates(down, { focusOf: async () => ({ id: 'F18' }) });
+    const byFocus = await focus.service.raise(SESSION, request, AGENT);
+    should(byFocus.ok).equal(true);
+    if (!byFocus.ok) return;
+    should(byFocus.item?.task).be.undefined();
+    should(byFocus.notes).deepEqual([
+      `&F18's gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note F18 "<text>"`,
+    ]);
+
+    const named = withGates(down);
+    const byName = await named.service.raise(SESSION, { ...request, task: { id: 'F12' } }, AGENT);
+    should(byName.ok && byName.item?.task).be.undefined();
+    should(byName.ok && byName.notes?.[0]).match(/&F12's gate could not be read/);
   });
 
   it('attaches a gate to a thread, and clears it, as the daemon', async () => {
@@ -665,5 +679,37 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
 
     should(attached.ok && attached.item?.gateAttached).deepEqual(gate);
     should(cleared.ok && cleared.item?.gateAttached).be.undefined();
+  });
+
+  it('records the owner answering a gate on a thread, as history the thread keeps', async () => {
+    const { service } = withGates(async () => undefined);
+    const gate = {
+      cardId: 'F1',
+      laneId: 'tested',
+      laneName: 'Try it',
+      entry: 1,
+      projectId: 'p1',
+      options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+    };
+    await service.raise(SESSION, request, AGENT);
+    await service.attachGate(SESSION, 'A1', gate);
+
+    const answered = await service.attachGate(SESSION, 'A1', gate, gate);
+
+    should(answered.ok && answered.item?.gateAttached).deepEqual(gate);
+    should(answered.ok && gatesAnsweredOn(answered.item!)).deepEqual([gateReference(gate)]);
+  });
+
+  it('links a thread to a card as the daemon, and refuses a thread another card already holds', async () => {
+    const { service } = withGates(async () => undefined);
+    await service.raise(SESSION, request, AGENT);
+
+    const linked = await service.linkTask(SESSION, 'A1', { id: 'F5' });
+    const again = await service.linkTask(SESSION, 'A1', { id: 'F5' });
+    const other = await service.linkTask(SESSION, 'A1', { id: 'F6' });
+
+    should(linked.ok && linked.item?.task).deepEqual({ id: 'F5' });
+    should(again.ok).equal(true);
+    should(other).match({ ok: false, error: { code: 'invalid', message: 'A1 is already linked to &F5' } });
   });
 });

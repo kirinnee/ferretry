@@ -26,7 +26,7 @@ import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
-import { attachedGateView, toGateAction } from '../../lib/gate-items.ts';
+import { attachedGateLead, attachedGateView, toGateAction } from '../../lib/gate-items.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
@@ -359,19 +359,18 @@ export function AgendaItemCard({
     attached === undefined ? null : (
       <div className="fy-card__gate-row" data-agenda-attached-gate={attached.gate.cardId}>
         <p className="fy-card__gate-lead">
-          <strong>&amp;{attached.gate.cardId}</strong> is at {attached.gate.laneName}. Answer it here too.
+          <strong>&amp;{attached.gate.cardId}</strong> {attachedGateLead(attached.gate)} Answer it here too.
         </p>
         <AgendaQuickReplies
           busy={busy}
           error={null}
-          map={Object.fromEntries(
-            Object.entries(swipeMap(attached)).map(([direction, action]) => [direction, toGateAction(action)]),
-          )}
+          map={{}}
           model={cardModel(attached)}
           onAct={action => onAct(toGateAction(action))}
           options={attached.ask?.kind === 'multiple-choice' ? attached.ask.options : []}
           plainLabels
           swipeable={false}
+          tapOnly
         />
       </div>
     );

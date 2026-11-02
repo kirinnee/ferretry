@@ -3,13 +3,15 @@
  * every open agenda that says which items are provably the same ask — the ones a sweep may close — and which only look
  * alike, which are reported and left alone.
  *
- * Provable, and closed:
+ * Provable, and closed — every rule within ONE lineage (the agendas that share a home), never across two:
  *
  * 1. one card with more than one open owner item (a gate item and a thread, or two threads);
  * 2. one `source` + `sourceRef` open on two agendas;
- * 3. identical titles (letters and digits only, case ignored) open in one lineage, both raised by agents.
+ * 3. identical titles (letters and digits only, case ignored), both raised by agents, with the same ask and body.
  *
- * Of each group the one KEPT is the one on the owner's turn, else the one on the lineage's home agenda, else the newest.
+ * Of each group the one KEPT is the OLDEST — the first ask stands, and the later one is the repeat — unless a newer one
+ * is on the owner's turn: that one is what the owner sees, so it stays and the oldest of those is kept.
+ * Closed only when both were raised by the SAME session: two voices asking alike is reported, not decided.
  * Never closed, however alike: a hands-on card, a gate the owner answered, an item the owner has begun a conversation on
  * (they asked for more, or the ferret was told something that never arrived). Those are reported instead.
  */
@@ -70,20 +72,21 @@ const keyOf = (entry: Entry): string => `${entry.agenda.sessionId}\u0000${entry.
 
 const memberOf = (entry: Entry): DuplicateMember => ({ sessionId: entry.agenda.sessionId, id: entry.item.id });
 
-/** Newest first: the later raise, then the higher id, then the session id, so the order never depends on read order. */
-const byNewest = (one: Entry, other: Entry): number =>
-  Date.parse(other.item.waitingSince) - Date.parse(one.item.waitingSince) ||
-  Number(other.item.id.slice(1)) - Number(one.item.id.slice(1)) ||
-  (other.agenda.sessionId < one.agenda.sessionId ? -1 : other.agenda.sessionId > one.agenda.sessionId ? 1 : 0);
+/** Oldest first: the earlier raise, then the lower id, then the session id, so the order never depends on read order. */
+const byOldest = (one: Entry, other: Entry): number =>
+  Date.parse(one.item.waitingSince) - Date.parse(other.item.waitingSince) ||
+  Number(one.item.id.slice(1)) - Number(other.item.id.slice(1)) ||
+  (one.agenda.sessionId < other.agenda.sessionId ? -1 : one.agenda.sessionId > other.agenda.sessionId ? 1 : 0);
 
-/** The one of a group to keep: on the owner's turn, else on the home agenda, else the newest. */
+/** The one of a group to keep: the oldest, unless a newer one is on the owner's turn (then the oldest of those). */
 const keeperOf = (group: readonly Entry[]): Entry => {
-  const ranked = [...group].sort(byNewest);
-  const first = (pick: (entry: Entry) => boolean): Entry | undefined => ranked.find(pick);
-  return (
-    first(entry => ownerTurn(entry.item)) ?? first(entry => entry.agenda.sessionId === entry.agenda.home) ?? ranked[0]!
-  );
+  const ranked = [...group].sort(byOldest);
+  return ranked.find(entry => ownerTurn(entry.item)) ?? ranked[0]!;
 };
+
+/** Whether two items ask the same thing in the same words: the ask and the body, as raised. */
+const sameWords = (one: AgendaItem, other: AgendaItem): boolean =>
+  JSON.stringify([one.ask ?? null, one.body ?? null]) === JSON.stringify([other.ask ?? null, other.body ?? null]);
 
 /** Why an item may not be closed, or `undefined` when it may. */
 const protectedBecause = (entry: Entry, facts: DuplicateFacts): string | undefined => {
@@ -113,7 +116,10 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
     const left: { readonly entry: Entry; readonly why: string }[] = [];
     for (const entry of group) {
       if (entry === keep) continue;
-      const why = protectedBecause(entry, facts);
+      const why =
+        protectedBecause(entry, facts) ??
+        (entry.item.raisedBySession === keep.item.raisedBySession ? undefined : 'raised by different sessions') ??
+        (kind === 'title' && !sameWords(entry.item, keep.item) ? 'the same title, but a different ask' : undefined);
       if (why === undefined) {
         closed.add(keyOf(entry));
         closures.push({ ...memberOf(entry), kind, keep: memberOf(keep) });
@@ -142,7 +148,7 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
     const { item } = entry;
     if (item.task === undefined || item.task === null || handsOnItem(item)) return undefined;
     if (item.gate === undefined && item.raisedBy !== 'agent') return undefined;
-    return `${item.task.machineId ?? ''}/${item.task.id}`;
+    return `${entry.agenda.home}\n${item.task.machineId ?? ''}/${item.task.id}`;
   };
   for (const group of grouped(open(), cardOf)) if (group.length > 1) settle('card', group);
 
@@ -150,7 +156,7 @@ export const findDuplicates = (agendas: readonly DuplicateAgenda[], facts: Dupli
   const sourceOf = (entry: Entry): string | undefined =>
     entry.item.sourceRef === null || handsOnItem(entry.item)
       ? undefined
-      : `${entry.item.source}\n${entry.item.sourceRef}`;
+      : `${entry.agenda.home}\n${entry.item.source}\n${entry.item.sourceRef}`;
   for (const group of grouped(open(), sourceOf)) {
     if (new Set(group.map(entry => entry.agenda.sessionId)).size > 1) settle('source', group);
   }

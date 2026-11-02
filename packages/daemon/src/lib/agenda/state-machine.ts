@@ -38,6 +38,8 @@ import {
   agendaShapeProblems,
   agendaWakeAt,
   formAnswerProblems,
+  formatTaskRef,
+  gateReference,
   parseGateFollowupReference,
   parseGateReference,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -351,6 +353,20 @@ export type AgendaCommand =
       readonly actor: AgendaActor;
       readonly id: AgendaId;
       readonly gate: AgendaGate | null;
+      /** The gate the OWNER just answered on this thread: kept in its history, so that gate stays asked for good. */
+      readonly answered?: AgendaGate;
+      readonly at: string;
+    }
+  | {
+      /**
+       * An open thread is linked to the card made to carry it out (docs/board.md § Thread cards link, they do not
+       * hide): its `task` becomes that card. Daemon-only; refused for a thread already linked to another card, a gate
+       * item and a notice.
+       */
+      readonly action: 'link-task';
+      readonly actor: AgendaActor;
+      readonly id: AgendaId;
+      readonly task: TaskRef;
       readonly at: string;
     }
   | {
@@ -757,6 +773,8 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return restateConfirms(ledger, command);
     case 'attach-gate':
       return attachGate(ledger, command);
+    case 'link-task':
+      return linkTask(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -794,6 +812,7 @@ type ResolveSourceCommand = Extract<AgendaCommand, { action: 'resolve-source' }>
 type UndeliveredCommand = Extract<AgendaCommand, { action: 'undelivered' }>;
 type RestateConfirmsCommand = Extract<AgendaCommand, { action: 'restate-confirms' }>;
 type AttachGateCommand = Extract<AgendaCommand, { action: 'attach-gate' }>;
+type LinkTaskCommand = Extract<AgendaCommand, { action: 'link-task' }>;
 
 function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   const { actor, request } = command;
@@ -1945,10 +1964,42 @@ function attachGate(ledger: AgendaLedger, command: AttachGateCommand): AgendaMut
   if (isGateItem(target.item) || target.item.notice === true) {
     return failure('invalid', `${command.id} is a gate item or a notice, so it carries no attached gate`);
   }
-  if (sameField(command.gate ?? undefined, target.item.gateAttached)) return unchanged(ledger);
+  if (command.answered === undefined && sameField(command.gate ?? undefined, target.item.gateAttached)) {
+    return unchanged(ledger);
+  }
   const { gateAttached: _gone, ...rest } = target.item;
-  const item: AgendaItem = command.gate === null ? rest : { ...rest, gateAttached: command.gate };
+  const kept: AgendaItem =
+    command.answered === undefined
+      ? rest
+      : {
+          ...rest,
+          history: withHistory(rest.history, {
+            at: command.at,
+            kind: 'gate-answered',
+            note: gateReference(command.answered),
+          }),
+        };
+  const item: AgendaItem = command.gate === null ? kept : { ...kept, gateAttached: command.gate };
   return replaceItem(ledger, item, command.at, 'refreshed');
+}
+
+/**
+ * An open thread is linked to a card: its `task` is set, and it is otherwise left exactly as it was. A thread that
+ * already names another card is refused: one thread, one card.
+ */
+function linkTask(ledger: AgendaLedger, command: LinkTaskCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon may link a thread to a card');
+  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (isGateItem(target.item) || target.item.notice === true) {
+    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no card`);
+  }
+  const linked = target.item.task;
+  if (linked !== undefined && linked !== null) {
+    if (linked.id === command.task.id && linked.machineId === command.task.machineId) return unchanged(ledger);
+    return failure('invalid', `${command.id} is already linked to ${formatTaskRef(linked)}`);
+  }
+  return replaceItem(ledger, { ...target.item, task: command.task }, command.at, 'refreshed');
 }
 
 /** The note on the newest history entry of this kind, if it had one. */

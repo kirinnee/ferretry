@@ -343,6 +343,32 @@ describe('the daemon health mount and the session-worker pool', () => {
 
     // Assert
     should(view.duplicateAsks).deepEqual(left);
+    should(view.duplicateAskCount).equal(1);
+    should(body).not.have.property('duplicateAsks');
+    should(body).not.have.property('duplicateAskCount');
+  });
+
+  it('should tell a caller that did not arrive on this host only HOW MANY asks are left, never which', async () => {
+    // Arrange
+    const left = [
+      {
+        kind: 'card' as const,
+        members: [
+          { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'peer', id: 'A2' },
+        ],
+        why: 'not closed: raised by different sessions',
+      },
+    ];
+
+    // Act
+    const body = JSON.parse((await ask(healthSubsystem({ duplicateAsks: left }), {}, false)).body) as Record<
+      string,
+      unknown
+    >;
+
+    // Assert
+    should(body.duplicateAskCount).equal(1);
     should(body).not.have.property('duplicateAsks');
   });
 });

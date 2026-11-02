@@ -77,6 +77,23 @@ describe('a thread with a gate attached', () => {
     expect(acted[1]?.gate).toBeUndefined();
   });
 
+  test('names the card by its title, and says it is ready to test', async () => {
+    const root = await draw(
+      thread({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
+    );
+    const lead = must(root.querySelector<HTMLElement>('.fy-card__gate-lead'), 'the lead');
+    expect(lead.textContent).toBe('&F12 Badge colour is ready to test. Answer it here too.');
+  });
+
+  test('keeps the arrows and the swipe on the thread own pair only: the gate buttons are tap only', async () => {
+    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>));
+    const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
+    expect(row.querySelectorAll('[data-agenda-answer]')).toHaveLength(0);
+    expect(row.querySelectorAll('.fy-qr__arrow')).toHaveLength(0);
+    const own = [...root.querySelectorAll<HTMLElement>('[data-agenda-answer]')].filter(node => !row.contains(node));
+    expect(own.length).toBeGreaterThan(0);
+  });
+
   test('a thread without an attachment draws no gate row', async () => {
     const root = await draw(thread());
     expect(root.querySelector('[data-agenda-attached-gate]')).toBeNull();

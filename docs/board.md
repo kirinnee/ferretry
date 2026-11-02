@@ -860,11 +860,12 @@ A gate does not ask the owner a second time about a card the owner is already be
 - **Attach, not wait.** A card at a gate with an open, owner-facing agent thread linked to it (`task` = the card) raises
   no gate item. The daemon puts the gate on the thread (`gateAttached`) and the owner answers its options there through
   `GateItems.answer`, owner only, the card moving first; the attachment clears only if the move went through, or when
-  the card leaves the gate. An attachment counts as asked once the **owner** closes the thread.
-- **The abuse guard.** A thread suppresses a gate item only while it is open and owner-facing. One left on the ferret's
+  the card leaves the gate. An attachment counts as asked only when the **owner answers a gate option** on the thread;
+  any other close while the card is at the gate raises the gate item.
+- **The abuse guard.** A thread suppresses a gate item only while it is open, not parked and owner-facing. One left on the ferret's
   turn for more than 24 hours no longer counts, and the next sweep raises the gate item.
-- **Thread cards are internal.** A card made with `fy task create --thread !A12` (the caller's own open thread) and no
-  `approval`, with no person asking, is a ferret's own errand (`cardAudience`): no gate item, not in the Inbox.
+- **`--thread` only links.** A card made with `fy task create --thread !A12` links the caller's own open thread to it
+  (refused if the thread already has another card). The card stays external: `cardAudience` has no thread branch.
 - **Duplicates.** One daemon sweep, at boot and each Warden sweep, closes the asks that are provably the same ask and
   reports the rest in `fy doctor`; see agenda.md.
 

@@ -29,6 +29,7 @@ const thread = agendaItem('A47', {
     entry: 3,
     projectId: 'p1',
     projectName: 'Ferretry',
+    cardTitle: 'Badge colour',
     options: [
       { id: 'o0', label: 'Done', outcome: 'close' },
       { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },

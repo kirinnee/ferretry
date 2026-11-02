@@ -2158,25 +2158,42 @@ describe('listing the card ids', () => {
 describe('creating a card for a thread (--thread)', () => {
   const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     ({ id: 'A12', raisedBy: 'agent', raisedBySession: 'lead', ...extra }) as AgendaItem;
-  const withThread = (item: AgendaItem | undefined | 'throws') =>
+  const linked: { sessionId: string; id: string; card: unknown }[] = [];
+  const withThread = (item: AgendaItem | undefined | 'throws', refusing?: string) =>
     serviceWith([], {
       threads: {
         open: async () => {
           if (item === 'throws') throw new Error('unreadable');
           return item;
         },
+        link: async (sessionId, id, card) => {
+          if (refusing !== undefined) return { ok: false, message: refusing };
+          linked.push({ sessionId, id, card });
+          return { ok: true };
+        },
       },
     });
   const forThread = create({ thread: 'A12', ask: { text: 'look at the badge', source: 'session:lead' } });
 
-  it('records the thread on the card, which is then the ferret’s own errand', async () => {
+  it('only LINKS the thread to the new card, which stays as external as any other', async () => {
+    linked.length = 0;
     const { ports, service } = withThread(thread());
 
     const response = await service.create(forThread, lead);
 
-    should(response.task.thread).eql({ sessionId: 'lead', id: 'A12' });
-    should(stored(ports).thread).eql({ sessionId: 'lead', id: 'A12' });
-    should(await service.audienceOf(stored(ports))).equal('internal');
+    should(linked).eql([{ sessionId: 'lead', id: 'A12', card: { id: response.task.id, machineId: MACHINE } }]);
+    should(stored(ports)).not.have.property('thread');
+    should(await service.audienceOf(stored(ports))).equal('external');
+  });
+
+  it('refuses a thread already linked to another card, and a link the agenda refuses', async () => {
+    const taken = thread({ task: { id: 'F9' } });
+    should((await refusal(withThread(taken).service.create(forThread, lead))).message).match(
+      /already linked to .*F9.*one thread, one card/,
+    );
+    should((await refusal(withThread(thread(), 'already linked to F9').service.create(forThread, lead))).message).match(
+      /was not linked to the new card: already linked to F9/,
+    );
   });
 
   it('refuses a caller who is not a ferret', async () => {

@@ -117,6 +117,13 @@ describe('duplicate ask lines', () => {
     should(duplicateAskLines([])).deepEqual(['no duplicate asks on the agendas']);
   });
 
+  it('should say how many, and no more, when the daemon sent only the count', () => {
+    should(duplicateAskLines(undefined, 0)).deepEqual([]);
+    should(duplicateAskLines(undefined, 2)).deepEqual([
+      "2 possible duplicate asks left open (the details are for the daemon's host)",
+    ]);
+  });
+
   it('should name each possible duplicate and where it is open', async () => {
     should(duplicateAskLines([pair])).deepEqual([
       '1 possible duplicate ask left open (the daemon closes only the ones it can prove):',

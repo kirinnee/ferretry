@@ -54,15 +54,9 @@ describe('findDuplicates: one card with more than one open owner item', () => {
     should(duplicateNote({ sessionId: 's1', id: 'A2' })).equal('duplicate of !A2');
   });
 
-  it('keeps the home agenda one when neither is on the owner turn, else the newest', () => {
+  it('keeps the oldest ask, whichever agenda of the lineage it is on, and closes the rest', () => {
     const waiting = { waitingOn: 'ferret', task: { id: 'F1' } };
-    const home = findDuplicates(
-      [agenda('kid', [item('A1', waiting)], 'lead'), agenda('lead', [item('A9', waiting)], 'lead')],
-      facts(),
-    );
-    should(home.closures[0]?.keep).deepEqual({ sessionId: 'lead', id: 'A9' });
-
-    const newest = findDuplicates(
+    const found = findDuplicates(
       [
         agenda('a', [item('A1', { ...waiting, waitingSince: '2026-10-01T09:00:00.000Z' })], 'x'),
         agenda('b', [item('A2', { ...waiting, waitingSince: '2026-10-01T11:00:00.000Z' })], 'x'),
@@ -70,14 +64,101 @@ describe('findDuplicates: one card with more than one open owner item', () => {
       ],
       facts(),
     );
-    should(newest.closures.map(each => each.sessionId).sort()).deepEqual(['a', 'b']);
-    should(newest.closures.every(each => each.keep.sessionId === 'c')).equal(true);
+    should(found.closures.map(each => each.sessionId).sort()).deepEqual(['b', 'c']);
+    should(found.closures.every(each => each.keep.sessionId === 'a')).equal(true);
   });
 
-  it('breaks a tie on the id, higher first', () => {
+  it('keeps a newer ask that is on the owner turn over an older one that is not', () => {
+    const found = findDuplicates(
+      [
+        agenda('s', [
+          item('A1', { task: { id: 'F1' }, waitingOn: 'ferret', waitingSince: '2026-10-01T09:00:00.000Z' }),
+          item('A2', { task: { id: 'F1' }, waitingSince: '2026-10-01T11:00:00.000Z' }),
+        ]),
+      ],
+      facts(),
+    );
+    should(found.closures).deepEqual([{ sessionId: 's', id: 'A1', kind: 'card', keep: { sessionId: 's', id: 'A2' } }]);
+  });
+
+  it('breaks a tie on the id, lower first', () => {
     const waiting = { waitingOn: 'ferret', task: { id: 'F1' } };
-    const found = findDuplicates([agenda('s', [item('A3', waiting), item('A10', waiting)], 'x')], facts());
-    should(found.closures).deepEqual([{ sessionId: 's', id: 'A3', kind: 'card', keep: { sessionId: 's', id: 'A10' } }]);
+    const found = findDuplicates([agenda('s', [item('A10', waiting), item('A3', waiting)], 'x')], facts());
+    should(found.closures).deepEqual([{ sessionId: 's', id: 'A10', kind: 'card', keep: { sessionId: 's', id: 'A3' } }]);
+  });
+
+  it('breaks a tie on the session when the time and the id are the same', () => {
+    const waiting = { waitingOn: 'ferret', task: { id: 'F1' } };
+    const found = findDuplicates(
+      [agenda('b', [item('A1', waiting)], 'x'), agenda('a', [item('A1', waiting)], 'x')],
+      facts(),
+    );
+    should(found.closures).deepEqual([{ sessionId: 'b', id: 'A1', kind: 'card', keep: { sessionId: 'a', id: 'A1' } }]);
+  });
+
+  it('never groups one card across two lineages', () => {
+    const found = findDuplicates(
+      [agenda('a', [item('A1', { task: { id: 'F1' } })], 'x'), agenda('b', [item('A1', { task: { id: 'F1' } })], 'y')],
+      facts(),
+    );
+    should(found).deepEqual({ closures: [], possible: [] });
+  });
+
+  it('reports, and closes nothing, when the asks were raised by different sessions', () => {
+    const found = findDuplicates(
+      [
+        agenda('s', [
+          item('A1', { task: { id: 'F1' }, raisedBySession: 'one' }),
+          item('A2', { task: { id: 'F1' }, raisedBySession: 'two', waitingSince: '2026-10-01T11:00:00.000Z' }),
+        ]),
+      ],
+      facts(),
+    );
+    should(found.closures).deepEqual([]);
+    should(found.possible).deepEqual([
+      {
+        kind: 'card',
+        members: [
+          { sessionId: 's', id: 'A1' },
+          { sessionId: 's', id: 'A2' },
+        ],
+        why: 'not closed: raised by different sessions',
+      },
+    ]);
+  });
+
+  it('reports a gate item and a thread the ferret left on its turn past the grace, and closes neither', () => {
+    const found = findDuplicates(
+      [
+        agenda('s', [
+          item('A1', {
+            task: { id: 'F1' },
+            waitingOn: 'ferret',
+            raisedBySession: 'lead',
+            waitingSince: '2026-10-01T09:00:00.000Z',
+          }),
+          item('A2', {
+            task: { id: 'F1' },
+            gate: gate('F1'),
+            raisedBy: 'daemon',
+            raisedBySession: null,
+            waitingSince: '2026-10-02T11:00:00.000Z',
+          }),
+        ]),
+      ],
+      facts(),
+    );
+    should(found.closures).deepEqual([]);
+    should(found.possible).deepEqual([
+      {
+        kind: 'card',
+        members: [
+          { sessionId: 's', id: 'A2' },
+          { sessionId: 's', id: 'A1' },
+        ],
+        why: 'not closed: raised by different sessions',
+      },
+    ]);
   });
 
   it('ignores a parked item for the owner turn, a notice, a hands-on card, and a card of another machine', () => {
@@ -137,7 +218,7 @@ describe('findDuplicates: one card with more than one open owner item', () => {
 });
 
 describe('findDuplicates: one source reference open on two agendas', () => {
-  it('closes the twin, never an item raised by hand', () => {
+  it('closes the newer twin, never an item raised by hand, and never across two lineages', () => {
     const source = { source: 'review', sourceRef: 'pr-9' };
     const found = findDuplicates(
       [
@@ -154,8 +235,13 @@ describe('findDuplicates: one source reference open on two agendas', () => {
       facts(),
     );
     should(found.closures).deepEqual([
-      { sessionId: 'a', id: 'A1', kind: 'source', keep: { sessionId: 'b', id: 'A1' } },
+      { sessionId: 'b', id: 'A1', kind: 'source', keep: { sessionId: 'a', id: 'A1' } },
     ]);
+    const apart = findDuplicates(
+      [agenda('a', [item('A1', source)], 'a'), agenda('b', [item('A1', source)], 'b')],
+      facts(),
+    );
+    should(apart).deepEqual({ closures: [], possible: [] });
   });
 
   it('is nothing when the same reference is open twice on one agenda', () => {
@@ -165,7 +251,7 @@ describe('findDuplicates: one source reference open on two agendas', () => {
 });
 
 describe('findDuplicates: identical titles in one lineage', () => {
-  it('closes the older of two agent-raised twins, ignoring case and punctuation', () => {
+  it('closes the newer of two agent-raised twins, ignoring case and punctuation', () => {
     const found = findDuplicates(
       [
         agenda('lead', [item('A1', { subject: 'Ship the release?' })], 'lead'),
@@ -174,7 +260,28 @@ describe('findDuplicates: identical titles in one lineage', () => {
       facts(),
     );
     should(found.closures).deepEqual([
-      { sessionId: 'lead', id: 'A1', kind: 'title', keep: { sessionId: 'kid', id: 'A2' } },
+      { sessionId: 'kid', id: 'A2', kind: 'title', keep: { sessionId: 'lead', id: 'A1' } },
+    ]);
+  });
+
+  it('reports twins that share a title but not their ask or body, and closes neither', () => {
+    const found = findDuplicates(
+      [
+        agenda('lead', [item('A1', { subject: 'Ship it', body: 'one way' })], 'lead'),
+        agenda('kid', [item('A2', { subject: 'Ship it', body: 'another way' })], 'lead'),
+      ],
+      facts(),
+    );
+    should(found.closures).deepEqual([]);
+    should(found.possible).deepEqual([
+      {
+        kind: 'title',
+        members: [
+          { sessionId: 'lead', id: 'A1' },
+          { sessionId: 'kid', id: 'A2' },
+        ],
+        why: 'not closed: the same title, but a different ask',
+      },
     ]);
   });
 
