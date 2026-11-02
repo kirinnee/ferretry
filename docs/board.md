@@ -31,13 +31,13 @@ Otherwise it asks first: one agenda yes/no, "Track this on the board?". A card a
 whatever the switch says. **The daemon enforces this** ([below](#the-daemon-refuses-a-card-nobody-asked-for)): words
 alone did not hold, because a person's own instructions that say "record every task" outvoted the Board rule.
 
-| Where the board is off                                    | What happens                                                                                                 |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `fy start`, the app's New session                         | no card is made                                                                                              |
-| `fy new`                                                  | a card only under the card the lead holds (the brief names it, or its focus), or the one `--card` hands over |
-| `fy task create`, `fy task refile` to another board       | a ferret's card is refused unless it rests on a live parent it holds there or on the owner's Yes             |
-| the [turn-end check](#the-turn-end-check)                 | silent                                                                                                       |
-| the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a card that exists, so only a ferret holding one hears them                  |
+| Where the board is off                                    | What happens                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `fy start`, the app's New session                         | no card is made                                                                                                    |
+| `fy new`                                                  | a card only under a live card the lead holds on the child's board (brief or focus), or the one `--card` hands over |
+| `fy task create`, `fy task refile` to another board       | a ferret's card is refused unless it rests on a live parent it holds there or on the owner's Yes                   |
+| the [turn-end check](#the-turn-end-check)                 | silent                                                                                                             |
+| the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a card that exists, so only a ferret holding one hears them                        |
 
 ### The daemon refuses a card nobody asked for
 
@@ -66,10 +66,11 @@ The ferretry board is off, so this work needs no card: put only what the owner m
 A named approval that does not count adds why (`The approval does not count: the owner did not answer Yes to !A12.`).
 An agenda that cannot be read counts as no Yes, so the rule fails closed.
 
-**`fy new` asks the same of the card it makes for a sub-ferret.** On a board that is off it makes one only under a card
-the lead may adopt under and that is still work (`BoardService.mayAdoptUnder`): the first card the brief names, else
-the lead's focus. A brief that merely mentions somebody else's card, or a closed or dropped one, gives no parent, so the
-switch decides and no card is made.
+**`fy new` asks the same of the card it makes for a sub-ferret**, of the board the **child** will work on (its own folder's
+with `--cwd`, resolved as its start resolves it, and checked again on the board it lands on). Where that board is off it
+makes one only under a card on that same board that the lead may adopt under and that is still work
+(`BoardService.mayAdoptUnder`): the first card the brief names, else the lead's focus. A brief that merely mentions
+somebody else's card, a closed or dropped one, or one on another board gives no card.
 
 Not asked: the owner (a paired device, the Board page), the admin token, and the daemon's own writes — gates, PRs,
 releases. Moves, links, notes and closes of a card a ferret holds are unchanged.

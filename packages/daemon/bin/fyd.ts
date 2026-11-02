@@ -2195,6 +2195,8 @@ function createBoardWorld(
   gates: CardWriteObserver,
   /** One ferret's answered agenda items, for the owner's Yes a card on a board that is off rests on; read lazily. */
   agendaResolved: (sessionId: string) => Promise<readonly ResolvedAgendaItem[]>,
+  /** The board a `fy new --cwd` child will work on, resolved as its start will resolve it. */
+  starts: Pick<SessionProjects, 'projectForStart'>,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
@@ -2262,6 +2264,7 @@ function createBoardWorld(
   const cards = new SessionCards({
     board,
     lanes,
+    starts,
     switches,
     proposer,
     adoption,
@@ -10191,6 +10194,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           if (!listed.ok) throw new Error(listed.error.message);
           return listed.value.resolved;
         },
+        new SessionProjects(
+          new StorageSessionFacts(storage),
+          { projects: async () => await catalogs.projects() },
+          new GitRepositoryProbe(),
+          [...COMMON_SCRATCH_ROOTS, tmpdir()],
+        ),
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after

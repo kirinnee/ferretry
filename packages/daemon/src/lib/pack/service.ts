@@ -396,6 +396,7 @@ export class PackService {
             card: request.card,
           },
           request.cwd === undefined,
+          request.cwd,
         );
       if (card?.refusal !== undefined) {
         return refused(
