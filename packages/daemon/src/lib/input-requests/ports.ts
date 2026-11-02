@@ -206,9 +206,12 @@ export interface TypeOptions {
    * A grant fill types a password into a page: before the first value goes in, the browser arms (its own `inputArm`
    * call) a `pagehide` listener in an isolated world of each password field's frame that empties every password input
    * when the page is hidden (the back/forward cache would otherwise keep the value). Arming fails or is refused (an
-   * older worker): nothing is typed.
+   * older worker): nothing is typed. `try` (an owner's value Ferretry does not submit, held while the page shows that
+   * document): armed if it can be, typed either way, and {@link armed} is told which.
    */
-  readonly armClear?: boolean;
+  readonly armClear?: boolean | 'try';
+  /** With `armClear: 'try'`: whether the pagehide clear was armed before the first key. */
+  readonly armed?: (armed: boolean) => void;
   /**
    * A grant fill: whether it may still go ahead, asked synchronously INSIDE the target's own turn (the page's queue, or
    * just before the terminal's guarded write), right before arming and right before the first key. `false`: nothing is

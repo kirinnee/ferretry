@@ -11,7 +11,8 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
-import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
+import { identityOf, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
+import type { ScriptedOriginsView } from '../../../src/lib/sign-in-grants/matcher.ts';
 import { LoginDirectory, LoginVault } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 import type { InputCaller as ServiceCaller } from '../../../src/lib/input-requests/ports.ts';
@@ -132,7 +133,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
   it('should hold a terminal that echoes for the full two minutes', async () => {
     const w = inputRequestService({ facts: { ...FACTS, echo: 'on', canonical: true, trustedProgram: true } });
     const { request } = await raised(w);
-    should(request.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(request.lock).deepEqual({ seconds: 120, reason: 'terminal-shows' });
     await w.service.deliver(
       SESSION,
       request.id,
@@ -170,16 +171,16 @@ describe('the lock a card shows, and the hold that runs it', () => {
   });
 
   it('should keep the full lock when the probe stops, shows the value, throws or cannot run', async () => {
-    for (const probe of [
-      async () => 'aborted' as const,
-      async () => 'shown' as const,
-      async () => await Promise.reject(new Error('the page went away')),
-    ]) {
+    for (const [probe, reason] of [
+      [async () => 'aborted' as const, 'probe-stopped'],
+      [async () => 'shown' as const, 'probe-shown'],
+      [async () => await Promise.reject(new Error('the page went away')), 'probe-stopped'],
+    ] as const) {
       const { request } = await raised(inputRequestService({ steered: () => false, facts: PAGE, probe }), PAGE_RAISE);
-      should(request.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
+      should(request.lock).deepEqual({ seconds: 120, reason });
     }
     const { request } = await raised(inputRequestService({ steered: () => false, facts: PAGE }), PAGE_RAISE);
-    should(request.lock?.seconds).equal(120);
+    should(request.lock).deepEqual({ seconds: 120, reason: 'first-time' });
   });
 
   it('should not probe a page a saved login already proves, and hold it 10 seconds', async () => {
@@ -219,7 +220,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
     } as InputTargetFacts;
     await deliver(w, request).catch(() => undefined);
     const [redrawn] = await w.service.list(HOST);
-    should(redrawn?.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(redrawn?.lock).deepEqual({ seconds: 120, reason: 'first-time' });
     should(w.writes).deepEqual([]);
   });
 
@@ -279,7 +280,372 @@ describe('the lock a card shows, and the hold that runs it', () => {
       },
     });
     const { request } = await raised(w, PAGE_RAISE);
-    should(request.lock?.seconds).equal(120);
+    should(request.lock).deepEqual({ seconds: 120, reason: 'not-proven' });
+  });
+});
+
+/**
+ * THE LOCK IS JUDGED PER PAGE (&B137 C): the owner's two Google tabs, one ferret. Only what the ferret did on the card's
+ * own page, or a page script there or on its site, lengthens the card's lock; another tab, another site's tab in the
+ * same profile, an incognito tab or a terminal does not.
+ */
+describe("what the ferret did, as the lock reads it: this card's page only", () => {
+  /** The real observer, on the test's clock, that saw the ferret open the card's profile page a minute before. */
+  const observer = () => {
+    let now = NOW - 60_000;
+    const seen = new LoginObserver({
+      sink: { observeSignIn: async () => undefined },
+      probe: { shows: async () => undefined, where: async () => undefined },
+      now: () => now,
+      sleep: async () => undefined,
+    });
+    seen.acted(SESSION, 'browser').placed({ id: 'page-1', hosts: ['accounts.example.test'] });
+    now = NOW;
+    return seen;
+  };
+  const probing = (seen: LoginObserver, scriptedOrigins?: () => ScriptedOriginsView) =>
+    inputRequestService({
+      observer: seen,
+      facts: PAGE,
+      probe: async () => 'hidden',
+      ...(scriptedOrigins === undefined ? {} : { scriptedOrigins }),
+    });
+  const PROFILE_TAB = { id: 'page-2', hosts: ['docs.other.test'] };
+  const INCOGNITO_TAB = { id: 'page-3', incognito: true as const, hosts: ['accounts.example.test'] };
+
+  it('should keep a 10 second lock when the ferret acts on another tab or a terminal while the card waits', async () => {
+    // Arrange
+    const seen = observer();
+    const w = probing(seen);
+    const { request } = await raised(w, PAGE_RAISE);
+    should(request.lock).deepEqual({ seconds: 10, reason: 'probed-field' });
+
+    // Act — another site's tab in the same profile, an incognito tab on this very site, and a terminal.
+    seen.acted(SESSION, 'browser').placed(PROFILE_TAB);
+    seen.acted(SESSION, 'browser').placed(INCOGNITO_TAB);
+    seen.acted(SESSION, 'terminal').placed(undefined);
+    const [shown] = await w.service.list(HOST);
+    await deliver(w, request);
+
+    // Assert — the card still says 10 s, and the hold runs 10 s.
+    should(shown?.lock).deepEqual({ seconds: 10, reason: 'probed-field' });
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 10_000);
+  });
+
+  it("should hold the full lock, and say so on the card, once the ferret uses the card's own page", async () => {
+    // Arrange
+    const seen = observer();
+    const w = probing(seen);
+    const { request } = await raised(w, PAGE_RAISE);
+
+    // Act — a navigation (or any act) of this page by the ferret, after the card was raised.
+    seen.acted(SESSION, 'browser').placed({ id: 'page-1', hosts: ['accounts.example.test'] });
+    const [shown] = await w.service.list(HOST);
+    await deliver(w, request);
+
+    // Assert
+    should(shown?.lock).deepEqual({ seconds: 120, reason: 'steered' });
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+  });
+
+  it('should hold the full lock when the ferret acts on a tab that shares its storage, on its site', async () => {
+    // Arrange
+    const seen = observer();
+    const w = probing(seen);
+    const { request } = await raised(w, PAGE_RAISE);
+
+    // Act — a profile tab that was on accounts.example.test around the act.
+    seen.acted(SESSION, 'browser').placed({ id: 'page-2', hosts: ['docs.other.test', 'accounts.example.test'] });
+    await deliver(w, request);
+
+    // Assert
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+  });
+
+  it('should count an act as on every page until it is placed, and for good when its page is never known', async () => {
+    // Arrange
+    const seen = observer();
+    const w = probing(seen);
+    await raised(w, PAGE_RAISE);
+
+    // Act — one act still running, one whose page was never known.
+    const running = seen.acted(SESSION, 'browser');
+    const [during] = await w.service.list(HOST);
+    running.placed(PROFILE_TAB);
+    const [after] = await w.service.list(HOST);
+    seen.acted(SESSION, 'browser').placed(undefined);
+    const [unknown] = await w.service.list(HOST);
+
+    // Assert
+    should(during?.lock?.reason).equal('steered');
+    should(after?.lock?.reason).equal('probed-field');
+    should(unknown?.lock?.reason).equal('steered');
+  });
+
+  it('should never probe, and keep the full lock, for a page the ferret scripted, or a script on its site', async () => {
+    // Arrange — a script of this session on this page; on another tab while it was at this host; and another
+    // ferret's script on this host, machine-wide.
+    const onPage = observer();
+    onPage.acted(SESSION, 'browser', true).placed({ id: 'page-1', hosts: ['other.example.test'] });
+    const onSite = observer();
+    onSite.acted(SESSION, 'browser', true).placed({ id: 'page-9', incognito: true, hosts: ['accounts.example.test'] });
+    const machine: ScriptedOriginsView = { hosts: new Map([['accounts.example.test', NOW - 60_000]]) };
+    let probed = 0;
+    const counting = (seen: LoginObserver, scriptedOrigins?: () => ScriptedOriginsView) =>
+      inputRequestService({
+        observer: seen,
+        facts: PAGE,
+        probe: async () => {
+          probed += 1;
+          return 'hidden';
+        },
+        ...(scriptedOrigins === undefined ? {} : { scriptedOrigins }),
+      });
+
+    // Act
+    const locks = [
+      (await raised(counting(onPage), PAGE_RAISE)).request.lock,
+      (await raised(counting(onSite), PAGE_RAISE)).request.lock,
+      (
+        await raised(
+          counting(observer(), () => machine),
+          PAGE_RAISE,
+        )
+      ).request.lock,
+      (
+        await raised(
+          counting(observer(), () => ({ hosts: new Map(), everywhere: NOW })),
+          PAGE_RAISE,
+        )
+      ).request.lock,
+      (
+        await raised(
+          counting(observer(), () => ({ hosts: new Map(), running: true })),
+          PAGE_RAISE,
+        )
+      ).request.lock,
+    ];
+
+    // Assert
+    should(probed).equal(0);
+    for (const lock of locks) should(lock).deepEqual({ seconds: 120, reason: 'scripted' });
+  });
+
+  it('should not lengthen the lock for a script on another site in this session', async () => {
+    // Arrange
+    const seen = observer();
+    seen.acted(SESSION, 'browser', true).placed({ id: 'page-2', hosts: ['docs.other.test'] });
+    const machine: ScriptedOriginsView = { hosts: new Map([['docs.other.test', NOW]]) };
+
+    // Act
+    const { request } = await raised(
+      probing(seen, () => machine),
+      PAGE_RAISE,
+    );
+
+    // Assert
+    should(request.lock).deepEqual({ seconds: 10, reason: 'probed-field' });
+  });
+
+  /** The field's facts prove it after a submit; Ferretry does not press Enter this time. */
+  const unsubmitted = async (arms: boolean, probe?: () => Promise<'hidden' | 'shown' | 'aborted'>) => {
+    const held: Listing = {
+      accounts: [account('EXAMPLE')],
+      signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [{ ...proof(), tapped: flag }])],
+    };
+    const w = inputRequestService({
+      observer: observer(),
+      facts: PAGE,
+      logins: logins(() => held),
+      arms,
+      ...(probe === undefined ? {} : { probe }),
+    });
+    const { request } = await raised(w, { ...PAGE_RAISE, submit: 'agent' } as InputRaise);
+    const raisedLock = request.lock;
+    await w.service.deliver(
+      SESSION,
+      request.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: request.observedDigest as string,
+        fields: [{ field: 'password', padded: padInputValue('hunter2-UNIQUE-pw') }],
+        submit: false,
+      } as never,
+      HOST,
+    );
+    return { w, request, raisedLock };
+  };
+
+  it('should hold a value Ferretry did not submit while the page shows its document, never 10 s (secrev-1333 M1)', async () => {
+    // Act — the owner's own tap that moved this page on is on record, and the browser armed its pagehide clear.
+    const { w, request } = await unsubmitted(true);
+
+    // Assert — the card says why; the page is held the full window, and only while it shows the value's document.
+    should(request.lock).deepEqual({ seconds: 120, reason: 'until-moved-on' });
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+    should(w.service.pageHeld(SESSION, ['app'])).deepEqual({
+      until: NOW + 120_000,
+      documents: ['loader-1'],
+      documentsOnly: true,
+    });
+  });
+
+  it('should give a page whose probe showed the value the plain hold and the probe reason, at raise and at Send (L4)', async () => {
+    for (const [probe, reason] of [
+      [async () => 'shown' as const, 'probe-shown'],
+      [async () => 'aborted' as const, 'probe-stopped'],
+    ] as const) {
+      // Act — the facts hold for the field, Ferretry does not press Enter, and the probe found trouble.
+      const { w, raisedLock } = await unsubmitted(true, probe);
+
+      // Assert — the card says the probe's reason, and the write (which cannot probe again) does not relax it into
+      // 'until-moved-on': with the pagehide clear armed, only that reason would make the hold follow its document.
+      should(raisedLock).deepEqual({ seconds: 120, reason });
+      should(w.service.pageHeld(SESSION, ['app'])).deepEqual({ until: NOW + 120_000, documents: ['loader-1'] });
+    }
+  });
+
+  it('should let only the until-moved-on reason follow its document: first-time, scripted and steered holds stay plain', async () => {
+    // Arrange — the browser arms its clear every time, and the facts would earn 'until-moved-on' if nothing else applied.
+    const held: Listing = {
+      accounts: [account('EXAMPLE')],
+      signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [{ ...proof(), tapped: flag }])],
+    };
+    const page = { id: 'page-1', hosts: ['accounts.example.test'] };
+    const scriptedOn = observer();
+    scriptedOn.acted(SESSION, 'browser', true).placed(page);
+    const actedAtSend = observer();
+    let act = false;
+    const cases: [string, ReturnType<typeof inputRequestService>, string][] = [
+      ['first-time', inputRequestService({ observer: observer(), facts: PAGE, arms: true }), 'first-time'],
+      [
+        'scripted',
+        inputRequestService({ observer: scriptedOn, facts: PAGE, logins: logins(() => held), arms: true }),
+        'scripted',
+      ],
+      [
+        'steered',
+        inputRequestService({
+          observer: actedAtSend,
+          facts: PAGE,
+          logins: logins(() => held),
+          arms: true,
+          journalled: event => {
+            if (!act || !JSON.stringify(event).includes('delivering')) return;
+            act = false;
+            actedAtSend.acted(SESSION, 'browser').placed(page);
+          },
+        }),
+        'until-moved-on',
+      ],
+    ];
+
+    for (const [label, w, raisedReason] of cases) {
+      // Act
+      const { request } = await raised(w, { ...PAGE_RAISE, submit: 'agent' } as InputRaise);
+      act = label === 'steered';
+      await w.service.deliver(
+        SESSION,
+        request.id,
+        {
+          deliveryId: crypto.randomUUID(),
+          observedDigest: request.observedDigest as string,
+          fields: [{ field: 'password', padded: padInputValue('hunter2-UNIQUE-pw') }],
+          submit: false,
+        } as never,
+        HOST,
+      );
+
+      // Assert — the hold is the plain full window: pictures never come back early on a moved-on page.
+      should([label, request.lock?.reason]).eql([label, raisedReason]);
+      should([label, w.service.pageHeld(SESSION, ['app'])]).eql([
+        label,
+        { until: NOW + 120_000, documents: ['loader-1'] },
+      ]);
+    }
+  });
+
+  it('should keep pictures out for the whole window when the pagehide clear could not be armed', async () => {
+    const { w } = await unsubmitted(false);
+    should(w.service.pageHeld(SESSION, ['app'])).deepEqual({ until: NOW + 120_000, documents: ['loader-1'] });
+  });
+
+  it('should count an act on the page that begins while the login store is read at Send (secrev-1333 L1)', async () => {
+    // Arrange — the act lands inside the write's store read, after the card was raised.
+    const seen = observer();
+    let during = false;
+    const w = inputRequestService({
+      observer: seen,
+      facts: PAGE,
+      probe: async () => 'hidden',
+      logins: {
+        listing: async () => {
+          if (during) seen.acted(SESSION, 'browser').placed({ id: 'page-1', hosts: ['accounts.example.test'] });
+          return { accounts: [], signIns: [] };
+        },
+        fill: async () => '',
+        save: async () => undefined,
+      },
+    });
+    const { request } = await raised(w, PAGE_RAISE);
+    should(request.lock?.seconds).equal(10);
+
+    // Act
+    during = true;
+    await deliver(w, request);
+
+    // Assert
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+  });
+
+  it('should take the full hold when an act on the page begins after the hold, before the write (secrev-1333 L1)', async () => {
+    // Arrange — the act lands while the attempt is journalled as delivering, with the short hold already on.
+    const seen = observer();
+    let armed = false;
+    const w = inputRequestService({
+      observer: seen,
+      facts: PAGE,
+      probe: async () => 'hidden',
+      journalled: event => {
+        if (!armed || !JSON.stringify(event).includes('delivering')) return;
+        armed = false;
+        seen.acted(SESSION, 'browser').placed({ id: 'page-1', hosts: ['accounts.example.test'] });
+      },
+    });
+    const { request } = await raised(w, PAGE_RAISE);
+
+    // Act
+    armed = true;
+    await deliver(w, request);
+
+    // Assert
+    should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
+  });
+
+  it('should count a tab, a script and a machine-wide taint on a sibling subdomain of the site (secrev-1333 L2)', async () => {
+    // Arrange — mail.example.test shares accounts.example.test's cookies.
+    const acted = observer();
+    acted.acted(SESSION, 'browser').placed({ id: 'page-2', hosts: ['mail.example.test'] });
+    const scripted = observer();
+    scripted.acted(SESSION, 'browser', true).placed({ id: 'page-2', hosts: ['mail.example.test:8443'] });
+    const machine: ScriptedOriginsView = { hosts: new Map([['www.example.test', NOW]]) };
+    const w = probing(acted);
+    await raised(w, PAGE_RAISE);
+
+    // Act
+    const [card] = await w.service.list(HOST);
+    const scriptedLock = (await raised(probing(scripted), PAGE_RAISE)).request.lock;
+    const machineLock = (
+      await raised(
+        probing(observer(), () => machine),
+        PAGE_RAISE,
+      )
+    ).request.lock;
+
+    // Assert
+    should(card?.lock).deepEqual({ seconds: 120, reason: 'steered' });
+    should(scriptedLock).deepEqual({ seconds: 120, reason: 'scripted' });
+    should(machineLock).deepEqual({ seconds: 120, reason: 'scripted' });
   });
 });
 
@@ -311,7 +677,7 @@ describe('the facts the lock reads: every sign-in matched to the target, togethe
         signInAt('si_00000000000000e2', 'EXAMPLE_WORK', 'accounts.example.test', [proof(false)]),
       ],
     };
-    should(await lockWith(split)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(await lockWith(split)).deepEqual({ seconds: 120, reason: 'did-not-move-on' });
   });
 
   it('should never read the facts of a sign-in matched somewhere else', async () => {
@@ -319,7 +685,7 @@ describe('the facts the lock reads: every sign-in matched to the target, togethe
       accounts: [account('EXAMPLE')],
       signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.other.test', [proof()])],
     };
-    should(await lockWith(elsewhere)).deepEqual({ seconds: 120, reason: 'not-proven' });
+    should(await lockWith(elsewhere)).deepEqual({ seconds: 120, reason: 'first-time' });
   });
 
   it("should keep a site's proof however many facts the account's other sign-ins hold (the real store)", async () => {

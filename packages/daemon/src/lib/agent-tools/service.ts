@@ -60,6 +60,7 @@ import {
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
+import type { ActedPage } from '../input-requests/login-observer.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import { LoginEntryError } from '../secrets/accounts.ts';
 import { type RecipeProposalTarget, RecipeValueError } from '../secrets/login-recipes.ts';
@@ -180,8 +181,16 @@ export interface AgentToolPorts {
   /**
    * Told each time the agent drives a terminal or a page, before the act: what the daemon sees after a saved login's
    * submit (the page moving on, the screen not echoing) is only kept as a fact when the ferret did nothing meanwhile.
+   * For a page, the answer is then told WHICH page the act touched, once the call is over (`placed`), so a page card's
+   * lock reads only acts on its own page (login-observer.ts `pageSteer`); until then the act counts on every page.
    */
-  readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
+  readonly loginActs?: {
+    acted(
+      sessionId: string,
+      kind: SurfaceKind,
+      script: boolean,
+    ): { placed(page: ActedPage | undefined): void } | undefined;
+  };
   /**
    * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
    * and again where it ended: a standing rule fills for every ferret in one shared browser profile, so a script on its
@@ -409,6 +418,7 @@ export class AgentToolService {
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
     const facts: CallFacts = {};
     let result: AgentToolResult;
+    let note: { placed(page: ActedPage | undefined): void } | undefined;
     try {
       const kind = switchOf(call);
       if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
@@ -422,7 +432,8 @@ export class AgentToolService {
       // Told BEFORE anything runs, for every call that may change a terminal or a page: a sign-in's after-submit facts
       // the ferret could have steered are not kept (docs/input-requests.md, "Login recipes").
       const acting = caller.kind === 'agent' ? actsOn(call) : undefined;
-      if (acting !== undefined) this.ports.loginActs?.acted(caller.sessionId, acting, call.tool === 'browser.eval');
+      if (acting !== undefined)
+        note = this.ports.loginActs?.acted(caller.sessionId, acting, call.tool === 'browser.eval') ?? undefined;
       // The surface is known only once the call has run: dispatch resolves it.
       const dispatched = await this.dispatch(caller, call, facts);
       result = this.remasked(caller, facts.surface, dispatched);
@@ -432,6 +443,8 @@ export class AgentToolService {
       const failed = !(refusal instanceof AgentToolError) || refusal.code === 'upstream_failed';
       await this.record(caller, call, facts, failed ? 'failed' : 'refused');
       throw refusal;
+    } finally {
+      if (note !== undefined) note.placed(await this.actedPage(caller.sessionId, facts.surface));
     }
     const pane = facts.pane ?? facts.surface;
     if (pane === undefined || (result.output === undefined && result.input?.observed === undefined)) return result;
@@ -565,6 +578,7 @@ export class AgentToolService {
           id: page.id,
           name: call.name,
           ...(page.incognito ? { incognito: true } : {}),
+          opened: true,
         };
         await this.drove(caller, call, facts.surface);
         await this.announce(caller, facts.surface, call.askOwner);
@@ -1329,7 +1343,9 @@ export class AgentToolService {
    * A page the daemon just typed a secret into is not READ while it is held: masking can only hide a value it
    * recognises, so the page's text, its log and any picture of it wait for the window to end. A picture always
    * waits (no mask can be drawn on pixels). Text may be read again as soon as the page has left the document the
-   * value went into, because every read is masked for the redaction window anyway.
+   * value went into, because every read is masked for the redaction window anyway. A hold that follows its document
+   * (`documentsOnly`: a value Ferretry did not submit, input service `until-moved-on`) lets pictures back the same way;
+   * a page that cannot say which document it shows is held.
    */
   private async assertPageReadable(
     caller: AgentToolCaller,
@@ -1344,7 +1360,7 @@ export class AgentToolService {
     const input = this.ports.input;
     const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;
-    if (PAGE_TEXT.has(tool) && held.documents.length > 0) {
+    if ((PAGE_TEXT.has(tool) || held.documentsOnly === true) && held.documents.length > 0) {
       const now = await (
         document ?? (async () => await input.pageDocument?.(caller.sessionId, surface.name ?? surface.id))
       )();
@@ -1352,10 +1368,14 @@ export class AgentToolService {
     }
     const reference = surfaceReference('browser', surface.name ?? surface.id);
     const when = new Date(held.until).toISOString();
+    const comesBack =
+      held.documentsOnly === true
+        ? 'text reads and pictures come back once the page has moved on.'
+        : 'text reads come back once the page has moved on, pictures after that time.';
     throw new AgentToolError(
       'conflict',
       caller.kind === 'agent'
-        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; text reads come back once the page has moved on, pictures after that time.`
+        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; ${comesBack}`
         : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
     );
   }
@@ -1804,6 +1824,31 @@ export class AgentToolService {
     return available ? { ...base, available } : undefined;
   }
 
+  /**
+   * The page an agent's act touched, once it is over, for the login observer: its id and context, and every host it was
+   * on around the act — where it was when it was resolved, where it is now, and where its popups are now (a popup lives
+   * in its opener's cookies and storage, and the act may have opened it). `hosts` is left out when one of them can't be
+   * read, so the act counts on every host; nothing is returned when no page was resolved (every page).
+   */
+  private async actedPage(sessionId: string, surface: ResolvedSurface | undefined): Promise<ActedPage | undefined> {
+    if (surface?.surface !== 'browser') return undefined;
+    const page = {
+      id: surface.id,
+      ...(surface.incognito === true ? { incognito: true as const } : {}),
+      ...(surface.openerId === undefined ? {} : { openerId: surface.openerId }),
+    };
+    const pages = await this.ports.browser
+      .status(sessionId)
+      .then(status => status.pages)
+      .catch(() => undefined);
+    if (pages === undefined) return page;
+    const now = pages.filter(each => each.id === surface.id || each.openerId === surface.id).map(each => each.url);
+    const urls = surface.url === undefined && surface.opened !== true ? undefined : [surface.url, ...now];
+    const hosts = urls?.filter(url => url !== undefined).map(url => hostOf(url));
+    if (hosts === undefined || hosts.some(host => host === undefined)) return page;
+    return { ...page, hosts: [...new Set(hosts as string[])] };
+  }
+
   /** The surface a name or id addresses, looked up in this session's own listing and nowhere else. */
   private async resolve(sessionId: string, surface: SurfaceKind, key: string): Promise<ResolvedSurface> {
     const candidates: readonly {
@@ -1812,6 +1857,7 @@ export class AgentToolService {
       readonly openedBy?: SurfaceOpener;
       readonly incognito?: true;
       readonly openerId?: string;
+      readonly url?: string;
     }[] =
       surface === 'terminal'
         ? (await this.ports.terminals.list(sessionId)).terminals
@@ -1831,6 +1877,7 @@ export class AgentToolService {
       ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
       ...(found.incognito === true ? { incognito: true } : {}),
       ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
+      ...(found.url === undefined ? {} : { url: found.url }),
     };
   }
 

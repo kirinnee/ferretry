@@ -52,7 +52,8 @@ export const INPUT_CODE_VISIBLE_NOTICE = 'One-time code: the ferret can see it.'
 export const INPUT_SHORT_LOCK_SECONDS = 10;
 
 /**
- * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw:
+ * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw. Every
+ * long one says its own cause, so the owner reads why the page or terminal stays hidden for two minutes:
  *
  * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd running setuid root.
  * - `proven-field`: a password field on a secure page whose identity Ferretry has seen, on an earlier sign-in, hide
@@ -60,9 +61,38 @@ export const INPUT_SHORT_LOCK_SECONDS = 10;
  * - `probed-field`: one password field on a secure page into which Ferretry typed a throwaway value, did not find it in
  *   the page's text, and cleared it again, with no request or socket it could see and no navigation meanwhile.
  * - `code`: a `private` value shows as it is typed (a one-time `code` field has no lock at all).
- * - `not-proven`: nothing proved that this target hides what is typed.
+ * - `not-proven`: nothing could be checked (no observer, an unreadable login store). Also an older daemon's one word
+ *   for every long page lock.
+ * - `terminal-shows`: a terminal that is not a local sudo, su, doas or passwd prompt with typing hidden.
+ * - `scripted`: a ferret ran a page script on this page or on this site (its registrable domain; any ferret,
+ *   machine-wide), or one whose site could not be read; or one is running now.
+ * - `steered`: this ferret acted on this page, or on a page that shares its cookies and storage on its site, after the
+ *   card was raised.
+ * - `not-password-field`: a secret field is not a visible, uncovered password box in the page's own origin on a secure
+ *   page, or a human check shows.
+ * - `first-time`: no saved sign-in here has facts for this field, and no probe ran.
+ * - `did-not-move-on`: a sign-in's facts for this field say it showed the value, or did not move on.
+ * - `until-moved-on`: the facts prove the field after a submit, but Ferretry is not pressing Enter, so the value sits
+ *   on the page: it stays hidden while the page shows that document, at most the full window (docs/input-requests.md).
+ * - `probe-shown`: the throwaway value showed in the page's text.
+ * - `probe-stopped`: the probe could not finish cleanly (a request, a socket, a navigation, a field that did not empty).
  */
-export const INPUT_LOCK_REASONS = ['hidden-terminal', 'proven-field', 'probed-field', 'code', 'not-proven'] as const;
+export const INPUT_LOCK_REASONS = [
+  'hidden-terminal',
+  'proven-field',
+  'probed-field',
+  'code',
+  'not-proven',
+  'terminal-shows',
+  'scripted',
+  'steered',
+  'not-password-field',
+  'first-time',
+  'did-not-move-on',
+  'until-moved-on',
+  'probe-shown',
+  'probe-stopped',
+] as const;
 export const InputLockReasonSchema = z.enum(INPUT_LOCK_REASONS);
 export type InputLockReason = z.infer<typeof InputLockReasonSchema>;
 
@@ -72,13 +102,22 @@ export const InputLockSchema = z.strictObject({
 });
 export type InputLock = z.infer<typeof InputLockSchema>;
 
-/** What the card says about each reason: one fixed sentence, never page or terminal text. */
+/** What the card says about each reason: one fixed, plain sentence, never page or terminal text. */
 export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
   'hidden-terminal': 'A local password prompt (sudo, su, doas or passwd) with typing hidden.',
   'proven-field': 'A password field Ferretry has seen hide the value and move on after signing in.',
   'probed-field': "A password field: a test value Ferretry typed did not show in the page's text.",
   code: 'This value shows on screen as it is typed.',
   'not-proven': 'Ferretry has not proven that this target hides what is typed.',
+  'terminal-shows': "Ferretry couldn't prove this is a local sudo, su, doas or passwd prompt with typing hidden.",
+  scripted: 'A ferret ran a script on this page or this site.',
+  steered: 'The ferret used this page, or another tab on this site, after asking you.',
+  'not-password-field': 'This is not a plain password box on a secure page.',
+  'first-time': "First time on this page: Ferretry hasn't seen it hide a password yet.",
+  'did-not-move-on': "Last time here, the page didn't move on or it showed the value.",
+  'until-moved-on': "It ends sooner once the page moves on, because the value hasn't been submitted yet.",
+  'probe-shown': "A test value Ferretry typed showed in the page's text.",
+  'probe-stopped': "Ferretry's quick test of this page didn't finish cleanly.",
 };
 
 /** "Hidden from the ferret for 10 s" or "for 2 minutes". */

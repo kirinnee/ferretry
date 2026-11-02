@@ -80,6 +80,16 @@ describe('the card', () => {
     );
     const long = await show(request({ lock: { seconds: 120, reason: 'not-proven' } }));
     expect(long.q('[data-input-lock]')?.textContent).toContain('for 2 minutes after typing');
+    // A long lock says its own cause, never just "not proven" (lock.ts).
+    const steered = await show(request({ lock: { seconds: 120, reason: 'steered' } }));
+    expect(steered.q('[data-input-lock]')?.textContent).toBe(
+      'Hidden from the ferret for 2 minutes after typing. The ferret used this page, or another tab on this site, after asking you.',
+    );
+    // A value Ferretry won't submit: held until the page moves on, at most 2 minutes, and the card says so.
+    const unsubmitted = await show(request({ lock: { seconds: 120, reason: 'until-moved-on' } }));
+    expect(unsubmitted.q('[data-input-lock]')?.textContent).toBe(
+      "Hidden from the ferret for 2 minutes after typing. It ends sooner once the page moves on, because the value hasn't been submitted yet.",
+    );
     expect((await show(request())).q('[data-input-lock]')).toBeNull();
   });
 

@@ -129,12 +129,16 @@ export class QuarantineRegistry {
       .map(entry => ({ id: entry.id, sessionId, names: entry.names }));
   }
 
-  /** When the quarantine on a terminal ends, or nothing when it is not quarantined. `names` are all the ways it is known. */
-  until(sessionId: string, names: readonly (string | undefined)[]): number | undefined {
+  /**
+   * When the quarantine on a terminal ends, or nothing when it is not quarantined. `names` are all the ways it is known.
+   * `skip`: holds left out by id (a page hold that follows its document, asked about apart).
+   */
+  until(sessionId: string, names: readonly (string | undefined)[], skip?: ReadonlySet<string>): number | undefined {
     this.purge();
     const now = this.clock.now();
     const wanted = names.filter((name): name is string => name !== undefined);
     const ends = (this.held.get(sessionId) ?? [])
+      .filter(entry => skip?.has(entry.id) !== true)
       .filter(entry => entry.names.includes(EVERY_TERMINAL) || overlaps(entry.names, wanted))
       .map(entry => (entry.until === 'in-flight' ? now + this.window : entry.until));
     if (this.locked === true || (this.locked !== undefined && this.locked > now)) ends.push(now + this.window);

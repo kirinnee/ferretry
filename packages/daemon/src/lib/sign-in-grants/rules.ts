@@ -204,6 +204,7 @@ export class RuleSignInGrants implements SignInGrantSource {
     return {
       hosts: this.#scripted,
       ...(this.#scriptedEverywhere === undefined ? {} : { everywhere: this.#scriptedEverywhere }),
+      ...(this.#running > 0 ? { running: true } : {}),
     };
   }
 
