@@ -1001,7 +1001,10 @@ The owner can start work on a card that has nobody working on it, from the Warde
   session record exists; the start reads that view and answers `invalid` with "No ferret was started on &X:
   <reason>", never `started: true`. A failed view is not proof nothing runs (the lifecycle can fail AFTER delivering
   the first turn), so the start stops that session's pane first; if the pane will not stop, the refusal says so and
-  asks the owner to check it before starting another. A retry therefore never runs two panes.
+  asks the owner to check it before starting another. A retry therefore never runs two panes: a session the
+  lifecycle recorded as `kill_failed` is terminal to the roster, but the start (and only the start) counts it as
+  still holding its card (its assignee, or the card as its focus) and refuses with "A ferret on &X could not be
+  stopped; stop it first."
 - **A card a live ferret holds is not started again.** Its assignee, its owner (unless the card is unclaimed in the
   backlog), or any live ferret whose focus it is, counts. The answer is `200` with that ferret and `started: false`,
   and the notice swaps its button for **Open its chat**; its line reads "&B1 … — a ferret has picked it up."

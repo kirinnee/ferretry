@@ -29,6 +29,7 @@ const FOLDERS: Readonly<Record<string, string>> = { [PROJECT]: '/work/board', [O
 const world = (initial: Partial<BoardTask> = {}, overrides: Partial<StartOnCardPorts> = {}) => {
   let current = card({ id: 'F1', laneId: 'todo', ...initial });
   const alive = new Map<string, BoardTaskId | null>();
+  const wedged = new Map<string, BoardTaskId | null>();
   const started: NewFerretOnCard[] = [];
   const keyed = new KeyedSerialExecutor();
   const stopped: { sessionId: string; reason: string }[] = [];
@@ -37,6 +38,7 @@ const world = (initial: Partial<BoardTask> = {}, overrides: Partial<StartOnCardP
     task: async () => ({ task: current, laneSet: lanes(current.projectId) }) as unknown as BoardTaskResponse,
     folderOf: async row => FOLDERS[row.projectId],
     live: async () => new Map(alive),
+    stuck: async () => new Map(wedged),
     exclusive: async (id, work) => await keyed.run(id, work),
     start: async request => {
       started.push(request);
@@ -62,6 +64,7 @@ const world = (initial: Partial<BoardTask> = {}, overrides: Partial<StartOnCardP
     started,
     stopped,
     alive,
+    wedged,
     edit: (change: Partial<BoardTask>) => {
       current = { ...current, ...change };
     },
@@ -427,12 +430,18 @@ describe('starting a ferret on a card', () => {
   });
 
   it('should not call the start failed, nor start another, when the failed pane cannot be stopped', async () => {
-    // Arrange
-    const { ports } = world(
+    // Arrange: the stop throws and the lifecycle records kill_failed, which the roster counts as terminal.
+    let attempts = 0;
+    const { ports, edit, wedged } = world(
       {},
       {
-        start: async () => ({ sessionId: 'stuck', status: 'failed', reason: 'settle threw' }),
+        start: async () => {
+          attempts += 1;
+          edit({ assignee: 'stuck', laneId: 'plan' });
+          return { sessionId: 'stuck', status: 'failed', reason: 'settle threw' };
+        },
         stop: async () => {
+          wedged.set('stuck', ID);
           throw new Error('the pane refused to die');
         },
       },
@@ -440,19 +449,60 @@ describe('starting a ferret on a card', () => {
 
     // Act
     const failure = await startOnCard(ports, ID, OWNER, 'click-1').catch((error: unknown) => error);
-    const plain = await startOnCard(
-      world({}, { start: async () => ({ sessionId: 's', status: 'failed' }), stop: async () => Promise.reject('gone') })
-        .ports,
-      ID,
-      OWNER,
-    ).catch((error: unknown) => error);
+    const retry = await startOnCard(ports, ID, OWNER, 'click-2').catch((error: unknown) => error);
 
     // Assert
     should((failure as BoardError).code).equal('invalid');
     should((failure as BoardError).message).equal(
       'No ferret was started on &F1: settle threw. It could not be stopped (the pane refused to die), so check it before starting another.',
     );
-    should((plain as BoardError).message).containEql('It could not be stopped (gone)');
+    should((retry as BoardError).code).equal('invalid');
+    should((retry as BoardError).message).equal('A ferret on &F1 could not be stopped; stop it first.');
+    should(attempts).equal(1);
+  });
+
+  it('should say the stop failure even when it was not an Error', async () => {
+    // Arrange
+    const { ports } = world(
+      {},
+      {
+        start: async () => ({ sessionId: 's', status: 'failed' }),
+        stop: async () => Promise.reject('gone'),
+      },
+    );
+
+    // Act
+    const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+
+    // Assert
+    should((failure as BoardError).message).containEql('It could not be stopped (gone)');
+  });
+
+  it('should refuse a start while a stuck pane has the card as its focus, though it is not the assignee', async () => {
+    // Arrange
+    const { ports, started, wedged } = world({ assignee: 'other' });
+    wedged.set('stuck', ID);
+
+    // Act
+    const refused = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
+
+    // Assert
+    should((refused as BoardError).message).equal('A ferret on &F1 could not be stopped; stop it first.');
+    should(started).have.length(0);
+  });
+
+  it('should not be held by a stuck pane that belongs to another card', async () => {
+    // Arrange
+    const { ports, started, wedged } = world({ assignee: 'gone' });
+    wedged.set('elsewhere', 'F9' as BoardTaskId);
+    wedged.set('unfocused', null);
+
+    // Act
+    const result = await startOnCard(ports, ID, OWNER);
+
+    // Assert
+    should(result.started).equal(true);
+    should(started).have.length(1);
   });
 
   it('should not remember a failed start, so the same click may try again', async () => {

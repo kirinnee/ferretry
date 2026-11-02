@@ -13120,6 +13120,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                       .map(session => [session.id, session.focusTask?.id ?? null] as const),
                   );
                 },
+                stuck: async () => {
+                  const roster = await boardSessions.roster();
+                  return new Map(
+                    [...roster.sessions.values()]
+                      .filter(session => session.status === 'kill_failed')
+                      .map(session => [session.id, session.focusTask?.id ?? null] as const),
+                  );
+                },
                 exclusive: async (taskId, work) => await cardStarts.run(taskId, work),
                 start: async ({ card, folder, name, prompt }) => {
                   const request = StartSessionRequestSchema.parse({ mode: 'auto', prompt, cwd: folder, name });

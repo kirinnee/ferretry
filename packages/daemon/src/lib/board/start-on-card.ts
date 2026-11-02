@@ -52,6 +52,8 @@ export interface StartOnCardPorts {
   folderOf(card: BoardTaskView): Promise<string | undefined>;
   /** Every ferret that is alive on this machine, with the card it is working on (`null`: none). */
   live(): Promise<ReadonlyMap<string, BoardTaskId | null>>;
+  /** Every ferret whose pane could not be stopped (`kill_failed`): terminal, yet possibly still running, with its card. */
+  stuck(): Promise<ReadonlyMap<string, BoardTaskId | null>>;
   /** Runs `work` alone for this card: a second start of the same card waits for the first to finish. */
   exclusive<T>(id: BoardTaskId, work: () => Promise<T>): Promise<T>;
   /** Starts the new ferret, with the card assigned to it. Throws {@link CardStartRefused}. */
@@ -154,6 +156,12 @@ export async function startOnCard(
       if (kept !== undefined) ports.remember(kept, held);
       return held;
     }
+    // A pane that would not stop is terminal to the roster but may still be working: it holds the card, so a start
+    // beside it is refused until the owner has stopped it.
+    const stuck = [...(await ports.stuck())].some(
+      ([sessionId, focus]) => task.assignee === sessionId || focus === task.id,
+    );
+    if (stuck) throw new BoardError('invalid', `A ferret on ${ref} could not be stopped; stop it first.`);
     const folder = await ports.folderOf(task);
     if (folder === undefined) {
       throw new BoardError(
