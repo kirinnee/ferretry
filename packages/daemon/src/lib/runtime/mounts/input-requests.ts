@@ -6,6 +6,7 @@ import {
   type InputRequest,
   type InputRequestList,
   type InputShot,
+  type PhoneApproval,
   PhoneApprovalIdSchema,
   type PhoneApprovalList,
 } from '@ferretry/protocol';
@@ -243,6 +244,16 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
   ];
 }
 
+/**
+ * An approval as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`, as for a card's `saved`):
+ * without the account, its username and the account it signs in via. Where and how it is approved stay: the page's
+ * origin, the factor and its number are what the owner checks against the phone.
+ */
+function accountless(approval: PhoneApproval): PhoneApproval {
+  const { account: _account, username: _username, via: _via, ...rest } = approval;
+  return rest;
+}
+
 function approvalOf(context: RouteContext): string {
   const parsed = PhoneApprovalIdSchema.safeParse(context.params.get('approvalId') ?? '');
   if (!parsed.success) throw new ApiError(400, 'the approval id in the path is not usable', 'bad_request');
@@ -272,7 +283,9 @@ export function phoneApprovalRoutes(service: PhoneApprovalService): readonly Api
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: context => {
-        const body: PhoneApprovalList = { approvals: [...run(() => service.list(ownerOf(context)))] };
+        const approvals = run(() => service.list(ownerOf(context)));
+        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
+        const body: PhoneApprovalList = { approvals: approvals.map(each => (names ? each : accountless(each))) };
         return Promise.resolve(jsonResponse(body));
       },
     },
@@ -283,10 +296,11 @@ export function phoneApprovalRoutes(service: PhoneApprovalService): readonly Api
       caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
-      handle: context =>
-        Promise.resolve(
-          jsonResponse(run(() => service.get(ownerOf(context), sessionOf(context), approvalOf(context)))),
-        ),
+      handle: context => {
+        const approval = run(() => service.get(ownerOf(context), sessionOf(context), approvalOf(context)));
+        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
+        return Promise.resolve(jsonResponse(names ? approval : accountless(approval)));
+      },
     },
     {
       method: 'POST',
@@ -297,7 +311,9 @@ export function phoneApprovalRoutes(service: PhoneApprovalService): readonly Api
       noStore: true,
       handle: async context => {
         const caller = ownerOf(context);
-        return jsonResponse(await service.refuse(caller, sessionOf(context), approvalOf(context)).catch(answered));
+        const refused = await service.refuse(caller, sessionOf(context), approvalOf(context)).catch(answered);
+        const names = refusedAccountNames(context, 'read the accounts an approval names') === undefined;
+        return jsonResponse(names ? refused : accountless(refused));
       },
     },
   ];

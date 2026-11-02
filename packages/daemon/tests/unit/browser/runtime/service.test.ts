@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import type {
+  BrowserAction,
   BrowserInputEvent,
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
@@ -15,6 +16,7 @@ import {
   pendingDialogOf,
 } from '../../../../src/lib/browser/runtime/service.ts';
 import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
+import { TypedIdentities } from '../../../../src/lib/input-requests/typed-identities.ts';
 
 type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
 
@@ -166,7 +168,7 @@ class Tabs {
 
 const known = new Set(['s1', 's2']);
 
-function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy) {
+function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy, signIns?: TypedIdentities) {
   let launches = 0;
   const service = new BrowserSessionService(
     {
@@ -187,6 +189,7 @@ function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy) {
     },
     () => Date.parse('2026-10-16T10:00:00.000Z'),
     idle,
+    signIns,
   );
   return { tabs, service, launches: () => launches };
 }
@@ -1045,5 +1048,155 @@ describe('the machine agent browser — a page’s lifecycle', () => {
 
     // Assert
     should(taken.code).equal('conflict');
+  });
+});
+
+describe('the machine agent browser — who a page signs in (secrev-1331-delta N1)', () => {
+  const HOST = 'accounts.google.com';
+  /** The browser with the daemon's real record of who each page signs in, the ferret having typed kirinnee97 on `app`. */
+  async function signingIn(tabs = new Tabs()) {
+    const identities = new TypedIdentities(() => Date.parse('2026-10-16T10:00:00.000Z'));
+    const { service } = harness(tabs, undefined, identities);
+    const page = await service.openPage('s1', 'app', { url: `https://${HOST}/` });
+    await service.act('s1', { action: 'activate-page', pageId: page.id });
+    const plant = (): void => identities.typed('s1', page.id, HOST, 'kirinnee97@gmail.com');
+    const who = (): string | undefined => identities.at('s1', page.id, HOST);
+    plant();
+    return { tabs, service, page, plant, who };
+  }
+
+  it('should forget who the page signs in on every toolbar act but a read: the owner’s address bar, a ferret’s fy browser', async () => {
+    const { service, plant, who } = await signingIn();
+    const cleared: string[] = [];
+    const kept: string[] = [];
+
+    const toolbar: BrowserAction[] = [
+      { action: 'navigate', url: `https://${HOST}/v3/signin` },
+      { action: 'type', selector: '#identifierId', text: 'ernest@atomi.tech' },
+      { action: 'click', selector: '[data-email="ernest@atomi.tech"]' },
+      { action: 'fill-form', fields: [{ selector: '#identifierId', text: 'ernest@atomi.tech' }] },
+      { action: 'press', keys: ['Enter'] },
+      { action: 'back' },
+      { action: 'forward' },
+      { action: 'reload' },
+      { action: 'open', url: `https://${HOST}/` },
+      { action: 'human-activity', kind: 'pointer' },
+      { action: 'read' },
+      { action: 'screenshot' },
+      { action: 'resize', width: 400, height: 300 },
+    ];
+    for (const action of toolbar) {
+      plant();
+      await service.act('s1', action);
+      (who() === undefined ? cleared : kept).push(action.action);
+    }
+
+    should(cleared).deepEqual([
+      'navigate',
+      'type',
+      'click',
+      'fill-form',
+      'press',
+      'back',
+      'forward',
+      'reload',
+      'open',
+      'human-activity',
+    ]);
+    should(kept).deepEqual(['read', 'screenshot', 'resize']);
+    plant();
+    await service.act('s1', { action: 'stop' });
+    should(who()).be.undefined();
+  });
+
+  it('should forget who the session’s pages sign in on a press in the live view, never on a move, a wheel or a release', async () => {
+    const { service, plant, who } = await signingIn();
+    const at = { x: 10, y: 10 } as const;
+
+    for (const type of ['mouseMoved', 'mouseWheel', 'mouseReleased'] as const)
+      await service.dispatchHumanInput('s1', { kind: 'mouse', type, ...at });
+    const afterMoves = who();
+    // The owner clicks ernest's tile in the account chooser: the "pick the account" hand-off.
+    await service.dispatchHumanInput('s1', {
+      kind: 'mouse',
+      type: 'mousePressed',
+      button: 'left',
+      clickCount: 1,
+      ...at,
+    });
+    const afterPress = who();
+    plant();
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'ernest@atomi.tech' });
+
+    should(afterMoves).equal('kirinnee97@gmail.com');
+    should(afterPress).be.undefined();
+    should(who()).be.undefined();
+  });
+
+  it('should forget who the page signs in before an agent act that may change it, and keep it through one that cannot', async () => {
+    const { service, plant, who } = await signingIn();
+    const cleared: string[] = [];
+    const kept: string[] = [];
+
+    const acts: BrowserPageAction[] = [
+      { action: 'navigate', url: `https://${HOST}/v3/signin` },
+      { action: 'type', selector: '#identifierId', text: 'ernest@atomi.tech' },
+      { action: 'fill-form', fields: [{ selector: '#identifierId', text: 'ernest@atomi.tech' }] },
+      { action: 'press', keys: ['e'] },
+      { action: 'click', x: 10, y: 10 },
+      { action: 'mouse', mouseAction: 'down', x: 10, y: 10 },
+      { action: 'back' },
+      { action: 'read' },
+      { action: 'screenshot' },
+      { action: 'hover', selector: 'a' },
+      { action: 'scroll', deltaY: 100 },
+      { action: 'press', keys: ['Enter'] },
+      { action: 'click', selector: '#identifierNext' },
+    ];
+    for (const action of acts) {
+      plant();
+      await service.actOnPage('s1', 'app', action);
+      (who() === undefined ? cleared : kept).push(
+        `${action.action}${'keys' in action ? `:${action.keys.join('+')}` : ''}`,
+      );
+    }
+
+    should(cleared).deepEqual(['navigate', 'type', 'fill-form', 'press:e', 'click', 'mouse', 'back']);
+    should(kept).deepEqual(['read', 'screenshot', 'hover', 'scroll', 'press:Enter', 'click']);
+  });
+
+  it('should forget who the page signs in when an act fails partway, and when a script runs', async () => {
+    const tabs = new Tabs();
+    const { service, plant, who } = await signingIn(tabs);
+    // A fill that typed the email box and then broke on a later field; a click whose page moved and then timed out.
+    Object.assign(tabs.automation, {
+      pointer: async () => {
+        throw new Error('the second field is gone');
+      },
+      click: async () => {
+        throw new Error('the click timed out');
+      },
+    });
+
+    const fill = await failure(
+      service.actOnPage('s1', 'app', {
+        action: 'fill-form',
+        fields: [
+          { selector: '#identifierId', text: 'ernest@atomi.tech' },
+          { selector: '#other', text: 'x' },
+        ],
+      }),
+    );
+    const afterFill = who();
+    plant();
+    await failure(service.actOnPage('s1', 'app', { action: 'click', selector: '#identifierNext' }));
+    const afterClick = who();
+    plant();
+    await service.scriptOnPage('s1', 'app', { source: '() => 1' });
+
+    should(fill.message).equal('the second field is gone');
+    should(afterFill).be.undefined();
+    should(afterClick).be.undefined();
+    should(who()).be.undefined();
   });
 });

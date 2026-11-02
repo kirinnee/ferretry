@@ -445,16 +445,12 @@ const freshNames = (saved: InputSaved, draft: SaveDraft, username: string): Pick
 };
 
 /**
- * Where "Save as" starts: off. The Username is who the page is signing in (what the ferret typed in its identifier box)
- * or, failing that, the account the card is about. It starts on UPDATE only when that username IS the account's own
- * (two absent usernames, a sudo password, count as the same); on NEW otherwise, and always after the owner pressed
- * "Type a different one" over a one-tap (`typedInstead`) or when the page is signing in someone else (`differentFrom`).
- * An account with another username is never the start, and never written by a card.
+ * Where "Save as" starts: off, and on "Save as a NEW account" — always. The Username is who the page is signing in
+ * (what the ferret typed in its identifier box), or empty. Update is never the start, not even when that username is
+ * the account's own: who the page signs in is the ferret's word and may be stale, so writing over a saved password is
+ * only ever the owner's own pick of "Update <account>" (secrev-1331-delta N1).
  */
-export const initialSaveDraft = (
-  saved: InputSaved | undefined,
-  options: { readonly typedInstead?: boolean } = {},
-): SaveDraft => {
+export const initialSaveDraft = (saved: InputSaved | undefined): SaveDraft => {
   const blank = { enabled: false, labelEdited: false, idEdited: false } as const;
   if (saved?.newAccount === undefined)
     return {
@@ -464,20 +460,8 @@ export const initialSaveDraft = (
       id: saved?.suggest?.id ?? '',
       username: saved?.typedUsername ?? '',
     };
-  const update = saved.update;
-  const typedInstead = options.typedInstead === true;
   // Only who the page said it signs in: a new account is never pre-filled with another account's username.
   const username = saved.typedUsername ?? '';
-  // Update is the start ONLY when the page said who it signs in and that is the account's own username: an unknown
-  // identity never starts on Update, whatever the account holds.
-  const updates =
-    update !== undefined &&
-    update.username !== undefined &&
-    saved.typedUsername !== undefined &&
-    !typedInstead &&
-    saved.differentFrom === undefined &&
-    sameUsername(saved.typedUsername, update.username);
-  if (updates) return { ...blank, mode: 'update', label: update.label, id: update.id, username };
   const draft: SaveDraft = { ...blank, mode: 'new', label: '', id: '', username };
   return { ...draft, ...freshNames(saved, draft, username) };
 };
@@ -522,9 +506,17 @@ export const savesUsername = (fields: readonly InputCardField[], draft: SaveDraf
 export const usernameLocked = (saved: InputSaved | undefined, draft: SaveDraft): boolean =>
   draft.mode === 'update' && saved?.update?.username !== undefined;
 
-/** The plain line under "Update <account>": what saving there does, said before the owner sends. */
-export const updateWords = (update: NonNullable<InputSaved['update']>): string =>
-  `Replaces the saved password of ${named(update)}.`;
+/**
+ * The plain line under "Update <account>": what saving there does, said before the owner sends. `username` is the one
+ * the save carries (the Save as box, or the card's own username field): an account with none saved takes it, and the
+ * line says so, because a card that does not know who the page signs in cannot tell it is the same person.
+ */
+export const updateWords = (update: NonNullable<InputSaved['update']>, username = ''): string => {
+  const typed = username.trim();
+  return update.username === undefined && typed !== ''
+    ? `${update.label} has no username saved. This sets its username to ${typed} and replaces its password.`
+    : `Replaces the saved password of ${named(update)}.`;
+};
 
 /** The "Update" choice's words: the account, and that it is the same person. */
 export const updateChoiceWords = (saved: InputSaved | undefined): string | undefined => {

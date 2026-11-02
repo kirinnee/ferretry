@@ -1180,6 +1180,36 @@ describe('AgentToolService — pointer and keys', () => {
       ]);
     });
 
+    it('should clear when an act fails partway, even one that would have named who signs in (secrev-1331-delta N1)', async () => {
+      // Arrange: the fill typed the email box and then broke on a later field.
+      const { world, events, pageId } = await signingIn();
+      world.browser.identifierFields = [{ index: 0, host: 'accounts.google.com' }];
+      const act = world.browser.actOnPage.bind(world.browser);
+      world.browser.actOnPage = async (...args) => {
+        await act(...args);
+        throw new Error('the second field is gone');
+      };
+
+      // Act
+      const failed = await world.service
+        .call(agent, {
+          tool: 'browser.fill_form',
+          name: 'app',
+          fields: [
+            { selector: '#identifierId', text: 'ernest@atomi.tech' },
+            { selector: '#other', text: 'x' },
+          ],
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      // Assert
+      should(failed).be.instanceOf(Error);
+      should(events).deepEqual([`cleared ${pageId}`]);
+    });
+
     it('should forget every page of the session when a page script runs: it may have typed anywhere', async () => {
       // Arrange
       const { world, events } = await signingIn();

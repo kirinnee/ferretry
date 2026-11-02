@@ -599,6 +599,33 @@ describe('the phone approval routes', () => {
     should(jsonBody(read)).containDeep({ id, state: 'waiting', number: { value: '42' } });
   });
 
+  it('should answer a device without secrets.use every approval with no account, username or via (secrev-1331-delta N2)', async () => {
+    const { run, id } = await approvals();
+    const blind = new ApiDispatcher(
+      new ApiRouter(phoneApprovalRoutes(run.service)),
+      CREDENTIALS,
+      withoutGrant({ capability: 'secrets', axis: 'use' }),
+    );
+    const sees = new ApiDispatcher(new ApiRouter(phoneApprovalRoutes(run.service)), CREDENTIALS, GRANTED);
+
+    const granted = await sees.dispatch(request({ method: 'GET', path: one(id), headers: human }));
+    const answers = [
+      await blind.dispatch(request({ method: 'GET', path: '/v1/phone-approvals', headers: human })),
+      await blind.dispatch(request({ method: 'GET', path: one(id), headers: human })),
+      await blind.dispatch(post(`${one(id)}/refuse`, {})),
+    ];
+
+    // The granted owner sees whose sign-in it is; the blind one still sees where, how, and its state.
+    should(jsonBody(granted)).containDeep({ account: { id: 'CLICKUP' }, username: 'a@gmail.com', via: { id: 'OKTA' } });
+    for (const answer of answers) {
+      should(answer.status).equal(200);
+      for (const name of ['CLICKUP', 'ClickUp', 'a@gmail.com', 'OKTA', 'Okta"'])
+        should(String(answer.body)).not.containEql(name);
+    }
+    should(jsonBody(answers[1] as (typeof answers)[number])).containDeep({ id, state: 'waiting' });
+    should(jsonBody(answers[2] as (typeof answers)[number])).containDeep({ id, state: 'refused' });
+  });
+
   it('should answer an unusable id, another session’s approval and an unknown one without reading anything', async () => {
     const { dispatch, id } = await approvals();
 

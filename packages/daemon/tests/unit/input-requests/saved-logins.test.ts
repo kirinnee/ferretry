@@ -3,6 +3,7 @@ import {
   type AgendaId,
   type InputDeliverBody,
   type InputRaise,
+  type InputRequest,
   type InputTargetFacts,
   PutLoginEntryRequestSchema,
   padInputValue,
@@ -1346,6 +1347,66 @@ describe('a second person on one site', () => {
     should(refused.code).equal('conflict');
     should(h.writes).deepEqual([]);
     should(await shape(h)).equal(before);
+  });
+
+  it('should take an Update for a stale record only as the owner’s own pick with the same username (secrev-1331-delta N1)', async () => {
+    // The record says kirinnee97 (the account's own username) while the page has moved on to ernest unseen.
+    const stale = async () => {
+      const h = await world('kirinnee97@gmail.com', KIRIN);
+      const { request } = await raised(h, PAGE_RAISE);
+      return { h, request };
+    };
+    const send = async (h: Harness, request: InputRequest, save: NonNullable<InputDeliverBody['save']>) =>
+      await h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, ERNEST_PASSWORD, { save }),
+        HOST,
+      );
+
+    // No choice sent: never an update. Another username in the box: refused. Both type nothing and write nothing.
+    const silent = await stale();
+    should(silent.request.saved?.typedUsername).equal(KIRIN.username);
+    should(silent.request.saved?.update).match({ id: 'ACCOUNTS_GOOGLE_COM' });
+    const before = await shape(silent.h);
+    const unchosen = await refusal(send(silent.h, silent.request, { entry: 'ACCOUNTS_GOOGLE_COM', label: 'x' }));
+    const other = await stale();
+    const otherBefore = await shape(other.h);
+    const otherName = await refusal(
+      send(other.h, other.request, {
+        entry: 'ACCOUNTS_GOOGLE_COM',
+        label: 'x',
+        mode: 'update',
+        username: 'ernest@atomi.tech',
+      }),
+    );
+    should([unchosen.code, otherName.code]).deepEqual(['conflict', 'conflict']);
+    should([...silent.h.writes, ...other.h.writes]).deepEqual([]);
+    should(await shape(silent.h)).equal(before);
+    should(await shape(other.h)).equal(otherBefore);
+
+    // The app's default is a new account: kirinnee97's password stays.
+    const fresh = await stale();
+    const created = await send(fresh.h, fresh.request, {
+      entry: 'GOOGLE_KIRINNEE97',
+      label: 'Google · kirinnee97@gmail.com',
+      mode: 'new',
+      username: KIRIN.username,
+    });
+    should(created.saved).deepEqual({ entry: 'GOOGLE_KIRINNEE97', ok: true });
+    should((await fresh.h.directory.accounts.list()).accounts.map(each => each.id)).deepEqual([
+      'ACCOUNTS_GOOGLE_COM',
+      'GOOGLE_KIRINNEE97',
+    ]);
+
+    // The owner deliberately picks Update, the box locked to the account's own username: that is theirs to choose.
+    const chosen = await stale();
+    const updated = await send(chosen.h, chosen.request, {
+      entry: 'ACCOUNTS_GOOGLE_COM',
+      label: 'accounts.google.com',
+      mode: 'update',
+    });
+    should(updated.saved).deepEqual({ entry: 'ACCOUNTS_GOOGLE_COM', ok: true });
   });
 
   it('should refuse an UPDATE of an account that is not there, with nothing typed', async () => {

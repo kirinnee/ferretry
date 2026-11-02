@@ -1,7 +1,8 @@
 /**
  * Screenshots of a sign-in card when the page is signing in a second person on one site (&B137): no one-tap of the
  * saved account, the title naming whose sign-in it is, and "Save to Accounts" in each of its states — a new account,
- * its name in the terminal under More, Update of the same person (never offered for another), and a password
+ * its name in the terminal under More, Update of the same person (never offered for another), a stale "who is signing
+ * in" that still starts on a new account, Update setting the username of an account that has none, and a password
  * too short to save — at a 390px phone and a 1440px desktop, in the light and dark studio themes. Review evidence;
  * nothing compares the PNGs.
  *
@@ -39,7 +40,10 @@ import { NOW, browserField, fakeClient, offer, requestOf, saved } from '../../te
 const view = new URLSearchParams(location.search).get('view') ?? 'different';
 const AT = '2026-11-02T03:14:00.000Z';
 const SIGN_IN = 'si_0123456789abcdef';
-const same = view === 'update' || view === 'one-tap';
+const same = view === 'update' || view === 'one-tap' || view === 'stale-default';
+// Who the page signs in is unknown, and the only account has no username: the owner picks Update and types one.
+const bare = view === 'update-bare';
+const tap = view === 'update' || view === 'one-tap' || bare;
 // The owner's REAL store (secrev-1331 M3): kirinnee97's account has no username saved. The same-person views save it.
 const KIRIN = same
   ? { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com', username: 'kirinnee97@gmail.com' }
@@ -50,7 +54,7 @@ const accounts = AccountListSchema.parse({
   accounts: [{ ...KIRIN, fields: { password: true, totp: false }, factors: [], signIns: [SIGN_IN], createdAt: AT, updatedAt: AT }],
   signIns: [{ id: SIGN_IN, account: KIRIN.id, place: { kind: 'site', domains: ['accounts.google.com'], match: [] }, method: { kind: 'password' }, createdAt: AT, updatedAt: AT }],
 });
-const who = same ? 'kirinnee97@gmail.com' : 'ernest@atomi.tech';
+const who = bare ? undefined : same ? 'kirinnee97@gmail.com' : 'ernest@atomi.tech';
 const request = requestOf('secret', {
   risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
   agendaItemId: 'A251',
@@ -67,12 +71,16 @@ const request = requestOf('secret', {
   },
   saved: saved({
     match: 'accounts.google.com',
-    suggest: same ? { id: KIRIN.id, label: KIRIN.label } : { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
-    ...(same ? { update: KIRIN } : {}),
-    newAccount: same ? { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' } : { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
-    typedUsername: who,
-    ...(same ? {} : { differentFrom: KIRIN }),
-    offers: [offer({ ...KIRIN, matched: true, signIn: SIGN_IN, ...(same ? { primary: true, why: 'only' } : {}) })],
+    suggest: same || bare ? { id: KIRIN.id, label: KIRIN.label } : { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+    ...(same || bare ? { update: KIRIN } : {}),
+    newAccount: same
+      ? { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' }
+      : bare
+        ? { id: 'ACCOUNTS_GOOGLE_COM_2', label: 'accounts.google.com' }
+        : { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+    ...(who === undefined ? {} : { typedUsername: who }),
+    ...(same || bare ? {} : { differentFrom: KIRIN }),
+    offers: [offer({ ...KIRIN, matched: true, signIn: SIGN_IN, ...(tap ? { primary: true, why: 'only' } : {}) })],
   }),
 });
 const machine = fakeClient(() => ({}));
@@ -110,9 +118,16 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const VIEWS = ['different', 'save-new', 'save-more', 'update', 'too-short', 'one-tap'].filter(
-  each => wanted === undefined || wanted.includes(each),
-);
+const VIEWS = [
+  'different',
+  'save-new',
+  'save-more',
+  'update',
+  'stale-default',
+  'update-bare',
+  'too-short',
+  'one-tap',
+].filter(each => wanted === undefined || wanted.includes(each));
 
 const PASSWORD = 'made-up-PASSWORD-1';
 
@@ -161,14 +176,16 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           await page.locator('[data-harness-surface]').waitFor({ state: 'visible' });
           if (state !== 'one-tap') {
-            if (state === 'update') await page.locator('[data-input-type-instead]').first().click();
+            if (state === 'update' || state === 'update-bare')
+              await page.locator('[data-input-type-instead]').first().click();
             // `different` is the card exactly as it opens: the password box is empty (the app never holds a saved value).
             // Every other state has the owner typing a made-up password first.
             if (state !== 'different')
               await page.locator('[data-input-value]').fill(state === 'too-short' ? 'abc' : PASSWORD);
             if (state !== 'different') await page.locator('[data-input-save-tick]').check();
             if (state === 'save-more') await page.locator('[data-input-save-more] summary').click();
-            if (state === 'update') await page.locator('[data-input-save-update]').check();
+            if (state === 'update' || state === 'update-bare') await page.locator('[data-input-save-update]').check();
+            if (state === 'update-bare') await page.locator('[data-input-save-username]').fill('ernest@atomi.tech');
           }
           const where = `${state} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

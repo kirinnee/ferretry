@@ -11782,13 +11782,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
-      const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {
-        timeoutMs: 15 * 60_000,
-        after: (milliseconds, action) => {
-          const timer = setTimeout(action, milliseconds);
-          return { cancel: () => clearTimeout(timer) };
+      const browserService = new BrowserSessionService(
+        sessions,
+        browserLauncher,
+        () => Date.now(),
+        {
+          timeoutMs: 15 * 60_000,
+          after: (milliseconds, action) => {
+            const timer = setTimeout(action, milliseconds);
+            return { cancel: () => clearTimeout(timer) };
+          },
         },
-      });
+        // Who a page is signing in, as the ferret typed it, is dropped by the runtime itself on every act that may have
+        // changed it, whoever made it: the toolbar route, the live view, the agent tools, an act that failed partway.
+        typedIdentities,
+      );
       pageHost = browserService;
       const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
       closeAgentBrowsers = async () => await browserService.closeAll();
@@ -11798,12 +11806,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         status: browserService.status.bind(browserService),
         act: browserService.act.bind(browserService),
         attachViewer: browserService.attachViewer.bind(browserService),
-        // A person typing in the live view may be signing someone else in: who the session's pages were signing in, as
-        // the ferret typed it, is no longer known (typed-identities.ts). A missing record is the safe state.
-        dispatchHumanInput: async (sessionId, input) => {
-          if (input.kind !== 'mouse') typedIdentities.forget(sessionId);
-          await browserService.dispatchHumanInput(sessionId, input);
-        },
+        dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
         releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),

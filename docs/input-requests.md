@@ -772,10 +772,12 @@ card shows, in this order:
 - **Username**, pre-filled only with [who the page is signing in](#who-is-signing-in) (what the ferret typed or chose
   there), and editable. Never another account's username. A card that types a username itself keeps that one instead.
 - **Save as a new account** or **Update `<account>`** — an explicit choice, drawn only when the daemon offers an
-  account to update (`InputSaved.update`); otherwise one plain line, "Saves as a new account". It starts on **Update**
-  ONLY when the page said who it signs in and that is the account's own username, and then says "(same username)";
-  with an unknown identity it starts on new and claims no sameness. "Update" says plainly "Replaces the saved password
-  of …" and keeps the account's own username (read-only).
+  account to update (`InputSaved.update`); otherwise one plain line, "Saves as a new account". It **always starts on
+  new**: who the page signs in is the ferret's word and may be stale, so writing over a saved password is only ever the
+  owner's own pick of Update. The Update choice says "(same username)" only when the page said who it signs in and
+  that is the account's own username. Picked, it says plainly "Replaces the saved password of …" and keeps the
+  account's own username (read-only). Into an account with no username saved, the owner's Username is kept on it, and
+  the card says so before Send: "… has no username saved. This sets its username to b@… and replaces its password."
 - **Name** (new only), from the provider and the username: "Google · a@gmail.com" (`suggestedNewAccount`; a fixed
   provider list — Google, Microsoft, an Okta tenant — else the host, `github.com · kirinnee`).
 - **More › Name in the terminal** (new only): the account's handle, the name `fy account` uses (`GOOGLE_A`), derived
@@ -847,9 +849,21 @@ the field's document, from the ferret's own acts as the browser saw them:
 - a click on an element that shows exactly one email: an account chooser's tile (`clickedIdentityOf`).
 
 **A missing record is the safe state**, so the record is CLEARED by anything that may change who the page signs in
-without the daemon reading who: a navigation, typing or filling anything else, a key press that types (Enter, Tab and
-arrows keep it), raw mouse moves, a click at a bare point, a page script (every page of the session), any act by a
-person — the API or typing in the live view — and a password delivered into the page (the sign-in moved on). It is also
+without the daemon reading who. The browser runtime clears it itself (`BrowserSignInWatch`), whoever acted, so no path
+goes around it:
+
+- every act through `POST /v1/sessions/:id/browser` but a read, a picture or a resize. Who posts it is not known: the
+  owner's address bar, Back, Forward and Reload, or a ferret's `fy browser type|click|navigate`;
+- a press, a key or text in the **live view** (an account tile the owner clicks in the "pick the account" hand-off),
+  for every page of the session. A mouse move, a wheel or a release is not;
+- on the agent tools' queue, BEFORE the act: a navigation, typing or filling, a key press that types (Enter, Tab and
+  arrows keep it), raw mouse, a drag, a click at a bare point, a dialog answered, and a page script (every page of the
+  session);
+- after ANY act that failed partway: a fill that typed the email and then broke, an Enter that timed out after the page
+  moved.
+
+Only the agent tools put a record back, from what a finished act of the ferret's was seen to do (above). Any act by a
+person through the agent tools clears it too, and so does a password delivered into the page (the sign-in moved on). It is also
 forgotten when the page is seen on another host, after 15 minutes, and when the session ends. A card raised on the same
 page and host reads it **at raise**, through the redactor like the ferret's prompt (a value the redactor would change
 is dropped), as `InputSaved.typedUsername`.
@@ -1304,7 +1318,9 @@ An approval lives in RAM. A restart ends it: at start, the daemon closes every c
 **The owner's routes** (owner only, like every input route; an agent is refused before anything is read):
 `GET /v1/phone-approvals` (the ones waiting), `GET /v1/sessions/:sessionId/phone-approvals/:approvalId` (one, for
 its card) and `POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
-card itself is refused (`use_input_form`). Only the daemon raises a card with the `phoneApproval` ref: the agenda's
+card itself is refused (`use_input_form`). They are `terminal.use` routes, and an approval names an account, its
+username and the account it signs in via: a caller without `secrets.use` gets each approval **without** `account`,
+`username` and `via`, as a card comes without `saved`. Only the daemon raises a card with the `phoneApproval` ref: the agenda's
 add route has no field for it, so a ferret's own "Approve on your phone" note draws as a plain note.
 
 **The security log** records `phone-approval.raised`, `phone-approval.refused` and `phone-approval.settled`. Each

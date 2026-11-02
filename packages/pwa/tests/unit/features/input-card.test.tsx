@@ -1125,7 +1125,7 @@ describe('a second person on one site', () => {
     });
   });
 
-  it('should start on Update for the same person, say plainly what it replaces, and keep that account’s username', async () => {
+  it('should start on New even for the same username, say plainly what Update replaces once picked, and keep that account’s username', async () => {
     const card = await open(
       true,
       withSaved(
@@ -1162,6 +1162,70 @@ describe('a second person on one site', () => {
       entry: 'ACCOUNTS_GOOGLE_COM',
       label: 'accounts.google.com',
       mode: 'update',
+    });
+  });
+
+  it('should send a stale record’s card as a new account by default: it never starts on Update (secrev-1331-delta N1)', async () => {
+    // The record says kirinnee97 (the only account here, by that username); the page has moved on to ernest. Nothing
+    // is a one-tap here, so the owner types ernest's password straight away and ticks Save to Accounts.
+    const card = await open(
+      true,
+      withSaved(
+        saved({
+          match: 'accounts.google.com',
+          update: KIRIN,
+          newAccount: { id: 'GOOGLE_KIRINNEE97', label: 'Google · kirinnee97@gmail.com' },
+          typedUsername: KIRIN.username,
+          offers: [],
+        }),
+      ),
+    );
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+
+    expect(card.q<HTMLInputElement>('[data-input-save-new]')?.checked).toBe(true);
+    expect(card.q<HTMLInputElement>('[data-input-save-update]')?.checked).toBe(false);
+    expect(card.q('[data-input-save-updates]')).toBeNull();
+    await click(card.q('[data-input-send]'));
+    await settle();
+    expect((deliver(card.calls).body as { save?: { entry?: string; mode?: string } }).save).toMatchObject({
+      entry: 'GOOGLE_KIRINNEE97',
+      mode: 'new',
+    });
+  });
+
+  it('should say before Send that Update sets the username of an account that has none (secrev-1331-delta N3)', async () => {
+    // Who the page signs in is unknown; the only account here has no username saved (the owner's real store).
+    const bare = { id: 'ACCOUNTS_GOOGLE_COM', label: 'accounts.google.com' };
+    const card = await open(
+      true,
+      withSaved(
+        saved({
+          match: 'accounts.google.com',
+          update: bare,
+          newAccount: { id: 'ACCOUNTS_GOOGLE_COM_2', label: 'accounts.google.com' },
+          offers: [],
+        }),
+      ),
+    );
+    await typeInto(card.q('[data-input-value]'), SECRET);
+    await click(card.q('[data-input-save-tick]'));
+    await click(card.q('[data-input-save-update]'));
+    expect(card.q('[data-input-save-updates]')?.textContent).toBe(
+      'Replaces the saved password of accounts.google.com.',
+    );
+    await typeInto(card.q('[data-input-save-username]'), 'ernest@atomi.tech');
+
+    expect(card.q('[data-input-save-updates]')?.textContent).toBe(
+      'accounts.google.com has no username saved. This sets its username to ernest@atomi.tech and replaces its password.',
+    );
+    await click(card.q('[data-input-send]'));
+    await settle();
+    expect((deliver(card.calls).body as { save?: unknown }).save).toEqual({
+      entry: 'ACCOUNTS_GOOGLE_COM',
+      label: 'accounts.google.com',
+      mode: 'update',
+      username: 'ernest@atomi.tech',
     });
   });
 

@@ -830,14 +830,15 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   const update = request.saved?.update;
   const differentLine = differentAccountWords(request.saved);
   const askUsername = savesUsername(fields, save);
+  // The username a save carries: the Save as box, or the username the card itself types.
+  const plainField = fields.find(field => field.sensitivity === 'plain');
+  const savedUsername = askUsername ? save.username : plainField === undefined ? '' : (values[plainField.key] ?? '');
   const saveFieldId = useId();
   // "Type a different one" over a saved account: what is typed is someone else's until the owner says otherwise.
   const typeInstead = (): void => {
     setTyping(true);
     setSave(current =>
-      current.mode === undefined
-        ? current
-        : { ...initialSaveDraft(request.saved, { typedInstead: true }), enabled: current.enabled },
+      current.mode === undefined ? current : { ...initialSaveDraft(request.saved), enabled: current.enabled },
     );
   };
   const ready = typedReady(fields, values);
@@ -1156,7 +1157,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           ) : null}
           {save.enabled && saveReason === undefined && save.mode === 'update' && update !== undefined ? (
             <p className="m-0 text-meta text-warn" data-input-save-updates="">
-              {updateWords(update)}
+              {updateWords(update, savedUsername)}
             </p>
           ) : null}
           {save.enabled && saveReason === undefined && save.mode === undefined && existing !== undefined ? (

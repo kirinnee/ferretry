@@ -417,6 +417,8 @@ routes, but a card's `saved` names accounts and people (offers, the account Upda
 name, who the page is signing in). A caller without `secrets.use` gets every card **without `saved`**; it still answers
 by typing. On the deliver route, typing a saved account (`entry`) also needs `secrets.use`, and keeping a typed value
 ("Save to Accounts", `save`) needs `secrets.configure` (and spends the step-up), as every other account write does.
+The **phone-approval** routes (`/v1/phone-approvals`, `terminal.use`) answer a caller without `secrets.use` each
+approval without its `account`, `username` and `via`.
 
 **Standing sign-in rules** (`/v1/sign-in-rules`, [secrets.md](secrets.md#standing-sign-in-rules)) are `caller:
 'person'` on every route, so a ferret's credential is refused `owner_only` before a body is read. Reading the list,

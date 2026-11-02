@@ -55,6 +55,7 @@ import {
   type BrowserPageAction,
   BrowserSessionError,
   type BrowserSubsystem,
+  NON_TYPING_KEYS,
   pendingDialogOf,
 } from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
@@ -998,12 +999,19 @@ export class AgentToolService {
     reference: string,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
-    const answer: BrowserActionResult = await this.ports.browser.actOnPage(
-      caller.sessionId,
-      surface.id,
-      pageActionOf(call),
-      this.browserGuard(caller, surface, call.tool),
-    );
+    let answer: BrowserActionResult;
+    try {
+      answer = await this.ports.browser.actOnPage(
+        caller.sessionId,
+        surface.id,
+        pageActionOf(call),
+        this.browserGuard(caller, surface, call.tool),
+      );
+    } catch (error) {
+      // An act that failed partway may still have moved the page or typed into it (the browser runtime clears too).
+      this.ports.typedIdentities?.cleared(caller.sessionId, surface.id);
+      throw error;
+    }
     const page: {
       readonly url?: string;
       readonly text?: unknown;
@@ -2436,21 +2444,6 @@ const LEAVES_SIGN_IN: ReadonlySet<string> = new Set([
   'browser.highlight',
   'browser.select',
   'browser.check',
-]);
-/** The keys that submit or move focus and type nothing: pressing them keeps who a page signs in. */
-const NON_TYPING_KEYS: ReadonlySet<string> = new Set([
-  'Enter',
-  'Tab',
-  'Shift+Tab',
-  'Escape',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-  'Home',
-  'End',
-  'PageUp',
-  'PageDown',
 ]);
 
 /** A page URL's host, lowercase, or `undefined` when there is none to read. */
