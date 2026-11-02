@@ -1410,6 +1410,42 @@ The Skills tab has one **+ Add skills** button by its "N active in this session"
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the sheet claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
+### + Add skills, On this machine (&B131 A4)
+
+The same sheet has a second group under the subscriptions, **On this machine**
+(`features/context-rail/machine-skills-group.tsx`, `machine-skills-model.ts`,
+`local-skill-install-sheet.tsx`). It is the app for ["Copying a skill from this machine"](#copying-a-skill-from-this-machine).
+
+- **What it lists**: the machine's skills inventory (`GET /v1/skills`: every account and every registered
+  project) **minus what this session already sees**. A skill is "already seen" when the session lists the same
+  `SKILL.md` path or the same name (case-folded). A skill listed by an account and a project at the same path is
+  one row. Each row has the name, "‹runtime› account" or "project ‹name›" with the agent, the description and
+  **Install** (or **Installed**, when the copy record holds a copy made from that path). The search field above
+  narrows both groups by every word typed.
+- **When it cannot be read** the group says so in one line, and the rest of the sheet still works. An empty list says
+  that no other account or project has a skill this session lacks; a truncated inventory says some are not shown.
+- **Install** opens a sheet in two steps. First the **place**, defaulted exactly as the catalog installs above are
+  (**This project** when the session's folder is inside a registered project, otherwise **This account**). Then
+  **Review before installing** calls the preview route, and the review shows what the machine returned:
+  - the machine's **warning** sentences, each with its severity;
+  - **From** (the account or project and the path), **Into** (the destination), and **Replaces** when an earlier
+    copy would be replaced;
+  - **Not copied** (each file left behind, with the machine's reason);
+  - **every file in full**, with hidden characters marked, never hidden.
+- **A refusal has no Install button.** A password or key in a file is the machine's own sentence, "‹file› line ‹n›
+  holds what looks like a password or key. Remove it, then copy the skill.", shown as written (the daemon never
+  returns the text it matched). A source over the file cap, a skill that is gone, a place that is unknown, a
+  conflict and an expired preview each say what happened and that **nothing was installed**; an expired or unknown
+  preview offers **Preview again**. Changing the place drops a review that was already read.
+- **Install** asks the person's passkey (the `catalog-install` step-up) and applies exactly the previewed bytes.
+  A missing passkey says so and changes nothing.
+- **After it lands** the sheet says "Installed", where it went, any note the machine added, and the Skills list
+  re-reads. The sentence about the session is the one A2 uses, so the two sources never word it differently:
+  Claude "It is active in this session now.", Codex "It is active from the next session.", and a place the session
+  does not read says so.
+- **Wording**: the button is **Install** and the row **Installed**; **Add** is only the "+ Add skills" button. The
+  search field is labelled "Search skills" (it covers both groups).
+
 ## Links (catalogs 3f)
 
 > **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4,

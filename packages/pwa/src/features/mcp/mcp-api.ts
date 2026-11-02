@@ -16,6 +16,8 @@ import {
   McpCheckRequestSchema,
   type McpCheckResult,
   McpCheckResultSchema,
+  type MachineSkillsInventory,
+  MachineSkillsInventorySchema,
   type McpInventory,
   McpInventorySchema,
   type SessionSkillsInventory,
@@ -81,3 +83,7 @@ export const readSkillFile = async (
     SkillFileSchema,
     signalled(signal),
   );
+
+/** Every skill in every runtime home and registered project on this machine. */
+export const readMachineSkills = async (client: ToolsClient, signal?: AbortSignal): Promise<MachineSkillsInventory> =>
+  await client.request('/v1/skills', MachineSkillsInventorySchema, signalled(signal));

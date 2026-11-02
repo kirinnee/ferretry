@@ -484,7 +484,7 @@ function Field({
   );
 }
 
-function TargetPicker({
+export function TargetPicker({
   draft,
   onDraft,
   options,
@@ -633,7 +633,7 @@ function TapToExpand({
   );
 }
 
-function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+export function Fact({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 border-b border-border-soft py-xs">
       <span className="text-meta font-semibold text-muted">{label}</span>
