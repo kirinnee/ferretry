@@ -1,5 +1,6 @@
 import type {
   CopyMeta,
+  DaemonId,
   IFyApiClient,
   PasteRule,
   PasteRuleCreate,
@@ -88,6 +89,8 @@ export interface PlanPorts extends CallerPorts {
   readonly appOrigin?: string | undefined;
   /** Said with the link when a set app address was refused and the hosted one stands. */
   readonly appOriginNote?: string | undefined;
+  /** This daemon's id, which the link names so the app opens the machine that holds the card; absent or failing, none. */
+  readonly machine?: (() => Promise<DaemonId | undefined>) | undefined;
   /** Hands a link to this host's browser; resolves to whether one was launched. */
   readonly openLink?: ((url: string) => Promise<boolean>) | undefined;
   readonly nowMs: () => number;

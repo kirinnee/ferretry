@@ -145,6 +145,12 @@ function acceptedCandidate(
 }
 
 /** Evaluate the directory. Total: every problem is an issue, never a throw. */
+/** The reason an account-default edit on disk waits, even a removal: the owner's own removal never reaches here. */
+export const UNATTRIBUTABLE_EDIT_NOTE = "Ferretry can't tell who edited the file, so it waits for you";
+
+const withEditorNote = (kind: string, changes: readonly string[]): readonly string[] =>
+  kind === 'accountDefaults' ? [...changes, UNATTRIBUTABLE_EDIT_NOTE] : changes;
+
 export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluation {
   const issues: ConfigIssue[] = [];
   const pending: ConfigPending[] = [];
@@ -226,7 +232,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         singletonValue(address.kind, candidate),
       );
       if (changes.length > 0) {
-        pending.push({ path: file.path, etag, changes: [...changes] });
+        pending.push({ path: file.path, etag, changes: [...withEditorNote(address.kind, changes)] });
         keepPrevious('pending');
         continue;
       }
@@ -258,7 +264,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         SINGLETON_DEFAULTS[address.kind],
       );
       if (changes.length > 0) {
-        pending.push({ path, etag: ABSENT_CONFIG_ETAG, changes: [...changes] });
+        pending.push({ path, etag: ABSENT_CONFIG_ETAG, changes: [...withEditorNote(address.kind, changes)] });
         states.set(path, { address, state: 'pending' });
         effective.set(path, previous);
         next[path] = accepted;

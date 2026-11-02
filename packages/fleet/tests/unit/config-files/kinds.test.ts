@@ -23,6 +23,7 @@ import {
   CONFIG_FILE_SCHEMAS,
   CONFIG_FILE_STARTERS,
   configFileBody,
+  accountDefaultsAdditions,
   configLoosening,
   configValue,
   type MachineFileValue,
@@ -898,6 +899,34 @@ describe('configLoosening — account-defaults.yaml', () => {
 
     // Assert
     should(actual).have.length(1);
+  });
+
+  it.each([
+    ['one site line', { sites: { 'a.com': A, 'b.com': B } }, { sites: { 'b.com': B } }],
+    ['a folder line', { folders: { '/srv/app': { 'github.com': A } } }, {}],
+    ['every line', { sites: { 'a.com': A }, projects: { ferretry: { 'github.com': B } } }, {}],
+  ])('should add or change nothing when an edit only removes %s (owner decision !A243)', (_name, before, after) => {
+    // Act + Assert
+    should(accountDefaultsAdditions(before, after)).deepEqual([]);
+  });
+
+  it.each([
+    ['a line added', { sites: { 'a.com': A } }, { sites: { 'a.com': A, 'b.com': B } }, ['b.com']],
+    ['a line changed', { sites: { 'a.com': A } }, { sites: { 'a.com': B } }, ['a.com']],
+    [
+      'a line changed while another is removed',
+      { sites: { 'a.com': A, 'b.com': A } },
+      { sites: { 'b.com': B } },
+      ['b.com'],
+    ],
+    ['a line moved to another place', { sites: { 'a.com': A } }, { sites: { 'b.com': A } }, ['b.com']],
+  ])('should say what %s adds or changes, and not what it removes', (_name, before, after, keys) => {
+    // Act
+    const actual = accountDefaultsAdditions(before, after);
+
+    // Assert
+    should(actual).have.length(keys.length);
+    for (const [index, key] of keys.entries()) should(actual[index]).containEql(`for ${key} in`);
   });
 
   it('should start from no defaults', () => {

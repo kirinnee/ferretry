@@ -508,6 +508,7 @@ import {
   TimerSendScheduler,
   TmuxSendTerminal,
 } from '../src/adapters/session/send/index.ts';
+import { mostRecentLiveSession } from '../src/adapters/session/owner-session.ts';
 import { sessionAddressCandidates } from '../src/adapters/session/session-address-candidates.ts';
 import {
   FileSignalArtifacts,
@@ -7833,6 +7834,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // hand-offs once they are, and until then a confirm-in-app or a card-bound stage is refused.
   let seedAgenda: TwoFactorSeedAgendaPort | undefined;
   let seedCards: TwoFactorSeedCardPort | undefined;
+  let seedOwnerSession: (() => Promise<string | undefined>) | undefined;
   const seedPasskeys = new StatePasskeyStore(paths, stateFiles);
   const twoFactorSeeds = new TwoFactorSeedStages({
     accounts: accountDirectory,
@@ -7841,6 +7843,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     anyPasskey: async () => await seedPasskeys.any(),
     hostName: hostname(),
     cards: lateSeedCards(() => seedCards),
+    ownerSession: async () => await seedOwnerSession?.(),
     agenda: {
       raise: async (sessionId, card) => {
         if (seedAgenda === undefined) throw new Error('the agenda is not running yet');
@@ -11070,6 +11073,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // the owner on the agenda (docs/secrets.md, "2FA keys").
       seedCards = inputRequestService;
       seedAgenda = new TwoFactorSeedAgendaAdapter(agenda);
+      seedOwnerSession = async () => await mostRecentLiveSession(storage, INPUT_ENDED_SESSION_STATUSES);
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
       // ferret's proposal waits on a card the owner answers in Settings or with `fy account site recipe`.
       const loginRecipes = new LoginRecipeService({

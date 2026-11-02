@@ -7,6 +7,9 @@ import {
   type AnalyticsResponse,
   appOriginChoice,
   CONFIG_DIRECTORY_NAME,
+  DAEMON_IDENTITY_PATH,
+  type DaemonId,
+  DaemonIdentityViewSchema,
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
   type IFyApiClient,
@@ -664,9 +667,20 @@ const UNAUTHENTICATED_PROBE_TOKEN = 'unauthenticated';
  * only when the answer actually changes, and building one costs nothing but an object.
  */
 /** The app address a plan's card link is built on, and why a set `FY_APP_URL` was not used. */
-function planApp(setting: string | undefined): { readonly appOrigin: string; readonly appOriginNote?: string } {
+function planApp(
+  setting: string | undefined,
+  client: Pick<IFyApiClient, 'request'>,
+): {
+  readonly appOrigin: string;
+  readonly appOriginNote?: string;
+  readonly machine: () => Promise<DaemonId | undefined>;
+} {
   const { origin, refused } = appOriginChoice(setting);
-  return { appOrigin: origin, ...(refused === undefined ? {} : { appOriginNote: refused }) };
+  return {
+    appOrigin: origin,
+    ...(refused === undefined ? {} : { appOriginNote: refused }),
+    machine: async () => (await client.request(DAEMON_IDENTITY_PATH, DaemonIdentityViewSchema)).daemonId,
+  };
 }
 
 function lazyHealthClient(environment: Record<string, string | undefined>, stateHome: string): HealthApiClient {
@@ -1088,7 +1102,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         agentCredential: paneCredentialValue(world.environment),
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
-        ...planApp(world.environment.FY_APP_URL),
+        ...planApp(world.environment.FY_APP_URL, client),
         openLink: async url => openInBrowser(url),
       }),
     ),
@@ -1103,7 +1117,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
         red: text => chalk.red(text),
-        ...planApp(world.environment.FY_APP_URL),
+        ...planApp(world.environment.FY_APP_URL, client),
         openLink: async url => openInBrowser(url),
       }),
     ),
@@ -1152,7 +1166,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
             ownSessionId,
             sleep: async ms => await Bun.sleep(ms),
             nowMs: () => Date.now(),
-            ...planApp(world.environment.FY_APP_URL),
+            ...planApp(world.environment.FY_APP_URL, client),
           }),
         };
       })(),

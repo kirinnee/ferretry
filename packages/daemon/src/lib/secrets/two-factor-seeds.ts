@@ -147,6 +147,11 @@ export interface TwoFactorSeedStagesDeps {
   readonly hostName: string;
   readonly cards?: TwoFactorSeedCardPort;
   readonly agenda?: TwoFactorSeedAgendaPort;
+  /**
+   * The session an owner's own card goes on when the request named none: the owner at their own shell has no session,
+   * and every Inbox card belongs to one. `undefined` when none is running.
+   */
+  readonly ownerSession?: () => Promise<string | undefined>;
   readonly newStageId?: () => TwoFactorStageId;
 }
 
@@ -411,20 +416,28 @@ export class TwoFactorSeedStages implements RedactionValueSource {
 
   /**
    * Puts a waiting stage on the owner's agenda so they confirm it with a passkey in the app: the card is the daemon's
-   * words only (the account, who asked, from where and when), and it saves nothing by itself.
+   * words only (the account, who asked, from where and when), and it saves nothing by itself. `requested` is the board the
+   * caller named; left out, the owner's most recently active session is used, and none running is refused (409).
    */
   async confirmInApp(
     accountId: AccountId,
     stage: TwoFactorStageId,
-    sessionId: string,
+    requested: string | undefined,
     askedBy: string,
     caller: StageCaller,
-  ): Promise<{ readonly agendaItemId: AgendaId }> {
+  ): Promise<{ readonly agendaItemId: AgendaId; readonly sessionId: string }> {
     const agenda = this.deps.agenda;
     if (agenda === undefined) throw new TwoFactorSeedError(503, 'unavailable', 'this daemon has no agenda to ask on');
     this.#sweep(this.deps.clock.nowMs());
     const held = await this.#own(accountId, stage, { finished: false, caller });
-    if (held.card !== undefined) return { agendaItemId: held.card.id };
+    if (held.card !== undefined) return { agendaItemId: held.card.id, sessionId: held.card.sessionId };
+    const sessionId = requested ?? (await this.deps.ownerSession?.());
+    if (sessionId === undefined)
+      throw new TwoFactorSeedError(
+        409,
+        'no_session',
+        'no session is running for the confirm card to go under: start one, or name one with --session <id>',
+      );
     const target = await this.deps.accounts.seedTarget(accountId);
     const at = new Date(this.deps.clock.nowMs()).toISOString().slice(11, 16);
     // What the key says it is for (often the username) is not on the card: the app reads it from the stage.
@@ -440,7 +453,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       expiresAt: new Date(held.expiresAtMs).toISOString(),
     });
     held.card = { sessionId, id };
-    return { agendaItemId: id };
+    return { agendaItemId: id, sessionId };
   }
 
   /** The waiting seeds, for MASKING: each one and the text it was pasted as, keyed `login:stage:<st_…>`. */

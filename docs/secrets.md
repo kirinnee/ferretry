@@ -403,8 +403,8 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 2FA keys have routes of their own: see [2FA keys](#2fa-keys).
 
 **The default account per place** is `config/account-defaults.yaml`, not a part of the account store: its lines hold
-**handles only**, never a value, and every change to it is held for the owner when anyone else makes it
-([Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
+**handles only**, never a value, and every change to it is held for the owner when anyone else makes it, a ferret's removal included; the OWNER's own write
+that only REMOVES lines needs no passkey (an edit made on the disk is held even then: Ferretry can't tell who edited the file, so it waits for you; owner decision !A243; [Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
 is the owner's own write of one line (`account: null` clears it): a ferret is refused before its body is read, a
 paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once (it is refused with `409 no_sign_in_here` for an account with no sign-in on that key). The card and `account_hint` read the file ([which account is first](input-requests.md#which-account-is-first-and-why)). The
 account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
@@ -499,10 +499,12 @@ the stage on a route that reads the accounts. Allow it in the app with your pass
 prints "Saved"; Deny, or two minutes, and nothing is saved. It first asks the daemon whether it reports
 `accounts.2fa-keys.1`, and on one that does not (v4.190 to v4.196 list accounts but have no 2FA key routes) says
 "this machine's daemon is too old for 2FA keys: update it (fy daemon update), then run this again" before anything is
-typed. Every Inbox card belongs to a session, so `--session <id>` names the one this card goes under (the current
-session's by default) and the owner's own shell must give one: there is no Inbox of the owner's own for it yet. When
+typed. Every Inbox card belongs to a session. Run from the owner's own terminal, where no session is current, the daemon puts
+the card under the most recently active live session, so the card still reaches the owner's Inbox and `--session <id>`
+is not needed (it still works, and names the session when you want a particular one). Where no session is running at
+all the daemon answers `409 no_session` and says so. A ferret's pane is refused as before. When
 the app's address is known (`FY_APP_URL`, or the hosted default) it prints the card's link,
-`<app>/#agenda/<id>?session=<sid>`, as `fy plan approve` does. The CLI has no way to save a seed itself.
+`<app>/#agenda/<id>?session=<sid>&machine=<this daemon's id>`, as `fy plan approve` does. The CLI has no way to save a seed itself.
 
 The rest of `fy account` is in [input requests](input-requests.md#managing-them): accounts, sign-ins (`site`), recipes,
 defaults, and 2FA keys that hold no value (`factor add --authenticator|--sms|--email|--push|--security-key`). Each write

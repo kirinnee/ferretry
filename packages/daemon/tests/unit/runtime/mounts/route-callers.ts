@@ -16,6 +16,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/pair/code operator person',
   'GET /v1/pair/code/:pairingId operator person',
   'DELETE /v1/pair/code/:pairingId operator person',
+  'GET /v1/pair/identity operator person',
   'GET /v1/pair/devices operator person',
   'DELETE /v1/pair/devices/:deviceId operator person',
   'PATCH /v1/pair/devices/:deviceId/grants operator person',

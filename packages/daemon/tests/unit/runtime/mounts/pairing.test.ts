@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type CapabilityGrants,
+  type DaemonId,
   FULL_DEVICE_GRANTS,
   LIMITED_DEVICE_GRANTS,
   type PairedDevice,
@@ -44,6 +45,7 @@ const device = (id: string, name: string): PairedDevice => ({
 });
 
 class FakePairing implements PairingSubsystem {
+  readonly daemonId = daemonId as DaemonId;
   readonly revoked: PairingId[] = [];
   readonly revokedDevices: string[] = [];
   /** Who each revocation was asked by, as the dispatcher derived it. */
@@ -157,6 +159,24 @@ async function mount(
 }
 
 describe('pairing routes', () => {
+  it('should tell the owner this daemon’s id, never a ferret or an anonymous caller (C7)', async () => {
+    // The id is the one the pairing QR already carries; the CLI puts it in a link so the app opens on the right machine.
+    // Arrange
+    const surface = await mount(new FakePairing());
+
+    // Act
+    const owner = await surface.dispatch(
+      request({ method: 'GET', path: '/v1/pair/identity', headers: admin, loopback: true }),
+    );
+    const anonymous = await surface.dispatch(request({ method: 'GET', path: '/v1/pair/identity', loopback: true }));
+
+    // Assert
+    should(owner.status).equal(200);
+    should(owner.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(owner)).deepEqual({ daemonId });
+    should(anonymous.status).equal(401);
+  });
+
   it('should serve no redemption at all: the plain-HTTP POST /v1/pair is gone', async () => {
     // Redemption happens only inside a session whose daemon was proved against the QR fingerprint, so
     // nothing on this surface is public any more. An anonymous caller there is an app from before

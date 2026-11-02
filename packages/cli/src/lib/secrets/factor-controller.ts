@@ -4,6 +4,7 @@ import {
   AccountIdSchema,
   agendaDeepLinkFragment,
   DAEMON_FEATURES,
+  type DaemonId,
   padInputValue,
   parseTotpInput,
   TOTP_INPUT_MAX_BYTES,
@@ -22,7 +23,7 @@ import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
 export interface TwoFactorAddOptions {
   readonly totp?: boolean | undefined;
   readonly label?: string | undefined;
-  /** The session whose card in the app's Inbox confirms it; defaults to the session this runs inside. */
+  /** The session whose card in the app's Inbox confirms it; defaults to the session this runs inside, else the daemon picks. */
   readonly session?: string | undefined;
   readonly iUnderstandTotp?: boolean | undefined;
 }
@@ -38,8 +39,10 @@ export interface TwoFactorSeedPorts {
   readonly ownSessionId?: string | undefined;
   readonly sleep: (ms: number) => Promise<void>;
   readonly nowMs: () => number;
-  /** The app's address, where the card is opened (`<origin>/#agenda/<id>?session=<sid>`); absent, no link is printed. */
+  /** The app's address, where the card is opened (`<origin>/#agenda/<id>?session=<sid>&machine=<id>`); absent, no link is printed. */
   readonly appOrigin?: string | undefined;
+  /** This daemon's id, which the link names so the app opens the right machine; absent or failing, the link names none. */
+  readonly machine?: (() => Promise<DaemonId | undefined>) | undefined;
   /** Said with the link when a set app address was refused and the hosted one stands. */
   readonly appOriginNote?: string | undefined;
 }
@@ -61,34 +64,34 @@ export class TwoFactorSeedController {
       throw new Error(
         'name the kind of 2FA key: --totp saves a TOTP key so Ferretry makes the codes (other kinds: Settings › Accounts)',
       );
-    const session = options.session?.trim() || this.ports.ownSessionId?.trim() || '';
-    // Every card in the app's Inbox belongs to one session: there is no Inbox of the owner's own for it to go to yet.
-    if (session === '')
-      throw new Error(
-        "name a session with --session <id> (see `fy session ls`): the confirm card goes in the app's Inbox under it, and a 2FA key is saved only with your passkey there",
-      );
+    // Named, or the session this runs inside; at the owner's own shell neither exists and the daemon puts the card on
+    // the owner's most recently active session (every Inbox card belongs to one).
+    const session = options.session?.trim() || this.ports.ownSessionId?.trim() || undefined;
     const label = options.label === undefined ? undefined : this.#label(options.label);
     // An account list can answer on a daemon with no 2FA key routes (v4.190 to v4.196): ask what it offers first.
     if (!(await this.ports.gateway.features()).includes(DAEMON_FEATURES.twoFactorKeys))
       throw new Error(daemonNeedsUpdate('2FA keys'));
     await this.#preflight(account.data);
     const staged = await this.#askAndStage(account.data, options.iUnderstandTotp === true, label);
-    const card = await this.ports.gateway.confirmInApp(account.data, staged.stage, { session });
+    const card = await this.ports.gateway.confirmInApp(account.data, staged.stage, {
+      ...(session === undefined ? {} : { session }),
+    });
     this.ports.out.success(
-      `Confirm it with your passkey on the card !${card.agendaItemId} in the app's Inbox (session ${session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the card !${card.agendaItemId} in the app's Inbox (session ${card.session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
-    this.#showCard(card.agendaItemId, session);
+    await this.#showCard(card.agendaItemId, card.session);
     const final = await this.#wait(account.data, staged.stage);
     this.ports.out.success(OUTCOME[final.state](account.data));
   }
 
   /** Prints the link that opens the card in the app. It carries no secret: it only picks a card. */
-  #showCard(agendaItemId: string, session: string): void {
-    const { appOrigin, appOriginNote } = this.ports;
+  async #showCard(agendaItemId: string, session: string): Promise<void> {
+    const { appOrigin, appOriginNote, machine } = this.ports;
     if (appOrigin === undefined) return;
+    const daemonId = machine === undefined ? undefined : await machine().catch(() => undefined);
     if (appOriginNote !== undefined) this.ports.out.success(appOriginNote);
     this.ports.out.success(
-      `Open the card: ${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, session)}`,
+      `Open the card: ${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, session, daemonId)}`,
     );
   }
 

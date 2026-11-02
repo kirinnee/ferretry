@@ -638,6 +638,16 @@ export const PairedDevicesViewSchema = z.strictObject({
 });
 export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;
 
+/** `GET /v1/pair/identity`: where a command line link points the app. */
+export const DAEMON_IDENTITY_PATH = '/v1/pair/identity';
+
+/**
+ * WHICH DAEMON THIS IS: its id and nothing else. The id is the public fingerprint every pairing QR already carries, so
+ * naming it leaks nothing; a link that carries it opens the app on the machine that holds what the link is about.
+ */
+export const DaemonIdentityViewSchema = z.strictObject({ daemonId: DaemonIdSchema });
+export type DaemonIdentityView = z.infer<typeof DaemonIdentityViewSchema>;
+
 /**
  * A change to ONE device's grants — `PATCH /v1/pair/devices/:deviceId/grants`.
  *

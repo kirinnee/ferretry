@@ -41,6 +41,7 @@
 
 import {
   ABSENT_CONFIG_ETAG,
+  accountDefaultsAdditions,
   type AcceptedConfigFiles,
   CONFIG_FILE_STARTERS,
   type ConfigCheckContext,
@@ -57,6 +58,7 @@ import {
   type SingletonKind,
 } from '@ferretry/fleet';
 import {
+  type AccountDefaultsFile,
   CONFIG_SCHEMA_DIRECTORY,
   type ConfigFileAddress,
   type ConfigFileView,
@@ -479,12 +481,18 @@ export class ConfigFilesService {
   /**
    * An editor's write: refused unless it checks, refused if the file moved since `ifMatch`, and — when
    * it loosens — in effect now only if `mayLoosen`, otherwise written and held for confirmation.
+   *
+   * `by` is who the daemon's route says is writing, never anything the caller sent: `'owner'` for the person's own
+   * route, `'agent'` (the default, so an unmarked door fails closed) for a ferret's. Only the owner's write that
+   * takes `account-defaults.yaml` lines away and adds or changes none needs no approval (owner decision !A243); the
+   * daemon compares the version in effect with the new text. A ferret's write that touches the file in any way is held.
    */
   async write(
     path: string,
     text: string,
     ifMatch: string | undefined,
     mayLoosen: boolean,
+    by: 'owner' | 'agent' = 'agent',
   ): Promise<ConfigWriteOutcome> {
     const address = this.#address(path);
     const issues = await this.validate(path, text);
@@ -495,7 +503,7 @@ export class ConfigFilesService {
       if (ifMatch !== undefined && ifMatch !== found) throw new ConfigFileConflictError(path);
       const etag = this.deps.digest(text);
       const loosening = isSingletonAddress(address)
-        ? this.#loosening(address.kind, path, text)
+        ? this.#loosening(address.kind, path, text, by)
         : address.kind === 'login'
           ? this.#loginLoosening(address.name, path, text)
           : address.kind === 'runtime'
@@ -512,11 +520,15 @@ export class ConfigFilesService {
   }
 
   /** What putting `text` into effect for a singleton would loosen, against what is in effect now. */
-  #loosening(kind: SingletonKind, path: string, text: string): readonly string[] {
+  #loosening(kind: SingletonKind, path: string, text: string, by: 'owner' | 'agent'): readonly string[] {
     const checked = checkConfigFile(path, text);
     // Already validated by the caller; a file that does not check loosens nothing because it is refused.
     if (!checked.ok) return [];
     const effective = this.current().evaluation.effective;
+    if (kind === 'accountDefaults' && by === 'owner') {
+      // The owner taking lines away: only what the new text adds or changes asks.
+      return accountDefaultsAdditions(effective.accountDefaults, checked.value as AccountDefaultsFile);
+    }
     const before =
       kind === 'machine' ? { machine: effective.model.machine, advanced: effective.model.advanced } : effective[kind];
     return configLoosening(kind, before as never, checked.value as never);

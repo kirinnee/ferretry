@@ -445,22 +445,42 @@ export function runtimeLoosening(
   ];
 }
 
-/**
- * Every line of `account-defaults.yaml` that is added, removed or changed is a sentence: a default decides which
- * account a card offers first, and the card says "Default for ferretry" in the owner's name, so the words must be the
- * owner's and not a ferret's. Nothing here is an exemption — taking a default away is held too.
- */
-function accountDefaultsLoosening(before: AccountDefaultsFile, after: AccountDefaultsFile): readonly string[] {
+/** One sentence for each place whose line differs between two versions, `of` choosing which side's lines are read. */
+function accountDefaultsDifferences(
+  before: AccountDefaultsFile,
+  after: AccountDefaultsFile,
+  of: 'both' | 'added-or-changed',
+): readonly string[] {
   const address = (line: AccountDefaultLine): string => JSON.stringify([line.scope, line.within ?? null, line.key]);
   const was = new Map(accountDefaultLines(before).map(line => [address(line), line]));
   const now = new Map(accountDefaultLines(after).map(line => [address(line), line]));
   const sentences: string[] = [];
-  for (const [where, line] of [...now, ...was]) {
+  for (const [where, line] of of === 'both' ? [...now, ...was] : [...now]) {
     if (was.get(where)?.account === now.get(where)?.account) continue;
     const sentence = `changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}`;
     if (!sentences.includes(sentence)) sentences.push(sentence);
   }
   return sentences;
+}
+
+/**
+ * Every line of `account-defaults.yaml` that is added, removed or changed is a sentence: a default decides which
+ * account a card offers first, and the card says "Default for ferretry" in the owner's name, so the words must be the
+ * owner's and not a ferret's. Taking a default away is held too when the writer cannot be told to be the owner: a
+ * ferret's write, a hand edit, a deleted file. The OWNER's own write of removals alone is let through by the service
+ * that takes it ({@link accountDefaultsAdditions}, owner decision !A243).
+ */
+function accountDefaultsLoosening(before: AccountDefaultsFile, after: AccountDefaultsFile): readonly string[] {
+  return accountDefaultsDifferences(before, after, 'both');
+}
+
+/**
+ * What an edit from `before` to `after` ADDS or CHANGES in `account-defaults.yaml`, in the words of
+ * {@link configLoosening}; empty when it only takes lines away. The service compares the two versions itself, so an
+ * owner's write that removes one line and changes another still has a sentence, for the one it changed.
+ */
+export function accountDefaultsAdditions(before: AccountDefaultsFile, after: AccountDefaultsFile): readonly string[] {
+  return accountDefaultsDifferences(before, after, 'added-or-changed');
 }
 
 /**

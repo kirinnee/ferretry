@@ -21,6 +21,7 @@ import {
   AgendaIdSchema,
   type AgendaItem,
   type AgendaSnapshot,
+  agendaDeepLinkFromFragment,
   agendaInDiscussion,
   agendaTurn,
   LEGACY_ATTENTION_LINK_PARAMETER,
@@ -31,7 +32,7 @@ import {
 import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './agenda-answers.ts';
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
-import type { DaemonId } from './daemon-connection.ts';
+import { type DaemonId, daemonId as toDaemonId } from './daemon-connection.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
 
@@ -718,31 +719,27 @@ export class DeferredAgendaActions {
   }
 }
 
-/** The card a link names: `#agenda/A3?session=<id>`. The session is optional only because an id alone is per-session. */
+/**
+ * The card a link names: `#agenda/A3?session=<id>&machine=<daemon id>`. The session is optional only because an id alone
+ * is per-session; the machine is optional because a link from an older `fy` names none.
+ */
 export interface AgendaDeepLink {
   readonly id: AgendaId;
   readonly sessionId?: string;
+  readonly machine?: DaemonId;
 }
 
-/** The card a location hash names, or `null` for any other hash (the join fragment among them). */
+/** The card a location hash names, or `null` for any other hash (the join fragment among them): the protocol's one grammar. */
 export const agendaDeepLinkFromHash = (hash: string): AgendaDeepLink | null => {
-  const match = /^#agenda\/([^?]+)(?:\?(.*))?$/u.exec(hash);
-  if (match === null) return null;
-  const raw = ((): string => {
-    try {
-      return decodeURIComponent(match[1] ?? '');
-    } catch {
-      return '';
-    }
-  })();
-  const id = AgendaIdSchema.safeParse(raw);
-  if (!id.success) return null;
-  const session = new URLSearchParams(match[2] ?? '').get(INBOX_SESSION_PARAMETER);
-  return session === null || session.trim() === '' ? { id: id.data } : { id: id.data, sessionId: session };
+  const found = hash.startsWith('#agenda/') ? agendaDeepLinkFromFragment(hash) : null;
+  if (found === null) return null;
+  const { machine, ...rest } = found;
+  return machine === undefined ? rest : { ...rest, machine: toDaemonId(machine) };
 };
 
 /**
- * Which paired machine runs the linked session: the one whose session list holds it. `'wait'` while a machine that might
+ * Which paired machine runs the linked session: the machine the link names when this app has it paired, else the one
+ * whose session list holds it. `'wait'` while a machine that might
  * hold it has not been read yet; `undefined` when no machine does (or the link names no session).
  */
 export const machineForAgendaLink = (
@@ -750,6 +747,7 @@ export const machineForAgendaLink = (
   machines: readonly { readonly daemonId: DaemonId; readonly sessionIds: readonly string[] | null }[],
 ): DaemonId | 'wait' | undefined => {
   if (link.sessionId === undefined) return undefined;
+  if (link.machine !== undefined && machines.some(machine => machine.daemonId === link.machine)) return link.machine;
   const held = machines.find(machine => machine.sessionIds?.includes(link.sessionId ?? '') === true);
   if (held !== undefined) return held.daemonId;
   return machines.some(machine => machine.sessionIds === null) ? 'wait' : undefined;

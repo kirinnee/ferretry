@@ -44,6 +44,7 @@ describe('ProtocolTwoFactorSeedGateway', () => {
       parsed: { params: { algorithm: 'SHA1', digits: 6, period: 30 } },
     });
     const confirm = gatewayOver({ stage: STAGE, session: 's1', agendaItemId: 'A7' });
+    const ownerShell = gatewayOver({ stage: STAGE, session: 'daemon-picked', agendaItemId: 'A7' });
     const view = gatewayOver({
       stage: STAGE,
       account: 'GITHUB',
@@ -56,6 +57,7 @@ describe('ProtocolTwoFactorSeedGateway', () => {
     await stage.gateway.stage('GITHUB', { padded: padInputValue('JBSWY3DPEHPK3PXP'), totpAcknowledged: true });
     await confirm.gateway.confirmInApp('GITHUB', STAGE, { session: 's1' });
     await view.gateway.view('GITHUB', STAGE);
+    await ownerShell.gateway.confirmInApp('GITHUB', STAGE, {});
     const refused = await stage.gateway
       .stage('GITHUB', { padded: 'x', totpAcknowledged: false } as never)
       .catch((error: unknown) => error);
@@ -66,6 +68,8 @@ describe('ProtocolTwoFactorSeedGateway', () => {
       path: `/v1/accounts/GITHUB/factors/seed/${STAGE}/confirm-in-app`,
       init: { method: 'POST', body: '{"session":"s1"}' },
     });
+    // At the owner's own shell there is no session to name: the body carries none and the daemon picks one.
+    should(ownerShell.seen[0]).match({ init: { method: 'POST', body: '{}' } });
     should(view.seen[0]).deepEqual({ path: `/v1/accounts/GITHUB/factors/seed/${STAGE}` });
     should(refused).be.an.Error();
     should(stage.seen).have.length(1);

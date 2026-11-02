@@ -153,6 +153,13 @@ describe('one source per fact: the links the CLI prints and the app reads', () =
       sessionId: 'mvx-1',
     });
     should(agendaDeepLinkFromFragment(agendaDeepLinkFragment('A12'))).deepEqual({ id: 'A12' });
+    should(agendaDeepLinkFromFragment(agendaDeepLinkFragment('A12', 'mvx-1', MACHINE as never))).deepEqual({
+      id: 'A12',
+      sessionId: 'mvx-1',
+      machine: MACHINE,
+    });
+    should(agendaDeepLinkFragment('A12', undefined, MACHINE as never)).equal(`#agenda/A12?machine=${MACHINE}`);
+    should(agendaDeepLinkFromFragment('#agenda/A12?machine=not-a-daemon')).be.null();
     should(agendaDeepLinkFromFragment(`#rules/${STAGE}`)).be.null();
     should(agendaDeepLinkFromFragment('#agenda/%E0%A4%A')).be.null();
   });

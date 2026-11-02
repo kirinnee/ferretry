@@ -198,12 +198,13 @@ export class PlanController {
     options: PlanApproveOptions,
     say: (message: string) => void,
   ): Promise<void> {
-    const { appOrigin, appOriginNote, openLink } = this.ports;
+    const { appOrigin, appOriginNote, openLink, machine } = this.ports;
     if (appOrigin === undefined) {
       if (options.open === true) say('--open has nowhere to open: this machine does not know the app address.');
       return;
     }
-    const link = `${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, plan.sessionId)}`;
+    const daemonId = machine === undefined ? undefined : await machine().catch(() => undefined);
+    const link = `${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, plan.sessionId, daemonId)}`;
     if (appOriginNote !== undefined) say(appOriginNote);
     say(`Open the card: ${link}`);
     if (options.open !== true) return;
