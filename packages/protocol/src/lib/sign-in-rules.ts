@@ -13,6 +13,7 @@ import {
   TwoFactorIdSchema,
 } from './account-ids.ts';
 import {
+  type AccountRef,
   AccountRefSchema,
   type Place,
   PlaceKeySchema,
@@ -110,8 +111,8 @@ export const SIGN_IN_RULE_SUGGESTIONS_PER_HOUR = 3;
 export const SIGN_IN_RULE_SUGGESTION_TTL_SECONDS = DAY_SECONDS;
 /** How many of the owner's own device taps that went through a sign-in needs before a rule can be made for it. */
 export const SIGN_IN_RULE_HISTORY_TAPS = 2;
-/** Most lines of a staged rule's summary: the daemon's words the passkey dialog shows. */
-export const SIGN_IN_RULE_SUMMARY_MAX_LINES = 8;
+/** The most own-hand sign-ins an eligibility answer counts (it is a tally for the owner to read, not a limit). */
+export const SIGN_IN_RULE_HISTORY_MAX = 1_000_000;
 /** Longest paired-device name a rule view shows. */
 const DEVICE_LABEL_MAX_CHARS = 200;
 
@@ -122,9 +123,16 @@ const DEVICE_LABEL_MAX_CHARS = 200;
 export const SIGN_IN_RULE_HONEST_LIMIT =
   "This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.";
 
-/** The red line on every terminal rule (sudo, su, doas), beside {@link SIGN_IN_RULE_HONEST_LIMIT}, verbatim. */
-export const SIGN_IN_RULE_ROOT_WARNING =
-  'This gives every ferret on this machine root whenever it asks, while the rule lasts.';
+/** The red line on every terminal rule (sudo, su, doas), first in its one red block, verbatim. */
+export const SIGN_IN_RULE_ROOT_WARNING = 'Any ferret on this machine gets root while this rule lasts.';
+
+/**
+ * The one red line on a rule that also types the 2FA code, verbatim: with it the password and the code both come from
+ * this machine. A rule's own words, since the saved-login card's {@link LOGIN_TOTP_WARNING} is about a vault and is
+ * longer than a rule's single red block holds.
+ */
+export const SIGN_IN_RULE_TOTP_WARNING =
+  'Ferretry types the password and the 2FA code, so a ferret that uses this rule has both factors.';
 
 /**
  * What a terminal rule's program proof is worth, beside {@link SIGN_IN_RULE_ROOT_WARNING}, verbatim: the kernel proves a
@@ -141,6 +149,15 @@ export const SIGN_IN_RULE_ROOT_WARNING =
  */
 export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
   'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';
+
+/**
+ * The residual risk the owner accepted for terminal rules (!A226, 2026-11-01), verbatim, second in the one red block
+ * after {@link SIGN_IN_RULE_ROOT_WARNING}: said wherever the red root flag is, so nobody approves a sudo rule without
+ * it. Twenty-five words at most, so the block stays two short sentences (the "How it's checked" expander holds the
+ * kernel proof, {@link SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}).
+ */
+export const SIGN_IN_RULE_TERMINAL_RESIDUAL =
+  'In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.';
 
 /** Whether a rule is for a page sign-in or a terminal one (sudo, su, doas). */
 export const SignInRuleSurfaceSchema = z.enum(['page', 'terminal']);
@@ -479,7 +496,7 @@ export const SIGN_IN_RULE_FLAGS = ['root', 'one-factor', 'auto-recipe'] as const
 export const SignInRuleFlagSchema = z.enum(SIGN_IN_RULE_FLAGS);
 export type SignInRuleFlag = z.infer<typeof SignInRuleFlagSchema>;
 
-/** `fields` and `totp` said twice on purpose: the red warning reads the boolean, never a list or a summary's words. */
+/** `fields` and `totp` said twice on purpose: the red warning reads the boolean, never a list or the rows' words. */
 const codeTickProblems = (value: {
   readonly fields: readonly SignInField[];
   readonly totp: boolean;
@@ -525,6 +542,8 @@ export const SignInRuleViewSchema = z
     place: PlaceSchema,
     fields: z.array(SignInFieldSchema).min(1).max(3),
     totp: z.boolean(),
+    /** The label of the 2FA key this rule's code comes from, when it types the code: the daemon's, never a value. */
+    codeKey: oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS).optional(),
     scope: SignInRuleScopeSchema,
     createdAt: InstantSchema,
     expiresAt: InstantSchema,
@@ -549,6 +568,9 @@ export const SignInRuleViewSchema = z
     const problems = [
       ...codeTickProblems(view),
       ...placeProblems({ place: view.place, fields: view.fields, root: view.flags.includes('root') }),
+      ...((view.codeKey !== undefined) === view.totp
+        ? []
+        : ['a rule that types a code names its key, and only that one']),
       ...(unique(view.flags) ? [] : ['each flag is shown once']),
       ...(view.flags.includes('one-factor') === view.totp ? [] : ['a rule that types a code is flagged one-factor']),
       ...((view.status === 'suspended') === (view.suspended !== undefined)
@@ -600,20 +622,164 @@ export const SignInRuleDraftSchema = z
   });
 export type SignInRuleDraft = z.infer<typeof SignInRuleDraftSchema>;
 
-/** What a staged rule may not be: its code flags agree, and `root` says exactly whether it is a terminal rule. */
+/** The labels a rule's rows carry: the facts the passkey binds, one row each (two notes at most). */
+export const SignInRuleRowLabelSchema = z.enum([
+  'Machine',
+  'Site',
+  'Account',
+  'Types',
+  'Who',
+  'Until',
+  'Uses',
+  'Code key',
+  'Note',
+]);
+export type SignInRuleRowLabel = z.infer<typeof SignInRuleRowLabelSchema>;
+
+/** One fact of a rule as the owner reads it: a label and one line. */
+export const SignInRuleRowSchema = z.strictObject({
+  label: SignInRuleRowLabelSchema,
+  value: oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS),
+});
+export type SignInRuleRow = z.infer<typeof SignInRuleRowSchema>;
+
+const ROW_ONCE: readonly SignInRuleRowLabel[] = ['Types', 'Who', 'Until', 'Uses'];
+const ROW_NOTES_MAX = 2;
+
+/** What a staged rule's rows may not be: each fact once, the machine or the site its place says, notes at most two. */
+const rowProblems = (staged: {
+  readonly rows: readonly SignInRuleRow[];
+  readonly place: Place;
+  readonly fields: readonly SignInField[];
+}): readonly string[] => {
+  const count = (label: SignInRuleRowLabel): number => staged.rows.filter(row => row.label === label).length;
+  const placeLabel = staged.place.kind === 'terminal' ? 'Machine' : 'Site';
+  const otherLabel = staged.place.kind === 'terminal' ? 'Site' : 'Machine';
+  return [
+    ...ROW_ONCE.filter(label => count(label) !== 1).map(label => `the rows name ${label} exactly once`),
+    ...(count(placeLabel) === 1 && count(otherLabel) === 0
+      ? []
+      : [`the rows name ${placeLabel} once, and not ${otherLabel}`]),
+    ...(count('Account') === (staged.place.kind === 'site' ? 1 : 0)
+      ? []
+      : ['the rows name the account exactly once for a page rule, and never for a terminal one']),
+    ...(count('Code key') === (staged.fields.includes('totp') ? 1 : 0)
+      ? []
+      : ['the code key is named exactly once for a rule that types the code, and never otherwise']),
+    ...(count('Note') <= ROW_NOTES_MAX ? [] : [`at most ${String(ROW_NOTES_MAX)} notes`]),
+  ];
+};
+
+/** What a staged rule may not be: its code flags agree, `root` says exactly whether it is a terminal rule, rows add up. */
 const stagedProblems = (staged: {
   readonly fields: readonly SignInField[];
   readonly totp: boolean;
   readonly root: boolean;
   readonly place: Place;
-}): readonly string[] => [...codeTickProblems(staged), ...placeProblems(staged)];
+  readonly rows: readonly SignInRuleRow[];
+}): readonly string[] => [...codeTickProblems(staged), ...placeProblems(staged), ...rowProblems(staged)];
+
+/** "username, password and 2FA code": the fields a rule types, in words. */
+export const signInRuleFieldWords = (fields: readonly SignInField[]): string => {
+  const named = fields.map(field => (field === 'totp' ? '2FA code' : field));
+  return named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named.at(-1) ?? ''}`;
+};
+
+const rowLine = (text: string): string => {
+  const flat = text
+    .replaceAll(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replaceAll(/\s+/gu, ' ')
+    .trim();
+  return flat.length <= TASK_PLAN_SUMMARY_LINE_MAX_CHARS
+    ? flat
+    : `${flat.slice(0, TASK_PLAN_SUMMARY_LINE_MAX_CHARS - 1)}…`;
+};
+
+/** The facts {@link signInRuleWords} turns into words: all resolved by the daemon, none a value. */
+export interface SignInRuleWordsFacts {
+  readonly fields: readonly SignInField[];
+  readonly account: AccountRef;
+  readonly username?: string | undefined;
+  readonly place: Place;
+  readonly scope: SignInRuleScope;
+  readonly expiresAt: string;
+  readonly uses?: number | undefined;
+  /** The label of the pinned 2FA key, when the rule types the code. */
+  readonly codeKey?: string | undefined;
+  readonly revision: number;
+  /** Why the rule this approves again is suspended, when it is: a resume says what it resumes. */
+  readonly suspended?: SignInRuleSuspension | undefined;
+}
+
+/**
+ * THE WORDS OF A STANDING RULE, ONE SHAPE EVERYWHERE (the create sheet, the machine view, Settings, the passkey dialog
+ * and `fy rules add`): ONE plain line of what it does and the facts the passkey binds as label/value rows, in this
+ * order: Machine or Site, Account (a page rule: its label and username), Types, Who, Until, Uses, Code key (only when the rule types the code), then up to two notes.
+ * Warnings are NOT in these words: they come from the staged rule's structured flags. Every string is one line, clipped,
+ * with no control character, and none is a value. The one builder, so the daemon states what the passkey binds and
+ * every app shows exactly that.
+ */
+export function signInRuleWords(facts: SignInRuleWordsFacts): {
+  readonly does: string;
+  readonly rows: SignInRuleRow[];
+} {
+  const { place, scope } = facts;
+  const who =
+    scope.kind === 'any'
+      ? 'Any ferret on this machine'
+      : scope.kind === 'project'
+        ? `Ferrets in board project ${scope.project}`
+        : `Session ${scope.session}`;
+  const forWhom =
+    scope.kind === 'any'
+      ? 'any ferret'
+      : scope.kind === 'project'
+        ? `ferrets in board project ${scope.project}`
+        : "one session's ferrets";
+  const hosts = place.kind === 'site' ? (place.domains.length > 0 ? place.domains : place.match) : [];
+  const [firstHost = ''] = hosts;
+  const does =
+    place.kind === 'terminal'
+      ? `Ferretry types ${facts.username === undefined ? 'your' : `${facts.username}'s`} ${place.tool} password for ${forWhom} on ${place.host}, without asking.`
+      : `Ferretry signs in to ${firstHost} as ${facts.account.label} for ${forWhom}, without asking.`;
+  const rows: SignInRuleRow[] = [
+    place.kind === 'terminal'
+      ? { label: 'Machine', value: rowLine(place.host) }
+      : { label: 'Site', value: rowLine(hosts.join(', ')) },
+    ...(place.kind === 'site'
+      ? [
+          {
+            label: 'Account' as const,
+            value: rowLine(`${facts.account.label}${facts.username === undefined ? '' : ` · ${facts.username}`}`),
+          },
+        ]
+      : []),
+    {
+      label: 'Types',
+      value: rowLine(place.kind === 'terminal' ? `the ${place.tool} password` : signInRuleFieldWords(facts.fields)),
+    },
+    { label: 'Who', value: rowLine(who) },
+    { label: 'Until', value: `${facts.expiresAt.slice(0, 16).replace('T', ' ')} UTC` },
+    { label: 'Uses', value: facts.uses === undefined ? 'No limit' : `At most ${String(facts.uses)} times` },
+    ...(facts.fields.includes('totp') && facts.codeKey !== undefined
+      ? [{ label: 'Code key' as const, value: rowLine(facts.codeKey) }]
+      : []),
+    ...(facts.revision > 1
+      ? [{ label: 'Note' as const, value: `Approves this rule again (revision ${String(facts.revision)})` }]
+      : []),
+    ...(facts.suspended === undefined
+      ? []
+      : [{ label: 'Note' as const, value: rowLine(`Suspended: ${signInRuleSuspensionWords(facts.suspended)}`) }]),
+  ];
+  return { does: rowLine(does), rows };
+}
 
 /**
  * A RULE WAITING FOR ITS PASSKEY: the stage the `approve-sign-in-rule` proof is bound to, the rule it makes, and the
- * daemon's own words for it, which the passkey dialog shows. Every red and amber warning comes from the STRUCTURED
- * fields (`root`: sudo, su or doas; `totp`: one factor; `autoRecipe`), never from the summary's words, which may be
- * clipped (secrev-1268 N1);
- * so does WHICH sign-in it is for (`account`, `place`: secrev-1271 L3), since a clip cuts the host first.
+ * daemon's own words for it (`does` and `rows`, {@link signInRuleWords}), which the passkey dialog shows. Every red
+ * and amber warning comes from the STRUCTURED fields (`root`: sudo, su or doas; `totp`: one factor; `autoRecipe`),
+ * never from those words, which may be clipped (secrev-1268 N1); so does WHICH sign-in it is for (`account`, `place`:
+ * secrev-1271 L3), since a clip cuts the host first.
  * `machine` is set when it was staged at the machine (`fy rules add`) and waits in the app. Never a value.
  */
 export const SignInRuleStagedSchema = z
@@ -622,10 +788,13 @@ export const SignInRuleStagedSchema = z
     rule: SignInRuleIdSchema,
     revision: SignInRuleRevisionSchema,
     signIn: SignInIdSchema,
-    /** The account and the place the rule is for, as fields: the dialog draws them from here, never from `summary`. */
+    /** The account and the place the rule is for, as fields: the dialog draws them from here, never from `rows`. */
     account: AccountRefSchema,
     place: PlaceSchema,
-    summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(SIGN_IN_RULE_SUMMARY_MAX_LINES),
+    /** What the passkey does, in one plain line: the daemon's {@link signInRuleWords}, shown as it is. */
+    does: oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS),
+    /** The facts it binds, label by label: the same words, shown as they are (the dialog's approved rows). */
+    rows: z.array(SignInRuleRowSchema).min(5).max(9),
     fields: z.array(SignInFieldSchema).min(1).max(3),
     totp: z.boolean(),
     /** A terminal rule: Ferretry would type sudo, su or doas's password for any ferret it covers, which is root. Red. */
@@ -874,7 +1043,13 @@ export const SIGN_IN_RULE_INELIGIBLE_WORDS = {
  * but it says whether the owner's taps qualify a sign-in, which no ferret may learn).
  */
 export const SignInRuleEligibilitySchema = z.discriminatedUnion('eligible', [
-  z.strictObject({ signIn: SignInIdSchema, eligible: z.literal(true), rule: SignInRuleIdSchema.optional() }),
+  z.strictObject({
+    signIn: SignInIdSchema,
+    eligible: z.literal(true),
+    rule: SignInRuleIdSchema.optional(),
+    /** How many of the owner's own hand sign-ins qualify this one (the most for any of its places): the owner's to read. */
+    history: z.number().int().min(0).max(SIGN_IN_RULE_HISTORY_MAX).optional(),
+  }),
   z.strictObject({
     signIn: SignInIdSchema,
     eligible: z.literal(false),

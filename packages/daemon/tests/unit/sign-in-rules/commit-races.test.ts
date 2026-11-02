@@ -136,7 +136,10 @@ describe('a suspension that lands after the stage is never cleared unseen (secre
     const resumed = await w.service.commit(deviceOwner(), resume.stage, () => evidenceFor(challenge));
 
     // Assert
-    should(resume.summary.some(line => line.startsWith('It was suspended: '))).be.true();
+    should(resume.rows.some(row => row.label === 'Note' && row.value.startsWith('Suspended: '))).be.true();
+    should(
+      resume.rows.some(row => row.label === 'Note' && row.value === 'Approves this rule again (revision 2)'),
+    ).be.true();
     should(resumed).containDeep({ revision: 2, status: 'active' });
     should(actions(w).at(-1)).equal('sign-in-rule-resumed');
   });

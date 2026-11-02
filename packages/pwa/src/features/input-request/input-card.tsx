@@ -31,12 +31,15 @@ import {
   type InputShot,
   lockWords,
   pickOneWords,
+  type SignInSummary,
   strongestSensitivity,
   type TwoFactorId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
+import { SignInRuleOffer } from '../secure-copy/sign-in-rule-offer.tsx';
 import { codesAccounts, startingAccount } from '../../lib/automatic-codes.ts';
 import { cancelInput, deliverInput, type InputClient, putAccountDefault, readInputShot } from '../../lib/input-api.ts';
 import {
@@ -110,6 +113,8 @@ export interface InputCardProps {
   readonly accounts?: AccountList;
   /** Asks for the passkey that saves a staged key (bound to that stage); absent: the setup panel is not offered. */
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
+  /** Present only when the machine offers standing sign-in rules: after a hand-tapped sign-in, the card offers to make one. */
+  readonly ruleOffer?: { readonly askPasskey: RulesBinding['askPasskey'] };
 }
 
 const RISK_ICON = { green: ShieldCheck, neutral: Shield, amber: ShieldQuestion, red: ShieldAlert } as const;
@@ -136,6 +141,7 @@ export function InputCard({
   embedded = false,
   accounts,
   addKey,
+  ruleOffer,
 }: InputCardProps) {
   const headingId = useId();
   const now = useNow(fixedNow);
@@ -143,6 +149,7 @@ export function InputCard({
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
+  const [tappedSignIn, setTappedSignIn] = useState<SignInSummary['id'] | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
   // Why the task plan (or a standing rule) did not fill this card: the owner's view only, one fixed sentence by source,
@@ -151,7 +158,9 @@ export function InputCard({
   const planFilledLine =
     request.preapproval?.by === 'plan' && request.preapproval.outcome === 'filled'
       ? `Filled under your task plan (line ${String(request.preapproval.line + 1)}).`
-      : undefined;
+      : request.preapproval?.by === 'rule' && request.preapproval.outcome === 'filled'
+        ? 'Filled under your standing sign-in rule.'
+        : undefined;
   // The FIELDS decide, never the card's own word: a field the daemon upgraded to a secret gets no code title and no panel.
   const asksCode = strongestSensitivity(request.fields) === 'code';
   const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
@@ -358,6 +367,7 @@ export function InputCard({
             onSettled={(text, handTapped) => {
               setSettled(text);
               setAlways(handTapped === undefined ? undefined : alwaysUseFor(request.saved, handTapped));
+              setTappedSignIn(handTapped?.signIn);
               onDone();
             }}
             request={request}
@@ -369,6 +379,9 @@ export function InputCard({
             {settled}
           </p>
           {always === undefined ? null : <AlwaysUseLine always={always} client={client} />}
+          {ruleOffer === undefined || tappedSignIn === undefined ? null : (
+            <SignInRuleOffer askPasskey={ruleOffer.askPasskey} client={client} signIn={tappedSignIn} />
+          )}
         </>
       )}
 

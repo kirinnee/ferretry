@@ -24,6 +24,7 @@ import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
+import { pageRule, ruleList } from '../../../support/sign-in-rule-fixtures.ts';
 
 const DAEMON_ID = `fy_daemon_${'a'.repeat(43)}`;
 const PAIRING_ID = `fy_pair_${'b'.repeat(22)}` as PairingId;
@@ -567,6 +568,7 @@ function fakeClient(world: {
   readonly grantFailure?: unknown;
   readonly patches?: { readonly deviceId: string; readonly body: DeviceGrantsPatch }[];
   readonly calls?: string[];
+  readonly rules?: unknown;
 }): PairingClientFactory {
   let current = world.devices ?? view();
   return async () => ({
@@ -613,10 +615,44 @@ function fakeClient(world: {
         if (world.revokeFailure !== undefined) throw world.revokeFailure;
         return schema.parse({ devices: [], hostLocal: true, mayWiden: MAY_WIDEN });
       }
+      if (path === '/v1/sign-in-rules' && world.rules !== undefined) return schema.parse(world.rules);
       throw new Error(`unexpected request ${method} ${path}`);
     },
   });
 }
+
+describe('AddDeviceSurface and standing sign-in rules', () => {
+  const surfaceWith = async (rulesOffered: boolean, calls: string[]) => {
+    let renderer: ReactTestRenderer | undefined;
+    const rules = ruleList({ rules: [pageRule({ approvedWith: { deviceId: DEVICE_ID, device: 'Pixel 8' } })] });
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface
+          connection={connection()}
+          createClient={fakeClient({ calls, rules })}
+          rulesOffered={rulesOffered}
+        />,
+      );
+    });
+    return renderer as ReactTestRenderer;
+  };
+
+  it('says under a device how many rules its passkey approved when the machine offers rules', async () => {
+    const calls: string[] = [];
+    const surface = await surfaceWith(true, calls);
+
+    should(calls).containEql('GET /v1/sign-in-rules');
+    should(marked(surface, 'data-device-rules', DEVICE_ID)).have.length(1);
+  });
+
+  it('asks nothing about rules, and draws no note, when the machine does not offer them', async () => {
+    const calls: string[] = [];
+    const surface = await surfaceWith(false, calls);
+
+    should(calls).not.containEql('GET /v1/sign-in-rules');
+    should(marked(surface, 'data-device-rules')).have.length(0);
+  });
+});
 
 describe('AddDeviceSurface', () => {
   it('reads the device list for the daemon it was given and then offers the button', async () => {

@@ -29,6 +29,7 @@ import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
 import { healthOf } from '../../support/health.ts';
 import { fakeClient, logins } from '../../support/input-fixtures.ts';
+import { ruleClient } from '../../support/sign-in-rule-client.ts';
 
 const CONNECTION = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
 const mounted: Mounted[] = [];
@@ -836,5 +837,75 @@ describe('the last two branches', () => {
     await click(screen.q('[data-accounts-signin="si_0000000000000004"] button'));
 
     expect(screen.q('[data-accounts-panel="method"]')?.textContent).toContain('Where it signs in: sudo@kirin-box');
+  });
+});
+
+describe('a machine that reports standing sign-in rules', () => {
+  const rulesFrame = async (panel: 'accounts' | 'secure-copy', withStore: boolean) => {
+    const rules = ruleClient();
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+        if (path.startsWith('/v1/sign-in-rules')) return await rules.client.request(path, schema as never, init);
+        if (path === '/v1/health')
+          return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.accountsSignIns, DAEMON_FEATURES.signInRules]));
+        if (path === '/v1/accounts') return schema.parse(list());
+        if (path.startsWith('/v1/config/file')) return schema.parse(fileOf('', false));
+        return schema.parse({ v: 1, groups: [] });
+      },
+    };
+    const tree = (
+      <DaemonClientProvider client={async () => client as never}>
+        <DaemonSettingsFrame
+          connection={CONNECTION}
+          name="Workshop"
+          panel={panel}
+          onOpenPanel={() => undefined}
+          readWardenStatus={async () => Promise.reject(new Error('not here'))}
+          createWardenClient={async () => Promise.reject(new Error('not here'))}
+        />
+      </DaemonClientProvider>
+    );
+    const store = await createAppStore({
+      repository: { load: async () => null, save: async () => undefined },
+      connectClient: async () => ({}) as never,
+      fetcher: async () => Response.json({}),
+    });
+    const view = await mount(withStore ? <StoreProvider store={store}>{tree}</StoreProvider> : tree);
+    mounted.push(view);
+    for (let tries = 0; tries < 8; tries += 1) await settle();
+    return { view, store };
+  };
+
+  const openRuleSheet = async ({ view }: { readonly view: Mounted }) => {
+    await click(view.container.querySelector('[data-accounts-row="GITHUB"] button'));
+    await click(view.container.querySelector('[data-accounts-tab="sites"]'));
+    await click(view.container.querySelector(`[data-accounts-signin="${SI_GITHUB}"] button`));
+    await click(view.container.querySelector('[data-accounts-tab="rule"]'));
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+    await click(view.container.querySelector('[data-rule-start]'));
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+  };
+
+  it('hands the rule passkey to the Accounts screen only when the app has a store', async () => {
+    const withStore = await rulesFrame('accounts', true);
+    await openRuleSheet(withStore);
+    const sheet = withStore.view.container;
+    expect(sheet.querySelector('[data-rule-sheet]')).not.toBeNull();
+    expect(sheet.querySelector('[data-rule-no-passkey]')).toBeNull();
+    await click(sheet.querySelector('[data-rule-approve]'));
+    for (let tries = 0; tries < 6; tries += 1) await settle();
+    expect(withStore.store.stepUp.snapshot()?.words?.does).toContain('for any ferret, without asking');
+    withStore.store.stepUp.dismiss();
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+
+    const without = await rulesFrame('accounts', false);
+    await openRuleSheet(without);
+    expect(without.view.container.querySelector('[data-rule-sheet]')).not.toBeNull();
+    expect(without.view.container.querySelector('[data-rule-no-passkey]')).not.toBeNull();
+  });
+
+  it('draws the machine’s rules in its Secure copy panel', async () => {
+    const { view } = await rulesFrame('secure-copy', true);
+    expect(view.container.querySelector('[data-sign-in-rules]')).not.toBeNull();
   });
 });

@@ -64,6 +64,8 @@ export type PinsSnapshot =
       readonly pins: SignInRulePins;
       readonly signIn: SignInSummary;
       readonly account: AccountSummary;
+      /** The label of the pinned 2FA key, when a code was asked for: the words of the rule's Code key row. */
+      readonly codeKey?: string;
     }
   | { readonly ok: false; readonly because: SignInRuleIneligible | 'not-found' | 'no-code-key' };
 
@@ -93,6 +95,7 @@ export function snapshotPins(listing: RuleListing, signInId: SignInId, totp: boo
       factors: factorFingerprint(at.account.factors),
       ...(factor === undefined ? {} : { factor: factor.id }),
     },
+    ...(factor === undefined ? {} : { codeKey: factor.label }),
   };
 }
 

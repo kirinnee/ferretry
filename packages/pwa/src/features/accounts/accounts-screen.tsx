@@ -31,6 +31,7 @@ import { handleFromLabel, parseDomains, passwordProblem } from '../../lib/login-
 import { AccountDetail, type AccountTab } from './account-detail.tsx';
 import { type AccountOps, INPUT, Refusal } from './accounts-parts.tsx';
 import { SiteDetail, type SiteTab } from './site-detail.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 type AccountsView =
   | { readonly kind: 'list' }
@@ -53,6 +54,8 @@ export interface AccountsScreenProps {
   readonly onRefresh: () => void;
   /** Called when the person moves between views, so a refusal from the last one stops showing. */
   readonly onNavigate?: () => void;
+  /** Standing sign-in rules, when this machine reports them. */
+  readonly rules?: RulesBinding | undefined;
   readonly initialView?: AccountsView;
 }
 
@@ -106,6 +109,7 @@ export function AccountsScreen(props: AccountsScreenProps): ReactNode {
           onClosed={() => go({ kind: 'account', id: siteAccount.id, tab: 'sites' })}
           onTab={tab => go({ kind: 'site', id: signIn.id, tab })}
           ops={ops}
+          rules={props.rules}
           signIn={signIn}
           tab={view.tab}
         />

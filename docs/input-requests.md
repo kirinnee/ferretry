@@ -1325,10 +1325,9 @@ or nothing is typed:
 
 ### Standing rule fills: a sign-in the owner approved for any ferret
 
-> **Needs `sign-in-rules.1`, which the daemon does not report yet.** The fills below are built and tested, and run
-> only once the app that draws the rule sheet and its cards ships (R3c-6); until then every sign-in a rule would cover
-> is a normal card. How a rule is made, pinned, suspended and revoked is
-> [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
+> **Needs `sign-in-rules.1`, which this build reports** now that the app draws the rule sheet and its cards (R3c-6). A
+> daemon that did not report it would leave every sign-in a rule would cover as a normal card (invariant 32). How a rule
+> is made, pinned, suspended and revoked is [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
 
 A **standing rule** is one owner-signed permission for Ferretry to fill ONE sign-in, for any ferret unless the owner
 narrowed its scope, until it expires: a page sign-in for at most 90 days, or sudo, su or doas in a terminal for at most 7
@@ -1440,12 +1439,13 @@ What it does NOT do, said plainly:
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, red on every terminal
-  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`): what
+- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, the first sentence of the one red block on every terminal
+  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`, then the accepted race `SIGN_IN_RULE_TERMINAL_RESIDUAL`): what
   reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
   could start another such program (`passwd`, say) as `sudo`:
 
-> This gives every ferret on this machine root whenever it asks, while the rule lasts.
+> Any ferret on this machine gets root while this rule lasts. In the split second before typing, a ferret could swap in
+> another program and read the password once. Ferretry stops the rule if it notices.
 
 > Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
 > process gave itself. A ferret starts that program, so it could start another program root installed under the name
