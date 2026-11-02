@@ -1103,6 +1103,10 @@ describe('AgentToolService — pointer and keys', () => {
     should(typed.join()).not.containEql('owner@x.com');
     // Every other agent act tells where the page now is, so a page that left the site forgets who it was signing in.
     should(seen).have.length(2);
+    // An address that cannot be read is no host at all: the page forgets.
+    world.browser.actedUrl = 'not a url';
+    await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
+    should(seen.at(-1)).match(/\|-$/u);
   });
 
   it('should say a password field was filled, tell the agent to hand secrets to the owner, and audit the flag', async () => {

@@ -1234,6 +1234,150 @@ describe('a second person on one site', () => {
   });
 });
 
+describe('Save as: the refusals and the races around new and update', () => {
+  const GOOGLE = 'https://accounts.google.com';
+  const PW = 'ernest-UNIQUE-pw-2';
+  const pageField = (fieldId: string, type: string) => ({
+    fieldId,
+    frameOrigin: GOOGLE,
+    frameId: 'main',
+    backendNodeId: fieldId === 'user' ? 11 : 12,
+    field: { tag: 'input' as const, type },
+    box: { x: 10, y: 10, w: 200, h: 40 },
+    visible: true,
+  });
+  const page = (fields = [pageField('value', 'password')]): InputTargetFacts => ({
+    kind: 'browser',
+    pageId: 'page-1',
+    origin: GOOGLE,
+    secure: true,
+    navigationId: 'loader-1',
+    fields,
+  });
+  const PAGE: InputRaise = {
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'Google wants a password',
+    sensitivity: 'secret',
+    fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e2' } }],
+    submit: 'offer-owner',
+  };
+
+  it('should refuse a confirmed username on a card that types its own, with nothing typed', async () => {
+    const h = harness({ facts: page([pageField('user', 'email'), pageField('pass', 'password')]) });
+    const { request } = await raised(h, {
+      ...PAGE,
+      fields: [
+        { id: 'user', sensitivity: 'plain', element: { kind: 'ref', ref: 'e1' } },
+        { id: 'pass', sensitivity: 'secret', element: { kind: 'ref', ref: 'e2' } },
+      ],
+    });
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        {
+          deliveryId: crypto.randomUUID(),
+          observedDigest: request.observedDigest as string,
+          fields: [
+            { field: 'user', padded: padInputValue('ernest@atomi.tech') },
+            { field: 'pass', padded: padInputValue(PW) },
+          ],
+          submit: true,
+          save: { entry: 'GOOGLE_ERNEST', label: 'Google', mode: 'new', username: 'someone@else.test' },
+        },
+        HOST,
+      ),
+    );
+
+    should(refused.code).equal('bad_request');
+    should(refused.message).containEql('types the username itself');
+    should(h.writes).deepEqual([]);
+    should(await h.directory.list()).deepEqual([]);
+  });
+
+  it('should type nothing when the accounts cannot be read to check a new or update choice', async () => {
+    const h = harness({
+      facts: page(),
+      logins: port => ({ ...port, listing: async () => await Promise.reject(new Error('store unreadable')) }),
+    });
+    const { request } = await raised(h, PAGE);
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, PW, { save: { entry: 'GOOGLE_ERNEST', label: 'Google', mode: 'new' } }),
+        HOST,
+      ),
+    );
+
+    should(refused.code).equal('unavailable');
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should say "typed, but not saved" when another card took the name between the check and the save, and overwrite nothing', async () => {
+    const h = harness({
+      facts: page(),
+      logins: port => ({
+        ...port,
+        save: async () =>
+          await Promise.reject(new LoginEntryError('login_exists', "GOOGLE_ERNEST is already an account's CLI name")),
+      }),
+    });
+    const { request } = await raised(h, PAGE);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      typed(request.observedDigest as string, PW, { save: { entry: 'GOOGLE_ERNEST', label: 'Google', mode: 'new' } }),
+      HOST,
+    );
+
+    should(h.writes).deepEqual([PW]);
+    should(result.saved?.ok).be.false();
+    should(result.saved?.problem).startWith('The value was typed, but not saved: GOOGLE_ERNEST is already');
+    should(result.saved?.problem).containEql('Nothing saved was changed');
+    should((result.saved?.problem ?? '').length).be.belowOrEqual(240);
+    should(await h.directory.list()).deepEqual([]);
+  });
+
+  it('should refuse, under the store lock, an update of an account that is not there or is another person, writing nothing', async () => {
+    const h = harness();
+    await h.directory.put(
+      'KIRIN',
+      PutLoginEntryRequestSchema.parse({
+        label: 'google',
+        match: ['accounts.google.com'],
+        username: 'kirinnee97@gmail.com',
+        password: 'kirin-UNIQUE-pw-1',
+      }),
+    );
+    const before = JSON.stringify(await h.directory.list());
+
+    const missing = await h.directory.saveFields('NOBODY', 'x', 'accounts.google.com', { password: PW }, 'update').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const other = await h.directory
+      .saveFields('KIRIN', 'x', 'accounts.google.com', { username: 'Ernest@Atomi.tech', password: PW }, 'update')
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    should(missing).be.instanceOf(LoginEntryError).and.match({ refusal: 'unknown_login' });
+    should(other).be.instanceOf(LoginEntryError).and.match({ refusal: 'invalid_change' });
+    should(JSON.stringify(await h.directory.list())).equal(before);
+    // The same person, whatever the case of the name, is an update.
+    await h.directory.saveFields(
+      'KIRIN',
+      'x',
+      'accounts.google.com',
+      { username: 'KirinNee97@gmail.com', password: PW },
+      'update',
+    );
+    should((await h.directory.list()).map(each => each.id)).deepEqual(['KIRIN']);
+  });
+});
+
 describe('a login observer that fails', () => {
   it('should never fail or hold up the delivery', async () => {
     const h = harness({

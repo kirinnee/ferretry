@@ -9,6 +9,7 @@ import {
   editSaveUsername,
   switchSaveMode,
   updateChoiceWords,
+  updateWords,
   usernameLocked,
   CAPTCHA_WARNING,
   chainWords,
@@ -828,5 +829,39 @@ describe('a second person on one site', () => {
     expect(editSaveUsername(card, named, 'x@y.z')).toMatchObject({ label: 'Work Google', username: 'x@y.z' });
     // A name in the terminal another account has is never suggested.
     expect(editSaveLabel(card, typed, 'accounts google com').id).toBe('ACCOUNTS_GOOGLE_COM_2');
+  });
+
+  it('should keep a terminal name the owner edited when the username changes, and change nothing it cannot switch to', () => {
+    const card = ernestCard();
+    const edited = { ...initialSaveDraft(card), id: 'MINE', idEdited: true };
+    expect(editSaveUsername(card, edited, 'x@y.z')).toMatchObject({ id: 'MINE', label: 'Google · x@y.z' });
+    // No account to update (the daemon sent none): Update changes nothing.
+    expect(switchSaveMode(card, edited, 'update')).toBe(edited);
+  });
+
+  it('should word an account plainly, with or without a username saved', () => {
+    expect(updateChoiceWords({ id: 'G', label: 'google' })).toBe('Update google');
+    expect(updateChoiceWords({ id: 'G', label: 'Google · a@x.com', username: 'a@x.com' })).toBe(
+      'Update Google · a@x.com (same username)',
+    );
+    expect(updateWords({ id: 'G', label: 'google' })).toBe('Replaces the saved password of google.');
+    expect(
+      differentAccountWords(
+        saved({ typedUsername: 'b@x.com', differentFrom: { id: 'G', label: 'google' }, offers: [] }),
+      ),
+    ).toBe(
+      'This looks like a different account. The page is signing in b@x.com, and google has no username saved, so pick it only if it is the same one.',
+    );
+  });
+
+  it('should say what is wrong with a username, or a new terminal name another account has', () => {
+    const card = ernestCard();
+    const draft = { ...initialSaveDraft(card), enabled: true };
+    expect(saveDraftProblem({ ...draft, username: 'a\nb' }, card)).toBe(
+      'That username cannot be kept: one line, at most 256 characters.',
+    );
+    expect(saveDraftProblem({ ...draft, id: KIRIN.id }, card)).toBe(
+      'Another account is already called ACCOUNTS_GOOGLE_COM in the terminal: change it under More.',
+    );
   });
 });
