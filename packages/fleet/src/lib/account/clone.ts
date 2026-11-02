@@ -52,12 +52,24 @@ import { canonicalAssetReference } from '../paths.ts';
 import { skillSourceReference } from './adapt.ts';
 import { cloudCredentialSentence, parseCloudCredential } from './environment.ts';
 import { type CloneBaseEntry, cloneBaseEntries, cloneOriginKeys } from './clone-base.ts';
+import {
+  bundleModel,
+  CloneRefusal,
+  countComponents,
+  environmentCredential,
+  HOME_PATH,
+  isAssetRelative,
+  type MutableComponents,
+  movedFile,
+  movedFolder,
+  movedUnderFolder,
+  referencedFiles,
+} from './clone-parts.ts';
 import { freeName } from './import.ts';
 import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import {
   type AccountModel,
   COMPONENT_KINDS,
-  type ComponentKind,
   type Credential,
   type LayeredProfile,
   parseAccountModel,
@@ -66,17 +78,7 @@ import {
 } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
 
-/** Why a bundle cannot be copied. The message is the sentence a person reads. */
-export class CloneRefusal extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CloneRefusal';
-  }
-}
-
-/** Whether a configured path is inside the asset tree, and so can travel as a document. */
-const isAssetRelative = (file: string): boolean =>
-  !file.startsWith('/') && !file.startsWith('~') && !file.startsWith('$') && !file.split('/').includes('..');
+export { CloneRefusal } from './clone-parts.ts';
 
 // ── The source ───────────────────────────────────────────────────────────────────────────────────
 
@@ -312,14 +314,6 @@ export interface ClonePlan {
   readonly sourceKeys: ReadonlySet<string>;
 }
 
-/** A path under a person's home on macOS or Linux, as it appears in text. */
-const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/u;
-
-type MutableComponents = Record<ComponentKind, Record<string, Record<string, unknown>>>;
-
-const countComponents = (components: AccountModel['components'], kinds: readonly ComponentKind[]): number =>
-  kinds.reduce((total, kind) => total + Object.keys(components[kind]).length, 0);
-
 const NON_MODEL_KINDS = COMPONENT_KINDS.filter(kind => kind !== 'modelSets');
 
 /**
@@ -379,85 +373,6 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[], sourc
       kept.some(component => cloneFileOwned(component, file.path)),
   );
   return { ...bundle, components, profiles, files };
-}
-
-/** The bundle as a model of its own, so a damaged one is refused before anything is renamed. */
-function bundleModel(bundle: FleetCloneBundle, sourceName: string): AccountModel {
-  const credentials: Record<string, Credential> = {};
-  for (const credential of bundle.credentials) {
-    // An environment login keeps its halves, so a runtime on its Codex half still reads as one.
-    credentials[credential.id] =
-      credential.store === 'environment'
-        ? (environmentCredential(credential) as Credential)
-        : { harness: credential.harness, store: 'ferretry' };
-  }
-  try {
-    return parseAccountModel({
-      version: 2,
-      credentials,
-      components: bundle.components,
-      profiles: bundle.profiles,
-      runtimes: bundle.runtimes,
-    });
-  } catch (error) {
-    const first = (error as { issues?: readonly { message: string }[] }).issues?.[0]?.message;
-    throw new CloneRefusal(
-      `The setup from ${sourceName} cannot be copied${first === undefined ? '' : `: ${first}`}. Nothing was changed.`,
-    );
-  }
-}
-
-/** The file a renamed component's document moves to, never one the target already uses. */
-function movedFile(file: string, from: string, to: string, used: ReadonlySet<string>): string {
-  if (!isAssetRelative(file)) return file;
-  const dot = file.lastIndexOf('.');
-  const slash = file.lastIndexOf('/');
-  const stem = dot > slash ? file.slice(0, dot) : file;
-  const extension = dot > slash ? file.slice(dot) : '';
-  const renamedStem = from !== to && stem.endsWith(`/${from}`) ? `${stem.slice(0, -from.length)}${to}` : stem;
-  const freeStem = freeName(renamedStem, candidate => used.has(`${candidate}${extension}`));
-  return `${freeStem}${extension}`;
-}
-
-/** Whether two asset paths are the same or one sits inside the other, by whole path segments. */
-function pathsOverlap(a: string, b: string): boolean {
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
-}
-
-/** The folder a renamed component's scripts move to, never one that overlaps a path the target already uses. */
-function movedFolder(folder: string, from: string, to: string, used: ReadonlySet<string>): string {
-  const clashes = (candidate: string): boolean => [...used].some(path => pathsOverlap(candidate, path));
-  if (!clashes(folder)) return folder;
-  // Inside a folder the target uses, no sibling name escapes it: step out beside that outermost folder.
-  const outer = [...used].filter(path => folder.startsWith(`${path}/`)).toSorted((a, b) => a.length - b.length)[0];
-  if (outer !== undefined) {
-    const rest = folder.slice(outer.length);
-    return `${freeName(outer, candidate => clashes(`${candidate}${rest}`))}${rest}`;
-  }
-  const renamed = from !== to && folder.endsWith(`/${from}`) ? `${folder.slice(0, -from.length)}${to}` : folder;
-  return freeName(renamed, clashes);
-}
-
-/** Where a carried file lands when a folder above it moved, or undefined when none did. */
-function movedUnderFolder(path: string, folderMoves: ReadonlyMap<string, string>): string | undefined {
-  let best: string | undefined;
-  for (const [folder, moved] of folderMoves) {
-    if (moved === folder || !path.startsWith(`${folder}/`)) continue;
-    if (best === undefined || folder.length > best.length) best = folder;
-  }
-  return best === undefined ? undefined : `${folderMoves.get(best) as string}${path.slice(best.length)}`;
-}
-
-/** Every asset-tree document the model's components name. */
-function referencedFiles(model: AccountModel): Set<string> {
-  const files = new Set<string>();
-  for (const kind of ['instructions', 'settings', 'hooks'] as const) {
-    for (const component of Object.values(model.components[kind]) as { file?: string; directory?: string }[]) {
-      if (component.file !== undefined) files.add(component.file);
-      if (component.directory !== undefined) files.add(component.directory);
-    }
-  }
-  return files;
 }
 
 /**
@@ -912,20 +827,5 @@ function environmentDescriptor(credential: Credential): Partial<FleetCloneCreden
     ...(credential.codexProvider === undefined ? {} : { codexProvider: { ...credential.codexProvider } }),
     ...(credential.claude === undefined ? {} : { claude: structuredClone(credential.claude) }),
     ...(credential.codex === undefined ? {} : { codex: structuredClone(credential.codex) }),
-  };
-}
-
-/** An environment login on the target, from its descriptor. The model's own parse checks every field. */
-function environmentCredential(descriptor: FleetCloneCredential): Record<string, unknown> {
-  return {
-    harness: descriptor.harness,
-    store: 'environment',
-    ...(descriptor.label === undefined ? {} : { label: descriptor.label }),
-    ...(descriptor.env === undefined ? {} : { env: { ...descriptor.env } }),
-    ...(descriptor.preset === undefined ? {} : { preset: descriptor.preset }),
-    ...(descriptor.cloudCredential === undefined ? {} : { cloudCredential: descriptor.cloudCredential }),
-    ...(descriptor.codexProvider === undefined ? {} : { codexProvider: { ...descriptor.codexProvider } }),
-    ...(descriptor.claude === undefined ? {} : { claude: structuredClone(descriptor.claude) }),
-    ...(descriptor.codex === undefined ? {} : { codex: structuredClone(descriptor.codex) }),
   };
 }

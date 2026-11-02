@@ -36,9 +36,18 @@
  * request; nothing is launched to find anything out, and no provider is called.
  */
 import {
+  analyseCloneUpdate,
   applyCloneToBase,
   assignOriginKeys,
   type AccountModel,
+  checkCloneReviewed,
+  type CloneAnalysis,
+  cloneBaseFor,
+  type CloneUpdatePlan,
+  describeCloneUpdate,
+  planCloneUpdate,
+  resolveCloneLogins,
+  reviewCloneUpdate,
   buildCloneBundle,
   CLONE_BASE_FILE,
   type ClonePlan,
@@ -84,6 +93,8 @@ import {
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetCloneFile,
+  type FleetCloneReview,
+  type FleetCloneReviewRequest,
   type FleetSetupRefusalCode,
   type FleetSetupScan,
   type FleetSetupTool,
@@ -102,6 +113,17 @@ import {
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
+
+/** A bundle compared against this machine, with what the apply needs to record it. */
+interface UpdateAnalysis {
+  readonly analysis: CloneAnalysis;
+  readonly bundle: FleetCloneBundle;
+  readonly machine: string;
+  readonly source: ReturnType<typeof cloneSourceIdentity>;
+  readonly record: ReturnType<typeof parseCloneBase>;
+  /** Whether the record already holds this source, verified the way it is now. */
+  readonly known: boolean;
+}
 
 /** Every refusal the setup routes answer with, so a client branches on cause rather than on prose. */
 export class FleetSetupRefusal extends Error {
@@ -660,6 +682,7 @@ export class FleetSetupService {
   // ── Clone ──────────────────────────────────────────────────────────────────────────────────────
 
   async #composeClone(change: CloneChange): Promise<Composed> {
+    if (change.mode === 'update') return await this.#composeUpdate(change);
     const catalog = this.deps.catalog;
     const host = catalog.machineName();
     // The person's names for the two machines, when the app sent them; the hostnames are only what each calls itself.
@@ -718,6 +741,121 @@ export class FleetSetupService {
               `Sign in once for ${plural(busiest.runtimes.length, 'runtime')}: ${busiest.email ?? busiest.label ?? busiest.id}.`,
             ]),
       ].join(' '),
+      fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path]),
+    };
+  }
+
+  /** `POST /v1/fleet/clone/review`: what a copy from this source would change here, and why. Writes nothing. */
+  async reviewClone(request: FleetCloneReviewRequest): Promise<FleetCloneReview> {
+    const reading = await this.#read();
+    try {
+      return reviewCloneUpdate((await this.#analyseUpdate(request, reading)).analysis);
+    } catch (error) {
+      if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
+        throw new FleetSetupRefusal('fleet_setup_refused', error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** The three-way comparison of a bundle against this machine, from what is on disk now. */
+  async #analyseUpdate(
+    request: {
+      readonly bundle: unknown;
+      readonly source?: { readonly daemonId: string };
+      readonly names?: { readonly source: string; readonly target: string };
+    },
+    reading: AccountDocumentReading,
+  ): Promise<UpdateAnalysis> {
+    const catalog = this.deps.catalog;
+    const host = catalog.machineName();
+    const machine = request.names?.target ?? host;
+    const bundle = parseCloneBundle(request.bundle);
+    if (bundle.machine === host) {
+      throw new CloneRefusal(`That setup was exported from ${machine} itself; pick another machine to copy from.`);
+    }
+    const source = cloneSourceIdentity(bundle, request.source?.daemonId, request.names?.source);
+    const record = parseCloneBase(await this.deps.cloneBase.read(this.#cloneBasePath()));
+    const base = cloneBaseFor(record, source);
+    const analysis = analyseCloneUpdate({
+      target: reading.model,
+      bundle,
+      machine,
+      ...(request.names === undefined ? {} : { sourceName: request.names.source }),
+      ...(source === undefined ? {} : { source }),
+      ...(base === undefined ? {} : { base }),
+      targetFiles: await this.#targetFiles(reading.model),
+      logins: resolveCloneLogins(bundle, reading.model, base),
+      installed: HARNESSES.filter(harness => catalog.locate(harness) !== undefined),
+      existingSkillItems: await this.deps.skillItems(),
+      existingSecrets: await this.deps.secrets.names().catch(() => []),
+      ...(request.source === undefined ? {} : { sourceDaemon: request.source.daemonId }),
+    });
+    return { analysis, bundle, machine, source, record, known: base !== undefined };
+  }
+
+  /** The documents this machine's own items own, as the export would carry them: what an update compares against. */
+  async #targetFiles(model: AccountModel): Promise<FleetCloneFile[]> {
+    const catalog = this.deps.catalog;
+    const sources = cloneSources(model);
+    const asset = (path: string): string =>
+      expandAssetPath(path, catalog.layout.userHome, catalog.layout.assetsDirectory);
+    const files: FleetCloneFile[] = [];
+    for (const path of sources.documents) {
+      const content = await catalog.readAsset(asset(path));
+      if (content !== undefined) files.push({ path, content });
+    }
+    for (const directory of sources.directories) {
+      const folder = await this.deps.readFolder(asset(directory));
+      for (const file of folder.files) files.push({ path: `${directory}/${file.path}`, content: file.content });
+    }
+    return files;
+  }
+
+  /** `clone.import` with `mode: 'update'`: re-plan, refuse a review that has moved, write only what was chosen. */
+  async #composeUpdate(change: CloneChange): Promise<Composed> {
+    const reading = await this.#read();
+    let plan: CloneUpdatePlan;
+    let found: UpdateAnalysis;
+    try {
+      found = await this.#analyseUpdate(change, reading);
+      checkCloneReviewed(found.analysis, change.reviewed);
+      plan = planCloneUpdate(found.analysis, {
+        decisions: change.decisions ?? {},
+        ...(change.logins === undefined ? {} : { logins: change.logins }),
+      });
+    } catch (error) {
+      if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
+        throw new FleetCatalogRefusal('fleet_change_refused', error.message);
+      }
+      throw error;
+    }
+    const path = this.#cloneBasePath();
+    const record =
+      found.source === undefined || plan.sourceKeys.size === 0
+        ? undefined
+        : {
+            path,
+            content: serializeCloneBase(
+              applyCloneToBase(found.record, {
+                source: found.source,
+                at: new Date(this.deps.catalog.now()).toISOString(),
+                replace: !found.known,
+                copied: plan.base,
+                sourceKeys: plan.sourceKeys,
+                model: plan.model,
+                settled: new Set(plan.settled),
+              }),
+            ),
+          };
+    const documents = await this.#documents(reading, plan.model, plan.files, record === undefined ? [] : [record]);
+    const sourceName = change.names?.source ?? found.bundle.machine;
+    return {
+      model: plan.model,
+      documents,
+      secrets: [],
+      lines: describeCloneUpdate(plan, found.machine, sourceName),
+      summary: `Updated ${found.machine} from ${sourceName}: ${plural(plan.done.taken.length, 'item')} updated, ${plural(plan.done.added.length, 'item')} added, ${plural(plan.done.removed.length, 'item')} removed.`,
       fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path]),
     };
   }

@@ -136,3 +136,4 @@ unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalo
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 
+unreached POST /v1/fleet/clone/review # TEMPORARY: the review answer the repeat-copy screen and `fy machine clone` read; both land in the next PRs of this stack (PR 6)

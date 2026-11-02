@@ -390,6 +390,8 @@ export interface CloneBaseUpdate {
   readonly sourceKeys: ReadonlySet<OriginKey>;
   /** The setup this machine is left with: what still links to the source is read from it. */
   readonly model: AccountModel;
+  /** Items the source dropped that the person chose to keep: not offered for removal again. */
+  readonly settled?: ReadonlySet<OriginKey>;
 }
 
 /**
@@ -451,6 +453,10 @@ export function applyCloneToBase(previous: CloneBase, update: CloneBaseUpdate): 
   const kept = plain<CloneBaseItem>();
   for (const [key, item] of Object.entries(items)) {
     if (update.sourceKeys.has(key) || linked(key, item)) kept[key] = item;
+  }
+  for (const key of update.settled ?? []) {
+    const item = kept[key];
+    if (item !== undefined && !update.sourceKeys.has(key)) kept[key] = { ...item, settled: true };
   }
 
   // A Replace can leave another source with nothing here to link to; that source goes too.
