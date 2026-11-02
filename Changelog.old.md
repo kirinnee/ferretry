@@ -1,3 +1,10 @@
+## [4.238.0](https://github.com/kirinnee/ferretry/compare/v4.237.0...v4.238.0) (2026-11-02)
+
+### Features
+
+* **catalogs:** a later invite proves the person's passkey; owner-approved new passkey for a lost device ([#1346](https://github.com/kirinnee/ferretry/issues/1346)) ([77b84df](https://github.com/kirinnee/ferretry/commit/77b84dfee7942eba54d822c6c9f780506e56ab6b))
+* **pwa:** installed version, Update, Stay, Skip and Move on store rows ([#1358](https://github.com/kirinnee/ferretry/issues/1358)) ([b367b7d](https://github.com/kirinnee/ferretry/commit/b367b7dc7192ded04032005240ab5dc39aca2282))
+
 ## [4.237.0](https://github.com/kirinnee/ferretry/compare/v4.236.0...v4.237.0) (2026-11-02)
 
 ### Features
