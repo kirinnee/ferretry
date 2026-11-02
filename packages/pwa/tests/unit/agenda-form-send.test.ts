@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { AgendaFormField } from '@ferretry/protocol';
 import { AgendaFormStore, agendaForms, recommendedPicks, toggled, withPick } from '../../src/lib/agenda-form-state.ts';
 import type { InboxAction } from '../../src/lib/agenda-answers.ts';
-import { formAnswersFrom, planFormSend, sendForm, withFormSend } from '../../src/lib/agenda-form-send.ts';
+import {
+  formAnswersFrom,
+  formProgress,
+  formSentSummary,
+  planFormSend,
+  sendForm,
+  withFormSend,
+} from '../../src/lib/agenda-form-send.ts';
 
 const FIELDS = [
   {
@@ -103,7 +110,7 @@ describe('planning the one Send of a form', () => {
       kind: 'send',
       action: {
         kind: 'respond',
-        label: 'Form',
+        label: 'Region: EU · Alerts: Page · Restart: No',
         response: {
           kind: 'form',
           answers: [
@@ -159,5 +166,22 @@ describe('withFormSend', () => {
       throw new Error('Not answered yet');
     });
     expect(() => wrapped.send('x')).toThrow('Not answered yet');
+  });
+});
+
+describe('what a sent form says', () => {
+  test('names each field picked on the card, never the typed words, and is "Form" when nothing was picked', () => {
+    const answers = [
+      { id: '1', picked: 'US' },
+      { id: '2', picked: ['Page', 'Mail'] },
+      { id: '4', picked: 'ship it' },
+    ];
+    expect(formSentSummary(FIELDS, answers)).toBe('Region: US · Alerts: Page, Mail');
+    expect(formSentSummary(FIELDS, [{ id: '4', picked: 'only words' }])).toBe('Form');
+  });
+
+  test('counts the fields answered on the card, not the reply box', () => {
+    expect(formProgress(FIELDS, {})).toEqual({ answered: 0, total: 3 });
+    expect(formProgress(FIELDS, { '1': ['EU'], '2': [], '3': ['Yes'] })).toEqual({ answered: 2, total: 3 });
   });
 });

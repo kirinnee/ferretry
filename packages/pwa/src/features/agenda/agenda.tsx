@@ -18,7 +18,7 @@
  *   returns to the new message. A quick reply carries the composer's text as its note.
  * - A FORM is filled in here exactly as in the Inbox: the same fields on the card, the same picks (the Inbox's key for
  *   the item), and the composer's Send answers it (`sendForm`) instead of chatting. The view stays until the answer
- *   lands, so a refusal is read on the card.
+ *   lands, so a refusal is read on the card; once it has, a "Sent to …" line above the composer says what was picked.
  * - The same rows, with the parked and resolved ones, are this ferret's one list in Info (`section`): the agenda has
  *   no side bar of its own.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request, and EVERY id
@@ -28,7 +28,7 @@
  */
 
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
@@ -104,6 +104,8 @@ const stepTicker =
     client.progress(connection, scope, id, step, done);
 
 const NO_ITEMS: readonly AgendaItem[] = [];
+/** How long the "Sent to …" line of a form answered here stays above the composer. */
+const SENT_FORM_MS = 12_000;
 const NO_RECORDS: readonly ResolvedAgendaItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
@@ -241,6 +243,13 @@ export const useAgenda = ({
 
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
+  // A form answered from here, said above the composer once it has landed: the view closing is not the confirmation.
+  const [sentForm, setSentForm] = useState<{ readonly id: AgendaId; readonly text: string } | null>(null);
+  useEffect(() => {
+    if (sentForm === null) return undefined;
+    const timer = setTimeout(() => setSentForm(null), SENT_FORM_MS);
+    return () => clearTimeout(timer);
+  }, [sentForm]);
   const [jumpHost, setJumpHost] = useState<HTMLElement | null>(null);
   // A form's Send is its answer, not a message: the view waits for the answer to land (`act` closes it).
   const answering = useRef(false);
@@ -271,6 +280,8 @@ export const useAgenda = ({
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
+        if (sent.kind === 'respond' && sent.response.kind === 'form')
+          setSentForm({ id: item.id, text: `Sent to ${ferret}: ${sent.label}` });
         if (note.trim() !== '' || inputDraftDiscarded(item, composer)) spendDraft(scope);
         // The answer is a message in the conversation: the view closes and the chat returns to it.
         update(current => (current.card === item.id ? { card: null } : {}));
@@ -283,7 +294,10 @@ export const useAgenda = ({
     );
   };
 
-  const openCard = (item: AgendaItem | ResolvedAgendaItem): void => update(() => ({ card: item.id, drawer: false }));
+  const openCard = (item: AgendaItem | ResolvedAgendaItem): void => {
+    setSentForm(null);
+    update(() => ({ card: item.id, drawer: false }));
+  };
 
   // A REQUEST IS HONOURED ONCE, when it can be: after the board that says where the item is has been read.
   const handled = useRef<number | null>(null);
@@ -333,6 +347,20 @@ export const useAgenda = ({
       {drawerOpen ? (
         <AgendaDrawer counts={counts} id={drawerId} items={agenda} onClose={closeDrawer} {...rows} />
       ) : null}
+      {sentForm === null ? null : (
+        <p className="fy-agenda-note" data-agenda-sent={sentForm.id} data-tone="ok">
+          <CircleCheck aria-hidden="true" size={14} />
+          <span className="fy-agenda-note__text">{sentForm.text}</span>
+          <button
+            aria-label="Dismiss"
+            className="fy-agenda-note__close"
+            onClick={() => setSentForm(null)}
+            type="button"
+          >
+            <X aria-hidden="true" size={14} />
+          </button>
+        </p>
+      )}
       {missing && focusTarget !== null ? (
         <p className="fy-agenda-note" data-agenda-missing={focusTarget} role="status">
           <CircleAlert aria-hidden="true" size={14} />

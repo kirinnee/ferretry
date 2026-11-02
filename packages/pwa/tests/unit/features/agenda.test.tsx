@@ -1177,6 +1177,11 @@ describe('a form opened in the chat (#B143)', () => {
     });
     expect(cardId(view)).toBeUndefined();
     expect(answered).toEqual(['answered']);
+    // The view closing is not the confirmation: a line above the composer says what went, until dismissed.
+    const sentLine = view.root.findByProps({ 'data-agenda-sent': 'A61' });
+    expect(textOf(sentLine)).toBe('Sent to Johnnie: Region: US · Alerts: Page · Restart: Yes');
+    run(() => sentLine.findByProps({ 'aria-label': 'Dismiss' }).props.onClick());
+    expect(view.root.findAll(node => node.props['data-agenda-sent'] !== undefined)).toHaveLength(0);
     dispose();
   });
 
@@ -1202,6 +1207,7 @@ describe('a form opened in the chat (#B143)', () => {
     });
     expect(cardId(view)).toBe('A63');
     expect(view.root.findByType(AgendaItemView).props.error).toBe('The machine said no.');
+    expect(view.root.findAll(node => node.props['data-agenda-sent'] !== undefined)).toHaveLength(0);
   });
 
   test('a settled form is read, not filled in: no picks key, and a reply is plain chat about it', () => {

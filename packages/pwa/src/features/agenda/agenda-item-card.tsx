@@ -17,7 +17,13 @@
  * bars, no hint lines, no menus.
  */
 
-import { type AgendaCardAnswer, type AgendaItem, type AgendaTerm, singleAgendaQuestion } from '@ferretry/protocol';
+import {
+  AGENDA_SHAPE_LEADS,
+  type AgendaCardAnswer,
+  type AgendaItem,
+  type AgendaTerm,
+  singleAgendaQuestion,
+} from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -448,7 +454,12 @@ export function AgendaItemCard({
           shape={shape}
           {...(gated && body !== null ? { heading: 'How to test' } : {})}
           {...(gated ? { lead: '' } : {})}
-          {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
+          {...(!answerable || (shape === 'form' && formKey !== undefined)
+            ? // A form filled in here says how to send in its own pinned foot, with the count.
+              { lead: '' }
+            : shape === 'form'
+              ? { lead: FORM_ELSEWHERE }
+              : {})}
         >
           {askLine === '' ||
           (gated && body !== null) ||
@@ -489,6 +500,7 @@ export function AgendaItemCard({
               disabled={busy || !answerable}
               fields={formFields}
               formKey={formKey ?? null}
+              instruction={answerable ? AGENDA_SHAPE_LEADS.form : null}
               picks={formPicks}
               renderProse={renderProse}
             />

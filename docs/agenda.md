@@ -642,7 +642,12 @@ the whole list.
   picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
 - **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
   it as it is; the next Send goes through. Nothing filled in at all is not sent.
-- **No swipes** except ↓ Skip. Recommended values start picked and say "Recommended".
+- **No swipes** except ↓ Skip. Recommended values start picked and carry a "Recommended" tag; what is picked is the
+  filled row (or the filled Yes/No half, with a check), so a recommendation never reads as a pick.
+- **What is left is said.** A required field with nothing picked says "Needs an answer", and a foot pinned to the bottom
+  of the open item counts the fields answered on the card ("2 of 3 answered") above how to send, so neither hides under
+  the composer. Once the answer has gone, the Inbox's undo toast and the chat's "Sent to …" line name what was picked
+  ("Region: US · Alerts: Page, Mail").
 - **In the chat** the item's view is the Inbox's: the same fields, the same picks (one key per item, so a pick made in
   one place is there in the other), and the chat's reply box is the form's one Send. The view stays open until the
   answer lands, so a refusal is read on the card. Only a form nothing can answer from here (settled, or a chat without

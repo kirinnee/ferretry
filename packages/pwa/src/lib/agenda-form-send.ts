@@ -11,15 +11,39 @@ import {
   type AgendaFormAnswer,
   type AgendaFormField,
   type AgendaItem,
+  formAnswerOf,
   formFieldName,
   formMissing,
+  formValues,
 } from '@ferretry/protocol';
 import { useMemo, useRef } from 'react';
 import type { InboxAction } from './agenda-answers.ts';
 import { agendaForms, type FormPicks, useFormChanges } from './agenda-form-state.ts';
 
-/** The label the sent form carries in the undo toast and in history. */
+/** The label a sent form carries when nothing on the card was picked (only the reply box answered it). */
 const FORM_SENT_LABEL = 'Form';
+
+/**
+ * What a sent form says it answered, in the undo toast and the chat's "sent" line: each field picked on the card,
+ * "Region: US · Alerts: Page, Mail". The typed words are the conversation's own message, so they are not repeated.
+ */
+export const formSentSummary = (fields: readonly AgendaFormField[], answers: readonly AgendaFormAnswer[]): string => {
+  const picked = fields.flatMap(field => {
+    if (field.type === 'text') return [];
+    const values = formValues(formAnswerOf(answers, field));
+    return values.length === 0 ? [] : [`${formFieldName(field)}: ${values.join(', ')}`];
+  });
+  return picked.length === 0 ? FORM_SENT_LABEL : picked.join(' · ');
+};
+
+/** How many of the fields answered ON THE CARD are answered so far; the reply box's own field is not counted. */
+export const formProgress = (
+  fields: readonly AgendaFormField[],
+  picks: FormPicks,
+): { readonly answered: number; readonly total: number } => {
+  const onCard = fields.filter(field => field.type !== 'text');
+  return { answered: onCard.filter(field => (picks[field.id] ?? []).length > 0).length, total: onCard.length };
+};
 
 /** The answers a form has so far: one per field the owner filled in, in the form's order. */
 export const formAnswersFrom = (
@@ -63,7 +87,12 @@ export const planFormSend = (
   const note = hasTextField || typed.trim() === '' ? {} : { note: typed.trim() };
   return {
     kind: 'send',
-    action: { kind: 'respond', label: FORM_SENT_LABEL, response: { kind: 'form', answers: [...answers] }, ...note },
+    action: {
+      kind: 'respond',
+      label: formSentSummary(fields, answers),
+      response: { kind: 'form', answers: [...answers] },
+      ...note,
+    },
   };
 };
 

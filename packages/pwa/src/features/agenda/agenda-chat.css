@@ -193,6 +193,27 @@ button.fy-agenda-line__main:focus-visible {
 .fy-agenda-note[data-tone='err'] {
   color: var(--err);
 }
+.fy-agenda-note[data-tone='ok'] {
+  color: var(--ok, var(--fg));
+}
+.fy-agenda-note[data-tone='ok'] > svg {
+  flex: none;
+}
+.fy-agenda-note__text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.fy-agenda-note__close {
+  display: inline-flex;
+  flex: none;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
 
 /* THE DRAWER: a raised sheet that floats above the pill over a scrim, never over the composer. The layer is a
    zero-height anchor at the top of what sits above the composer; the sheet grows upward from it. */
