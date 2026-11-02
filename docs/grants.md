@@ -398,12 +398,14 @@ right after an unlock. **A fresh proof is stamped with the act it was proved for
 it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
 for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
 at admission, so one passkey buys one install. At the machine, nothing is asked — **except saving a 2FA seed**
-(act `add-2fa-key`), **approving a task plan's sign-in lines** (act `approve-task-plan`), **approving a standing
-sign-in rule** (act `approve-sign-in-rule`) **and making or widening a paste rule** (act `approve-paste-rule`, owner
-decision !A244): those four are asked of EVERY caller, the admin token on loopback included, and each proof is bound
-to the one staged thing it commits (`subject`: the staged save `st_…`, the staged selection `tps_…`, the staged
-rule `srs_…` or the staged paste rule `prs_…`, never another's), opens no step-up window, and is never the fresh
-proof another act takes; a held window is never enough ([secrets.md](secrets.md#2fa-keys),
+(act `add-2fa-key`), **approving any line of a task plan** (act `approve-task-plan`, a paste line too by owner
+ruling on !A244), **approving a standing sign-in rule** (act `approve-sign-in-rule`), **making or widening a paste
+rule** (act `approve-paste-rule`, owner decision !A244) **and letting paste rules use programs in your own profile**
+(act `allow-profile-targets`, secrev-1334 M2): those five are asked of EVERY caller, the admin token on loopback
+included, and each proof is bound to the one staged thing it commits (`subject`: the staged save `st_…`, the staged
+selection `tps_…`, the staged rule `srs_…`, or the staged paste change `prs_…`, which only the device it is bound to
+gets a challenge for; never another's), opens no step-up window, and is never the fresh proof another act takes; a
+held window is never enough ([secrets.md](secrets.md#2fa-keys),
 [secure-copy.md](secure-copy.md#task-plans), [secure-copy.md](secure-copy.md#approving-in-advance)). A standing rule's
 proof is also a **stored proof** (`STEP_UP_ACTS_STORED_PROOF`): its challenge is derived from the rule's signed bytes
 and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Its options

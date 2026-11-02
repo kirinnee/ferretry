@@ -12788,7 +12788,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         secureCopy: {
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
-          stages: new PasteRuleStages({ rules: pasteRules, clock: { now: () => Date.now() } }),
+          stages: new PasteRuleStages({
+            rules: pasteRules,
+            clock: { now: () => Date.now() },
+            deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
+          }),
           plans: copyPlans,
           homes: machineProgramHomes(
             homedir(),

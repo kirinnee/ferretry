@@ -12,6 +12,7 @@ import {
   type PasteRuleList,
   type PasteRuleSettingsView,
   type PasteRuleStaged,
+  type PasteRuleStageKind,
   type PasteRuleStageState,
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
@@ -142,12 +143,19 @@ function renderStagedRule(staged: PasteRuleStaged): readonly string[] {
   ];
 }
 
-const STAGED_RULE_OUTCOME: Readonly<
-  Record<Exclude<PasteRuleStageState, 'waiting'>, (rule: string | undefined) => string>
+const STAGED_OUTCOME: Readonly<
+  Record<PasteRuleStageKind, Record<Exclude<PasteRuleStageState, 'waiting'>, (rule: string | undefined) => string>>
 > = {
-  approved: rule => `Approved with your passkey: the paste rule ${rule?.slice(0, 8) ?? ''} is in force.`,
-  denied: () => 'Denied. No paste rule was made.',
-  expired: () => 'Timed out. No paste rule was made; run the command again.',
+  rule: {
+    approved: rule => `Approved with your passkey: the paste rule ${rule?.slice(0, 8) ?? ''} is in force.`,
+    denied: () => 'Denied. No paste rule was made.',
+    expired: () => 'Timed out. No paste rule was made; run the command again.',
+  },
+  'profile-targets': {
+    approved: () => `Approved with your passkey. ${PROFILE_SETTING}: ${profileWords(true)}`,
+    denied: () => `Denied. ${PROFILE_SETTING}: ${profileWords(false)}`,
+    expired: () => `Timed out. ${PROFILE_SETTING}: ${profileWords(false)}; run the command again.`,
+  },
 };
 
 function renderCopy(copy: CopyMeta): string {
@@ -211,6 +219,12 @@ export class CopyController {
     const word = state.trim().toLowerCase();
     if (word !== 'on' && word !== 'off') throw new Error(`say on or off, not "${state}"`);
     const allowProfileTargets = word === 'on';
+    // Turning it on widens every terminal paste rule a profile program could satisfy: it is staged with a passkey bound
+    // to that list, confirmed in the app, on a daemon that stages paste changes (secrev-1334 M2).
+    if (allowProfileTargets && (await this.ports.gateway.features()).includes(DAEMON_FEATURES.pasteRulePasskey)) {
+      this.ports.out.diagnostic(`warning: ${PROFILE_TARGETS_WARNING}`);
+      return await this.#confirmStaged(await this.ports.gateway.stageProfileTargets(), options);
+    }
     const settings = await this.ports.gateway.changeRuleSettings({ allowProfileTargets }).catch((error: unknown) => {
       if (error instanceof FyHttpError && error.code === STEP_UP_REQUIRED_CODE)
         throw new Error(PROFILE_TARGETS_NEEDS_PASSKEY);
@@ -256,7 +270,11 @@ export class CopyController {
    * and the machine's token could not prove one anyway. This waits for the answer, as `fy rules add` does.
    */
   async #stageAndWait(request: PasteRuleCreate, options: CopyRuleOptions): Promise<void> {
-    const staged = await this.ports.gateway.stageRule(request);
+    await this.#confirmStaged(await this.ports.gateway.stageRule(request), options);
+  }
+
+  /** Shows a staged change in the daemon's words, then waits while the owner approves it with a passkey in the app. */
+  async #confirmStaged(staged: PasteRuleStaged, options: CopyCommandOptions): Promise<void> {
     for (const line of renderStagedRule(staged)) this.#say(options, line);
     this.#say(
       options,
@@ -266,7 +284,7 @@ export class CopyController {
     this.ports.out.success(
       options.json === true
         ? JSON.stringify({ stage: staged.stage, state, ...(rule === undefined ? {} : { rule }) }, null, 2)
-        : STAGED_RULE_OUTCOME[state](rule),
+        : STAGED_OUTCOME[staged.kind][state](rule),
     );
   }
 

@@ -18,6 +18,7 @@ import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { takeAwayRefusal } from '../../../../src/lib/runtime/mounts/config-files.ts';
 import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
 import {
   type AcceptedConfigStore,
@@ -70,6 +71,8 @@ class MemoryAccepted implements AcceptedConfigStore {
 interface Caller {
   readonly kind: 'host' | 'device' | 'agent' | 'ferret';
   readonly fresh?: boolean;
+  /** The grants refuse this device `secrets.configure` outright. */
+  readonly denied?: boolean;
 }
 const HOST: Caller = { kind: 'host' };
 const DEVICE: Caller = { kind: 'device' };
@@ -146,9 +149,11 @@ async function world(): Promise<World> {
     const governance: CallerGovernance = {
       governed: caller.kind === 'device',
       decide: demand =>
-        caller.kind === 'device' && demandNeedsStepUp(demand) && caller.fresh !== true
-          ? { allowed: false, refusal: 'step-up-required' }
-          : { allowed: true, refusal: 'granted' },
+        caller.denied === true && demand.capability === 'secrets' && demand.narrowing !== true
+          ? { allowed: false, refusal: 'not-granted' }
+          : caller.kind === 'device' && demandNeedsStepUp(demand) && caller.fresh !== true
+            ? { allowed: false, refusal: 'step-up-required' }
+            : { allowed: true, refusal: 'granted' },
     };
     const context: RouteContext = {
       request: request({
@@ -308,6 +313,32 @@ describe('PUT /v1/accounts/defaults', () => {
     should(done.status).equal(200);
     should(done.spent).equal(1);
     should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_B' } });
+  });
+
+  it('should tell a device its grants refuse that it may not choose a default, rather than ask for a passkey', async () => {
+    const w = await world();
+    await withAccounts(w);
+
+    const refused = await w.drive(
+      { kind: 'device', fresh: true, denied: true },
+      'PUT',
+      '/v1/accounts/defaults',
+      SITE_LINE,
+    );
+
+    should(refused.status).equal(403);
+    should(refused.code).equal('grant_not_granted');
+    should(text(w)).be.undefined();
+  });
+
+  it('should never let an agent take a line away, even past the route that refuses it first', () => {
+    const context = {
+      actor: 'peer:s1',
+      credential: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
+      governance: { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) },
+    } as unknown as RouteContext;
+
+    should(() => takeAwayRefusal(context, PATH)).throw(ApiError);
   });
 
   it('should be admitted at the boundary as a narrowing, so the handler judges every widen itself (!A243)', async () => {

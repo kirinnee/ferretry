@@ -152,6 +152,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     fixedSubject: 'copy-rule-settings',
     responseSettings: [],
   },
+  // Turning profile targets on is staged now, and its commit (with a passkey bound to what it widens) is the change.
+  {
+    method: 'POST',
+    path: '/v1/copy-rules/settings/stages/:stage/commit',
+    event: 'security.changed',
+    fixedSubject: 'copy-rule-settings',
+    responseSettings: [],
+  },
   {
     method: 'DELETE',
     path: '/v1/copy-rules/:ruleId',

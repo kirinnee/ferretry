@@ -88,6 +88,13 @@ export class ProtocolCopyGateway implements ICopyGateway {
     });
   }
 
+  async stageProfileTargets(): Promise<PasteRuleStaged> {
+    return await this.client.request('/v1/copy-rules/settings/stages', PasteRuleStagedSchema, {
+      method: 'POST',
+      headers: this.#headers,
+    });
+  }
+
   async ruleStage(stage: string): Promise<PasteRuleStageView> {
     return await this.client.request(`/v1/copy-rules/stages/${encodeURIComponent(stage)}`, PasteRuleStageViewSchema, {
       headers: this.#headers,

@@ -89,6 +89,11 @@ class FakeGateway implements ICopyGateway {
     this.staged.push(rule);
     return STAGED;
   }
+  profileStaged = 0;
+  async stageProfileTargets(): Promise<PasteRuleStaged> {
+    this.profileStaged += 1;
+    return PROFILE_STAGED;
+  }
   async ruleStage(): Promise<PasteRuleStageView> {
     const state =
       this.states.length > 1 ? (this.states.shift() as PasteRuleStageView['state']) : (this.states[0] ?? 'waiting');
@@ -98,6 +103,7 @@ class FakeGateway implements ICopyGateway {
 
 const STAGED: PasteRuleStaged = {
   stage: `prs_${'1'.repeat(24)}`,
+  kind: 'rule',
   does: 'Ferretry pastes what gh prints into bash in a terminal, for any ferret on this machine, without asking.',
   rows: [
     { label: 'From', value: 'what gh prints' },
@@ -107,6 +113,18 @@ const STAGED: PasteRuleStaged = {
     { label: 'Until', value: 'No end: until you remove it' },
   ],
   runsAnything: true,
+  expiresAt: '2026-10-31T12:02:00.000Z',
+};
+
+const PROFILE_STAGED: PasteRuleStaged = {
+  stage: `prs_${'2'.repeat(24)}`,
+  kind: 'profile-targets',
+  does: 'Paste rules may then paste into programs from your own profile (~/.nix-profile), which any ferret can swap; it widens one paste rule now.',
+  rows: [
+    { label: 'Widens', value: 'what gh prints → vercel in a terminal' },
+    { label: 'Staged', value: 'At this machine, 2026-10-31 12:00 UTC' },
+  ],
+  runsAnything: false,
   expiresAt: '2026-10-31T12:02:00.000Z',
 };
 
@@ -166,6 +184,9 @@ describe('fy copy rules profile', () => {
       "this machine's daemon is too old for programs in your own profile",
     );
     should(stepUp.warned).eql([]);
+    const down = rig();
+    down.gateway.refuseSettings = new Error('the daemon went away');
+    should(await failure(down.controller.profile('on', {}))).equal('the daemon went away');
   });
 
   it('should refuse inside a ferret pane in the one neutral sentence, before any call', async () => {
@@ -439,5 +460,71 @@ describe('fy copy rules add: a passkey bound to that one rule (!A244)', () => {
 
     should(gateway.staged).eql([]);
     should(gateway.added.length).equal(1);
+  });
+});
+
+describe('fy copy rules add: the wait on a staged paste rule', () => {
+  it('should read a stage the daemon no longer has as timed out, and surface any other failure', async () => {
+    const gone = rig();
+    gone.gateway.features_ = ['copy-rules.passkey.1'];
+    gone.gateway.ruleStage = async () => {
+      throw new FyHttpError('no such stage', 404, 'paste_rule_stage_not_found');
+    };
+    await gone.controller.addRule({ from: 'command:gh', to: 'terminal:vercel' });
+    should(gone.said.at(-1)).equal('Timed out. No paste rule was made; run the command again.');
+
+    const broken = rig();
+    broken.gateway.features_ = ['copy-rules.passkey.1'];
+    broken.gateway.ruleStage = async () => {
+      throw new FyHttpError('the daemon fell over', 500, 'internal');
+    };
+    should(await failure(broken.controller.addRule({ from: 'command:gh', to: 'terminal:vercel' }))).equal(
+      'the daemon fell over',
+    );
+  });
+});
+
+describe('fy copy rules profile on: staged with a passkey bound to what it widens (secrev-1334 M2)', () => {
+  it('should stage turning it on, show the rules it widens, and change nothing itself', async () => {
+    const { gateway, said, warned, controller } = rig();
+    gateway.features_ = ['copy-rules.passkey.1'];
+    gateway.states = ['waiting', 'approved'];
+
+    await controller.profile('on', {});
+
+    should(gateway.profileStaged).equal(1);
+    should(gateway.changed).eql([]);
+    should(said).containEql('  Widens  what gh prints → vercel in a terminal');
+    should(said.join('\n')).containEql(`Confirm it with your passkey in the Ferretry app (${PASTE_RULES_SCREEN_PATH})`);
+    should(said.at(-1)).equal('Approved with your passkey. programs in your own profile: allowed');
+    should(warned).eql([`warning: ${PROFILE_TARGETS_WARNING}`]);
+  });
+
+  it('should say a denied or timed-out stage left it off, and still turn it off in one step', async () => {
+    const denied = rig();
+    denied.gateway.features_ = ['copy-rules.passkey.1'];
+    denied.gateway.states = ['denied'];
+    await denied.controller.profile('on', {});
+    should(denied.said.at(-1)).equal('Denied. programs in your own profile: not allowed (they ask you)');
+
+    let now = 0;
+    const late = rig({
+      nowMs: () => now,
+      sleep: async ms => {
+        now += ms * 1_000;
+      },
+    });
+    late.gateway.features_ = ['copy-rules.passkey.1'];
+    late.gateway.states = ['waiting'];
+    await late.controller.profile('on', {});
+    should(late.said.at(-1)).equal(
+      'Timed out. programs in your own profile: not allowed (they ask you); run the command again.',
+    );
+
+    const off = rig();
+    off.gateway.features_ = ['copy-rules.passkey.1'];
+    await off.controller.profile('off', {});
+    should(off.gateway.changed).eql([{ allowProfileTargets: false }]);
+    should(off.gateway.profileStaged).equal(0);
   });
 });

@@ -129,7 +129,7 @@ export interface StagedSignInRuleBinding {
  * nothing when it is not waiting. Absent: this daemon stages none, so it issues no challenge for `approve-paste-rule`.
  */
 export interface StagedPasteRuleBinding {
-  boundSubjectOf(stage: PasteRuleStageId): string | undefined;
+  boundSubjectOf(stage: PasteRuleStageId, kind: 'rule' | 'profile-targets', deviceId: string): string | undefined;
 }
 
 export function stepUpRoutes(
@@ -215,11 +215,19 @@ export function stepUpRoutes(
             StepUpOptionsSchema.parse(value),
           );
         }
-        // Making a paste rule binds its challenge, and so its proof, to the ONE staged rule it names
-        // (`pasteRuleApprovalSubject(stage, canonical)`): only that stage's commit can spend it.
-        if (body.act === STEP_UP_ACTS.approvePasteRule) {
+        // Making a paste rule, or letting rules use programs in your own profile, binds its challenge, and so its proof,
+        // to the ONE staged change it names, of that kind, waiting for THIS device (secrev-1334 L1): only that stage's
+        // commit can spend it, and another paired device that learns a `prs_` id gets no challenge for it.
+        if (body.act === STEP_UP_ACTS.approvePasteRule || body.act === STEP_UP_ACTS.allowProfileTargets) {
+          const deviceId = context.request.device?.deviceId;
           const bound =
-            body.subject === undefined ? undefined : pasteRules?.boundSubjectOf(body.subject as PasteRuleStageId);
+            body.subject === undefined || deviceId === undefined
+              ? undefined
+              : pasteRules?.boundSubjectOf(
+                  body.subject as PasteRuleStageId,
+                  body.act === STEP_UP_ACTS.approvePasteRule ? 'rule' : 'profile-targets',
+                  deviceId,
+                );
           if (bound === undefined)
             return errorResponse(
               404,

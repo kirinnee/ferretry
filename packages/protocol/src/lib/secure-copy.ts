@@ -384,8 +384,13 @@ export type PasteRuleStageId = z.infer<typeof PasteRuleStageIdSchema>;
 /** Where the app lists the paste rules and one staged at the machine waits for its passkey: said by `fy copy`, verbatim. */
 export const PASTE_RULES_SCREEN_PATH = 'Settings › Secure copy › Pastes approved in advance';
 
-/** At most this many paste rules wait for a passkey at once: a new stage past it drops the oldest. */
+/**
+ * At most this many stages wait for a passkey at once FROM ONE STAGER (the machine, or one paired device): a new one past
+ * it drops that stager's own oldest, never another's (secrev-1334 L2).
+ */
 export const PASTE_RULE_STAGES_MAX = 8;
+/** At most this many stages are listed at once: every stager's cap together. */
+export const PASTE_RULE_STAGES_LISTED_MAX = 64;
 
 /** Where a value comes from, in plain words: "what gh prints", "text on https://github.com". */
 export const pasteFromWords = (from: CopyRouteFrom): string =>
@@ -420,8 +425,11 @@ const lifetimeWords = (seconds: number): string => {
   return `${String(count)} ${unit}${count === 1 ? '' : 's'}`;
 };
 
-/** The rows a staged paste rule is shown with, in this order, by the daemon. */
-export const PasteRuleRowLabelSchema = z.enum(['From', 'To', 'Who', 'Pastes', 'Until']);
+/**
+ * The rows a stage is shown with, by the daemon: a rule's From, To, Who, Pastes and Until; for turning on programs in
+ * your own profile, one Widens row per rule it widens; then, on every stage, who staged it and when (Staged).
+ */
+export const PasteRuleRowLabelSchema = z.enum(['From', 'To', 'Who', 'Pastes', 'Until', 'Widens', 'Staged']);
 export type PasteRuleRowLabel = z.infer<typeof PasteRuleRowLabelSchema>;
 export const PasteRuleRowSchema = z.strictObject({ label: PasteRuleRowLabelSchema, value: boundedLine(320) });
 export type PasteRuleRow = z.infer<typeof PasteRuleRowSchema>;
@@ -454,6 +462,49 @@ export function pasteRuleWords(request: PasteRuleCreate): {
   };
 }
 
+/** Who staged a stage, as its Staged row says it: the machine, or a paired device by its name, and when. */
+export type PasteRuleStager =
+  | { readonly kind: 'host' }
+  | { readonly kind: 'device'; readonly deviceId: string; readonly name?: string | undefined };
+
+/** The Staged row: "At this machine, 2026-11-02 04:31 UTC" or "On Kirin's phone, …", so the owner tells stages apart. */
+export const pasteRuleStagedRow = (by: PasteRuleStager, at: string): PasteRuleRow => ({
+  label: 'Staged',
+  value: `${by.kind === 'host' ? 'At this machine' : `On ${by.name ?? `a paired device (…${by.deviceId.slice(-6)})`}`}, ${at.slice(0, 16).replace('T', ' ')} UTC`,
+});
+
+/**
+ * WHAT TURNING ON "programs in my own profile" WIDENS (owner decision !A244, secrev-1334 M2), in the daemon's words: one
+ * plain line and a Widens row for every paste rule a program from the owner's profile could then satisfy. The proof is
+ * bound to exactly that list ({@link canonicalProfileTargets}). Pure and total.
+ */
+export function profileTargetsWords(widens: readonly Pick<PasteRule, 'from' | 'to'>[]): {
+  readonly does: string;
+  readonly rows: readonly PasteRuleRow[];
+} {
+  return {
+    does: `Paste rules may then paste into programs from your own profile (~/.nix-profile), which any ferret can swap; it widens ${widens.length === 1 ? 'one paste rule' : `${String(widens.length)} paste rules`} now.`,
+    rows: widens.map(rule => ({ label: 'Widens', value: `${pasteFromWords(rule.from)} → ${pasteToWords(rule.to)}` })),
+  };
+}
+
+/** The one canonical spelling of turning profile targets on, bound to the rules it widens, by id, in order. */
+export const canonicalProfileTargets = (widens: readonly string[]): string => {
+  const text = canonicalJson({ v: 1, allowProfileTargets: true, widens: [...widens].sort() });
+  // A list of ids always has a canonical spelling.
+  if (!text.ok) throw new Error(text.reason);
+  return text.text;
+};
+
+const PROFILE_TARGETS_DOMAIN = 'ferretry.profile-targets.v1';
+
+/**
+ * What an `allow-profile-targets` passkey proof is bound to: `sha256("ferretry.profile-targets.v1\0" + stage + "\0" +
+ * sha256(canonical))`, its own domain, so it can never stand for a paste rule's proof, nor the reverse.
+ */
+export const profileTargetsApprovalSubject = (stage: PasteRuleStageId, canonical: string): string =>
+  sha256Hex(`${PROFILE_TARGETS_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
+
 /** Whether a paste rule's destination runs whatever it reads: the red {@link RUNS_WHAT_IT_READS_WARNING}. */
 export const pasteRuleRunsAnything = (to: CopyRouteTo): boolean =>
   to.kind === 'terminal' && runsWhatItReads(to.program);
@@ -476,14 +527,23 @@ const PASTE_RULE_DOMAIN = 'ferretry.paste-rule.v1';
 export const pasteRuleApprovalSubject = (stage: PasteRuleStageId, canonical: string): string =>
   sha256Hex(`${PASTE_RULE_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
 
+/** What a stage makes: a paste rule (`approve-paste-rule`), or programs in your own profile turned on (`allow-profile-targets`). */
+export const PasteRuleStageKindSchema = z.enum(['rule', 'profile-targets']);
+export type PasteRuleStageKind = z.infer<typeof PasteRuleStageKindSchema>;
+
 /**
- * `POST /v1/copy-rules/stages`: A PASTE RULE WAITING FOR ITS PASSKEY. The stage the proof is bound to, the daemon's own
- * line and rows of what it allows, and the structured flag the red warning is drawn from. Never a value.
+ * `POST /v1/copy-rules/stages` (a rule) and `POST /v1/copy-rules/settings/stages` (profile targets on): A CHANGE WAITING
+ * FOR ITS PASSKEY. The stage the proof is bound to, what it makes, the daemon's own line and rows of what it allows (who
+ * staged it last), and the structured flag the red warning is drawn from. Never a value.
  */
 export const PasteRuleStagedSchema = z.strictObject({
   stage: PasteRuleStageIdSchema,
+  kind: PasteRuleStageKindSchema,
   does: boundedLine(800),
-  rows: z.array(PasteRuleRowSchema).length(PasteRuleRowLabelSchema.options.length),
+  rows: z
+    .array(PasteRuleRowSchema)
+    .min(1)
+    .max(COPY_MAX_RULES + 1),
   /** The destination runs whatever it reads: the red {@link RUNS_WHAT_IT_READS_WARNING}. */
   runsAnything: z.boolean(),
   expiresAt: InstantSchema,
@@ -501,9 +561,12 @@ export const PasteRuleStageViewSchema = z.strictObject({
 });
 export type PasteRuleStageView = z.infer<typeof PasteRuleStageViewSchema>;
 
-/** `GET /v1/copy-rules/stages`: the rules waiting for a passkey, such as one `fy copy rules add` staged at the machine. */
+/**
+ * `GET /v1/copy-rules/stages`: the stages this caller may answer: a device's own, and the machine's that no other device
+ * took (`fy copy rules add`, `fy copy rules profile on`). The machine sees its own.
+ */
 export const PasteRuleStageListSchema = z.strictObject({
-  stages: z.array(PasteRuleStagedSchema).max(PASTE_RULE_STAGES_MAX),
+  stages: z.array(PasteRuleStagedSchema).max(PASTE_RULE_STAGES_LISTED_MAX),
 });
 export type PasteRuleStageList = z.infer<typeof PasteRuleStageListSchema>;
 
@@ -515,6 +578,8 @@ export type PasteRuleStageDropped = z.infer<typeof PasteRuleStageDroppedSchema>;
 export const PASTE_RULE_ERROR_CODES = {
   stageNotFound: 'paste_rule_stage_not_found',
   passkeyNeeded: 'paste_rule_passkey_needed',
+  profileTargetsPasskeyNeeded: 'profile_targets_passkey_needed',
+  profileTargetsChanged: 'profile_targets_changed',
 } as const;
 
 export const PASTE_RULE_REFUSAL_WORDS = {
@@ -524,6 +589,12 @@ export const PASTE_RULE_REFUSAL_WORDS = {
   /** `POST /v1/copy-rules` from an app or CLI that does not stage: this daemon makes a rule only with a bound passkey. */
   paste_rule_passkey_needed:
     'Making a paste rule needs your passkey for that one rule: update the Ferretry app or fy, then add it again. Nothing was approved.',
+  /** `PUT /v1/copy-rules/settings` turning profile targets ON: that is staged now, with a passkey bound to what it widens. */
+  profile_targets_passkey_needed:
+    'Letting paste rules use programs in your own profile needs your passkey for that change: update the Ferretry app or fy, then turn it on again. Nothing was changed.',
+  /** The paste rules it would widen changed since it was staged, so the proof would not cover them. */
+  profile_targets_changed:
+    'The paste rules this would widen changed since it was staged, so nothing was changed. Turn it on again to see the new list.',
 } as const satisfies Record<(typeof PASTE_RULE_ERROR_CODES)[keyof typeof PASTE_RULE_ERROR_CODES], string>;
 
 /** One paste a ferret plans, said before it starts. `why` is the agent's own words, shown as such. */

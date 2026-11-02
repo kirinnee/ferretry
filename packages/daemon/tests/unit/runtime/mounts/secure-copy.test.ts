@@ -36,6 +36,7 @@ const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal',
 const INTO_STORE = { kind: 'secret', name: 'VERCEL_TOKEN' } as const;
 const INTO_PAGE = { kind: 'browser', origin: 'https://vercel.com' } as const;
 const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
+const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'd1' } };
 /** Where a plan's pastes went: the rules held in MEMORY, by destination kind (the store never holds them). */
 const planned = (rules: PasteRuleService) =>
   rules
@@ -125,7 +126,15 @@ async function commitAs(
   if (found.kind !== 'matched') throw new Error('no commit route');
   const device = committer !== 'host';
   const claims: [string | undefined, string | undefined][] = [];
-  const subject = world.stages.boundSubjectOf(stage as PasteRuleStageId);
+  // A machine stage is taken by the device first (`…/bind`), as the app does before it asks the passkey.
+  if (device) {
+    try {
+      world.stages.bind(PHONE, stage as PasteRuleStageId);
+    } catch {
+      // already gone: the commit says so
+    }
+  }
+  const subject = world.stages.boundSubjectOf(stage as PasteRuleStageId, 'rule', 'd1');
   const context: RouteContext = {
     request: request({ method: 'POST', path }),
     params: found.params,
@@ -248,16 +257,21 @@ describe('the secure copy routes', () => {
     should(stored.rules).eql([]);
   });
 
-  it('should approve a plan item into a one-use rule for that session, kept in memory only', async () => {
+  it('should allow no plan item on the old one-step route, which only declines now (!A244)', async () => {
     const { dispatch, stored, plan, rules } = await served();
 
-    const answer = await dispatch.dispatch(
+    const ticked = await dispatch.dispatch(
       post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }),
     );
+    const declined = await dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [] }),
+    );
 
-    should(answer.status).equal(200);
-    should(jsonBody(answer)).match({ state: 'approved', approved: [0] });
-    should(rules.list(OWNER)).match([{ sessionId: SESSION, remaining: 1, plan: plan.id }]);
+    should(ticked.status).equal(409);
+    should(jsonBody(ticked).code).equal('needs_passkey');
+    should(declined.status).equal(200);
+    should(jsonBody(declined)).match({ state: 'declined' });
+    should(rules.list(OWNER)).eql([]);
     should(stored.rules).be.undefined();
   });
 
@@ -296,13 +310,16 @@ describe('the secure copy routes', () => {
       'GET /v1/sessions/:sessionId/copies use',
       'GET /v1/copy-rules use',
       'GET /v1/copy-rules/settings use',
-      // Turning profile targets ON demands terminal.configure and a passkey inside the route; OFF only narrows.
+      // Turning profile targets ON is staged with its own passkey; this write only narrows or keeps.
       'PUT /v1/copy-rules/settings use',
+      'POST /v1/copy-rules/settings/stages configure',
+      'POST /v1/copy-rules/settings/stages/:stage/commit configure',
       'POST /v1/copy-rules configure',
       'POST /v1/copy-rules/stages configure',
       'GET /v1/copy-rules/stages use',
       'GET /v1/copy-rules/stages/:stage use',
       'POST /v1/copy-rules/stages/:stage/commit configure',
+      'POST /v1/copy-rules/stages/:stage/bind configure',
       'DELETE /v1/copy-rules/stages/:stage use',
       'DELETE /v1/copy-rules/:ruleId use',
       'GET /v1/copy-plans use',
@@ -363,8 +380,9 @@ describe('approving pastes into the secret store', () => {
     should(both.status).equal(403);
     should(jsonBody(both)).match({ code: 'grant_step_up_required', demand: { capability: 'secrets' } });
     should(planned(refusing.rules)).eql([]);
-    should(first.status).equal(200);
-    should(planned(terminalOnly.rules)).eql(['terminal']);
+    // Past the grant, a tick still needs the plan's passkey, which this route can't carry.
+    should(first.status).equal(409);
+    should(planned(terminalOnly.rules)).eql([]);
   });
 
   it('should add a rule into the store for a caller holding the grant', async () => {
@@ -401,9 +419,9 @@ describe('approving pastes into a page', () => {
       post(`/v1/sessions/${SESSION}/copy-plans/${others.plan.id}/approve`, { items: [0, 1] }),
     );
 
-    should([page.status, rest.status]).eql([403, 200]);
+    should([page.status, rest.status]).eql([403, 409]);
     should(planned(refused.rules)).eql([]);
-    should(planned(others.rules)).eql(['terminal', 'secret']);
+    should(planned(others.rules)).eql([]);
   });
 });
 
@@ -460,8 +478,13 @@ async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: S
       return true;
     }) as RouteContext['claimFreshStepUp'],
   };
-  const response = await found.route.handle(context);
-  return { status: response.status, body: jsonBody(response) as Record<string, unknown>, claimed };
+  try {
+    const response = await found.route.handle(context);
+    return { status: response.status, body: jsonBody(response) as Record<string, unknown>, claimed };
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    return { status: error.status, body: { code: error.code } as Record<string, unknown>, claimed };
+  }
 }
 
 describe('the secure copy settings: profile targets', () => {
@@ -497,66 +520,113 @@ describe('the secure copy settings: profile targets', () => {
     should(answer.status).equal(403);
   });
 
-  it('should let the owner at the machine turn it on and off, with no passkey', async () => {
+  it('should make nothing when the one-step write turns it on, from the machine or a device (secrev-1334 M2)', async () => {
     const { routes, stored } = await served();
 
-    const on = await putSettings(routes, { allowProfileTargets: true }, 'host');
-    should([on.status, on.body, on.claimed]).eql([200, { allowProfileTargets: true }, 0]);
-    should(stored.settings).eql({ allowProfileTargets: true });
-    const off = await putSettings(routes, { allowProfileTargets: false }, 'host');
-    should([off.status, off.claimed]).eql([200, 0]);
+    for (const caller of ['host', 'fresh-device'] as const) {
+      const on = await putSettings(routes, { allowProfileTargets: true }, caller);
+      should([on.status, on.body.code, on.claimed]).eql([409, 'profile_targets_passkey_needed', 0]);
+    }
     should(stored.settings).eql({ allowProfileTargets: false });
   });
 
-  it('should hold turning it on from a device for a passkey proved for that act, and claim it', async () => {
-    const { routes, stored } = await served();
+  it('should stage turning it on with the rules it widens, and turn it on only with a proof bound to that stage', async () => {
+    const world = await served();
+    await addRule(world, RULE);
+    await addRule(world, { ...RULE, to: { kind: 'terminal', program: 'psql' } });
 
-    const held = await putSettings(routes, { allowProfileTargets: true }, 'device');
-    should(held.status).equal(403);
-    should(held.body).match({
-      code: STEP_UP_REQUIRED_CODE,
-      demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.allowProfileTargets },
+    const staged = await world.dispatch.dispatch(post('/v1/copy-rules/settings/stages', {}));
+    const stage = String(jsonBody(staged).stage);
+    world.stages.bind(PHONE, stage as PasteRuleStageId);
+    const subject = world.stages.boundSubjectOf(stage as PasteRuleStageId, 'profile-targets', 'd1');
+    const commit = async (proofs: [string, string | undefined][]) =>
+      await handleAsDevice(world.routes, 'POST', `/v1/copy-rules/settings/stages/${stage}/commit`, proofs);
+
+    should(staged.status).equal(201);
+    // Only the vercel rule could be satisfied from the profile (`profileCouldStandFor`), so only it is widened.
+    should(jsonBody(staged)).match({
+      kind: 'profile-targets',
+      rows: [{ label: 'Widens', value: 'what gh prints → vercel in a terminal' }, { label: 'Staged' }],
     });
-    should(stored.settings).eql({ allowProfileTargets: false });
+    const refusals = [
+      await commit([]),
+      await commit([[STEP_UP_ACTS.approvePasteRule, subject]]),
+      await commit([[STEP_UP_ACTS.allowProfileTargets, 'f'.repeat(64)]]),
+    ];
+    should(refusals.map(answer => [answer.status, answer.body.code])).eql(
+      refusals.map(() => [403, STEP_UP_REQUIRED_CODE]),
+    );
+    should(world.stored.settings).eql({ allowProfileTargets: false });
 
-    const refused = await putSettings(routes, { allowProfileTargets: true }, 'device-without-configure');
-    should(refused.status).equal(403);
-    should(refused.body.code).not.equal(STEP_UP_REQUIRED_CODE);
-    should(stored.settings).eql({ allowProfileTargets: false });
+    const done = await commit([[STEP_UP_ACTS.allowProfileTargets, subject]]);
 
-    const confirmed = await putSettings(routes, { allowProfileTargets: true }, 'fresh-device');
-    should([confirmed.status, confirmed.claimed]).eql([200, 1]);
-    should(stored.settings).eql({ allowProfileTargets: true });
+    should([done.status, done.body]).eql([200, { allowProfileTargets: true }]);
+    should(world.stored.settings).eql({ allowProfileTargets: true });
+    const again = await world.dispatch.dispatch(post('/v1/copy-rules/settings/stages', {}));
+    should(again.status).equal(409);
   });
 
-  it('should refuse a fresh proof minted for another act, and let one proof turn it on only once (L1)', async () => {
-    const { routes, stored } = await served();
+  it('should refuse the commit when the rules it widens changed since it was staged', async () => {
+    const world = await served();
+    const staged = await world.dispatch.dispatch(post('/v1/copy-rules/settings/stages', {}));
+    const stage = String(jsonBody(staged).stage);
+    world.stages.bind(PHONE, stage as PasteRuleStageId);
+    const subject = world.stages.boundSubjectOf(stage as PasteRuleStageId, 'profile-targets', 'd1');
+    await addRule(world, RULE);
 
-    const other = await putSettings(routes, { allowProfileTargets: true }, 'device-proved-other');
-    should(other.status).equal(403);
-    should(other.body.code).equal(STEP_UP_REQUIRED_CODE);
-    should(stored.settings).eql({ allowProfileTargets: false });
-
-    // One proof, two requests racing: the second finds it claimed.
-    const proof = { held: true };
-    const [first, second] = await Promise.all([
-      putSettings(routes, { allowProfileTargets: true }, 'fresh-device', proof),
-      putSettings(routes, { allowProfileTargets: true }, 'fresh-device', proof),
+    const late = await handleAsDevice(world.routes, 'POST', `/v1/copy-rules/settings/stages/${stage}/commit`, [
+      [STEP_UP_ACTS.allowProfileTargets, subject],
     ]);
-    should([first.status, second.status].sort()).eql([200, 403]);
+
+    should([late.status, late.body.code]).eql([404, 'profile_targets_changed']);
+    should(world.stored.settings).eql({ allowProfileTargets: false });
   });
 
   it('should let a device turn it off, or leave it on, with no passkey at all', async () => {
-    const { routes, stored } = await served();
-    await putSettings(routes, { allowProfileTargets: true }, 'host');
+    const world = await served();
+    world.stored.rules = [];
+    world.stored.settings = { allowProfileTargets: true };
+    await world.rules.load();
 
-    const again = await putSettings(routes, { allowProfileTargets: true }, 'device');
-    const off = await putSettings(routes, { allowProfileTargets: false }, 'device-without-configure');
+    const again = await putSettings(world.routes, { allowProfileTargets: true }, 'device');
+    const off = await putSettings(world.routes, { allowProfileTargets: false }, 'device-without-configure');
 
     should([again.status, again.claimed, off.status, off.claimed]).eql([200, 0, 200, 0]);
-    should(stored.settings).eql({ allowProfileTargets: false });
+    should(world.stored.settings).eql({ allowProfileTargets: false });
   });
 });
+
+/** A route driven as paired device d1, holding exactly these fresh proofs (act, subject), each claimed once. */
+async function handleAsDevice(
+  routes: readonly ApiRoute[],
+  method: string,
+  path: string,
+  proofs: [string, string | undefined][],
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const found = new ApiRouter(routes).lookup(method, path);
+  if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
+  const held = [...proofs];
+  try {
+    const response = await found.route.handle({
+      request: request({ method, path }),
+      params: found.params,
+      actor: 'device:d1',
+      credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' },
+      governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
+      presentation: { loopback: false, adminToken: false, actor: 'device:d1', stepUp: true, freshStepUp: true },
+      claimFreshStepUp: ((act?: string, subject?: string) => {
+        const at = held.findIndex(([a, s]) => a === act && s === subject);
+        if (at < 0) return false;
+        held.splice(at, 1);
+        return true;
+      }) as RouteContext['claimFreshStepUp'],
+    });
+    return { status: response.status, body: jsonBody(response) as Record<string, unknown> };
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    return { status: error.status, body: { code: error.code } };
+  }
+}
 
 describe('the paste plans, read by the owner', () => {
   it('should list the plans for the owner, and still refuse a ferret’s own credential in the handler', async () => {
@@ -619,7 +689,11 @@ describe('making a paste rule: a passkey bound to that one rule (!A244)', () => 
     const world = await served();
     const stage = String(jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', RULE))).stage);
 
-    for (const committer of ['window', 'other-act', 'other-stage', 'host'] as const) {
+    // The machine's token never holds the stage: it is answered as not its own, and nothing is made.
+    const machine = await commitAs(world, stage, 'host');
+    should(machine.status).equal(404);
+    should(machine.body.code).equal('paste_rule_stage_not_found');
+    for (const committer of ['window', 'other-act', 'other-stage'] as const) {
       const refused = await commitAs(world, stage, committer);
       should(refused.status).equal(403);
       should(refused.body).match({
@@ -629,9 +703,11 @@ describe('making a paste rule: a passkey bound to that one rule (!A244)', () => 
     }
     // The device asked only for the bound act, and only with this stage's subject.
     const asked = await commitAs(world, stage, 'window');
-    should(asked.claims).eql([[STEP_UP_ACTS.approvePasteRule, world.stages.boundSubjectOf(stage as PasteRuleStageId)]]);
+    should(asked.claims).eql([
+      [STEP_UP_ACTS.approvePasteRule, world.stages.boundSubjectOf(stage as PasteRuleStageId, 'rule', 'd1')],
+    ]);
     should(world.stored.rules).be.undefined();
-    should(world.stages.boundSubjectOf(stage as PasteRuleStageId)).be.a.String();
+    should(world.stages.boundSubjectOf(stage as PasteRuleStageId, 'rule', 'd1')).be.a.String();
   });
 
   it('should make exactly the staged rule with a bound proof, once', async () => {
@@ -679,5 +755,53 @@ describe('making a paste rule: a passkey bound to that one rule (!A244)', () => 
       .map(route => `${route.method} ${route.path}`);
 
     should(narrowing).eql(['DELETE /v1/copy-rules/stages/:stage', 'DELETE /v1/copy-rules/:ruleId']);
+  });
+});
+
+describe('the paste stage routes, at their edges (secrev-1334)', () => {
+  const GONE = `prs_${'9'.repeat(24)}`;
+
+  it('should answer a stage that is not there as not waiting, on every stage route', async () => {
+    const world = await served();
+
+    const view = await world.dispatch.dispatch(
+      request({ method: 'GET', path: `/v1/copy-rules/stages/${GONE}`, headers: human }),
+    );
+    const drop = await world.dispatch.dispatch(
+      request({ method: 'DELETE', path: `/v1/copy-rules/stages/${GONE}`, headers: human }),
+    );
+    const bind = await handleAsDevice(world.routes, 'POST', `/v1/copy-rules/stages/${GONE}/bind`, []);
+
+    should([view.status, drop.status, bind.status]).eql([404, 404, 404]);
+    should([jsonBody(view).code, jsonBody(drop).code, bind.body.code]).eql(
+      Array.from({ length: 3 }, () => 'paste_rule_stage_not_found'),
+    );
+  });
+
+  it('should let a paired device take a machine stage once, and no other device after', async () => {
+    const world = await served();
+    const stage = String(jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', RULE))).stage);
+
+    const taken = await handleAsDevice(world.routes, 'POST', `/v1/copy-rules/stages/${stage}/bind`, []);
+
+    should(taken.status).equal(200);
+    should(taken.body).match({ stage, kind: 'rule', rows: [{ label: 'From' }] });
+    should(world.stages.boundSubjectOf(stage as PasteRuleStageId, 'rule', 'd1')).be.a.String();
+    should(() =>
+      world.stages.bind({ kind: 'owner', actor: { kind: 'device', deviceId: 'd2' } }, stage as PasteRuleStageId),
+    ).throw();
+  });
+
+  it("should answer a commit the rules' cap refuses in the service's own words, making nothing", async () => {
+    const world = await served();
+    for (let index = 0; index < 50; index += 1)
+      await world.rules.create(OWNER, { ...RULE, to: { kind: 'terminal', program: `p${String(index)}` } });
+    const stage = String(jsonBody(await world.dispatch.dispatch(post('/v1/copy-rules/stages', RULE))).stage);
+
+    const full = await commitAs(world, stage, 'bound');
+
+    should(full.status).not.equal(201);
+    should(full.body.code).equal('capacity');
+    should(world.rules.list(OWNER)).have.length(50);
   });
 });

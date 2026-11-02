@@ -55,7 +55,10 @@ export async function listTaskPlans(client: TaskPlanClient): Promise<TaskPlanLis
   return await client.request('/v1/task-plans', TaskPlanListSchema);
 }
 
-/** STAGE: paste-only or empty selections are answered at once; a ticked sign-in line comes back staged for its passkey. */
+/**
+ * STAGE: a decline (nothing ticked) is answered at once; any ticked line, a paste line too, comes back staged for its
+ * passkey (owner ruling on !A244). An older daemon may still answer a paste-only selection at once.
+ */
 async function stageApproval(
   client: TaskPlanClient,
   plan: Pick<TaskPlan, 'id' | 'sessionId'>,
@@ -124,7 +127,7 @@ export const DISMISSED_PLAN_WORDS = 'The passkey was dismissed, so nothing was a
 const NO_PASSKEY_DEVICE_WORDS =
   'This device cannot confirm with a passkey, so it cannot approve a sign-in line. Paste lines can still be approved.';
 export const NO_PASSKEY_TICK_WORDS =
-  'This device cannot confirm with a passkey, so a sign-in line cannot be approved here.';
+  'This device cannot confirm with a passkey, so no line of this plan can be approved here. Declining needs no passkey.';
 const STAGE_GONE_WORDS = 'That selection timed out or was already answered. Tick the lines again.';
 
 /** What a plan can't cover, listed on every plan card under "You'll still be asked": the protocol's one list. */
@@ -307,9 +310,9 @@ export function allowBlockedWords(plan: TaskPlan, ticks: Ticks, canUsePasskey: b
   return undefined;
 }
 
-/** Whether any ticked line is a sign-in (so the passkey is needed). */
+/** Whether the passkey is needed: any ticked line, a paste line included (owner ruling on !A244). */
 export const ticksNeedPasskey = (plan: TaskPlan, ticks: Ticks): boolean =>
-  plan.lines.some(line => isSignIn(line) && ticks[line.line]?.ticked === true);
+  plan.lines.some(line => ticks[line.line]?.ticked === true);
 
 // ── Grouping (lines sit under the account they would use) ────────────────────────────────────────────
 

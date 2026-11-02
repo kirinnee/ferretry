@@ -127,8 +127,13 @@ interface World {
   readonly stages?: Readonly<Record<string, string>>;
   /** The staged task-plan selections the options bind an `approve-task-plan` challenge to, the same way. */
   readonly planStages?: Readonly<Record<string, string>>;
-  /** The staged paste rules the options bind an `approve-paste-rule` challenge to, the same way (!A244). */
-  readonly pasteStages?: Readonly<Record<string, string>>;
+  /**
+   * The staged paste-rule changes the options bind an `approve-paste-rule` or `allow-profile-targets` challenge to:
+   * stage id → its kind, the one device it waits on, and what its proof is bound to (!A244, secrev-1334 L1).
+   */
+  readonly pasteStages?: Readonly<
+    Record<string, { readonly kind: 'rule' | 'profile-targets'; readonly device: string; readonly subject: string }>
+  >;
   /**
    * The staged standing rules: stage id → the device it waits on and the challenge derived from its body. Absent mounts
    * the routes with no rule provider at all, as this daemon runs until rules are staged.
@@ -185,7 +190,12 @@ function mount(world: World = {}) {
                   return staged?.device === device ? staged.challenge : undefined;
                 },
               },
-          { boundSubjectOf: stage => world.pasteStages?.[stage] },
+          {
+            boundSubjectOf: (stage, kind, device) => {
+              const staged = world.pasteStages?.[stage];
+              return staged?.kind === kind && staged.device === device ? staged.subject : undefined;
+            },
+          },
         ),
       ),
       credentials,
@@ -584,10 +594,17 @@ describe('step-up routes', () => {
   it('should bind an approve-paste-rule proof to the one staged paste rule, never to a held window (!A244)', async () => {
     // Arrange — a paste rule waiting for its passkey, bound to PASTE_BOUND
     const pasteStage = `prs_${'e'.repeat(24)}`;
+    const otherDevice = `prs_${'d'.repeat(24)}`;
+    const profileStage = `prs_${'c'.repeat(24)}`;
     const PASTE_BOUND = 'e'.repeat(64);
+    const PROFILE_BOUND = 'c'.repeat(64);
     const world = mount({
       store: new MemoryStore([stored(CREDENTIAL_ID)]),
-      pasteStages: { [pasteStage]: PASTE_BOUND },
+      pasteStages: {
+        [pasteStage]: { kind: 'rule', device: browser.deviceId, subject: PASTE_BOUND },
+        [otherDevice]: { kind: 'rule', device: 'someone-else', subject: 'd'.repeat(64) },
+        [profileStage]: { kind: 'profile-targets', device: browser.deviceId, subject: PROFILE_BOUND },
+      },
     });
     const dispatcher = await world.surface;
     const step = async (body: unknown) => {
@@ -611,6 +628,24 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'approve-paste-rule', BOUND)).be.false();
     should(world.service.claimFresh(browser, 'approve-paste-rule', PASTE_BOUND)).be.true();
     should(world.service.claimFresh(browser, 'approve-paste-rule', PASTE_BOUND)).be.false();
+
+    // A caller with no proven device (the machine's token) gets no challenge for any stage.
+    const noDevice = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'approve-paste-rule', subject: pasteStage }),
+        ...asAdminNoDevice,
+      }),
+    );
+    should(noDevice.status).not.equal(200);
+    // Another device's stage, and a stage of the other kind for this act, get no challenge (secrev-1334 L1).
+    should((await step({ origin: ORIGIN, act: 'approve-paste-rule', subject: otherDevice }))[0]).equal(404);
+    should((await step({ origin: ORIGIN, act: 'approve-paste-rule', subject: profileStage }))[0]).equal(404);
+    // Turning profile targets on: its own act, bound to its stage, never a paste rule's proof (secrev-1334 M2).
+    should(await step({ origin: ORIGIN, act: 'allow-profile-targets', subject: profileStage })).deepEqual([200, 200]);
+    should(world.service.claimFresh(browser, 'approve-paste-rule', PROFILE_BOUND)).be.false();
+    should(world.service.claimFresh(browser, 'allow-profile-targets', PROFILE_BOUND)).be.true();
   });
 
   it('should refuse a subject on any act but add-2fa-key, and add-2fa-key without one', async () => {

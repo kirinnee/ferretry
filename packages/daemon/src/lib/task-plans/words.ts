@@ -97,11 +97,9 @@ export function planContext(plan: Pick<TaskPlan, 'lines'>): string {
   return clip([...lines, '', TASK_PLAN_HONEST_LIMIT].join('\n'), MAX_AGENDA_DETAIL_LENGTH);
 }
 
-/** How the card is answered: on the card, and (paste lines only) at the machine as today. */
+/** How the card is answered: ticked on the card, or staged at the machine, and always confirmed with the passkey. */
 export function planHowToResolve(plan: Pick<TaskPlan, 'id' | 'lines'>): string {
-  return plan.lines.every(line => line.kind === 'paste')
-    ? `Tick the pastes you allow on the card, or at the machine: \`fy plan approve ${plan.id} <numbers>\`.`
-    : 'Tick the lines you allow on the card in the app; a sign-in line is confirmed with your passkey.';
+  return `Tick the lines you allow on the card in the app and confirm them with your passkey, or stage them at the machine: \`fy plan approve ${plan.id} <numbers>\`.`;
 }
 
 /**

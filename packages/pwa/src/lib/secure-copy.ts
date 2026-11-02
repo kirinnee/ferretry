@@ -103,48 +103,77 @@ export async function listPasteRuleStages(client: CopyClient): Promise<readonly 
   return (await client.request(STAGES_PATH, PasteRuleStageListSchema)).stages;
 }
 
-/** COMMIT: only after the `approve-paste-rule` passkey bound to this stage. */
-async function commitPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<PasteRule> {
-  return await client.request(`${stagePath(stage)}/commit`, PasteRuleSchema, { method: 'POST' });
+/**
+ * STAGE turning on programs in your own profile (secrev-1334 M2): nothing changes yet. Answers the daemon's line and a
+ * Widens row for every paste rule it would widen, which the passkey prompt lists.
+ */
+export async function stageProfileTargets(client: CopyClient): Promise<PasteRuleStaged> {
+  return await client.request(`${RULES_PATH}/settings/stages`, PasteRuleStagedSchema, { method: 'POST' });
 }
 
-/** Drops a staged paste rule: the prompt was dismissed, or the owner denied it. Nothing is allowed. */
+/** TAKE a stage the machine made, so this device alone gets its passkey challenge and may commit it. Approves nothing. */
+async function bindPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<PasteRuleStaged> {
+  return await client.request(`${stagePath(stage)}/bind`, PasteRuleStagedSchema, { method: 'POST' });
+}
+
+/** COMMIT a staged change, only after the passkey bound to it: a paste rule, or programs in your own profile turned on. */
+async function commitStage(client: CopyClient, staged: PasteRuleStaged): Promise<void> {
+  if (staged.kind === 'rule')
+    await client.request(`${stagePath(staged.stage)}/commit`, PasteRuleSchema, { method: 'POST' });
+  else
+    await client.request(
+      `${RULES_PATH}/settings/stages/${encodeURIComponent(staged.stage)}/commit`,
+      PasteRuleSettingsSchema,
+      {
+        method: 'POST',
+      },
+    );
+}
+
+/** Drops a staged change: the prompt was dismissed, or the owner denied it. Nothing is allowed. */
 export async function dropPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<void> {
   await client.request(stagePath(stage), PasteRuleStageDroppedSchema, { method: 'DELETE' });
 }
 
-/** What the passkey prompt shows for a staged paste rule: the daemon's line and rows, and the red line its flag gives. */
+/** What the passkey prompt shows for a staged change: the daemon's line and rows, and the red line its flag gives. */
 const pasteRulePasskeyWords = (staged: PasteRuleStaged): StepUpWords => ({
   does: staged.does,
   rows: staged.rows.map(row => ({ label: row.label, value: row.value })),
   warnings: staged.runsAnything ? [RUNS_WHAT_IT_READS_WARNING] : [],
 });
 
-/** Asks for the `approve-paste-rule` passkey bound to a stage, showing the daemon's words; `false` when dismissed. */
-export type PasteRuleAsk = (stage: PasteRuleStageId, words: StepUpWords) => Promise<boolean>;
+/** The passkey act each kind of stage is bound to. */
+const STAGE_ACTS = { rule: 'approve-paste-rule', 'profile-targets': 'allow-profile-targets' } as const;
+export type PasteRuleStageAct = (typeof STAGE_ACTS)[keyof typeof STAGE_ACTS];
+
+/** Asks for the passkey for `act` bound to a stage, showing the daemon's words; `false` when dismissed. */
+export type PasteRuleAsk = (stage: PasteRuleStageId, words: StepUpWords, act: PasteRuleStageAct) => Promise<boolean>;
 
 /** Said when this device cannot run a passkey ceremony at all: the stage is dropped and nothing is approved. */
 export const PASTE_RULE_NO_PASSKEY_WORDS =
-  'This device cannot confirm with a passkey, so it cannot approve a paste rule. Nothing was approved.';
+  'This device cannot confirm with a passkey, so it cannot approve this change. Nothing was approved.';
 
 export type PasteRuleOutcome =
-  | { readonly kind: 'made'; readonly rule: PasteRule }
+  | { readonly kind: 'made' }
   | { readonly kind: 'dismissed' }
   | { readonly kind: 'failed'; readonly words: string };
 
 const causeWords = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
 /**
- * THE OWNER'S APPROVAL OF ONE STAGED PASTE RULE (owner decision !A244): ask for the passkey bound to the stage with the
- * daemon's own rows, then commit. A dismissed or failed prompt DROPS the stage, so nothing waits half-approved.
+ * THE OWNER'S APPROVAL OF ONE STAGED CHANGE (owner decision !A244, secrev-1334): a stage the machine made is TAKEN by
+ * this device first (`taken`), then the passkey bound to it is asked with the daemon's own rows, then it is committed.
+ * A dismissed or failed prompt DROPS a stage this device made, so nothing waits half-approved; a machine's stage it took
+ * keeps waiting (Deny drops it), so the command waiting on it is not told "Denied" by a stray tap.
  */
 export async function confirmPasteRuleStage(
   client: CopyClient,
   ask: PasteRuleAsk | undefined,
   staged: PasteRuleStaged,
+  options: { readonly taken?: boolean } = {},
 ): Promise<PasteRuleOutcome> {
   const drop = async (): Promise<void> => {
-    await dropPasteRuleStage(client, staged.stage).catch(() => undefined);
+    if (options.taken !== true) await dropPasteRuleStage(client, staged.stage).catch(() => undefined);
   };
   if (ask === undefined) {
     await drop();
@@ -152,7 +181,8 @@ export async function confirmPasteRuleStage(
   }
   let given: boolean;
   try {
-    given = await ask(staged.stage, pasteRulePasskeyWords(staged));
+    const held = options.taken === true ? await bindPasteRuleStage(client, staged.stage) : staged;
+    given = await ask(held.stage, pasteRulePasskeyWords(held), STAGE_ACTS[held.kind]);
   } catch (cause) {
     await drop();
     return { kind: 'failed', words: causeWords(cause) };
@@ -162,7 +192,8 @@ export async function confirmPasteRuleStage(
     return { kind: 'dismissed' };
   }
   try {
-    return { kind: 'made', rule: await commitPasteRuleStage(client, staged.stage) };
+    await commitStage(client, staged);
+    return { kind: 'made' };
   } catch (cause) {
     return { kind: 'failed', words: causeWords(cause) };
   }

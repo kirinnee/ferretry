@@ -4,6 +4,7 @@ import {
   type CopyPlanList,
   PASTE_RULE_ERROR_CODES,
   PASTE_RULE_REFUSAL_WORDS,
+  type PasteRule,
   type PasteRuleCreate,
   PasteRuleCreateSchema,
   type PasteRuleList,
@@ -22,7 +23,6 @@ import {
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
 } from '@ferretry/protocol';
-import { grantRefusalCode } from '../../api/capability.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -55,12 +55,13 @@ import { taskPlanAnswered } from './task-plans.ts';
  * `terminal.use`. No route returns a copy's value: the copies list is {@link CopyMeta}, and no schema here has a
  * field for one.
  *
- * ## THE SETTINGS: LOOSEN AT THE MACHINE, OR WITH A PASSKEY
+ * ## THE SETTINGS: ON ONLY WITH A PASSKEY BOUND TO WHAT IT WIDENS
  *
- * `PUT /v1/copy-rules/settings` is owner only like every route here. Turning `allowProfileTargets` ON loosens what
- * a rule matches, so a governed (remote) device needs `terminal.configure` AND a passkey proved for that one act
- * (`allow-profile-targets`), which this route then spends. Turning it OFF only narrows, and asks no more than
- * `terminal.use`.
+ * Turning `allowProfileTargets` ON widens every terminal paste rule a program in the owner's profile could satisfy, so
+ * it is staged like a rule (`POST /v1/copy-rules/settings/stages`, rows: the rules it widens) and committed only with a
+ * fresh `allow-profile-targets` proof bound to that stage and that list, from every caller (secrev-1334 M2, under
+ * !A244). `PUT /v1/copy-rules/settings` turning it on makes nothing and says so; turning it OFF only narrows, and asks
+ * no more than `terminal.use`.
  */
 
 const ruleOwner = (context: RouteContext): PasteRuleCaller => ({
@@ -91,19 +92,6 @@ function refusedDestination(context: RouteContext, request: PasteRuleCreate): Ap
       : undefined;
 }
 
-/**
- * The commit's refusal without a proof: the step-up demand naming `approve-paste-rule`, so the app runs the ceremony
- * for this stage and sends the commit again. The machine's own token gets it too: it proves nothing.
- */
-const pasteRuleProofDemand = (): ApiResponse =>
-  jsonResponse(
-    {
-      error: 'making a paste rule needs a passkey confirmation for this one rule, from a paired device',
-      code: STEP_UP_REQUIRED_CODE,
-      demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.approvePasteRule },
-    } satisfies StepUpRequiredBody,
-    403,
-  );
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 function param(context: RouteContext, name: string, shape: RegExp): string {
@@ -138,33 +126,28 @@ async function profileRulesOf(homes: RuleProgramHomes | undefined, list: PasteRu
   return found.flat();
 }
 
-/**
- * Whether this caller may turn profile targets ON: at the machine, or from a device holding `terminal.configure` with
- * a passkey proved for this act. Answers the refusal, or `undefined` when allowed.
- */
-function profileTargetsRefusal(context: RouteContext): ReturnType<typeof jsonResponse> | undefined {
-  const governance = context.governance;
-  if (governance?.governed === false) return undefined;
-  const decision = governance?.decide({ capability: 'terminal', axis: 'configure' });
-  if (decision !== undefined && !decision.allowed && decision.refusal !== 'step-up-required')
-    return jsonResponse(
-      { error: 'this device may not let copy rules paste into your profile', code: grantRefusalCode(decision.refusal) },
-      403,
-    );
-  // Claimed, not read: a proof stamped for THIS act, taken in one step, so a proof for another act or a second request
-  // racing on the same one never turns this on.
-  if (decision === undefined || context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets) !== true)
-    return jsonResponse(
-      {
-        error:
-          'letting copy rules paste into programs in your own profile needs a passkey confirmation for this change',
-        code: STEP_UP_REQUIRED_CODE,
-        demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.allowProfileTargets },
-      } satisfies StepUpRequiredBody,
-      403,
-    );
-  return undefined;
+/** The rules a program from the owner's profile could satisfy now, as rules: what turning profile targets on widens. */
+async function widenedBy(
+  homes: RuleProgramHomes | undefined,
+  list: readonly PasteRule[],
+): Promise<readonly PasteRule[]> {
+  const ids = new Set(await profileRulesOf(homes, [...list]));
+  return list.filter(rule => ids.has(rule.id));
 }
+
+/** The commit's refusal without a bound proof, naming the act, so the app runs the ceremony for this stage. */
+const stageProofDemand = (act: typeof STEP_UP_ACTS.approvePasteRule | typeof STEP_UP_ACTS.allowProfileTargets) =>
+  jsonResponse(
+    {
+      error:
+        act === STEP_UP_ACTS.approvePasteRule
+          ? 'making a paste rule needs a passkey confirmation for this one rule, from a paired device'
+          : 'letting paste rules use programs in your own profile needs a passkey confirmation for this one change, from a paired device',
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'terminal', axis: 'configure', act },
+    } satisfies StepUpRequiredBody,
+    403,
+  );
 
 export function secureCopyRoutes(
   copies: CopyListing,
@@ -226,9 +209,56 @@ export function secureCopyRoutes(
         const caller = ruleOwner(context);
         const settings = await parseBody(context.request, PasteRuleSettingsSchema);
         const loosens = settings.allowProfileTargets && !rules.currentSettings(caller).allowProfileTargets;
-        const refused = loosens ? profileTargetsRefusal(context) : undefined;
-        if (refused !== undefined) return refused;
+        // Turning it ON is staged with its own bound passkey now: this one-step write only narrows or keeps.
+        if (loosens)
+          throw new ApiError(
+            409,
+            PASTE_RULE_REFUSAL_WORDS.profile_targets_passkey_needed,
+            PASTE_RULE_ERROR_CODES.profileTargetsPasskeyNeeded,
+          );
         return jsonResponse(await rules.changeSettings(caller, settings).catch(taskPlanAnswered));
+      },
+    },
+    {
+      // STAGE turning profile targets on: rows are the rules it widens now. Nothing changes until its passkey commits it.
+      method: 'POST',
+      path: '/v1/copy-rules/settings/stages',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'configure' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        if (rules.currentSettings(caller).allowProfileTargets)
+          throw new ApiError(409, 'programs in your own profile are already allowed: nothing to approve', 'conflict');
+        const staged = await stages.stageProfileTargets(caller, await widenedBy(homes, rules.list(caller)));
+        return jsonResponse(PasteRuleStagedSchema.parse(staged), 201);
+      },
+    },
+    {
+      // COMMIT: only a fresh `allow-profile-targets` proof bound to this stage and the rules it widens, from every caller.
+      method: 'POST',
+      path: '/v1/copy-rules/settings/stages/:stage/commit',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'configure' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        const stage = stageParam(context);
+        const widensNow = (await widenedBy(homes, rules.list(caller))).map(rule => rule.id);
+        try {
+          const settings = await stages.commitProfileTargets(
+            caller,
+            stage,
+            widensNow,
+            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets, subject) === true,
+          );
+          return jsonResponse(PasteRuleSettingsSchema.parse(settings));
+        } catch (error) {
+          if (error instanceof PasteRuleProofMissing) return stageProofDemand(STEP_UP_ACTS.allowProfileTargets);
+          return stageAnswered(error);
+        }
       },
     },
     {
@@ -262,7 +292,7 @@ export function secureCopyRoutes(
         const request = await parseBody(context.request, PasteRuleCreateSchema);
         const refused = refusedDestination(context, request);
         if (refused !== undefined) return refused;
-        return jsonResponse(PasteRuleStagedSchema.parse(stages.stage(caller, request)), 201);
+        return jsonResponse(PasteRuleStagedSchema.parse(await stages.stage(caller, request)), 201);
       },
     },
     {
@@ -322,7 +352,25 @@ export function secureCopyRoutes(
           if (request.to.kind === 'secret') spentSecretWrite(context);
           return jsonResponse(PasteRuleSchema.parse(rule), 201);
         } catch (error) {
-          if (error instanceof PasteRuleProofMissing) return pasteRuleProofDemand();
+          if (error instanceof PasteRuleProofMissing) return stageProofDemand(STEP_UP_ACTS.approvePasteRule);
+          return stageAnswered(error);
+        }
+      },
+    },
+    {
+      // TAKE a stage the machine made (`fy copy rules add`, `fy copy rules profile on`): this paired device holds it from
+      // now on, and only it gets its challenge and may commit it (secrev-1334 L1). It approves nothing.
+      method: 'POST',
+      path: '/v1/copy-rules/stages/:stage/bind',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'configure' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        try {
+          return jsonResponse(PasteRuleStagedSchema.parse(stages.bind(caller, stageParam(context))));
+        } catch (error) {
           return stageAnswered(error);
         }
       },
@@ -393,14 +441,15 @@ export function secureCopyRoutes(
             const line = plan === undefined ? undefined : plan.lines[taskPlanLineOfCopyItem(plan, index) ?? -1];
             return line?.kind === 'paste' && line.to.kind === kind;
           });
-        const intoStore = into('secret');
         const refused =
-          (intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined) ??
+          (into('secret') ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined) ??
           (into('browser') ? refusedPageInput(context, 'approve pastes into a page') : undefined);
         if (refused !== undefined) return refused;
-        const answer = await plans.approveCopyItems(caller, sessionId, planId, body.items).catch(taskPlanAnswered);
-        if (intoStore) spentSecretWrite(context);
-        return jsonResponse(answer);
+        // Only a decline is answered here now: allowing a paste needs the plan's bound passkey (owner ruling on !A244),
+        // so a tick is refused `409 needs_passkey` and nothing is written.
+        return jsonResponse(
+          await plans.approveCopyItems(caller, sessionId, planId, body.items).catch(taskPlanAnswered),
+        );
       },
     },
   ];
