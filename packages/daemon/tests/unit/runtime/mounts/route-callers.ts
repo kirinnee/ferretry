@@ -252,6 +252,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/board/tasks/:taskId operator any',
   'GET /v1/search operator any',
   'POST /v1/search/related operator any',
+  'POST /v1/tidy/plan operator any',
   'GET /v1/analytics operator any',
   'GET /v1/analytics/pricing operator any',
   'PATCH /v1/analytics/pricing operator any',

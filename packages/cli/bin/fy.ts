@@ -94,6 +94,7 @@ import { GitHubLatestRelease } from '../src/adapters/update/latest-release';
 import { CommandPackageManagers } from '../src/adapters/update/package-managers';
 import { StandaloneRelease } from '../src/adapters/update/standalone-release';
 import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
+import { FyTidyGateway } from '../src/adapters/tidy/fy-tidy-gateway';
 import { FyWorkSearchGateway } from '../src/adapters/work-search/fy-work-search-gateway';
 import { registerAgendaCommands } from '../src/lib/agenda/commands';
 import { AgendaController } from '../src/lib/agenda/controller';
@@ -276,6 +277,8 @@ import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
 import { DaemonUpdateStatusReader } from '../src/lib/update/status';
 import { DaemonUpdater } from '../src/lib/update/updater';
 import { assertSemver } from '../src/lib/version';
+import { registerTidyCommands } from '../src/lib/tidy/commands';
+import { TidyController } from '../src/lib/tidy/controller';
 import { registerWorkSearchCommands } from '../src/lib/work-search/commands';
 import { WorkSearchController } from '../src/lib/work-search/controller';
 import { RelatedCheck } from '../src/lib/work-search/related';
@@ -1604,6 +1607,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           clientName: BINARY_NAME,
           clientVersion: pkg.version,
         }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerTidyCommands(
+      program,
+      new TidyController({
+        plans: new FyTidyGateway(client),
+        cards: new FyBoardGateway(client),
+        agenda: new ProtocolAgendaGateway(client, ownSessionId),
+        output: world.io,
+        binary: BINARY_NAME,
+        environmentSessionId: ownSessionId,
+      }),
     ),
   ({ program, world, client, ownSessionId }) =>
     registerWorkSearchCommands(

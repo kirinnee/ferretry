@@ -96,6 +96,11 @@ export const DAEMON_FEATURES = {
    */
   workSearch: 'work.search.1',
   /**
+   * One ferret's clean-up of its own unwanted cards and work-tracking agenda items (`POST /v1/tidy/plan`, docs/board.md,
+   * "Tidy"). A daemon without this name answers 404: `fy tidy` says the machine needs an update.
+   */
+  tidy: 'tidy.1',
+  /**
    * Accounts and sign-ins (docs/input-requests.md, "Accounts and sign-ins"): `/v1/accounts*`, a card offer's
    * `signIn`/`primary`/`why`, a deliver's `signIn` and a `si_` `secretHint` that orders the card. The app reads an
    * offer's `primary`/`why` and sends a deliver's `signIn` whenever the offer carries one, with or without this name

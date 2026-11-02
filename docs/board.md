@@ -58,6 +58,35 @@ credential)" — and only a paired device's act reads as `owner`. A ferret on it
 itself (`ferret`), never the owner. That is why the migration counts only Not good. Closing the gap for good is
 `fy` presenting the session credential in every pane (RF-3, &F291).
 
+## Tidy: dropping what nobody asked for
+
+`fy tidy` is the one-shot clean-up for a ferret that made cards and work-tracking agenda items nobody asked for
+(the owner's one-line prompt to such a ferret is "run `fy tidy`"). It acts on **the calling ferret's own work
+only**, and it is a **dry run unless `--yes`**: it prints what it would drop, close and keep, each with the reason.
+`fy tidy --yes [--reason "<why>"]` applies it; `--json` prints the plan (and, with `--yes`, the result).
+
+The daemon decides (`planTidy`, `packages/daemon/src/lib/tidy/plan.ts`, behind the read-only
+`POST /v1/tidy/plan`; the session is the caller's own credential and is never a parameter). The CLI acts: it
+applies the plan with the same card drop and agenda "done" the ferret could type itself, one by one, so every
+change keeps its history and its authority check, and it names each failure without stopping. A failure makes
+the command exit non-zero.
+
+| It **drops** a card when …                                         | It **never** drops …                                      |
+| ------------------------------------------------------------------ | --------------------------------------------------------- |
+| the caller owns or is assigned it, and it is not closed or dropped | a card the owner asked for (`askedBy: person`)            |
+| its project's board is **off** ([switch](#the-board-is-opt-in))    | a card on a board that is on                              |
+| `askedBy` is `agent`: it is the ferret's own work                  | a card assigned to another live session (a sub-ferret)    |
+|                                                                    | a card waiting at a gate on the owner (an open gate item) |
+
+| It **closes** an item when … (any open state: active, snoozed, replied, in discussion)       | It **never** closes …                                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| it is on the caller's own agenda and the caller raised it                                    | a gate item or gate follow-up, or anything the daemon raised                                                                                |
+| it is kind `info`, or linked (`--task`) to a card this run drops, or an ask with no question | an item on the owner's turn mid-reply (a reply held or being sent)                                                                          |
+|                                                                                              | an item with a question, fields, options or a confirm: listed as "kept: needs the owner" with the `fy agenda done <id>` to close it by hand |
+
+A sub-ferret may run it: its plan has no cards (the daemon already refuses a sub-ferret's drop) and only its own
+tracking items. An older daemon without the route answers 404; the CLI says to run `fy daemon update`.
+
 ## Boards, cards and lanes at a glance
 
 - A **board** is one registered project, or the machine-wide **Unfiled** board for work outside any git repository.
@@ -904,6 +933,7 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fy task create`                                  | make a card: `-k/--kind`, `-t/--title`, `--summary`, `--ask`, `--ask-source`, `--premise`, `--context` (each repeatable, one bullet each), `--term`, `--brief`, `--brief-file`, `--how-to-test`, `--how-to-test-file`, `--workflow`, `--depends-on`, `--parent`, `--assignee`, `--project`, `--lane`, `--file`, `--pr`, `--branch`, `--doc`; asks the daemon first and refuses a strong duplicate unless `--new` (or `--related <id>` notes that card instead) |
 | `fy search <words>`                               | find cards and agenda items by what they say; `--kind`, `--open`, `--project`, `--limit`, `--json`                                                                                                                                                                                                                                                                                                                                                             |
+| `fy tidy`                                         | drop your own unwanted cards and close your own work-tracking agenda items; a dry run unless `--yes`; `--reason`, `--session`, `--json` ([Tidy](#tidy-dropping-what-nobody-asked-for))                                                                                                                                                                                                                                                                         |
 | `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `fy task move <id> <lane>`                        | move it; `--reason` is required for a move back                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `fy task trigger <id> <event>`                    | report an external event for a card (`pr.review_approved`, `deploy.done`); the daemon moves it if a lane waits on it. A sub-ferret may run it                                                                                                                                                                                                                                                                                                                  |
@@ -945,6 +975,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | `GET, PUT /v1/board/projects/:projectId/switch` | read whether the project uses the board; set it (the owner only)            |
 | `GET /v1/search`                                | find cards and agenda items by any words ([work-search.md](work-search.md)) |
 | `POST /v1/search/related`                       | the related check before filing                                             |
+| `POST /v1/tidy/plan`                            | the calling ferret's tidy plan: what to drop, close and keep (read-only)    |
 
 A write that fails answers with one of these codes: `invalid`, `not-found`, `forbidden`, `reason-required`,
 `owner-gate`, `blocked-by`, `cycle`, `unknown-lane`, `no-lane-set`, `version-conflict`.
