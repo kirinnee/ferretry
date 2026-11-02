@@ -46,7 +46,7 @@ import {
   refusalNotice,
 } from '@ferretry/protocol';
 import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
 
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import { cn } from '../../lib/class-names.ts';
@@ -72,6 +72,7 @@ import {
 } from '../../lib/pairing-invite.ts';
 import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { DeviceRuleNote } from '../secure-copy/device-rule-note.tsx';
 import {
   changeDeviceGrants,
   mintPairingCode,
@@ -325,10 +326,12 @@ function PairedDeviceRow({
   clientName,
   grantFailure,
   initiallyOpen,
+  note,
   onRevoke,
   onChangeGrants,
 }: {
   readonly device: PairedDevice;
+  readonly note?: ReactNode;
   readonly view: PairedDevicesView;
   readonly busy: boolean;
   readonly clientName: string;
@@ -380,6 +383,7 @@ function PairedDeviceRow({
       <p id={describedBy} className="m-0 text-meta leading-base text-muted">
         {revokeConsequence(device, view)}
       </p>
+      {note}
       <details
         open={open}
         onToggle={event => setOpen(event.currentTarget.open)}
@@ -462,6 +466,8 @@ export interface AddDeviceCardProps {
   readonly clientName?: string;
   /** Which device's capabilities start open — for a screenshot or a deep link, never persisted. */
   readonly capabilitiesOpenFor?: string | undefined;
+  /** Drawn under a device's revoke (the standing rules its passkey approved), when the machine offers them. */
+  readonly deviceNote?: ((deviceId: string) => ReactNode) | undefined;
   readonly onMint: () => void;
   readonly onDiscardInvite: () => void;
   readonly onRevokeCode: () => void;
@@ -485,6 +491,7 @@ export function AddDeviceCard({
   grantFailure = null,
   clientName = 'fy',
   capabilitiesOpenFor,
+  deviceNote,
   onMint,
   onDiscardInvite,
   onRevokeCode,
@@ -616,6 +623,7 @@ export function AddDeviceCard({
                 clientName={clientName}
                 grantFailure={grantFailure?.deviceId === device.id ? grantFailure.failure : null}
                 initiallyOpen={capabilitiesOpenFor === device.id}
+                note={deviceNote?.(device.id)}
                 onRevoke={() => onRevokeDevice(device.id)}
                 onChangeGrants={patch => onChangeDeviceGrants(device.id, patch)}
               />
@@ -654,10 +662,13 @@ export function AddDeviceSurface({
   connection,
   createClient: injectedClient,
   now = Date.now,
+  rulesOffered = false,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: PairingClientFactory;
   readonly now?: PairingClock;
+  /** The machine offers standing sign-in rules, so a device's revoke says how many its passkey approved. */
+  readonly rulesOffered?: boolean;
 }) {
   // The carrier-routed client unless a test or the harness hands one in: a plain-network client
   // reaches no daemon at all, because a paired browser is answered only inside its own session.
@@ -794,6 +805,11 @@ export function AddDeviceSurface({
         busy={busy}
         failure={failure}
         grantFailure={grantFailure}
+        deviceNote={
+          rulesOffered && client !== null
+            ? deviceId => <DeviceRuleNote client={client} deviceId={deviceId} />
+            : undefined
+        }
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}

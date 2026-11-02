@@ -373,6 +373,15 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
   allowed and declined), `task-plan-line-approved` (one per allowed line: the sign-in, account, fields and uses) and
   `task-plan-ended` (`revoked`, `expired` or `session-ended`). A restart writes nothing.
 
+### Standing sign-in rules
+
+A rule is one owner-signed permission to fill one sign-in for any ferret until it ends; its sheet, card and Settings list
+are described in [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules). On this screen: the sheet
+starts with nothing ticked when a ferret suggested it, the code needs its own red acknowledgement and is never carried
+over on resume or renew, a terminal rule is password-only with the root warning, and approving always asks for the
+passkey. The card a rule filled closes with "Filled under your standing sign-in rule on <site>."; a rule that did not
+apply shows one plain line on the owner's card and none on the ferret's.
+
 ## Programs in your own profile
 
 Settings › Secure copy › "Copy rules may target programs in my own profile" (`allowProfileTargets`, owner decision

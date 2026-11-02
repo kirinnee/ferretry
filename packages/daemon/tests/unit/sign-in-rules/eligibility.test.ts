@@ -8,7 +8,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
-import { ineligibleBecause, tappedIdentities } from '../../../src/lib/sign-in-rules/index.ts';
+import { ineligibleBecause, tappedCount, tappedIdentities } from '../../../src/lib/sign-in-rules/index.ts';
 import { signIn, tappedFact } from './support.ts';
 
 /**
@@ -145,6 +145,16 @@ describe('who may have a rule at all', () => {
       ),
     ).eql([]);
     should(tappedIdentities(signIn())).eql(['0123456789abcdef']);
+  });
+
+  it('should count the owner’s own hand sign-ins at the sign-in’s own places, the most of them, and none otherwise', () => {
+    should(
+      tappedCount(signIn({ observed: [tappedFact('github.com', 5), tappedFact('github.com', 3, 'other')] })),
+    ).equal(5);
+    should(tappedCount(signIn({ observed: [tappedFact('gitlab.com', 9)] }))).equal(0);
+    should(tappedCount(signIn({ observed: [tappedFact('github.com', 1)] }))).equal(0);
+    should(tappedCount(signIn({ observed: undefined }))).equal(0);
+    should(tappedCount(signIn({ observed: [tappedFact('github.com', 2_000_000)] }))).equal(1_000_000);
   });
 
   it('should refuse a terminal sign-in for any program but sudo, su or doas, a provider one and one with no password', () => {

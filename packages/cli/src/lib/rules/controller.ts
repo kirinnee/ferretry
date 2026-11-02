@@ -1,11 +1,14 @@
 import {
+  AccountIdSchema,
   DAEMON_FEATURES,
-  LOGIN_ONE_FACTOR_WARNING,
   placeKeys,
   SIGN_IN_RULE_HONEST_LIMIT,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_STAGE_TTL_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
   SignInIdSchema,
   type SignInRuleDraft,
   type SignInRuleNarrow,
@@ -34,6 +37,12 @@ export interface RulesStageOptions extends RulesCommandOptions {
   readonly uses?: string | undefined;
   /** Opens the rule's page in this host's browser once it is staged. */
   readonly open?: boolean | undefined;
+}
+
+/** `fy rules rm` flags. */
+export interface RulesRemoveOptions extends RulesCommandOptions {
+  /** Ends every rule of this account instead of one rule. */
+  readonly account?: string | undefined;
 }
 
 /** `fy rules narrow` flags. */
@@ -70,19 +79,25 @@ const placeWords = (place: SignInRuleView['place']): string => placeKeys(place).
 export const AUTO_RECIPE_WARNING = "Its recipe takes a ferret's edits without your review.";
 
 /**
- * The warnings a staged or listed rule carries, drawn from its STRUCTURED flags and never from its summary's words,
- * which may be clipped (secrev-1301 L2): the red root line and the residual sentence for a terminal rule, the red
- * one-factor line for a code, the auto-recipe line, and the honest limit on every rule.
+ * What a staged or listed rule warns of, drawn from its STRUCTURED flags and never from its rows' words, which may be
+ * clipped (secrev-1301 L2): ONE red block (a terminal rule's root line and its residual sentence, or a code's own
+ * sentence), the amber auto-recipe line, then "How it's checked:" with the proof and the honest limit under it.
  */
 export function ruleWarnings(
   rule: { readonly root: boolean; readonly totp: boolean; readonly autoRecipe: boolean },
   red: (text: string) => string,
 ): readonly string[] {
+  const block = rule.root
+    ? `${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`
+    : rule.totp
+      ? SIGN_IN_RULE_TOTP_WARNING
+      : undefined;
   return [
-    ...(rule.root ? [red(SIGN_IN_RULE_ROOT_WARNING), SIGN_IN_RULE_TERMINAL_HONEST_LIMIT] : []),
-    ...(rule.totp ? [red(LOGIN_ONE_FACTOR_WARNING)] : []),
+    ...(block === undefined ? [] : [red(block)]),
     ...(rule.autoRecipe ? [AUTO_RECIPE_WARNING] : []),
-    SIGN_IN_RULE_HONEST_LIMIT,
+    "How it's checked:",
+    ...(rule.root ? [`  ${SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}`] : []),
+    `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
   ];
 }
 
@@ -109,9 +124,12 @@ function renderRule(rule: SignInRuleView, red: (text: string) => string): string
   return lines.join('\n');
 }
 
+/** The staged rule in the one shape every app shows: what it does, the facts the passkey binds, then the warnings. */
 function renderStaged(staged: SignInRuleStaged, red: (text: string) => string): readonly string[] {
+  const width = Math.max(...staged.rows.map(row => row.label.length));
   return [
-    ...staged.summary.map(line => `  ${showUntrusted(line)}`),
+    `  ${showUntrusted(staged.does)}`,
+    ...staged.rows.map(row => `  ${row.label.padEnd(width)}  ${showUntrusted(row.value)}`),
     ...ruleWarnings(staged, red).map(line => `  ${line}`),
   ];
 }
@@ -201,12 +219,31 @@ export class RulesController {
     );
   }
 
-  async remove(reference: string, options: RulesCommandOptions): Promise<void> {
+  async remove(reference: string | undefined, options: RulesRemoveOptions): Promise<void> {
     refuseFerret(this.ports);
+    if (options.account !== undefined) {
+      if (reference !== undefined) throw new Error('name a rule or --account, not both');
+      return await this.#removeAccount(options.account, options);
+    }
+    if (reference === undefined)
+      throw new Error('name the rule to end (sr_…), or --account <ACCOUNT> for all of one account');
     if (!reference.trim().startsWith('sr_')) throw new Error(PASTE_RULE_POINTER);
     const rule = await this.#rule(reference);
     await this.ports.gateway.revoke(rule.id);
     this.ports.out.success(options.json === true ? JSON.stringify({ revoked: rule.id }) : `Ended the rule ${rule.id}.`);
+  }
+
+  async #removeAccount(account: string, options: RulesCommandOptions): Promise<void> {
+    const id = AccountIdSchema.safeParse(account.trim());
+    if (!id.success) throw new Error(`"${account}" is not an account id: see \`fy accounts\``);
+    const revoked = await this.ports.gateway.revokeAccount(id.data);
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify({ account: id.data, revoked })
+        : revoked === 0
+          ? `${id.data} had no standing rules.`
+          : `Ended ${String(revoked)} standing ${revoked === 1 ? 'rule' : 'rules'} of ${id.data}.`,
+    );
   }
 
   /** Stages the same rule again (same id, next revision): the owner's passkey is what makes it a new approval. */
@@ -233,7 +270,7 @@ export class RulesController {
   #code(options: RulesStageOptions): boolean {
     if (options.totp === true && options.iUnderstandOneFactor !== true)
       throw new Error(
-        `--totp makes the sign-in one factor. ${LOGIN_ONE_FACTOR_WARNING} Add --i-understand-one-factor to go on.`,
+        `--totp makes the sign-in one factor. ${SIGN_IN_RULE_TOTP_WARNING} Add --i-understand-one-factor to go on.`,
       );
     if (options.totp !== true && options.iUnderstandOneFactor === true)
       throw new Error('--i-understand-one-factor goes with --totp only');
@@ -268,6 +305,8 @@ export class RulesController {
       throw new Error(
         'standing sign-in rules can only be confirmed in the app, and this daemon does not report them yet: nothing was staged',
       );
+    const eligibility = await gateway.eligibility(draft.signIn);
+    if (!eligibility.eligible) throw new Error(SIGN_IN_RULE_INELIGIBLE_WORDS[eligibility.because]);
     const startedMs = this.ports.nowMs();
     const staged = await gateway.stage(draft);
     if (staged.root && !features.includes(DAEMON_FEATURES.signInRulesTerminal)) {

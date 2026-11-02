@@ -14,7 +14,15 @@ const STAGED = {
   signIn: SIGN_IN,
   account: { id: 'GITHUB_WORK', label: 'work github' },
   place: { kind: 'site', domains: ['github.com'], match: [] },
-  summary: ['Sign in as GITHUB_WORK at github.com'],
+  does: 'Ferretry signs in to github.com as work github for any ferret, without asking.',
+  rows: [
+    { label: 'Site', value: 'github.com' },
+    { label: 'Account', value: 'work github' },
+    { label: 'Types', value: 'password' },
+    { label: 'Who', value: 'Any ferret on this machine' },
+    { label: 'Until', value: '2026-12-01 12:00 UTC' },
+    { label: 'Uses', value: 'No limit' },
+  ],
   fields: ['password'],
   totp: false,
   root: false,
@@ -87,6 +95,19 @@ describe('ProtocolRulesGateway', () => {
     const revoked = rig({ id: 'sr_x', revoked: true });
     await revoked.gateway.revoke('sr_x');
     should(revoked.calls[0]?.path).equal('/v1/sign-in-rules/sr_x');
+  });
+
+  it('should end every rule of an account on its own route, and read eligibility on its query', async () => {
+    const ended = rig({ account: 'GITHUB_WORK', revoked: 3 });
+    should(await ended.gateway.revokeAccount('GITHUB_WORK')).equal(3);
+    should(ended.calls[0]?.path).equal('/v1/accounts/GITHUB_WORK/sign-in-rules/revoke');
+    should(ended.calls[0]?.init?.method).equal('POST');
+    should(headerNames(ended.calls[0]?.init)).not.containEql('x-fy-session');
+
+    const asked = rig({ signIn: SIGN_IN, eligible: false, because: 'no-history' });
+    const answer = await asked.gateway.eligibility(SIGN_IN);
+    should(asked.calls[0]?.path).equal(`/v1/sign-in-rules/eligibility?signIn=${SIGN_IN}`);
+    should(answer.eligible).equal(false);
   });
 
   it('should confirm a stage in the app and read its state on the stage routes', async () => {

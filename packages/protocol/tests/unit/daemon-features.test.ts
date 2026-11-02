@@ -75,19 +75,19 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.taskPlan)).be.true();
   });
 
-  it('should name standing sign-in rules for the app to gate on, but not report them until the app draws the sheet', () => {
-    // A rule fill closes an input card with a `sign-in-rule` actor an older app's strict parse refuses: the app ships first.
+  it('should report standing sign-in rules now that the app draws the sheet, the card and the Settings list', () => {
+    // A rule fill closes an input card with a `sign-in-rule` actor an older app's strict parse refuses: only a daemon that reports this fills one.
     should(DAEMON_FEATURES.signInRules).equal('sign-in-rules.1');
-    should(daemonFeatureList()).not.containEql('sign-in-rules.1');
-    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRules)).be.false();
+    should(daemonFeatureList()).containEql('sign-in-rules.1');
+    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRules)).be.true();
   });
 
   // Owner decision !A226: terminal standing rules are reported, with their known limit; still only beside sign-in-rules.1.
-  it('should report terminal standing rules on their own name, while sign-in-rules.1 itself is not reported yet', () => {
+  it('should report terminal standing rules on their own name, beside sign-in-rules.1', () => {
     should(DAEMON_FEATURES.signInRulesTerminal).equal('sign-in-rules-terminal.1');
     should(daemonFeatureList()).containEql('sign-in-rules-terminal.1');
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRulesTerminal)).be.true();
-    should(daemonFeatureList()).not.containEql('sign-in-rules.1');
+    should(daemonFeatureList()).containEql('sign-in-rules.1');
     // The list takes nothing in: no config, environment, route or file can add or take away a name.
     should(daemonFeatureList.length).equal(0);
     process.env['FY_FEATURES'] = '';

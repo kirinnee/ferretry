@@ -2,9 +2,13 @@ import { describe, it } from 'bun:test';
 import {
   DAEMON_FEATURES,
   SIGN_IN_RULE_HONEST_LIMIT,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+  SIGN_IN_RULE_TOTP_WARNING,
   type SignInRuleDraft,
+  type SignInRuleEligibility,
   type SignInRuleNarrow,
   type SignInRuleStaged,
   type SignInRuleStageState,
@@ -59,7 +63,14 @@ const stagedOf = (overrides: Partial<SignInRuleStaged> = {}): SignInRuleStaged =
     signIn: SIGN_IN,
     account: SITE_VIEW.account,
     place: SITE_VIEW.place,
-    summary: ['Sign in as GITHUB_WORK at github.com'],
+    does: 'Ferretry signs in to github.com as work github for any ferret, without asking.',
+    rows: [
+      { label: 'Site', value: 'github.com' },
+      { label: 'Types', value: 'password' },
+      { label: 'Who', value: 'Any ferret on this machine' },
+      { label: 'Until', value: '2026-12-01 12:00 UTC' },
+      { label: 'Uses', value: 'No limit' },
+    ],
     fields: ['password'],
     totp: false,
     root: false,
@@ -76,6 +87,9 @@ class SpyGateway implements IRulesGateway {
   readonly drafts: SignInRuleDraft[] = [];
   readonly narrowed: { readonly rule: string; readonly narrow: SignInRuleNarrow }[] = [];
   readonly revoked: string[] = [];
+  readonly accountsRevoked: string[] = [];
+  eligible: SignInRuleEligibility = { signIn: SIGN_IN, eligible: true } as SignInRuleEligibility;
+  accountCount = 2;
   rules: SignInRuleView[] = [SITE_VIEW, TERMINAL_VIEW];
   stages: SignInRuleStaged[] = [];
   health: 'ok' | 'damaged' = 'ok';
@@ -113,6 +127,15 @@ class SpyGateway implements IRulesGateway {
   async revoke(rule: string) {
     this.calls.push('revoke');
     this.revoked.push(rule);
+  }
+  async revokeAccount(account: string) {
+    this.calls.push('revokeAccount');
+    this.accountsRevoked.push(account);
+    return this.accountCount;
+  }
+  async eligibility() {
+    this.calls.push('eligibility');
+    return this.eligible;
   }
   async features() {
     this.calls.push('features');
@@ -159,6 +182,7 @@ describe('fy rules (controller)', () => {
         async () => await controller.renew(RULE, {}),
         async () => await controller.narrow(RULE, { dropTotp: true }),
         async () => await controller.remove(RULE, {}),
+        async () => await controller.remove(undefined, { account: 'GITHUB_WORK' }),
       ])
         await run().then(
           () => should.fail('', '', 'a ferret got through'),
@@ -173,29 +197,58 @@ describe('fy rules (controller)', () => {
     await controller.list({});
     const text = said.join('\n');
     should(text).containEql(RULE).and.containEql('github.com');
-    should(text).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
+    should(text).containEql(RED(`${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`));
     should(text).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
     should(text).containEql(SIGN_IN_RULE_HONEST_LIMIT);
   });
 
-  it('should render the root warning and the residual sentence from the structured root flag, not the summary', () => {
-    const lines = ruleWarnings({ root: true, totp: false, autoRecipe: false }, RED);
-    should(lines).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
-    should(lines).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
-    should(ruleWarnings({ root: false, totp: false, autoRecipe: false }, RED)).eql([SIGN_IN_RULE_HONEST_LIMIT]);
+  it('should render ONE red block from the structured flags: root and its residual, or the code’s own sentence', () => {
+    const root = ruleWarnings({ root: true, totp: false, autoRecipe: false }, RED);
+    should(root).eql([
+      RED(`${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`),
+      "How it's checked:",
+      `  ${SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}`,
+      `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
+    ]);
+    should(ruleWarnings({ root: false, totp: true, autoRecipe: false }, RED)).eql([
+      RED(SIGN_IN_RULE_TOTP_WARNING),
+      "How it's checked:",
+      `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
+    ]);
+    should(ruleWarnings({ root: false, totp: false, autoRecipe: false }, RED)).eql([
+      "How it's checked:",
+      `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
+    ]);
   });
 
-  it('should print the red root warning on a staged terminal rule even when its summary says nothing of root', async () => {
+  it('should print a staged rule as its line, aligned rows, one red block and the proof, whatever its words say of root', async () => {
     const { controller, gateway, said } = rig();
     gateway.staged = stagedOf({
       root: true,
       place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
-      summary: ['Type the password at the prompt'],
+      does: 'Ferretry types your sudo password for any ferret on kirin-box, without asking.',
+      rows: [
+        { label: 'Machine', value: 'kirin-box' },
+        { label: 'Types', value: 'the sudo password' },
+        { label: 'Who', value: 'Any ferret on this machine' },
+        { label: 'Until', value: '2026-11-02 09:55 UTC' },
+        { label: 'Uses', value: 'No limit' },
+      ],
     });
     await controller.add(SIGN_IN, {});
-    const text = said.join('\n');
-    should(text).containEql(RED(SIGN_IN_RULE_ROOT_WARNING));
-    should(text).containEql(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
+    should(said.slice(0, 11)).eql([
+      '  Ferretry types your sudo password for any ferret on kirin-box, without asking.',
+      '  Machine  kirin-box',
+      '  Types    the sudo password',
+      '  Who      Any ferret on this machine',
+      '  Until    2026-11-02 09:55 UTC',
+      '  Uses     No limit',
+      `  ${RED(`${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`)}`,
+      "  How it's checked:",
+      `    ${SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}`,
+      `    ${SIGN_IN_RULE_HONEST_LIMIT}`,
+      said[10],
+    ]);
   });
 
   it('should drop a terminal stage and stage nothing while the daemon does not report terminal rules', async () => {
@@ -225,7 +278,7 @@ describe('fy rules (controller)', () => {
     should(gateway.drafts).eql([
       { signIn: SIGN_IN, fields: ['password'], scope: { kind: 'any' }, lifetimeSeconds: 7 * 86_400, uses: 5 },
     ]);
-    should(gateway.calls).eql(['features', 'stage', 'confirmInApp', 'view', 'view']);
+    should(gateway.calls).eql(['features', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
     should(said.join('\n')).containEql(`https://app.example/#rules/${STAGE}`);
     should(said[said.length - 1]).startWith('Approved.');
     should(slept).eql([1_000]);
@@ -357,14 +410,58 @@ describe('fy rules (controller)', () => {
     should(gateway.revoked).eql([RULE]);
   });
 
-  it('should print the auto-recipe line from the structured flag, even when the summary omits it', async () => {
+  it('should end every rule of an account with --account, and refuse a rule beside it or a bad account id', async () => {
+    const { controller, gateway, said } = rig();
+    await controller.remove(undefined, { account: 'GITHUB_WORK' });
+    should(gateway.accountsRevoked).eql(['GITHUB_WORK']);
+    should(said[said.length - 1]).equal('Ended 2 standing rules of GITHUB_WORK.');
+    await controller.remove(RULE, { account: 'GITHUB_WORK' }).then(
+      () => should.fail('', '', 'took both'),
+      (error: unknown) => should((error as Error).message).containEql('not both'),
+    );
+    await controller.remove(undefined, { account: 'not an id!' }).then(
+      () => should.fail('', '', 'took a bad id'),
+      (error: unknown) => should((error as Error).message).containEql('not an account id'),
+    );
+    await controller.remove(undefined, {}).then(
+      () => should.fail('', '', 'took nothing'),
+      (error: unknown) => should((error as Error).message).containEql('name the rule'),
+    );
+    should(gateway.accountsRevoked).eql(['GITHUB_WORK']);
+    should(gateway.revoked).eql([]);
+  });
+
+  it('should say so when an account had no rules, and print the count as JSON with --json', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.accountCount = 0;
+    await controller.remove(undefined, { account: 'GITHUB_WORK' });
+    should(said[said.length - 1]).equal('GITHUB_WORK had no standing rules.');
+    gateway.accountCount = 1;
+    await controller.remove(undefined, { account: 'GITHUB_WORK', json: true });
+    should(JSON.parse(said[said.length - 1] ?? '')).eql({ account: 'GITHUB_WORK', revoked: 1 });
+    await controller.remove(undefined, { account: 'GITHUB_WORK' });
+    should(said[said.length - 1]).equal('Ended 1 standing rule of GITHUB_WORK.');
+  });
+
+  it('should say why a sign-in cannot have a rule yet, and stage nothing', async () => {
+    const { controller, gateway } = rig();
+    gateway.eligible = { signIn: SIGN_IN, eligible: false, because: 'no-history' } as SignInRuleEligibility;
+    await controller.add(SIGN_IN, {}).then(
+      () => should.fail('', '', 'staged'),
+      (error: unknown) => should((error as Error).message).equal(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']),
+    );
+    should(gateway.calls).not.containEql('stage');
+  });
+
+  it('should print the auto-recipe line from the structured flag, even when the words omit it', async () => {
     should(ruleWarnings({ root: false, totp: false, autoRecipe: true }, RED)).eql([
       AUTO_RECIPE_WARNING,
-      SIGN_IN_RULE_HONEST_LIMIT,
+      "How it's checked:",
+      `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
     ]);
 
     const staging = rig();
-    staging.gateway.staged = stagedOf({ autoRecipe: true, summary: ['Sign in as GITHUB_WORK at github.com'] });
+    staging.gateway.staged = stagedOf({ autoRecipe: true });
     await staging.controller.add(SIGN_IN, {});
     should(staging.said.filter(line => line.includes(AUTO_RECIPE_WARNING))).eql([`  ${AUTO_RECIPE_WARNING}`]);
 

@@ -2,6 +2,7 @@ import {
   type ConfigChangeKind,
   DaemonCarriersViewSchema,
   type PairingResponse,
+  type SignInRuleStageId,
   type TaskPlanStageId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
@@ -116,7 +117,7 @@ import {
   stepUpCeremony,
   unlockCeremony,
 } from './step-up-ceremony.ts';
-import { StepUpGate } from './step-up-gate.ts';
+import { StepUpGate, type StepUpWords } from './step-up-gate.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
   browserOnDeviceVoices,
@@ -1337,6 +1338,27 @@ export function useApproveTaskPlanStepUp():
         ? undefined
         : async (daemon: DaemonConnection, stage: TaskPlanStageId, words: string) =>
             await store.stepUp.require(daemon, words, 'explicit', 'approve-task-plan', stage),
+    [store],
+  );
+}
+
+/**
+ * The passkey for ONE approval of a staged standing sign-in rule, asked BEFORE the commit is sent: the proof is bound to
+ * this stage (act `approve-sign-in-rule`, subject the stage id; the daemon derives the challenge from the staged bytes),
+ * so it is taken for that commit and no other. The words on the prompt are the daemon's own plain line and rows of the
+ * staged bytes and the structured flags' sentences, handed over as STRUCTURE (never one text to split) — nothing a ferret
+ * wrote reaches them. Outside a provider there is no prompt.
+ */
+export function useApproveSignInRuleStepUp():
+  | ((daemon: DaemonConnection, stage: SignInRuleStageId, words: StepUpWords) => Promise<boolean>)
+  | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, stage: SignInRuleStageId, words: StepUpWords) =>
+            await store.stepUp.require(daemon, words.does, 'explicit', 'approve-sign-in-rule', stage, words),
     [store],
   );
 }

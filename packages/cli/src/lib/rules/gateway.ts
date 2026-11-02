@@ -2,6 +2,8 @@ import {
   HealthViewSchema,
   type SignInRuleDraft,
   SignInRuleDraftSchema,
+  type SignInRuleEligibility,
+  SignInRuleEligibilitySchema,
   type SignInRuleList,
   SignInRuleListSchema,
   type SignInRuleNarrow,
@@ -20,6 +22,8 @@ import type { IRulesGateway, RulesApiClient } from './ports.ts';
 
 const DroppedSchema = z.looseObject({ dropped: z.literal(true) });
 const RevokedSchema = z.looseObject({ revoked: z.literal(true) });
+
+const AccountRevokedSchema = z.looseObject({ account: z.string(), revoked: z.number().int().min(0) });
 
 const stagePath = (stage: string): string => `/v1/sign-in-rules/stages/${encodeURIComponent(stage)}`;
 
@@ -74,6 +78,23 @@ export class ProtocolRulesGateway implements IRulesGateway {
       method: 'DELETE',
       headers: this.#headers,
     });
+  }
+
+  async revokeAccount(account: string): Promise<number> {
+    const answer = await this.client.request(
+      `/v1/accounts/${encodeURIComponent(account)}/sign-in-rules/revoke`,
+      AccountRevokedSchema,
+      { method: 'POST', headers: this.#headers },
+    );
+    return answer.revoked;
+  }
+
+  async eligibility(signIn: string): Promise<SignInRuleEligibility> {
+    return await this.client.request(
+      `/v1/sign-in-rules/eligibility?signIn=${encodeURIComponent(signIn)}`,
+      SignInRuleEligibilitySchema,
+      { headers: this.#headers },
+    );
   }
 
   async features(): Promise<readonly string[]> {

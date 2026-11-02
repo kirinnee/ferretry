@@ -48,6 +48,7 @@ import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
+import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
@@ -408,6 +409,11 @@ export const useAgenda = ({
                     sessionId={scope.sessionId}
                   />
                 ),
+              }
+            : {})}
+          {...(cardItem.signInRuleSuggestion !== undefined
+            ? {
+                planForm: <SignInRuleSuggestionHost agentName={ferret} connection={connection} item={cardItem} />,
               }
             : {})}
           {...(cardItem.phoneApproval !== undefined

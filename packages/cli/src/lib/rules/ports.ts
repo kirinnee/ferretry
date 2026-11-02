@@ -1,6 +1,7 @@
 import type {
   IFyApiClient,
   SignInRuleDraft,
+  SignInRuleEligibility,
   SignInRuleList,
   SignInRuleNarrow,
   SignInRuleStaged,
@@ -26,6 +27,10 @@ export interface IRulesGateway {
   drop(stage: string): Promise<void>;
   narrow(rule: string, narrow: SignInRuleNarrow): Promise<SignInRuleView>;
   revoke(rule: string): Promise<void>;
+  /** Ends every rule of one account (`POST /v1/accounts/:id/sign-in-rules/revoke`): how many it ended. */
+  revokeAccount(account: string): Promise<number>;
+  /** Whether the owner could make a rule for this sign-in now, and why not. */
+  eligibility(signIn: string): Promise<SignInRuleEligibility>;
   /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
   features(): Promise<readonly string[]>;
 }

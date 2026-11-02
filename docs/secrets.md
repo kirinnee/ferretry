@@ -502,10 +502,17 @@ in a terminal for up to 7** ([below](#terminal-rules-sudo-su-or-doas)). Rules ar
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
 > a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-**No rule fills until the app ships.** The service, the file, the routes, suspension, history and the fills through the
-shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
-are built; `sign-in-rules.1` stays unadvertised until the app draws the rule sheet and its cards, and until then every
-sign-in a rule would cover is a normal card.
+**The app draws rules, and the daemon reports `sign-in-rules.1`.** The service, the file, the routes, suspension,
+history and the fills through the shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
+are matched by the screens in the app: the sheet (Accounts › a sign-in › Standing rule, and "Don’t ask again for this
+sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
+ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
+`fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
+rule's structured flags, never from its words. Every rule card has ONE shape: a plain `does` line, label/value `rows`
+(Types, Who, Until, Uses, plus Machine or Site, Code key and History where they apply), ONE red block, and "How it's
+checked" for the proof, all built by the protocol's `signInRuleWords`. Editing a sign-in's method or recipe says how many rules that
+suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
+device that may not use secrets sees one sentence and the app stops asking.
 
 ### Only the owner, a fresh passkey every time, bound to the bytes
 
@@ -644,9 +651,11 @@ exactly the pinned key; one password field; the form the owner's taps have histo
 suspends nothing and tells the ferret nothing it would not be told with no rule. The rule is asked once more inside the
 terminal's own turn, right before the guarded tmux write (`proceed()`), so a revoke that lands then types nothing.
 
-Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim:
+Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim. The first
+is the red block, with the accepted race (`SIGN_IN_RULE_TERMINAL_RESIDUAL`) as its second sentence; the second is under "How
+it's checked":
 
-> This gives every ferret on this machine root whenever it asks, while the rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
+> Any ferret on this machine gets root while this rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
 
 > Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
 > process gave itself. A ferret starts that program, so it could start another program root installed under the name
@@ -661,7 +670,7 @@ itself; under a restricted sudoers it could set a password the ferret then knows
 **Its own feature, now reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time
 name in the protocol's daemon features. Nothing reads it from config, the environment, a route or a file. This build
 reports it (owner decision !A226, with the risk below accepted), and a terminal rule still fills only beside
-`sign-in-rules.1`: while that is not reported, every sign-in is a plain card. A build that does not report it refuses
+`sign-in-rules.1`, which this build also reports: a daemon that did not would leave every sign-in a plain card. A build that does not report it refuses
 to stage a sudo, su or doas rule (`409 tool_not_covered`), says the same in the eligibility, and offers no terminal
 rule to the matcher, so a terminal rule already in the file never fills there.
 
@@ -669,7 +678,7 @@ rule to the matcher, so a terminal rule already in the file never fills there.
 write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
 foreground command and the cursor row. **A program swapped in between the last kernel check and the typing can still
 read the password once.** Holding Enter back does not stop that: a reader that takes the bytes as they arrive has them
-before anything is checked again. What a rule adds is that the swap is SEEN and the rule then stops:
+before anything is checked again. What a rule adds is that a swap is SEEN, when it is still there to see, and the rule then stops:
 
 1. it types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads
    the foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
@@ -678,12 +687,17 @@ before anything is checked again. What a rule adds is that the swap is SEEN and 
    screen that merely changed before the write still just redraws the card.
 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
-audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
+audited and shown to the owner only, so the rule **cannot be retried under that approval**.
 
-**Accepted risk (owner, 2026-11-01).** The owner switched sudo rules on knowing this: in the split second between
+**A swap that puts everything back is not seen.** A program that takes the place of sudo, reads the password the moment it
+is typed, and then puts the real sudo back before the second kernel check has nothing left for that check to find, so
+the rule carries on as if nothing happened. That is why the rule says it stops "if it notices", never "then". Nothing
+more is claimed.
+
+**Accepted risk (owner, 2026-11-01, re-confirmed 2026-11-02 (!A239) knowing a swap that puts everything back before the re-check may go UNDETECTED; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.").** The owner switched sudo rules on knowing this: in the split second between
 Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
-and that program could read the password once. Ferretry then notices, stops the rule and tells the owner, so the same
-approval can never be used to try again. A sudo rule also means every ferret can get root on this machine while the rule
+and that program could read the password once. If Ferretry notices, it stops the rule and tells the owner, so the same
+approval can never be used to try again; a swap that is put back before the check is not noticed. A sudo rule also means every ferret can get root on this machine while the rule
 lasts, which is why it is red, lasts one day unless the owner picks longer, and never more than seven.
 
 ### Strict, and fails closed
@@ -739,7 +753,7 @@ else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-s
 
 ### The owner's command: `fy rules`
 
-`fy rules ls|add|resume|renew|narrow|rm` is the owner's, and refused inside a ferret's pane. `add`, `resume` and `renew`
+`fy rules ls|add|resume|renew|narrow|rm` (`rm --account <ACCOUNT>` ends every rule of one account) is the owner's, and refused inside a ferret's pane. `add`, `resume` and `renew`
 only **stage** (and `confirm-in-app`): the command prints the `<app>/#rules/<stage>` link (`--open` opens it in this
 machine's browser), then polls the stage for up to 125 seconds and prints Approved, Denied or Timed out. **The command has
 no way to commit**: the passkey is the app's. `--totp` needs `--i-understand-one-factor`. A terminal rule prints the red

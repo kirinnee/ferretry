@@ -171,8 +171,13 @@ describe('stage refusals', () => {
       ...DRAFT,
       scope: { kind: 'session', session: 'mvv6b4qw-49d0158d' },
     });
-    should(project.summary).containEql('only for ferrets in board project 6a1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d');
-    should(session.summary).containEql('only for session mvv6b4qw-49d0158d');
+    should(project.does).containEql('for ferrets in board project 6a1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d');
+    should(project.rows).containEql({
+      label: 'Who',
+      value: 'Ferrets in board project 6a1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+    });
+    should(session.does).containEql("for one session's ferrets");
+    should(session.rows).containEql({ label: 'Who', value: 'Session mvv6b4qw-49d0158d' });
   });
 
   it(`should hold at most ${String(SIGN_IN_RULE_MAX)} rules: the stage refuses past it, and so does a commit that raced`, async () => {
@@ -285,9 +290,14 @@ describe('approving a rule again', () => {
 describe('eligibility and revoking', () => {
   it('should say a sign-in can have a rule, and name its rule once it has one', async () => {
     const w = await world();
-    should(await w.service.eligibility(HOST_OWNER, GITHUB)).eql({ signIn: GITHUB, eligible: true });
+    should(await w.service.eligibility(HOST_OWNER, GITHUB)).eql({ signIn: GITHUB, eligible: true, history: 2 });
     const { view } = await approved(w);
-    should(await w.service.eligibility(HOST_OWNER, GITHUB)).eql({ signIn: GITHUB, eligible: true, rule: view.id });
+    should(await w.service.eligibility(HOST_OWNER, GITHUB)).eql({
+      signIn: GITHUB,
+      eligible: true,
+      history: 2,
+      rule: view.id,
+    });
     should((await refusal(w.service.eligibility(HOST_OWNER, 'si_0000000000000fff'))).code).equal('not_found');
   });
 

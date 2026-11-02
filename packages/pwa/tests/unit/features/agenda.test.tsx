@@ -1020,3 +1020,22 @@ describe('a staged 2FA seed card', () => {
     run(() => copied.unmount());
   });
 });
+
+describe('a sign-in rule suggestion card', () => {
+  const offered = (extra: Partial<AgendaItem>) => {
+    const view = mount({
+      snapshot: board([item('A1', { kind: 'info', ...extra } as Partial<AgendaItem>)]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    const form = view.root.findByType(AgendaItemView).props.planForm;
+    run(() => view.unmount());
+    return form;
+  };
+
+  test('is offered to the item view only for the daemon’s own suggestion reference', () => {
+    expect(
+      offered({ signInRuleSuggestion: { suggestion: 'srg_aaaaaaaaaaaaaaaa' } } as Partial<AgendaItem>),
+    ).toBeDefined();
+    expect(offered({})).toBeUndefined();
+  });
+});

@@ -115,6 +115,7 @@ import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
+import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
@@ -219,6 +220,10 @@ const inputFormFor = (
           sessionId={card.view.config.id}
         />
       ),
+    };
+  if (connection !== undefined && card.item.signInRuleSuggestion !== undefined)
+    return {
+      planForm: <SignInRuleSuggestionHost agentName={inboxWho(card).ferret} connection={connection} item={card.item} />,
     };
   if (connection !== undefined && card.item.copyPlan !== undefined)
     return {
