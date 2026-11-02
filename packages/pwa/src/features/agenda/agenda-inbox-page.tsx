@@ -595,8 +595,8 @@ function UnreadableMachines({ inbox }: { readonly inbox: AgendaInbox }) {
         <li className="fy-attn-inbox__unreadable-row" data-daemon={machine.daemonId} key={machine.daemonId}>
           <CloudOff aria-hidden="true" size={14} />
           <span className="min-w-0 flex-1">
-            Couldn’t read {machine.items === 1 ? '1 item' : `${machine.items} items`} on {machine.machineName}. Trying
-            again.
+            Couldn’t read {machine.items === 1 ? '1 item' : `${machine.items} items`} on {machine.machineName}
+            {machine.why === undefined ? '' : ` — ${machine.why}`}. Trying again.
           </span>
         </li>
       ))}

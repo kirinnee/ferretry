@@ -140,10 +140,31 @@ describe('unread conversations', () => {
         },
         { daemonId: STUDIO, name: 'Studio', sessions: [waiting('read', summary(2, 3))] },
       ]);
-      expect(inboxUnavailable(more, entry => entry.daemonId === LAPTOP)).toEqual([
+      expect(inboxUnavailable(more, entry => (entry.daemonId === LAPTOP ? 'unsettled' : undefined))).toEqual([
         { daemonId: LAPTOP, machineName: 'Laptop', items: 4 },
       ]);
-      expect(inboxUnavailable(more, () => false)).toEqual([]);
+      expect(inboxUnavailable(more, () => undefined)).toEqual([]);
+    });
+
+    test('should say why a machine’s boards could not be read, the reason covering the most items first', () => {
+      const more = unreadSessions([
+        {
+          daemonId: LAPTOP,
+          name: 'Laptop',
+          sessions: [
+            waiting('a', summary(1, 1)),
+            waiting('b', summary(3, 2)),
+            waiting('c', summary(1, 3)),
+            waiting('d', summary(1, 4)),
+          ],
+        },
+        { daemonId: STUDIO, name: 'Studio', sessions: [waiting('e', summary(2, 5))] },
+      ]);
+      const why = { a: 'timed-out', b: 'error', c: 'timed-out', d: 'unsettled', e: 'refused' } as const;
+      expect(inboxUnavailable(more, entry => why[entry.view.config.id as keyof typeof why])).toEqual([
+        { daemonId: STUDIO, machineName: 'Studio', items: 2, why: 'refused' },
+        { daemonId: LAPTOP, machineName: 'Laptop', items: 6, why: 'the machine hit an error, timed out' },
+      ]);
     });
   });
 

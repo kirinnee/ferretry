@@ -1,5 +1,5 @@
 import { AgendaOutboxSchema } from './reply-batch.ts';
-import { parseAgendaLedger } from './state-machine.ts';
+import { agendaLedgerDocument, parseAgendaLedger } from './state-machine.ts';
 
 /** The two documents a ferret's session directory holds for its agenda. */
 export type AgendaFileKind = 'ledger' | 'outbox';
@@ -68,7 +68,7 @@ function understand(kind: AgendaFileKind, sessionId: string, text: string): Unde
     // `nextId` moves on every item it raises, which breaks a tie between two writes in the same instant.
     return ledger === null
       ? undefined
-      : { canonical: `${JSON.stringify(ledger, null, 2)}\n`, stamp: [Date.parse(ledger.updatedAt), ledger.nextId] };
+      : { canonical: agendaLedgerDocument(ledger), stamp: [Date.parse(ledger.updatedAt), ledger.nextId] };
   }
   const parsed = AgendaOutboxSchema.safeParse(value);
   if (!parsed.success || parsed.data.sessionId !== sessionId) return undefined;

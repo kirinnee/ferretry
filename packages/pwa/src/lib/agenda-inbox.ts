@@ -32,6 +32,7 @@ import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } fr
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { DaemonId } from './daemon-connection.ts';
+import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
@@ -137,20 +138,44 @@ export interface InboxUnavailable {
   readonly daemonId: DaemonId;
   readonly machineName: string;
   readonly items: number;
+  /**
+   * Why, as a short clause — "timed out" — or several when its boards failed differently, the one covering the
+   * most items first. Absent when no read said why (`unsettled`).
+   */
+  readonly why?: string;
 }
 
-/** The machines with a conversation whose board could not be read, in the order they are listed, with their items. */
+/**
+ * The machines with a conversation whose board could not be read, in the order they are listed, with their items
+ * and why. `failed` is why an entry's board failed, or `undefined` when it did not.
+ */
 export const inboxUnavailable = (
   unread: readonly UnreadSession[],
-  failed: (entry: UnreadSession) => boolean,
+  failed: (entry: UnreadSession) => BoardReadFailure | undefined,
 ): readonly InboxUnavailable[] => {
   const machines = new Map<DaemonId, InboxUnavailable>();
+  const reasons = new Map<DaemonId, Map<string, number>>();
   for (const entry of unread) {
-    if (!failed(entry)) continue;
-    const items = (machines.get(entry.daemonId)?.items ?? 0) + needsYouCount(entry.attention);
+    const failure = failed(entry);
+    if (failure === undefined) continue;
+    const count = needsYouCount(entry.attention);
+    const items = (machines.get(entry.daemonId)?.items ?? 0) + count;
     machines.set(entry.daemonId, { daemonId: entry.daemonId, machineName: entry.machineName, items });
+    const words = BOARD_READ_FAILURE_WORDS[failure];
+    if (words === undefined) continue;
+    const tally = reasons.get(entry.daemonId) ?? new Map<string, number>();
+    tally.set(words, (tally.get(words) ?? 0) + count);
+    reasons.set(entry.daemonId, tally);
   }
-  return [...machines.values()];
+  return [...machines.values()].map(machine => {
+    const tally = reasons.get(machine.daemonId);
+    if (tally === undefined) return machine;
+    const why = [...tally]
+      .sort(([, left], [, right]) => right - left)
+      .map(([words]) => words)
+      .join(', ');
+    return { ...machine, why };
+  });
 };
 
 /**

@@ -51,7 +51,7 @@ import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { toTestBesideGates } from '../lib/gate-items.ts';
-import { InboxBoardReads } from '../lib/inbox-board-reads.ts';
+import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 import { nextWake, sessionTaskNames, splitSnoozed, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -343,13 +343,16 @@ export function useAgendaInboxModel(
   const boardKey = (entry: UnreadSession): string =>
     daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id });
   const held = (entry: UnreadSession): boolean => boards.snapshots.has(boardKey(entry));
-  const failed = (entry: UnreadSession): boolean => !held(entry) && failedBoards.has(boardKey(entry));
-  const reading = unread.some(entry => !held(entry) && !failed(entry));
+  const failed = (entry: UnreadSession): BoardReadFailure | undefined =>
+    held(entry) ? undefined : failedBoards.get(boardKey(entry));
+  const reading = unread.some(entry => !held(entry) && failed(entry) === undefined);
   const total = inboxCount(unread, held, cards, toTest.length);
   const freshUnavailable = inboxUnavailable(unread, failed);
   const unavailable = useStable(
     freshUnavailable,
-    freshUnavailable.map(entry => `${entry.daemonId}\u0000${entry.machineName}\u0000${entry.items}`).join('\u0001'),
+    freshUnavailable
+      .map(entry => `${entry.daemonId}\u0000${entry.machineName}\u0000${entry.items}\u0000${entry.why ?? ''}`)
+      .join('\u0001'),
   );
 
   const sources = useMemo(
