@@ -10,6 +10,7 @@ import {
   cloneNeeds,
   controlsChange,
   keysToCopy,
+  type MatchableLogin,
   needsAfterCopy,
   needsSentence,
   outcomeSentence,
@@ -540,28 +541,34 @@ describe('needsAfterCopy', () => {
   });
   const secret: CloneNeed = { key: 'secret:KEY', kind: 'secret', name: 'KEY', why: 'login glm', held: false };
 
-  it('drops a sign-in for a reused login that has no slot, and keeps one with a slot', () => {
+  it('drops a sign-in for a signed-in reused login that has no slot, and keeps one with a slot', () => {
     const reused = signIn('claude-you');
     const slotted = signIn('codex-you');
-    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'], new Set(['claude-you']))).toEqual([
-      slotted,
-      secret,
-    ]);
+    const signedIn = new Map([['claude-you', { id: 'claude-mine', signedIn: true }]]);
+    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'], signedIn)).toEqual([slotted, secret]);
+  });
+
+  it('keeps the sign-in of a reused login that still needs one', () => {
+    const pending = signIn('codex-you');
+    const reused = new Map([['codex-you', { id: 'codex-mine', signedIn: false }]]);
+    expect(needsAfterCopy([pending, secret], [], reused)).toEqual([pending, secret]);
   });
 
   it('keeps a slotless sign-in that was not reused, and every secret', () => {
     const ghost = signIn('ghost');
-    expect(needsAfterCopy([ghost, secret], [], new Set())).toEqual([ghost, secret]);
+    expect(needsAfterCopy([ghost, secret], [], new Map())).toEqual([ghost, secret]);
   });
 });
 
 describe('reusedSignIns', () => {
   const here = (
     harness: string,
-    fields: { email?: string; label?: string; store?: string } = {},
-  ): { harness: string; store: string; email?: string; label?: string } => ({
+    fields: { id?: string; email?: string; label?: string; store?: string; status?: string } = {},
+  ): MatchableLogin => ({
+    id: fields.id ?? `${harness}-here`,
     harness,
     store: fields.store ?? 'ferretry',
+    status: { word: fields.status ?? 'ready' },
     ...(fields.email === undefined ? {} : { email: fields.email }),
     ...(fields.label === undefined ? {} : { label: fields.label }),
   });
@@ -577,7 +584,7 @@ describe('reusedSignIns', () => {
       here('claude', { email: 'me@work.example' }),
       here('claude', { email: 'env@work.example', store: 'environment' }),
     ];
-    expect([...reusedSignIns(credentials, logins)]).toEqual(['claude-you']);
+    expect([...reusedSignIns(credentials, logins).keys()]).toEqual(['claude-you']);
   });
 
   it('falls back to the label only when neither side has an email, and never lets an email meet none', () => {
@@ -586,6 +593,38 @@ describe('reusedSignIns', () => {
       { id: 'has-email', harness: 'claude', email: 'me@work.example' },
     );
     const logins = [here('codex', { label: 'Work' }), here('claude', { label: 'Work' })];
-    expect([...reusedSignIns(credentials, logins)]).toEqual(['by-label']);
+    expect([...reusedSignIns(credentials, logins).keys()]).toEqual(['by-label']);
+  });
+
+  it('names the matched login and whether it is signed in, preferring a signed-in match', () => {
+    const credentials = bundleOf(
+      { id: 'codex-you', harness: 'codex', label: 'Work' },
+      { id: 'claude-you', harness: 'claude', email: 'me@work.example' },
+    );
+    const logins = [
+      here('codex', { id: 'codex-mine', label: 'Work', status: 'needs_sign_in' }),
+      here('claude', { id: 'claude-empty', email: 'me@work.example', status: 'needs_sign_in' }),
+      here('claude', { id: 'claude-ready', email: 'me@work.example' }),
+    ];
+    expect(reusedSignIns(credentials, logins)).toEqual(
+      new Map([
+        ['codex-you', { id: 'codex-mine', signedIn: false }],
+        ['claude-you', { id: 'claude-ready', signedIn: true }],
+      ]),
+    );
+  });
+
+  it('keeps the need of a label-matched login that is not signed in (codex-you / codex-mine, both Work)', () => {
+    const credentials = bundleOf({ id: 'codex-you', harness: 'codex', label: 'Work' });
+    const logins = [here('codex', { id: 'codex-mine', label: 'Work', status: 'needs_sign_in' })];
+    const need: CloneNeed = {
+      key: 'sign-in:codex-you',
+      kind: 'sign-in',
+      name: 'Codex login (codex-you)',
+      credentialId: 'codex-you',
+      why: 'Work',
+      held: false,
+    };
+    expect(needsAfterCopy([need], [], reusedSignIns(credentials, logins))).toEqual([need]);
   });
 });

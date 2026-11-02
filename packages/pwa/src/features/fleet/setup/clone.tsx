@@ -91,6 +91,7 @@ import {
   controlsChange,
   keysToCopy,
   needsAfterCopy,
+  type ReusedLogin,
   reusedSignIns,
   type SourceSettingsFile,
   sourceItemSummary,
@@ -119,7 +120,7 @@ interface CloneResult {
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
   /** The source sign-ins whose login this machine already had: reused as they are, with no slot. */
-  readonly reused: ReadonlySet<string>;
+  readonly reused: ReadonlyMap<string, ReusedLogin>;
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
   /** The source as the person names it, for the Done sentences. */
   readonly sourceName: string;
@@ -375,7 +376,7 @@ export function CloneMachine(props: CloneMachineProps) {
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
         reused:
-          credentials?.kind === 'done' ? reusedSignIns(bundle.credentials, credentials.value.credentials) : new Set(),
+          credentials?.kind === 'done' ? reusedSignIns(bundle.credentials, credentials.value.credentials) : new Map(),
         outcomes,
         sourceName,
       });
@@ -842,8 +843,9 @@ function DoneStep({
 }) {
   if (result === null) return null;
   const busiest = result.slots[0];
-  const slotFor = (need: CloneNeed): FleetCredentialView | undefined =>
-    result.slots.find(slot => slot.id === need.credentialId);
+  const signInTarget = (need: CloneNeed): string | undefined =>
+    result.slots.find(slot => slot.id === need.credentialId)?.id ??
+    (need.credentialId === undefined ? undefined : result.reused.get(need.credentialId)?.id);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-clone-step="done">
       <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
@@ -860,12 +862,12 @@ function DoneStep({
         onAdd={onAdd}
         copy={copy}
         signIn={need => {
-          const slot = slotFor(need);
-          return slot === undefined ? null : (
+          const target = signInTarget(need);
+          return target === undefined ? null : (
             <a
-              href={machineItemHash(machineName, 'sign-ins', slot.id)}
+              href={machineItemHash(machineName, 'sign-ins', target)}
               className="inline-flex min-h-control items-center gap-1 font-semibold text-accent underline"
-              data-clone-need-sign-in={slot.id}
+              data-clone-need-sign-in={target}
             >
               Sign in
               <ChevronRight size={14} aria-hidden="true" />

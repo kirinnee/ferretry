@@ -264,53 +264,65 @@ export const cloneNeeds = (
 
 /** The part of a login on this machine that the copy matches a source sign-in against. */
 export interface MatchableLogin {
+  readonly id: string;
   readonly harness: string;
   readonly store: string;
   readonly email?: string | undefined;
   readonly label?: string | undefined;
+  readonly status: { readonly word: string };
+}
+
+/** The login on this machine a source sign-in was matched to, and whether it is signed in. */
+export interface ReusedLogin {
+  readonly id: string;
+  readonly signedIn: boolean;
 }
 
 const normalEmail = (email: string | undefined): string | undefined => email?.trim().toLowerCase();
 
 /**
  * The source sign-ins whose login this machine already had, by the rule the daemon's copy used (same CLI,
- * same email ignoring case, or the same label when neither has an email; an API-key login never). The
- * daemon reuses such a login as it is, so there is nothing to sign in to afterwards.
+ * same email ignoring case, or the same label when neither has an email; an API-key login never), each with
+ * the login it matched. The daemon reuses such a login as it is, so a signed-in one needs nothing afterwards;
+ * one that still needs sign-in keeps its need, pointing at that login. A signed-in match wins over another.
  */
 export const reusedSignIns = (
   credentials: FleetCloneBundle['credentials'],
   here: readonly MatchableLogin[],
-): ReadonlySet<string> =>
-  new Set(
-    credentials
-      .filter(credential => credential.store !== 'environment')
-      .filter(credential => {
-        const email = normalEmail(credential.email);
-        return here.some(login => {
-          if (login.store === 'environment' || login.harness !== credential.harness) return false;
-          const own = normalEmail(login.email);
-          if (email !== undefined || own !== undefined) return email !== undefined && email === own;
-          return credential.label !== undefined && login.label === credential.label;
-        });
-      })
-      .map(credential => credential.id),
-  );
+): ReadonlyMap<string, ReusedLogin> => {
+  const reused = new Map<string, ReusedLogin>();
+  for (const credential of credentials) {
+    if (credential.store === 'environment') continue;
+    const email = normalEmail(credential.email);
+    const matches = here.filter(login => {
+      if (login.store === 'environment' || login.harness !== credential.harness) return false;
+      const own = normalEmail(login.email);
+      if (email !== undefined || own !== undefined) return email !== undefined && email === own;
+      return credential.label !== undefined && login.label === credential.label;
+    });
+    const signedIn = matches.find(login => login.status.word !== 'needs_sign_in');
+    const match = signedIn ?? matches[0];
+    if (match !== undefined) reused.set(credential.id, { id: match.id, signedIn: signedIn !== undefined });
+  }
+  return reused;
+};
 
 /**
  * The needs still worth showing once the copy is done: a sign-in is dropped when the copy left no slot for
- * it and this machine already had the login (`reused`). Any other need stays.
+ * it and this machine already had that login signed in (`reused`). A reused login that still needs sign-in
+ * keeps its need, and any other need stays.
  */
 export const needsAfterCopy = (
   needs: readonly CloneNeed[],
   slotIds: readonly string[],
-  reused: ReadonlySet<string>,
+  reused: ReadonlyMap<string, ReusedLogin>,
 ): readonly CloneNeed[] =>
   needs.filter(
     need =>
       need.kind !== 'sign-in' ||
       need.credentialId === undefined ||
       slotIds.includes(need.credentialId) ||
-      !reused.has(need.credentialId),
+      reused.get(need.credentialId)?.signedIn !== true,
   );
 
 /** The secret names an environment login names anywhere: its variables and, for a two-CLI login, either half. */

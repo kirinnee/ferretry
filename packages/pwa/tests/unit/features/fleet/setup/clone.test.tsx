@@ -1475,7 +1475,11 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
       }),
       target: fullTarget({
         '/v1/fleet/credentials': credentials([
-          credentialView('claude-mine', { email: 'me@work.example', usedBy: ['claude-default'] }),
+          credentialView('claude-mine', {
+            email: 'me@work.example',
+            usedBy: ['claude-default'],
+            status: { ...credentialView('x').status, word: 'ready', label: 'Ready' },
+          }),
           credentialView('codex-work', { harness: 'codex', clonedFrom: 'work-linux', email: undefined, label: 'Work' }),
         ]),
       }),
@@ -1488,6 +1492,33 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
       expect(screen.step()).toBe('done');
       expect(screen.q('[data-clone-need="sign-in:claude-you"]')).toBeNull();
       expect(screen.q('[data-clone-need="sign-in:codex-work"] [data-clone-need-sign-in="codex-work"]')).not.toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('keeps the sign-in of a reused login that still needs one, pointing at that login', async () => {
+    const { createClient } = daemons({
+      work: sourceFiles({
+        '/v1/fleet/export': bundle({
+          credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }],
+        }),
+      }),
+      target: fullTarget({
+        '/v1/fleet/credentials': credentials([
+          credentialView('codex-mine', { harness: 'codex', email: undefined, label: 'Work' }),
+        ]),
+      }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(screen.q('[data-clone-need="sign-in:codex-you"] [data-clone-need-sign-in="codex-mine"]')).not.toBeNull();
+      expect(screen.q('[data-clone-need-sign-in="codex-you"]')).toBeNull();
+      expect(screen.q('[data-setup-section="slots"]')).toBeNull();
     } finally {
       await screen.view.unmount();
     }
