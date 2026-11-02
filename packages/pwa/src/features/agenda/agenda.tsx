@@ -16,6 +16,9 @@
  *   is typed goes with the item's reference (`withReferencePrefix`), said in the composer's placeholder ("Reply to
  *   Piper…"). ✕ or Esc is plain chat. A send, or a quick-reply tap, sends AND closes the view, and the conversation
  *   returns to the new message. A quick reply carries the composer's text as its note.
+ * - A FORM is filled in here exactly as in the Inbox: the same fields on the card, the same picks (the Inbox's key for
+ *   the item), and the composer's Send answers it (`sendForm`) instead of chatting. The view stays until the answer
+ *   lands, so a refusal is read on the card.
  * - The same rows, with the parked and resolved ones, are this ferret's one list in Info (`section`): the agenda has
  *   no side bar of its own.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request, and EVERY id
@@ -31,8 +34,9 @@ import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import { actionSentence, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
+import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
@@ -169,6 +173,10 @@ export interface Agenda {
   /** Wire this into the Composer: a message went, so the open item closes. */
   readonly composer: {
     readonly onSent: () => void;
+    /** The open item is a form: Send answers it with this instead of chatting (`useFormComposer`). */
+    readonly answerForm?: () => void;
+    /** The open form's picks key, present with `answerForm`. */
+    readonly formKey?: string;
     /** Escape in the composer goes back to the chat; absent while no item is open. */
     readonly onEscape?: () => void;
   };
@@ -234,7 +242,15 @@ export const useAgenda = ({
   const [busy, setBusy] = useState<ReadonlyMap<AgendaId, string | null>>(new Map());
   const [announcement, setAnnouncement] = useState('');
   const [jumpHost, setJumpHost] = useState<HTMLElement | null>(null);
-  const onSent = useCallback((): void => update(() => ({ card: null })), [update]);
+  // A form's Send is its answer, not a message: the view waits for the answer to land (`act` closes it).
+  const answering = useRef(false);
+  const onSent = useCallback((): void => {
+    if (answering.current) {
+      answering.current = false;
+      return;
+    }
+    update(() => ({ card: null }));
+  }, [update]);
 
   const setCard = useCallback((id: AgendaId, state: string | null | undefined): void => {
     setBusy(current => {
@@ -374,6 +390,24 @@ export const useAgenda = ({
         {...(client === undefined || closed ? {} : { onBringBack: () => act(cardItem, UNSNOOZE_ACTION, '') })}
       />
     );
+  // The card's fields are live wherever the composer's Send can answer them: an open (or replied-to) form, with a client.
+  const formItem =
+    cardItem !== undefined &&
+    !closed &&
+    client !== undefined &&
+    cardItem.kind === 'form' &&
+    (standing === undefined || questionKept)
+      ? cardItem
+      : undefined;
+  const formKey = formItem === undefined ? undefined : inboxCardKey(connection.daemonId, scope.sessionId, formItem.id);
+  const answerForm =
+    formItem === undefined || formKey === undefined
+      ? undefined
+      : (): void =>
+          sendForm(formKey, formItem, composerDraft(scope), action => {
+            answering.current = true;
+            act(formItem, action, '');
+          });
   const view =
     cardItem === undefined ? null : (
       <AgendaDeliveryContext.Provider value={deliveryState}>
@@ -390,6 +424,7 @@ export const useAgenda = ({
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
           quoteScope={scope}
           renderProse={agendaProse(copyWriter)}
+          {...(formKey === undefined ? {} : { formKey })}
           {...(cardItem.copyPlan !== undefined
             ? {
                 planForm: (
@@ -512,7 +547,16 @@ export const useAgenda = ({
     jumpHost,
     section,
     references: () => aboutRef.current,
-    placeholder: cardId === null || closed ? undefined : `Reply to ${ferret}…`,
-    composer: { onSent, ...(cardId === null ? {} : { onEscape: () => update(() => ({ card: null })) }) },
+    placeholder:
+      cardId === null || closed
+        ? undefined
+        : formItem === undefined
+          ? `Reply to ${ferret}…`
+          : `Anything else for ${ferret}?`,
+    composer: {
+      onSent,
+      ...(answerForm === undefined || formKey === undefined ? {} : { answerForm, formKey }),
+      ...(cardId === null ? {} : { onEscape: () => update(() => ({ card: null })) }),
+    },
   };
 };

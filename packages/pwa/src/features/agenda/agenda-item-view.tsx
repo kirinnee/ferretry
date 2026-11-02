@@ -84,7 +84,7 @@ export interface AgendaItemViewProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
   readonly planForm?: ReactNode;
-  /** Names this item's form picks when a composer sends them (the Inbox); absent, a form is read, not filled in. */
+  /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
   /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
   readonly wrapTitle?: boolean;

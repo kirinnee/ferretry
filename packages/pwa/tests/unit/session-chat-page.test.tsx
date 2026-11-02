@@ -3086,6 +3086,75 @@ describe('SessionChatPage', () => {
       }
     });
 
+    test('a form item’s Send in the chat answers the form, the Inbox’s way, and never chats (#B143)', async () => {
+      const formItem = {
+        ...agendaItem,
+        id: 'A9',
+        kind: 'form',
+        ask: { kind: 'open-question' },
+        fields: [
+          {
+            id: '1',
+            type: 'one',
+            label: 'Which region?',
+            options: [{ label: 'EU' }, { label: 'US' }],
+            recommended: ['EU'],
+          },
+          { id: '2', type: 'yesno', label: 'OK to restart?', recommended: ['Yes'] },
+        ],
+      };
+      const sent: string[] = [];
+      const answers: unknown[] = [];
+      const spy = {
+        ...client([], agendaSession()),
+        send: async (_id: string, body: { message: string }) => {
+          sent.push(body.message);
+        },
+      };
+      const model = agendaModel([formItem]) as unknown as { client: Record<string, unknown> };
+      const attention = {
+        ...model,
+        client: {
+          ...model.client,
+          respond: async (_c: unknown, _s: unknown, id: string, response: unknown) => {
+            answers.push({ id, response });
+          },
+        },
+      } as unknown as SessionAgendaModel;
+      const page = renderSessionChatPage(agendaPage({ client: spy as never, attention }));
+      try {
+        press(page.root);
+        run(() => page.root.findByType(AgendaRow).props.onOpen());
+        const composer = () => page.root.findByType(Composer);
+        expect(composer().props.allowEmptySend).toBe(true);
+        expect(composer().props.placeholder).toMatch(/^Anything else for .+\?$/u);
+        // The card's fields are the Inbox's live controls, not a list to read.
+        expect(page.root.findAll(node => node.type === 'input' && node.props.type === 'radio')).toHaveLength(2);
+
+        await runAsync(async () => {
+          await composer().props.api.send('shared', { message: '', now: false });
+        });
+        expect(sent).toEqual([]);
+        expect(answers).toEqual([
+          {
+            id: 'A9',
+            response: {
+              kind: 'form',
+              answers: [
+                { id: '1', picked: 'EU' },
+                { id: '2', picked: 'Yes' },
+              ],
+            },
+          },
+        ]);
+        // Answered: the view closed and the composer chats again.
+        expect(cards(page.root)).toHaveLength(0);
+        expect(composer().props.allowEmptySend).toBe(false);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
     test('counts a held answer down on the line when the host passes agendaReplies', () => {
       const replies = {
         secondsLeft: 8,

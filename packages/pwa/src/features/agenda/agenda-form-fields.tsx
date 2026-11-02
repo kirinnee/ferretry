@@ -7,8 +7,8 @@
  *   free text     "Type it below." — the composer is its answer
  *
  * The asker's recommended value is already picked and says so. The picks live in `agendaForms`; the composer's one
- * Send combines them with its text (`agenda-form-send.ts`). Where no composer takes the send (the chat), the
- * fields are a numbered list to read, not controls.
+ * Send combines them with its text (`agenda-form-send.ts`), the Inbox's and the chat's alike. Where no composer can
+ * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
  */
 
 import { type AgendaFormField, FORM_NO, FORM_YES, formFieldRequired } from '@ferretry/protocol';

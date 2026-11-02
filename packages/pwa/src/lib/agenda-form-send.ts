@@ -14,8 +14,9 @@ import {
   formFieldName,
   formMissing,
 } from '@ferretry/protocol';
+import { useMemo, useRef } from 'react';
 import type { InboxAction } from './agenda-answers.ts';
-import { agendaForms, type FormPicks } from './agenda-form-state.ts';
+import { agendaForms, type FormPicks, useFormChanges } from './agenda-form-state.ts';
 
 /** The label the sent form carries in the undo toast and in history. */
 const FORM_SENT_LABEL = 'Form';
@@ -104,3 +105,35 @@ export const withFormSend = <T extends { readonly send: (...args: never[]) => un
       };
     },
   });
+
+/** What a composer under an open form item is given: its client, and whether Send needs no words. */
+export interface FormComposer<T> {
+  readonly api: T;
+  /** A form item is open: Send answers it even with an empty box. */
+  readonly allowEmptySend: boolean;
+  /** Bumped when a pick changes, so the "Not answered yet" line under the box goes away with it. */
+  readonly clearErrorOn?: number;
+}
+
+/**
+ * THE COMPOSER OF AN OPEN FORM ITEM, the Inbox's and the chat's alike: with `answerForm` its Send answers the form
+ * through {@link withFormSend}; without it the client is `api` itself and the composer chats as it always does.
+ * `formKey` names the open form's picks.
+ */
+export const useFormComposer = <T extends { readonly send: (...args: never[]) => unknown } | null>(
+  api: T,
+  answerForm: (() => void) | undefined,
+  formKey: string | undefined,
+): FormComposer<T> => {
+  const changes = useFormChanges(formKey ?? '');
+  const answer = useRef(answerForm);
+  answer.current = answerForm;
+  const forForm = answerForm !== undefined;
+  const client = useMemo(
+    () => (api === null || !forForm ? api : withFormSend(api, () => answer.current?.())),
+    [api, forForm],
+  );
+  return forForm
+    ? { api: client, allowEmptySend: true, clearErrorOn: changes }
+    : { api: client, allowEmptySend: false };
+};
