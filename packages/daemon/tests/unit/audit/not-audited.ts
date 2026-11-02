@@ -67,6 +67,11 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     "a choice about future versions (hold or skip) kept in its own small file; it writes no installed file, runs nothing and widens nobody's access, and the install it names is the one that was audited",
   'PATCH /v1/catalog-installs/runtime/:installId':
     "a choice about future versions (hold or skip) kept in its own small file; it writes no installed file, runs nothing and widens nobody's access, and the install it names is the one that was audited",
+  'POST /v1/skill-installs/local/project/preview':
+    'a read with a body: shows the full review of a skill on this machine and writes nothing; the apply is audited',
+  'POST /v1/skill-installs/local/runtime/preview':
+    'a read with a body: shows the full review of a skill on this machine and writes nothing; the apply is audited',
+  'GET /v1/skill-installs/local': 'a read: lists the copies this machine recorded; changes nothing',
   'POST /v1/sessions/:sessionId/interrupt': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/attachments': 'a file handed to an agent; the transcript is that history',
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',
