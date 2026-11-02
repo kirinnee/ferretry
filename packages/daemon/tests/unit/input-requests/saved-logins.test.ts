@@ -450,7 +450,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     const { request } = await raised(h);
 
     should(request.saved?.offers).deepEqual([
-      { id: 'SUDO_LAPTOP', label: 'sudo on laptop', fills: 'password', matched: false },
+      { id: 'SUDO_LAPTOP', label: 'sudo on laptop', fills: 'password', matched: false, elsewhere: ['sudo@laptop'] },
     ]);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_LAPTOP'), HOST);
     should(h.writes).deepEqual([PASSWORD]);
@@ -496,7 +496,14 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     });
 
     should(hinted.request.saved?.offers).deepEqual([
-      { id: 'SUDO_LAPTOP', label: 'laptop', fills: 'password', matched: false, hinted: true },
+      {
+        id: 'SUDO_LAPTOP',
+        label: 'laptop',
+        fills: 'password',
+        matched: false,
+        hinted: true,
+        elsewhere: ['sudo@laptop'],
+      },
     ]);
     const { id: _a, note: _n, ...first } = hinted.view;
     const { id: _b, note: _m, ...second } = unknown.view;

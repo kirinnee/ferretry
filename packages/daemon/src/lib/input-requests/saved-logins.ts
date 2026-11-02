@@ -14,8 +14,11 @@ import {
   type InputTargetFacts,
   type LoginFieldRole,
   LoginMatchSchema,
+  LOGIN_MATCH_MAX,
   matchedSignIns,
   namesSignIn,
+  type PlaceKey,
+  placeHosts,
   type SignInChoiceContext,
   type SignInSummary,
   savedRolesOf,
@@ -175,13 +178,32 @@ function handPickable(
 }
 
 /**
+ * Where an account signs in when that is NOT this target: the place keys of its sign-ins (names only), so the card can
+ * say "signs in at liftoff.okta.com" and keep it behind a second step. Empty when it signs in nowhere ("not linked to a
+ * site", also a second step); `undefined` when any of its sign-ins names this key (a site it is only "for": it is this
+ * site's account, offered in the first step).
+ */
+function signsInElsewhere(
+  account: AccountId,
+  matchKey: string | undefined,
+  listing: SavedListing,
+): readonly PlaceKey[] | undefined {
+  const hosts = listing.signIns
+    .filter(signIn => signIn.account === account)
+    .flatMap(signIn => placeHosts(signIn.place));
+  if (matchKey !== undefined && hosts.includes(matchKey)) return undefined;
+  return [...new Set(hosts)].slice(0, LOGIN_MATCH_MAX);
+}
+
+/**
  * WHAT THE OWNER'S CARD MAY OFFER, for a card whose fields need `roles`, filled from ONE account that holds them all:
  *
  * 1. the sign-ins the daemon MATCHED to the key (exact), of accounts that hold every field;
  * 2. the primary: {@link chosenSignIn} among those ONLY — the ferret's hint, a default, or the only one. Two or more
  *    matched and nothing chose one: no primary, and the owner picks. A hint or a default naming an account with no
  *    sign-in matched here is never promoted (a hinted one is still tagged);
- * 3. then, by hand, the other accounts that hold the fields ({@link handPickable}), hinted first, then by label.
+ * 3. then, by hand, the other accounts that hold the fields ({@link handPickable}), hinted first, then by label; the
+ *    ones that sign in at ANOTHER site come last and say where (`elsewhere`), for the card's second step.
  *
  * Nothing here types anything: the owner's tap is the permission.
  */
@@ -246,10 +268,20 @@ function offered(
   const here = new Set(matched.map(each => each.account));
   const byHand: InputSavedOffer[] = holders
     .filter(account => !here.has(account.id) && handPickable(account, roles, signIn !== undefined, providers))
-    .map(account => ({ ...base(account), matched: false, ...(hinted === account.id ? { hinted: true } : {}) }))
+    .map(account => {
+      const elsewhere = signsInElsewhere(account.id, matchKey, listing);
+      return {
+        ...base(account),
+        matched: false,
+        ...(hinted === account.id ? { hinted: true } : {}),
+        ...(elsewhere === undefined ? {} : { elsewhere }),
+      };
+    })
     .sort(
       (left, right) =>
-        Number(right.hinted === true) - Number(left.hinted === true) || left.label.localeCompare(right.label),
+        Number(left.elsewhere !== undefined) - Number(right.elsewhere !== undefined) ||
+        Number(right.hinted === true) - Number(left.hinted === true) ||
+        left.label.localeCompare(right.label),
     );
   return {
     offers: [...atKey, ...byHand],

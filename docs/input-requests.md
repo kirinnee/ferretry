@@ -982,6 +982,15 @@ accounts that may be picked by hand.
   better — except a one-time code (a code belongs to the sign-in it is for), any account on a page whose sign-in
   goes through a provider, and a provider account anywhere it is not matched ([above](#how-it-signs-in-and-where)).
   A hand pick keeps no facts.
+- **An account saved for ANOTHER site is a second step** (`elsewhere`, place keys only: `liftoff.okta.com`,
+  `sudo@kirin-box`; EMPTY for an account that signs in nowhere). "Choose another account" lists first ONLY the accounts
+  that sign in at THIS site; an account whose sign-ins are all elsewhere, or that has none, is behind "Use an account
+  from another site…", each saying "signs in at …" or "not linked to a site", after the others and never the primary or
+  a one-tap, even as the only account on the card. A sign-in that is only FOR this site (its `match`) is not elsewhere.
+  The place keys are names, so they leave the daemon only inside `saved`, which a caller without `secrets.use` never
+  gets. An older daemon sends no `elsewhere`: its card keeps the one list. "Only account here" is said only when the
+  one-tap truly is the only account that signs in here: a card whose `primary` says `only` beside another matched
+  account draws no one-tap and no such line, and asks "Pick one" instead.
 - **The ferret may hint** (`secretHint` / `secret_hint`, a handle or a `si_…`): a hint naming a matched sign-in
   makes it the primary ("Ferret chose this", `why: ferret`); one naming anything else is only tagged "the ferret
   suggested this", never promoted, and the agent's answer is the same whether the account exists. Nothing a hint or

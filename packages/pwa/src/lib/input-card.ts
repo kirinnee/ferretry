@@ -97,8 +97,10 @@ export const targetRef = (request: InputRequest): string =>
 export interface SplitOffers {
   /** The one-tap choice: the offer the DAEMON marked `primary`. Never "the first matched one", never a hinted one. */
   readonly primary: InputSavedOffer | undefined;
-  /** Every other offer, in the daemon's order, selectable by hand. */
+  /** Every other offer for THIS site, in the daemon's order, selectable by hand. */
   readonly others: readonly InputSavedOffer[];
+  /** Offers whose account signs in at ANOTHER site, or nowhere: only ever behind a second step, never a one-tap. */
+  readonly elsewhere: readonly InputSavedOffer[];
 }
 
 /**
@@ -106,10 +108,30 @@ export interface SplitOffers {
  * daemon alone knows the owner's defaults and the ferret's hint, so a card from an older daemon, which sends no
  * `primary`, has no one-tap: the owner picks. `hinted` (the ferret named it) is a tag, never a promotion.
  */
+/**
+ * An offer picked by hand whose account signs in at another site, or nowhere (`elsewhere: []`); an older daemon
+ * names neither, and its offers stay in the one list.
+ */
+const isFromElsewhere = (offer: InputSavedOffer): boolean => !offer.matched && offer.elsewhere !== undefined;
+
+/**
+ * The one-tap choice: marked `primary` by the daemon, and never "the only account here" while another account signs in
+ * here too (a card that says so contradicts its own list; the owner picks instead).
+ */
+const isOneTap = (offer: InputSavedOffer, offers: readonly InputSavedOffer[]): boolean =>
+  offer.primary === true &&
+  offer.matched &&
+  !(offer.why === 'only' && offers.some(other => other !== offer && other.matched));
+
 export const splitOffers = (saved: InputSaved | undefined): SplitOffers => {
   const offers = saved?.offers ?? [];
-  const primary = offers.find(offer => offer.primary === true && offer.matched);
-  return { primary, others: offers.filter(offer => offer !== primary) };
+  const primary = offers.find(offer => isOneTap(offer, offers));
+  const rest = offers.filter(offer => offer !== primary);
+  return {
+    primary,
+    others: rest.filter(offer => !isFromElsewhere(offer)),
+    elsewhere: rest.filter(isFromElsewhere),
+  };
 };
 
 /** The few words under the one-tap button: why the daemon put this account first ("Default for ferretry"). */
@@ -132,7 +154,7 @@ export const choiceReasonWords = (
  */
 export const pickOneOffers = (saved: InputSaved | undefined): readonly InputSavedOffer[] => {
   const offers = saved?.offers ?? [];
-  if (offers.some(offer => offer.primary === true)) return [];
+  if (offers.some(offer => isOneTap(offer, offers))) return [];
   const matched = offers.filter(offer => offer.matched && offer.signIn !== undefined);
   return matched.length >= 2 ? matched : [];
 };
@@ -177,6 +199,18 @@ export const savedButtonWords = (offer: InputSavedOffer): string => `Use saved $
 /** The username line under it, unless the label already says it. */
 export const offerUsername = (offer: InputSavedOffer): string | undefined =>
   offer.username === undefined || offer.label.includes(offer.username) ? undefined : offer.username;
+
+/** The second step's title: accounts saved for OTHER sites (or none), which are never the default here. */
+export const OTHER_SITE_ACCOUNTS_WORDS = 'Use an account from another site…';
+
+/** An account with no sign-in anywhere. */
+const NOT_LINKED_WORDS = 'not linked to a site';
+
+/** Where an account from another site signs in: `signs in at liftoff.okta.com`. */
+export const signsInAtWords = (offer: InputSavedOffer): string =>
+  offer.elsewhere === undefined || offer.elsewhere.length === 0
+    ? NOT_LINKED_WORDS
+    : `signs in at ${offer.elsewhere.join(', ')}`;
 
 export const REOBSERVING = 'Ferretry is looking at the target again';
 

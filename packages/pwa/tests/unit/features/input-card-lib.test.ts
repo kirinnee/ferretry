@@ -36,6 +36,7 @@ import {
   shotBoxes,
   showsHeaderRisk,
   signInWords,
+  signsInAtWords,
   splitOffers,
   targetRef,
   titleWords,
@@ -123,7 +124,7 @@ describe('offers ordering', () => {
   it('makes the offer the DAEMON marked primary the primary and leaves the daemon order for the rest', () => {
     const first = offer({ id: 'A_ONE', label: 'one', matched: false });
     const second = offer({ id: 'B_TWO', label: 'two', matched: true });
-    const third = primaryOffer({ id: 'C_THREE', label: 'three' });
+    const third = primaryOffer({ id: 'C_THREE', label: 'three', why: 'site' });
 
     const { primary, others } = splitOffers(saved({ offers: [first, second, third] }));
 
@@ -141,7 +142,55 @@ describe('offers ordering', () => {
   });
 
   it('has no primary and no others when nothing is saved', () => {
-    expect(splitOffers(undefined)).toEqual({ primary: undefined, others: [] });
+    expect(splitOffers(undefined)).toEqual({ primary: undefined, others: [], elsewhere: [] });
+  });
+
+  it('puts an account that signs in at another site in a list of its own, never the primary or the others', () => {
+    const here = offer({ id: 'HERE', label: 'here', matched: false });
+    const away = offer({ id: 'AWAY', label: 'away', matched: false, elsewhere: ['liftoff.okta.com'] });
+
+    const split = splitOffers(saved({ offers: [here, away] }));
+
+    expect(split.primary).toBeUndefined();
+    expect(split.others).toEqual([here]);
+    expect(split.elsewhere).toEqual([away]);
+  });
+
+  it('says where an account from another site signs in', () => {
+    const away = offer({ matched: false, elsewhere: ['liftoff.okta.com', 'sudo@box'] });
+
+    expect(signsInAtWords(away)).toBe('signs in at liftoff.okta.com, sudo@box');
+  });
+
+  it('puts an account that signs in nowhere behind the second step, as "not linked to a site"', () => {
+    const bare = offer({ id: 'BARE', label: 'bare', matched: false, elsewhere: [] });
+    const split = splitOffers(saved({ offers: [bare] }));
+
+    expect(split.others).toEqual([]);
+    expect(split.elsewhere).toEqual([bare]);
+    expect(signsInAtWords(bare)).toBe('not linked to a site');
+  });
+
+  it('never calls an account "the only one here" while another account signs in here too', () => {
+    const lone = primaryOffer({ id: 'A', label: 'a' });
+    const second = offer({ id: 'B', label: 'b', matched: true, signIn: 'si_0123456789abcdee' });
+
+    const split = splitOffers(saved({ offers: [lone, second] }));
+
+    expect(split.primary).toBeUndefined();
+    expect(split.others).toEqual([lone, second]);
+    expect(choiceReasonWords(saved({ offers: [lone, second] }), split.primary)).toBeUndefined();
+    expect(pickOneOffers(saved({ offers: [lone, second] }))).toEqual([lone, second]);
+  });
+
+  it('keeps the one-tap, and its "only" line, when it truly is the only account that signs in here', () => {
+    const lone = primaryOffer({ id: 'A', label: 'a' });
+    const away = offer({ id: 'B', label: 'b', matched: false, elsewhere: ['liftoff.okta.com'] });
+
+    const split = splitOffers(saved({ offers: [lone, away] }));
+
+    expect(split.primary).toBe(lone);
+    expect(pickOneOffers(saved({ offers: [lone, away] }))).toEqual([]);
   });
 });
 
@@ -660,7 +709,7 @@ describe('the reason, Pick one and Always use words', () => {
     const b = offer({ id: 'B_TWO', signIn: 'si_fedcba9876543210' });
     expect(pickOneOffers(saved({ offers: [a, b] })).map(each => each.id)).toEqual(['A_ONE', 'B_TWO']);
     expect(pickOneOffers(saved({ offers: [a] }))).toEqual([]);
-    expect(pickOneOffers(saved({ offers: [primaryOffer({ id: 'A_ONE' }), b] }))).toEqual([]);
+    expect(pickOneOffers(saved({ offers: [primaryOffer({ id: 'A_ONE', why: 'site' }), b] }))).toEqual([]);
     expect(pickOneOffers(saved({ offers: [offer({ id: 'A_ONE' }), offer({ id: 'B_TWO' })] }))).toEqual([]);
   });
 
