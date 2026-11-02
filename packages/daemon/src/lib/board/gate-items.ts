@@ -22,7 +22,8 @@
  *   linked to it (an agent's item with `task` = the card) raises no gate item. The daemon puts the gate on the thread
  *   (`gateAttached`) and the owner answers its options there, through {@link GateItems.answer}. A thread left on the
  *   FERRET's turn for more than {@link THREAD_GRACE_MS} stops counting, so a ferret cannot mute a gate by opening one.
- *   An attachment counts as asked once the OWNER closes the thread: no gate item is raised for that entry afterwards.
+ *   An attachment counts as asked only when the OWNER answered a gate option on it (a `gate-answered` entry);
+ *   any other close of the thread (its own answer, Dismiss, a reply, a snooze, the ferret) raises the gate item.
  *
  * An internal card (its lead's bookkeeping) never raises one: its owner ferret or a lead passes its gate itself.
  */
@@ -480,12 +481,15 @@ export class GateItems implements CardWriteObserver {
     }
   }
 
-  /** Where this card's gate is asking now, or `undefined` when it is not: a gate item, or a thread carrying the gate. */
+  /**
+   * Where this card's gate is asking now, or `undefined` when it is not: a gate item, or a thread carrying the gate.
+   * A board or agenda that cannot be read THROWS: "not asking" would let a second ask through.
+   */
   async asking(cardId: BoardTaskId): Promise<GateAsking | undefined> {
-    const card = await this.ports.board.card(cardId).catch(() => undefined);
+    const card = await this.ports.board.card(cardId);
     const gate = card === undefined ? undefined : gateOf(card, this.ports.lanes);
     if (card === undefined || gate === undefined) return undefined;
-    const held = await this.held(card.task, await this.sessionsOf(card.task));
+    const held = await this.held(card.task, await this.sessionsOf(card.task), true);
     const wanted = gateReference(gate);
     const found =
       held.gates.find(each => each.item.sourceRef === wanted) ??
@@ -579,9 +583,13 @@ export class GateItems implements CardWriteObserver {
 
   /**
    * The card's gate items and follow-ups, on its ferrets' agendas and on every other that ever held one of its items:
-   * open ones, and the gates already asked and closed. An agenda that cannot be read holds none.
+   * open ones, and the gates already asked and closed. An agenda that cannot be read holds none, unless `strict`: then it throws.
    */
-  private async held(card: Pick<BoardTask, 'id' | 'machineId'>, home: readonly string[]): Promise<HeldItems> {
+  private async held(
+    card: Pick<BoardTask, 'id' | 'machineId'>,
+    home: readonly string[],
+    strict = false,
+  ): Promise<HeldItems> {
     const cardId = card.id;
     await this.scanned();
     const gates: OpenItem[] = [];
@@ -590,8 +598,13 @@ export class GateItems implements CardWriteObserver {
     const asked = new Set<string>();
     const answeredOnThread = new Set<string>();
     for (const sessionId of new Set([...home, ...(this.holders.get(cardId) ?? [])])) {
-      const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
-      if (listed === undefined || !listed.ok) continue;
+      const listed = strict
+        ? await this.ports.agenda.list(sessionId)
+        : await this.ports.agenda.list(sessionId).catch(() => undefined);
+      if (listed === undefined || !listed.ok) {
+        if (strict) throw new Error(`${sessionId}'s agenda could not be read`);
+        continue;
+      }
       for (const item of listed.value.items) {
         if (isThreadOf(item, card)) threads.push({ sessionId, item });
         for (const reference of answeredGatesOf(item, cardId)) answeredOnThread.add(reference);
