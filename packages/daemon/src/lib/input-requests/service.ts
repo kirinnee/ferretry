@@ -1118,6 +1118,20 @@ export class InputRequestService {
     return about === undefined ? undefined : clipped(factorAskWords(about.keys, { place: matchKey }));
   }
 
+  /**
+   * A request spelled again at publication, after the service answered: sealed when a hold now covers ANY of its
+   * terminal's names (the target key, the pane's name and its id), the same names the service's own seal reads, as the
+   * agent-tools publication checks both the name and the id. A request the service no longer holds is checked by its
+   * key alone; a page's or a secret's facts pass through.
+   */
+  resealed(request: InputRequest): InputRequest {
+    const held = this.held.get(request.id);
+    const names = held?.request.sessionId === request.sessionId ? held.names : [request.target.key];
+    if (request.observed?.kind !== 'terminal' || this.quarantinedUntil(request.sessionId, names) === undefined)
+      return request;
+    return { ...request, observed: maskedFacts(request.observed) };
+  }
+
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
   private sealed(held: Held, shown: InputRequest): InputRequest {
     if (shown.observed?.kind !== 'terminal' || !this.quarantined(shown.sessionId, held.names)) return shown;

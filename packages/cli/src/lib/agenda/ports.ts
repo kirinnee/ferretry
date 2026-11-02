@@ -24,7 +24,7 @@ export interface IAgendaGateway {
   sendReplies(sessionId: string): Promise<AgendaSnapshot>;
   /** The owner's bulk clear of the agent ferrets' open items; `dryRun` only counts them. */
   clearAgents(dryRun: boolean): Promise<AgendaClearAgentsResult>;
-  /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
+  /** The features the daemon reports (`DAEMON_FEATURES`); throws `DaemonFeaturesUnreadable` when it cannot be asked. */
   features(): Promise<readonly string[]>;
 }
 

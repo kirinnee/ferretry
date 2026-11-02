@@ -47,7 +47,7 @@ describe('fy input answer', () => {
 
     // Assert
     const shown = out.diagnostics.join('\n');
-    should(shown).containEql('the agent says: sudo password to install the package');
+    should(shown).containEql('the ferret says: sudo password to install the package');
     should(shown).containEql('reading the terminal now: sudo');
     should(shown).containEql('echo: off');
     should(shown).containEql('[sudo] password for deploy:');
@@ -235,7 +235,7 @@ describe('fy input ls and cancel', () => {
 
     // Assert
     should(out.messages[0]).containEql('!A7  pending  secret  %terminal:dev  8m left');
-    should(out.messages[0]).containEql('the agent says: sudo password to install the package');
+    should(out.messages[0]).containEql('the ferret says: sudo password to install the package');
   });
 
   it('should say when nothing is waiting, and print the protocol payload with --json', async () => {

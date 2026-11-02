@@ -16,6 +16,7 @@ import type {
   SignInSummary,
   TwoFactorKeySummary,
 } from '@ferretry/protocol';
+import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { Command } from 'commander';
 import { AccountController } from '../../../src/lib/secrets/account-controller';
 import { type AccountControllers, registerAccountCommands } from '../../../src/lib/secrets/account-commands';
@@ -229,6 +230,9 @@ class FakeSeedGateway implements ITwoFactorSeedGateway {
       state: 'saved',
       expiresAt: '2026-01-01T00:02:00.000Z',
     } as Awaited<ReturnType<ITwoFactorSeedGateway['view']>>;
+  }
+  async features(): Promise<readonly string[]> {
+    return [DAEMON_FEATURES.twoFactorKeys];
   }
 }
 

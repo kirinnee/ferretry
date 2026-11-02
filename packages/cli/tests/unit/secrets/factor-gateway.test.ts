@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import { padInputValue } from '@ferretry/protocol';
 import should from 'should';
+import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
+import { health } from '../daemon/fixtures';
 import { ProtocolTwoFactorSeedGateway } from '../../../src/lib/secrets/factor-gateway';
 
 interface Seen {
@@ -23,6 +25,15 @@ function gatewayOver(reply: unknown) {
 }
 
 describe('ProtocolTwoFactorSeedGateway', () => {
+  it('should read the features from the health route, and fail as unreadable when it cannot ask', async () => {
+    const reported = gatewayOver(health({ features: ['accounts.2fa-keys.1'] }));
+    const broken = new ProtocolTwoFactorSeedGateway({ request: () => Promise.reject(new Error('down')) } as never);
+
+    should(await reported.gateway.features()).deepEqual(['accounts.2fa-keys.1']);
+    should(reported.seen.map(call => call.path)).deepEqual(['/v1/health']);
+    await should(broken.features()).be.rejectedWith(DaemonFeaturesUnreadable);
+  });
+
   it('should stage, put on the agenda and watch a seed, each on its route, parsed both ways', async () => {
     // Arrange
     const stage = gatewayOver({

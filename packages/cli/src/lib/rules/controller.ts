@@ -2,24 +2,36 @@ import {
   AccountIdSchema,
   DAEMON_FEATURES,
   placeKeys,
+  ruleDeepLink,
+  SIGN_IN_RULE_AUTO_RECIPE_WARNING,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
+  SIGN_IN_RULE_MIN_SECONDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_STAGE_TTL_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TOTP_WARNING,
+  SIGN_IN_RULES_SCREEN_PATH,
   SignInIdSchema,
   type SignInRuleDraft,
   type SignInRuleNarrow,
   type SignInRuleScope,
   SignInRuleScopeSchema,
   type SignInRuleStaged,
+  type SignInRuleStageId,
   type SignInRuleView,
+  signInRuleFieldWords,
+  signInRuleResumable,
+  signInRuleScopeWords,
+  signInRuleStatusWords,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
+import { daemonNeedsUpdate } from '../daemon/features.ts';
+import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import { showUntrusted } from '../input/render.ts';
 import { parseLifetime, unique } from '../plan/controller.ts';
+import { RULES_FEATURE_WORDS } from './gateway.ts';
 import type { RulesPorts } from './ports.ts';
 
 /** Options every `fy rules` command accepts. */
@@ -27,7 +39,7 @@ export interface RulesCommandOptions {
   readonly json?: boolean | undefined;
 }
 
-/** `fy rules add|resume|renew` flags. */
+/** `fy rules add|resume|renew|widen` flags. */
 export interface RulesStageOptions extends RulesCommandOptions {
   readonly username?: boolean | undefined;
   readonly totp?: boolean | undefined;
@@ -52,18 +64,6 @@ export interface RulesNarrowOptions extends RulesCommandOptions {
   readonly uses?: string | undefined;
 }
 
-/** Said to a ferret that runs any `fy rules` command. */
-export const RULES_FERRET_REFUSAL =
-  "this is the owner's command; a ferret cannot make or change a standing sign-in rule";
-
-function refuseFerret(caller: {
-  readonly ownSessionId: string | undefined;
-  readonly agentCredential: string | undefined;
-}): void {
-  if ((caller.ownSessionId?.trim() ?? '') !== '' || (caller.agentCredential?.trim() ?? '') !== '')
-    throw new Error(RULES_FERRET_REFUSAL);
-}
-
 /** Said when a paste rule's id is given to `fy rules rm`. */
 export const PASTE_RULE_POINTER =
   'that is not a standing sign-in rule (those start sr_). A paste rule is removed with: fy copy rules rm <id>';
@@ -72,48 +72,55 @@ const POLL_MS = 1_000;
 /** The stage lapses at the daemon after this long; the wait outlasts it by a few seconds so the last word is heard. */
 const WAIT_SECONDS = SIGN_IN_RULE_STAGE_TTL_SECONDS + 5;
 const LISTING = 'rules ls';
+/** The command that prints every sign-in's id (si_…), which `fy rules add` takes. */
+export const SIGN_IN_LISTING = 'fy account site ls';
+/** The command that prints every account's id, which `fy rules rm --account` takes. */
+export const ACCOUNT_LISTING = 'fy account ls';
 
 const placeWords = (place: SignInRuleView['place']): string => placeKeys(place).map(showUntrusted).join(', ');
 
-/** The amber line for a sign-in whose recipe takes a ferret's edits unreviewed. */
-export const AUTO_RECIPE_WARNING = "Its recipe takes a ferret's edits without your review.";
+/** The start of a rule id a command takes back (`sr_` and eight more), as every hint prints it. */
+const shortId = (rule: Pick<SignInRuleView, 'id'>): string => rule.id.slice(0, 11);
 
 /**
  * What a staged or listed rule warns of, drawn from its STRUCTURED flags and never from its rows' words, which may be
- * clipped (secrev-1301 L2): ONE red block (a terminal rule's root line and its residual sentence, or a code's own
- * sentence), the amber auto-recipe line, then "How it's checked:" with the proof and the honest limit under it.
+ * clipped (secrev-1301 L2): ONE red block (a terminal rule's root line and its residual sentence, then a code's own
+ * sentence, each when it applies), the amber auto-recipe line, then "How it's checked:" with the proof and the honest
+ * limit under it.
  */
 export function ruleWarnings(
   rule: { readonly root: boolean; readonly totp: boolean; readonly autoRecipe: boolean },
   red: (text: string) => string,
 ): readonly string[] {
-  const block = rule.root
-    ? `${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL}`
-    : rule.totp
-      ? SIGN_IN_RULE_TOTP_WARNING
-      : undefined;
+  const block = [
+    ...(rule.root ? [SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULE_TERMINAL_RESIDUAL] : []),
+    ...(rule.totp ? [SIGN_IN_RULE_TOTP_WARNING] : []),
+  ];
   return [
-    ...(block === undefined ? [] : [red(block)]),
-    ...(rule.autoRecipe ? [AUTO_RECIPE_WARNING] : []),
+    ...(block.length === 0 ? [] : [red(block.join(' '))]),
+    ...(rule.autoRecipe ? [SIGN_IN_RULE_AUTO_RECIPE_WARNING] : []),
     "How it's checked:",
     ...(rule.root ? [`  ${SIGN_IN_RULE_TERMINAL_HONEST_LIMIT}`] : []),
     `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
   ];
 }
 
-const scopeWords = (scope: SignInRuleScope): string =>
-  scope.kind === 'any'
-    ? 'any ferret'
-    : scope.kind === 'project'
-      ? `project ${scope.project}`
-      : `session ${showUntrusted(scope.session)}`;
+/** "used 3×, last <when>", or "not used yet": the app's Uses row says the same. */
+const usedWords = (usage: SignInRuleView['usage']): string =>
+  usage.count === 0
+    ? 'not used yet'
+    : `used ${String(usage.count)}×${usage.lastUsedAt === undefined ? '' : `, last ${usage.lastUsedAt}`}`;
 
+/** A listed rule in words: its status, what it types, for whom (the protocol's words for each), its end and its use. */
 function renderRule(rule: SignInRuleView, red: (text: string) => string): string {
   const cap = rule.uses === undefined ? '' : `, ${String(rule.remaining ?? 0)} of ${String(rule.uses)} uses left`;
-  const head = `${rule.id}  ${rule.status}  ${showUntrusted(rule.account.id)} (${showUntrusted(rule.account.label)}) at ${placeWords(rule.place)}  types ${rule.fields.join(', ')}  for ${scopeWords(rule.scope)}  until ${rule.expiresAt}${cap}`;
+  const head = `${rule.id}  ${signInRuleStatusWords(rule)}  ${showUntrusted(rule.account.id)} (${showUntrusted(rule.account.label)}) at ${placeWords(rule.place)}  types ${signInRuleFieldWords(rule.fields)}  who: ${showUntrusted(signInRuleScopeWords(rule.scope))}  until ${rule.expiresAt}${cap}  ${usedWords(rule.usage)}`;
   const lines = [head];
+  // A rule whose sign-in is gone cannot be resumed (the app offers no Resume either): no hint to a command that fails.
   if (rule.suspended !== undefined)
-    lines.push(`   stopped ${rule.suspended.at}: ${rule.suspended.because} (fy rules resume ${rule.id.slice(0, 11)})`);
+    lines.push(
+      `   suspended ${rule.suspended.at}${signInRuleResumable(rule) ? ` (fy rules resume ${shortId(rule)})` : ''}`,
+    );
   if (rule.unverified === true) lines.push('   not checked yet: it fills nothing until the daemon has checked it');
   lines.push(
     ...ruleWarnings(
@@ -135,16 +142,16 @@ function renderStaged(staged: SignInRuleStaged, red: (text: string) => string): 
 }
 
 /**
- * Drives `fy rules`: the owner reads their standing sign-in rules, stages a new, resumed or renewed one, narrows one
- * and ends one. A rule is NEVER approved here: it is staged, shown in the app, and committed by a passkey there. There
- * is no commit call in {@link IRulesGateway} for this to make, and the machine's token could not make its proof
- * anyway. Refused inside a ferret's pane, and again by the daemon's route spine.
+ * Drives `fy rules`: the owner reads their standing sign-in rules, stages a new, resumed, renewed or widened one,
+ * narrows one and revokes one. A rule is NEVER approved here: it is staged, shown in the app, and committed by a passkey
+ * there. There is no commit call in {@link IRulesGateway} for this to make, and the machine's token could not make its
+ * proof anyway. Refused inside a ferret's pane, and again by the daemon's route spine.
  */
 export class RulesController {
   constructor(private readonly ports: RulesPorts) {}
 
   async list(options: RulesCommandOptions): Promise<void> {
-    refuseFerret(this.ports);
+    refuseOwnerCommandInPane(this.ports);
     const list = await this.ports.gateway.list();
     const { red } = this.ports;
     const damaged =
@@ -171,9 +178,9 @@ export class RulesController {
   }
 
   async add(signIn: string, options: RulesStageOptions): Promise<void> {
-    refuseFerret(this.ports);
+    refuseOwnerCommandInPane(this.ports);
     const id = SignInIdSchema.safeParse(signIn.trim());
-    if (!id.success) throw new Error(`"${signIn}" is not a sign-in: name one as si_… (see \`fy accounts\`)`);
+    if (!id.success) throw new Error(`"${signIn}" is not a sign-in: name one as si_… (see \`${SIGN_IN_LISTING}\`)`);
     const code = this.#code(options);
     const draft: SignInRuleDraft = {
       signIn: id.data,
@@ -185,24 +192,81 @@ export class RulesController {
   }
 
   async resume(reference: string, options: RulesStageOptions): Promise<void> {
-    refuseFerret(this.ports);
+    refuseOwnerCommandInPane(this.ports);
     const rule = await this.#rule(reference);
     if (rule.status !== 'suspended')
       throw new Error(
-        `the rule ${rule.id} is ${rule.status}, not suspended: use \`fy rules renew ${rule.id.slice(0, 11)}\` to approve it again`,
+        `the rule ${rule.id} is not suspended (${signInRuleStatusWords(rule)}): use \`fy rules renew ${shortId(rule)}\` to approve it again`,
       );
-    await this.#restage(rule, { ...options, expires: undefined }, 'resume');
+    if (!signInRuleResumable(rule))
+      throw new Error(
+        `the rule ${rule.id} can't be resumed: ${signInRuleStatusWords(rule)}. Revoke it with \`fy rules rm ${shortId(rule)}\``,
+      );
+    await this.#restage(rule, { ...options, expires: undefined, uses: undefined }, 'resume');
   }
 
   async renew(reference: string, options: RulesStageOptions): Promise<void> {
-    refuseFerret(this.ports);
+    refuseOwnerCommandInPane(this.ports);
     await this.#restage(await this.#rule(reference), options, 'renew');
+  }
+
+  /**
+   * Gives a rule MORE (the username, the 2FA code, another scope, more uses or a later end): the same rule staged again
+   * with `replaces`, like a renew, so a fresh passkey in the app approves it. Every term not named keeps the old rule's;
+   * one that cannot be kept (no uses left, or under an hour left) must be named, so a widen never extends anything
+   * silently. A widen that gives nothing more is refused and pointed to `fy rules narrow`.
+   */
+  async widen(reference: string, options: RulesStageOptions): Promise<void> {
+    refuseOwnerCommandInPane(this.ports);
+    const code = this.#code(options);
+    const uses = this.#count(options.uses, 1);
+    const lifetime = options.expires === undefined ? undefined : parseLifetime(options.expires);
+    const scope = options.scope === undefined ? undefined : parseScope(options.scope);
+    const rule = await this.#rule(reference);
+    const short = shortId(rule);
+    if (rule.totp && !code)
+      throw new Error(
+        `the rule ${rule.id} types a 2FA code: a widen keeps it only with --totp --i-understand-one-factor (to drop the code, \`fy rules narrow ${short} --drop-totp\`)`,
+      );
+    const nowMs = this.ports.nowMs();
+    const leftSeconds = Math.floor((Date.parse(rule.expiresAt) - nowMs) / 1_000);
+    if (lifetime === undefined && leftSeconds < SIGN_IN_RULE_MIN_SECONDS)
+      throw new Error(`the rule ${rule.id} has under an hour left: say how long it lasts with --expires`);
+    const usesLeft = rule.uses === undefined ? undefined : (rule.remaining ?? 0);
+    if (uses === undefined && usesLeft === 0)
+      throw new Error(`the rule ${rule.id} has no uses left: say how many with --uses N`);
+    const wider = [
+      ...(options.username === true && !rule.fields.includes('username') ? ['the username'] : []),
+      ...(code && !rule.totp ? ['the 2FA code'] : []),
+      ...(scope !== undefined && !sameScope(scope, rule.scope)
+        ? [`who: ${showUntrusted(signInRuleScopeWords(scope))}`]
+        : []),
+      ...(uses !== undefined && usesLeft !== undefined && uses > usesLeft ? [`${String(uses)} uses`] : []),
+      ...(lifetime !== undefined && nowMs + lifetime * 1_000 > Date.parse(rule.expiresAt) ? ['a later end'] : []),
+    ];
+    if (wider.length === 0)
+      throw new Error(
+        `nothing here widens the rule ${rule.id}: a widen adds the username (--username), the 2FA code (--totp --i-understand-one-factor), another scope (--scope), more uses (--uses) or a later end (--expires). To take something away: \`fy rules narrow ${short}\``,
+      );
+    const kept = (field: 'username' | 'password'): boolean =>
+      rule.fields.includes(field) || (field === 'username' && options.username === true);
+    const draft: SignInRuleDraft = {
+      signIn: rule.signIn,
+      fields: (['username', 'password'] as const).filter(kept),
+      ...(code ? { totp: true, totpAcknowledged: true as const } : {}),
+      scope: scope ?? rule.scope,
+      lifetimeSeconds: lifetime ?? leftSeconds,
+      ...(uses !== undefined ? { uses } : usesLeft === undefined ? {} : { uses: usesLeft }),
+      replaces: rule.id,
+    };
+    this.#say(options, `Widening ${short}: ${wider.join(', ')}. Everything else stays as it is.`);
+    await this.#stageAndWait(draft, options);
   }
 
   /** Takes something away. It needs no passkey, so the daemon refuses anything that is not strictly narrower. */
   async narrow(reference: string, options: RulesNarrowOptions): Promise<void> {
-    refuseFerret(this.ports);
-    const uses = this.#count(options.uses);
+    refuseOwnerCommandInPane(this.ports);
+    const uses = this.#count(options.uses, 0);
     const narrow: SignInRuleNarrow = {
       ...(options.dropTotp === true ? { dropTotp: true as const } : {}),
       ...(options.expires === undefined
@@ -219,36 +283,43 @@ export class RulesController {
     );
   }
 
+  /** `fy rules rm` (alias `revoke`): revokes one rule, or every rule of an account. No passkey: it only takes away. */
   async remove(reference: string | undefined, options: RulesRemoveOptions): Promise<void> {
-    refuseFerret(this.ports);
+    refuseOwnerCommandInPane(this.ports);
     if (options.account !== undefined) {
       if (reference !== undefined) throw new Error('name a rule or --account, not both');
       return await this.#removeAccount(options.account, options);
     }
     if (reference === undefined)
-      throw new Error('name the rule to end (sr_…), or --account <ACCOUNT> for all of one account');
+      throw new Error('name the rule to revoke (sr_…), or --account <ACCOUNT> for all of one account');
     if (!reference.trim().startsWith('sr_')) throw new Error(PASTE_RULE_POINTER);
     const rule = await this.#rule(reference);
     await this.ports.gateway.revoke(rule.id);
-    this.ports.out.success(options.json === true ? JSON.stringify({ revoked: rule.id }) : `Ended the rule ${rule.id}.`);
+    this.ports.out.success(
+      options.json === true ? JSON.stringify({ revoked: rule.id }) : `Revoked the rule ${rule.id}.`,
+    );
   }
 
+  /** `revokedCount`, not the wire's `revoked`: the one-rule answer's `revoked` is an id, and one key has one type. */
   async #removeAccount(account: string, options: RulesCommandOptions): Promise<void> {
     const id = AccountIdSchema.safeParse(account.trim());
-    if (!id.success) throw new Error(`"${account}" is not an account id: see \`fy accounts\``);
+    if (!id.success) throw new Error(`"${account}" is not an account id: see \`${ACCOUNT_LISTING}\``);
     const revoked = await this.ports.gateway.revokeAccount(id.data);
     this.ports.out.success(
       options.json === true
-        ? JSON.stringify({ account: id.data, revoked })
+        ? JSON.stringify({ account: id.data, revokedCount: revoked })
         : revoked === 0
           ? `${id.data} had no standing rules.`
-          : `Ended ${String(revoked)} standing ${revoked === 1 ? 'rule' : 'rules'} of ${id.data}.`,
+          : `Revoked ${String(revoked)} standing ${revoked === 1 ? 'rule' : 'rules'} of ${id.data}.`,
     );
   }
 
   /** Stages the same rule again (same id, next revision): the owner's passkey is what makes it a new approval. */
   async #restage(rule: SignInRuleView, options: RulesStageOptions, verb: 'resume' | 'renew'): Promise<void> {
     const code = this.#code(options);
+    const uses = this.#count(options.uses, 1) ?? rule.uses;
+    // A cap narrowed to 0 cannot be approved again as it is: a rule's cap is at least one use.
+    if (uses === 0) throw new Error(`the rule ${rule.id} has a cap of 0 uses: say how many with --uses N`);
     if (rule.totp && !code)
       this.#say(
         options,
@@ -259,7 +330,7 @@ export class RulesController {
       fields: rule.fields.filter((field): field is 'username' | 'password' => field !== 'totp'),
       ...(rule.totp && code ? { totp: true, totpAcknowledged: true as const } : {}),
       scope: rule.scope,
-      ...(rule.uses === undefined ? {} : { uses: rule.uses }),
+      ...(uses === undefined ? {} : { uses }),
       ...(options.expires === undefined ? {} : { lifetimeSeconds: parseLifetime(options.expires) }),
       replaces: rule.id,
     };
@@ -278,7 +349,7 @@ export class RulesController {
   }
 
   #terms(options: RulesStageOptions): Pick<SignInRuleDraft, 'scope' | 'lifetimeSeconds' | 'uses'> {
-    const uses = this.#count(options.uses);
+    const uses = this.#count(options.uses, 1);
     return {
       ...(options.scope === undefined ? {} : { scope: parseScope(options.scope) }),
       ...(options.expires === undefined ? {} : { lifetimeSeconds: parseLifetime(options.expires) }),
@@ -286,10 +357,15 @@ export class RulesController {
     };
   }
 
-  #count(text: string | undefined): number | undefined {
+  /**
+   * `--uses`, as a whole number of at least `least`: 1 for a rule a passkey approves (its cap is at least one use, and
+   * a 0 would otherwise reach the owner as the draft schema's raw error), 0 for a narrowing, which may end the uses.
+   */
+  #count(text: string | undefined, least: 0 | 1): number | undefined {
     if (text === undefined) return undefined;
     const count = Number(text);
-    if (!Number.isInteger(count) || count < 0) throw new Error(`--uses "${text}" is not a whole number`);
+    if (!Number.isInteger(count) || count < least)
+      throw new Error(`--uses "${text}" is not a whole number${least === 1 ? ' of at least 1' : ''}`);
     return count;
   }
 
@@ -300,11 +376,9 @@ export class RulesController {
 
   async #stageAndWait(draft: SignInRuleDraft, options: RulesStageOptions): Promise<void> {
     const { gateway } = this.ports;
+    // A health read that fails says so (`DaemonFeaturesUnreadable`): only a daemon that answered is called too old.
     const features = await gateway.features();
-    if (!features.includes(DAEMON_FEATURES.signInRules))
-      throw new Error(
-        'standing sign-in rules can only be confirmed in the app, and this daemon does not report them yet: nothing was staged',
-      );
+    if (!features.includes(DAEMON_FEATURES.signInRules)) throw new Error(daemonNeedsUpdate(RULES_FEATURE_WORDS));
     const eligibility = await gateway.eligibility(draft.signIn);
     if (!eligibility.eligible) throw new Error(SIGN_IN_RULE_INELIGIBLE_WORDS[eligibility.because]);
     const startedMs = this.ports.nowMs();
@@ -319,7 +393,7 @@ export class RulesController {
     const confirming = await gateway.confirmInApp(staged.stage);
     this.#say(
       options,
-      `Confirm it with your passkey in the Ferretry app (Settings › Rules). Nothing is approved until you do; waiting up to ${String(SIGN_IN_RULE_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey in the Ferretry app (${SIGN_IN_RULES_SCREEN_PATH}). Nothing is approved until you do; waiting up to ${String(SIGN_IN_RULE_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     await this.#showLink(confirming.stage, options);
     const state = await this.#wait(staged.stage);
@@ -350,15 +424,19 @@ export class RulesController {
     );
   }
 
-  /** Prints the link that opens the rule's page, and opens it with `--open`. It carries no secret: it only picks a stage. */
-  async #showLink(stage: string, options: RulesStageOptions): Promise<void> {
-    const { appOrigin, appOriginNote, openLink } = this.ports;
+  /**
+   * Prints the link that opens the rule's page, and opens it with `--open`. It carries no secret: it only picks a stage,
+   * and the machine that holds it when this daemon's id can be read (without one, the app opens its selected machine).
+   */
+  async #showLink(stage: SignInRuleStageId, options: RulesStageOptions): Promise<void> {
+    const { appOrigin, appOriginNote, openLink, machine } = this.ports;
     if (appOrigin === undefined) {
       if (options.open === true)
         this.#say(options, '--open has nowhere to open: this machine does not know the app address.');
       return;
     }
-    const link = `${appOrigin.replace(/\/+$/u, '')}/#rules/${encodeURIComponent(stage)}`;
+    const daemonId = machine === undefined ? undefined : await machine().catch(() => undefined);
+    const link = ruleDeepLink(appOrigin, stage, daemonId);
     if (appOriginNote !== undefined) this.#say(options, appOriginNote);
     this.#say(options, `Open the rule: ${link}`);
     if (options.open !== true) return;
@@ -397,6 +475,9 @@ export class RulesController {
     );
   }
 }
+
+const sameScope = (left: SignInRuleScope, right: SignInRuleScope): boolean =>
+  signInRuleScopeWords(left) === signInRuleScopeWords(right);
 
 function parseScope(text: string): SignInRuleScope {
   const [kind, ...rest] = text.trim().split(':');

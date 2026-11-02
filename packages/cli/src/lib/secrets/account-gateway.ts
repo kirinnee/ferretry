@@ -49,9 +49,12 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 export const OLD_DAEMON_MESSAGE =
   'this daemon is older than accounts and sign-ins and has no /v1/accounts routes: update it (fy daemon update), then run this again';
 
-/** What the daemon's `403 owner_only` means for a ferret on a person route, in the owner's words. No other credential is tried. */
+/**
+ * What the daemon's `403 owner_only` means for a ferret on a person route, in the owner's words. Neutral on purpose:
+ * a read (`account ls`) is refused there as well as a change. No other credential is tried.
+ */
 export const OWNER_ONLY_MESSAGE =
-  "the daemon refused this: changing accounts is the OWNER's, not a ferret's. Run it yourself at your own shell (or in the Ferretry app). Nothing was changed, and no other credential was tried";
+  "the daemon refused this: this is the owner's command, and it ran with a ferret's credential. Run it yourself at your own shell (or in the Ferretry app). Nothing was changed, and no other credential was tried";
 
 /** The two answers every account route can give regardless of what was asked, said once. */
 export function accountRefusal(error: unknown): unknown {

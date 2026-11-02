@@ -71,8 +71,8 @@ import {
  *
  * Every owner method takes a {@link PasteRuleCaller} and refuses `{ kind: 'agent' }` before anything else: the routes
  * refuse a ferret before the body, and this is the second wall. The owner can only NARROW what was asked
- * (`taskPlanSelection`). A selection of paste lines only is answered at once, as a paste plan always was. Any ticked
- * sign-in line is STAGED with its pins and committed only with a fresh `approve-task-plan` proof bound to
+ * (`taskPlanSelection`). Declining (nothing ticked) is answered at once. Any ticked line, a paste line included (owner
+ * ruling on !A244), is STAGED with its pins and committed only with a fresh `approve-task-plan` proof bound to
  * `taskPlanApprovalSubject(stage, canonical)`, from every caller, the machine too: the machine's token holds no passkey.
  *
  * ## NOTHING READ FROM A PAGE BECOMES A LINE
@@ -396,10 +396,9 @@ export class TaskPlanService {
   // ── The owner answers ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * THE OWNER'S SELECTION. Nothing ticked declines the plan; paste lines only are approved at once (no passkey, as a
-   * paste plan always was); any ticked sign-in line is STAGED: its pins snapshotted, its canonical bytes computed, and
-   * held for {@link TASK_PLAN_STAGE_TTL_SECONDS} until a passkey bound to it commits it. One stage per plan: a new one
-   * drops the old.
+   * THE OWNER'S SELECTION. Nothing ticked declines the plan at once; any ticked line, paste or sign-in, is STAGED: its
+   * pins snapshotted, its canonical bytes computed, and held for {@link TASK_PLAN_STAGE_TTL_SECONDS} until a passkey
+   * bound to it commits it (owner ruling on !A244). One stage per plan: a new one drops the old.
    */
   async stage(
     caller: PasteRuleCaller,
@@ -425,7 +424,7 @@ export class TaskPlanService {
       throw new TaskPlanError(
         409,
         TASK_PLAN_ERROR_CODES.passkeyRequired,
-        'approving a sign-in on a task plan needs a passkey: add a passkey in Settings › Security first (paste lines can still be approved on their own)',
+        'approving a task plan needs a passkey, its paste lines too: add a passkey in Settings › Security first (declining needs none)',
       );
     const pins = await this.#pinsFor(plan, selection.lines);
     const canonical = boundSelection(plan, checked.data, pins);
@@ -556,9 +555,15 @@ export class TaskPlanService {
     const lines = [...new Set(items)].map(item => taskPlanLineOfCopyItem(plan, item));
     if (lines.some(line => line === undefined))
       throw new SecureCopyError('bad_request', `the plan has ${String(projected.items.length)} items`);
-    const approval = { lines: lines.map(line => ({ line: line as number })) };
-    // Every line an item maps to is a paste line, so this is answered at once and never staged for a passkey.
-    const answer = await this.stage(caller, sessionId, planId, approval);
+    // Allowing any paste needs the bound passkey now (owner ruling on !A244), which this one-step route cannot carry:
+    // only a decline is answered here, and an older app is told where the passkey is asked.
+    if (lines.length > 0)
+      throw new TaskPlanError(
+        409,
+        TASK_PLAN_ERROR_CODES.needsPasskey,
+        "allowing a plan's pastes needs your passkey: tick them on the plan's card in an updated Ferretry app, or run fy plan approve. Nothing was allowed",
+      );
+    const answer = await this.stage(caller, sessionId, planId, { lines: [] });
     const settled = answer.outcome === 'answered' ? copyPlanOf(answer.plan) : undefined;
     if (settled === undefined) throw new SecureCopyError('conflict', 'the plan was not answered');
     return settled;

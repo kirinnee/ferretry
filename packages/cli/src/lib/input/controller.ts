@@ -9,6 +9,7 @@ import {
   padInputValue,
 } from '@ferretry/protocol';
 import { parseAgendaReference } from '../agenda/reference.ts';
+import { OWNER_COMMAND_REFUSAL, refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import type { InputPorts } from './ports.ts';
 import {
   describeInputReason,
@@ -33,37 +34,43 @@ export interface InputCommandOptions {
   readonly json?: boolean | undefined;
 }
 
-/** Flags on `fy input answer`. There is deliberately no flag that carries a value: only a saved login's NAME. */
+/** Flags on `fy input answer`. There is deliberately no flag that carries a value: only an account's NAME. */
 export interface InputAnswerOptions extends InputCommandOptions {
   /** `--no-enter` is `false`; `--enter` (browser targets) is `true`. */
   readonly enter?: boolean | undefined;
-  /** `--secret NAME`: type this saved login's field instead of reading a value. */
+  /** `--account NAME`: type this account's field instead of reading a value. */
+  readonly account?: string | undefined;
+  /** `--secret NAME`: the older spelling of `--account`, still read and no longer shown. */
   readonly secret?: string | undefined;
-  /** `--entry NAME`: the same flag, spelled for the entry it names. */
+  /** `--entry NAME`: the oldest spelling of `--account`, still read and no longer shown. */
   readonly entry?: string | undefined;
-  /** `--save-as NAME`: keep the typed value in this saved login. */
+  /** `--save-as NAME`: keep the typed value in this account. */
   readonly saveAs?: string | undefined;
-  /** `--label TEXT`: the label a new saved login gets. */
+  /** `--label TEXT`: the label a new account gets. */
   readonly label?: string | undefined;
 }
 
-/** Said when a ferret reaches for the owner's command. */
-export const FERRET_REFUSAL = "this is the owner's command; a ferret cannot answer an input request";
+/** Said when a ferret reaches for the owner's command: the one neutral sentence, `input ls` (a read) included. */
+export const FERRET_REFUSAL = OWNER_COMMAND_REFUSAL;
 
 function handle(value: string, flag: string): string {
   const parsed = LoginEntryIdSchema.safeParse(value.trim());
   if (!parsed.success)
-    throw new Error(`${flag} "${value}" is not a saved login's handle: uppercase letters, digits and underscores`);
+    throw new Error(`${flag} "${value}" is not an account's handle: uppercase letters, digits and underscores`);
   return parsed.data;
 }
 
-/** The saved login `--secret` / `--entry` names, if either was given. */
+/** The account `--account` (or its older spellings `--secret` / `--entry`) names, if any was given. */
 function namedEntry(options: InputAnswerOptions): string | undefined {
-  const secret = options.secret === undefined ? undefined : handle(options.secret, '--secret');
-  const entry = options.entry === undefined ? undefined : handle(options.entry, '--entry');
-  if (secret !== undefined && entry !== undefined && secret !== entry)
-    throw new Error('--secret and --entry are the same flag: name one saved login');
-  return secret ?? entry;
+  const named = (
+    [
+      ['--account', options.account],
+      ['--secret', options.secret],
+      ['--entry', options.entry],
+    ] as const
+  ).flatMap(([flag, value]) => (value === undefined ? [] : [handle(value, flag)]));
+  if (new Set(named).size > 1) throw new Error('--account, --secret and --entry are the same flag: name one account');
+  return named[0];
 }
 
 /** The label a save carries: the owner's own, else the one the card suggests or the entry already has, else the handle. */
@@ -119,7 +126,7 @@ export class InputController {
     const named = namedEntry(options);
     const saveAs = options.saveAs === undefined ? undefined : handle(options.saveAs, '--save-as');
     if (named !== undefined && (saveAs !== undefined || options.label !== undefined)) {
-      throw new Error('--save-as keeps a value you type; it cannot be combined with --secret / --entry');
+      throw new Error('--save-as keeps a value you type; it cannot be combined with --account');
     }
     if (saveAs === undefined && options.label !== undefined) throw new Error('--label goes with --save-as');
     const sessionId = target(options);
@@ -136,7 +143,7 @@ export class InputController {
       throw new Error(`!${request.agendaItemId} is still being re-checked after a restart: try again in a moment`);
     }
     if (saveAs !== undefined && request.saved?.saves === undefined) {
-      throw new Error(`!${request.agendaItemId} cannot be saved: this kind of value is never kept in a saved login`);
+      throw new Error(`!${request.agendaItemId} cannot be saved: this kind of value is never kept in an account`);
     }
     for (const line of renderInputFacts(request)) this.ports.out.diagnostic(line);
     const submit = submitAfter(request, options);
@@ -146,7 +153,7 @@ export class InputController {
       this.ports.out.diagnostic(`allowing the paste of sealed:${request.source.name}`);
       body = { ...base, sealed: true };
     } else if (named !== undefined) {
-      this.ports.out.diagnostic(`using the saved login ${named}`);
+      this.ports.out.diagnostic(`using the account ${named}`);
       body = { ...base, entry: named };
     } else if (request.fields.length > 1) {
       const fields: { field: string; padded: string }[] = [];
@@ -226,8 +233,6 @@ export class InputController {
   }
 
   #refuseFerret(): void {
-    const credential = this.ports.agentCredential?.trim() ?? '';
-    const own = this.ports.ownSessionId?.trim() ?? '';
-    if (own !== '' || credential !== '') throw new Error(FERRET_REFUSAL);
+    refuseOwnerCommandInPane(this.ports);
   }
 }

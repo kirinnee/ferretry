@@ -66,6 +66,30 @@ describe('fy input answer --secret', () => {
     should(second.gateway.delivered).have.length(0);
   });
 
+  it('should take --account as the flag, the same name in an old spelling too, and refuse two different names', async () => {
+    // Arrange
+    const first = rigWith();
+    const second = rigWith();
+    const third = rigWith();
+
+    // Act
+    await new InputController(first.ports).answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' });
+    await new InputController(second.ports).answer('!A7', {
+      ...options,
+      account: 'SUDO_KIRIN_BOX',
+      secret: 'SUDO_KIRIN_BOX',
+    });
+    const failure = await new InputController(third.ports)
+      .answer('!A7', { ...options, account: 'A_ONE', secret: 'A_TWO' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(first.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
+    should(second.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
+    should((failure as Error).message).equal('--account, --secret and --entry are the same flag: name one account');
+    should(third.gateway.delivered).have.length(0);
+  });
+
   it('should work without a terminal, because no value is typed', async () => {
     // Arrange
     const { ports, gateway } = rigWith(undefined, {}, { interactive: false });
@@ -87,7 +111,7 @@ describe('fy input answer --secret', () => {
       .catch((error: unknown) => error);
 
     // Assert
-    should((failure as Error).message).containEql('is not a saved login');
+    should((failure as Error).message).containEql("is not an account's handle");
     should(gateway.delivered).have.length(0);
   });
 
@@ -101,7 +125,7 @@ describe('fy input answer --secret', () => {
       .catch((error: unknown) => error);
 
     // Assert
-    should((failure as Error).message).containEql('a ferret cannot answer');
+    should((failure as Error).message).containEql("a ferret's pane can't run it");
     should(gateway.listed).have.length(0);
     should(gateway.delivered).have.length(0);
   });
@@ -133,7 +157,9 @@ describe('fy input answer --secret', () => {
     await new InputController(ports).answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX' });
 
     // Assert
-    should(out.diagnostics.join('\n')).containEql('a saved login matches: SUDO_KIRIN_BOX (sudo on kirin-box)');
+    should(out.diagnostics.join('\n')).containEql(
+      'an account matches: SUDO_KIRIN_BOX (sudo on kirin-box) (answer with --account SUDO_KIRIN_BOX)',
+    );
   });
 });
 
@@ -320,19 +346,47 @@ describe('fy input commands (saved logins)', () => {
     return { ...harness, parsed: program.parseAsync(['node', 'fy', ...argv]) };
   }
 
-  it('should parse --secret NAME, --entry NAME and --save-as NAME --label TEXT', async () => {
+  it('should parse --account NAME, its old spellings --secret and --entry, and --save-as NAME --label TEXT', async () => {
     // Arrange
+    const account = run(['input', 'answer', '!A7', '-s', SESSION, '--account', 'SUDO_KIRIN_BOX']);
     const secret = run(['input', 'answer', '!A7', '-s', SESSION, '--secret', 'SUDO_KIRIN_BOX']);
     const entry = run(['input', 'answer', '!A7', '-s', SESSION, '--entry', 'SUDO_KIRIN_BOX']);
     const save = run(['input', 'answer', '!A7', '-s', SESSION, '--save-as', 'NEW_ONE', '--label', 'My box']);
 
     // Act
-    await Promise.all([secret.parsed, entry.parsed, save.parsed]);
+    await Promise.all([account.parsed, secret.parsed, entry.parsed, save.parsed]);
 
     // Assert
+    should(account.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
     should(secret.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
     should(entry.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
     should(save.gateway.delivered[0]?.body.save).deepEqual({ entry: 'NEW_ONE', label: 'My box' });
+  });
+
+  it('should show --account in the help and hide its old spellings, which say "account" for the save too', () => {
+    // Arrange
+    const program = new Command().name('fy').exitOverride();
+    registerInputCommands(program, new InputController(rig().ports));
+    const answer = program.commands
+      .find(each => each.name() === 'input')
+      ?.commands.find(each => each.name() === 'answer');
+
+    // Act
+    const help = answer?.helpInformation() ?? '';
+    const group = program.commands.find(each => each.name() === 'input');
+    const chunks: string[] = [];
+    group?.configureOutput({ writeOut: text => void chunks.push(text), writeErr: () => {} });
+    group?.outputHelp();
+    const after = chunks.join('');
+
+    // Assert
+    should(help).containEql('--account <name>');
+    should(help).not.containEql('--secret');
+    should(help).not.containEql('--entry');
+    should(help).containEql('keep the value you type as this account');
+    should(help).containEql('the label a new account gets with --save-as');
+    should(after).containEql('answer <!A7> --account NAME');
+    should(after).not.containEql('--secret');
   });
 
   it('should still refuse a value as a flag or argument', async () => {

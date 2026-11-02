@@ -191,6 +191,13 @@ export const DAEMON_FEATURES = {
    * only where the machine reports it, and otherwise the other devices see a file once it has landed.
    */
   sharedDraftUploading: 'shared-draft.uploading.1',
+  /**
+   * A paste rule is made only with a passkey bound to it (docs/secure-copy.md, owner decision !A244): staged at
+   * `POST /v1/copy-rules/stages` with the daemon's rows, committed with a fresh `approve-paste-rule` proof for that stage,
+   * and the old one-step `POST /v1/copy-rules` makes nothing. The app and `fy copy rules add` stage where the machine
+   * reports this name, and keep the one-step create on a daemon that does not.
+   */
+  pasteRulePasskey: 'copy-rules.passkey.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

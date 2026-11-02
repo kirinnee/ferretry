@@ -20,7 +20,7 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
-import { PasteRuleService } from '../../../../src/lib/secure-copy/index.ts';
+import { PasteRuleService, PasteRuleStages } from '../../../../src/lib/secure-copy/index.ts';
 import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
@@ -761,7 +761,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       clock: { now: () => 0 },
       ids: { planId: () => '0'.repeat(32) },
     });
-    return { copies: { list: () => [] }, rules, plans };
+    return {
+      copies: { list: () => [] },
+      rules,
+      plans,
+      stages: new PasteRuleStages({ rules, clock: { now: () => 0 } }),
+    };
   })(),
   // Only its routes are read here: nothing is staged, so no port is reached.
   signInRules: new SignInRuleService({
@@ -961,7 +966,7 @@ describe('the mounted daemon surface', () => {
       13 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, a sign-in’s add, put, delete and recipe answer, and the owner’s default account for a place (docs/secrets.md)
       9 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read (by account, or by the stage alone), passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
-      8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
+      16 + // secure copy: a session's copies, the rules (list, the old one-step add that now makes nothing, remove, settings read and change), a paste rule's stage, profile targets' stage and its passkey-bound commit, the waiting stages, a stage's read, a device taking a machine stage, a rule's passkey-bound commit and drop (owner decision !A244, secrev-1334), the paste plans and an answer to one (docs/secure-copy.md)
       8 + // task plans: the list, one plan, a selection's stage, read, passkey-bound commit, confirm-in-app and drop, and revoke (docs/secure-copy.md)
       13 + // standing sign-in rules: the ferrets' suggestions (read and dismiss, memory only), the list, eligibility, a stage, its read, confirm-in-app, a device taking a machine stage, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
@@ -1319,7 +1324,15 @@ describe('the mounted daemon surface', () => {
       'GET /v1/copy-rules',
       'GET /v1/copy-rules/settings',
       'PUT /v1/copy-rules/settings',
+      'POST /v1/copy-rules/settings/stages',
+      'POST /v1/copy-rules/settings/stages/:stage/commit',
       'POST /v1/copy-rules',
+      'POST /v1/copy-rules/stages',
+      'GET /v1/copy-rules/stages',
+      'GET /v1/copy-rules/stages/:stage',
+      'POST /v1/copy-rules/stages/:stage/commit',
+      'POST /v1/copy-rules/stages/:stage/bind',
+      'DELETE /v1/copy-rules/stages/:stage',
       'DELETE /v1/copy-rules/:ruleId',
       'GET /v1/copy-plans',
       'POST /v1/sessions/:sessionId/copy-plans/:planId/approve',

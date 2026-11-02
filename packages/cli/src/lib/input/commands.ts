@@ -1,4 +1,4 @@
-import type { Command } from 'commander';
+import { type Command, Option } from 'commander';
 import type { InputAnswerOptions, InputCommandOptions, InputController } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
@@ -12,14 +12,14 @@ request instead of asking for the value; you answer it here, or on its card in t
   ls                      the requests still waiting, with what each one is typed into
   answer <!A7>            shows what the daemon sees at the target, then reads the value from this
                           terminal with nothing echoed, and types it for the ferret
-  answer <!A7> --secret NAME
-                          types the account NAME instead (alias --entry); only its name is sent
+  answer <!A7> --account NAME
+                          types the account NAME instead; only its name is sent
   answer <!A7> --save-as NAME [--label TEXT]
                           also keeps the value you type as the account NAME
   cancel <!A7>            declines the request
 
 There is no flag, argument, environment variable or pipe that carries the value: it is typed at the
-prompt, sent once, and dropped. \`--secret\` names an account (see \`fy account ls\`); the daemon
+prompt, sent once, and dropped. \`--account\` names an account (see \`fy account ls\`); the daemon
 types it, so the value never reaches this command. A ferret cannot run these commands.
 \`answer\` presses Enter for you in a terminal (--no-enter to leave it); the card flags the
 risk (green, amber or red) before you type, and never refuses for it.`;
@@ -53,10 +53,12 @@ export function registerInputCommands(program: Command, controller: InputControl
     .option(JSON_FLAG, JSON_HELP)
     .option('--no-enter', 'type it without pressing Enter')
     .option('--enter', 'press Enter after typing (browser fields otherwise stay unsubmitted)')
-    .option('--secret <name>', 'type this account instead of reading a value (see `fy account ls`)')
-    .option('--entry <name>', 'the same as --secret')
-    .option('--save-as <name>', 'keep the value you type as this saved login (a new one, or an existing handle)')
-    .option('--label <text>', 'the label a new saved login gets with --save-as')
+    .option('--account <name>', 'type this account instead of reading a value (see `fy account ls`)')
+    // The flag's older spellings, from before an account was called one: still read, no longer shown.
+    .addOption(new Option('--secret <name>', 'the same as --account').hideHelp())
+    .addOption(new Option('--entry <name>', 'the same as --account').hideHelp())
+    .option('--save-as <name>', 'keep the value you type as this account (a new one, or an existing handle)')
+    .option('--label <text>', 'the label a new account gets with --save-as')
     .action(async (reference: string, _options: unknown, command: Command) => {
       await controller.answer(reference, merged<InputAnswerOptions>(command));
     });

@@ -3,7 +3,6 @@ import {
   InputCancelBodySchema,
   InputDeliverBodySchema,
   type InputQuarantineList,
-  type InputRequest,
   type InputRequestList,
   type InputShot,
   PhoneApprovalIdSchema,
@@ -85,30 +84,13 @@ function requestOf(context: RouteContext): string {
   return id;
 }
 
-/** Mirrors the notice `InputRequestService` masks a quarantined terminal's facts with. */
-const QUARANTINE_NOTICE = '[hidden: a secret was just typed in this terminal]';
-
-/** A request as it may be spelled right now: a terminal quarantined since the service answered reads as masked. */
-function sealed(service: InputRequestService, request: InputRequest): InputRequest {
-  const facts = request.observed;
-  if (facts?.kind !== 'terminal' || service.quarantinedUntil(request.sessionId, [request.target.key]) === undefined)
-    return request;
-  return {
-    ...request,
-    observed: {
-      ...facts,
-      promptLine: QUARANTINE_NOTICE,
-      foreground: { ...facts.foreground, comm: QUARANTINE_NOTICE, argv: '' },
-    },
-  };
-}
-
 async function list(service: InputRequestService, context: RouteContext, all: boolean): Promise<ApiResponse> {
   const caller = ownerOf(context);
   const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
-  // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
+  // A hold taken since the service answered still wins, now and again as the dispatcher sends it, under any of the
+  // terminal's names (its key, the pane's name and its id), as the agent-tools path checks them.
   const spell = (): ApiResponse => {
-    const body: InputRequestList = { requests: requests.map(request => sealed(service, request)) };
+    const body: InputRequestList = { requests: requests.map(request => service.resealed(request)) };
     return jsonResponse(body);
   };
   return { ...spell(), late: spell };

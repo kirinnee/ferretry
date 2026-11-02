@@ -55,9 +55,9 @@ export { TaskPlanStageIdSchema };
  * ## THE OWNER ONLY NARROWS, AND A SIGN-IN NEEDS THE PASSKEY
  *
  * The owner ticks lines, picks one of the daemon's candidate accounts and ticks codes; nothing can raise a line's uses,
- * lengthen the plan or add a field. Any ticked sign-in line needs a fresh passkey (`approve-task-plan`, asked of every
- * caller, the machine included) bound to {@link taskPlanApprovalSubject} of exactly what was ticked. A selection of
- * paste lines only keeps the paste plan's rule.
+ * lengthen the plan or add a field. Any ticked line, a paste line included, needs a fresh passkey (`approve-task-plan`,
+ * asked of every caller, the machine included) bound to {@link taskPlanApprovalSubject} of exactly what was ticked
+ * (owner ruling on !A244). Only declining, with nothing ticked, is answered at once.
  *
  * ## THE FERRET LEARNS NOTHING ABOUT AN ACCOUNT'S SECRET FIELDS
  *
@@ -918,9 +918,11 @@ export function taskPlanSelection(plan: TaskPlan, approval: TaskPlanApproval): T
   return { ok: true, lines: selected };
 }
 
-/** Whether a selection needs the `approve-task-plan` passkey: it ticks a sign-in line. Paste lines only keep the old rule. */
-export const taskPlanSelectionNeedsPasskey = (lines: readonly TaskPlanSelectedLine[]): boolean =>
-  lines.some(line => line.kind !== 'paste');
+/**
+ * Whether a selection needs the `approve-task-plan` passkey: it ticks any line, a paste line included (owner ruling on
+ * !A244, as a paste rule does). Only a decline, nothing ticked, is answered without one.
+ */
+export const taskPlanSelectionNeedsPasskey = (lines: readonly TaskPlanSelectedLine[]): boolean => lines.length > 0;
 
 /**
  * WHAT A TICKED SIGN-IN LINE IS PINNED TO, snapshotted when the selection is staged: the account's immutable key (a
@@ -1033,8 +1035,8 @@ export const TaskPlanStageViewSchema = z.strictObject({
 export type TaskPlanStageView = z.infer<typeof TaskPlanStageViewSchema>;
 
 /**
- * What `POST …/approval` answers: the plan, answered at once (paste lines only, or nothing ticked: declined), or the
- * selection staged for its passkey.
+ * What `POST …/approval` answers: the plan, answered at once (nothing ticked: declined), or the selection staged for its
+ * passkey.
  */
 export const TaskPlanApprovalAnswerSchema = z.discriminatedUnion('outcome', [
   z.strictObject({ outcome: z.literal('answered'), plan: TaskPlanSchema }),
@@ -1065,7 +1067,7 @@ export const TASK_PLAN_ERROR_CODES = {
   stageNotFound: 'stage_not_found',
   /** No device has a passkey yet, so no sign-in line can be approved: "Add a passkey in Settings › Security first". */
   passkeyRequired: 'passkey_required',
-  /** The paste-plan approve route was asked to tick a sign-in line: that needs the passkey, in the app. */
+  /** The old paste-plan approve route was asked to tick a line: that needs the passkey, on the plan's card in the app. */
   needsPasskey: 'needs_passkey',
 } as const;
 

@@ -7,6 +7,7 @@ import {
   type AgentLessonToolResult,
   type AgentToolCall,
   type AgentToolResult,
+  TaskPlanCallSchema,
   type WorkSearchQueryInput,
   type WorkSearchResponse,
 } from '@ferretry/protocol';
@@ -407,6 +408,7 @@ describe('McpServer — the tools', () => {
     // browser_open, browser_emulate and four older phrases gave up repeated words (31,945).
     // Margin for the plan work after it (R3a): a dozen older descriptions gave up repeated words (31,749).
     // account_propose gained preapprove (suggest a standing rule, R3c-5): net-zero, older words trimmed (31,715).
+    // task_plan's expiresInSeconds (C45) fit by trimming the punctuation of its lines words (31,704).
     // The list never grows past main's measured size (31,749) — a new tool's words are paid for by trimming old ones.
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
@@ -483,6 +485,35 @@ describe('McpServer — the tools', () => {
     should(tool?.tool).equal('account.propose');
     should(tool?.inputSchema).containEql({ required: ['signIn', 'why'] });
     should(tool?.description.length).belowOrEqual(300);
+  });
+
+  it('should offer task_plan the plan lifetime the protocol takes, and send it as its wire call', async () => {
+    // Arrange
+    const { calls, request } = harness();
+    const tool = MCP_TOOLS.find(candidate => candidate.name === 'task_plan');
+    const lines = [
+      {
+        kind: 'paste',
+        from: { kind: 'command', program: 'gh' },
+        to: { kind: 'terminal', program: 'vercel' },
+        why: 'the token',
+      },
+    ];
+
+    // Act
+    await request('tools/call', toolCall('task_plan', { lines, expiresInSeconds: 3_600 }));
+    const short = (await request('tools/call', toolCall('task_plan', { lines, expiresInSeconds: 60 }))) as {
+      result: { isError?: boolean };
+    };
+
+    // Assert
+    should(tool?.inputSchema).containEql({ required: ['lines'] });
+    const schema = tool?.inputSchema as { properties: Record<string, unknown> } | undefined;
+    should(schema?.properties.expiresInSeconds).eql({ type: 'integer' });
+    should(TaskPlanCallSchema.safeParse({ tool: 'task.plan', lines, expiresInSeconds: 3_600 }).success).be.true();
+    should(calls).match([{ tool: 'task.plan', expiresInSeconds: 3_600 }]);
+    should(calls).have.length(1);
+    should(short.result.isError).be.true();
   });
 
   it('should name Approve on your phone on the push flag of both request tools, inside the budget', async () => {

@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
+import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
+import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
 import { ProtocolRulesGateway } from '../../../src/lib/rules/gateway';
 import type { RulesApiClient } from '../../../src/lib/rules/ports';
 
@@ -145,7 +147,7 @@ describe('ProtocolRulesGateway', () => {
     should(calls).have.length(1);
   });
 
-  it('should read the daemon features from its health, and none when it cannot be read', async () => {
+  it('should read the daemon features from its health, and say so when it cannot be read', async () => {
     const reported: RulesApiClient = { request: async () => ({ features: ['sign-in-rules'] }) as never };
     should(await new ProtocolRulesGateway(reported).features()).eql(['sign-in-rules']);
     const unreadable: RulesApiClient = {
@@ -153,6 +155,35 @@ describe('ProtocolRulesGateway', () => {
         throw new Error('down');
       },
     };
-    should(await new ProtocolRulesGateway(unreadable).features()).eql([]);
+    await should(new ProtocolRulesGateway(unreadable).features()).be.rejectedWith(DaemonFeaturesUnreadable);
+  });
+
+  it('should say an older daemon with no rule routes needs an update, on every route, and pass other errors on', async () => {
+    const old: RulesApiClient = {
+      request: async () => {
+        throw new FyHttpError('no such route', 404, 'unknown_route');
+      },
+    };
+    const gateway = new ProtocolRulesGateway(old);
+    const sentence = daemonNeedsUpdate('standing sign-in rules');
+    for (const call of [
+      async () => await gateway.list(),
+      async () => await gateway.narrow(RULE, { dropTotp: true }),
+      async () => await gateway.revoke(RULE),
+      async () => await gateway.revokeAccount('GITHUB_WORK'),
+      async () => await gateway.stage({ signIn: SIGN_IN, fields: ['password'] }),
+      async () => await gateway.eligibility(SIGN_IN),
+    ])
+      await should(call()).be.rejectedWith(sentence);
+
+    const gone: RulesApiClient = {
+      request: async () => {
+        throw new FyHttpError('no such stage', 404, 'stage_not_found');
+      },
+    };
+    await new ProtocolRulesGateway(gone).view(STAGE).then(
+      () => should.fail('', '', 'a missing stage was answered'),
+      (error: unknown) => should((error as FyHttpError).code).equal('stage_not_found'),
+    );
   });
 });

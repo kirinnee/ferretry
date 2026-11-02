@@ -983,6 +983,47 @@ describe('standing sign-in rules: suspension', () => {
     should(signInRuleSuspensionWords('passkey-removed')).equal('the passkey or device that approved it was removed');
     should(signInRuleSuspensionWords('form-changed')).equal('the sign-in form changed since you approved it');
   });
+
+  it('should say "suspended" for a rule, never "stopped" (that word is a plan line’s)', () => {
+    // Act / Assert
+    for (const reason of SIGN_IN_RULE_SUSPENSIONS) should(signInRuleSuspensionWords(reason)).not.match(/\bstopped\b/u);
+    should(signInRuleSuspensionWords('store-write-failed')).containEql('suspended');
+  });
+});
+
+describe('standing sign-in rules: a rule’s status and scope in words', () => {
+  it('should word every status, a suspension with its reason, and an unchecked rule as not yet active', () => {
+    // Act / Assert
+    should(rules.signInRuleStatusWords({ status: 'active' })).equal('Active');
+    should(rules.signInRuleStatusWords({ status: 'used-up' })).equal('All uses spent');
+    should(rules.signInRuleStatusWords({ status: 'expired' })).equal('Expired');
+    should(rules.signInRuleStatusWords({ status: 'active', unverified: true })).equal(
+      'Active once Ferretry has checked it',
+    );
+    should(
+      rules.signInRuleStatusWords({
+        status: 'suspended',
+        suspended: { at: '2026-11-01T12:00:00.000Z', because: 'scripted-origin' },
+      }),
+    ).equal(`Suspended: ${signInRuleSuspensionWords('scripted-origin')}`);
+  });
+
+  it('should resume a suspended rule unless its sign-in is gone', () => {
+    // Arrange
+    const at = '2026-11-01T12:00:00.000Z';
+
+    // Act / Assert
+    should(rules.signInRuleResumable({ status: 'suspended', suspended: { at, because: 'form-changed' } })).be.true();
+    should(rules.signInRuleResumable({ status: 'suspended', suspended: { at, because: 'sign-in-gone' } })).be.false();
+    should(rules.signInRuleResumable({ status: 'active' })).be.false();
+  });
+
+  it('should word a scope as the Who row does', () => {
+    // Act / Assert
+    should(rules.signInRuleScopeWords({ kind: 'any' })).equal('Any ferret on this machine');
+    should(rules.signInRuleScopeWords({ kind: 'session', session: 'sess-1' })).equal('Session sess-1');
+    should(rules.SIGN_IN_RULES_SCREEN_PATH).equal('Settings › Secure copy › Standing sign-in rules');
+  });
 });
 
 describe('standing sign-in rules: what the owner sees and sends', () => {

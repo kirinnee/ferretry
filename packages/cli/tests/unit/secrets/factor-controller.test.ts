@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type ConfirmTwoFactorSeedRequest,
+  DAEMON_FEATURES,
   LOGIN_TOTP_WARNING,
   type StageTwoFactorSeedRequest,
   type TwoFactorSeedConfirming,
@@ -50,6 +51,9 @@ class FakePrompt implements IAccountPrompt {
 
 class FakeSeeds implements ITwoFactorSeedGateway {
   readonly calls: string[] = [];
+  /** What the daemon's health reports: 2FA keys unless a test says the daemon is older. */
+  reported: readonly string[] = [DAEMON_FEATURES.twoFactorKeys];
+  featureReads = 0;
   readonly staged: StageTwoFactorSeedRequest[] = [];
   readonly confirms: ConfirmTwoFactorSeedRequest[] = [];
   constructor(
@@ -85,6 +89,10 @@ class FakeSeeds implements ITwoFactorSeedGateway {
     this.confirms.push(body);
     return { stage: STAGE, session: body.session, agendaItemId: 'A7' };
   }
+  async features(): Promise<readonly string[]> {
+    this.featureReads += 1;
+    return this.reported;
+  }
   async view(account: string, stage: string): Promise<TwoFactorSeedStageView> {
     this.calls.push(`view ${account} ${stage}`);
     if (this.failures.view !== undefined) throw this.failures.view;
@@ -106,6 +114,7 @@ function rig(
     session?: string;
     interactive?: boolean;
     accounts?: FakeAccountGateway;
+    appOrigin?: string;
   } = {},
 ) {
   const seeds = options.seeds ?? new FakeSeeds();
@@ -124,6 +133,7 @@ function rig(
       now += ms;
     },
     nowMs: () => now,
+    ...(options.appOrigin === undefined ? {} : { appOrigin: options.appOrigin }),
   });
   return { controller, seeds, prompt, messages, accounts };
 }
@@ -200,6 +210,7 @@ describe('fy account factor add --totp', () => {
     // Assert
     should(noKind).containEql('--totp');
     should(noBoard).containEql('--session');
+    should(noBoard).containEql("the app's Inbox");
     should(noTerminal).containEql('terminal');
     should(no).containEql('nothing was changed');
     for (const prompt of [piped.prompt, declined.prompt]) should(prompt.hidden).have.length(0);
@@ -270,6 +281,42 @@ describe('fy account factor add --totp, before anything is typed', () => {
     should(prompt.asked).deepEqual([]);
     should(prompt.hidden).deepEqual([]);
     should(seeds.calls).deepEqual([]);
+  });
+
+  it('should say the daemon needs an update for 2FA keys when it lists accounts but has no 2FA key routes', async () => {
+    // Arrange — v4.190 to v4.196: /v1/accounts answers, /factors does not exist yet
+    const seeds = new FakeSeeds();
+    seeds.reported = [DAEMON_FEATURES.accountsSignIns];
+    const accounts = new FakeAccountGateway();
+    const { controller, prompt } = rig({ session: 's', seeds, accounts });
+
+    // Act
+    const message = await fails(() => controller.add('GITHUB', { totp: true }));
+
+    // Assert — said before anything is read, warned or typed, and never the "older than accounts" sentence
+    should(message).equal(
+      "this machine's daemon is too old for 2FA keys: update it (fy daemon update), then run this again. Nothing was changed",
+    );
+    should(message).not.equal(OLD_DAEMON_MESSAGE);
+    should(prompt.asked).deepEqual([]);
+    should(prompt.hidden).deepEqual([]);
+    should(seeds.calls).deepEqual([]);
+  });
+
+  it("should point to the card in the app's Inbox, and print its link when the app address is known", async () => {
+    // Arrange
+    const linked = rig({ session: 'lead-1', appOrigin: 'https://app.example/' });
+    const unlinked = rig({ session: 'lead-1' });
+
+    // Act
+    await linked.controller.add('GITHUB', { totp: true });
+    await unlinked.controller.add('GITHUB', { totp: true });
+
+    // Assert
+    should(linked.messages).containEql('Open the card: https://app.example/#agenda/A7?session=lead-1');
+    should(linked.messages.join('\n')).containEql("on the card !A7 in the app's Inbox (session lead-1)");
+    should(linked.messages.join('\n')).not.containEql('agenda of');
+    should(unlinked.messages.some(message => message.startsWith('Open the card'))).be.false();
   });
 
   it('should name an older daemon before asking for the key', async () => {

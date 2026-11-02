@@ -10,8 +10,8 @@
  * "create-*" are the owner's sheet (a page rule, a page rule with the code ticked and its red acknowledgement, a sudo
  * rule with the root flag); "ineligible" is the sheet for a sign-in that cannot have a rule; "suggestion" is a
  * ferret's card, nothing ticked; "passkey" is the passkey sheet with the daemon's own words for a root stage;
- * "machine" is a rule staged with `fy rules add`; "settings" is Settings › Secure copy › Standing rules; "suspended"
- * and "narrow" are the rule card; "site-panel" and "edit-warning" are the Accounts site's Rule and Method tabs;
+ * "machine" is a rule staged with `fy rules add`; "settings" is Settings › Secure copy › Standing sign-in rules;
+ * "suspended" and "narrow" are the rule card; "site-panel" and "edit-warning" are the Accounts site's Rule and Method tabs;
  * "fallback" is the input card for a rule that did not apply; "history" is the closed card of a fill that did;
  * "device-revoke" is Settings › Devices with the rules a device's passkey approved; "replaces" is a ferret's suggestion
  * opened for a sign-in that already has a rule (it renews it, never a second rule); "filled" is the owner's input card

@@ -5,9 +5,9 @@ import {
   AgendaClearAgentsResultSchema,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
-  HealthViewSchema,
 } from '@ferretry/protocol';
 import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
+import { readDaemonFeatures } from '../daemon/features.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 import type { AgendaApiClient, IAgendaGateway } from './ports.ts';
 
@@ -20,9 +20,6 @@ export function agendaBoardPath(sessionId: string): string {
 export function agendaRepliesPath(sessionId: string): string {
   return `${agendaBoardPath(sessionId)}/replies`;
 }
-
-/** The daemon's health report, which lists the features it offers. */
-export const DAEMON_HEALTH_PATH = '/v1/health';
 
 /** The older spelling of the agenda route, which a daemon that predates `agenda.wire.1` still answers. */
 export function legacyAttentionBoardPath(sessionId: string): string {
@@ -110,7 +107,6 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
   }
 
   async features(): Promise<readonly string[]> {
-    const health = await this.client.request(DAEMON_HEALTH_PATH, HealthViewSchema).catch(() => undefined);
-    return health?.features ?? [];
+    return await readDaemonFeatures(this.client);
   }
 }

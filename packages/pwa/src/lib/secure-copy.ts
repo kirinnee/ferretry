@@ -25,20 +25,30 @@ import {
   PasteRuleSettingsSchema,
   type PasteRuleSettingsView,
   PasteRuleSettingsViewSchema,
+  type PasteRuleStaged,
+  PasteRuleStagedSchema,
+  PasteRuleStageDroppedSchema,
+  type PasteRuleStageId,
+  PasteRuleStageListSchema,
+  RUNS_WHAT_IT_READS_WARNING,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { z } from 'zod';
 import { targetRef } from './input-card.ts';
+import type { StepUpWords } from './step-up-gate.ts';
 
 export type CopyClient = Pick<IFyApiClient, 'request'>;
 
 const RULES_PATH = '/v1/copy-rules';
+const STAGES_PATH = `${RULES_PATH}/stages`;
+const stagePath = (stage: PasteRuleStageId): string => `${STAGES_PATH}/${encodeURIComponent(stage)}`;
 const RemovedSchema = z.strictObject({ removed: z.literal(true) });
 
 export async function listRules(client: CopyClient): Promise<PasteRuleList> {
   return await client.request(RULES_PATH, PasteRuleListSchema);
 }
 
+/** The one-step create, for a daemon that does not stage paste rules (`copy-rules.passkey.1` not reported). */
 export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promise<PasteRule> {
   return await client.request(RULES_PATH, PasteRuleSchema, {
     method: 'POST',
@@ -79,6 +89,116 @@ export async function changeCopySettings(client: CopyClient, settings: PasteRule
   });
 }
 
+/** STAGE a paste rule: nothing is allowed yet. Answers the daemon's own line and rows, which the passkey prompt lists. */
+export async function stagePasteRule(client: CopyClient, rule: PasteRuleCreate): Promise<PasteRuleStaged> {
+  return await client.request(STAGES_PATH, PasteRuleStagedSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
+  });
+}
+
+/** The paste rules waiting for a passkey, such as one `fy copy rules add` staged at the machine. */
+export async function listPasteRuleStages(client: CopyClient): Promise<readonly PasteRuleStaged[]> {
+  return (await client.request(STAGES_PATH, PasteRuleStageListSchema)).stages;
+}
+
+/**
+ * STAGE turning on programs in your own profile (secrev-1334 M2): nothing changes yet. Answers the daemon's line and a
+ * Widens row for every paste rule it would widen, which the passkey prompt lists.
+ */
+export async function stageProfileTargets(client: CopyClient): Promise<PasteRuleStaged> {
+  return await client.request(`${RULES_PATH}/settings/stages`, PasteRuleStagedSchema, { method: 'POST' });
+}
+
+/** TAKE a stage the machine made, so this device alone gets its passkey challenge and may commit it. Approves nothing. */
+async function bindPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<PasteRuleStaged> {
+  return await client.request(`${stagePath(stage)}/bind`, PasteRuleStagedSchema, { method: 'POST' });
+}
+
+/** COMMIT a staged change, only after the passkey bound to it: a paste rule, or programs in your own profile turned on. */
+async function commitStage(client: CopyClient, staged: PasteRuleStaged): Promise<void> {
+  if (staged.kind === 'rule')
+    await client.request(`${stagePath(staged.stage)}/commit`, PasteRuleSchema, { method: 'POST' });
+  else
+    await client.request(
+      `${RULES_PATH}/settings/stages/${encodeURIComponent(staged.stage)}/commit`,
+      PasteRuleSettingsSchema,
+      {
+        method: 'POST',
+      },
+    );
+}
+
+/** Drops a staged change: the prompt was dismissed, or the owner denied it. Nothing is allowed. */
+export async function dropPasteRuleStage(client: CopyClient, stage: PasteRuleStageId): Promise<void> {
+  await client.request(stagePath(stage), PasteRuleStageDroppedSchema, { method: 'DELETE' });
+}
+
+/** What the passkey prompt shows for a staged change: the daemon's line and rows, and the red line its flag gives. */
+const pasteRulePasskeyWords = (staged: PasteRuleStaged): StepUpWords => ({
+  does: staged.does,
+  rows: staged.rows.map(row => ({ label: row.label, value: row.value })),
+  warnings: staged.runsAnything ? [RUNS_WHAT_IT_READS_WARNING] : [],
+});
+
+/** The passkey act each kind of stage is bound to. */
+const STAGE_ACTS = { rule: 'approve-paste-rule', 'profile-targets': 'allow-profile-targets' } as const;
+export type PasteRuleStageAct = (typeof STAGE_ACTS)[keyof typeof STAGE_ACTS];
+
+/** Asks for the passkey for `act` bound to a stage, showing the daemon's words; `false` when dismissed. */
+export type PasteRuleAsk = (stage: PasteRuleStageId, words: StepUpWords, act: PasteRuleStageAct) => Promise<boolean>;
+
+/** Said when this device cannot run a passkey ceremony at all: the stage is dropped and nothing is approved. */
+export const PASTE_RULE_NO_PASSKEY_WORDS =
+  'This device cannot confirm with a passkey, so it cannot approve this change. Nothing was approved.';
+
+export type PasteRuleOutcome =
+  | { readonly kind: 'made' }
+  | { readonly kind: 'dismissed' }
+  | { readonly kind: 'failed'; readonly words: string };
+
+const causeWords = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+
+/**
+ * THE OWNER'S APPROVAL OF ONE STAGED CHANGE (owner decision !A244, secrev-1334): a stage the machine made is TAKEN by
+ * this device first (`taken`), then the passkey bound to it is asked with the daemon's own rows, then it is committed.
+ * A dismissed or failed prompt DROPS a stage this device made, so nothing waits half-approved; a machine's stage it took
+ * keeps waiting (Deny drops it), so the command waiting on it is not told "Denied" by a stray tap.
+ */
+export async function confirmPasteRuleStage(
+  client: CopyClient,
+  ask: PasteRuleAsk | undefined,
+  staged: PasteRuleStaged,
+  options: { readonly taken?: boolean } = {},
+): Promise<PasteRuleOutcome> {
+  const drop = async (): Promise<void> => {
+    if (options.taken !== true) await dropPasteRuleStage(client, staged.stage).catch(() => undefined);
+  };
+  if (ask === undefined) {
+    await drop();
+    return { kind: 'failed', words: PASTE_RULE_NO_PASSKEY_WORDS };
+  }
+  let given: boolean;
+  try {
+    const held = options.taken === true ? await bindPasteRuleStage(client, staged.stage) : staged;
+    given = await ask(held.stage, pasteRulePasskeyWords(held), STAGE_ACTS[held.kind]);
+  } catch (cause) {
+    await drop();
+    return { kind: 'failed', words: causeWords(cause) };
+  }
+  if (!given) {
+    await drop();
+    return { kind: 'dismissed' };
+  }
+  try {
+    await commitStage(client, staged);
+    return { kind: 'made' };
+  } catch (cause) {
+    return { kind: 'failed', words: causeWords(cause) };
+  }
+}
+
 export async function removeRule(client: CopyClient, id: string): Promise<void> {
   await client.request(`${RULES_PATH}/${encodeURIComponent(id)}`, RemovedSchema, { method: 'DELETE' });
 }
@@ -96,17 +216,8 @@ export async function answerPlan(client: CopyClient, plan: CopyPlan, items: read
   );
 }
 
-/** Where a value comes from, in plain words: "what gh prints", "text on https://github.com". */
-export function fromWords(from: CopyRouteFrom): string {
-  if (from.kind === 'command') return `what ${from.program} prints`;
-  return from.kind === 'browser' ? `text on ${from.origin}` : `the clipboard of ${from.origin}`;
-}
-
-/** Where a value goes, in plain words: "vercel in a terminal", "a field on https://vercel.com", "the secret NAME". */
-export function toWords(to: CopyRouteTo): string {
-  if (to.kind === 'terminal') return `${to.program} in a terminal`;
-  return to.kind === 'browser' ? `a field on ${to.origin}` : `the secret ${to.name}`;
-}
+/** Where a value comes from and goes, in plain words: the protocol's, which the daemon's rows use too. */
+export { pasteFromWords as fromWords, pasteToWords as toWords } from '@ferretry/protocol';
 
 /** What a rule still allows, and for how long, in one line. */
 export function ruleLimits(rule: PasteRule): string {

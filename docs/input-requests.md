@@ -923,6 +923,10 @@ place by `--domain`/`--for`, or `--tool`/`--host`/`--dest`; the method by `--met
 echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 owner_only`, `fy` says so and tries
 no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
 `fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
+At the machine, `fy input answer <!A7> --account <ACCOUNT>` answers a waiting card with an account (only its name is
+sent, and the daemon types it; `--secret` and `--entry` are its older spellings, still read and no longer shown), and
+`--save-as <ACCOUNT> [--label <text>]` keeps the value you type as an account. When the daemon matched an account to
+the card, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
@@ -1451,7 +1455,8 @@ What it does NOT do, said plainly:
   before the page is held from the ferret, so a refusal the ferret can cause (a script it starts, say) lands before
   anything it can read changes. One that lands in the few milliseconds between taking that hold and typing (a revoke, a
   script started in exactly that gap) leaves the page held from the ferret for that moment, which a card no rule was
-  about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.- **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
+  about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.
+- **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
   secret went into a password box (`masked`), so a code page is never in it, however often you tap it. A rule with the
   code ticked therefore types a code on a separate page only as a JOIN to the sign-in it just did: the rule typed the
   password in this same session, IN THIS SAME TAB, at this same place, within the last three minutes; the tab has since
@@ -1467,10 +1472,11 @@ What it does NOT do, said plainly:
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, the first sentence of the one red block on every terminal
-  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`, then the accepted race `SIGN_IN_RULE_TERMINAL_RESIDUAL`): what
-  reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
-  could start another such program (`passwd`, say) as `sudo`:
+- **A sudo rule gives every ferret root on demand while it lasts**: the one red block on every terminal rule says the
+  root warning (`SIGN_IN_RULE_ROOT_WARNING`), then the accepted race (`SIGN_IN_RULE_TERMINAL_RESIDUAL`). And **the
+  program is proved by the kernel, not by its name**: that limit (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`) sits under
+  "How it's checked". What reads the password is a setuid program root installed, but whoever starts it picks the name
+  it runs under, so a ferret could start another such program (`passwd`, say) as `sudo`:
 
 > Any ferret on this machine gets root while this rule lasts. In the split second before typing, a ferret could swap in
 > another program and read the password once. Ferretry stops the rule if it notices.

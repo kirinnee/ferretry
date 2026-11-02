@@ -75,7 +75,7 @@ describe('fy input commands', () => {
     const failure = await parsed.catch((error: unknown) => error);
 
     // Assert
-    should((failure as Error).message).containEql('a ferret cannot answer');
+    should((failure as Error).message).containEql("a ferret's pane can't run it");
     should(gateway.listed).have.length(0);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { AUTOMATED_CODE_ACK_WORDS, AUTOMATED_CODE_WARNING, TASK_PLAN_HONEST_LIMIT } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { registerCopyCommands } from '../../../src/lib/plan/commands';
@@ -17,6 +18,7 @@ function run(argv: string[]) {
     rules: record('rules'),
     addRule: record('addRule'),
     removeRule: record('removeRule'),
+    profile: record('profile'),
   } as unknown as CopyController;
   const plans = {
     list: record('plan.list'),
@@ -36,6 +38,7 @@ describe('fy copy commands', () => {
       ['copy', 'rules', 'ls'],
       ['copy', 'rules', 'add', '--from', 'command:gh', '--to', 'terminal:vercel', '--count', '2', '--expires', '2h'],
       ['copy', 'rules', 'rm', 'a1b2'],
+      ['copy', 'rules', 'profile', 'on', '--json'],
       ['copy', 'plan', 'ls', '--session', 's1'],
       ['copy', 'plan', 'approve', 'feed', '1', '3'],
       ['plan', 'ls', '--json'],
@@ -51,6 +54,7 @@ describe('fy copy commands', () => {
         '1=si_0123456789abcdef',
         '--totp',
         '1',
+        '--i-understand-one-factor',
       ],
       ['plan', 'revoke', 'feed', '2'],
       ['plan', 'revoke', 'feed'],
@@ -67,13 +71,44 @@ describe('fy copy commands', () => {
       ['rules', {}],
       ['addRule', { from: 'command:gh', to: 'terminal:vercel', count: '2', expires: '2h' }],
       ['removeRule', 'a1b2', {}],
+      ['profile', 'on', { json: true }],
       ['plan.list', { session: 's1' }],
       ['plan.approve', 'feed', ['1', '3'], { pick: [], totp: [] }],
       ['plan.list', { json: true }],
-      ['plan.approve', 'feed', ['1', '3'], { pick: ['3=GITHUB_WORK', '1=si_0123456789abcdef'], totp: ['1'] }],
+      [
+        'plan.approve',
+        'feed',
+        ['1', '3'],
+        { pick: ['3=GITHUB_WORK', '1=si_0123456789abcdef'], totp: ['1'], iUnderstandOneFactor: true },
+      ],
       ['plan.revoke', 'feed', ['2'], {}],
       ['plan.revoke', 'feed', [], {}],
     ]);
+  });
+
+  it('should put the honest limit and the one-factor flag in the plan help, and say paste rule in the copy help', () => {
+    const program = new Command().name('fy').exitOverride();
+    registerCopyCommands(program, {} as CopyController, {} as PlanController);
+    const help = (name: string): string => {
+      const chunks: string[] = [];
+      const command = program.commands.find(each => each.name() === name);
+      command?.configureOutput({ writeOut: chunk => void chunks.push(chunk), writeErr: () => {} });
+      command?.outputHelp();
+      return chunks.join('');
+    };
+    const approve = program.commands
+      .find(each => each.name() === 'plan')
+      ?.commands.find(each => each.name() === 'approve');
+    const ack = approve?.options.find(option => option.long === '--i-understand-one-factor');
+
+    should(help('plan')).containEql(TASK_PLAN_HONEST_LIMIT);
+    should(help('plan')).containEql('[--totp 1 --i-understand-one-factor]');
+    should(help('plan')).containEql(AUTOMATED_CODE_WARNING);
+    should(help('plan')).not.containEql('goes around Ferretry');
+    should(ack?.description).equal(AUTOMATED_CODE_ACK_WORDS);
+    should(help('copy')).containEql('rules profile on|off');
+    should(help('copy')).containEql('your paste rules');
+    should(help('copy')).not.containEql('the routes you approved in advance');
   });
 
   it('should refuse a rule without its route before reaching the controller', async () => {
