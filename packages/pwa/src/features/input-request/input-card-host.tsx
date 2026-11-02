@@ -22,7 +22,7 @@ import { machineOffers } from '../../lib/daemon-health.ts';
 import type { InputClient } from '../../lib/input-api.ts';
 import { readAccounts, readInputRequest } from '../../lib/input-api.ts';
 import { fieldsOf } from '../../lib/input-card.ts';
-import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
+import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { InputCard } from './input-card.tsx';
 
@@ -61,6 +61,8 @@ export function InputCardHost({
   const health = useDaemonHealth(connection);
   const offersKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
   const requireAddKey = useAddKeyStepUp();
+  const askRuleStage = useApproveSignInRuleStepUp();
+  const offersRules = machineOffers(health, DAEMON_FEATURES.signInRules);
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
   const [accountsTick, setAccountsTick] = useState(0);
 
@@ -163,6 +165,16 @@ export function InputCardHost({
         ? {}
         : { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) })}
       {...(agentName === undefined ? {} : { agentName })}
+      {...(!offersRules
+        ? {}
+        : {
+            ruleOffer: {
+              askPasskey:
+                askRuleStage === undefined
+                  ? undefined
+                  : (stage: `srs_${string}`, words: string) => askRuleStage(connection, stage, words),
+            },
+          })}
     />
   );
 }

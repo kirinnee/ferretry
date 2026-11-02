@@ -89,6 +89,19 @@ describe('ProtocolRulesGateway', () => {
     should(revoked.calls[0]?.path).equal('/v1/sign-in-rules/sr_x');
   });
 
+  it('should end every rule of an account on its own route, and read eligibility on its query', async () => {
+    const ended = rig({ account: 'GITHUB_WORK', revoked: 3 });
+    should(await ended.gateway.revokeAccount('GITHUB_WORK')).equal(3);
+    should(ended.calls[0]?.path).equal('/v1/accounts/GITHUB_WORK/sign-in-rules/revoke');
+    should(ended.calls[0]?.init?.method).equal('POST');
+    should(headerNames(ended.calls[0]?.init)).not.containEql('x-fy-session');
+
+    const asked = rig({ signIn: SIGN_IN, eligible: false, because: 'no-history' });
+    const answer = await asked.gateway.eligibility(SIGN_IN);
+    should(asked.calls[0]?.path).equal(`/v1/sign-in-rules/eligibility?signIn=${SIGN_IN}`);
+    should(answer.eligible).equal(false);
+  });
+
   it('should confirm a stage in the app and read its state on the stage routes', async () => {
     const confirmed = rig(STAGED);
     should((await confirmed.gateway.confirmInApp(STAGE)).stage).equal(STAGE);

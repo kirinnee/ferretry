@@ -42,7 +42,7 @@ import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineOffers } from '../../lib/daemon-health.ts';
-import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
+import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { daemonSharingPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
@@ -53,6 +53,7 @@ import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/act
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
+import { SignInRulesSurface } from '../secure-copy/sign-in-rules-surface.tsx';
 import { TaskPlansSurface } from '../secure-copy/task-plans-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
@@ -202,16 +203,28 @@ function AccountsPanel({ connection }: DaemonSettingsTabProps) {
   const routed = useDaemonClient();
   const health = useDaemonHealth(connection);
   const requireAddKey = useAddKeyStepUp();
+  const requireRule = useApproveSignInRuleStepUp();
   const createClient = createSecretClient ?? routed;
   // A machine that does not say it has accounts keeps today's saved-logins surface, whatever the reason it is silent.
   if (!machineOffers(health, DAEMON_FEATURES.accountsSignIns))
     return <LoginsSurface connection={connection} createClient={createClient} />;
   const withKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
+  const withRules = machineOffers(health, DAEMON_FEATURES.signInRules);
   return (
     <AccountsSurface
       connection={connection}
       createClient={createClient}
       withKeys={withKeys}
+      {...(withRules
+        ? {
+            rules: {
+              askPasskey:
+                requireRule === undefined
+                  ? undefined
+                  : (stage: `srs_${string}`, words: string) => requireRule(connection, stage, words),
+            },
+          }
+        : {})}
       {...(withKeys && requireAddKey !== undefined
         ? { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) }
         : {})}
@@ -229,6 +242,9 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
       <CopyRulesSurface connection={connection} createClient={createClient} />
       {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
         <TaskPlansSurface connection={connection} createClient={createClient} />
+      ) : null}
+      {machineOffers(health, DAEMON_FEATURES.signInRules) ? (
+        <SignInRulesSurface connection={connection} createClient={createClient} />
       ) : null}
     </div>
   );
@@ -254,8 +270,13 @@ function CatalogsPanel({ connection }: DaemonSettingsTabProps) {
 
 function DevicesPanel({ connection }: DaemonSettingsTabProps) {
   const { createPairingClient } = useFrameLive();
+  const health = useDaemonHealth(connection);
   return (
-    <AddDeviceSurface connection={connection} {...(createPairingClient ? { createClient: createPairingClient } : {})} />
+    <AddDeviceSurface
+      connection={connection}
+      rulesOffered={machineOffers(health, DAEMON_FEATURES.signInRules)}
+      {...(createPairingClient ? { createClient: createPairingClient } : {})}
+    />
   );
 }
 

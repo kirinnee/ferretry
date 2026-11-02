@@ -219,3 +219,50 @@ describe('a staged 2FA seed card in the Inbox', () => {
     expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
+
+describe('a standing sign-in rule card in the Inbox', () => {
+  const info = (extra: Record<string, unknown>) =>
+    inboxCard(
+      agendaItem('A12', {
+        kind: 'info',
+        ask: undefined,
+        raisedBy: 'daemon',
+        subject: 'Your standing rule for github work was suspended',
+        ...extra,
+      } as never),
+    );
+
+  const draw = async (extra: Record<string, unknown>) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[info(extra)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('draws a suspension reference plain: suspension is shown owner-side, never as a session card', async () => {
+    const view = await draw({ signInRuleSuspended: { rule: `sr_${'a'.repeat(24)}` } });
+    expect(view.container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect(view.container.querySelector('[data-rule-suggestion]')).toBeNull();
+    expect(view.container.querySelector('[data-rule]')).toBeNull();
+  });
+
+  it('draws no suggestion card from a ferret’s words alone', async () => {
+    const view = await draw({ subject: 'Suggested standing rule for github.com', raisedBy: 'agent' });
+    expect(view.container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

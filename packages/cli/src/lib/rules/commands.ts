@@ -1,5 +1,11 @@
 import type { Command } from 'commander';
-import type { RulesCommandOptions, RulesController, RulesNarrowOptions, RulesStageOptions } from './controller.ts';
+import type {
+  RulesCommandOptions,
+  RulesController,
+  RulesNarrowOptions,
+  RulesRemoveOptions,
+  RulesStageOptions,
+} from './controller.ts';
 
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
@@ -17,7 +23,7 @@ const RULES_HELP = `The owner's command for standing sign-in rules: a sign-in a 
   renew <sr_…> [--expires 7d]               approve a rule again for a new period, with a new passkey
   narrow <sr_…> [--drop-totp] [--expires 2h] [--uses N]
                                             take something away; no passkey needed
-  rm <sr_…>                                 end a rule now; no passkey needed
+  rm <sr_…> | --account <ACCOUNT>           end a rule now, or every rule of an account; no passkey needed
 
 add, resume and renew only STAGE the rule: this command prints a link, you confirm with your passkey in the Ferretry
 app, and it waits for your answer. Nothing is approved until you do. A rule for sudo, su or doas gives every ferret on
@@ -79,8 +85,9 @@ export function registerRulesCommands(program: Command, controller: RulesControl
     .action(async (rule: string, options: RulesNarrowOptions) => await controller.narrow(rule, options));
   rules
     .command('rm')
-    .description('end a rule now; no passkey')
-    .argument('<rule>', 'the rule, by the start of its id')
+    .description('end a rule now, or every rule of an account; no passkey')
+    .argument('[rule]', 'the rule, by the start of its id')
+    .option('--account <account>', 'end every standing rule of this account instead')
     .option(JSON_FLAG, JSON_HELP)
-    .action(async (rule: string, options: RulesCommandOptions) => await controller.remove(rule, options));
+    .action(async (rule: string | undefined, options: RulesRemoveOptions) => await controller.remove(rule, options));
 }

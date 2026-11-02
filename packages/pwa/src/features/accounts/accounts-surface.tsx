@@ -30,6 +30,7 @@ import {
 } from './accounts-api.ts';
 import type { AccountOps } from './accounts-parts.tsx';
 import { AccountsScreen } from './accounts-screen.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
 export type AccountsClientFactory = (connection: DaemonConnection) => Promise<AccountsClient>;
 
@@ -64,6 +65,7 @@ export function AccountsSurface({
   createClient,
   addKey,
   withKeys = true,
+  rules,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient: AccountsClientFactory;
@@ -71,6 +73,8 @@ export function AccountsSurface({
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
   /** Whether this machine has 2FA keys; false hides their tab. */
   readonly withKeys?: boolean;
+  /** Present only when this machine reports standing sign-in rules: asks the passkey bound to a staged rule. */
+  readonly rules?: { readonly askPasskey: RulesBinding['askPasskey'] };
 }) {
   const [client, setClient] = useState<AccountsClient | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -179,6 +183,7 @@ export function AccountsSurface({
       onNavigate={() => setError(null)}
       onRefresh={() => void refresh()}
       ops={ops}
+      rules={rules === undefined ? undefined : { client, askPasskey: rules.askPasskey }}
     />
   );
 }

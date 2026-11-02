@@ -30,8 +30,10 @@ import {
 import { methodOfDraft, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
 import { MethodFields } from './method-fields.tsx';
+import { RuleEditWarning, SignInRulePanel } from './sign-in-rule-panel.tsx';
+import type { RulesBinding } from './use-sign-in-rules.ts';
 
-export type SiteTab = 'method' | 'recipe' | 'seen' | 'defaults';
+export type SiteTab = 'method' | 'recipe' | 'seen' | 'defaults' | 'rule';
 
 const TABS = [
   { id: 'method', label: 'Method' },
@@ -39,6 +41,8 @@ const TABS = [
   { id: 'seen', label: 'What Ferretry saw' },
   { id: 'defaults', label: 'Defaults' },
 ] as const;
+
+const RULE_TAB = { id: 'rule', label: 'Standing rule' } as const;
 
 export interface SiteDetailProps {
   readonly signIn: SignInSummary;
@@ -51,6 +55,8 @@ export interface SiteDetailProps {
   readonly tab: SiteTab;
   readonly onTab: (tab: SiteTab) => void;
   readonly onClosed: () => void;
+  /** Present only when this machine reports standing sign-in rules. */
+  readonly rules?: RulesBinding | undefined;
 }
 
 const DIFF_TONE = { ' ': 'text-muted', '-': 'bg-err-bg text-err', '+': 'bg-ok-bg text-ok' } as const;
@@ -67,18 +73,26 @@ export function SiteDetail(props: SiteDetailProps): ReactNode {
         <h3 className="m-0 min-w-0 break-words text-row font-semibold text-fg">{placeTitle(signIn.place)}</h3>
         <p className="m-0 break-words text-meta text-muted">{accountTitle(account)}</p>
       </header>
-      <Tabs label="Sign-in sections" onSelect={onTab} selected={tab} tabs={TABS} />
+      <Tabs
+        label="Sign-in sections"
+        onSelect={onTab}
+        selected={tab}
+        tabs={props.rules === undefined ? TABS : [...TABS, RULE_TAB]}
+      />
       {tab === 'method' ? <MethodTab {...props} /> : null}
       {tab === 'recipe' ? <RecipeTab {...props} /> : null}
       {tab === 'seen' ? <SeenTab {...props} /> : null}
       {tab === 'defaults' ? <DefaultsTab {...props} /> : null}
+      {tab === 'rule' && props.rules !== undefined ? (
+        <SignInRulePanel account={account} rules={props.rules} signIn={signIn} />
+      ) : null}
     </section>
   );
 }
 
 // ── Method ───────────────────────────────────────────────────────────────────────────────────────────
 
-function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed }: SiteDetailProps): ReactNode {
+function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed, rules }: SiteDetailProps): ReactNode {
   const [draft, setDraft] = useState<SignInDraft>({
     method: signIn.method.kind as LoginMethodKind,
     ssoName: signIn.method.name ?? '',
@@ -120,6 +134,7 @@ function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed }: Si
           {problem}
         </p>
       )}
+      {rules === undefined ? null : <RuleEditWarning rules={rules} signIn={signIn.id} />}
       <Refusal error={error} />
       <div className="flex flex-wrap gap-2">
         <button
@@ -167,7 +182,7 @@ function MethodTab({ signIn, account, accounts, ops, busy, error, onClosed }: Si
 
 // ── Recipe ───────────────────────────────────────────────────────────────────────────────────────────
 
-function RecipeTab({ signIn, ops, busy, error }: SiteDetailProps): ReactNode {
+function RecipeTab({ signIn, ops, busy, error, rules }: SiteDetailProps): ReactNode {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(signIn.recipe ?? '');
   const proposals = signIn.proposals ?? [];
@@ -193,6 +208,7 @@ function RecipeTab({ signIn, ops, busy, error }: SiteDetailProps): ReactNode {
               value={text}
             />
           </label>
+          {rules === undefined ? null : <RuleEditWarning rules={rules} signIn={signIn.id} />}
           <div className="flex flex-wrap gap-2">
             <button
               className="kt-btn min-h-[44px]"
@@ -328,6 +344,7 @@ function RecipeTab({ signIn, ops, busy, error }: SiteDetailProps): ReactNode {
         />
         <span>Apply ferret recipe changes without asking</span>
       </label>
+      {rules === undefined ? null : <RuleEditWarning rules={rules} signIn={signIn.id} />}
       <Refusal error={error} />
     </div>
   );

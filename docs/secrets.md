@@ -502,10 +502,15 @@ in a terminal for up to 7** ([below](#terminal-rules-sudo-su-or-doas)). Rules ar
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
 > a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-**No rule fills until the app ships.** The service, the file, the routes, suspension, history and the fills through the
-shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
-are built; `sign-in-rules.1` stays unadvertised until the app draws the rule sheet and its cards, and until then every
-sign-in a rule would cover is a normal card.
+**The app draws rules, and the daemon reports `sign-in-rules.1`.** The service, the file, the routes, suspension,
+history and the fills through the shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
+are matched by the screens in the app: the sheet (Accounts › a sign-in › Standing rule, and "Don’t ask again for this
+sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
+ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
+`fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
+rule's structured flags, never from its summary text. Editing a sign-in's method or recipe says how many rules that
+suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
+device that may not use secrets sees one sentence and the app stops asking.
 
 ### Only the owner, a fresh passkey every time, bound to the bytes
 
@@ -661,7 +666,7 @@ itself; under a restricted sudoers it could set a password the ferret then knows
 **Its own feature, now reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time
 name in the protocol's daemon features. Nothing reads it from config, the environment, a route or a file. This build
 reports it (owner decision !A226, with the risk below accepted), and a terminal rule still fills only beside
-`sign-in-rules.1`: while that is not reported, every sign-in is a plain card. A build that does not report it refuses
+`sign-in-rules.1`, which this build also reports: a daemon that did not would leave every sign-in a plain card. A build that does not report it refuses
 to stage a sudo, su or doas rule (`409 tool_not_covered`), says the same in the eligibility, and offers no terminal
 rule to the matcher, so a terminal rule already in the file never fills there.
 
@@ -739,7 +744,7 @@ else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-s
 
 ### The owner's command: `fy rules`
 
-`fy rules ls|add|resume|renew|narrow|rm` is the owner's, and refused inside a ferret's pane. `add`, `resume` and `renew`
+`fy rules ls|add|resume|renew|narrow|rm` (`rm --account <ACCOUNT>` ends every rule of one account) is the owner's, and refused inside a ferret's pane. `add`, `resume` and `renew`
 only **stage** (and `confirm-in-app`): the command prints the `<app>/#rules/<stage>` link (`--open` opens it in this
 machine's browser), then polls the stage for up to 125 seconds and prints Approved, Denied or Timed out. **The command has
 no way to commit**: the passkey is the app's. `--totp` needs `--i-understand-one-factor`. A terminal rule prints the red

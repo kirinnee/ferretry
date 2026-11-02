@@ -1152,7 +1152,7 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
   const builtTerminal = BUILD.includes(DAEMON_FEATURES.signInRulesTerminal);
   const builtRules = BUILD.includes(DAEMON_FEATURES.signInRules);
 
-  it('should fill sudo through the guarded write with this build’s terminal feature, once sign-in-rules.1 is reported', async () => {
+  it('should fill sudo through the guarded write with this build’s terminal feature, beside sign-in-rules.1', async () => {
     // Arrange
     const h = await harness({ terminal: builtTerminal, advertised: true });
     h.setFacts(sudoPrompt());
@@ -1170,26 +1170,20 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
     should(view.state).equal('delivered');
   });
 
-  it('should leave every raise a plain card, sudo and page alike, while this build does not report sign-in-rules.1', async () => {
-    // Arrange — both rules on disk, the features exactly as this build reports them
+  it('should fill sudo with the features exactly as this build reports them, now that it reports sign-in-rules.1', async () => {
+    // Arrange — the rule on disk, the features read from the build and nothing forced
     const h = await harness({ terminal: builtTerminal, advertised: builtRules });
-    await ruleFor(h, await github(h));
     h.setFacts(sudoPrompt());
     await sudoRule(h);
 
     // Act
-    const sudo = await raised(h, SUDO_RAISE);
-    h.setFacts(loginPage());
-    const login = await raised(h);
+    const { view } = await raised(h, SUDO_RAISE);
     await settled();
 
     // Assert
-    should(builtRules).be.false();
-    should(h.writes).deepEqual([]);
-    should([sudo.view.state, login.view.state]).eql(['pending', 'pending']);
-    should(h.quietAtRaise).deepEqual([false, false]);
-    should([sudo.request?.preapproval, login.request?.preapproval]).eql([undefined, undefined]);
-    should(h.typeOptions).deepEqual([]);
+    should(builtRules).be.true();
+    should(h.writes).deepEqual([PASSWORD]);
+    should(view.state).equal('delivered');
   });
 
   it('should ask the target to prove the reader again before Enter, for a terminal rule only (secrev-1301 M1)', async () => {

@@ -1325,10 +1325,9 @@ or nothing is typed:
 
 ### Standing rule fills: a sign-in the owner approved for any ferret
 
-> **Needs `sign-in-rules.1`, which the daemon does not report yet.** The fills below are built and tested, and run
-> only once the app that draws the rule sheet and its cards ships (R3c-6); until then every sign-in a rule would cover
-> is a normal card. How a rule is made, pinned, suspended and revoked is
-> [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
+> **Needs `sign-in-rules.1`, which this build reports** now that the app draws the rule sheet and its cards (R3c-6). A
+> daemon that did not report it would leave every sign-in a rule would cover as a normal card (invariant 32). How a rule
+> is made, pinned, suspended and revoked is [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
 
 A **standing rule** is one owner-signed permission for Ferretry to fill ONE sign-in, for any ferret unless the owner
 narrowed its scope, until it expires: a page sign-in for at most 90 days, or sudo, su or doas in a terminal for at most 7

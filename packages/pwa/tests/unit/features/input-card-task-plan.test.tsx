@@ -48,3 +48,21 @@ describe('an input card a task plan line touched', () => {
     expect(q('[data-input-plan-filled]')).toBeNull();
   });
 });
+
+describe('an input card a standing sign-in rule touched', () => {
+  const RULE = `sr_${'a'.repeat(24)}`;
+
+  it('says it was filled under the standing rule', async () => {
+    const q = await show(request({ preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'filled' } }));
+    expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule.');
+    expect(q('[data-input-plan-miss]')).toBeNull();
+  });
+
+  it('says in the daemon’s fixed words why the rule did not apply', async () => {
+    const q = await show(
+      request({ preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'did-not-apply', reason: 'rate' } }),
+    );
+    expect(q('[data-input-plan-miss]')).not.toBeNull();
+    expect(q('[data-input-plan-filled]')).toBeNull();
+  });
+});

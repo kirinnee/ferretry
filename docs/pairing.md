@@ -406,7 +406,9 @@ device is suspended (`passkey-removed`) as part of the same revocation, because 
 device-state purges. Every purge is attempted even when an earlier one fails, so a push store that cannot be written
 still leaves the rules suspended. A rule's kept proof also stops verifying once its device is no longer paired, so a
 missed purge costs a refusal, never a fill. Only a new passkey from a device that is still paired resumes one
-([secrets.md](secrets.md#standing-sign-in-rules)). The same holds for an idle expiry.
+([secrets.md](secrets.md#standing-sign-in-rules)). The same holds for an idle expiry. Settings › Devices says so
+before the owner revokes: "N standing rules were approved with this device's passkey; they will be suspended." It is
+shown only on a machine that reports `sign-in-rules.1`, and only to a device that may read the rules.
 
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses

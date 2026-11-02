@@ -2,9 +2,11 @@ import { describe, it } from 'bun:test';
 import {
   DAEMON_FEATURES,
   SIGN_IN_RULE_HONEST_LIMIT,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   type SignInRuleDraft,
+  type SignInRuleEligibility,
   type SignInRuleNarrow,
   type SignInRuleStaged,
   type SignInRuleStageState,
@@ -76,6 +78,9 @@ class SpyGateway implements IRulesGateway {
   readonly drafts: SignInRuleDraft[] = [];
   readonly narrowed: { readonly rule: string; readonly narrow: SignInRuleNarrow }[] = [];
   readonly revoked: string[] = [];
+  readonly accountsRevoked: string[] = [];
+  eligible: SignInRuleEligibility = { signIn: SIGN_IN, eligible: true } as SignInRuleEligibility;
+  accountCount = 2;
   rules: SignInRuleView[] = [SITE_VIEW, TERMINAL_VIEW];
   stages: SignInRuleStaged[] = [];
   health: 'ok' | 'damaged' = 'ok';
@@ -113,6 +118,15 @@ class SpyGateway implements IRulesGateway {
   async revoke(rule: string) {
     this.calls.push('revoke');
     this.revoked.push(rule);
+  }
+  async revokeAccount(account: string) {
+    this.calls.push('revokeAccount');
+    this.accountsRevoked.push(account);
+    return this.accountCount;
+  }
+  async eligibility() {
+    this.calls.push('eligibility');
+    return this.eligible;
   }
   async features() {
     this.calls.push('features');
@@ -225,7 +239,7 @@ describe('fy rules (controller)', () => {
     should(gateway.drafts).eql([
       { signIn: SIGN_IN, fields: ['password'], scope: { kind: 'any' }, lifetimeSeconds: 7 * 86_400, uses: 5 },
     ]);
-    should(gateway.calls).eql(['features', 'stage', 'confirmInApp', 'view', 'view']);
+    should(gateway.calls).eql(['features', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
     should(said.join('\n')).containEql(`https://app.example/#rules/${STAGE}`);
     should(said[said.length - 1]).startWith('Approved.');
     should(slept).eql([1_000]);
@@ -355,6 +369,37 @@ describe('fy rules (controller)', () => {
     );
     should(PASTE_RULE_POINTER).containEql('fy copy rules rm');
     should(gateway.revoked).eql([RULE]);
+  });
+
+  it('should end every rule of an account with --account, and refuse a rule beside it or a bad account id', async () => {
+    const { controller, gateway, said } = rig();
+    await controller.remove(undefined, { account: 'GITHUB_WORK' });
+    should(gateway.accountsRevoked).eql(['GITHUB_WORK']);
+    should(said[said.length - 1]).equal('Ended 2 standing rules of GITHUB_WORK.');
+    await controller.remove(RULE, { account: 'GITHUB_WORK' }).then(
+      () => should.fail('', '', 'took both'),
+      (error: unknown) => should((error as Error).message).containEql('not both'),
+    );
+    await controller.remove(undefined, { account: 'not an id!' }).then(
+      () => should.fail('', '', 'took a bad id'),
+      (error: unknown) => should((error as Error).message).containEql('not an account id'),
+    );
+    await controller.remove(undefined, {}).then(
+      () => should.fail('', '', 'took nothing'),
+      (error: unknown) => should((error as Error).message).containEql('name the rule'),
+    );
+    should(gateway.accountsRevoked).eql(['GITHUB_WORK']);
+    should(gateway.revoked).eql([]);
+  });
+
+  it('should say why a sign-in cannot have a rule yet, and stage nothing', async () => {
+    const { controller, gateway } = rig();
+    gateway.eligible = { signIn: SIGN_IN, eligible: false, because: 'no-history' } as SignInRuleEligibility;
+    await controller.add(SIGN_IN, {}).then(
+      () => should.fail('', '', 'staged'),
+      (error: unknown) => should((error as Error).message).equal(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']),
+    );
+    should(gateway.calls).not.containEql('stage');
   });
 
   it('should print the auto-recipe line from the structured flag, even when the summary omits it', async () => {

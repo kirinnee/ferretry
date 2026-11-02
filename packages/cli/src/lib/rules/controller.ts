@@ -1,8 +1,10 @@
 import {
+  AccountIdSchema,
   DAEMON_FEATURES,
   LOGIN_ONE_FACTOR_WARNING,
   placeKeys,
   SIGN_IN_RULE_HONEST_LIMIT,
+  SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_STAGE_TTL_SECONDS,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
@@ -34,6 +36,12 @@ export interface RulesStageOptions extends RulesCommandOptions {
   readonly uses?: string | undefined;
   /** Opens the rule's page in this host's browser once it is staged. */
   readonly open?: boolean | undefined;
+}
+
+/** `fy rules rm` flags. */
+export interface RulesRemoveOptions extends RulesCommandOptions {
+  /** Ends every rule of this account instead of one rule. */
+  readonly account?: string | undefined;
 }
 
 /** `fy rules narrow` flags. */
@@ -201,12 +209,31 @@ export class RulesController {
     );
   }
 
-  async remove(reference: string, options: RulesCommandOptions): Promise<void> {
+  async remove(reference: string | undefined, options: RulesRemoveOptions): Promise<void> {
     refuseFerret(this.ports);
+    if (options.account !== undefined) {
+      if (reference !== undefined) throw new Error('name a rule or --account, not both');
+      return await this.#removeAccount(options.account, options);
+    }
+    if (reference === undefined)
+      throw new Error('name the rule to end (sr_…), or --account <ACCOUNT> for all of one account');
     if (!reference.trim().startsWith('sr_')) throw new Error(PASTE_RULE_POINTER);
     const rule = await this.#rule(reference);
     await this.ports.gateway.revoke(rule.id);
     this.ports.out.success(options.json === true ? JSON.stringify({ revoked: rule.id }) : `Ended the rule ${rule.id}.`);
+  }
+
+  async #removeAccount(account: string, options: RulesCommandOptions): Promise<void> {
+    const id = AccountIdSchema.safeParse(account.trim());
+    if (!id.success) throw new Error(`"${account}" is not an account id: see \`fy accounts\``);
+    const revoked = await this.ports.gateway.revokeAccount(id.data);
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify({ account: id.data, revoked })
+        : revoked === 0
+          ? `${id.data} had no standing rules.`
+          : `Ended ${String(revoked)} standing ${revoked === 1 ? 'rule' : 'rules'} of ${id.data}.`,
+    );
   }
 
   /** Stages the same rule again (same id, next revision): the owner's passkey is what makes it a new approval. */
@@ -268,6 +295,8 @@ export class RulesController {
       throw new Error(
         'standing sign-in rules can only be confirmed in the app, and this daemon does not report them yet: nothing was staged',
       );
+    const eligibility = await gateway.eligibility(draft.signIn);
+    if (!eligibility.eligible) throw new Error(SIGN_IN_RULE_INELIGIBLE_WORDS[eligibility.because]);
     const startedMs = this.ports.nowMs();
     const staged = await gateway.stage(draft);
     if (staged.root && !features.includes(DAEMON_FEATURES.signInRulesTerminal)) {
