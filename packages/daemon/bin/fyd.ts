@@ -994,6 +994,7 @@ import {
   MemberDispatcher,
   MemberGateway,
   MemberJoinGate,
+  MemberJoinProver,
   renameNotice,
   MemberPasskeyService,
   MigrationPreflight,
@@ -13375,15 +13376,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           throw new Error('pairing has not opened, so this machine cannot describe itself');
         return memberFacts;
       };
+      const memberPasskeyStore = new StatePasskeyStore(paths, stateFiles, {
+        path: paths.catalogMemberPasskeys,
+        owner: CatalogMemberKeyIdSchema,
+      });
+      const memberPasskeyVerifier = passkeyVerifier(new WebCryptoPasskeyCrypto());
+      const memberPasskeyRandom = { bytes: (length: number) => crypto.getRandomValues(new Uint8Array(length)) };
+      const memberPasskeyClock = { nowMs: () => Date.now() };
       const memberPasskeys = new MemberPasskeyService({
-        store: new StatePasskeyStore(paths, stateFiles, {
-          path: paths.catalogMemberPasskeys,
-          owner: CatalogMemberKeyIdSchema,
-        }),
-        verifier: passkeyVerifier(new WebCryptoPasskeyCrypto()),
+        store: memberPasskeyStore,
+        verifier: memberPasskeyVerifier,
         challenges: new ChallengeLedger(),
-        random: { bytes: length => crypto.getRandomValues(new Uint8Array(length)) },
-        clock: { nowMs: () => Date.now() },
+        random: memberPasskeyRandom,
+        clock: memberPasskeyClock,
         unlocks: new StateUnlockLedger(paths, stateFiles, attachmentDaemonId ?? '', {
           path: paths.catalogMemberUnlocks,
           owner: CatalogMemberKeyIdSchema,
@@ -13406,6 +13411,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const memberJoinGate = new MemberJoinGate({
         members: catalogMembers,
+        proof: new MemberJoinProver({
+          passkeysOf: async memberId => await memberPasskeys.passkeysOf(memberId),
+          store: memberPasskeyStore,
+          verifier: memberPasskeyVerifier,
+          random: memberPasskeyRandom,
+          clock: memberPasskeyClock,
+          allowedOrigins: () => facts().origins(),
+        }),
         publisher: () => ({
           daemonId: attachmentDaemonId ?? '',
           daemonName: facts().daemonName,

@@ -83,6 +83,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('catalog-installs.updates.1');
   });
 
+  it('should report join-by-proof, so the app asks a later invite for a passkey only where the machine can verify one', () => {
+    should(DAEMON_FEATURES.catalogJoinProof).equal('catalogs.join-proof.1');
+    should(daemonFeatureList()).containEql('catalogs.join-proof.1');
+  });
+
   it('should report task plans now that the app draws the plan card', () => {
     // A plan fill closes an input card with a `plan` actor an older app's strict parse refuses: only a daemon that reports this fills one.
     should(DAEMON_FEATURES.taskPlan).equal('task-plan.1');
@@ -105,11 +110,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('sign-in-rules.1');
     // The list takes nothing in: no config, environment, route or file can add or take away a name.
     should(daemonFeatureList.length).equal(0);
-    process.env['FY_FEATURES'] = '';
+    process.env.FY_FEATURES = '';
     try {
       should(daemonFeatureList()).containEql('sign-in-rules-terminal.1');
     } finally {
-      delete process.env['FY_FEATURES'];
+      delete process.env.FY_FEATURES;
     }
   });
 

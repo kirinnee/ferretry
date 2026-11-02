@@ -17,10 +17,12 @@ import { beforeAll, describe, it } from 'bun:test';
 import {
   MAX_SESSION_SECONDS,
   MAX_TUNNEL_BODY_BYTES,
+  type MemberJoinProof,
   OLDER_APP_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_CODE,
   RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+  type StepUpOptions,
 } from '@ferretry/protocol';
 import {
   type ChannelState,
@@ -50,6 +52,7 @@ import {
   MEMBER_JOIN_OUTCOME_BYTES,
   memberAuthMessage,
   memberJoinMessage,
+  memberJoinOptionsMessage,
   memberRenewMessage,
   NONCE_BYTES,
   openChannel,
@@ -105,6 +108,8 @@ import {
 import type {
   MemberJoinAttempt,
   MemberJoinCarrier,
+  MemberJoinOptionsAttempt,
+  MemberJoinOptionsResult,
   MemberJoinResult,
   MemberKeyLookup,
   RelayMemberSessions,
@@ -146,6 +151,7 @@ let memberKeyText: string;
 const MEMBER_ID = `mbr_${'a'.repeat(22)}`;
 const MEMBER_KEY_ID = `mk_${'b'.repeat(22)}`;
 const BOX_KEY = 'B'.repeat(43);
+const APP_ORIGIN = 'https://app.ferretry.test';
 /** Each open session's transcript hash, so a credential can be signed for exactly that session. */
 const transcripts = new Map<string, Uint8Array>();
 
@@ -193,6 +199,17 @@ async function credentialed(channel: ChannelState, message: unknown): Promise<un
       memberJoinMessage(transcript, key, box),
     );
     return { code: 'CODE-1234', clientName: 'Ferretry PWA', ...rest, memberKey: key, boxKey: box, proof };
+  }
+  if (record.t === 'join-options' && !('proof' in record)) {
+    const { forged, ...rest } = record;
+    const key = typeof rest.memberKey === 'string' ? rest.memberKey : memberKeyText;
+    const origin = typeof rest.origin === 'string' ? rest.origin : APP_ORIGIN;
+    const proof = await signDeviceProof(
+      crypto_,
+      forged === true ? strangerKey : memberKey,
+      memberJoinOptionsMessage(transcript, key, origin),
+    );
+    return { code: 'CODE-1234', ...rest, memberKey: key, origin, proof };
   }
   if (record.t === 'member' && !('proof' in record)) {
     const { forged, ...rest } = record;
@@ -4058,12 +4075,14 @@ interface RecordedJoin {
   readonly clientName: string;
   readonly memberKey: string;
   readonly boxKey: string;
+  readonly passkey?: MemberJoinProof;
   readonly proven: boolean;
   readonly carrier: MemberJoinCarrier;
 }
 
 interface MemberCalls {
   readonly joins: RecordedJoin[];
+  readonly options: RecordedJoinOptions[];
   readonly keyLookups: string[];
   readonly opened: SessionMember[];
   readonly ends: Array<() => void>;
@@ -4071,7 +4090,19 @@ interface MemberCalls {
   released: number;
 }
 
+interface RecordedJoinOptions {
+  readonly code: string;
+  readonly memberKey: string;
+  readonly origin: string;
+  readonly proven: boolean;
+  readonly carrier: MemberJoinCarrier;
+}
+
 interface MemberBehaviour {
+  readonly joinOptions?: (
+    attempt: MemberJoinOptionsAttempt,
+    carrier: MemberJoinCarrier,
+  ) => Promise<MemberJoinOptionsResult>;
   readonly join?: (attempt: MemberJoinAttempt, carrier: MemberJoinCarrier) => Promise<MemberJoinResult>;
   readonly key?: (keyId: string) => Promise<MemberKeyLookup | undefined>;
   readonly open?: (member: SessionMember) => Promise<boolean>;
@@ -4082,7 +4113,15 @@ const KNOWN_MEMBER = (keyId: string): MemberKeyLookup | undefined =>
   keyId === MEMBER_KEY_ID ? { memberId: MEMBER_ID, memberKey: memberKeyText } : undefined;
 
 function fakeMembers(behaviour: MemberBehaviour = {}): { members: RelayMemberSessions; calls: MemberCalls } {
-  const calls: MemberCalls = { joins: [], keyLookups: [], opened: [], ends: [], dispatched: [], released: 0 };
+  const calls: MemberCalls = {
+    joins: [],
+    options: [],
+    keyLookups: [],
+    opened: [],
+    ends: [],
+    dispatched: [],
+    released: 0,
+  };
   const members: RelayMemberSessions = {
     join: async (attempt, carrier) => {
       calls.joins.push({
@@ -4090,10 +4129,21 @@ function fakeMembers(behaviour: MemberBehaviour = {}): { members: RelayMemberSes
         clientName: attempt.clientName,
         memberKey: attempt.memberKey,
         boxKey: attempt.boxKey,
+        ...(attempt.passkey === undefined ? {} : { passkey: attempt.passkey }),
         proven: await attempt.prove(),
         carrier,
       });
       return await (behaviour.join?.(attempt, carrier) ?? Promise.resolve({ ok: false }));
+    },
+    joinOptions: async (attempt, carrier) => {
+      calls.options.push({
+        code: attempt.code,
+        memberKey: attempt.memberKey,
+        origin: attempt.origin,
+        proven: await attempt.prove(),
+        carrier,
+      });
+      return await (behaviour.joinOptions?.(attempt, carrier) ?? Promise.resolve({ ok: false }));
     },
     key: async keyId => {
       calls.keyLookups.push(keyId);
@@ -4144,6 +4194,19 @@ async function clientReadText(sent: Wire, channel: ChannelState): Promise<string
 
 const joinRecord = { t: 'join', protocol: SESSION_PROTOCOL_ID } as const;
 const memberRecord = { t: 'member', protocol: SESSION_PROTOCOL_ID } as const;
+const joinOptionsRecord = { t: 'join-options', protocol: SESSION_PROTOCOL_ID } as const;
+const PASSKEY: MemberJoinProof = {
+  credentialId: 'Y3JlZA',
+  clientDataJSON: 'e30',
+  authenticatorData: 'YXV0aA',
+  signature: 'c2ln',
+};
+const CHALLENGE_OPTIONS: StepUpOptions = {
+  challenge: 'Y2hhbGxlbmdl',
+  rpId: 'app.ferretry.test',
+  allowCredentials: [{ type: 'public-key', id: 'Y3JlZA' }],
+  timeout: 120_000,
+};
 
 describe('a member join session', () => {
   it('should hand the record to the member port with a proof over this transcript, answer padded, and close 4440', async () => {
@@ -4384,6 +4447,173 @@ describe('a member join session', () => {
     await joining;
 
     should(harnessed.wire.frames).have.length(before);
+  });
+});
+
+describe('a member join-options session', () => {
+  async function ask(behaviour: MemberBehaviour, record: Record<string, unknown> = joinOptionsRecord) {
+    const { members, calls } = fakeMembers(behaviour);
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { members });
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, record);
+    return { harnessed, calls, body: await clientReadText(harnessed.wire, after) };
+  }
+
+  it('should hand the port the code, key and origin with a proof over this transcript, and answer a challenge padded, then close 4440', async () => {
+    // Act
+    const { harnessed, calls, body } = await ask({
+      joinOptions: async () => ({
+        ok: true,
+        answer: { kind: 'challenge', memberLabel: 'Ada', options: CHALLENGE_OPTIONS },
+      }),
+    });
+
+    // Assert
+    should(calls.options).deepEqual([
+      { code: 'CODE-1234', memberKey: memberKeyText, origin: APP_ORIGIN, proven: true, carrier: { kind: 'relay' } },
+    ]);
+    should(calls.joins).be.empty();
+    should(JSON.parse(body)).containDeep({
+      t: 'join-challenge',
+      protocol: SESSION_PROTOCOL_ID,
+      memberLabel: 'Ada',
+      options: CHALLENGE_OPTIONS,
+    });
+    should(new TextEncoder().encode(body).length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+    });
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should answer join-open with why, padded to the same size', async () => {
+    for (const why of ['first-browser', 'owner-approved'] as const) {
+      // Act
+      const { body } = await ask({ joinOptions: async () => ({ ok: true, answer: { kind: 'open', why } }) });
+
+      // Assert
+      should(JSON.parse(body)).containDeep({ t: 'join-open', protocol: SESSION_PROTOCOL_ID, why });
+      should(new TextEncoder().encode(body).length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    }
+  });
+
+  it('should refuse alike for a refusal, a port that throws and no member side, in the same size', async () => {
+    // Arrange
+    const bare = harness();
+    const bareOpen = await keyedSession(bare);
+    const bareAfter = await clientSend(bare.link, bareOpen.channel, joinOptionsRecord);
+    const refused = await ask({});
+    const broken = await ask({
+      joinOptions: async () => {
+        throw new Error('the port broke');
+      },
+    });
+
+    // Assert
+    for (const body of [await clientReadText(bare.wire, bareAfter), refused.body, broken.body]) {
+      should(JSON.parse(body)).containDeep({ t: 'join-refused', reason: 'join_refused' });
+      should(new TextEncoder().encode(body).length).equal(MEMBER_JOIN_OUTCOME_BYTES);
+    }
+  });
+
+  it('should send the padded refusal when the challenge cannot be padded to the fixed size', async () => {
+    // Act
+    const { body } = await ask({
+      joinOptions: async () => ({
+        ok: true,
+        answer: {
+          kind: 'challenge',
+          memberLabel: 'Ada',
+          options: { ...CHALLENGE_OPTIONS, rpId: 'r'.repeat(MEMBER_JOIN_OUTCOME_BYTES) },
+        },
+      }),
+    });
+
+    // Assert
+    should(JSON.parse(body)).containDeep({ t: 'join-refused', reason: 'join_refused' });
+  });
+
+  it('should ask the port with a failed proof when the key did not sign, and leave the verdict to it', async () => {
+    // Act
+    const { calls } = await ask({}, { ...joinOptionsRecord, forged: true });
+
+    // Assert
+    should(calls.options.map(options => options.proven)).deepEqual([false]);
+  });
+
+  it('should name the carrier it arrived on', async () => {
+    const carrierOf = async (arrival?: SessionArrival): Promise<MemberJoinCarrier | undefined> => {
+      const { members, calls } = fakeMembers();
+      const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, {
+        members,
+        ...(arrival === undefined ? {} : { arrival }),
+      });
+      const opened = await keyedSession(harnessed);
+      await clientSend(harnessed.link, opened.channel, joinOptionsRecord);
+      return calls.options[0]?.carrier;
+    };
+
+    should(await carrierOf({ loopback: false, privilegedLoopback: false, carrier: 'tunnel' })).deepEqual({
+      kind: 'tunnel',
+    });
+    should(await carrierOf({ loopback: false, privilegedLoopback: false, clientAddress: '203.0.113.9' })).deepEqual({
+      kind: 'direct',
+      rateLimitKey: '203.0.113.9',
+    });
+    should(await carrierOf({ loopback: false, privilegedLoopback: false })).deepEqual({
+      kind: 'direct',
+      rateLimitKey: `direct-session:${sessionOne().text}`,
+    });
+  });
+
+  it('should send nothing for a session the rendezvous ended while the options were in flight', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let asked = false;
+    const { members } = fakeMembers({
+      joinOptions: async () => {
+        asked = true;
+        await gate;
+        return { ok: true, answer: { kind: 'open', why: 'first-browser' } };
+      },
+    });
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { members });
+    const opened = await keyedSession(harnessed);
+    const sealed = await sealRecord(
+      crypto_,
+      opened.channel,
+      utf8Bytes(JSON.stringify(await credentialed(opened.channel, joinOptionsRecord))),
+    );
+    if (!sealed.ok) throw new Error(sealed.reason);
+
+    const asking = harnessed.link.receiveBinary(encodeFrame(sealed.frame));
+    await until(() => asked);
+    await harnessed.link.receiveBinary(
+      control({ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'gone' }, sessionOne()),
+    );
+    const before = harnessed.wire.frames.length;
+    release();
+    await asking;
+
+    should(harnessed.wire.frames).have.length(before);
+  });
+});
+
+describe('a member join carrying a passkey', () => {
+  it('should hand the assertion to the port exactly as the browser sent it', async () => {
+    // Arrange
+    const { members, calls } = fakeMembers({ join: granted });
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { members });
+    const opened = await keyedSession(harnessed);
+
+    // Act
+    await clientSend(harnessed.link, opened.channel, { ...joinRecord, passkey: PASSKEY });
+
+    // Assert
+    should(calls.joins.map(join => join.passkey)).deepEqual([PASSKEY]);
   });
 });
 

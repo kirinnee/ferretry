@@ -85,6 +85,18 @@ describe('memberView', () => {
 });
 
 describe('shareView', () => {
+  it('should show the owner’s new-passkey mark when it is on, and say nothing when it is off or absent', () => {
+    // Arrange
+    const marked = storedShare(1, { newPasskey: true });
+    const cleared = storedShare(1, { newPasskey: false });
+    const plain = storedShare(1);
+
+    // Act / Assert
+    should(shareView(marked, T0).newPasskey).be.true();
+    should(shareView(cleared, T0)).not.have.property('newPasskey');
+    should(shareView(plain, T0)).not.have.property('newPasskey');
+  });
+
   it('should show a live share and who used it', () => {
     // Arrange
     const share = storedShare(1, {

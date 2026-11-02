@@ -190,6 +190,13 @@ export const DAEMON_FEATURES = {
    */
   catalogInstallUpdates: 'catalog-installs.updates.1',
   /**
+   * A later invite proves the person's passkey, and the owner may mark one invite "They need a new passkey"
+   * (docs/catalogs.md § Joining as someone who is already here): the `join-options` record, the optional `passkey` on a
+   * join, `newPasskey` on a mint and `PUT/DELETE /v1/catalog-shares/:shareId/new-passkey`. A daemon without this name
+   * lets a later invite join without a proof, so the app offers the proof step only where the machine reports it.
+   */
+  catalogJoinProof: 'catalogs.join-proof.1',
+  /**
    * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
    * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
    * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.

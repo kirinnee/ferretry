@@ -20,7 +20,7 @@ describe('CatalogMemberRefusal', () => {
     should(refusal.name).equal('CatalogMemberRefusal');
   });
 
-  it("should list every protocol refusal and this machine's own four", () => {
+  it("should list every protocol refusal and this machine's own six", () => {
     // Arrange / Act / Assert
     should([...CATALOG_MEMBER_REFUSALS]).eql([
       ...CATALOG_SHARE_REFUSALS,
@@ -28,6 +28,8 @@ describe('CatalogMemberRefusal', () => {
       'catalogs_full',
       'share_link_unavailable',
       'store_damaged',
+      'new_passkey_multi',
+      'share_not_live',
     ]);
   });
 });
@@ -63,6 +65,8 @@ describe('CATALOG_MEMBER_STATUS', () => {
       catalogs_full: 409,
       share_link_unavailable: 503,
       store_damaged: 500,
+      new_passkey_multi: 400,
+      share_not_live: 409,
     });
   });
 });

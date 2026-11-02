@@ -86,6 +86,7 @@ import {
   type MemberJoinOutcomeContent,
   memberAuthMessage,
   memberJoinMessage,
+  memberJoinOptionsMessage,
   memberRenewMessage,
   NONCE_BYTES,
   newReceiveWindow,
@@ -131,6 +132,7 @@ import {
   type RelayTunnelDaemonMessage,
   type RelayTunnelData,
   type RelayTunnelJoin,
+  type RelayTunnelJoinOptions,
   type RelayTunnelMember,
   type RelayTunnelPair,
   type RelayTunnelRequest,
@@ -588,6 +590,13 @@ interface LinkSession {
   owesConclusion: boolean;
 }
 
+/** The one refusal a join or a join-options gets, for every cause. */
+const REFUSED_JOIN_OUTCOME: MemberJoinOutcomeContent = {
+  t: 'join-refused',
+  protocol: SESSION_PROTOCOL_ID,
+  reason: 'join_refused',
+};
+
 export class RelayLink {
   readonly #sessions = new Map<string, LinkSession>();
   /** Sessions this daemon ended recently, each with the timer that forgets it. See
@@ -1010,6 +1019,9 @@ export class RelayLink {
         return;
       case 'join':
         await this.#joinMember(session, message);
+        return;
+      case 'join-options':
+        await this.#joinOptions(session, message);
         return;
       case 'member':
         await this.#authenticateMember(session, message);
@@ -1464,11 +1476,7 @@ export class RelayLink {
         : arrival.carrier === 'tunnel'
           ? { kind: 'tunnel' }
           : { kind: 'direct', rateLimitKey: arrival.clientAddress ?? `direct-session:${session.sessionId.text}` };
-    let content: MemberJoinOutcomeContent = {
-      t: 'join-refused',
-      protocol: SESSION_PROTOCOL_ID,
-      reason: 'join_refused',
-    };
+    let content: MemberJoinOutcomeContent = REFUSED_JOIN_OUTCOME;
     try {
       const result = await this.deps.members?.join(
         {
@@ -1476,6 +1484,7 @@ export class RelayLink {
           clientName: request.clientName,
           memberKey: request.memberKey,
           boxKey: request.boxKey,
+          ...(request.passkey === undefined ? {} : { passkey: request.passkey }),
           prove: async () =>
             transcript !== undefined &&
             (await verifyDeviceProof(
@@ -1495,6 +1504,59 @@ export class RelayLink {
     const text =
       padJoinOutcome(content) ??
       padJoinOutcome({ t: 'join-refused', protocol: SESSION_PROTOCOL_ID, reason: 'join_refused' });
+    this.#queue(session, { t: 'join-outcome', text: text ?? '' });
+    this.#conclude(session);
+  }
+
+  /**
+   * What a join with a code needs (docs/relay-protocol.md §14 "Joining as someone who is already here"): the same
+   * one-attempt, one-sealed-outcome, `4440` shape as a join, and it spends nothing. The answer is a challenge to
+   * prove one of the person's passkeys, "no proof needed", or the one refusal.
+   */
+  async #joinOptions(session: LinkSession, request: RelayTunnelJoinOptions): Promise<void> {
+    session.phase = 'concluding';
+    const transcript = session.transcript;
+    const arrival = this.deps.arrival;
+    const carrier: MemberJoinCarrier =
+      arrival === undefined
+        ? { kind: 'relay' }
+        : arrival.carrier === 'tunnel'
+          ? { kind: 'tunnel' }
+          : { kind: 'direct', rateLimitKey: arrival.clientAddress ?? `direct-session:${session.sessionId.text}` };
+    let content: MemberJoinOutcomeContent = REFUSED_JOIN_OUTCOME;
+    try {
+      const result = await this.deps.members?.joinOptions(
+        {
+          code: request.code,
+          memberKey: request.memberKey,
+          origin: request.origin,
+          prove: async () =>
+            transcript !== undefined &&
+            (await verifyDeviceProof(
+              this.deps.crypto,
+              request.memberKey,
+              request.proof,
+              memberJoinOptionsMessage(transcript, request.memberKey, request.origin),
+            )),
+        },
+        carrier,
+      );
+      if (result?.ok === true) {
+        content =
+          result.answer.kind === 'open'
+            ? { t: 'join-open', protocol: SESSION_PROTOCOL_ID, why: result.answer.why }
+            : {
+                t: 'join-challenge',
+                protocol: SESSION_PROTOCOL_ID,
+                memberLabel: result.answer.memberLabel,
+                options: result.answer.options,
+              };
+      }
+    } catch {
+      // The port promises not to throw; a port that does is a refusal, not a session left hanging.
+    }
+    if (!this.#live(session)) return;
+    const text = padJoinOutcome(content) ?? padJoinOutcome(REFUSED_JOIN_OUTCOME);
     this.#queue(session, { t: 'join-outcome', text: text ?? '' });
     this.#conclude(session);
   }

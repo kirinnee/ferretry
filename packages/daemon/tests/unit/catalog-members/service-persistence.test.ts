@@ -169,7 +169,12 @@ describe('CatalogMemberService.commit', () => {
     // Arrange
     const members = membersDoc(storedMember(7, { catalogIds: [catalogId(1)], keys: [storedKey(7)] }));
     const shares = sharesDoc(
-      storedShare(1, { memberId: memberId(7), memberKind: 'existing', catalogIds: [catalogId(1), catalogId(2)] }),
+      storedShare(1, {
+        memberId: memberId(7),
+        memberKind: 'existing',
+        newPasskey: true,
+        catalogIds: [catalogId(1), catalogId(2)],
+      }),
     );
     const r = await rig({ members, shares });
     const reservation = joinOf(r.service.admitJoin(codeOf(1), T0));

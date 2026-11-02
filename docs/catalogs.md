@@ -895,7 +895,9 @@ act alone (`share-catalog`), as minting a pairing code does.
   field for it (a test walks every schema).
 - **A code for an existing member is a credential for everything that member can read**, not only the
   catalogs the share adds: whoever opens it becomes another browser of that member. The share sheet says
-  so before a code is minted for an existing member, and suggests a new member instead when in doubt.
+  so before a code is minted for an existing member, and suggests a new member instead when in doubt. Opening it
+  also takes one of that person's passkeys ([Joining as someone who is already here](#joining-as-someone-who-is-already-here)),
+  so a forwarded code alone does not add a stranger's browser.
 - **The link carries it in the fragment only**: `https://<app>/join#v1;url=…;fp=…;share=…`. The pairing
   link's grammar and the same reader, but the code is under its own field name: a share reader refuses a
   link carrying `code=`, a pairing reader one carrying `share=`, so no link is read by both. The app routes
@@ -937,7 +939,7 @@ step, the code is found, room is checked (a refusal for room leaves the code liv
 single-use code is burned whatever happens next; one made for a different member, or for a new member, is
 refused and the owner is told (owner decision Q5). A multi-use code counts a use only when it adds a
 catalog, so reopening a workshop link costs nothing. Q5 is enforced for a browser that signs in first; a
-browser that joins instead becomes whichever member the code names, which is what the code allowed anyway.
+browser that joins instead becomes whichever member the code names, once it has proved one of that person's passkeys (or the owner marked the invite for a new passkey), which is what the code and the person allowed.
 
 **What a member can reach** is a **separate route table**, `/v1/shared/*`: their own summary, the signed
 manifests and items of the catalogs they hold now, redeeming a code, registering passkeys and unlocking,
@@ -972,10 +974,12 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   (`existing`), and an ID nobody holds makes a new person. The older arms stay accepted. `{ "kind": "new",
 "label" }` for an ID that is taken is refused `409 member_exists` with the `memberId` that holds it ("Someone
   here already has the user ID ‹id›. Pick another."), so a mint never makes a second person of the same ID. A
-  code for many people may name a person who has **not joined yet** (every browser then joins that one new
-  person) but is **refused** for someone already in (`409 member_exists`, or a 400 for `{ "kind": "existing" }`):
-  until a joiner proves a passkey of the person (join by proof, a later change), a forwarded code would let up to
-  its cap of strangers in as them. Use a single-use code to add catalogs to an existing person.
+  code for many people (a **group link**) takes only a name **nobody holds or reserves**: every browser then joins
+  that one new person. For a name that is **reserved** (an invite for it is waiting, nobody has joined) it is refused
+  `409 member_exists` with the `memberId` that holds it, because a reserved name IS the person: the second code
+  would let every stranger who held it join as them, with no passkey to prove, once the first browser had one. Use a
+  single-use code for them, or a name nobody holds. For someone **already in**, a code for many people is allowed and
+  each browser proves a passkey of the person to join (join by proof, below).
 - **A new ID is reserved.** An invite for an ID nobody holds yet holds it, as the shares themselves do (nothing
   is stored apart): the ID is held while any live share that names the person has not been used, and while a join
   with it is in flight, and lets go by itself when every invite naming them is used up, ended or expired and they
@@ -1002,12 +1006,85 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   Sharing › People." (the plural names how many).
 - **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
   (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
-  and the join flow are unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id`
-  stays per browser on purpose: a passkey manager that syncs would let one browser's registration overwrite
-  another's if two shared a `user.id`, so the people of one ID would lose each other's passkeys.
+  is unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id` stays per browser on
+  purpose: a passkey manager that syncs would let one browser's registration overwrite another's if two shared a
+  `user.id`, so the people of one ID would lose each other's passkeys. The join flow gained the proof below, which
+  uses this read to find every passkey that can vouch for the person.
 - **Removal is final.** Removing a person writes the members file first, then ends the invites that name them. If
   either write fails, the person is already gone in memory and their sessions are closed; asking again finishes
   the writes, and a restart does too (the person is gone from the file, the invites are still live to end).
+
+### Joining as someone who is already here
+
+**Feature flag: `catalogs.join-proof.1`**, reported on `/v1/health`, so the app knows this machine asks. An older
+daemon does not, and the app then joins as it always did.
+
+A share code for a person who already has a passkey is **not enough** to add a browser to them: whoever held a
+forwarded invite for Alice would be Alice. So a later join **proves** the person first, and nothing is filed and no
+code is spent until the proof holds.
+
+1. The browser asks `join-options` with the code ([relay-protocol.md](relay-protocol.md) §14). The answer is one of
+   `join-open` (no proof wanted), `join-challenge` (prove one of these passkeys) or the one generic refusal.
+2. For a challenge, the app has the browser sign it with ONE of the person's passkeys. `allowCredentials` is the
+   passkeys that person has made at this page's origin, **newest first, up to 64** (and at most 12 KiB of ids, so the
+   sealed answer always fits), so a passkey synced to this browser, a passkey made on a newer browser, or one on a
+   phone through its hybrid QR code, just works. (A step-up lists at most 8, one device's own passkeys; a person
+   spans many devices, so `join-challenge` has its own larger bound.)
+3. The browser sends `join` with that assertion. The daemon checks it exactly as an unlock does (origin, rpId, a
+   challenge bound to this join, user verification as the unlock rule asks, and the signature counter), against the
+   passkeys of THIS person only. Only then is the code spent and the browser's key filed.
+4. That browser then registers its **own** passkey, in the usual ten-minute window. **Passkeys stay per browser**: a
+   passkey's WebAuthn `user.id` is still its browser's member key id and never changes, so a synced password manager
+   still never replaces one browser's passkey with another's.
+
+The challenge is random, held in memory for two minutes, and issued per (share, browser key). It is spent when a `join`
+arrives, whether or not the assertion verifies, so replaying a captured assertion, or an assertion made for another
+share or another browser key, proves nothing. A failed or missing proof is the uniform refusal: the code is **not**
+spent, the browser is **not** added, and the browser cannot tell why. A passkey of a revoked person or a removed
+browser is no longer on the list, so it cannot prove either, and another person's passkey is refused. The Q5
+cross-member refusal is unchanged.
+
+**The app shows the sentence, the wire does not.** The daemon answers `join-refused` and nothing more. The app, which
+knows from `join-challenge` whose passkey it asked for, says: "Use ‹Alice›'s passkey, or ask ‹owner› to let you set up
+a new one."
+
+#### Lost devices: "They need a new passkey"
+
+A person whose every passkey is gone (a lost phone, a wiped laptop) cannot prove anything. The owner can mark ONE
+invite **"They need a new passkey"** (owner decision D8), at mint (`newPasskey: true`) or on a live invite
+(`PUT /v1/catalog-shares/:shareId/new-passkey`; `DELETE` takes it off). Putting it on needs the owner's fresh
+`share-catalog` passkey, because it widens who a code can add. Such an invite joins like a first join, with no proof,
+even though the person exists; the browser then registers its own passkey as usual.
+
+- **It is never automatic.** Nothing sets it but the owner's own request. When the person has no passkey left, the
+  mint's answer carries `noPasskeyLeft: true` so the app can pre-tick the box, but the owner still marks it.
+- **It is per invite and single use.** The invite burns when used, taking the mark with it.
+- **A multi-use code is refused it** (`400 new_passkey_multi`): a mark that opens a code for many browsers is a hole,
+  so make one single-use invite per browser. An invite that is no longer live cannot be marked (`409 share_not_live`).
+- **A ferret may not mint or mark**; it may list, as for every share route.
+
+#### The decisions behind it
+
+- **A group link is exempt.** A multi-use code made for a name nobody held or reserved (a workshop) has nobody to
+  prove, so every browser joins that new person as before. The mint decides this, not the join: a code for many
+  people is refused for a reserved name (above), so a multi-use code that names a new person can only be a group link.
+  It stays open even when everyone has removed that person's browsers or skipped the passkey prompt: no passkey and no
+  open window never blocks a group link. (Codes minted before this rule keep their old meaning for their lifetime, at
+  most a day.)
+- **An existing person with no passkey and no D8 mark is blocked.** The join is refused (the code stays live) rather
+  than opened by default. The owner marks the invite, or mints one that does. A second invite for a person who
+  has not joined (`memberKind: 'new'`) joins freely **only while a browser of theirs is inside its passkey window**
+  (the owner made two invites and the second arrives while the first browser is registering); once no window is
+  open, the person is as good as one who existed and the invite is blocked until the owner marks it.
+- **`join-options` tells a holder of a live code three things:** the person's name (which the invite names anyway),
+  the credential ids of the passkeys that can answer (ids, never keys), and that the code is live. It is the price of
+  letting the browser pick the right passkey, and it needs only the code. It spends nothing and issues at most 16 live
+  challenges per share, 1,024 in all.
+- **Passkeys do not move between people or browsers.** Joining by proof proves the person; it does not copy anything.
+
+**Audit** ([audit.md](audit.md)): `catalog.member.join-proved`, `catalog.member.new-passkey-used`,
+`catalog.member.join-proof-refused` (at most one a minute per share), `catalog.share.new-passkey-marked` and
+`catalog.share.new-passkey-cleared`. IDs only; never the code, the challenge or the assertion.
 
 ### Built in 2b-1: shares and members on the publisher
 
@@ -1039,6 +1116,7 @@ SHA-256 of a code is stored.
 - **Sweep.** Passkey-less keys are removed when their 600 s window closes and idle keys after 90 days; a timer
   adapter calls the pure sweep every minute.
 - **Owner routes**, all `sharing.use`: `POST/GET /v1/catalog-shares`, `DELETE /v1/catalog-shares/:shareId`,
+  `PUT|DELETE /v1/catalog-shares/:shareId/new-passkey` (the D8 mark, above),
   `GET /v1/catalog-members`, `PATCH|DELETE /v1/catalog-members/:memberId`, and `DELETE` of one browser or one
   catalog of a member. A ferret may list and nothing else. Minting needs a fresh `share-catalog` passkey from a
   governed caller, claimed atomically. The code and link appear ONLY in the mint's answer. Minting is refused

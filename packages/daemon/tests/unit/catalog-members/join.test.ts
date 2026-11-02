@@ -21,12 +21,17 @@ const RELAY: MemberJoinCarrier = { kind: 'relay' };
 const TUNNEL: MemberJoinCarrier = { kind: 'tunnel' };
 
 type Members = ConstructorParameters<typeof MemberJoinGate>[0]['members'];
+type Proof = ConstructorParameters<typeof MemberJoinGate>[0]['proof'];
+
+/** No person here has a passkey the gate could be shown, so nothing proves. */
+const NO_PROOF: Proof = { options: async () => undefined, verify: async () => false };
 
 function build(
   r: Rig,
   override: Partial<Members> = {},
   publisher: () => MemberJoinPublisher = () => PUBLISHER,
   persisted?: Promise<void>,
+  proof: Proof = NO_PROOF,
 ) {
   const calls: string[] = [];
   const audit: AuditEntry[] = [];
@@ -37,9 +42,13 @@ function build(
       calls.push('ready');
       await r.service.ready();
     },
-    admitJoin: (code, now) => {
+    joinNeed: (code, now) => {
+      calls.push('need');
+      return r.service.joinNeed(code, now);
+    },
+    admitJoin: (code, now, proven) => {
       calls.push('admit');
-      const admission = r.service.admitJoin(code, now);
+      const admission = r.service.admitJoin(code, now, proven);
       return persisted === undefined ? admission : ({ ...admission, persisted } as Durable<JoinAdmission>);
     },
     commit: async (reservation, key) => {
@@ -54,6 +63,7 @@ function build(
   };
   const gate = new MemberJoinGate({
     members,
+    proof,
     publisher,
     audit: {
       record: async entry => {
@@ -112,7 +122,7 @@ async function settled(work: Promise<unknown>): Promise<boolean> {
 }
 
 describe('MemberJoinGate: a join that succeeds', () => {
-  it('should answer with who joined and what this machine is, in the order ready, admit, commit', async () => {
+  it('should answer with who joined and what this machine is, in the order ready, need, admit, commit', async () => {
     // Arrange
     const r = await rig();
     const { code } = await r.service.mint(singleFor('Alice'));
@@ -132,7 +142,7 @@ describe('MemberJoinGate: a join that succeeds', () => {
     should(result.response.memberUnlockDays).equal(30);
     should(result.response.carriers).eql(PUBLISHER.carriers);
     should(proofs.count).equal(1);
-    should(calls).eql(['ready', 'admit', 'commit']);
+    should(calls).eql(['ready', 'need', 'admit', 'commit']);
     should(r.members.document.members[0]?.keys.map(key => key.memberKey)).eql([attempt.memberKey]);
   });
 
@@ -312,7 +322,7 @@ describe('MemberJoinGate: the burn is on disk before anything is answered', () =
 
     // Assert
     should(early).equal(false);
-    should(callsEarly).eql(['ready', 'admit']);
+    should(callsEarly).eql(['ready', 'need', 'admit']);
     should(result.ok).equal(true);
   });
 
@@ -350,7 +360,7 @@ describe('MemberJoinGate: the burn is on disk before anything is answered', () =
 
     // Assert
     should(result).eql({ ok: false });
-    should(calls).eql(['ready', 'admit', 'release']);
+    should(calls).eql(['ready', 'need', 'admit', 'release']);
     should(reasons(audit)).eql(['failed']);
   });
 });
@@ -372,7 +382,7 @@ describe('MemberJoinGate: a reservation is committed or released, never held', (
 
     // Assert
     should(result).eql({ ok: false });
-    should(calls).eql(['ready', 'admit', 'commit', 'release']);
+    should(calls).eql(['ready', 'need', 'admit', 'commit', 'release']);
     should(reasons(audit)).eql(['failed']);
   });
 

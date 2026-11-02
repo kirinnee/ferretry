@@ -4,10 +4,17 @@ import type { ApiRequest } from '../../../src/lib/api/http.ts';
 import {
   DeferredMemberSessions,
   type MemberJoinAttempt,
+  type MemberJoinOptionsAttempt,
   type RelayMemberSessions,
 } from '../../../src/lib/relay/member-port.ts';
 
 const ATTEMPT: MemberJoinAttempt = { code: 'c', clientName: 'n', memberKey: 'k', boxKey: 'b', prove: async () => true };
+const OPTIONS_ATTEMPT: MemberJoinOptionsAttempt = {
+  code: 'c',
+  memberKey: 'k',
+  origin: 'https://app.ferretry.test',
+  prove: async () => true,
+};
 const REQUEST = { method: 'GET', path: '/v1/shared/me' } as ApiRequest;
 const MEMBER = { memberId: 'mbr_1', keyId: 'mk_1', appSession: 'app', sessionId: 'session-1' };
 
@@ -18,11 +25,13 @@ describe('DeferredMemberSessions: before the member side is bound', () => {
 
     // Act
     const joined = await deferred.join(ATTEMPT, { kind: 'relay' });
+    const asked = await deferred.joinOptions(OPTIONS_ATTEMPT, { kind: 'relay' });
     const key = await deferred.key('mk_1');
     const open = await deferred.open(MEMBER, () => undefined);
 
     // Assert
     should(joined).eql({ ok: false });
+    should(asked).eql({ ok: false });
     should(key).equal(undefined);
     should(open).equal(undefined);
   });
@@ -53,6 +62,10 @@ describe('DeferredMemberSessions: once bound', () => {
         log.push(`join:${carrier.kind}`);
         return { ok: false };
       },
+      joinOptions: async (_attempt, carrier) => {
+        log.push(`options:${carrier.kind}`);
+        return { ok: true, answer: { kind: 'open', why: 'first-browser' } };
+      },
       key: async keyId => {
         log.push(`key:${keyId}`);
         return { memberId: 'mbr_1', memberKey: 'k' };
@@ -71,12 +84,14 @@ describe('DeferredMemberSessions: once bound', () => {
 
     // Act
     await deferred.join(ATTEMPT, { kind: 'tunnel' });
+    const asked = await deferred.joinOptions(OPTIONS_ATTEMPT, { kind: 'relay' });
     const key = await deferred.key('mk_1');
     const open = await deferred.open(MEMBER, () => undefined);
     const response = await deferred.dispatch(REQUEST);
 
     // Assert
-    should(log).eql(['join:tunnel', 'key:mk_1', 'open:mk_1', 'dispatch:/v1/shared/me']);
+    should(log).eql(['join:tunnel', 'options:relay', 'key:mk_1', 'open:mk_1', 'dispatch:/v1/shared/me']);
+    should(asked).eql({ ok: true, answer: { kind: 'open', why: 'first-browser' } });
     should(key).eql({ memberId: 'mbr_1', memberKey: 'k' });
     should(open).equal(release);
     should(response.status).equal(200);

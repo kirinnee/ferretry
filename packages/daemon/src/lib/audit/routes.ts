@@ -700,7 +700,22 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
       catalogIds: ['share', 'catalogIds', '*'],
       uses: ['share', 'uses', 'kind'],
       expiresAt: ['share', 'expiresAt'],
+      newPasskey: ['share', 'newPasskey'],
     },
+  },
+  {
+    method: 'PUT',
+    path: '/v1/catalog-shares/:shareId/new-passkey',
+    event: 'catalog.share.new-passkey-marked',
+    subject: 'shareId',
+    responseFields: { memberId: ['memberId'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-shares/:shareId/new-passkey',
+    event: 'catalog.share.new-passkey-cleared',
+    subject: 'shareId',
+    responseFields: { memberId: ['memberId'] },
   },
   { method: 'DELETE', path: '/v1/catalog-shares/:shareId', event: 'catalog.share.ended', subject: 'shareId' },
   {

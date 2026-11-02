@@ -137,6 +137,8 @@ const StoredShareSchema = z.strictObject({
   /** How many uses are spent. A single-use share has 0 or 1. */
   used: z.number().int().min(0).max(1_000),
   state: CatalogShareStateSchema,
+  /** The owner marked this invite "They need a new passkey" (D8). Only the owner sets it; a single-use code takes it to its end. */
+  newPasskey: z.boolean().optional(),
   usedBy: z
     .array(z.strictObject({ clientName: MemberClientNameSchema, keyId: CatalogMemberKeyIdSchema, at: InstantSchema }))
     .max(1_000),

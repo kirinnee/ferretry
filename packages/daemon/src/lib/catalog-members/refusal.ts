@@ -13,6 +13,8 @@ export const CATALOG_MEMBER_REFUSALS = [
   'catalogs_full',
   'share_link_unavailable',
   'store_damaged',
+  'new_passkey_multi',
+  'share_not_live',
 ] as const;
 export type CatalogMemberRefusalCode = (typeof CATALOG_MEMBER_REFUSALS)[number];
 
@@ -50,4 +52,6 @@ export const CATALOG_MEMBER_STATUS: Readonly<Record<CatalogMemberRefusalCode, nu
   catalogs_full: 409,
   share_link_unavailable: 503,
   store_damaged: 500,
+  new_passkey_multi: 400,
+  share_not_live: 409,
 };

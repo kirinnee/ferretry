@@ -54,6 +54,9 @@ import {
   admitJoin,
   admitRedeem,
   type Admitted,
+  joinNeed,
+  type JoinNeed,
+  locateShare,
   type CrossMemberUse,
   type DigestComparison,
   type JoinAdmission,
@@ -120,6 +123,20 @@ export interface JoinedMember {
   readonly label: string;
   readonly catalogCount: number;
   readonly passkeyWindowEndsAt: string;
+}
+
+/** The share and person a passkey proof was just verified for. */
+export interface JoinProven {
+  readonly shareId: string;
+  readonly memberId: string;
+}
+
+/** What a join with a code needs, and whose invite it is. */
+export interface JoinNeeded {
+  readonly need: JoinNeed;
+  readonly shareId: string;
+  readonly memberId: string;
+  readonly memberLabel: string;
 }
 
 /** Who spent a redeem, so the share can list it. A redeem that adds nothing records nobody. */
@@ -279,8 +296,28 @@ export class CatalogMemberService {
    * Step 2 of a join, synchronously: find the code, check it is live, check room and the hourly count, spend
    * it, reserve a key slot. Answers a reservation or ONE refusal. {@link ready} must have resolved.
    */
-  admitJoin(codeText: string, now: number): Durable<JoinAdmission> {
-    return this.#admit(codeText, now, probe => admitJoin(probe));
+  admitJoin(codeText: string, now: number, proven?: JoinProven): Durable<JoinAdmission> {
+    return this.#admit(codeText, now, probe => admitJoin({ ...probe, ...(proven === undefined ? {} : { proven }) }));
+  }
+
+  /**
+   * What a join with this code needs, WITHOUT spending anything: nothing, a proof of the person's passkey, or the
+   * owner's say-so first. `undefined` for a code that is unknown, not live or for a person who has gone; the caller
+   * refuses those exactly as it refuses everything. Synchronous, like the admission step. {@link ready} must have resolved.
+   */
+  joinNeed(codeText: string, now: number): JoinNeeded | undefined {
+    const state = this.#state;
+    if (state === undefined) return undefined;
+    const share = locateShare(state.shares, this.deps.hasher.hex(codeText), this.#compare);
+    if (share === undefined || shareState(share, now) !== 'live') return undefined;
+    const member = state.members.members.find(entry => entry.memberId === share.memberId);
+    if (member === undefined && share.memberKind === 'existing') return undefined;
+    return {
+      need: joinNeed(share, member, now),
+      shareId: share.shareId,
+      memberId: share.memberId,
+      memberLabel: member?.label ?? share.memberLabel,
+    };
   }
 
   /** Step 2 of a redeem by a browser that already belongs to `memberId`. */
@@ -515,6 +552,11 @@ export class CatalogMemberService {
           'shares_full',
           `${String(CATALOG_SHARES_LISTED_MAX)} shares are stored. Old ones are forgotten after 30 days; end some, or try again later.`,
         );
+      if (request.newPasskey === true && request.uses.kind === 'multi')
+        throw new CatalogMemberRefusal(
+          'new_passkey_multi',
+          'A new passkey can be approved for one invite at a time. Make a single-use invite for each browser.',
+        );
       const who = this.#whoFor(request.member, request.uses, now);
       const existing = who.existing;
       if (new Set([...(existing?.catalogIds ?? []), ...request.catalogIds]).size > CATALOG_SHARE_MAX_CATALOGS)
@@ -535,6 +577,7 @@ export class CatalogMemberService {
         uses: request.uses,
         used: 0,
         state: 'live',
+        ...(request.newPasskey === true ? { newPasskey: true } : {}),
         usedBy: [],
         successes: [],
       };
@@ -549,7 +592,34 @@ export class CatalogMemberService {
           daemonId: DaemonIdSchema.parse(target.daemonId),
           code,
         }),
+        ...(existing !== undefined && !existing.keys.some(key => key.passkeyCount > 0) ? { noPasskeyLeft: true } : {}),
       };
+    });
+  }
+
+  /**
+   * The owner's mark on a live single-use invite: "They need a new passkey" (D8), or taking it off again. Only the
+   * owner calls this (the route claims a fresh passkey for putting it ON; taking it off only narrows). A code that is
+   * not live or is used up many times over cannot carry it.
+   */
+  async markNewPasskey(shareId: string, on: boolean): Promise<CatalogShareView> {
+    await this.ready();
+    return await this.#serially(async () => {
+      const state = this.#loaded();
+      const now = this.deps.now();
+      const share = state.shares.shares.find(entry => entry.shareId === shareId);
+      if (share === undefined) throw new CatalogMemberRefusal('share_unknown', 'There is no such share.');
+      if (shareState(share, now) !== 'live')
+        throw new CatalogMemberRefusal('share_not_live', 'That invite is no longer open, so it cannot be changed.');
+      if (on && share.uses.kind === 'multi')
+        throw new CatalogMemberRefusal(
+          'new_passkey_multi',
+          'A new passkey can be approved for one invite at a time. Make a single-use invite for each browser.',
+        );
+      if ((share.newPasskey === true) === on) return shareView(share, now);
+      const next: StoredShare = { ...share, newPasskey: on };
+      await this.#applyShares(this.#sharesWith(state.shares, next), state.shares);
+      return shareView(next, now);
     });
   }
 
@@ -850,11 +920,11 @@ export class CatalogMemberService {
     );
   }
 
-  #alreadyIn(member: StoredMember): CatalogMemberRefusal {
+  #reservedForOne(holder: { memberId: string; label: string }): CatalogMemberRefusal {
     return new CatalogMemberRefusal(
       'member_exists',
-      `${member.label} is already in. A code for many people can't add to someone already in yet; use a single-use code.`,
-      member.memberId,
+      `${holder.label} has an invite that nobody has used yet. A code for many people can't name them; use a single-use code, or pick a name nobody holds.`,
+      holder.memberId,
     );
   }
 
@@ -877,7 +947,6 @@ export class CatalogMemberService {
     if ('kind' in member && member.kind === 'existing') {
       const found = state.members.members.find(entry => entry.memberId === member.memberId);
       if (found === undefined) throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
-      if (uses.kind === 'multi') throw this.#alreadyIn(found);
       return { kind: 'existing', memberId: found.memberId, label: found.label, existing: found };
     }
     const name = 'kind' in member ? member.label : member.name;
@@ -886,9 +955,9 @@ export class CatalogMemberService {
       return { kind: 'new', memberId: `mbr_${randomText(this.deps.crypto)}`, label: name, existing: undefined };
     if ('kind' in member) throw this.#taken(name, holder.memberId);
     const found = state.members.members.find(entry => entry.memberId === holder.memberId);
-    // Until a joiner can prove they are the person (join-by-proof), a code for many people never reaches someone
-    // who is already in: every stranger who held it would arrive as them. A person only reserved may still have one.
-    if (found !== undefined && uses.kind === 'multi') throw this.#alreadyIn(found);
+    // A reserved name IS the person (docs/catalogs.md § People): a code for many people would let every stranger who
+    // held it join as them before they have a passkey to prove, so only a name nobody holds or reserves gets one.
+    if (found === undefined && uses.kind === 'multi') throw this.#reservedForOne(holder);
     return { kind: found === undefined ? 'new' : 'existing', ...holder, existing: found };
   }
 

@@ -14,10 +14,12 @@ import {
   multiNamed,
   newKey,
   refusal,
+  refusedOf,
   rig,
   sharesDoc,
   singleFor,
   singleForMember,
+  singleForMemberD8,
   singleNamed,
   storedKey,
   storedMember,
@@ -97,28 +99,57 @@ describe('a name is a user ID: minting', () => {
     should(error.memberId).equal(first.share.memberId);
   });
 
-  it('should refuse a code for many people that names someone already in, until join-by-proof', async () => {
+  it('should take a code for many people that names someone already in: each browser then proves the person', async () => {
     const r = await rig({ members: membersDoc(alice()) });
 
-    const byName = await refusal(() => r.service.mint(multiNamed('ALICE', 10)));
-    const byId = await refusal(() => r.service.mint({ ...singleForMember(1), uses: { kind: 'multi', cap: 10 } }));
+    const byName = await r.service.mint(multiNamed('ALICE', 10));
+    const byId = await r.service.mint({ ...singleForMember(1), uses: { kind: 'multi', cap: 10 } });
 
-    for (const error of [byName, byId]) {
-      should(error.refusal).equal('member_exists');
-      should(error.memberId).equal(memberId(1));
-    }
-    should(byName.message).containEql('is already in');
-    should(r.shares.writes).equal(0);
+    for (const minted of [byName, byId]) should(minted.share.memberId).equal(memberId(1));
+    should(r.shares.document.shares.map(share => share.memberKind)).eql(['existing', 'existing']);
+    should(refusedOf(r.service.admitJoin(byName.code, T0)).reason).equal('proof-required');
   });
 
-  it('should let a code for many people name a person who is only reserved, not yet joined', async () => {
+  it('should refuse a code for many people that names a person who is only reserved: a reserved name is the person', async () => {
     const r = await rig();
     const first = await r.service.mint(singleNamed('Bob'));
+    const writes = r.shares.writes;
 
-    const crowd = await r.service.mint(multiNamed('bob', 10));
+    const error = await refusal(() => r.service.mint(multiNamed('bob', 10)));
 
-    should(crowd.share.memberId).equal(first.share.memberId);
-    should(r.shares.document.shares.map(share => share.memberKind)).eql(['new', 'new']);
+    should(error.refusal).equal('member_exists');
+    should(error.memberId).equal(first.share.memberId);
+    should(error.message).containEql('Bob').and.not.containEql('bob');
+    should(r.shares.writes).equal(writes);
+    should(r.shares.document.shares).have.length(1);
+  });
+
+  it('should never let a code for many people join a stranger as a reserved person: the review repro', async () => {
+    // A single-use and a many-person code for Carol, both before she has joined. Were the second taken, a stranger
+    // holding it would join as Carol with no passkey to prove, once Carol had one.
+    const r = await rig();
+    const single = await r.service.mint(singleNamed('Carol'));
+
+    const error = await refusal(() => r.service.mint(multiNamed('Carol', 10)));
+
+    should(error.refusal).equal('member_exists');
+    should(r.shares.document.shares.map(share => share.memberKind)).eql(['new']);
+    should(joinOf(r.service.admitJoin(single.code, T0)).memberId).equal(single.share.memberId);
+    const proven = await rig({
+      members: membersDoc(storedMember(1, { label: 'Carol', keys: [storedKey(11)] })),
+    });
+    const later = await proven.service.mint(multiNamed('Carol', 10));
+    should(refusedOf(proven.service.admitJoin(later.code, T0)).reason).equal('proof-required');
+  });
+
+  it('should refuse a code for many people that names a name a group link already reserved', async () => {
+    const r = await rig();
+    const group = await r.service.mint(multiFor('Team', 5));
+
+    const error = await refusal(() => r.service.mint(multiNamed('team', 5)));
+
+    should(error.refusal).equal('member_exists');
+    should(error.memberId).equal(group.share.memberId);
   });
 
   it('should still give a single-use code to someone already in', async () => {
@@ -255,7 +286,7 @@ describe('a name is a user ID: renaming', () => {
 
   it('should keep codes already minted for the person reaching them', async () => {
     const r = await rig({ members: pair() });
-    const minted = await r.service.mint(singleForMember(1));
+    const minted = await r.service.mint(singleForMemberD8(1));
 
     await r.service.renameMember(memberId(1), 'Alicia');
 

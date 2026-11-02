@@ -20,6 +20,7 @@ import {
   sharesDoc,
   singleFor,
   singleForMember,
+  singleForMemberD8,
   storedKey,
   storedMember,
   storedShare,
@@ -85,7 +86,7 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
 
   it('should refuse a code made for a member who has gone and leave it live', async () => {
     // Arrange
-    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing' }));
+    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing', newPasskey: true }));
     const r = await rig({ shares });
 
     // Act
@@ -119,7 +120,7 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
     // Arrange
     const keys = Array.from({ length: 200 }, (_, index) => storedKey(index + 1));
     const r = await rig({ members: membersDoc(storedMember(7, { keys })) });
-    const minted = await r.service.mint(singleForMember(7));
+    const minted = await r.service.mint(singleForMemberD8(7));
 
     // Act
     const result = refusedOf(r.service.admitJoin(minted.code, T0));
@@ -134,7 +135,9 @@ describe('CatalogMemberService.admitJoin: the refusals of step 2, in order', () 
     // Arrange: member 7 holds 60; the code brings 5 more
     const held = Array.from({ length: 60 }, (_, index) => catalogId(index + 1));
     const added = Array.from({ length: 5 }, (_, index) => catalogId(index + 61));
-    const shares = sharesDoc(storedShare(1, { memberId: memberId(7), memberKind: 'existing', catalogIds: added }));
+    const shares = sharesDoc(
+      storedShare(1, { memberId: memberId(7), memberKind: 'existing', newPasskey: true, catalogIds: added }),
+    );
     const r = await rig({ members: membersDoc(storedMember(7, { catalogIds: held })), shares });
 
     // Act
@@ -209,6 +212,20 @@ describe('CatalogMemberService.admitJoin: single and multi use', () => {
     should(first.ok).be.true();
     should(second.ok).be.true();
     should(refusedOf(third).reason).equal('spent');
+  });
+
+  it('should keep admitting strangers to a group link after the owner removes every browser of its person', async () => {
+    // Arrange
+    const r = await rig();
+    const { code } = await r.service.mint(multiFor('Team', 5));
+    const joined = await r.service.commit(joinOf(r.service.admitJoin(code, T0)), newKey(1));
+    await r.service.removeKey(joined.memberId, joined.keyId);
+
+    // Act
+    const next = r.service.admitJoin(code, T0);
+
+    // Assert
+    should(joinOf(next).memberId).equal(joined.memberId);
   });
 
   it('should give every browser of a multi-use code the one member it names', async () => {
@@ -458,6 +475,7 @@ describe('CatalogMemberService.admitRedeem: owner decision Q5', () => {
       storedShare(1, {
         memberId: memberId(5),
         memberKind: 'existing',
+        newPasskey: true,
         uses: { kind: 'multi', cap: 2 },
       }),
     );

@@ -48,6 +48,21 @@ describe('security log words', () => {
     expect(AUDIT_EVENT_WORDS['catalog.share.cross-member']).toBe(
       "A share code made for one person was used by another person's browser",
     );
+    expect(AUDIT_EVENT_WORDS['catalog.member.join-proved']).toBe(
+      'A new browser joined a person after one of their passkeys proved it',
+    );
+    expect(AUDIT_EVENT_WORDS['catalog.member.join-proof-refused']).toBe(
+      "A browser was turned away because it could not prove the person's passkey",
+    );
+    expect(AUDIT_EVENT_WORDS['catalog.member.new-passkey-used']).toBe(
+      'A browser joined a person on an invite approved for a new passkey',
+    );
+    expect(AUDIT_EVENT_WORDS['catalog.share.new-passkey-marked']).toBe(
+      'An invite was approved to let a person set up a new passkey',
+    );
+    expect(AUDIT_EVENT_WORDS['catalog.share.new-passkey-cleared']).toBe(
+      'The approval for a new passkey was taken off an invite',
+    );
     expect(Object.values(AUDIT_EVENT_WORDS).join(' ')).not.toContain('Password confirmation');
   });
 

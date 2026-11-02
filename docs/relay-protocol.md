@@ -2446,7 +2446,7 @@ and says so.
 ### Member sessions
 
 **Status: served (catalogs phase 2b-2).** A daemon's sequence-1 union is `auth`, `stream`, `pair`,
-`join` and `member`, on the direct carrier and the relay alike. The publisher half is built: the join
+`join` and `member`, on the direct carrier and the relay alike (plus `join-options`, below). The publisher half is built: the join
 gate (`catalog-members/join.ts`), the member route table (`catalog-members/shared-routes.ts`, mounted
 as `MemberDispatcher`), member passkeys and unlocks (`catalog-members/passkeys.ts`), and closing a revoked
 member's live sessions. The browser half is built in phase 2c (`join` and `member` modes of the client session); the end-to-end test is 2d.
@@ -2584,6 +2584,56 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   can occupy the rendezvous's shared admission and slots and DELAY a relayed recipient (who retries
   `4429`), never refuse them, and the direct carrier is untouched. A transport failure spends nothing; a
   sealed `join-refused` is final for that attempt.
+
+**`join-options` and the proof a later join carries.** A code that names a person who already has a passkey does
+not add a browser on its own ([catalogs.md](catalogs.md#joining-as-someone-who-is-already-here)). The browser
+first asks, in its own session, what joining with this code needs, spending nothing:
+
+```
+options = Ed25519(member key, "ferretry-member-join-options-v1" ‖ 0x00 ‖ TH ‖ LP(memberKey) ‖ LP(origin))
+```
+
+```json
+{
+  "t": "join-options",
+  "protocol": "ferretry-relay/2",
+  "code": "fy_share_…",
+  "memberKey": "<44-byte Ed25519 SPKI b64url>",
+  "origin": "https://app.example",
+  "proof": "<the join-options signature by memberKey>"
+}
+```
+
+`origin` is the page's origin, which must be one this machine serves; the passkeys offered are the ones made there.
+The signature proves this session holds `memberKey`, so a stranger cannot make the daemon issue a challenge for a key
+it does not hold. The answer is one sealed, padded outcome (the same `MEMBER_JOIN_OUTCOME_BYTES`), then `4440`:
+
+```json
+{ "t": "join-open", "protocol": "ferretry-relay/2", "why": "first-browser", "pad": "   …" }
+{ "t": "join-challenge", "protocol": "ferretry-relay/2", "memberLabel": "Alice", "options": { "challenge": "…", "rpId": "…", "allowCredentials": [{ "type": "public-key", "id": "…" }], "timeout": 120000 }, "pad": "   …" }
+{ "t": "join-refused", "protocol": "ferretry-relay/2", "reason": "join_refused", "pad": "   …" }
+```
+
+- **`join-open`** (`why` is `first-browser` or `owner-approved`): no proof is wanted; send `join` as before.
+- **`join-challenge`**: sign `options` with ONE of the listed passkeys and send a **second session**, a `join` whose
+  optional `passkey` field is the assertion (`credentialId`, `clientDataJSON`, `authenticatorData`, `signature`). Each
+  session is one attempt and ends with `4440`, so the options session and the join session are two. `allowCredentials`
+  lists the person's passkeys at the page's origin, newest first, at most 64.
+- **The challenge** is random and issued per (share, browser key). It lives two minutes, is kept in memory only, and is
+  **spent whenever a `join` for that share and key arrives, whether or not the assertion verifies**, so a replay needs
+  fresh options. The ledger is bounded: 1,024 challenges in all and 16 per share, the oldest first. It is not the
+  step-up ledger.
+- **What the daemon checks** before it files anything: the credential is one of THIS person's, at the issued origin;
+  the origin, rpId, the challenge, user verification as an unlock requires, and the signature counter. A failed or
+  absent proof is the one generic `join-refused` and **the code is not spent**. The admission step then checks the same
+  rule again (`proof-required`, `approval-required`), so nothing above it is the only lock.
+- **Uniform refusal.** An unknown or spent code, a malformed field, a bad session proof, an origin this machine does
+  not serve, a person with no passkey at that origin, and a person who is blocked (an existing person with no passkey
+  and no owner mark) are all `join-refused`. `join-challenge` does tell a holder of a live code the person's name, the
+  credential ids and that the code is live; it needs only the code, and spends nothing.
+- **A `join` with no `passkey`** is exactly the record above, so a first join and an older app are unchanged.
+- **Feature flag** `catalogs.join-proof.1` on `/v1/health`. An old daemon answers a `join-options` record with `4400`
+  (unknown `t`); the app joins as before.
 
 **`member`: a request session on the member route table.**
 

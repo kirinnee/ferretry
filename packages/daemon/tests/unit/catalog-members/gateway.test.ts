@@ -4,7 +4,7 @@ import type { ApiRequest, ApiResponse, SessionMember } from '../../../src/lib/ap
 import { MemberGateway, type MemberGatewayDeps } from '../../../src/lib/catalog-members/gateway.ts';
 import { LiveMemberSessions } from '../../../src/lib/catalog-members/sessions.ts';
 import type { MemberAccess } from '../../../src/lib/catalog-members/service.ts';
-import type { MemberJoinAttempt } from '../../../src/lib/relay/member-port.ts';
+import type { MemberJoinAttempt, MemberJoinOptionsAttempt } from '../../../src/lib/relay/member-port.ts';
 import { keyId, memberId, storedKey } from './support.ts';
 
 const MEMBER: SessionMember = { memberId: memberId(1), keyId: keyId(1), appSession: 'app-1', sessionId: 'session-1' };
@@ -25,6 +25,10 @@ function rigOf(parts: { access?: () => Promise<MemberAccess | undefined>; touch?
     gate: {
       join: async (attempt, carrier) => {
         log.push(`join:${attempt.code}:${carrier.kind}`);
+        return { ok: false };
+      },
+      options: async (attempt, carrier) => {
+        log.push(`options:${attempt.code}:${carrier.kind}`);
         return { ok: false };
       },
     },
@@ -70,6 +74,26 @@ describe('MemberGateway: join and dispatch', () => {
     should(joined).eql({ ok: false });
     should(response.status).equal(204);
     should(r.log).eql(['join:c:relay', 'dispatch:/v1/shared/me']);
+  });
+});
+
+describe('MemberGateway: join options', () => {
+  it('should hand a join-options request to the gate and answer what it answers', async () => {
+    // Arrange
+    const r = rigOf();
+    const attempt: MemberJoinOptionsAttempt = {
+      code: 'c',
+      memberKey: 'k',
+      origin: 'https://app.ferretry.test',
+      prove: async () => true,
+    };
+
+    // Act
+    const answered = await r.gateway.joinOptions(attempt, { kind: 'tunnel' });
+
+    // Assert
+    should(answered).eql({ ok: false });
+    should(r.log).eql(['options:c:tunnel']);
   });
 });
 

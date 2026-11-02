@@ -140,6 +140,7 @@ export function probeOf(
     now?: number;
     code?: string;
     compare?: DigestComparison;
+    proven?: { shareId: string; memberId: string };
   } = {},
 ): Probe {
   return {
@@ -150,6 +151,7 @@ export function probeOf(
     digest: digestOf(parts.code ?? codeOf(1)),
     compare: parts.compare ?? ((left, right) => left === right),
     reservationId: 'rsv-new',
+    ...(parts.proven === undefined ? {} : { proven: parts.proven }),
   };
 }
 
@@ -346,6 +348,15 @@ export const singleForMember = (memberN: number, ids: readonly string[] = [catal
   member: { kind: 'existing', memberId: memberId(memberN) },
   expiresIn: '1h',
   uses: { kind: 'single' },
+});
+
+/** The same invite, marked by the owner "They need a new passkey" (D8): a join through it needs no proof. */
+export const singleForMemberD8 = (
+  memberN: number,
+  ids: readonly string[] = [catalogId(1)],
+): CatalogShareMintRequest => ({
+  ...singleForMember(memberN, ids),
+  newPasskey: true,
 });
 
 export async function refusal(work: () => Promise<unknown>): Promise<CatalogMemberRefusal> {

@@ -5,6 +5,7 @@ import {
   admitJoin,
   admitRedeem,
   HOUR_MS,
+  joinNeed,
   locateShare,
   shareState,
 } from '../../../src/lib/catalog-members/admission.ts';
@@ -26,6 +27,7 @@ import {
   shareId,
   shareOf,
   sharesDoc,
+  storedKey,
   storedMember,
   storedShare,
   T0,
@@ -181,7 +183,7 @@ describe('admitJoin: step 2 refusals, in order', () => {
 
   it('should refuse a code made for a member who has since gone, and leave it alone', () => {
     // Arrange
-    const probe = probeOf({ shares: sharesDoc(storedShare(1, { memberKind: 'existing' })) });
+    const probe = probeOf({ shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })) });
 
     // Act
     const result = refusedOf(admitJoin(probe));
@@ -225,7 +227,7 @@ describe('admitJoin: room', () => {
 
   it('should admit a browser of a member who already exists even when the publisher is full', () => {
     // Arrange
-    const shares = sharesDoc(storedShare(1, { memberId: memberId(10), memberKind: 'existing' }));
+    const shares = sharesDoc(storedShare(1, { memberId: memberId(10), memberKind: 'existing', newPasskey: true }));
     const probe = probeOf({ members: full, shares });
 
     // Act
@@ -278,7 +280,7 @@ describe('admitJoin: room', () => {
     );
     const probe = probeOf({
       members,
-      shares: sharesDoc(storedShare(1, { memberId: memberId(13), memberKind: 'existing' })),
+      shares: sharesDoc(storedShare(1, { memberId: memberId(13), memberKind: 'existing', newPasskey: true })),
     });
 
     // Act
@@ -299,7 +301,7 @@ describe('admitJoin: room', () => {
     );
     const probe = probeOf({
       members,
-      shares: sharesDoc(storedShare(1, { memberId: memberId(12), memberKind: 'existing' })),
+      shares: sharesDoc(storedShare(1, { memberId: memberId(12), memberKind: 'existing', newPasskey: true })),
       pending: [joinReservation(2, 11)],
     });
 
@@ -313,7 +315,7 @@ describe('admitJoin: room', () => {
   it('should refuse a browser when the member already has the most browsers', () => {
     // Arrange
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 200) }));
-    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing' })) });
+    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })) });
 
     // Act
     const result = refusedOf(admitJoin(probe));
@@ -327,7 +329,7 @@ describe('admitJoin: room', () => {
   it('should admit the last browser a member may have', () => {
     // Arrange
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 199) }));
-    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing' })) });
+    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })) });
 
     // Act
     const result = admitJoin(probe);
@@ -341,7 +343,7 @@ describe('admitJoin: room', () => {
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 199) }));
     const probe = probeOf({
       members,
-      shares: sharesDoc(storedShare(1, { memberKind: 'existing' })),
+      shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })),
       pending: [joinReservation(2, 1)],
     });
 
@@ -357,7 +359,7 @@ describe('admitJoin: room', () => {
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 199) }), storedMember(2));
     const probe = probeOf({
       members,
-      shares: sharesDoc(storedShare(1, { memberKind: 'existing' })),
+      shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })),
       pending: [joinReservation(2, 2)],
     });
 
@@ -371,7 +373,9 @@ describe('admitJoin: room', () => {
   it('should refuse when the catalogs together would pass the most a member may read', () => {
     // Arrange: 60 held + 5 new = 65
     const members = membersDoc(storedMember(1, { catalogIds: catalogIds(1, 60) }));
-    const shares = sharesDoc(storedShare(1, { memberKind: 'existing', catalogIds: catalogIds(61, 5) }));
+    const shares = sharesDoc(
+      storedShare(1, { memberKind: 'existing', newPasskey: true, catalogIds: catalogIds(61, 5) }),
+    );
     const probe = probeOf({ members, shares });
 
     // Act
@@ -386,7 +390,9 @@ describe('admitJoin: room', () => {
   it('should count a catalog the member already reads once', () => {
     // Arrange: 60 held + 5 offered of which 3 are held = 62
     const members = membersDoc(storedMember(1, { catalogIds: catalogIds(1, 60) }));
-    const shares = sharesDoc(storedShare(1, { memberKind: 'existing', catalogIds: catalogIds(58, 5) }));
+    const shares = sharesDoc(
+      storedShare(1, { memberKind: 'existing', newPasskey: true, catalogIds: catalogIds(58, 5) }),
+    );
     const probe = probeOf({ members, shares });
 
     // Act
@@ -432,7 +438,7 @@ describe('admitJoin: room', () => {
       storedMember(2, { keys: keysOf(201, 200) }),
       storedMember(3, { keys: keysOf(401, 112) }),
     );
-    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing' })) });
+    const probe = probeOf({ members, shares: sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true })) });
 
     // Act
     const result = refusedOf(admitJoin(probe));
@@ -444,7 +450,9 @@ describe('admitJoin: room', () => {
   it("should report the member's own browsers limit before the catalogs limit", () => {
     // Arrange
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 200), catalogIds: catalogIds(1, 64) }));
-    const shares = sharesDoc(storedShare(1, { memberKind: 'existing', catalogIds: catalogIds(70, 1) }));
+    const shares = sharesDoc(
+      storedShare(1, { memberKind: 'existing', newPasskey: true, catalogIds: catalogIds(70, 1) }),
+    );
     const probe = probeOf({ members, shares });
 
     // Act
@@ -457,7 +465,7 @@ describe('admitJoin: room', () => {
   it('should refuse for room before it looks at the hourly count', () => {
     // Arrange
     const members = membersDoc(storedMember(1, { keys: keysOf(1, 200) }));
-    const shares = sharesDoc(storedShare(1, { memberKind: 'existing', successes: recent(60) }));
+    const shares = sharesDoc(storedShare(1, { memberKind: 'existing', newPasskey: true, successes: recent(60) }));
 
     // Act
     const result = refusedOf(admitJoin(probeOf({ members, shares })));
@@ -547,6 +555,7 @@ describe('admitJoin: spending the code', () => {
       memberId: memberId(1),
       memberLabel: 'Alice',
       catalogIds: [catalogId(1), catalogId(2)],
+      entry: 'first-browser',
     });
     const spent = shareOf(result.shares, 1);
     should(spent.state).equal('spent');
@@ -586,7 +595,12 @@ describe('admitJoin: spending the code', () => {
 
   it('should name the member by the stored label when the member exists', () => {
     // Arrange
-    const members = membersDoc(storedMember(1, { label: 'Alice (renamed)' }));
+    const members = membersDoc(
+      storedMember(1, {
+        label: 'Alice (renamed)',
+        keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })],
+      }),
+    );
     const shares = sharesDoc(storedShare(1, { memberLabel: 'Alice', memberKind: 'new' }));
 
     // Act
@@ -658,7 +672,11 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
 
   it("should burn the code and reserve the catalogs it adds, in the share's order", () => {
     // Arrange
-    const share = storedShare(1, { memberKind: 'existing', catalogIds: [catalogId(3), catalogId(1), catalogId(2)] });
+    const share = storedShare(1, {
+      memberKind: 'existing',
+      newPasskey: true,
+      catalogIds: [catalogId(3), catalogId(1), catalogId(2)],
+    });
     const probe = probeOf({ members: membersDoc(holder), shares: sharesDoc(share) });
 
     // Act
@@ -679,7 +697,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
 
   it('should burn the code even when the redeem adds nothing', () => {
     // Arrange
-    const share = storedShare(1, { memberKind: 'existing', catalogIds: [catalogId(1)] });
+    const share = storedShare(1, { memberKind: 'existing', newPasskey: true, catalogIds: [catalogId(1)] });
     const probe = probeOf({ members: membersDoc(holder), shares: sharesDoc(share) });
 
     // Act
@@ -692,7 +710,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
 
   it("should burn the code first when another member's browser presents it, then refuse and say who", () => {
     // Arrange: the code was made for member 2; member 1's browser presents it
-    const share = storedShare(2, { memberKind: 'existing' });
+    const share = storedShare(2, { memberKind: 'existing', newPasskey: true });
     const probe = probeOf({ members: membersDoc(holder, storedMember(2)), shares: sharesDoc(share), code: codeOf(2) });
 
     // Act
@@ -728,7 +746,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
   it("should refuse for the catalogs limit and leave the code live when the owner's own browser would pass it", () => {
     // Arrange: 60 held + 5 new = 65
     const member = storedMember(1, { catalogIds: catalogIds(1, 60) });
-    const share = storedShare(1, { memberKind: 'existing', catalogIds: catalogIds(61, 5) });
+    const share = storedShare(1, { memberKind: 'existing', newPasskey: true, catalogIds: catalogIds(61, 5) });
     const probe = probeOf({ members: membersDoc(member), shares: sharesDoc(share) });
 
     // Act
@@ -744,7 +762,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
   it("should not look at the catalogs limit for another member's browser: it burns and refuses", () => {
     // Arrange
     const member = storedMember(1, { catalogIds: catalogIds(1, 60) });
-    const share = storedShare(2, { memberKind: 'existing', catalogIds: catalogIds(61, 5) });
+    const share = storedShare(2, { memberKind: 'existing', newPasskey: true, catalogIds: catalogIds(61, 5) });
     const probe = probeOf({ members: membersDoc(member), shares: sharesDoc(share), code: codeOf(2) });
 
     // Act
@@ -757,7 +775,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
 
   it('should refuse for the hourly count before it burns anything, and leave the code live', () => {
     // Arrange: a cross-member presentation, but the share is at its hourly most
-    const share = storedShare(2, { memberKind: 'existing', successes: recent(60) });
+    const share = storedShare(2, { memberKind: 'existing', newPasskey: true, successes: recent(60) });
     const probe = probeOf({ members: membersDoc(holder), shares: sharesDoc(share), code: codeOf(2) });
 
     // Act
@@ -773,7 +791,7 @@ describe('admitRedeem: a single-use code (owner decision Q5)', () => {
 
   it('should refuse a matching member for the hourly count too', () => {
     // Arrange
-    const share = storedShare(1, { memberKind: 'existing', successes: recent(60) });
+    const share = storedShare(1, { memberKind: 'existing', newPasskey: true, successes: recent(60) });
     const probe = probeOf({ members: membersDoc(holder), shares: sharesDoc(share) });
 
     // Act
@@ -831,7 +849,7 @@ describe('admitRedeem: a multi-use code (owner decision Q5)', () => {
 
   it("should refuse a different member's browser without counting, for an existing-member share", () => {
     // Arrange: the code names member 2; member 1's browser presents it
-    const share = multi({ memberId: memberId(2), memberKind: 'existing' });
+    const share = multi({ memberId: memberId(2), memberKind: 'existing', newPasskey: true });
     const probe = probeOf({ members: membersDoc(holder), shares: sharesDoc(share) });
 
     // Act
@@ -884,5 +902,242 @@ describe('admitRedeem: a multi-use code (owner decision Q5)', () => {
     // Assert
     should(result.reason).equal('hourly');
     should(result.leftLive).be.true();
+  });
+});
+
+describe('joinNeed', () => {
+  const withPasskey = storedMember(1, { keys: keysOf(1, 2) });
+  const withoutPasskey = storedMember(1, { keys: keysOf(1, 2).map(key => ({ ...key, passkeyCount: 0 })) });
+
+  it('should need nothing for a person who is not here yet', () => {
+    // Arrange / Act / Assert
+    should(joinNeed(storedShare(1), undefined, T0)).equal('first-browser');
+  });
+
+  it('should need a proof of a person who has a passkey', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing' });
+
+    // Act / Assert
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
+  });
+
+  it('should need a proof when only one of the person’s browsers has a passkey', () => {
+    // Arrange
+    const some = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 }), storedKey(2)] });
+
+    // Act / Assert
+    should(joinNeed(storedShare(1, { memberKind: 'existing' }), some, T0)).equal('proof');
+  });
+
+  it('should let the owner’s mark stand in for the proof, for a person with or without a passkey', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing', newPasskey: true });
+
+    // Act / Assert
+    should(joinNeed(share, withPasskey, T0)).equal('owner-approved');
+    should(joinNeed(share, withoutPasskey, T0)).equal('owner-approved');
+  });
+
+  it('should not read a mark that is false as the owner’s say-so', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing', newPasskey: false });
+
+    // Act / Assert
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
+  });
+
+  it('should block a person with no passkey left, unless the owner marks the invite', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing' });
+
+    // Act / Assert
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
+    should(joinNeed(share, storedMember(1), T0)).equal('blocked');
+  });
+
+  it('should need nothing for a person with no passkey while their first browser can still register one', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new' });
+    const open = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })] });
+
+    // Act / Assert
+    should(joinNeed(share, open, T0)).equal('first-browser');
+  });
+
+  it('should block a second invite made before the person joined once no passkey window is open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new' });
+    const closing = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0) })] });
+    const swept = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 })] });
+
+    // Act / Assert
+    should(joinNeed(share, closing, T0)).equal('blocked');
+    should(joinNeed(share, swept, T0)).equal('blocked');
+    should(joinNeed(share, withoutPasskey, T0)).equal('blocked');
+    should(joinNeed(share, storedMember(1), T0)).equal('blocked');
+  });
+
+  it('should still let the owner’s mark open a second pre-join invite once no window is open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new', newPasskey: true });
+
+    // Act / Assert
+    should(joinNeed(share, withoutPasskey, T0)).equal('owner-approved');
+  });
+
+  it('should let a group link keep joining strangers to the one name, though that name has a passkey now', () => {
+    // Arrange
+    const group = storedShare(1, { memberKind: 'new', uses: { kind: 'multi', cap: 50 } });
+    const multiForExisting = storedShare(1, { memberKind: 'existing', uses: { kind: 'multi', cap: 50 } });
+
+    // Act / Assert
+    should(joinNeed(group, withPasskey, T0)).equal('first-browser');
+    should(joinNeed(multiForExisting, withPasskey, T0)).equal('proof');
+  });
+
+  it('should keep a group link open after its person has no passkey and no passkey window left', () => {
+    // Arrange
+    const group = storedShare(1, { memberKind: 'new', uses: { kind: 'multi', cap: 50 } });
+    const swept = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 })] });
+    const closed = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0) })] });
+
+    // Act / Assert
+    should(joinNeed(group, withoutPasskey, T0)).equal('first-browser');
+    should(joinNeed(group, swept, T0)).equal('first-browser');
+    should(joinNeed(group, closed, T0)).equal('first-browser');
+    should(joinNeed(group, storedMember(1), T0)).equal('first-browser');
+  });
+
+  it('should block a code made for an existing person with no passkey even while a browser of theirs has a window open', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'existing' });
+    const open = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) })] });
+
+    // Act / Assert
+    should(joinNeed(share, open, T0)).equal('blocked');
+  });
+
+  it('should still need a proof for a single-use code made before the person joined, once they have a passkey', () => {
+    // Arrange
+    const share = storedShare(1, { memberKind: 'new', uses: { kind: 'single' } });
+
+    // Act / Assert
+    should(joinNeed(share, withPasskey, T0)).equal('proof');
+  });
+});
+
+describe('admitJoin: proving the person', () => {
+  const alice = storedMember(1, { keys: keysOf(1, 1) });
+  const forAlice = (overrides: Partial<StoredShare> = {}): StoredShare =>
+    storedShare(1, { memberKind: 'existing', ...overrides });
+  const proof = { shareId: shareId(1), memberId: memberId(1) };
+
+  it('should refuse a forwarded invite for a person with a passkey, and leave the code live', () => {
+    // Arrange
+    const probe = probeOf({ members: membersDoc(alice), shares: sharesDoc(forAlice()) });
+
+    // Act
+    const result = refusedOf(admitJoin(probe));
+
+    // Assert
+    should(result.refusal).equal('share_refused');
+    should(result.reason).equal('proof-required');
+    should(result.leftLive).be.true();
+    should(result.shares).equal(probe.shares);
+  });
+
+  it('should refuse a proof that was verified for another share, and leave the code live', () => {
+    // Arrange
+    const probe = probeOf({
+      members: membersDoc(alice),
+      shares: sharesDoc(forAlice()),
+      proven: { shareId: shareId(2), memberId: memberId(1) },
+    });
+
+    // Act
+    const result = refusedOf(admitJoin(probe));
+
+    // Assert
+    should(result.reason).equal('proof-required');
+    should(result.leftLive).be.true();
+  });
+
+  it('should refuse a proof that was verified for another person, and leave the code live', () => {
+    // Arrange
+    const probe = probeOf({
+      members: membersDoc(alice),
+      shares: sharesDoc(forAlice()),
+      proven: { shareId: shareId(1), memberId: memberId(2) },
+    });
+
+    // Act
+    const result = refusedOf(admitJoin(probe));
+
+    // Assert
+    should(result.reason).equal('proof-required');
+    should(result.leftLive).be.true();
+  });
+
+  it('should admit the proven person, burn the code and say the entry was a proof', () => {
+    // Arrange
+    const probe = probeOf({ members: membersDoc(alice), shares: sharesDoc(forAlice()), proven: proof });
+
+    // Act
+    const result = admitJoin(probe);
+
+    // Assert
+    should(joinOf(result).entry).equal('proof');
+    should(shareOf(result.shares, 1).state).equal('spent');
+  });
+
+  it('should admit a browser the owner approved without any proof, and say so', () => {
+    // Arrange
+    const probe = probeOf({ members: membersDoc(alice), shares: sharesDoc(forAlice({ newPasskey: true })) });
+
+    // Act
+    const result = admitJoin(probe);
+
+    // Assert
+    should(joinOf(result).entry).equal('owner-approved');
+    should(shareOf(result.shares, 1).state).equal('spent');
+  });
+
+  it('should refuse a person with no passkey left as needing the owner, and leave the code live', () => {
+    // Arrange
+    const bare = storedMember(1, { keys: [storedKey(1, { passkeyCount: 0 })] });
+    const probe = probeOf({ members: membersDoc(bare), shares: sharesDoc(forAlice()), proven: proof });
+
+    // Act
+    const result = refusedOf(admitJoin(probe));
+
+    // Assert
+    should(result.refusal).equal('share_refused');
+    should(result.reason).equal('approval-required');
+    should(result.leftLive).be.true();
+  });
+
+  it('should admit a first browser with no proof, and say it was the first', () => {
+    // Arrange
+    const probe = probeOf({ shares: sharesDoc(storedShare(1)) });
+
+    // Act
+    const result = admitJoin(probe);
+
+    // Assert
+    should(joinOf(result).entry).equal('first-browser');
+  });
+
+  it('should look for the proof before it looks for room', () => {
+    // Arrange
+    const full = storedMember(1, { keys: keysOf(1, 200) });
+    const probe = probeOf({ members: membersDoc(full), shares: sharesDoc(forAlice()) });
+
+    // Act
+    const result = refusedOf(admitJoin(probe));
+
+    // Assert
+    should(result.reason).equal('proof-required');
   });
 });

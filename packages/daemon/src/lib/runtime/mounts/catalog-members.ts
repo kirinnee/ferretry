@@ -44,7 +44,15 @@ const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
 export interface CatalogMemberSubsystem {
   readonly members: Pick<
     CatalogMemberService,
-    'mint' | 'listShares' | 'endShare' | 'listMembers' | 'renameMember' | 'revokeMember' | 'removeKey' | 'removeCatalog'
+    | 'mint'
+    | 'markNewPasskey'
+    | 'listShares'
+    | 'endShare'
+    | 'listMembers'
+    | 'renameMember'
+    | 'revokeMember'
+    | 'removeKey'
+    | 'removeCatalog'
   >;
 }
 
@@ -144,6 +152,36 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
         const refusal = claimPasskey(context);
         if (refusal !== undefined) return refusal;
         return await answer(() => members.mint(request), 201);
+      },
+    },
+    {
+      // "They need a new passkey" (D8) on a live invite. Putting it ON widens who a code can add, so it takes the
+      // owner's fresh passkey like minting does; it is never set by anything but this call or the mint request.
+      method: 'PUT',
+      path: '/v1/catalog-shares/:shareId/new-passkey',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'approve a new passkey for an invite');
+        const id = shareId(context);
+        const refusal = claimPasskey(context);
+        if (refusal !== undefined) return refusal;
+        return await answer(() => members.markNewPasskey(id, true));
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/catalog-shares/:shareId/new-passkey',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'take back the approval of a new passkey');
+        const id = shareId(context);
+        return await answer(() => members.markNewPasskey(id, false));
       },
     },
     {

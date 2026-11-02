@@ -144,6 +144,17 @@ describe('the session tunnel envelope', () => {
 
     should(decodeTunnelClientMessage(record(join))).containDeep({ t: 'join', code: 'ABCD-2345' });
     should(decodeTunnelClientMessage(record(member))).containDeep({ t: 'member', keyId: MEMBER.keyId });
+    const options = {
+      t: 'join-options',
+      protocol: 'ferretry-relay/2',
+      code: 'ABCD-2345',
+      memberKey: 'k'.repeat(44),
+      origin: 'https://app.ferretry.test',
+      proof: PROOF,
+    };
+    should(decodeTunnelClientMessage(record(options))).containDeep({ t: 'join-options', origin: options.origin });
+    should(decodeTunnelClientMessage(record({ ...options, origin: '' }))).be.null();
+    should(decodeTunnelClientMessage(record({ ...options, extra: 1 }))).be.null();
     should(decodeTunnelClientMessage(record({ ...join, extra: 1 }))).be.null();
     should(decodeTunnelClientMessage(record({ ...join, protocol: 'ferretry-relay/1' }))).be.null();
     should(decodeTunnelClientMessage(record({ ...member, deviceId: DEVICE_ID }))).be.null();

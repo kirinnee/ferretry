@@ -6,6 +6,10 @@
  * 1. The per-peer budget of FAILED joins (direct only; a relayed session has no peer worth keying by).
  * 2. The stateless checks: the share code's shape, the member key, the box key, the client name, and the proof
  *    over this session's transcript. Any failure is the generic refusal and SPENDS NOTHING.
+ * 2b. A code that names a person who already has a passkey needs ONE of that person's passkeys proved first
+ *    ({@link MemberJoinProver}); a code the owner marked "They need a new passkey" and a person's first browser need
+ *    none. A missing or failed proof is a refusal that SPENDS NOTHING — the code stays live — and the admission step
+ *    checks the same rule again, so nothing here is the only lock.
  * 3. The admission step, synchronously (2b-1): the code is looked up, checked, spent and a slot reserved.
  * 4. AWAIT the admission's `persisted` — the burn is on disk before anything is answered, a refusal included.
  * 5. `commit`, then the answer. A reservation lapses after thirty seconds, so it is committed or released in a
@@ -23,8 +27,16 @@ import {
 } from '@ferretry/protocol';
 import { MemberBoxKeySchema, MemberKeySchema } from '@ferretry/relay';
 import type { AuditEntry } from '../audit/types.ts';
-import type { MemberJoinAttempt, MemberJoinCarrier, MemberJoinResult } from '../relay/member-port.ts';
-import type { CatalogMemberService } from './service.ts';
+import type {
+  MemberJoinAnswer,
+  MemberJoinAttempt,
+  MemberJoinCarrier,
+  MemberJoinOptionsAttempt,
+  MemberJoinOptionsResult,
+  MemberJoinResult,
+} from '../relay/member-port.ts';
+import type { MemberJoinProver } from './join-proof.ts';
+import type { CatalogMemberService, JoinNeeded, JoinProven } from './service.ts';
 import type { MemberAuditSink } from './ports.ts';
 
 const MINUTE_MS = 60_000;
@@ -77,7 +89,8 @@ export interface MemberJoinPublisher {
 }
 
 export interface MemberJoinDeps {
-  readonly members: Pick<CatalogMemberService, 'ready' | 'admitJoin' | 'commit' | 'release'>;
+  readonly members: Pick<CatalogMemberService, 'ready' | 'joinNeed' | 'admitJoin' | 'commit' | 'release'>;
+  readonly proof: Pick<MemberJoinProver, 'options' | 'verify'>;
   readonly publisher: () => MemberJoinPublisher;
   readonly audit: MemberAuditSink;
   readonly now: () => number;
@@ -99,8 +112,22 @@ const REFUSED: MemberJoinResult = { ok: false };
 
 type Attempted = { readonly joined: MemberJoinedResponse } | { readonly why: string };
 
+/** The `join-options` record's fields as a stranger spelled them. */
+function optionsWellFormed(attempt: MemberJoinOptionsAttempt): boolean {
+  return (
+    CatalogShareCodeSchema.safeParse(attempt.code).success &&
+    MemberKeySchema.safeParse(attempt.memberKey).success &&
+    attempt.origin.length > 0 &&
+    attempt.origin.length <= 256
+  );
+}
+
+const OPTIONS_REFUSED: MemberJoinOptionsResult = { ok: false };
+
 export class MemberJoinGate {
   readonly #budget = new FailedJoinBudget();
+  /** Per share: when a proof refusal was last written. */
+  readonly #proofWritten = new Map<string, number>();
   /** Per carrier: when a refusal was last written, how many were left out since, and the last one's reason. */
   readonly #written = new Map<string, { at: number; folded: number; reason: string; armed: boolean }>();
 
@@ -120,6 +147,49 @@ export class MemberJoinGate {
     return REFUSED;
   }
 
+  /**
+   * What a join with this code needs, spending nothing: the same refusal for an unknown code, a dead one, a person
+   * who is gone, a person who may not join without the owner's say-so, and a person with no passkey that answers at
+   * this page. Never throws.
+   */
+  async options(attempt: MemberJoinOptionsAttempt, carrier: MemberJoinCarrier): Promise<MemberJoinOptionsResult> {
+    const peer = carrier.kind === 'direct' ? carrier.rateLimitKey : undefined;
+    if (peer !== undefined && this.#budget.spent(peer, this.deps.now())) {
+      await this.#refused(carrier, 'budget');
+      return OPTIONS_REFUSED;
+    }
+    const answered = await this.#options(attempt);
+    if ('answer' in answered) return { ok: true, answer: answered.answer };
+    if (peer !== undefined) this.#budget.fail(peer, this.deps.now());
+    await this.#refused(carrier, answered.why);
+    if (answered.needed !== undefined) await this.#proofRefused(answered.needed, answered.why);
+    return OPTIONS_REFUSED;
+  }
+
+  async #options(
+    attempt: MemberJoinOptionsAttempt,
+  ): Promise<{ readonly answer: MemberJoinAnswer } | { readonly why: string; readonly needed?: JoinNeeded }> {
+    try {
+      if (!optionsWellFormed(attempt)) return { why: 'malformed' };
+      if (!(await attempt.prove())) return { why: 'proof' };
+      const { members } = this.deps;
+      await members.ready();
+      const needed = members.joinNeed(attempt.code, this.deps.now());
+      if (needed === undefined) return { why: 'share_refused' };
+      if (needed.need === 'blocked') return { why: 'approval-required', needed };
+      if (needed.need === 'first-browser') return { answer: { kind: 'open', why: 'first-browser' } };
+      if (needed.need === 'owner-approved') return { answer: { kind: 'open', why: 'owner-approved' } };
+      const options = await this.deps.proof.options(
+        { shareId: needed.shareId, memberId: needed.memberId, memberKey: attempt.memberKey },
+        attempt.origin,
+      );
+      if (options === undefined) return { why: 'no-passkey-here', needed };
+      return { answer: { kind: 'challenge', memberLabel: needed.memberLabel, options } };
+    } catch {
+      return { why: 'failed' };
+    }
+  }
+
   async #attempt(attempt: MemberJoinAttempt, carrier: MemberJoinCarrier): Promise<Attempted> {
     try {
       if (!wellFormed(attempt)) return { why: 'malformed' };
@@ -135,7 +205,9 @@ export class MemberJoinGate {
     // Read BEFORE anything is spent, so a machine that cannot describe itself refuses a join that costs no code.
     const publisher = this.deps.publisher();
     await members.ready();
-    const admission = members.admitJoin(attempt.code, this.deps.now());
+    const proven = await this.#proven(attempt);
+    if ('why' in proven) return proven;
+    const admission = members.admitJoin(attempt.code, this.deps.now(), proven.proven);
     const held = admission.ok ? admission.reservation : undefined;
     let committed = false;
     let joined: Awaited<ReturnType<typeof members.commit>>;
@@ -151,6 +223,15 @@ export class MemberJoinGate {
       committed = true;
     } finally {
       if (held !== undefined && !committed) await members.release(held).catch(() => undefined);
+    }
+    if (held?.entry === 'proof' || held?.entry === 'owner-approved') {
+      await this.#record({
+        event: held.entry === 'proof' ? 'catalog.member.join-proved' : 'catalog.member.new-passkey-used',
+        actor: { kind: 'anonymous' },
+        subject: joined.memberId,
+        outcome: 'succeeded',
+        detail: { shareId: held.shareId, keyId: joined.keyId, carrier: carrier.kind },
+      });
     }
     await this.#record({
       event: 'catalog.member.joined',
@@ -177,6 +258,46 @@ export class MemberJoinGate {
         memberUnlockDays: publisher.memberUnlockDays,
       },
     };
+  }
+
+  /**
+   * The proof a code asks for, judged BEFORE anything is spent. A person's first browser and an invite the owner
+   * marked need none, so they pass with nothing proven; a code that asks for a proof and has none that holds is the
+   * one refusal, with the code left live.
+   */
+  async #proven(attempt: MemberJoinAttempt): Promise<{ readonly proven?: JoinProven } | { readonly why: string }> {
+    const needed = this.deps.members.joinNeed(attempt.code, this.deps.now());
+    if (needed === undefined || needed.need === 'first-browser' || needed.need === 'owner-approved') return {};
+    if (needed.need === 'blocked') {
+      await this.#proofRefused(needed, 'approval-required');
+      return { why: 'approval-required' };
+    }
+    const subject = { shareId: needed.shareId, memberId: needed.memberId, memberKey: attempt.memberKey };
+    if (attempt.passkey === undefined || !(await this.deps.proof.verify(subject, attempt.passkey))) {
+      await this.#proofRefused(needed, attempt.passkey === undefined ? 'proof-required' : 'proof-failed');
+      return { why: 'proof-required' };
+    }
+    return { proven: { shareId: needed.shareId, memberId: needed.memberId } };
+  }
+
+  /** IDs only, and at most one per share per minute: a holder of one code cannot flood the log with refusals. */
+  async #proofRefused(needed: JoinNeeded, reason: string): Promise<void> {
+    const now = this.deps.now();
+    const last = this.#proofWritten.get(needed.shareId);
+    if (last !== undefined && now - last < MINUTE_MS) return;
+    this.#proofWritten.delete(needed.shareId);
+    if (this.#proofWritten.size >= BUDGET_PEERS_MAX) {
+      const oldest = this.#proofWritten.keys().next();
+      if (!oldest.done) this.#proofWritten.delete(oldest.value);
+    }
+    this.#proofWritten.set(needed.shareId, now);
+    await this.#record({
+      event: 'catalog.member.join-proof-refused',
+      actor: { kind: 'anonymous' },
+      subject: needed.memberId,
+      outcome: 'refused',
+      detail: { shareId: needed.shareId, reason },
+    });
   }
 
   /**
