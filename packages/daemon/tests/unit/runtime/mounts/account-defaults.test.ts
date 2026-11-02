@@ -18,6 +18,7 @@ import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
 import {
   type AcceptedConfigStore,
   type ConfigDirectoryPort,
@@ -140,9 +141,14 @@ async function world(): Promise<World> {
     if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
     let spent = 0;
     const reads = { limits: [], consumed: false, discarded: false };
+    // The policy's shape with "ask again for each act" on: a governed device holding no fresh proof is asked for one,
+    // where the real policy asks one (never on a narrowing, which asks the grant alone).
     const governance: CallerGovernance = {
       governed: caller.kind === 'device',
-      decide: () => ({ allowed: true, refusal: 'granted' }),
+      decide: demand =>
+        caller.kind === 'device' && demandNeedsStepUp(demand) && caller.fresh !== true
+          ? { allowed: false, refusal: 'step-up-required' }
+          : { allowed: true, refusal: 'granted' },
     };
     const context: RouteContext = {
       request: request({
@@ -273,6 +279,45 @@ describe('PUT /v1/accounts/defaults', () => {
     should(done.status).equal(200);
     should(done.spent).equal(1);
     should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+  });
+
+  it('should let a paired device remove a line with no passkey, and spend none (!A243)', async () => {
+    const w = await world();
+    await withAccounts(w);
+    await w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE);
+
+    const removed = await w.drive(DEVICE, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account: null });
+
+    should(removed.status).equal(200);
+    should(removed.spent).equal(0);
+    should(await inEffect(w)).deepEqual({});
+  });
+
+  it('should still ask a paired device for the passkey to change a line to another account (!A243)', async () => {
+    const w = await world();
+    await withAccounts(w);
+    await w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE);
+    const before = text(w);
+
+    const asked = await w.drive(DEVICE, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account: 'CLICKUP_B' });
+    should(asked.status).equal(403);
+    should(asked.code).equal(STEP_UP_REQUIRED_CODE);
+    should(text(w)).equal(before);
+
+    const done = await w.drive(FRESH_DEVICE, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account: 'CLICKUP_B' });
+    should(done.status).equal(200);
+    should(done.spent).equal(1);
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_B' } });
+  });
+
+  it('should be admitted at the boundary as a narrowing, so the handler judges every widen itself (!A243)', async () => {
+    const w = await world();
+
+    const found = new ApiRouter(secretRoutes(w.subsystem)).lookup('PUT', '/v1/accounts/defaults');
+
+    should(found.kind).equal('matched');
+    if (found.kind !== 'matched') return;
+    should(found.route.capability).deepEqual({ capability: 'secrets', axis: 'configure', narrowing: true });
   });
 
   it('should refuse a body that names a place wrongly', async () => {

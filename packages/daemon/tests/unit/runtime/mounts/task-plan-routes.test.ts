@@ -14,7 +14,7 @@ import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiRoute } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
-import { PasteRuleService, TaskPlanService } from '../../../../src/lib/index.ts';
+import { PasteRuleService, PasteRuleStages, TaskPlanService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
 import { taskPlanRoutes } from '../../../../src/lib/runtime/mounts/task-plans.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
@@ -84,7 +84,10 @@ async function served(guard = GRANTED) {
     clock: { now: () => ms.now },
     ids: { planId: () => (plans + 1).toString(16).padStart(32, 'b') },
   });
-  const routes = [...taskPlanRoutes(service), ...secureCopyRoutes({ list: () => [] }, rules, service)];
+  const routes = [
+    ...taskPlanRoutes(service),
+    ...secureCopyRoutes({ list: () => [] }, rules, service, new PasteRuleStages({ rules, clock: { now: () => 0 } })),
+  ];
   const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, guard);
   return { service, rules, routes, dispatch, writes, ms };
 }

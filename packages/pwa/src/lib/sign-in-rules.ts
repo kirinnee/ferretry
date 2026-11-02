@@ -50,7 +50,6 @@ import {
   signInRuleDayChoices,
   signInRuleLifetime,
   signInRuleScopeWords,
-  signInRuleSuspensionWords,
   stillAskedFor,
   signInRuleWords,
   type TwoFactorKeySummary,
@@ -369,17 +368,8 @@ export function codeKeyLabel(
 /** Who a rule fills for, in the protocol's one wording (the passkey's Who row says the same). */
 export const scopeWords = signInRuleScopeWords;
 
-/** The owner's words for a status. */
-export function statusWords(rule: Pick<SignInRuleView, 'status' | 'suspended' | 'unverified'>): string {
-  if (rule.status === 'suspended' && rule.suspended !== undefined)
-    return `Suspended: ${signInRuleSuspensionWords(rule.suspended.because)}`;
-  if (rule.status === 'active' && rule.unverified === true) return 'Active once Ferretry has checked it';
-  return { active: 'Active', suspended: 'Suspended', 'used-up': 'All uses spent', expired: 'Expired' }[rule.status];
-}
-
-/** Whether a suspended rule can be resumed with a new passkey: not when its sign-in is gone. */
-export const canResume = (rule: Pick<SignInRuleView, 'status' | 'suspended'>): boolean =>
-  rule.status === 'suspended' && rule.suspended?.because !== 'sign-in-gone';
+/** The owner's words for a status, and whether a suspended rule can be resumed: the protocol's, as `fy rules` says them. */
+export { signInRuleResumable as canResume, signInRuleStatusWords as statusWords } from '@ferretry/protocol';
 
 /** Whether a rule that ended on time or on its cap can be approved again. */
 export const canRenew = (rule: Pick<SignInRuleView, 'status'>): boolean =>

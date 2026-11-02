@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { BrowserRefSchema } from './browser-target.ts';
+import { canonicalJson } from './canonical-json.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { sha256Hex } from './mcp-oauth.ts';
 import { SurfaceKeySchema } from './surface-names.ts';
 
 /**
@@ -366,6 +368,163 @@ export const runsWhatItReads = (program: string): boolean => {
 
 /** What the rule editor and the CLI say about such a rule. */
 export const RUNS_WHAT_IT_READS_WARNING = 'This program runs whatever it reads: a paste into it can run as a command.';
+
+// ── Making a paste rule: staged, then a passkey bound to it (owner decision !A244) ─────────────────────
+
+/**
+ * A STAGED PASTE RULE (`prs_` and 24 hex digits): one paste rule the owner is making or widening, waiting for its
+ * passkey, held in the daemon's memory only. A passkey proof for `approve-paste-rule` is bound to exactly one
+ * ({@link pasteRuleApprovalSubject}), so it cannot be spent on another rule. A step-up names it.
+ */
+export const PasteRuleStageIdSchema = z
+  .string()
+  .regex(/^prs_[0-9a-f]{24}$/u, 'a staged paste rule is prs_ and 24 hex digits');
+export type PasteRuleStageId = z.infer<typeof PasteRuleStageIdSchema>;
+
+/** Where the app lists the paste rules and one staged at the machine waits for its passkey: said by `fy copy`, verbatim. */
+export const PASTE_RULES_SCREEN_PATH = 'Settings › Secure copy › Pastes approved in advance';
+
+/** At most this many paste rules wait for a passkey at once: a new stage past it drops the oldest. */
+export const PASTE_RULE_STAGES_MAX = 8;
+
+/** Where a value comes from, in plain words: "what gh prints", "text on https://github.com". */
+export const pasteFromWords = (from: CopyRouteFrom): string =>
+  from.kind === 'command'
+    ? `what ${from.program} prints`
+    : from.kind === 'browser'
+      ? `text on ${from.origin}`
+      : `the clipboard of ${from.origin}`;
+
+/** Where a value goes, in plain words: "vercel in a terminal", "a field on https://vercel.com", "the secret NAME". */
+export const pasteToWords = (to: CopyRouteTo): string =>
+  to.kind === 'terminal'
+    ? `${to.program} in a terminal`
+    : to.kind === 'browser'
+      ? `a field on ${to.origin}`
+      : `the secret ${to.name}`;
+
+/** Who a paste rule covers: any ferret, or one session. */
+export const pasteWhoWords = (sessionId: string | undefined): string =>
+  sessionId === undefined ? 'Any ferret on this machine' : `Session ${sessionId}`;
+
+/** A rule's life in words: "30 days", "2 hours", "45 minutes". */
+const lifetimeWords = (seconds: number): string => {
+  const [count, unit] =
+    seconds % 86_400 === 0
+      ? [seconds / 86_400, 'day']
+      : seconds % 3_600 === 0
+        ? [seconds / 3_600, 'hour']
+        : seconds % 60 === 0
+          ? [seconds / 60, 'minute']
+          : [seconds, 'second'];
+  return `${String(count)} ${unit}${count === 1 ? '' : 's'}`;
+};
+
+/** The rows a staged paste rule is shown with, in this order, by the daemon. */
+export const PasteRuleRowLabelSchema = z.enum(['From', 'To', 'Who', 'Pastes', 'Until']);
+export type PasteRuleRowLabel = z.infer<typeof PasteRuleRowLabelSchema>;
+export const PasteRuleRowSchema = z.strictObject({ label: PasteRuleRowLabelSchema, value: boundedLine(320) });
+export type PasteRuleRow = z.infer<typeof PasteRuleRowSchema>;
+
+/**
+ * WHAT A STAGED PASTE RULE ALLOWS, in the daemon's words: one plain line and its rows. The daemon builds them from the
+ * staged request, and the passkey prompt and `fy copy rules add` show exactly these, so the owner approves what the
+ * proof is bound to and nothing a ferret wrote. Pure and total.
+ */
+export function pasteRuleWords(request: PasteRuleCreate): {
+  readonly does: string;
+  readonly rows: readonly PasteRuleRow[];
+} {
+  const who = pasteWhoWords(request.sessionId);
+  return {
+    does: `Ferretry pastes ${pasteFromWords(request.from)} into ${pasteToWords(request.to)}, for ${who.charAt(0).toLowerCase()}${who.slice(1)}, without asking.`,
+    rows: [
+      { label: 'From', value: pasteFromWords(request.from) },
+      { label: 'To', value: pasteToWords(request.to) },
+      { label: 'Who', value: who },
+      { label: 'Pastes', value: request.count === undefined ? 'Any number' : `At most ${String(request.count)}` },
+      {
+        label: 'Until',
+        value:
+          request.expiresInSeconds === undefined
+            ? 'No end: until you remove it'
+            : `For ${lifetimeWords(request.expiresInSeconds)} from approval`,
+      },
+    ],
+  };
+}
+
+/** Whether a paste rule's destination runs whatever it reads: the red {@link RUNS_WHAT_IT_READS_WARNING}. */
+export const pasteRuleRunsAnything = (to: CopyRouteTo): boolean =>
+  to.kind === 'terminal' && runsWhatItReads(to.program);
+
+/** The one canonical spelling of a paste rule request, which its passkey proof is bound to. */
+export const canonicalPasteRule = (request: PasteRuleCreate): string => {
+  const text = canonicalJson({ v: 1, ...PasteRuleCreateSchema.parse(request) });
+  // A parsed request holds only strings and integers, so it always has a canonical spelling.
+  if (!text.ok) throw new Error(text.reason);
+  return text.text;
+};
+
+const PASTE_RULE_DOMAIN = 'ferretry.paste-rule.v1';
+
+/**
+ * What an `approve-paste-rule` passkey proof is bound to: `sha256("ferretry.paste-rule.v1\0" + stage + "\0" +
+ * sha256(canonical))`. The domain keeps it apart from every other bound act, and the stage keeps one proof from
+ * committing another staging of the same rule.
+ */
+export const pasteRuleApprovalSubject = (stage: PasteRuleStageId, canonical: string): string =>
+  sha256Hex(`${PASTE_RULE_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
+
+/**
+ * `POST /v1/copy-rules/stages`: A PASTE RULE WAITING FOR ITS PASSKEY. The stage the proof is bound to, the daemon's own
+ * line and rows of what it allows, and the structured flag the red warning is drawn from. Never a value.
+ */
+export const PasteRuleStagedSchema = z.strictObject({
+  stage: PasteRuleStageIdSchema,
+  does: boundedLine(800),
+  rows: z.array(PasteRuleRowSchema).length(PasteRuleRowLabelSchema.options.length),
+  /** The destination runs whatever it reads: the red {@link RUNS_WHAT_IT_READS_WARNING}. */
+  runsAnything: z.boolean(),
+  expiresAt: InstantSchema,
+});
+export type PasteRuleStaged = z.infer<typeof PasteRuleStagedSchema>;
+
+export const PasteRuleStageStateSchema = z.enum(['waiting', 'approved', 'denied', 'expired']);
+export type PasteRuleStageState = z.infer<typeof PasteRuleStageStateSchema>;
+
+/** `GET /v1/copy-rules/stages/:stage`: where a staged rule stands, and the rule it made once approved. */
+export const PasteRuleStageViewSchema = z.strictObject({
+  ...PasteRuleStagedSchema.shape,
+  state: PasteRuleStageStateSchema,
+  rule: RuleIdSchema.optional(),
+});
+export type PasteRuleStageView = z.infer<typeof PasteRuleStageViewSchema>;
+
+/** `GET /v1/copy-rules/stages`: the rules waiting for a passkey, such as one `fy copy rules add` staged at the machine. */
+export const PasteRuleStageListSchema = z.strictObject({
+  stages: z.array(PasteRuleStagedSchema).max(PASTE_RULE_STAGES_MAX),
+});
+export type PasteRuleStageList = z.infer<typeof PasteRuleStageListSchema>;
+
+/** `DELETE /v1/copy-rules/stages/:stage`: nothing was approved. */
+export const PasteRuleStageDroppedSchema = z.strictObject({ stage: PasteRuleStageIdSchema, dropped: z.literal(true) });
+export type PasteRuleStageDropped = z.infer<typeof PasteRuleStageDroppedSchema>;
+
+/** The refusal codes of making a paste rule, each with its one sentence in {@link PASTE_RULE_REFUSAL_WORDS}. */
+export const PASTE_RULE_ERROR_CODES = {
+  stageNotFound: 'paste_rule_stage_not_found',
+  passkeyNeeded: 'paste_rule_passkey_needed',
+} as const;
+
+export const PASTE_RULE_REFUSAL_WORDS = {
+  /** The stage is not waiting: approved, dropped, timed out or never made. */
+  paste_rule_stage_not_found:
+    'That paste rule is not waiting for a passkey any more: it was approved, dropped or timed out. Add it again.',
+  /** `POST /v1/copy-rules` from an app or CLI that does not stage: this daemon makes a rule only with a bound passkey. */
+  paste_rule_passkey_needed:
+    'Making a paste rule needs your passkey for that one rule: update the Ferretry app or fy, then add it again. Nothing was approved.',
+} as const satisfies Record<(typeof PASTE_RULE_ERROR_CODES)[keyof typeof PASTE_RULE_ERROR_CODES], string>;
 
 /** One paste a ferret plans, said before it starts. `why` is the agent's own words, shown as such. */
 export const CopyPlanItemSchema = z.strictObject({

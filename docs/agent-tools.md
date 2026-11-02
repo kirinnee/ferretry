@@ -31,7 +31,7 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
 `browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
 `browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
-`browser.close(name)` · `browser.ask_owner(name, message?)` · `task.plan(lines)` (see [Task plan](#task-plan-ask-once-before-a-task)).
+`browser.close(name)` · `browser.ask_owner(name, message?)` · `task.plan(lines, expiresInSeconds?)` (see [Task plan](#task-plan-ask-once-before-a-task)).
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -303,8 +303,9 @@ a staged path the daemon alone saves.
 
 ## Task plan: ask once before a task
 
-`task.plan(lines)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the sign-ins and pastes a
-task will need. One call raises ONE card on the owner's agenda, up to 10 lines:
+`task.plan(lines, expiresInSeconds?)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the
+sign-ins and pastes a task will need. One call raises ONE card on the owner's agenda, up to 10 lines, for
+`expiresInSeconds` (300 to 86,400: five minutes to a day; two hours when it is left out):
 
 - `{ kind: "sign-in", signIn | site, fields: [username, password, totp], uses, why }`: a sign-in on a page;
 - `{ kind: "terminal-sign-in", signIn | place, uses, why }`: the password typed into `sudo`, `su` or `doas` only;
@@ -323,11 +324,11 @@ same call, and answers the old `plan` shape. It is no longer listed in MCP.
 
 **The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's card:
 
-| Command                                                                    | Does                                            |
-| -------------------------------------------------------------------------- | ----------------------------------------------- |
-| `fy plan ls [--session <id>] [--json]`                                     | lists the waiting plans, line by line (1-based) |
-| `fy plan approve <id> [lines…] [--pick 3=GITHUB_WORK] [--totp 1] [--open]` | allows those lines; none declines the plan      |
-| `fy plan revoke <id> [lines…]`                                             | ends those lines, or every line                 |
+| Command                                                                                              | Does                                                        |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `fy plan ls [--session <id>] [--json]`                                                               | lists the waiting plans, line by line (1-based), with flags |
+| `fy plan approve <id> [lines…] [--pick 3=GITHUB_WORK] [--totp 1 --i-understand-one-factor] [--open]` | allows those lines; none declines the plan                  |
+| `fy plan revoke <id> [lines…]`                                                                       | ends those lines, or every line                             |
 
 A paste-only selection is approved at once. A selection with a sign-in line is only **staged**: the command asks the
 daemon to show the stage on the plan's card, and waits up to 125 seconds for the owner's passkey in the app. It then
@@ -337,10 +338,15 @@ has no commit call: the machine's token cannot make the passkey proof, so no sig
 terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged; paste lines still work. The command prints a link to the plan's card (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default; `FY_APP_URL` must be an absolute `https` address (`http` only on this machine), with no user name or password, or it is refused out loud and the hosted default stands), and `--open` hands it to this machine's browser.
 `--pick` takes an account handle or a `si_…` id and must be one of the line's candidates, or nothing is staged;
 a line with several candidates needs one. `--totp` ticks a code only where the ferret asked for it and the account
-can make them. A ferret's pane (and any command carrying an agent credential) is refused: these routes are the owner's.
+can make them, and only with `--i-understand-one-factor` (the same rule and words as `fy rules`); either one without
+the other is refused before anything is read. `fy plan ls` prints each sign-in line's flags under it in the
+protocol's words (root, the one-factor code, a first fill) and ends with the honest-client line. The command asks you
+to confirm on the plan's card in the app's Inbox. A ferret's pane (and any command carrying an agent credential) is
+refused, whatever `--as-owner` says: these routes are the owner's.
 
-**An honest-client limit.** A plan guards against tool misuse and page-text steering, not against a ferret that goes
-around Ferretry: every ferret can read Ferretry's own state-home files. Every plan card says so. Design and rules:
+**An honest-client limit.** Every plan card, `fy plan ls` and `fy plan --help` say it in these words
+(`TASK_PLAN_HONEST_LIMIT`): "This stops misuse through a ferret's tools and page text; it can't stop a ferret that
+reads Ferretry's own files." Every ferret can read Ferretry's own state-home files. Design and rules:
 [secure-copy.md](secure-copy.md#task-plans).
 
 ## Suggesting a standing rule

@@ -43,7 +43,12 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineLacks, machineOffers } from '../../lib/daemon-health.ts';
 import { needsNewerFerretry } from '../../lib/machine-update-words.ts';
-import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
+import {
+  useAddKeyStepUp,
+  useApprovePasteRuleStepUp,
+  useApproveSignInRuleStepUp,
+  useDaemonClient,
+} from '../../lib/store.tsx';
 import { daemonSharingPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import type { StepUpWords } from '../../lib/step-up-gate.ts';
@@ -262,9 +267,17 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
   const routed = useDaemonClient();
   const health = useDaemonHealth(connection);
   const createClient = createSecretClient ?? routed;
+  const requirePasteRule = useApprovePasteRuleStepUp();
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <CopyRulesSurface connection={connection} createClient={createClient} />
+      <CopyRulesSurface
+        connection={connection}
+        createClient={createClient}
+        staging={machineOffers(health, DAEMON_FEATURES.pasteRulePasskey)}
+        {...(requirePasteRule === undefined
+          ? {}
+          : { askPasskey: (stage, words) => requirePasteRule(connection, stage, words) })}
+      />
       {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
         <TaskPlansSurface connection={connection} createClient={createClient} />
       ) : machineLacks(health, DAEMON_FEATURES.taskPlan) ? (

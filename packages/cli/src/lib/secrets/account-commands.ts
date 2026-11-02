@@ -33,7 +33,7 @@ is told about).`;
 
 const FACTOR_HELP = `A 2FA key Ferretry holds makes that account's codes, so the password and the code then come
 from this one machine. So a seed is saved only with your PASSKEY, every time, even here at the machine: \`factor add
---totp\` stages it (in memory, two minutes) and puts a card on your agenda; Allow it in the app with your passkey
+--totp\` stages it (in memory, two minutes) and puts a card in the app's Inbox; Allow it there with your passkey
 and it is saved. Nothing else saves one, and nothing ever prints one back. The other kinds hold no value: they only
 tell a ferret how this account asks for a code. Removing a key asks first.`;
 
@@ -307,7 +307,7 @@ function mountAccountCommands(account: Command, controllers: AccountControllers)
     .option('--label <text>', 'what you call it, e.g. "Authy backup" (required, except with --totp)')
     .option(
       '-s, --session <id>',
-      'with --totp: the agenda board the confirm card goes on (defaults to the current session)',
+      "with --totp: the session whose card in the app's Inbox confirms it (defaults to the current session)",
     )
     .option('--i-understand-totp', 'with --totp: skip the typed "yes" after the 2FA warning')
     .action(

@@ -1074,6 +1074,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         out: world.io,
         ownSessionId,
         agentCredential: paneCredentialValue(world.environment),
+        sleep: async ms => await Bun.sleep(ms),
+        nowMs: () => Date.now(),
       }),
       new PlanController({
         gateway: new ProtocolPlanGateway(client),
@@ -1146,6 +1148,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
             ownSessionId,
             sleep: async ms => await Bun.sleep(ms),
             nowMs: () => Date.now(),
+            ...planApp(world.environment.FY_APP_URL),
           }),
         };
       })(),

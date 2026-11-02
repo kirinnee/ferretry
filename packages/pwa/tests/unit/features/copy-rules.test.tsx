@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import {
+  type PasteRule,
+  type PasteRuleCreate,
+  type PasteRuleStaged,
+  RUNS_WHAT_IT_READS_WARNING,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { CopyRulesCard } from '../../../src/features/secure-copy/copy-rules-card.tsx';
 import { CopyRulesSurface } from '../../../src/features/secure-copy/copy-rules-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { PASTE_RULE_NO_PASSKEY_WORDS } from '../../../src/lib/secure-copy.ts';
+import type { StepUpWords } from '../../../src/lib/step-up-gate.ts';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
 import { type Call, fakeClient } from '../../support/input-fixtures.ts';
@@ -313,5 +320,132 @@ describe('the pre-approval rules surface', () => {
     expect(view.container.textContent).toContain('Reading this daemon’s paste rules…');
     const other = await surface(() => ({ rules: [RULE] }), OTHER);
     expect(other.q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+  });
+});
+
+describe('making a paste rule with a passkey bound to it (!A244)', () => {
+  const STAGE = `prs_${'1'.repeat(24)}`;
+  const STAGED: PasteRuleStaged = {
+    stage: STAGE as PasteRuleStaged['stage'],
+    does: 'Ferretry pastes what gh prints into bash in a terminal, for any ferret on this machine, without asking.',
+    rows: [
+      { label: 'From', value: 'what gh prints' },
+      { label: 'To', value: 'bash in a terminal' },
+      { label: 'Who', value: 'Any ferret on this machine' },
+      { label: 'Pastes', value: 'Any number' },
+      { label: 'Until', value: 'No end: until you remove it' },
+    ],
+    runsAnything: true,
+    expiresAt: '2026-11-02T09:02:00.000Z',
+  };
+
+  /** The surface on a machine that stages paste rules, with a passkey prompt that answers `given`. */
+  const staging = async (given: boolean | undefined, waiting: readonly PasteRuleStaged[] = []) => {
+    const asked: [string, StepUpWords][] = [];
+    const rules: PasteRule[] = [];
+    const fake = fakeClient(call => {
+      if (call.method === 'POST' && call.path === '/v1/copy-rules/stages') return STAGED;
+      if (call.method === 'POST' && call.path === `/v1/copy-rules/stages/${STAGE}/commit`) {
+        rules.push(RULE);
+        return RULE;
+      }
+      if (call.method === 'DELETE') return { stage: STAGE, dropped: true };
+      if (call.path === '/v1/copy-rules/stages') return { stages: waiting };
+      if (call.path === '/v1/copy-rules/settings') throw new FyHttpError('no route', 404, 'unknown_route');
+      return { rules };
+    });
+    const view = await mount(
+      <CopyRulesSurface
+        connection={CONNECTION}
+        createClient={async () => fake.client}
+        staging
+        {...(given === undefined
+          ? {}
+          : {
+              askPasskey: async (stage: string, words: StepUpWords) => {
+                asked.push([stage, words]);
+                return given;
+              },
+            })}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    const q = (selector: string) => view.container.querySelector(selector);
+    const addOne = async () => {
+      await click(q('[data-copy-rule-add-open]'));
+      await typeInto(q('[data-copy-rule-from]'), 'gh');
+      await typeInto(q('[data-copy-rule-to]'), 'bash');
+      await click(q('[data-copy-rule-form] button[type="submit"]'));
+      await settle();
+    };
+    const routes = () => fake.calls.map(call => `${call.method} ${call.path}`);
+    return { q, asked, addOne, routes, text: () => view.container.textContent ?? '' };
+  };
+
+  it("stages the rule, asks for the passkey bound to it with the daemon's rows, then commits", async () => {
+    const { asked, addOne, routes, q } = await staging(true);
+
+    await addOne();
+
+    expect(asked).toEqual([
+      [STAGE, { does: STAGED.does, rows: [...STAGED.rows], warnings: [RUNS_WHAT_IT_READS_WARNING] }],
+    ]);
+    expect(routes()).toContain('POST /v1/copy-rules/stages');
+    expect(routes()).toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
+    expect(routes()).not.toContain('POST /v1/copy-rules');
+    expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+  });
+
+  it('drops the stage and commits nothing when the passkey prompt is dismissed', async () => {
+    const { addOne, routes, q } = await staging(false);
+
+    await addOne();
+
+    expect(routes()).toContain(`DELETE /v1/copy-rules/stages/${STAGE}`);
+    expect(routes()).not.toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
+    expect(q('[data-testid="copy-rules-error"]')).toBeNull();
+    expect(q('[data-copy-rule-form]')).not.toBeNull();
+  });
+
+  it('drops the stage and says so on a device that cannot confirm with a passkey', async () => {
+    const { addOne, routes, text } = await staging(undefined);
+
+    await addOne();
+
+    expect(routes()).toContain(`DELETE /v1/copy-rules/stages/${STAGE}`);
+    expect(routes()).not.toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
+    expect(text()).toContain(PASTE_RULE_NO_PASSKEY_WORDS);
+  });
+
+  it('shows a rule staged at the machine with its rows, approves it with the passkey, or denies it', async () => {
+    const approving = await staging(true, [STAGED]);
+
+    expect(approving.text()).toContain('Waiting for your passkey');
+    expect(approving.text()).toContain(STAGED.does);
+    expect(approving.q('[data-copy-rule-waiting-runs-anything]')?.textContent).toBe(RUNS_WHAT_IT_READS_WARNING);
+    await click(approving.q('[data-copy-rule-waiting-approve]'));
+    await settle();
+    expect(approving.asked.map(([stage]) => stage)).toEqual([STAGE]);
+    expect(approving.routes()).toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
+
+    const denying = await staging(true, [STAGED]);
+    await click(denying.q('[data-copy-rule-waiting-deny]'));
+    await settle();
+    expect(denying.asked).toEqual([]);
+    expect(denying.routes()).toContain(`DELETE /v1/copy-rules/stages/${STAGE}`);
+    expect(denying.routes()).not.toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
+  });
+
+  it('keeps the one-step add on a machine that does not stage paste rules', async () => {
+    const { calls, q } = await surface(call => (call.method === 'POST' ? RULE : { rules: [] }));
+    await click(q('[data-copy-rule-add-open]'));
+    await typeInto(q('[data-copy-rule-from]'), 'gh');
+    await typeInto(q('[data-copy-rule-to]'), 'vercel');
+    await click(q('[data-copy-rule-form] button[type="submit"]'));
+    await settle();
+
+    expect(calls.map(call => `${call.method} ${call.path}`)).toContain('POST /v1/copy-rules');
+    expect(calls.some(call => call.path.startsWith('/v1/copy-rules/stages'))).toBe(false);
   });
 });

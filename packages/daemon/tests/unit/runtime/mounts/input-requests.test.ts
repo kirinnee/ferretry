@@ -290,6 +290,31 @@ describe('the owner request list — publication at the transport', () => {
     should(String(sent.body)).not.containEql('pane-prompt-CANARY');
   });
 
+  it("should mask the facts of a terminal a late hold took under the pane's id only, not its key", async () => {
+    // The card targets `dev`; the hold names only the pane's id. The route must check every alias, as agent-tools does.
+    const { service, quarantine } = inputRequestService({
+      facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY }, promptLine: 'pane-prompt-CANARY' },
+      names: ['dev', '000000000001'],
+    });
+    await service.raise(SESSION, RAISE);
+    const list = service.list.bind(service);
+    service.list = async (...args: Parameters<typeof list>) => {
+      const answered = await list(...args);
+      void quarantine.begin(SESSION, ['000000000001'], 'by-id');
+      return answered;
+    };
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    const sent = finalised(
+      await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human })),
+    );
+
+    should(sent.status).equal(200);
+    should(String(sent.body)).not.containEql(CANARY);
+    should(String(sent.body)).not.containEql('pane-prompt-CANARY');
+    should(String(sent.body)).containEql('sudo wants your password');
+  });
+
   it('should mask the facts of a terminal a hold took after the dispatcher answered, before the carrier sent', async () => {
     const { service, quarantine } = inputRequestService({
       facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY }, promptLine: 'pane-prompt-CANARY' },

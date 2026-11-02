@@ -178,12 +178,27 @@ without ever reading it. It is the same input request, with the store as the des
 
 On screen: Settings › this machine › **Secure copy** › Pastes approved in advance.
 
-- **A rule** allows pastes from a source (`command:<program>`, `browser:<origin>`, `clipboard:<origin>`) to
+- **A paste rule** allows pastes from a source (`command:<program>`, `browser:<origin>`, `clipboard:<origin>`) to
   a destination (`terminal:<program>`, `browser:<origin>`, `secret:<NAME>`), for one session or any, with an
-  optional expiry and count. Only the owner adds or removes one (`fy copy rules add|rm`, `POST|DELETE
-/v1/copy-rules`): the route refuses an agent before it reads a body and the service refuses again. Adding
-  one demands `terminal.configure`, so a remote device follows "ask again for each change"; each add, removal
-  and plan answer is kept in the security log as `security.changed`.
+  optional expiry and count. Only the owner adds or removes one (`fy copy rules add|rm`): every route refuses an
+  agent before it reads a body and the service refuses again. Each add, removal and plan answer is kept in the
+  security log as `security.changed`.
+- **Making or widening one needs a passkey for that one rule** (owner decision !A244), from every caller, the
+  machine included, like a standing sign-in rule. A rule is **staged** first (`POST /v1/copy-rules/stages`,
+  `terminal.configure`, plus `secrets.configure` into the store and `browser.use` into a page): it allows nothing,
+  and the daemon answers its own line and rows (From, To, Who, Pastes, Until) and whether the destination runs
+  whatever it reads. The passkey prompt lists exactly those, and the act `approve-paste-rule` is bound to that one
+  stage (`subject`: the staged rule `prs_…`, `pasteRuleApprovalSubject(stage, canonical)`). The commit
+  (`POST /v1/copy-rules/stages/:stage/commit`) takes only that proof: a held step-up window, an unlock, a proof for
+  another act or another stage, and the machine's own token are all answered the step-up demand, and nothing is
+  made. A stage lives one passkey challenge (two minutes), in memory only; at most eight wait at once.
+  `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it under
+  Settings › Secure copy › Pastes approved in advance › **Waiting for your passkey** (or Deny it). The old
+  one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; an app or `fy` on a
+  daemon that does not report `copy-rules.passkey.1` keeps the one-step add.
+- **Narrowing and removing stay tap-free.** Removing a rule (`DELETE /v1/copy-rules/:ruleId`) and dropping a staged
+  one (`DELETE /v1/copy-rules/stages/:stage`) are narrowing routes: they ask the grant and a proven device, never a
+  passkey, whatever "ask again for each act" says.
 - **Matching** runs on what the DAEMON observed: the program the copy was captured from, and the program
   reading the terminal as the KERNEL proves it (`program` in the card's facts: the one program every process of the
   terminal's foreground group runs, in line mode: [who reads the terminal](input-requests.md#who-reads-the-terminal)). The name
@@ -317,6 +332,12 @@ a ferret's words: a plain item with the same text is a plain item.
   is the time the owner answered.
 - **A device without `secrets.use`** can't read the plan: the card says so once, stops retrying, and keeps the paste-plan
   card for the item's `copyPlan`.
+- **At the machine, `fy plan ls`** prints each line with the same flags under it, in the protocol's words: a terminal
+  line's root (`taskPlanRootWords`, "this gives the ferret root on kirin-box"), a code the ferret asked for
+  (`AUTOMATED_CODE_WARNING`, said as "with --totp N: …" while the line waits) and a first fill
+  (`TASK_PLAN_FIRST_FILL_WORDS`), then the honest-client line. `fy plan approve <id> <lines> --totp N` ticks a code
+  only with `--i-understand-one-factor`, the same rule and words as `fy rules` (`AUTOMATED_CODE_ACK_WORDS` is its
+  help); either flag without the other is refused before anything is read.
 - **Settings › Secure copy › Task plans** lists the live plans with the same revoke. **A link opens a card:**
   `<app>/#agenda/<id>?session=<sid>` (printed by `fy plan approve`, and opened by `--open`) goes to that agenda item on
   the machine that runs the session. The fragment never reaches a daemon; it only picks the card.
@@ -376,7 +397,10 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
 
 ### Standing sign-in rules
 
-A rule is one owner-signed permission to fill one sign-in for any ferret until it ends; its sheet, card and Settings list
+> This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
+> ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
+
+That is `SIGN_IN_RULE_HONEST_LIMIT`, verbatim, the honest-client line of every rule. A rule is one owner-signed permission to fill one sign-in for any ferret until it ends; its sheet, card and Settings list
 are described in [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules). On this screen: the sheet
 starts with nothing ticked when a ferret suggested it, the code needs its own red acknowledgement and is never carried
 over on resume or renew, a terminal rule is password-only with the root warning, and approving always asks for the
@@ -414,7 +438,9 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
 - **Who may turn it on:** the owner only. A ferret is refused before its request is read
   (`PUT /v1/copy-rules/settings`). At the machine it takes effect at once; from a paired device it needs
   `terminal.configure` and a passkey proved for this one act (`allow-profile-targets`), claimed in one step, so a
-  passkey proved for something else never turns it on. Turning it off never asks. It is kept beside the rules in
+  passkey proved for something else never turns it on. Turning it off never asks. At the machine,
+  `fy copy rules profile on|off` sets it through the same route (on prints the risk as a warning); a caller the daemon
+  governs (off this machine) is told that turning it on needs a passkey, and to switch it on in the app. It is kept beside the rules in
   `<state>/secure-copy/rules.json`; a file that cannot be read holds it off. "The owner only" is the honest-client
   boundary in [honest limits](#honest-limits): a ferret that reads the admin token is taken for the owner here too.
 - **What you see:** while the setting is on or off, every terminal rule a program from your profile could satisfy

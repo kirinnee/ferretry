@@ -263,6 +263,16 @@ describe('TaskPlanService: the ferret asks', () => {
     should(w.cards[0]?.how).containEql('passkey');
   });
 
+  it('should point a paste-only card at `fy plan approve`, never the alias `fy copy plan approve`', async () => {
+    const w = world();
+    await w.rules.load();
+
+    const plan = await w.service.propose(SESSION, { lines: [PASTE] });
+
+    should(w.cards[0]?.how).containEql(`\`fy plan approve ${plan.id} <numbers>\``);
+    should(w.cards[0]?.how).not.containEql('fy copy plan');
+  });
+
   it("should preselect only the owner's own default on a picker, never the ferret's hint", async () => {
     const w = world();
     await w.rules.load();

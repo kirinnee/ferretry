@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import * as secureCopy from '../../src/lib/secure-copy.ts';
 import { z } from 'zod';
 import {
   AGENT_TOOL_NAMES,
@@ -323,5 +324,46 @@ describe('the secure copy settings and the rule warnings', () => {
     ])
       should(runsWhatItReads(program)).be.true();
     for (const program of ['psql', 'gh', 'vercel', 'pythonista', 'sudo']) should(runsWhatItReads(program)).be.false();
+  });
+});
+
+describe('a staged paste rule (!A244)', () => {
+  const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
+
+  it("should word the daemon's rows from the request, in their fixed order", () => {
+    const words = secureCopy.pasteRuleWords({ ...RULE, count: 2, expiresInSeconds: 7_200, sessionId: 's1' });
+
+    should(words.does).equal(
+      'Ferretry pastes what gh prints into vercel in a terminal, for session s1, without asking.',
+    );
+    should(words.rows).deepEqual([
+      { label: 'From', value: 'what gh prints' },
+      { label: 'To', value: 'vercel in a terminal' },
+      { label: 'Who', value: 'Session s1' },
+      { label: 'Pastes', value: 'At most 2' },
+      { label: 'Until', value: 'For 2 hours from approval' },
+    ]);
+    should(
+      secureCopy
+        .pasteRuleWords(RULE)
+        .rows.map(row => row.value)
+        .slice(2),
+    ).deepEqual(['Any ferret on this machine', 'Any number', 'No end: until you remove it']);
+  });
+
+  it('should bind its subject to the stage and the exact request, nothing else', () => {
+    const stage = `prs_${'a'.repeat(24)}` as const;
+    const other = `prs_${'b'.repeat(24)}` as const;
+    const subject = secureCopy.pasteRuleApprovalSubject(stage, secureCopy.canonicalPasteRule(RULE));
+
+    should(subject).match(/^[0-9a-f]{64}$/u);
+    should(secureCopy.pasteRuleApprovalSubject(other, secureCopy.canonicalPasteRule(RULE))).not.equal(subject);
+    should(secureCopy.pasteRuleApprovalSubject(stage, secureCopy.canonicalPasteRule({ ...RULE, count: 1 }))).not.equal(
+      subject,
+    );
+    // Key order does not change the bytes a proof is bound to.
+    should(secureCopy.canonicalPasteRule({ to: RULE.to, from: RULE.from })).equal(secureCopy.canonicalPasteRule(RULE));
+    should(secureCopy.pasteRuleRunsAnything({ kind: 'terminal', program: 'bash' })).be.true();
+    should(secureCopy.pasteRuleRunsAnything(RULE.to)).be.false();
   });
 });

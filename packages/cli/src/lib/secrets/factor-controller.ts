@@ -2,6 +2,8 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import {
   LOGIN_TOTP_WARNING,
   AccountIdSchema,
+  agendaDeepLinkFragment,
+  DAEMON_FEATURES,
   padInputValue,
   parseTotpInput,
   TOTP_INPUT_MAX_BYTES,
@@ -11,6 +13,7 @@ import {
   type TwoFactorSeedStaged,
   type TwoFactorSeedStageView,
 } from '@ferretry/protocol';
+import { daemonNeedsUpdate } from '../daemon/features.ts';
 import { accountRefusal } from './account-gateway.ts';
 import type { IAccountGateway, IAccountPrompt } from './account-ports.ts';
 import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
@@ -19,7 +22,7 @@ import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
 export interface TwoFactorAddOptions {
   readonly totp?: boolean | undefined;
   readonly label?: string | undefined;
-  /** The agenda board the confirm card goes on; defaults to the session this runs inside. */
+  /** The session whose card in the app's Inbox confirms it; defaults to the session this runs inside. */
   readonly session?: string | undefined;
   readonly iUnderstandTotp?: boolean | undefined;
 }
@@ -35,12 +38,16 @@ export interface TwoFactorSeedPorts {
   readonly ownSessionId?: string | undefined;
   readonly sleep: (ms: number) => Promise<void>;
   readonly nowMs: () => number;
+  /** The app's address, where the card is opened (`<origin>/#agenda/<id>?session=<sid>`); absent, no link is printed. */
+  readonly appOrigin?: string | undefined;
+  /** Said with the link when a set app address was refused and the hosted one stands. */
+  readonly appOriginNote?: string | undefined;
 }
 
 const POLL_MS = 1_000;
 
 /**
- * `fy account factor add --totp` (docs/secrets.md, "2FA keys"): STAGES the seed and puts a card on the owner's agenda,
+ * `fy account factor add --totp` (docs/secrets.md, "2FA keys"): STAGES the seed and puts a card in the app's Inbox,
  * then waits while the owner confirms it with a passkey in the app. It never saves a seed: there is no route this CLI
  * could call to do that without a passkey, the machine's own admin token included.
  */
@@ -55,19 +62,34 @@ export class TwoFactorSeedController {
         'name the kind of 2FA key: --totp saves a TOTP key so Ferretry makes the codes (other kinds: Settings › Accounts)',
       );
     const session = options.session?.trim() || this.ports.ownSessionId?.trim() || '';
+    // Every card in the app's Inbox belongs to one session: there is no Inbox of the owner's own for it to go to yet.
     if (session === '')
       throw new Error(
-        'name the agenda board the confirm card goes on with --session <id> (fy session ls): a seed is saved only with your passkey, in the app',
+        "name a session with --session <id> (see `fy session ls`): the confirm card goes in the app's Inbox under it, and a 2FA key is saved only with your passkey there",
       );
     const label = options.label === undefined ? undefined : this.#label(options.label);
+    // An account list can answer on a daemon with no 2FA key routes (v4.190 to v4.196): ask what it offers first.
+    if (!(await this.ports.gateway.features()).includes(DAEMON_FEATURES.twoFactorKeys))
+      throw new Error(daemonNeedsUpdate('2FA keys'));
     await this.#preflight(account.data);
     const staged = await this.#askAndStage(account.data, options.iUnderstandTotp === true, label);
     const card = await this.ports.gateway.confirmInApp(account.data, staged.stage, { session });
     this.ports.out.success(
-      `Confirm it with your passkey on the card !${card.agendaItemId} in the Ferretry app (agenda of ${session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the card !${card.agendaItemId} in the app's Inbox (session ${session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
+    this.#showCard(card.agendaItemId, session);
     const final = await this.#wait(account.data, staged.stage);
     this.ports.out.success(OUTCOME[final.state](account.data));
+  }
+
+  /** Prints the link that opens the card in the app. It carries no secret: it only picks a card. */
+  #showCard(agendaItemId: string, session: string): void {
+    const { appOrigin, appOriginNote } = this.ports;
+    if (appOrigin === undefined) return;
+    if (appOriginNote !== undefined) this.ports.out.success(appOriginNote);
+    this.ports.out.success(
+      `Open the card: ${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, session)}`,
+    );
   }
 
   /** Owner-only read first: a refused caller never sees the warning or the seed prompt, and an older daemon is named before typing. */

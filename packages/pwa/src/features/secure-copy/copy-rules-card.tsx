@@ -5,6 +5,9 @@
  * each time: from what a program prints, or a page, into the program reading a terminal or a page's field. Every
  * paste a rule allows is still raised, audited and shown in the log, and a rule pastes unasked only where what is
  * typed is hidden. Nothing here is a value: a rule is a route, a count and an end.
+ *
+ * Making a rule asks for a passkey bound to that one rule (owner decision !A244); a rule staged at the machine
+ * (`fy copy rules add`) waits at the top for the same passkey, with the daemon's rows. Removing one never asks.
  */
 
 import {
@@ -13,6 +16,7 @@ import {
   type PasteRule,
   type PasteRuleCreate,
   type PasteRuleSettings,
+  type PasteRuleStaged,
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
 } from '@ferretry/protocol';
@@ -36,6 +40,10 @@ export interface CopyRulesCardProps {
   readonly onSettings?: (settings: PasteRuleSettings) => Write;
   /** Why the setting and the badges could not be read: said in their place, never left blank. */
   readonly settingsError?: string;
+  /** Paste rules staged at the machine, waiting for this device's passkey. */
+  readonly waiting?: readonly PasteRuleStaged[];
+  readonly onApproveWaiting?: (staged: PasteRuleStaged) => Write;
+  readonly onDenyWaiting?: (staged: PasteRuleStaged) => Write;
 }
 
 /** What a rule into a program from the owner's profile is labelled with (docs/secure-copy.md). */
@@ -318,6 +326,65 @@ function RuleRow({
   );
 }
 
+/** A paste rule staged at the machine: the daemon's own line and rows, its red line, and the passkey that approves it. */
+function WaitingRule({
+  staged,
+  busy,
+  onApprove,
+  onDeny,
+}: {
+  readonly staged: PasteRuleStaged;
+  readonly busy: boolean;
+  readonly onApprove: NonNullable<CopyRulesCardProps['onApproveWaiting']>;
+  readonly onDeny: NonNullable<CopyRulesCardProps['onDenyWaiting']>;
+}) {
+  return (
+    <li
+      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      data-copy-rule-waiting={staged.stage}
+    >
+      <p className="m-0 text-ui text-fg">{staged.does}</p>
+      <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
+        {staged.rows.map((row, index) => (
+          <div key={`${String(index)} ${row.label}`} className="contents">
+            <dt className="text-faint">{row.label}</dt>
+            <dd className="m-0 min-w-0 break-words text-fg">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {staged.runsAnything && (
+        <p
+          className="m-0 flex items-start gap-1.5 text-meta font-medium text-err"
+          data-copy-rule-waiting-runs-anything=""
+        >
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+          {RUNS_WHAT_IT_READS_WARNING}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          disabled={busy}
+          data-copy-rule-waiting-approve=""
+          onClick={() => void onApprove(staged)}
+        >
+          <ShieldCheck size={14} aria-hidden="true" /> Approve with passkey…
+        </button>
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          disabled={busy}
+          data-copy-rule-waiting-deny=""
+          onClick={() => void onDeny(staged)}
+        >
+          Deny
+        </button>
+      </div>
+    </li>
+  );
+}
+
 /** "Paste rules may target programs in my own profile": off by default, and turning it on is a loosening. */
 function ProfileTargetsSetting({
   settings,
@@ -366,6 +433,9 @@ export function CopyRulesCard({
   profileRules = [],
   onSettings,
   settingsError,
+  waiting = [],
+  onApproveWaiting,
+  onDenyWaiting,
 }: CopyRulesCardProps) {
   const [adding, setAdding] = useState(false);
   return (
@@ -381,6 +451,24 @@ export function CopyRulesCard({
         </h2>
       </div>
       <p className="m-0 text-cell text-muted">Pastes allowed without asking. Every paste is still logged.</p>
+      {waiting.length > 0 && onApproveWaiting !== undefined && onDenyWaiting !== undefined && (
+        <section className="flex flex-col gap-2" aria-labelledby="copy-rules-waiting-heading">
+          <h3 id="copy-rules-waiting-heading" className="m-0 text-ui font-semibold text-fg">
+            Waiting for your passkey
+          </h3>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules waiting for your passkey">
+            {waiting.map(staged => (
+              <WaitingRule
+                key={staged.stage}
+                staged={staged}
+                busy={busy}
+                onApprove={onApproveWaiting}
+                onDeny={onDenyWaiting}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
       {rules.length === 0 ? (
         <p className="m-0 text-ui text-faint" data-testid="copy-rules-empty">
           No paste rules: every paste asks you.

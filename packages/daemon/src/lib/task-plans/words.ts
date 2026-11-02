@@ -100,7 +100,7 @@ export function planContext(plan: Pick<TaskPlan, 'lines'>): string {
 /** How the card is answered: on the card, and (paste lines only) at the machine as today. */
 export function planHowToResolve(plan: Pick<TaskPlan, 'id' | 'lines'>): string {
   return plan.lines.every(line => line.kind === 'paste')
-    ? `Tick the pastes you allow on the card, or at the machine: \`fy copy plan approve ${plan.id} <numbers>\`.`
+    ? `Tick the pastes you allow on the card, or at the machine: \`fy plan approve ${plan.id} <numbers>\`.`
     : 'Tick the lines you allow on the card in the app; a sign-in line is confirmed with your passkey.';
 }
 

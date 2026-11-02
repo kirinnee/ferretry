@@ -2,8 +2,19 @@ import {
   type CopyMeta,
   CopyPlanApproveSchema,
   type CopyPlanList,
+  PASTE_RULE_ERROR_CODES,
+  PASTE_RULE_REFUSAL_WORDS,
+  type PasteRuleCreate,
   PasteRuleCreateSchema,
   type PasteRuleList,
+  PasteRuleSchema,
+  type PasteRuleStageDropped,
+  type PasteRuleStageId,
+  PasteRuleStageIdSchema,
+  type PasteRuleStageList,
+  PasteRuleStageListSchema,
+  PasteRuleStagedSchema,
+  PasteRuleStageViewSchema,
   PasteRuleSettingsSchema,
   type PasteRuleSettingsView,
   taskPlanLineOfCopyItem,
@@ -15,7 +26,9 @@ import { grantRefusalCode } from '../../api/capability.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
+import type { ApiResponse } from '../../api/http.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { PasteRuleProofMissing, PasteRuleStageGone, type PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
@@ -26,11 +39,19 @@ import { taskPlanAnswered } from './task-plans.ts';
  * THE OWNER'S ROUTES FOR SECURE COPY (docs/secure-copy.md): the copies a session holds (descriptions only), the
  * rules that approve pastes in advance, and the plans ferrets asked about.
  *
+ * ## MAKING A PASTE RULE: A PASSKEY BOUND TO THAT ONE RULE (owner decision !A244)
+ *
+ * A rule is STAGED (`POST /v1/copy-rules/stages`, which answers the daemon's own line and rows of what it allows) and
+ * made only by its commit, with a fresh `approve-paste-rule` proof bound to that stage, from EVERY caller: the commit
+ * never reads `governance`, a held step-up window, an unlock or "ask again for each act", so the machine's own token,
+ * which holds no passkey, never makes one. `fy copy rules add` stages at the machine and waits for the app. The old
+ * one-step `POST /v1/copy-rules` makes nothing and says so. Removing a rule only narrows, and asks nothing more.
+ *
  * ## OWNER ONLY, TWICE
  *
  * An agent caller (`peer:`, `warden:`) is refused before a body is read, and the services refuse again. Adding a
- * rule or approving a plan LOOSENS what agents may do unasked, so those demand `terminal.configure`: a remote
- * device follows the owner's "ask again for each change" setting. Removing a rule only narrows, so it demands
+ * rule or approving a plan LOOSENS what agents may do unasked, so those demand `terminal.configure`, and a rule's commit
+ * a passkey bound to it (below). Removing a rule only narrows, so it demands
  * `terminal.use`. No route returns a copy's value: the copies list is {@link CopyMeta}, and no schema here has a
  * field for one.
  *
@@ -48,6 +69,41 @@ const ruleOwner = (context: RouteContext): PasteRuleCaller => ({
 });
 
 const ID = /^[0-9a-f]{32}$/u;
+
+function stageParam(context: RouteContext): PasteRuleStageId {
+  const parsed = PasteRuleStageIdSchema.safeParse(context.params.get('stage') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the stage in the path is not usable', 'bad_request');
+  return parsed.data;
+}
+
+/** A stage that is not waiting, as one sentence; anything else is the plans' and rules' own answer. */
+function stageAnswered(error: unknown): never {
+  if (error instanceof PasteRuleStageGone) throw new ApiError(404, error.message, error.code);
+  return taskPlanAnswered(error);
+}
+
+/** What a rule's destination demands beyond `terminal.configure`: a write into the secret store, or into a page. */
+function refusedDestination(context: RouteContext, request: PasteRuleCreate): ApiResponse | undefined {
+  return request.to.kind === 'secret'
+    ? refusedSecretWrite(context, 'approve pastes into the secret store')
+    : request.to.kind === 'browser'
+      ? refusedPageInput(context, 'approve pastes into a page')
+      : undefined;
+}
+
+/**
+ * The commit's refusal without a proof: the step-up demand naming `approve-paste-rule`, so the app runs the ceremony
+ * for this stage and sends the commit again. The machine's own token gets it too: it proves nothing.
+ */
+const pasteRuleProofDemand = (): ApiResponse =>
+  jsonResponse(
+    {
+      error: 'making a paste rule needs a passkey confirmation for this one rule, from a paired device',
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.approvePasteRule },
+    } satisfies StepUpRequiredBody,
+    403,
+  );
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 function param(context: RouteContext, name: string, shape: RegExp): string {
@@ -114,6 +170,7 @@ export function secureCopyRoutes(
   copies: CopyListing,
   rules: PasteRuleService,
   plans: TaskPlanService,
+  stages: PasteRuleStages,
   homes?: RuleProgramHomes,
 ): readonly ApiRoute[] {
   return [
@@ -175,6 +232,8 @@ export function secureCopyRoutes(
       },
     },
     {
+      // THE OLD ONE-STEP CREATE makes nothing: a paste rule is made only by a staged commit with its own passkey. An app
+      // or `fy` from before !A244 is told to update rather than looping on a step-up it can never satisfy.
       method: 'POST',
       path: '/v1/copy-rules',
       minimum: 'operator',
@@ -182,18 +241,109 @@ export function secureCopyRoutes(
       capability: { capability: 'terminal', axis: 'configure' },
       noStore: true,
       handle: async context => {
+        ruleOwner(context);
+        throw new ApiError(
+          409,
+          PASTE_RULE_REFUSAL_WORDS.paste_rule_passkey_needed,
+          PASTE_RULE_ERROR_CODES.passkeyNeeded,
+        );
+      },
+    },
+    {
+      // STAGE: nothing is allowed yet. Answers the daemon's own line and rows, which the passkey prompt lists.
+      method: 'POST',
+      path: '/v1/copy-rules/stages',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'configure' },
+      noStore: true,
+      handle: async context => {
         const caller = ruleOwner(context);
         const request = await parseBody(context.request, PasteRuleCreateSchema);
-        const intoStore = request.to.kind === 'secret';
-        const refused = intoStore
-          ? refusedSecretWrite(context, 'approve pastes into the secret store')
-          : request.to.kind === 'browser'
-            ? refusedPageInput(context, 'approve pastes into a page')
-            : undefined;
+        const refused = refusedDestination(context, request);
         if (refused !== undefined) return refused;
-        const rule = await rules.create(caller, request).catch(taskPlanAnswered);
-        if (intoStore) spentSecretWrite(context);
-        return jsonResponse(rule, 201);
+        return jsonResponse(PasteRuleStagedSchema.parse(stages.stage(caller, request)), 201);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/copy-rules/stages',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const body: PasteRuleStageList = { stages: [...stages.waiting(ruleOwner(context))] };
+        return jsonResponse(PasteRuleStageListSchema.parse(body));
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/copy-rules/stages/:stage',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        try {
+          return jsonResponse(PasteRuleStageViewSchema.parse(stages.view(caller, stageParam(context))));
+        } catch (error) {
+          return stageAnswered(error);
+        }
+      },
+    },
+    {
+      // COMMIT: only a fresh `approve-paste-rule` proof bound to this stage, from every caller, the machine included.
+      method: 'POST',
+      path: '/v1/copy-rules/stages/:stage/commit',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'configure' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        const stage = stageParam(context);
+        let request: PasteRuleCreate | undefined;
+        try {
+          request = stages.requestOf(caller, stage);
+        } catch (error) {
+          return stageAnswered(error);
+        }
+        const refused = refusedDestination(context, request);
+        if (refused !== undefined) return refused;
+        try {
+          // EVERY CALLER proves it: no `governance` read for the proof, so the machine's token skips nothing.
+          const rule = await stages.commit(
+            caller,
+            stage,
+            subject => context.claimFreshStepUp?.(STEP_UP_ACTS.approvePasteRule, subject) === true,
+          );
+          if (request.to.kind === 'secret') spentSecretWrite(context);
+          return jsonResponse(PasteRuleSchema.parse(rule), 201);
+        } catch (error) {
+          if (error instanceof PasteRuleProofMissing) return pasteRuleProofDemand();
+          return stageAnswered(error);
+        }
+      },
+    },
+    {
+      // DROP: the prompt was dismissed, or the owner denied it. Nothing is allowed, so it asks no more than `use`.
+      method: 'DELETE',
+      path: '/v1/copy-rules/stages/:stage',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use', narrowing: true },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        const stage = stageParam(context);
+        try {
+          stages.drop(caller, stage);
+        } catch (error) {
+          return stageAnswered(error);
+        }
+        return jsonResponse({ stage, dropped: true } satisfies PasteRuleStageDropped);
       },
     },
     {
@@ -201,7 +351,7 @@ export function secureCopyRoutes(
       path: '/v1/copy-rules/:ruleId',
       minimum: 'operator',
       caller: 'person',
-      capability: { capability: 'terminal', axis: 'use' },
+      capability: { capability: 'terminal', axis: 'use', narrowing: true },
       noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);

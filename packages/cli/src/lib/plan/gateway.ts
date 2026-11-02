@@ -3,13 +3,18 @@ import {
   CopyMetaSchema,
   type PasteRule,
   type PasteRuleCreate,
-  HealthViewSchema,
   PasteRuleCreateSchema,
   type PasteRuleList,
   PasteRuleListSchema,
+  type PasteRuleSettings,
+  PasteRuleSettingsSchema,
   type PasteRuleSettingsView,
   PasteRuleSettingsViewSchema,
   PasteRuleSchema,
+  type PasteRuleStaged,
+  PasteRuleStagedSchema,
+  type PasteRuleStageView,
+  PasteRuleStageViewSchema,
   type TaskPlan,
   type TaskPlanApproval,
   TaskPlanApprovalSchema,
@@ -25,7 +30,7 @@ import {
   TaskPlanStageViewSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { DAEMON_HEALTH_PATH } from '../agenda/gateway.ts';
+import { readDaemonFeatures } from '../daemon/features.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';
 import type { CopyApiClient, ICopyGateway, IPlanGateway } from './ports.ts';
 
@@ -59,12 +64,38 @@ export class ProtocolCopyGateway implements ICopyGateway {
     });
   }
 
+  async changeRuleSettings(settings: PasteRuleSettings): Promise<PasteRuleSettings> {
+    return await this.client.request('/v1/copy-rules/settings', PasteRuleSettingsSchema, {
+      method: 'PUT',
+      headers: this.#json,
+      body: JSON.stringify(PasteRuleSettingsSchema.parse(settings)),
+    });
+  }
+
   async addRule(rule: PasteRuleCreate): Promise<PasteRule> {
     return await this.client.request('/v1/copy-rules', PasteRuleSchema, {
       method: 'POST',
       headers: this.#json,
       body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
     });
+  }
+
+  async stageRule(rule: PasteRuleCreate): Promise<PasteRuleStaged> {
+    return await this.client.request('/v1/copy-rules/stages', PasteRuleStagedSchema, {
+      method: 'POST',
+      headers: this.#json,
+      body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
+    });
+  }
+
+  async ruleStage(stage: string): Promise<PasteRuleStageView> {
+    return await this.client.request(`/v1/copy-rules/stages/${encodeURIComponent(stage)}`, PasteRuleStageViewSchema, {
+      headers: this.#headers,
+    });
+  }
+
+  async features(): Promise<readonly string[]> {
+    return await readDaemonFeatures(this.client);
   }
 
   async removeRule(id: string): Promise<void> {
@@ -123,8 +154,7 @@ export class ProtocolPlanGateway implements IPlanGateway {
   }
 
   async features(): Promise<readonly string[]> {
-    const health = await this.client.request(DAEMON_HEALTH_PATH, HealthViewSchema).catch(() => undefined);
-    return health?.features ?? [];
+    return await readDaemonFeatures(this.client);
   }
 }
 

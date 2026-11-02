@@ -1,28 +1,28 @@
 import { describe, it } from 'bun:test';
 import {
   DAEMON_FEATURES,
+  type DaemonId,
+  SIGN_IN_RULE_AUTO_RECIPE_WARNING,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_ROOT_WARNING,
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TOTP_WARNING,
+  SIGN_IN_RULES_SCREEN_PATH,
   type SignInRuleDraft,
   type SignInRuleEligibility,
   type SignInRuleNarrow,
   type SignInRuleStaged,
   type SignInRuleStageState,
   type SignInRuleView,
+  signInRuleSuspensionWords,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
-import {
-  AUTO_RECIPE_WARNING,
-  PASTE_RULE_POINTER,
-  RULES_FERRET_REFUSAL,
-  RulesController,
-  ruleWarnings,
-} from '../../../src/lib/rules/controller';
+import { DaemonFeaturesUnreadable, daemonNeedsUpdate } from '../../../src/lib/daemon/features';
+import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
+import { PASTE_RULE_POINTER, RulesController, ruleWarnings } from '../../../src/lib/rules/controller';
 import type { IRulesGateway, RulesPorts } from '../../../src/lib/rules/ports';
 
 const STAGE = `srs_${'a'.repeat(24)}`;
@@ -180,13 +180,14 @@ describe('fy rules (controller)', () => {
         async () => await controller.add(SIGN_IN, {}),
         async () => await controller.resume(RULE, {}),
         async () => await controller.renew(RULE, {}),
+        async () => await controller.widen(RULE, { username: true }),
         async () => await controller.narrow(RULE, { dropTotp: true }),
         async () => await controller.remove(RULE, {}),
         async () => await controller.remove(undefined, { account: 'GITHUB_WORK' }),
       ])
         await run().then(
           () => should.fail('', '', 'a ferret got through'),
-          (error: unknown) => should((error as Error).message).equal(RULES_FERRET_REFUSAL),
+          (error: unknown) => should((error as Error).message).equal(OWNER_COMMAND_REFUSAL),
         );
       should(gateway.calls).eql([]);
     }
@@ -262,12 +263,27 @@ describe('fy rules (controller)', () => {
     should(gateway.calls).containEql('drop').and.not.containEql('confirmInApp');
   });
 
-  it('should stage nothing while the daemon does not report sign-in rules', async () => {
+  it('should stage nothing while the daemon does not report sign-in rules, and say it needs an update', async () => {
     const { controller, gateway } = rig();
     gateway.reported = [];
     await controller.add(SIGN_IN, {}).then(
       () => should.fail('', '', 'staged'),
-      (error: unknown) => should((error as Error).message).containEql('does not report them yet'),
+      (error: unknown) => should((error as Error).message).equal(daemonNeedsUpdate('standing sign-in rules')),
+    );
+    should(gateway.calls).not.containEql('stage');
+  });
+
+  it('should tell a health read that failed apart from an old daemon, and stage nothing', async () => {
+    const { controller, gateway } = rig();
+    gateway.features = async () => {
+      throw new DaemonFeaturesUnreadable(new Error('down'));
+    };
+    await controller.add(SIGN_IN, {}).then(
+      () => should.fail('', '', 'staged'),
+      (error: unknown) => {
+        should(error).be.instanceOf(DaemonFeaturesUnreadable);
+        should((error as Error).message).not.containEql('too old');
+      },
     );
     should(gateway.calls).not.containEql('stage');
   });
@@ -367,7 +383,7 @@ describe('fy rules (controller)', () => {
       {
         ...SITE_VIEW,
         status: 'suspended',
-        suspended: { at: '2026-11-01T11:00:00.000Z', because: 'drift' },
+        suspended: { at: '2026-11-01T11:00:00.000Z', because: 'scripted-origin' },
       } as unknown as SignInRuleView,
     ];
     await controller.resume(RULE, {});
@@ -414,7 +430,7 @@ describe('fy rules (controller)', () => {
     const { controller, gateway, said } = rig();
     await controller.remove(undefined, { account: 'GITHUB_WORK' });
     should(gateway.accountsRevoked).eql(['GITHUB_WORK']);
-    should(said[said.length - 1]).equal('Ended 2 standing rules of GITHUB_WORK.');
+    should(said[said.length - 1]).equal('Revoked 2 standing rules of GITHUB_WORK.');
     await controller.remove(RULE, { account: 'GITHUB_WORK' }).then(
       () => should.fail('', '', 'took both'),
       (error: unknown) => should((error as Error).message).containEql('not both'),
@@ -431,16 +447,25 @@ describe('fy rules (controller)', () => {
     should(gateway.revoked).eql([]);
   });
 
-  it('should say so when an account had no rules, and print the count as JSON with --json', async () => {
+  it('should say so when an account had no rules, and print the count as JSON under its own key', async () => {
     const { controller, gateway, said } = rig();
     gateway.accountCount = 0;
     await controller.remove(undefined, { account: 'GITHUB_WORK' });
     should(said[said.length - 1]).equal('GITHUB_WORK had no standing rules.');
     gateway.accountCount = 1;
     await controller.remove(undefined, { account: 'GITHUB_WORK', json: true });
-    should(JSON.parse(said[said.length - 1] ?? '')).eql({ account: 'GITHUB_WORK', revoked: 1 });
+    // `revoked` is the one-rule answer's id; a count has its own key.
+    should(JSON.parse(said[said.length - 1] ?? '')).eql({ account: 'GITHUB_WORK', revokedCount: 1 });
     await controller.remove(undefined, { account: 'GITHUB_WORK' });
-    should(said[said.length - 1]).equal('Ended 1 standing rule of GITHUB_WORK.');
+    should(said[said.length - 1]).equal('Revoked 1 standing rule of GITHUB_WORK.');
+  });
+
+  it('should say Revoked for one rule, and keep the rule id under revoked in --json', async () => {
+    const { controller, said } = rig();
+    await controller.remove(RULE, {});
+    should(said[said.length - 1]).equal(`Revoked the rule ${RULE}.`);
+    await controller.remove(RULE, { json: true });
+    should(JSON.parse(said[said.length - 1] ?? '')).eql({ revoked: RULE });
   });
 
   it('should say why a sign-in cannot have a rule yet, and stage nothing', async () => {
@@ -455,7 +480,7 @@ describe('fy rules (controller)', () => {
 
   it('should print the auto-recipe line from the structured flag, even when the words omit it', async () => {
     should(ruleWarnings({ root: false, totp: false, autoRecipe: true }, RED)).eql([
-      AUTO_RECIPE_WARNING,
+      SIGN_IN_RULE_AUTO_RECIPE_WARNING,
       "How it's checked:",
       `  ${SIGN_IN_RULE_HONEST_LIMIT}`,
     ]);
@@ -463,16 +488,18 @@ describe('fy rules (controller)', () => {
     const staging = rig();
     staging.gateway.staged = stagedOf({ autoRecipe: true });
     await staging.controller.add(SIGN_IN, {});
-    should(staging.said.filter(line => line.includes(AUTO_RECIPE_WARNING))).eql([`  ${AUTO_RECIPE_WARNING}`]);
+    should(staging.said.filter(line => line.includes(SIGN_IN_RULE_AUTO_RECIPE_WARNING))).eql([
+      `  ${SIGN_IN_RULE_AUTO_RECIPE_WARNING}`,
+    ]);
 
     const quiet = rig();
     await quiet.controller.add(SIGN_IN, {});
-    should(quiet.said.join('\n')).not.containEql(AUTO_RECIPE_WARNING);
+    should(quiet.said.join('\n')).not.containEql(SIGN_IN_RULE_AUTO_RECIPE_WARNING);
 
     const listing = rig();
     listing.gateway.rules = [{ ...SITE_VIEW, flags: ['auto-recipe'] } as unknown as SignInRuleView];
     await listing.controller.list({});
-    should(listing.said.join('\n').split('\n')).containEql(`   ${AUTO_RECIPE_WARNING}`);
+    should(listing.said.join('\n').split('\n')).containEql(`   ${SIGN_IN_RULE_AUTO_RECIPE_WARNING}`);
   });
 
   it('should say a denied stage was approved in the app when a newer rule for that sign-in is now active', async () => {
@@ -514,7 +541,7 @@ describe('fy rules (controller)', () => {
       {
         ...SITE_VIEW,
         status: 'suspended',
-        suspended: { at: '2026-11-01T12:00:40.000Z', because: 'drift' },
+        suspended: { at: '2026-11-01T12:00:40.000Z', because: 'scripted-origin' },
         createdAt: '2026-11-01T12:00:30.000Z',
       } as unknown as SignInRuleView,
     ];
@@ -566,7 +593,7 @@ describe('fy rules (controller)', () => {
         uses: 5,
         remaining: 2,
         status: 'suspended',
-        suspended: { at: '2026-11-01T11:30:00.000Z', because: 'drift' },
+        suspended: { at: '2026-11-01T11:30:00.000Z', because: 'scripted-origin' },
       } as unknown as SignInRuleView,
       {
         ...TERMINAL_VIEW,
@@ -578,11 +605,236 @@ describe('fy rules (controller)', () => {
     gateway.stages = [stagedOf()];
     await controller.list({});
     const text = said.join('\n');
-    should(text).containEql('project 0c1d2e3f-0000-4000-8000-000000000000').and.containEql('2 of 5 uses left');
-    should(text).containEql('stopped 2026-11-01T11:30:00.000Z: drift (fy rules resume sr_bbbbbbbb');
-    should(text).containEql('session sess-1').and.containEql('0 of 3 uses left');
-    should(text).containEql('not checked yet');
+    should(text)
+      .containEql('who: Ferrets in board project 0c1d2e3f-0000-4000-8000-000000000000')
+      .and.containEql('2 of 5 uses left');
+    should(text).containEql(`Suspended: ${signInRuleSuspensionWords('scripted-origin')}`);
+    should(text).containEql('   suspended 2026-11-01T11:30:00.000Z (fy rules resume sr_bbbbbbbb)');
+    should(text).containEql('who: Session sess-1').and.containEql('0 of 3 uses left');
+    should(text).containEql('Active once Ferretry has checked it').and.containEql('not checked yet');
     should(text).containEql('waiting for your passkey in the app:').and.containEql(`${STAGE}  until `);
+    should(text).not.containEql('stopped').and.not.containEql('scripted-origin');
+  });
+
+  it('should list a rule in words: its status, its fields, its use, and no resume hint for a gone sign-in', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.rules = [
+      {
+        ...SITE_VIEW,
+        fields: ['username', 'password', 'totp'],
+        totp: true,
+        codeKey: 'phone',
+        flags: ['one-factor'],
+        uses: 4,
+        remaining: 0,
+        status: 'used-up',
+        usage: { count: 4, lastUsedAt: '2026-11-01T10:00:00.000Z' },
+      } as unknown as SignInRuleView,
+      {
+        ...SITE_VIEW,
+        id: `sr_${'d'.repeat(24)}`,
+        status: 'suspended',
+        suspended: { at: '2026-11-01T11:30:00.000Z', because: 'sign-in-gone' },
+      } as unknown as SignInRuleView,
+    ];
+    await controller.list({});
+    const [spent = '', gone = ''] = said.join('\n').split(/\n(?=sr_)/u);
+    should(spent).containEql('All uses spent').and.not.containEql('used-up');
+    should(spent).containEql('types username, password and 2FA code').and.not.containEql('totp');
+    should(spent).containEql('used 4×, last 2026-11-01T10:00:00.000Z');
+    should(gone)
+      .containEql(`Suspended: ${signInRuleSuspensionWords('sign-in-gone')}`)
+      .and.containEql('not used yet');
+    should(gone).containEql('   suspended 2026-11-01T11:30:00.000Z\n').and.not.containEql('fy rules resume');
+  });
+
+  it('should refuse to resume a rule whose sign-in is gone, and point to rm', async () => {
+    const { controller, gateway } = rig();
+    gateway.rules = [
+      {
+        ...SITE_VIEW,
+        status: 'suspended',
+        suspended: { at: '2026-11-01T11:30:00.000Z', because: 'sign-in-gone' },
+      } as unknown as SignInRuleView,
+    ];
+    await controller.resume(RULE, {}).then(
+      () => should.fail('', '', 'resumed a rule with no sign-in'),
+      (error: unknown) =>
+        should((error as Error).message)
+          .containEql("can't be resumed")
+          .and.containEql('fy rules rm'),
+    );
+    should(gateway.calls).not.containEql('stage');
+  });
+
+  it('should draw ONE red block with the root lines and then the code sentence when a rule has both', () => {
+    should(ruleWarnings({ root: true, totp: true, autoRecipe: false }, RED)[0]).equal(
+      RED(`${SIGN_IN_RULE_ROOT_WARNING} ${SIGN_IN_RULE_TERMINAL_RESIDUAL} ${SIGN_IN_RULE_TOTP_WARNING}`),
+    );
+  });
+
+  it('should refuse --uses 0 on add and renew in words, before anything is staged, and allow it on narrow', async () => {
+    const { controller, gateway } = rig();
+    for (const run of [
+      async () => await controller.add(SIGN_IN, { uses: '0' }),
+      async () => await controller.renew(RULE, { uses: '0' }),
+      async () => await controller.widen(RULE, { uses: '0' }),
+    ])
+      await run().then(
+        () => should.fail('', '', 'staged a rule with no uses'),
+        (error: unknown) => should((error as Error).message).equal('--uses "0" is not a whole number of at least 1'),
+      );
+    should(gateway.calls).not.containEql('stage');
+    await controller.narrow(RULE, { uses: '0' });
+    should(gateway.narrowed).eql([{ rule: RULE, narrow: { uses: 0 } }]);
+  });
+
+  it('should renew a rule with a new cap, and ask for one when its cap was narrowed to 0', async () => {
+    const { controller, gateway } = rig();
+    gateway.rules = [{ ...SITE_VIEW, uses: 0, remaining: 0, status: 'used-up' } as unknown as SignInRuleView];
+    await controller.renew(RULE, {}).then(
+      () => should.fail('', '', 'renewed a 0 cap'),
+      (error: unknown) => should((error as Error).message).containEql('--uses N'),
+    );
+    await controller.renew(RULE, { uses: '3' });
+    should(gateway.drafts).eql([
+      { signIn: SIGN_IN, fields: ['password'], scope: { kind: 'any' }, uses: 3, replaces: RULE },
+    ]);
+  });
+
+  it('should name the machine in the link when this daemon’s id can be read, and leave it out when not', async () => {
+    const MACHINE = `fy_daemon_${'m'.repeat(43)}` as DaemonId;
+    const named = rig({ machine: async () => MACHINE });
+    await named.controller.add(SIGN_IN, { open: true });
+    should(named.opened).eql([`https://app.example/#rules/${STAGE}?machine=${MACHINE}`]);
+
+    const failing = rig({
+      machine: async () => {
+        throw new Error('down');
+      },
+    });
+    await failing.controller.add(SIGN_IN, { open: true });
+    should(failing.opened).eql([`https://app.example/#rules/${STAGE}`]);
+  });
+
+  it('should say where in the app the rule is confirmed', async () => {
+    const { controller, said } = rig();
+    await controller.add(SIGN_IN, {});
+    should(said.join('\n')).containEql(
+      `Confirm it with your passkey in the Ferretry app (${SIGN_IN_RULES_SCREEN_PATH}).`,
+    );
+  });
+});
+
+describe('fy rules widen', () => {
+  const PROJECT = '0c1d2e3f-0000-4000-8000-000000000000';
+  // Now is 2026-11-01T12:00Z; SITE_VIEW ends 2026-12-01T12:00Z: 30 days left.
+  const LEFT_SECONDS = 30 * 86_400;
+
+  it('should stage the same rule again with the wider terms, keeping every other term, and say what it adds', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.rules = [
+      {
+        ...SITE_VIEW,
+        scope: { kind: 'project', project: PROJECT },
+        uses: 5,
+        remaining: 2,
+      } as unknown as SignInRuleView,
+    ];
+    await controller.widen(RULE.slice(0, 8), { username: true });
+    should(gateway.drafts).eql([
+      {
+        signIn: SIGN_IN,
+        fields: ['username', 'password'],
+        scope: { kind: 'project', project: PROJECT },
+        lifetimeSeconds: LEFT_SECONDS,
+        uses: 2,
+        replaces: RULE,
+      },
+    ]);
+    should(gateway.calls).eql(['list', 'features', 'eligibility', 'stage', 'confirmInApp', 'view', 'view']);
+    should(said[0]).equal('Widening sr_bbbbbbbb: the username. Everything else stays as it is.');
+    should(said[said.length - 1]).startWith('Approved.');
+  });
+
+  it('should widen an active rule to the code, any ferret, more uses and a later end', async () => {
+    const { controller, gateway } = rig();
+    gateway.rules = [
+      {
+        ...SITE_VIEW,
+        scope: { kind: 'session', session: 'sess-1' },
+        uses: 5,
+        remaining: 2,
+      } as unknown as SignInRuleView,
+    ];
+    await controller.widen(RULE, { totp: true, iUnderstandOneFactor: true, scope: 'any', uses: '10', expires: '60d' });
+    should(gateway.drafts).eql([
+      {
+        signIn: SIGN_IN,
+        fields: ['password'],
+        totp: true,
+        totpAcknowledged: true,
+        scope: { kind: 'any' },
+        lifetimeSeconds: 60 * 86_400,
+        uses: 10,
+        replaces: RULE,
+      },
+    ]);
+  });
+
+  it('should refuse a widen that gives nothing more, point to narrow, and stage nothing', async () => {
+    const { controller, gateway } = rig();
+    gateway.rules = [
+      { ...SITE_VIEW, fields: ['username', 'password'], uses: 5, remaining: 5 } as unknown as SignInRuleView,
+    ];
+    for (const options of [{}, { username: true }, { scope: 'any' }, { uses: '3' }, { expires: '2d' }])
+      await controller.widen(RULE, options).then(
+        () => should.fail('', '', `widened with ${JSON.stringify(options)}`),
+        (error: unknown) =>
+          should((error as Error).message)
+            .containEql('nothing here widens')
+            .and.containEql('fy rules narrow sr_bbbbbbbb'),
+      );
+    should(gateway.calls.filter(call => call !== 'list')).eql([]);
+  });
+
+  it('should keep a rule’s 2FA code only with its acknowledgement, never drop it silently', async () => {
+    const { controller, gateway } = rig();
+    gateway.rules = [
+      {
+        ...SITE_VIEW,
+        fields: ['password', 'totp'],
+        totp: true,
+        codeKey: 'phone',
+        flags: ['one-factor'],
+      } as unknown as SignInRuleView,
+    ];
+    await controller.widen(RULE, { username: true }).then(
+      () => should.fail('', '', 'dropped the code'),
+      (error: unknown) => should((error as Error).message).containEql('--totp --i-understand-one-factor'),
+    );
+    await controller.widen(RULE, { username: true, totp: true, iUnderstandOneFactor: true });
+    should(gateway.drafts[0]).containEql({ fields: ['username', 'password'], totp: true, totpAcknowledged: true });
+  });
+
+  it('should ask for the terms it cannot keep: an end under an hour away, or no uses left', async () => {
+    const ended = rig();
+    ended.gateway.rules = [{ ...SITE_VIEW, expiresAt: '2026-11-01T12:30:00.000Z' } as unknown as SignInRuleView];
+    await ended.controller.widen(RULE, { username: true }).then(
+      () => should.fail('', '', 'widened a rule about to end'),
+      (error: unknown) => should((error as Error).message).containEql('--expires'),
+    );
+    await ended.controller.widen(RULE, { username: true, expires: '7d' });
+    should(ended.gateway.drafts[0]?.lifetimeSeconds).equal(7 * 86_400);
+
+    const spent = rig();
+    spent.gateway.rules = [{ ...SITE_VIEW, uses: 3, remaining: 0, status: 'used-up' } as unknown as SignInRuleView];
+    await spent.controller.widen(RULE, { username: true }).then(
+      () => should.fail('', '', 'widened a rule with no uses left'),
+      (error: unknown) => should((error as Error).message).containEql('--uses N'),
+    );
+    await spent.controller.widen(RULE, { uses: '3' });
+    should(spent.gateway.drafts[0]).containEql({ uses: 3, replaces: RULE });
   });
 
   it('should read a project or session scope, and refuse any other', async () => {

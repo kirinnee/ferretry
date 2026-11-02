@@ -252,12 +252,18 @@ describe('the passkey step-up wire', () => {
 
     // Act / Assert — the act every caller is asked, the machine included, and the stage its proof is bound to
     should(stepUp.STEP_UP_ACTS.addTwoFactorKey).equal('add-2fa-key');
-    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key', 'approve-task-plan', 'approve-sign-in-rule']);
+    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual([
+      'add-2fa-key',
+      'approve-task-plan',
+      'approve-sign-in-rule',
+      'approve-paste-rule',
+    ]);
     // Every other act is one the machine itself is never asked to prove; these, every caller is.
     should(stepUp.StepUpActSchema.options.filter(act => !stepUp.stepUpSkippableAtMachine(act))).deepEqual([
       'add-2fa-key',
       'approve-task-plan',
       'approve-sign-in-rule',
+      'approve-paste-rule',
     ]);
     should(
       stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'add-2fa-key', subject: stage }).success,
@@ -282,6 +288,34 @@ describe('the passkey step-up wire', () => {
         name: 'a stage that is not one',
         schema: stepUp.StepUpOptionsRequestSchema,
         value: { origin: ORIGIN, act: 'add-2fa-key', subject: 'tf_000000000001' },
+      },
+    ]);
+  });
+
+  it('should bind an approve-paste-rule step-up to one staged paste rule, never to another kind of stage (!A244)', () => {
+    const stage = `prs_${'a'.repeat(24)}`;
+
+    should(stepUp.STEP_UP_ACTS.approvePasteRule).equal('approve-paste-rule');
+    should(stepUp.stepUpKeepsProof('approve-paste-rule')).be.false();
+    should(
+      stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'approve-paste-rule', subject: stage })
+        .success,
+    ).be.true();
+    assertRejects([
+      {
+        name: 'a paste rule with no stage',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-paste-rule' },
+      },
+      {
+        name: "a task plan's stage for a paste rule",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-paste-rule', subject: `tps_${'a'.repeat(24)}` },
+      },
+      {
+        name: "a paste rule's stage for a task plan",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-task-plan', subject: stage },
       },
     ]);
   });

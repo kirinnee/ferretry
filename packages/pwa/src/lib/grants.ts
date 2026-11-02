@@ -121,6 +121,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'approve-sign-in-rule':
     "let Ferretry sign in for the ferrets a rule names with an account's password, until the rule ends",
   'resume-cut-off': 'bring back a ferret you cut off',
+  'approve-paste-rule': 'let Ferretry paste a sealed copy for ferrets without asking, under this one paste rule',
 };
 
 /**

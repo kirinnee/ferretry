@@ -228,6 +228,13 @@ admin token. In order:
   notify, session, work-search and `--session` terminal and browser commands still send `x-ferretry-session-id`
   under it, so those acts stay the ferret's (`peer:<id>`) and are still refused on person routes; only
   commands that send no session header (config, secrets, the daemon group, …) act as the owner.
+- **The owner-only verbs refuse in a pane whatever `--as-owner` says.** `fy rules`, `fy plan` (and its alias
+  `fy copy plan`), `fy copy` and `fy input` refuse inside a ferret's pane before they ask the daemon anything,
+  read or change alike, on the environment alone (`FY_SESSION_ID`, or an agent credential in the pane): "this is
+  the owner's command; a ferret's pane can't run it". `--as-owner` changes which credential is presented, not
+  where the command runs, so it does not lift this; run them from your own shell. The daemon refuses a ferret on
+  these routes again (`403 owner_only`). `fy account` asks the daemon instead, and a refusal there says "this is
+  the owner's command, and it ran with a ferret's credential", for a read like `fy account ls` as for a change.
 - **`FY_TOKEN` in a pane wins.** Step 1 comes first, so a shell rc that exports `FY_TOKEN` puts every ferret
   whose shell reads it on the admin token, silently. `fy doctor` inside a pane warns about it, and about a
   pane whose credential is from before the prefix.
@@ -457,12 +464,17 @@ pairing code, widening a device or any other act takes. Both directions are test
 - **Removing a key never asks for a passkey**: it only narrows what this machine can do. Its seed is swept with it.
 
 **From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
-prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
+prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card in the app's Inbox — "Save automatic codes to
 your account on github.com? Asked by fy on kirin-box at 14:02 UTC" — then waits. The card's words name the place only
 (agenda text is every ferret's to read); the app's card names the account and what the key says it is for, read from
 the stage on a route that reads the accounts. Allow it in the app with your passkey and it
-prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
-current session's by default). The CLI has no way to save a seed itself.
+prints "Saved"; Deny, or two minutes, and nothing is saved. It first asks the daemon whether it reports
+`accounts.2fa-keys.1`, and on one that does not (v4.190 to v4.196 list accounts but have no 2FA key routes) says
+"this machine's daemon is too old for 2FA keys: update it (fy daemon update), then run this again" before anything is
+typed. Every Inbox card belongs to a session, so `--session <id>` names the one this card goes under (the current
+session's by default) and the owner's own shell must give one: there is no Inbox of the owner's own for it yet. When
+the app's address is known (`FY_APP_URL`, or the hosted default) it prints the card's link,
+`<app>/#agenda/<id>?session=<sid>`, as `fy plan approve` does. The CLI has no way to save a seed itself.
 
 The rest of `fy account` is in [input requests](input-requests.md#managing-them): accounts, sign-ins (`site`), recipes,
 defaults, and 2FA keys that hold no value (`factor add --authenticator|--sms|--email|--push|--security-key`). Each write
@@ -525,7 +537,9 @@ rule's structured flags, never from its words. Each is one protocol constant, sa
 - "You'll still be asked" (`stillAskedFor('rule')`, one list with the plan card's): push approvals, security keys and
   passkeys, captchas, a sign-in whose form changed since you approved it, ssh, scp, npm or docker login, gh and any
   program but `sudo`, `su` and `doas`, and SMS and email codes or a code you did not tick. Every rule card has ONE shape: a plain `does` line, label/value `rows`
-  (Types, Who, Until, Uses, plus Machine or Site, Code key and History where they apply), ONE red block, and "How it's
+  (the protocol's `SignInRuleRowLabelSchema`: Machine or Site, Account, Types, Who, Until, Uses, and Code key on a rule
+  that types the code), a Note line under the rows where one applies (the history, or the rule it replaces), ONE red
+  block, and "How it's
   checked" for the proof, all built by the protocol's `signInRuleWords`. Editing a sign-in's method or recipe says how many rules that
   suspends, and revoking a device says how many its passkey approved. Names come only from secrets-gated routes: a
   device that may not use secrets sees one sentence and the app stops asking.
@@ -672,8 +686,9 @@ stops.
 The owner may also make a rule for **sudo, su or doas on this machine** (owner decision !A197): the sign-in's one
 `tool@host` key (`sudo@kirin-box`), the password only, **1 day by default and 7 at most**, made with the same passkey,
 pinned and suspended by the same triggers as a page rule. The staged rule and the owner's view carry `root: true` /
-the `root` flag, and the app draws a red line from that field, never from the summary's words; the summary says it
-second, before the account: "into sudo: root on kirin-box for every ferret it covers".
+the `root` flag. The summary carries no warnings at all: the red block (`SIGN_IN_RULE_ROOT_WARNING`, then
+`SIGN_IN_RULE_TERMINAL_RESIDUAL`) is drawn from the structured `root` flag, on the sheet, the machine view, the
+passkey dialog, Settings and `fy rules`, never from the summary's words.
 
 It fills only where every check of a terminal plan line holds ([input requests › Standing rule
 fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)): the program **proved by
