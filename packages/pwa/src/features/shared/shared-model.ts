@@ -19,12 +19,19 @@ export const REFUSED_JOIN_AGAIN = 'Join with a new link';
 export const REFUSED_JOIN_AGAIN_NOTE = 'Ask the owner for a new link, then open it here.';
 export const FORGET_CATALOG = 'Forget this catalog';
 export const FORGET_NOTE = 'This removes the key from this browser. You can join again later with a new link.';
-export const LEAVE = 'Leave';
-export const LEAVE_NOTE = 'You will stop seeing this publisher’s catalogs. What you installed stays.';
-export const LEFT_SENTENCE = 'You left. You can join again later with a new link.';
+export const LEAVE = 'Unsubscribe';
+export const LEAVE_NOTE =
+  'You will stop seeing this publisher’s catalogs. What you installed stays, and keeps working.';
+export const LEFT_SENTENCE = 'You unsubscribed. You can subscribe again later with a new invite link.';
 export const UNLOCK_NOTE = 'Use your passkey to see what is shared with you.';
-export const SHARED_WITH_ME = 'Shared with me';
-export const NOTHING_SHARED = 'Nothing is shared with you yet. Open a share link to join.';
+export const SHARED_WITH_ME = 'Subscriptions';
+export const NOTHING_SHARED =
+  'You do not subscribe to any catalog yet. Open an invite link someone sent you to subscribe.';
+/** Said once per publisher above its store page: subscribing never installs or updates anything by itself. */
+export const PINNED_NOTE =
+  'Nothing installs or updates by itself. Install what you want; each install stays on its version until you update it.';
+export const INSTALL = 'Install';
+export const INSTALLED = 'Installed';
 export const ONLINE_ONLY = 'You need to be online to see these.';
 export const NOT_SHOWN_SENTENCE = 'This catalog was not shown: it was not signed by the publisher it names.';
 

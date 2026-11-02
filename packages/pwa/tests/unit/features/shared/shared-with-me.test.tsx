@@ -1,10 +1,13 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { SharedWithMe } from '../../../../src/features/shared/shared-with-me.tsx';
 import {
+  INSTALL,
+  INSTALLED,
   LEAVE_NOTE,
   LEFT_SENTENCE,
   NOTHING_SHARED,
   ONLINE_ONLY,
+  PINNED_NOTE,
   REFUSED_SENTENCE,
   REFUSED_TITLE,
   STILL_REFUSED_SENTENCE,
@@ -73,7 +76,7 @@ const two = (): Partial<Members> => ({ list: async () => [studio, loft], browse:
 describe('nothing shared yet', () => {
   it('says so, with the way to start, and goes back', async () => {
     const { view, homes } = await open({ list: async () => [] });
-    expect(q('h1')?.textContent).toBe('Shared with me');
+    expect(q('h1')?.textContent).toBe('Subscriptions');
     expect(q('[data-shared-empty]')?.textContent).toBe(NOTHING_SHARED);
     await click(q('[data-shared-home]'));
     expect(homes()).toBe(1);
@@ -96,7 +99,7 @@ describe('inside another page', () => {
     const view = await mount(<SharedWithMe embedded members={fake.members} machines={[]} onHome={() => undefined} />);
     await settle();
     expect(q('h1')).toBeNull();
-    expect(q('h2')?.textContent).toBe('Shared with me');
+    expect(q('h2')?.textContent).toBe('Subscriptions');
     expect(q('[data-shared-home]')).toBeNull();
     await view.unmount();
   });
@@ -105,7 +108,7 @@ describe('inside another page', () => {
     const fake = fakeMembers({ list: async () => [] });
     const view = await mount(<SharedWithMe members={fake.members} machines={[]} />);
     await settle();
-    expect(q('h1')?.textContent).toBe('Shared with me');
+    expect(q('h1')?.textContent).toBe('Subscriptions');
     expect(q('[data-shared-home]')).toBeNull();
     await view.unmount();
   });
@@ -524,6 +527,69 @@ describe('opening an item', () => {
     });
     await click(q('[data-shared-item]'));
     expect(q('[data-access-refused]')).not.toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('the store page', () => {
+  const firstItem = (): string => {
+    const entry = shared.entries[0];
+    if (entry === undefined) throw new Error('no item in the fixture');
+    return entry.itemId;
+  };
+
+  it('says nothing installs or updates by itself, and shows each item’s version', async () => {
+    const { view } = await open({ list: async () => [studio], browse: browseOk });
+    expect(q('[data-shared-pinned]')?.textContent).toBe(PINNED_NOTE);
+    expect(q(`[data-shared-item-row="${firstItem()}"] [data-shared-item-version]`)?.textContent).toMatch(/^v\d+$/u);
+    await view.unmount();
+  });
+
+  it('offers Install only when a machine is paired to install on, and Install opens the item', async () => {
+    const without = await open({ list: async () => [studio], browse: browseOk });
+    expect(q('[data-shared-item-install]')).toBeNull();
+    await without.view.unmount();
+    document.body.replaceChildren();
+    let opened = 0;
+    const { view } = await open(
+      {
+        list: async () => [studio],
+        browse: browseOk,
+        openItem: async () => {
+          opened += 1;
+          return { kind: 'failed', problem: { sentence: 'Not this time.' } } as never;
+        },
+      },
+      { machines: true },
+    );
+    const install = q(`[data-shared-item-row="${firstItem()}"] [data-shared-item-install]`);
+    expect(install?.textContent).toBe(INSTALL);
+    await click(install);
+    await settle();
+    expect(opened).toBe(1);
+    await view.unmount();
+  });
+
+  it('says Installed, with no Install, for an item a paired machine already holds', async () => {
+    const record = installRecord('skill', 'pdf-tools');
+    const client = {
+      request: async () => ({
+        installs: [{ ...record, provenance: { ...record.provenance, publisher: studioId, itemId: firstItem() } }],
+      }),
+    };
+    const fake = fakeMembers({ list: async () => [studio], browse: browseOk });
+    const view = await mount(
+      <SharedWithMe
+        members={fake.members}
+        machines={[{ connection: alpha, name: 'Studio laptop' }]}
+        installHost={{ createClient: async () => client as never }}
+        onHome={() => undefined}
+      />,
+    );
+    await settle();
+    const row = q(`[data-shared-item-row="${firstItem()}"]`);
+    expect(row?.querySelector('[data-shared-item-installed]')?.textContent).toBe(INSTALLED);
+    expect(row?.querySelector('[data-shared-item-install]')).toBeNull();
     await view.unmount();
   });
 });

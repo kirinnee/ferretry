@@ -2,13 +2,14 @@
  * Sharing › My catalogs: the catalogs this machine publishes, what is in each, and the acts on them.
  *
  * Calm and plain. The list shows names and counts; one catalog shows its items with their versions, says
- * when a source changed since it was frozen, and offers Publish update, Withdraw, Rename, Delete and
- * Export file. Where this device may not use Sharing, the panel says so and how to turn it on, instead of
+ * when a source changed since it was frozen, and offers + Publish skills (the machine's skills, &B131 A3), Publish
+ * update, Withdraw, Rename, Delete and Export file. Subscribing to someone else's catalog and installing from a file
+ * are not here: they are Subscriptions', so the publisher's page and the store stay apart. Where this device may not use Sharing, the panel says so and how to turn it on, instead of
  * showing buttons that would fail.
  */
 
 import type { OwnedCatalog, OwnedCatalogItem } from '@ferretry/protocol';
-import { CircleAlert, CircleCheck, FileDown, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, FileDown, MoreHorizontal, PackagePlus, Share2, Star, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -16,10 +17,8 @@ import { useDaemonClient } from '../../lib/store.tsx';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
-import { AddCatalogFromLink } from './add-from-link.tsx';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
 import { VersionsSheet } from './versions-sheet.tsx';
-import { CatalogMoreMenu } from './catalog-more-menu.tsx';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
 import { MarkedText } from './catalog-review-view.tsx';
@@ -46,15 +45,16 @@ import {
   PUBLISH_COPY_NOTE,
   roleLabel,
 } from './catalogs-model.ts';
-import { InstallFromFileSheet, type InstallHost } from './install-from-file-sheet.tsx';
+import { PublishSkillsSheet } from './publish-skills-sheet.tsx';
 import { ShareSheet } from './share-sheet.tsx';
+import type { MachineSkillEntriesLoader } from '../skills/machine-skills-api.ts';
 
 export interface CatalogsSurfaceProps {
   readonly connection: DaemonConnection;
   readonly createClient?: CatalogClientFactory;
   readonly saveFile?: SaveText;
-  /** Test and harness seam for the install sheet; the app uses the daemon-bound client and the known projects. */
-  readonly installHost?: InstallHost;
+  /** Reads this machine's skills for + Publish skills. A seam for tests and the harness. */
+  readonly loadMachineSkills?: MachineSkillEntriesLoader;
 }
 
 export type Read =
@@ -107,12 +107,11 @@ export function CatalogsSurface({
   connection,
   createClient: injected,
   saveFile = downloadText,
-  installHost,
+  loadMachineSkills,
 }: CatalogsSurfaceProps) {
   const routed = useDaemonClient();
   const createClient: CatalogClientFactory = injected ?? routed;
   const [openId, setOpenId] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
   const detail = openId !== null;
   const { read, reload } = useCatalogs(connection, createClient, detail);
 
@@ -122,16 +121,6 @@ export function CatalogsSurface({
         <h3 className="m-0 text-row font-semibold text-fg">Catalogs</h3>
         <p className="m-0 text-cell text-muted">{CATALOGS_INTRO}</p>
       </header>
-      {openId === null ? (
-        <div className="flex min-w-0 flex-col gap-xs" data-catalogs-add="">
-          <AddCatalogFromLink />
-          {read.kind === 'failed' && read.refusal.sharingOff ? null : (
-            <div>
-              <CatalogMoreMenu onInstallFromFile={() => setInstalling(true)} />
-            </div>
-          )}
-        </div>
-      ) : null}
       {read.kind === 'loading' ? (
         <p className="m-0 text-cell text-muted" role="status">
           Reading catalogs…
@@ -153,6 +142,7 @@ export function CatalogsSurface({
           canMakeDefault={read.features.items}
           features={read.features}
           saveFile={saveFile}
+          {...(loadMachineSkills === undefined ? {} : { loadMachineSkills })}
           onBack={() => setOpenId(null)}
           onChanged={reload}
           onDeleted={() => {
@@ -161,13 +151,6 @@ export function CatalogsSurface({
           }}
         />
       )}
-      {installing ? (
-        <InstallFromFileSheet
-          connection={connection}
-          onClose={() => setInstalling(false)}
-          {...(installHost === undefined ? {} : { host: installHost })}
-        />
-      ) : null}
     </section>
   );
 }
@@ -227,6 +210,7 @@ function CatalogDetail({
   canMakeDefault,
   features,
   saveFile,
+  loadMachineSkills,
   onBack,
   onChanged,
   onDeleted,
@@ -238,6 +222,7 @@ function CatalogDetail({
   readonly canMakeDefault: boolean;
   readonly features: CatalogFeatures;
   readonly saveFile: SaveText;
+  readonly loadMachineSkills?: MachineSkillEntriesLoader;
   readonly onBack: () => void;
   readonly onChanged: () => void;
   readonly onDeleted: () => void;
@@ -250,6 +235,7 @@ function CatalogDetail({
   const [publishing, setPublishing] = useState<OwnedCatalogItem | null>(null);
   const [versionsOf, setVersionsOf] = useState<OwnedCatalogItem | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [picking, setPicking] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
 
@@ -275,7 +261,7 @@ function CatalogDetail({
           {
             key: 'make-default',
             label: 'Make default',
-            hint: 'One tap on Add puts a skill here.',
+            hint: 'One tap on Publish puts a skill here.',
             icon: <Star size={16} aria-hidden="true" />,
             onSelect: () =>
               void act(async id => {
@@ -342,6 +328,17 @@ function CatalogDetail({
         />
       ) : (
         <div className="flex min-w-0 flex-wrap gap-xs">
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            disabled={busy}
+            onClick={() => setPicking(true)}
+            data-catalog-publish-skills=""
+          >
+            <PackagePlus size={16} aria-hidden="true" />
+            Publish skills
+          </Button>
           <Button type="button" size="sm" disabled={busy} onClick={() => setEditing(true)} data-catalog-rename="">
             Rename or describe
           </Button>
@@ -362,14 +359,7 @@ function CatalogDetail({
             <FileDown size={16} aria-hidden="true" />
             Export file
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            disabled={busy}
-            onClick={() => setSharing(true)}
-            data-catalog-share=""
-          >
+          <Button type="button" size="sm" disabled={busy} onClick={() => setSharing(true)} data-catalog-share="">
             <Share2 size={16} aria-hidden="true" />
             Share…
           </Button>
@@ -471,6 +461,16 @@ function CatalogDetail({
           items={menu}
         />
       )}
+      {picking ? (
+        <PublishSkillsSheet
+          connection={connection}
+          catalog={catalog}
+          createClient={createClient}
+          onClose={() => setPicking(false)}
+          onChanged={onChanged}
+          {...(loadMachineSkills === undefined ? {} : { load: loadMachineSkills })}
+        />
+      ) : null}
       {sharing ? (
         <ShareSheet
           connection={connection}

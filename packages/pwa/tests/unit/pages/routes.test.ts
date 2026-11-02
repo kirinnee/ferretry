@@ -417,7 +417,7 @@ describe('sharing routes', () => {
   it('should build the Sharing address with or without a tab', () => {
     should(daemonSharingPath(daemonA)).equal('/d/daemon%2Fa/sharing');
     should(daemonSharingPath(daemonA, 'catalogs')).equal('/d/daemon%2Fa/sharing/catalogs');
-    should(daemonSharingPath(daemonA, 'skills')).equal('/d/daemon%2Fa/sharing/skills');
+    should(daemonSharingPath(daemonA, 'people')).equal('/d/daemon%2Fa/sharing/people');
   });
 
   it('should parse every tab, and the bare page, back to the address it came from', () => {
@@ -432,6 +432,8 @@ describe('sharing routes', () => {
 
   it('should land an unknown tab on the Sharing page rather than somewhere else', () => {
     should(parseRoute('/d/daemon%2Fa/sharing/nope')).deepEqual({ kind: 'sharing', daemonId: daemonA });
+    // The Skills tab is gone (&B131): an old address to it opens Sharing on its first tab.
+    should(parseRoute('/d/daemon%2Fa/sharing/skills')).deepEqual({ kind: 'sharing', daemonId: daemonA });
   });
 
   it('should keep the tab out of the page key so switching tabs does not remount the page', () => {

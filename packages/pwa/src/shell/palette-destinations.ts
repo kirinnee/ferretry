@@ -99,15 +99,15 @@ export const SHELL_DESTINATIONS = [
 export const SHARING_TAB_DESTINATIONS = [
   {
     id: 'sharing-shared',
-    label: 'Shared with me',
-    title: 'Skills and MCP servers other people share with you',
+    label: 'Subscriptions',
+    title: 'Catalogs you subscribe to, and what you can install from them',
     path: (daemon: DaemonId) => daemonSharingPath(daemon, 'shared'),
   },
   {
-    id: 'sharing-skills',
-    label: 'Share a skill…',
-    title: 'Pick a skill on this machine to share',
-    path: (daemon: DaemonId) => daemonSharingPath(daemon, 'skills'),
+    id: 'sharing-publish',
+    label: 'Publish skills…',
+    title: 'Put skills from this machine in a catalog others can subscribe to',
+    path: (daemon: DaemonId) => daemonSharingPath(daemon, 'catalogs'),
   },
 ] as const satisfies readonly AppBarDestinationLike[];
 
@@ -130,8 +130,18 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   warden: ['warden', 'supervision', 'verdicts', 'ai login', 'ai logins', 'failover', 'quota'],
   learning: ['learning', 'proposals', 'rules', 'lessons', 'scan'],
   sharing: ['sharing', 'share', 'catalog', 'catalogs', 'people', 'members', 'skills', 'mcp'],
-  'sharing-shared': ['shared', 'received', 'invite', 'join', 'publisher', 'catalogs'],
-  'sharing-skills': ['share', 'skill', 'publish', 'send', 'give'],
+  'sharing-shared': [
+    'shared',
+    'shared with me',
+    'received',
+    'invite',
+    'join',
+    'subscribe',
+    'install',
+    'publisher',
+    'catalogs',
+  ],
+  'sharing-publish': ['share', 'share a skill', 'skill', 'publish', 'send', 'give', 'catalog'],
   settings: ['settings', 'preferences', 'appearance', 'theme', 'density', 'options', 'configure'],
 };
 

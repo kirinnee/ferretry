@@ -143,13 +143,16 @@ export interface DaemonLearningRoute {
   readonly daemonId: DaemonId;
 }
 
-/** Sharing's four tabs, in the order the page shows them. */
-export const SHARING_TABS = ['catalogs', 'shared', 'people', 'skills'] as const;
+/**
+ * Sharing's three tabs, in the order the page shows them (&B131): Subscriptions (`shared`, the id kept so old links
+ * still land), My catalogs and People. The old `skills` tab is gone; an address naming it opens the first tab.
+ */
+export const SHARING_TABS = ['shared', 'catalogs', 'people'] as const;
 export type SharingTab = (typeof SHARING_TABS)[number];
 
 export const isSharingTab = (value: string): value is SharingTab => (SHARING_TABS as readonly string[]).includes(value);
 
-/** Sharing: catalogs, what is shared with this browser, people, and skills. Absent `tab` means My catalogs. */
+/** Sharing: what this browser subscribes to, the catalogs it publishes, and people. Absent `tab` means Subscriptions. */
 export interface DaemonSharingRoute {
   readonly kind: 'sharing';
   readonly daemonId: DaemonId;

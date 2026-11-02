@@ -277,7 +277,7 @@ packages/pwa/src/hooks/use-warden-daemon-scope.ts # the Warden page daemon filte
 packages/pwa/src/hooks/use-warden-statuses.ts # the combined Warden totals' reads, used by warden-totals-surface.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-work-project-names.ts # the project names a work-search card hit shows, used by App.tsx and SessionChatPage ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-rule-deep-link.ts # sends a #rules/<stage> link to the Secure copy panel, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/skills/machine-skills-api.ts # the machine skills read behind the Sharing Skills tab, used by sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/features/skills/machine-skills-api.ts # the machine skills read behind My catalogs’ Publish skills picker, used by publish-skills-sheet.tsx ← catalogs-surface.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-chat-url.ts # the Tasks tab address grammar (tasks=full, agents=1), used by use-chat-tasks-url.ts ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/chat-search.ts # search within a conversation: used by components/chat-search.tsx ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
@@ -310,3 +310,5 @@ packages/pwa/src/features/shared/shared-installs.ts # which items a person insta
 # stopped opening the Share sheet (&B131: nothing on an active-skills row publishes).
 packages/pwa/src/features/catalogs/catalog-shares-api.ts # the owner's share and member routes, used by share-sheet.tsx, catalog-members.tsx and versions-sheet.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/catalogs/catalog-sharing-model.ts # the share sheet's and People's sentences and rules, used by share-sheet.tsx and catalog-members.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+# My catalogs' Publish skills picker (&B131 A3), reached only from the .tsx app tree.
+packages/pwa/src/features/catalogs/publish-skills-model.ts # which skills the Publish skills picker lists and whether the catalog holds each, used by publish-skills-sheet.tsx ← catalogs-surface.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
