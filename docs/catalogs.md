@@ -783,6 +783,70 @@ carries exactly one protocol payload: the
 applied install with its notes, the install list, or what was removed. The preview still goes out in full,
 as JSON on stderr, so a script never skips the review a person would have read.
 
+## Copying a skill from this machine
+
+A skill you already have on this machine can be copied into a project or a runtime without a catalog:
+another account's home (`~/.claude/skills`, a runtime's skills folder) or a registered project's
+`.claude/skills` / `.agents/skills`. It is the file installer's twin and keeps its rules
+(`packages/daemon/src/lib/local-skill-installs/`, wire in `packages/protocol/src/lib/local-skill-install.ts`).
+**Skills only**: an MCP server is never copied this way.
+
+| Route                                                | Capability             | What it does                                                           |
+| ---------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------- |
+| `POST /v1/skill-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing |
+| `POST /v1/skill-installs/local/project`              | `filesystem.configure` | copies exactly that preview into a project folder                      |
+| `POST /v1/skill-installs/local/runtime/preview`      | `fleet.use`            | the same, for a runtime and profile                                    |
+| `POST /v1/skill-installs/local/runtime`              | `fleet.configure`      | copies it as one fleet change                                          |
+| `GET /v1/skill-installs/local`                       | `fleet.use`            | what was copied, and where                                             |
+| `DELETE /v1/skill-installs/local/project/:installId` | `filesystem.configure` | removes exactly the files that copy wrote                              |
+| `DELETE /v1/skill-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                           |
+
+- **Person only.** Every route is `caller: 'person'`: **a ferret is refused on all seven**, previews and
+  list included (`403 forbidden`), because a copied skill is instructions a ferret will follow.
+- **The source is looked up, never opened on the caller's word.** The request names a `SKILL.md` path. The
+  daemon asks the same skills inventory as `GET /v1/skills` and re-resolves that path itself; a path the
+  inventory does not list (or no longer lists) is `local_skill_source_unknown`. Its folder is then read
+  without ever following a link, with the catalog's file-count and size caps. Links, binaries, oversized
+  and credential-named files, hard links and case collisions are **not copied and are said**
+  (`skipped`, with the reason); a folder that cannot be carried whole, or whose name is not a catalog
+  name, is `local_skill_source_invalid`.
+- **The review is a catalog review.** Every file in full, hidden characters marked, the same warnings, and
+  the secret redaction the catalog review has. Where it is from is `origin` (account or project, and the
+  `SKILL.md` path), as this machine found it, never as the caller reported it.
+- **A preview writes nothing.** Previews live in memory for 600 seconds, up to 8 per caller, and are bound
+  to the caller that reviewed them. An apply writes **exactly** the bytes that were previewed (the preview
+  holds them; the source is not read a second time, so it cannot change between review and write). The
+  destination is judged again at apply, so a conflict that appeared since is still refused.
+- **A copy, never a link.** The files are written into the target and the two stay separate.
+- **It writes only through existing paths**: the project skill-folder port the catalog installer uses, and
+  for a runtime the fleet catalogue's `installCatalogItem` with a **synthetic provenance** (publisher
+  "This machine", catalog "Skills on this machine"; no signature exists because nobody published anything).
+  Removing a runtime copy goes through the fleet's own remove proposal.
+- **One passkey per apply.** A governed caller needs a fresh step-up for the act `catalog-install` (the
+  existing act: it is the same decision, installing instructions that will run, so no new act is minted);
+  the proof is claimed atomically and not given back. **Removing never asks.** A loopback caller is
+  ungoverned, and the CLI asks y/N.
+- **The record.** `<FY_HOME>/state/local-skill-installs.json`, mode `0600`, written by temp file and rename,
+  a sibling of the catalog install record with the same shape: each copy with the SHA-256 of every file it
+  wrote. Remove and update touch **only recorded files**, and a recorded file edited since is
+  `local_skill_conflict`. Anything at the destination that no record of ours wrote is a conflict, so a skill
+  you wrote by hand is never overwritten.
+- **Refusals** (`LOCAL_SKILL_REFUSALS`): `local_skill_source_unknown` (404), `local_skill_source_invalid`
+  (422), `local_skill_target_unknown` (404), `local_skill_preview_unknown` (404),
+  `local_skill_preview_expired` (410), `local_skill_conflict` (409), `local_skill_install_unknown` (404).
+  An unreadable record is `500`, never a fresh start.
+- **Audit.** `fleet.configured` with `detail.action` `local-skill-install` or `local-skill-remove` and the
+  scope: the skill's name, never a file ([audit.md](audit.md)).
+
+```
+fy skill install --from <skill folder or its SKILL.md> ( --to project --project <root> --harness claude|codex | --to runtime --runtime <r> --profile <p> ) [--yes] [--json]
+fy skill installs [--json]
+fy skill uninstall <installId> [--yes] [--json]
+```
+
+`install` previews, prints the whole review, asks y/N unless `--yes`, then applies. When the daemon wants
+a passkey it says so and changes nothing.
+
 ## Members (phase 2)
 
 **Status: the contract (2a) is written; 2b-1 and 2b-2 serve the publisher's half of it.** The relay's `join`
