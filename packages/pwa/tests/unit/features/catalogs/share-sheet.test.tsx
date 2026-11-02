@@ -116,9 +116,11 @@ describe('ShareSheet form', () => {
   it('refuses hidden characters in their words and keeps the button off', async () => {
     const { view } = await open({});
     await typeInto(q('[data-share-user-id]'), 'ca\u200brol');
-    expect(q('[data-share-user-id-line]')?.textContent).toBe(
+    expect(q('[data-catalog-failure]')?.textContent).toBe(
       "A user ID can't contain hidden or invisible characters. Type it again.",
     );
+    expect(q('[data-catalog-failure]')?.getAttribute('role')).toBe('alert');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe('');
     expect(q('[data-share-user-id]')?.getAttribute('aria-invalid')).toBe('true');
     expect(q('[data-share-problem]')).toBeNull();
     expect(q('[data-share-confirm]')?.hasAttribute('disabled')).toBe(true);
@@ -386,8 +388,10 @@ describe('ShareSheet result', () => {
     });
     await typeInto(q('[data-share-user-id]'), 'sam');
     await choose('[data-share-uses-multi]');
+    expect(q('[data-share-user-id-line]')?.textContent).toContain('New user ID');
     await choose('[data-share-confirm]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('Someone here already has the user ID sam.');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe('');
     expect(q('[data-share-link]')).toBeNull();
     await view.unmount();
   });

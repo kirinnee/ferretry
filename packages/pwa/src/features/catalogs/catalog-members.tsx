@@ -53,7 +53,6 @@ import {
   takeAwayChoices,
   takeAwayConfirm,
   takenUserIdLine,
-  USER_ID_FIELD_LABEL,
   userIdChangedNote,
 } from './catalog-sharing-model.ts';
 import type { CatalogClientFactory } from './catalogs-api.ts';
@@ -396,32 +395,31 @@ function MemberCard({
   const taking = mine?.kind === 'catalog' ? readable.find(catalog => catalog.id === mine.catalogId) : undefined;
   return (
     <li className="kt-panel flex min-w-0 flex-col gap-xs p-control-x py-2" data-members-person={member.label}>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-meta font-semibold text-muted">{USER_ID_FIELD_LABEL}</span>
-        <span className="break-words text-ui font-semibold text-fg" data-members-user-id="">
-          {member.label}
-        </span>
-        <span className="break-words text-meta text-muted" data-members-facts="">
-          {personFacts(member, timeZone)}
-        </span>
-      </div>
-      {mine?.kind === 'rename' ? (
-        <RenameForm member={member} members={members} busy={busy} taken={taken} onSave={onRename} onCancel={onCancel} />
-      ) : (
-        <div>
+      <div className="flex min-w-0 items-start justify-between gap-xs">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="break-words text-ui font-semibold text-fg" data-members-user-id="">
+            {member.label}
+          </span>
+          <span className="break-words text-meta text-muted" data-members-facts="">
+            {personFacts(member, timeZone)}
+          </span>
+        </div>
+        {mine?.kind === 'rename' ? null : (
           <Button
             type="button"
             size="sm"
-            variant="ghost"
-            className="kt-btn--flush-start"
+            className="shrink-0"
             disabled={busy}
             onClick={() => onAsk({ kind: 'rename', memberId: member.memberId })}
             data-members-rename={member.label}
           >
             {CHANGE_USER_ID_LABEL}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
+      {mine?.kind === 'rename' ? (
+        <RenameForm member={member} members={members} busy={busy} taken={taken} onSave={onRename} onCancel={onCancel} />
+      ) : null}
       <div className="flex min-w-0 flex-wrap items-center gap-xs" data-members-catalogs="">
         <span className="text-meta text-muted">Can read</span>
         {readable.length === 0 ? <span className="text-meta text-muted">No catalogs</span> : null}

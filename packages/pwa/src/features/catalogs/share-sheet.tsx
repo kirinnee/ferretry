@@ -271,15 +271,14 @@ function ShareForm({
             ))}
           </ul>
         )}
+        {hidden === null ? null : <FailureLine sentence={hidden} />}
         <p
           id={`${idField}-line`}
           className="m-0 break-words text-cell text-fg"
           aria-live="polite"
           data-share-user-id-line=""
         >
-          {hidden !== null ? (
-            hidden
-          ) : line === null ? null : (
+          {hidden !== null || failure !== null || line === null ? null : (
             <>
               {line.before}
               <strong>{line.id}</strong>

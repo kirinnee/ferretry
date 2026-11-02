@@ -198,9 +198,9 @@ describe('withdrawnSummary', () => {
 
 describe('the sentences of an invite for a named person', () => {
   it('should say who they are signing in as and where, in three pieces and in one', () => {
-    const sentence = signingInAs('alice', 'Studio');
-    expect(sentence).toEqual({ before: "You're signing in as ", name: 'alice', after: ' on Studio.' });
-    expect(plainSentence(sentence)).toBe("You're signing in as alice on Studio.");
+    const sentence = signingInAs('alice', 'box.example.test');
+    expect(sentence).toEqual({ before: "You're signing in as ", name: 'alice', after: ' on box.example.test.' });
+    expect(plainSentence(sentence)).toBe("You're signing in as alice on box.example.test.");
   });
 
   it('should say what a first invite does and what a later one does, to the word', () => {

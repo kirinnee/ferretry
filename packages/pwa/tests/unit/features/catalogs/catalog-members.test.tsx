@@ -53,10 +53,12 @@ const tap = async (selector: string) => {
 };
 
 describe('CatalogMembersPanel', () => {
-  it('titles each card by user ID, labelled "User ID", with since, browsers and passkeys', async () => {
+  it('titles each card by user ID alone, with since, browsers and passkeys, and a real Change user ID button', async () => {
     const { view } = await open();
     expect(q('[data-members-user-id]')?.textContent).toBe('Alice');
-    expect(q('[data-members-person="Alice"]')?.textContent).toContain('User ID');
+    expect(q('[data-members-person="Alice"]')?.textContent).not.toContain('User ID');
+    expect(q('[data-members-rename="Alice"]')?.tagName).toBe('BUTTON');
+    expect(q('[data-members-rename="Alice"]')?.textContent).toBe('Change user ID');
     expect(q('[data-members-facts]')?.textContent).toBe('since Oct 31 · 2 browsers · 1 passkey');
     await view.unmount();
   });
@@ -231,10 +233,11 @@ describe('CatalogMembersPanel', () => {
       [`PATCH /v1/catalog-members/${MEMBER_A}`]: () => memberView({ label: 'alicia' }),
     });
     await tap('[data-members-rename="Alice"]');
+    expect(q('[data-members-rename="Alice"]')).toBeNull();
     expect(q('[data-members-rename-save]')?.hasAttribute('disabled')).toBe(true);
     await typeInto(q('[data-members-rename-input]'), 'alicia');
     expect(q('[data-members-rename-says]')?.textContent).toBe(
-      'Alice becomes alicia. They keep their browsers, passkeys and installs. Passkeys they already made keep the old name in their password manager, and still sign them in.',
+      'Alice becomes alicia. They keep their browsers, passkeys and installs.',
     );
     expect(fake.calls.some(call => call.method === 'PATCH')).toBe(false);
     await tap('[data-members-rename-save]');

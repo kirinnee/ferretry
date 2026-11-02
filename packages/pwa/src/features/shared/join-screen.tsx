@@ -42,6 +42,7 @@ import {
   PASSKEY_ADDED,
   plainSentence,
   redeemView,
+  shareHost,
   SIGN_IN_BUTTON,
   signInWithPasskey,
   signingInAs,
@@ -356,7 +357,7 @@ export function JoinScreen({ members, fragment, now, ticker = secondTicker, onSh
       const { sub } = phase;
       const countdown = passkeyWindow(sub.passkeyWindowEndsAt, clock);
       const closed = phase.stage === 'add' && (!countdown.open || phase.failure?.kind === 'window-closed');
-      const who = signingInAs(sub.memberLabel, sub.ownLabel);
+      const who = signingInAs(sub.memberLabel, shareHost(sub.daemonUrl));
       const heading = plainSentence(who);
       if (closed)
         return (

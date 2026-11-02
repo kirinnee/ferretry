@@ -229,7 +229,7 @@ describe('user IDs on the People list', () => {
   });
   it('says what a rename does before it is done, and after', () => {
     should(changeUserIdSentence('alice', 'alicia')).equal(
-      'alice becomes alicia. They keep their browsers, passkeys and installs. Passkeys they already made keep the old name in their password manager, and still sign them in.',
+      'alice becomes alicia. They keep their browsers, passkeys and installs.',
     );
     should(userIdChangedNote('alice', 'alicia')).equal('alice is now alicia.');
   });

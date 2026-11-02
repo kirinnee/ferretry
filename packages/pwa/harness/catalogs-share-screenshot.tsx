@@ -289,7 +289,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
 
   await open(page, theme, 'share-hidden');
   await page.locator('[data-share-user-id]').fill('ali\u200bce');
-  await page.locator('[data-share-user-id-line], [data-share-problem]').first().waitFor({ state: 'visible' });
+  await page.locator('[data-catalog-failure]').waitFor({ state: 'visible' });
   await shot(page, 'share-hidden', theme, vp);
 
   await open(page, theme, 'share-taken');

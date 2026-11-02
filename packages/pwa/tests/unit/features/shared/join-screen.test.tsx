@@ -42,7 +42,7 @@ const text = (): string => document.body.textContent ?? '';
 
 let sub: MemberSubscription;
 beforeAll(async () => {
-  sub = await testSubscription(SEED.daemonId);
+  sub = await testSubscription(SEED.daemonId, { memberLabel: 'alice', daemonUrl: 'https://box.example.test' });
 });
 
 /** The clock the screen reads, moved by the test, and the ticker it is driven by. */
@@ -143,7 +143,7 @@ describe('a publisher this browser has not met', () => {
     expect(q('h1')?.textContent).toBe('Could not reach the publisher');
     expect(text()).toContain('Could not reach the publisher.');
     await click(q('[data-join-again-try]'));
-    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
+    expect(q('h1')?.textContent).toBe("You're signing in as alice on box.example.test.");
     expect(calls).toEqual(['begin', 'join', 'join']);
     await view.unmount();
   });
@@ -183,10 +183,10 @@ describe('adding the passkey', () => {
   it('names who and where, explains it, and counts down live', async () => {
     const { view, time } = await open({ ...fresh, ...joined() });
     await click(q('[data-join-button]'));
-    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
-    expect(q('[data-passkey-explain]')?.textContent).toBe("Create a passkey for Alice. You'll use it to sign in here.");
-    expect(q('[data-passkey-explain] strong')?.textContent).toBe('Alice');
-    expect(q('h1 strong')?.textContent).toBe('Alice');
+    expect(q('h1')?.textContent).toBe("You're signing in as alice on box.example.test.");
+    expect(q('[data-passkey-explain]')?.textContent).toBe("Create a passkey for alice. You'll use it to sign in here.");
+    expect(q('[data-passkey-explain] strong')?.textContent).toBe('alice');
+    expect(q('h1 strong')?.textContent).toBe('alice');
     expect(q('[data-passkey-countdown]')?.textContent).toBe(
       'Add a passkey in the next 8:41 or this link stops working.',
     );
@@ -492,7 +492,7 @@ describe('a publisher this browser already belongs to', () => {
 });
 
 type ProveEnd = Awaited<ReturnType<Extract<Awaited<ReturnType<Members['join']>>, { kind: 'prove' }>['prove']>>;
-const proving = (prove: () => Promise<ProveEnd>, memberLabel = 'Alice'): Partial<Members> => ({
+const proving = (prove: () => Promise<ProveEnd>, memberLabel = 'alice'): Partial<Members> => ({
   join: async () => ({ kind: 'prove', memberLabel, prove }),
 });
 
@@ -507,10 +507,10 @@ describe('a later invite for someone who already has a passkey', () => {
       }),
     });
     await click(q('[data-join-button]'));
-    expect(q('h1')?.textContent).toBe("You're signing in as Alice on box.example.test.");
-    expect(q('h1 strong')?.textContent).toBe('Alice');
-    expect(q('[data-join-prove]')?.textContent).toBe('Sign in with your Alice passkey to add this browser.');
-    expect(q('[data-join-prove] strong')?.textContent).toBe('Alice');
+    expect(q('h1')?.textContent).toBe("You're signing in as alice on box.example.test.");
+    expect(q('h1 strong')?.textContent).toBe('alice');
+    expect(q('[data-join-prove]')?.textContent).toBe('Sign in with your alice passkey to add this browser.');
+    expect(q('[data-join-prove] strong')?.textContent).toBe('alice');
     expect(q('[data-join-prove-button]')?.textContent).toBe('Sign in with passkey');
     expect(proves).toBe(0);
     await view.unmount();
@@ -525,13 +525,13 @@ describe('a later invite for someone who already has a passkey', () => {
     expect(q('[data-join-prove-button]')?.hasAttribute('disabled')).toBe(true);
     gate.resolve({ kind: 'joined', subscription: sub, proved: true });
     await settle();
-    expect(q('h1')?.textContent).toBe("You're signing in as Alice on Studio.");
+    expect(q('h1')?.textContent).toBe("You're signing in as alice on box.example.test.");
     expect(q('[data-passkey-explain]')?.textContent).toBe(PASSKEY_EXPLAIN);
     expect(q('[data-passkey-step]')?.getAttribute('data-passkey-step')).toBe('add');
     await view.unmount();
   });
 
-  it('says this invite is for Alice, with a way to try again, when this device cannot vouch for them', async () => {
+  it('says this invite is for alice, with a way to try again, when this device cannot vouch for them', async () => {
     let asks = 0;
     const { view, homes, calls } = await open({
       ...fresh,
@@ -539,18 +539,18 @@ describe('a later invite for someone who already has a passkey', () => {
         asks += 1;
         return {
           kind: 'prove',
-          memberLabel: 'Alice',
-          prove: async () => ({ kind: 'no-passkey', memberLabel: 'Alice' }),
+          memberLabel: 'alice',
+          prove: async () => ({ kind: 'no-passkey', memberLabel: 'alice' }),
         };
       },
     });
     await click(q('[data-join-button]'));
     await click(q('[data-join-prove-button]'));
-    expect(q('h1')?.textContent).toBe("You're signing in as Alice on box.example.test.");
+    expect(q('h1')?.textContent).toBe("You're signing in as alice on box.example.test.");
     expect(q('[data-join-no-passkey]')?.textContent).toBe(
-      'This invite is for Alice. Use Alice\'s passkey (on another device: choose "use a phone or tablet"), or ask the person who sent you this link to let you set up a new one.',
+      'This invite is for alice. Use alice\'s passkey (on another device: choose "use a phone or tablet"), or ask the person who sent you this link to let you set up a new one.',
     );
-    expect(q('[data-join-no-passkey] strong')?.textContent).toBe('Alice');
+    expect(q('[data-join-no-passkey] strong')?.textContent).toBe('alice');
     await click(q('[data-join-again-try]'));
     expect(asks).toBe(2);
     expect(calls.filter(call => call === 'join')).toHaveLength(2);

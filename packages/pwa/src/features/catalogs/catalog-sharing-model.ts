@@ -380,7 +380,6 @@ export function orderedShares(shares: readonly CatalogShareView[], nowMs: number
 
 // ── Members ──────────────────────────────────────────────────────────────────────────────────────
 
-export const USER_ID_FIELD_LABEL = 'User ID';
 export const CHANGE_USER_ID_LABEL = 'Change user ID';
 export const CHANGE_USER_ID_INPUT_LABEL = 'New user ID';
 export const CHANGE_USER_ID_SAVE = 'Change user ID';
@@ -395,7 +394,7 @@ export function personFacts(member: CatalogMemberView, timeZone?: string): strin
 
 /** What a rename does, said before it is done. `to` is the new user ID as typed. */
 export const changeUserIdSentence = (from: string, to: string): string =>
-  `${from} becomes ${to}. They keep their browsers, passkeys and installs. Passkeys they already made keep the old name in their password manager, and still sign them in.`;
+  `${from} becomes ${to}. They keep their browsers, passkeys and installs.`;
 
 export const userIdChangedNote = (from: string, to: string): string => `${from} is now ${to}.`;
 
