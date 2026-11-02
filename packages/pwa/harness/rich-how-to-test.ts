@@ -19,3 +19,7 @@ export const RICH_HOW_TO_TEST = [
 
 /** The run the harness pages share: `?rich=1` swaps a card's How to test for the long one above. */
 export const richRequested = (): boolean => new URLSearchParams(window.location.search).get('rich') === '1';
+
+/** A brief with the bug shape: a label straight above a list that starts at 4. */
+export const RICH_BRIEF =
+  'The device grant replaces the token on every route.\n\nRoutes that change\n4. `GET /devices` lists grants → **never a token**\n5. `POST /pair` returns a grant, once';
