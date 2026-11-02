@@ -7,11 +7,11 @@
  * every credential is a placeholder, so no real harness setup, login or fleet is read or written.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
-import { resolveDefaultRuntime } from '@ferretry/fleet';
+import { EXPORT_KEYS_FILE, parseExportKeys, resolveDefaultRuntime } from '@ferretry/fleet';
 import should from 'should';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -95,6 +95,7 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
       catalog: catalogDeps,
+      daemonId: () => 'daemon-source',
       credentials: {
         material: async () => ({ outcome: 'missing' }),
         storedMaterial: async () => (options.claude ? { outcome: 'found', blob: FAKE_LOGIN } : { outcome: 'missing' }),
@@ -440,5 +441,126 @@ describe('a catalog install over real files cannot leave the skill folder', () =
     should(await readFile(path.join(on.fleet, 'assets/skills/pdf-tools/scripts/split.sh'), 'utf8')).equal(
       'echo split\n',
     );
+  });
+});
+
+/** A placeholder token for a login that is already signed in on the target; worth nothing. */
+const TARGET_TOKEN = JSON.stringify({
+  claudeAiOauth: { accessToken: 'target-access', refreshToken: 'target-refresh' },
+});
+const TARGET_SECRET = 'ghp_targetplaceholderplaceholder000000000';
+
+/**
+ * A target that is signed in: the login `claude-you` (the id the source's own login has, so a copy has
+ * to deal with a clash), its credential-store entry with a placeholder token, and a secret the store holds.
+ */
+async function signedInTarget(name: string): Promise<Machine> {
+  const target = await machine(name, { claude: false });
+  const steps = [
+    { kind: 'credential.add', id: 'claude-you', harness: 'claude' },
+    { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
+    { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
+    {
+      kind: 'runtime.put',
+      name: 'claude-kirin',
+      credential: 'claude-you',
+      profile: 'plain',
+      agent: true,
+      create: true,
+    },
+  ];
+  for (const step of steps) {
+    const staged = await target.catalog.propose(step as never);
+    await target.catalog.apply(staged.id, { governed: false } as never);
+  }
+  const store = path.join(target.fleet, 'credentials', 'claude-you');
+  await mkdir(store, { recursive: true });
+  await writeFile(path.join(store, '.credentials.json'), TARGET_TOKEN, { mode: 0o600 });
+  target.secrets.set('TARGET_TOKEN', TARGET_SECRET);
+  return target;
+}
+
+/** Everything that makes the login `claude-you` signed in here: store entry, secret store, config entry. */
+async function signedInState(on: Machine): Promise<unknown> {
+  const store = path.join(on.fleet, 'credentials', 'claude-you');
+  const entries: Record<string, string> = {};
+  for (const file of await filesUnder(store)) entries[file] = (await readFile(path.join(store, file))).toString('hex');
+  return {
+    store: entries,
+    secrets: Object.fromEntries([...on.secrets].toSorted()),
+    login: await readFile(path.join(on.home.paths.config, 'logins', 'claude-you.yaml'), 'utf8'),
+  };
+}
+
+describe('importing a version 2 bundle never touches a login that is signed in here (§14.4)', () => {
+  for (const mode of ['alongside', 'replace'] as const) {
+    it(`should leave the target's login, its token file and its secrets byte-identical on a ${mode} copy`, async () => {
+      // Arrange: a version 2 bundle from a set-up source, and a target whose login is signed in.
+      const source = await machine('studio', { claude: true });
+      await importHost(source);
+      const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+      should(bundle.version).equal(2);
+      const target = await signedInTarget(`work-${mode}`);
+      const before = await signedInState(target);
+      should(before).match({ store: { '.credentials.json': Buffer.from(TARGET_TOKEN).toString('hex') } });
+
+      // Act
+      const staged = await target.catalog.propose({ kind: 'clone.import', mode, bundle });
+      const outcome = await target.catalog.apply(staged.id, { governed: false } as never);
+
+      // Assert: the copy happened, and the signed-in login is exactly as it was.
+      should(outcome).match({ outcome: 'executed', executor: 'clone' });
+      should(await signedInState(target)).deepEqual(before);
+    });
+  }
+});
+
+describe('the export writes its origin keys into state over real files', () => {
+  it('should answer version 2 and keep export-keys.json under the fleet directory, private and secret-free', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const keysPath = path.join(source.fleet, EXPORT_KEYS_FILE);
+    await rm(keysPath, { force: true });
+
+    // Act
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+
+    // Assert
+    if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
+    should(bundle.daemon).equal('daemon-source');
+    const text = await readFile(keysPath, 'utf8');
+    const stored = parseExportKeys(text);
+    should(Object.keys(stored.items).length).be.above(0);
+    for (const [reference, entry] of Object.entries(stored.items)) should(bundle.keys[reference]).equal(entry.key);
+    should((await stat(keysPath)).mode & 0o077).equal(0);
+    should(text).not.containEql(FAKE_SECRET);
+    should(JSON.stringify(bundle)).not.containEql(FAKE_SECRET);
+    should(JSON.stringify(bundle)).not.containEql('placeholder-access');
+
+    // A second export keeps every key, and the config files never name one.
+    const again = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    if (again.version !== 2) throw new Error('expected a version 2 bundle');
+    should(again.keys).deepEqual(bundle.keys);
+    for (const file of await filesUnder(source.home.paths.config)) {
+      should(await readFile(path.join(source.home.paths.config, file), 'utf8')).not.containEql(
+        Object.values(bundle.keys)[0] as string,
+      );
+    }
+  });
+
+  it('should still answer when export-keys.json cannot be written', async () => {
+    // Arrange: a FILE where the setup directory would go, so the write fails.
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    await rm(path.join(source.fleet, 'setup'), { recursive: true, force: true });
+    await writeFile(path.join(source.fleet, 'setup'), 'in the way');
+
+    // Act
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+
+    // Assert
+    if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
+    should(Object.keys(bundle.keys).length).be.above(0);
   });
 });

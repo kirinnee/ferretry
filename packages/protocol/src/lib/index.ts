@@ -53,6 +53,7 @@ export * from './doctor.ts';
 export * from './fleet-catalog.ts';
 export * from './fleet-changes.ts';
 export * from './fleet-clone-default.ts';
+export * from './fleet-clone-digest.ts';
 export * from './fleet-clone-review.ts';
 export * from './fleet-credentials.ts';
 export * from './fleet-setup.ts';

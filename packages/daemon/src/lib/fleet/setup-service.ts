@@ -36,6 +36,7 @@
  * request; nothing is launched to find anything out, and no provider is called.
  */
 import {
+  assignOriginKeys,
   type AccountModel,
   buildCloneBundle,
   type ClonePlan,
@@ -43,6 +44,7 @@ import {
   cloneSources,
   describeClone,
   EMPTY_RUNTIME_IDS,
+  EXPORT_KEYS_FILE,
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
@@ -61,22 +63,25 @@ import {
   mergeImport,
   mergeImportRecord,
   parseCloneBundle,
+  parseExportKeys,
   parseSettings,
   planClone,
   planImport,
   type SettingsObject,
   skillFrontmatterKeys,
+  serializeExportKeys,
   skillSourceReference,
 } from '@ferretry/fleet';
-import type {
-  FleetAccountChange,
-  FleetCloneBundle,
-  FleetCloneFile,
-  FleetSetupRefusalCode,
-  FleetSetupScan,
-  FleetSetupTool,
-  FleetToolInstallRequest,
-  FleetToolInstallResult,
+import {
+  CLONE_BUNDLE_KEYS_LIMIT,
+  type FleetAccountChange,
+  type FleetCloneBundle,
+  type FleetCloneFile,
+  type FleetSetupRefusalCode,
+  type FleetSetupScan,
+  type FleetSetupTool,
+  type FleetToolInstallRequest,
+  type FleetToolInstallResult,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
 import {
@@ -161,6 +166,18 @@ export interface FleetSetupServiceDeps {
   skillItems(): Promise<readonly string[]>;
   /** A content digest (sha256). */
   digest(text: string): string;
+  /**
+   * This daemon's own id, as it reports itself to a machine that copies from it. Absent while pairing
+   * identity is not open yet, and then there is nothing to say a copy came from.
+   */
+  daemonId(): string | undefined;
+  /** Cryptographically random bytes: an origin key is 16 of them. */
+  randomBytes(length: number): Uint8Array;
+  /** `setup/export-keys.json`: the origin keys this machine gave what it exported (state, never configuration). */
+  readonly exportKeys: {
+    read(path: string): Promise<string | undefined>;
+    write(path: string, text: string): Promise<void>;
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────
@@ -374,7 +391,14 @@ export class FleetSetupService {
       for (const skipped of folder.skipped)
         notCopied.push({ path: `${directory}/${skipped.path}`, reason: skipped.reason });
     }
-    return buildCloneBundle({
+    const daemon = this.deps.daemonId();
+    if (daemon === undefined) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} is still starting, so it cannot be copied from yet. Try again in a moment.`,
+      );
+    }
+    const bundle = buildCloneBundle({
       model: reading.model,
       machine: catalog.machineName(),
       exportedAt: new Date(catalog.now()).toISOString(),
@@ -382,6 +406,41 @@ export class FleetSetupService {
       files,
       notCopied,
     });
+    const path = `${catalog.layout.fleetDirectory}/${EXPORT_KEYS_FILE}`;
+    const remembered = await this.#storedKeys(path);
+    const { keys, stored } = assignOriginKeys({
+      bundle,
+      previous: parseExportKeys(remembered.text),
+      runtimeIds: Object.fromEntries(
+        Object.entries(((await catalog.ids()) ?? EMPTY_RUNTIME_IDS).runtimes).map(([name, entry]) => [name, entry.id]),
+      ),
+      randomBytes: length => this.deps.randomBytes(length),
+    });
+    if (Object.keys(keys).length > CLONE_BUNDLE_KEYS_LIMIT) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} has more than ${String(CLONE_BUNDLE_KEYS_LIMIT)} items, which is more than one copy can carry. Remove some, then try again.`,
+      );
+    }
+    // Bookkeeping: an export that cannot remember its keys still answers with the ones it minted. A file
+    // that is merely absent or invalid is replaced; one that could not be READ is left alone, because it
+    // may hold keys every target already stamped, and writing fresh ones over it would lose them for good.
+    if (remembered.readable) {
+      try {
+        await this.deps.exportKeys.write(path, serializeExportKeys(stored));
+      } catch {
+        // The next export re-derives what it can; a renamed item then looks new rather than copying wrongly.
+      }
+    }
+    return { ...bundle, version: 2, daemon, keys };
+  }
+
+  async #storedKeys(path: string): Promise<{ readonly text: string | undefined; readonly readable: boolean }> {
+    try {
+      return { text: await this.deps.exportKeys.read(path), readable: true };
+    } catch {
+      return { text: undefined, readable: false };
+    }
   }
 
   async #emails(): Promise<Record<string, string | undefined>> {

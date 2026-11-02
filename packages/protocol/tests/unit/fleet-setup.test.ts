@@ -57,6 +57,9 @@ const bundle = {
   notCopied: [{ path: '/etc/hosts', reason: 'outside the asset tree' }],
 };
 
+const KEY = 'abcdefghijklmnopqrstuvwxyz';
+const bundleV2 = { ...bundle, version: 2, daemon: 'daemon-source', keys: { 'instructions/main': KEY } };
+
 const cases: SchemaCase[] = [
   {
     name: 'FleetToolInstallPlanSchema',
@@ -103,6 +106,11 @@ const cases: SchemaCase[] = [
   { name: 'FleetCloneCredentialSchema', schema: setup.FleetCloneCredentialSchema, value: bundle.credentials[0] },
   { name: 'FleetCloneFileSchema', schema: setup.FleetCloneFileSchema, value: bundle.files[0] },
   { name: 'FleetCloneBundleSchema', schema: setup.FleetCloneBundleSchema, value: bundle },
+  { name: 'FleetCloneBundleSchema v2', schema: setup.FleetCloneBundleSchema, value: bundleV2 },
+  { name: 'FleetCloneBundleV1Schema', schema: setup.FleetCloneBundleV1Schema, value: bundle },
+  { name: 'FleetCloneBundleV2Schema', schema: setup.FleetCloneBundleV2Schema, value: bundleV2 },
+  { name: 'OriginKeySchema', schema: setup.OriginKeySchema, value: KEY },
+  { name: 'CloneKeyReferenceSchema', schema: setup.CloneKeyReferenceSchema, value: 'profile/default' },
   { name: 'FleetSetupRefusalCodeSchema', schema: setup.FleetSetupRefusalCodeSchema, value: 'fleet_setup_busy' },
 ];
 
@@ -225,11 +233,42 @@ describe('the machine setup wire contract', () => {
       }),
       rejects('a clone file with a numeric content', setup.FleetCloneFileSchema, { path: 'a', content: 1 }),
       rejects('a bundle of another format', setup.FleetCloneBundleSchema, { ...bundle, format: 'other' }),
-      rejects('a bundle of another version', setup.FleetCloneBundleSchema, { ...bundle, version: 2 }),
+      rejects('a bundle of another version', setup.FleetCloneBundleSchema, { ...bundle, version: 3 }),
+      rejects('a version 1 bundle carrying keys', setup.FleetCloneBundleSchema, { ...bundle, keys: {} }),
+      rejects('a version 2 bundle without its keys', setup.FleetCloneBundleSchema, { ...bundleV2, keys: undefined }),
+      rejects('a version 2 bundle without its daemon', setup.FleetCloneBundleSchema, {
+        ...bundleV2,
+        daemon: undefined,
+      }),
+      rejects('a version 2 bundle with an extra key', setup.FleetCloneBundleSchema, { ...bundleV2, history: [] }),
+      rejects('a key that is not 16 bytes of base32', setup.OriginKeySchema, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+      rejects('a key that is too short', setup.OriginKeySchema, KEY.slice(1)),
+      rejects('a key with a padding character', setup.OriginKeySchema, `${KEY.slice(1)}=`),
+      rejects('a key naming no subject', setup.CloneKeyReferenceSchema, 'main'),
+      rejects('a bundle naming a key that is not a key', setup.FleetCloneBundleSchema, {
+        ...bundleV2,
+        keys: { 'instructions/main': 'x' },
+      }),
       rejects('a bundle with an extra key', setup.FleetCloneBundleSchema, { ...bundle, history: [] }),
       rejects('a bundle exported at no instant', setup.FleetCloneBundleSchema, { ...bundle, exportedAt: 'yesterday' }),
       rejects('a bundle not carrying its files', setup.FleetCloneBundleSchema, { ...bundle, files: undefined }),
       rejects('a refusal code nobody declared', setup.FleetSetupRefusalCodeSchema, 'fleet_setup_bad'),
     ]);
+  });
+
+  it('should accept a version 1 and a version 2 bundle, and cap the keys a version 2 bundle carries', () => {
+    // Arrange
+    const keysOf = (count: number): Record<string, string> =>
+      Object.fromEntries(Array.from({ length: count }, (_, index) => [`instructions/item-${String(index)}`, KEY]));
+
+    // Act & Assert
+    should(setup.FleetCloneBundleSchema.parse(bundle).version).equal(1);
+    should(setup.FleetCloneBundleSchema.parse(bundleV2).version).equal(2);
+    should(
+      setup.FleetCloneBundleSchema.safeParse({ ...bundleV2, keys: keysOf(setup.CLONE_BUNDLE_KEYS_LIMIT) }).success,
+    ).be.true();
+    should(
+      setup.FleetCloneBundleSchema.safeParse({ ...bundleV2, keys: keysOf(setup.CLONE_BUNDLE_KEYS_LIMIT + 1) }).success,
+    ).be.false();
   });
 });

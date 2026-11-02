@@ -236,10 +236,62 @@ describe('parseCloneBundle', () => {
 
   it('should refuse a bundle of a version this machine cannot read', () => {
     // Act
-    const refusal = refusalOf(() => parseCloneBundle({ ...bundleWith(), version: 2 }));
+    const refusal = refusalOf(() => parseCloneBundle({ ...bundleWith(), version: 3 }));
 
     // Assert
     should(refusal.message).containEql('version this machine cannot read');
+  });
+});
+
+describe('parseCloneBundle versions', () => {
+  const KEY = 'abcdefghijklmnopqrstuvwxyz';
+  const v2 = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...bundleWith(),
+    version: 2,
+    daemon: 'sha256:studio',
+    keys: { 'instructions/main': KEY, 'profile/default': KEY, 'login/claude-you': KEY },
+    ...patch,
+  });
+
+  it('should accept a version 1 bundle and a version 2 bundle', () => {
+    should(parseCloneBundle(bundleWith()).version).equal(1);
+    should(parseCloneBundle(v2()).version).equal(2);
+  });
+
+  it('should refuse a version 2 bundle that is missing what version 2 adds, in the usual sentence', () => {
+    for (const damaged of [
+      v2({ keys: undefined }),
+      v2({ daemon: undefined }),
+      v2({ keys: { 'instructions/main': 'x' } }),
+    ]) {
+      should(refusalOf(() => parseCloneBundle(damaged)).message).containEql('version this machine cannot read');
+    }
+  });
+
+  it('should plan a version 2 bundle exactly as it plans the version 1 bundle it came from', () => {
+    const fromV1 = planClone(emptyTarget(), bundleWith(), options({ sourceDaemon: 'sha256:studio' }));
+    const fromV2 = planClone(emptyTarget(), parseCloneBundle(v2()), options({ sourceDaemon: 'sha256:studio' }));
+    should(fromV2.model).deepEqual(fromV1.model);
+    should(fromV2.files).deepEqual(fromV1.files);
+  });
+
+  it('should strip a clonedFromKey the source claimed, like clonedFrom, and not stamp one yet', () => {
+    const bundle = parseCloneBundle(
+      v2({
+        components: {
+          mcp: { notes: { command: 'npx', clonedFrom: 'work-mac', clonedFromDaemon: 'forged', clonedFromKey: KEY } },
+        },
+        profiles: {},
+        runtimes: {},
+        files: [],
+      }),
+    );
+    const plan = planClone(emptyTarget(), bundle, options({ sourceDaemon: 'sha256:studio' }));
+    should(plan.model.components.mcp.notes).deepEqual({
+      command: 'npx',
+      clonedFrom: 'studio-mac',
+      clonedFromDaemon: 'sha256:studio',
+    });
   });
 });
 

@@ -283,6 +283,7 @@ export type CredentialStore = z.infer<typeof CredentialStoreSchema>;
 const CLONE_ORIGIN_SHAPE = {
   clonedFrom: NonEmptyString.optional(),
   clonedFromDaemon: NonEmptyString.optional(),
+  clonedFromKey: NonEmptyString.optional(),
 };
 
 /**

@@ -6,10 +6,12 @@
  * boundary.
  */
 import { HostHarnessScanner, type StoredCredentialMaterialReader } from '@ferretry/fleet/adapters';
+import { randomBytes } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FleetSetupServiceDeps, FolderReading, SetupCatalogDeps } from '../../lib/fleet/setup-service.ts';
 import type { ToolInstallService } from '../../lib/fleet/tool-install.ts';
+import { AtomicFileWriter } from '../atomic-file/atomic-file.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 export const MAX_FOLDER_FILE_BYTES = 256 * 1024;
@@ -96,6 +98,8 @@ export interface FileFleetSetupOptions {
   /** The platform credential store: reads a login, never hands one out of this adapter. */
   readonly credentials: StoredCredentialMaterialReader;
   readonly tools: Pick<ToolInstallService, 'plans' | 'install'>;
+  /** This daemon's id as it reports itself; absent until pairing identity is open. */
+  readonly daemonId: () => string | undefined;
   /** The secret store's management side. */
   readonly secrets: {
     list(): Promise<readonly { readonly name: string }[]>;
@@ -111,6 +115,7 @@ const MAX_HOST_DOCUMENT_BYTES = 1024 * 1024;
 /** The setup service's collaborators over this machine's files. */
 export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupServiceDeps {
   const { catalog } = options;
+  const keyWriter = new AtomicFileWriter();
   const layout = catalog.layout;
   const scanner = new HostHarnessScanner({
     userHome: layout.userHome,
@@ -137,5 +142,13 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     readFolder: readTextFolder,
     skillItems: async () => await skillItemsIn(join(layout.assetsDirectory, 'skills')),
     digest: sha256,
+    daemonId: options.daemonId,
+    randomBytes: length => new Uint8Array(randomBytes(length)),
+    exportKeys: {
+      read: async path => (await keyWriter.read(path)) ?? undefined,
+      write: async (path, text) => {
+        await keyWriter.write(path, text);
+      },
+    },
   };
 }

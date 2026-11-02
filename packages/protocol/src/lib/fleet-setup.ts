@@ -190,13 +190,22 @@ export const FleetCloneFileSchema = z.strictObject({
 export type FleetCloneFile = z.infer<typeof FleetCloneFileSchema>;
 
 /**
- * Everything Clone copies (L1): components, model sets, profiles and runtimes, plus the documents
- * the components name. The component, profile and runtime entries are the configuration's own
- * shapes, checked again when the target plans the copy.
+ * An item's ORIGIN KEY (docs/design/account-model.md §3.8): 16 random bytes in lower-case base32
+ * (26 characters), minted once by the source and stable across renames, so a later copy can tell a
+ * renamed item from a new one. It is random on purpose — nothing about the item can be read from it.
  */
-export const FleetCloneBundleSchema = z.strictObject({
+export const ORIGIN_KEY_PATTERN = /^[a-z2-7]{26}$/u;
+export const OriginKeySchema = z.string().regex(ORIGIN_KEY_PATTERN, 'an origin key is 16 random bytes in base32');
+export type OriginKey = z.infer<typeof OriginKeySchema>;
+
+/** How many keys one bundle may carry. A source with more items refuses to export rather than send keys it cannot hold. */
+export const CLONE_BUNDLE_KEYS_LIMIT = 8192;
+
+/** A key's subject: `<kind>/<name>`, `profile/<name>`, `runtime/<name>` or `login/<id>`. */
+export const CloneKeyReferenceSchema = z.string().regex(/^[a-zA-Z]+\/.+$/u, 'a key names <kind>/<name>');
+
+const cloneBundleShape = {
   format: z.literal(FLEET_CLONE_BUNDLE_FORMAT),
-  version: z.literal(1),
   machine: NonEmptyStringSchema,
   exportedAt: InstantSchema,
   credentials: z.array(FleetCloneCredentialSchema).readonly(),
@@ -206,7 +215,38 @@ export const FleetCloneBundleSchema = z.strictObject({
   files: z.array(FleetCloneFileSchema).readonly(),
   /** Documents the source could not carry, each with the reason (too large, outside the asset tree). */
   notCopied: z.array(z.strictObject({ path: NonEmptyStringSchema, reason: NonEmptyStringSchema })).readonly(),
+};
+
+/**
+ * Everything Clone copies (L1): components, model sets, profiles and runtimes, plus the documents
+ * the components name. The component, profile and runtime entries are the configuration's own
+ * shapes, checked again when the target plans the copy.
+ */
+export const FleetCloneBundleV1Schema = z.strictObject({ ...cloneBundleShape, version: z.literal(1) });
+export type FleetCloneBundleV1 = z.infer<typeof FleetCloneBundleV1Schema>;
+
+/**
+ * Version 2 adds who sent it and what each item is: `daemon` is the source's self-reported id and
+ * `keys` maps every copied item to its origin key. Nothing in either is secret — the keys are random,
+ * and a target computes every digest itself rather than taking one from the bundle.
+ */
+export const FleetCloneBundleV2Schema = z.strictObject({
+  ...cloneBundleShape,
+  version: z.literal(2),
+  daemon: NonEmptyStringSchema,
+  keys: z
+    .record(CloneKeyReferenceSchema, OriginKeySchema)
+    .refine(keys => Object.keys(keys).length <= CLONE_BUNDLE_KEYS_LIMIT, {
+      message: `a bundle carries at most ${String(CLONE_BUNDLE_KEYS_LIMIT)} keys`,
+    }),
 });
+export type FleetCloneBundleV2 = z.infer<typeof FleetCloneBundleV2Schema>;
+
+/** A bundle of either version: a target reads both, a source writes the newest. */
+export const FleetCloneBundleSchema = z.discriminatedUnion('version', [
+  FleetCloneBundleV1Schema,
+  FleetCloneBundleV2Schema,
+]);
 export type FleetCloneBundle = z.infer<typeof FleetCloneBundleSchema>;
 
 /** Every refusal the setup surface answers with, so a client branches on cause. */

@@ -483,7 +483,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       const free = freeName(name, candidate => components[kind][candidate] !== undefined);
       if (free !== name) renamed.push({ what: 'component', from: `${kind}/${name}`, to: `${kind}/${free}` });
       componentNames.set(`${kind}/${name}`, `${kind}/${free}`);
-      const { clonedFrom: _claimed, clonedFromDaemon: _claimedDaemon, ...own } = value;
+      const { clonedFrom: _claimed, clonedFromDaemon: _claimedDaemon, clonedFromKey: _claimedKey, ...own } = value;
       const copy: Record<string, unknown> = { ...own, ...origin };
       const file = copy.file;
       if (typeof file === 'string' && isAssetRelative(file)) {
