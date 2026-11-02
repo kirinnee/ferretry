@@ -397,6 +397,7 @@ export function shareLinkUrl(appOrigin: string, seed: ShareLinkSeed): string {
 export function parseShareFragment(fragment: string): ShareLinkSeed {
   const fields = readLinkFragmentFields(fragment, 'share link');
   if (fields.has('code')) throw new Error('this is a pairing link, not a share link');
+  if (fields.has('k')) throw new Error('this is a download link, not a share link');
   const daemonUrl = fields.get('url');
   const fingerprint = fields.get('fp');
   const code = fields.get('share');

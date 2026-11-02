@@ -232,6 +232,10 @@ and reads it, so the daemon and the browser cannot hold different opinions about
 readers require `url`/`code`/`fp`, ignore an unrecognised field name — a stray `relay=` included, which
 is therefore never honoured — and refuse a duplicated one.
 
+Two names are refused rather than ignored: `share`, which only a catalog share link carries, and `k`, which only a
+catalog download link (`/get#v1;b=…;k=…;fp=…`, [catalogs.md](catalogs.md) § Links) carries. A fragment holding a pairing
+code and either is read by no reader, and a download link is routed by its `/get` path, so it is never handed to this one.
+
 **A relayed first pairing needs nothing in the link when both ends resolve the same directory
 candidate.** The scanning device's build carries `HOSTED_RELAY_DIRECTORY_ORIGIN` by default, reads
 that no-store advertisement once per document, and dials the address it names when the daemon's own

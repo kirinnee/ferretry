@@ -15,6 +15,13 @@
  * does not prove that machine is the person the reader meant (trust on first use, gap G5).
  */
 import {
+  CATALOG_LINK_SIGNATURE_LABEL,
+  catalogLinkSignedBytes,
+  LINK_ITEM_CATALOG_ID,
+  type SharedCatalogLink,
+  SharedCatalogLinkSchema,
+  type SharedCatalogLinkBundle,
+  type SignedCatalogLink,
   CATALOG_MANIFEST_SIGNATURE_LABEL,
   CATALOG_VERSIONS_SIGNATURE_LABEL,
   type CatalogDigest,
@@ -37,10 +44,16 @@ import { ED25519_SIGNATURE_BYTES, ED25519_SPKI_BYTES } from './constants.ts';
 import type { DaemonIdentity, RelayCrypto } from './crypto.ts';
 import { publicKeyMatchesDaemonId } from './identity.ts';
 
-export { CATALOG_MANIFEST_SIGNATURE_LABEL, CATALOG_VERSIONS_SIGNATURE_LABEL };
+export { CATALOG_LINK_SIGNATURE_LABEL, CATALOG_MANIFEST_SIGNATURE_LABEL, CATALOG_VERSIONS_SIGNATURE_LABEL };
 
 /** Why a catalog did not verify. Each is a different sentence for the person. */
-export type CatalogVerificationRefusal = 'signature_invalid' | 'item_mismatch' | 'not_canonical' | 'manifest_invalid';
+export type CatalogVerificationRefusal =
+  | 'signature_invalid'
+  | 'item_mismatch'
+  | 'not_canonical'
+  | 'manifest_invalid'
+  | 'link_mismatch'
+  | 'link_stale';
 
 export type CatalogVerification<T> =
   | { readonly ok: true; readonly value: T }
@@ -281,4 +294,110 @@ export async function verifyCatalogItemAgainstVersions(
     return refuse('not_canonical', `${item.name} has no one canonical spelling, so it cannot be checked.`);
   if (measured.digest !== offered.digest || measured.size !== offered.size) return refuse('item_mismatch', mismatch);
   return { ok: true, value: offered };
+}
+
+// ── A link: one signed item, shared as a URL ─────────────────────────────────────────────────────
+
+/** How far past `notAfter` a reader's clock may be before the copy is stale. */
+export const LINK_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/** What a link signature signs, for this document. */
+async function linkSignedBytes(crypto: RelayCrypto, link: SharedCatalogLink): Promise<Uint8Array | null> {
+  const bytes = canonicalBytes(link);
+  return bytes === null ? null : catalogLinkSignedBytes(await crypto.sha256(bytes));
+}
+
+/**
+ * Sign a link document as this daemon, under the link label. The document is parsed first, so a typed
+ * object the schema refuses is never signed, and it is refused when it names another publisher: a daemon
+ * signs only for itself.
+ */
+export async function signCatalogLink(
+  crypto: RelayCrypto,
+  identity: DaemonIdentity,
+  link: SharedCatalogLink,
+): Promise<CatalogVerification<SignedCatalogLink>> {
+  const parsed = SharedCatalogLinkSchema.safeParse(link);
+  if (!parsed.success)
+    return refuse(
+      'manifest_invalid',
+      `This link cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
+    );
+  if (link.publisher !== identity.daemonId)
+    return refuse('signature_invalid', 'A machine signs only links it publishes itself.');
+  const signed = await linkSignedBytes(crypto, link);
+  if (signed === null)
+    return refuse('not_canonical', 'This link has no one canonical spelling, so it cannot be signed.');
+  const sig = await crypto.signEd25519(identity.privateKey, signed);
+  return { ok: true, value: { link, spki: toBase64Url(identity.publicKeySpki), sig: toBase64Url(sig) } };
+}
+
+/** What a reader already knows about a link before it opens it: the URL's fingerprint and ids, the envelope's sequence. */
+export interface ExpectedLink {
+  /** The `fp` of the URL. */
+  readonly publisher: string;
+  /** The `b` of the URL. */
+  readonly bundleId: string;
+  /** The sequence in the envelope's clear header, which its AAD has already authenticated. */
+  readonly sequence: number;
+  /** The reader's clock. When given, a copy past its end is refused. */
+  readonly now?: Date;
+}
+
+/**
+ * Check an opened link bundle. In this order, and nothing from the bundle is shown before all of it holds:
+ *
+ * 1. the key hashes to the publisher the document names, and the signature holds under the link label;
+ * 2. that publisher is the one the URL named, and the document is for this bundle id and this sequence;
+ * 3. the item is exactly the one the document describes: publisher, placeholder catalog, id, version, kind,
+ *    name, summary, harness, and the digest and size of these bytes;
+ * 4. when the reader's clock is given, the copy has not ended (with five minutes of skew).
+ *
+ * No sentence names anything from the bundle until the signature has held.
+ */
+export async function verifyLinkBundle(
+  crypto: RelayCrypto,
+  bundle: SharedCatalogLinkBundle,
+  expected: ExpectedLink,
+): Promise<CatalogVerification<{ readonly link: SharedCatalogLink; readonly item: SharedCatalogItem }>> {
+  const { link } = bundle.signedLink;
+  const spki = fromBase64UrlFixed(bundle.signedLink.spki, ED25519_SPKI_BYTES);
+  const sig = fromBase64UrlFixed(bundle.signedLink.sig, ED25519_SIGNATURE_BYTES);
+  const notSigned = 'This link was not signed by the machine it names.';
+  if (spki === null || sig === null) return refuse('signature_invalid', notSigned);
+  if (!(await publicKeyMatchesDaemonId(crypto, spki, link.publisher))) return refuse('signature_invalid', notSigned);
+  const signed = await linkSignedBytes(crypto, link);
+  if (signed === null)
+    return refuse('not_canonical', 'This link has no one canonical spelling, so it cannot be checked.');
+  if (!(await crypto.verifyEd25519(spki, sig, signed))) return refuse('signature_invalid', notSigned);
+
+  if (
+    link.publisher !== expected.publisher ||
+    link.bundleId !== expected.bundleId ||
+    link.sequence !== expected.sequence
+  )
+    return refuse('link_mismatch', 'This link is not the one its address names, so it was not used.');
+
+  const { item } = bundle;
+  const mismatch = `${item.name} is not the item this link says it carries, so it was not used.`;
+  if (
+    item.publisher !== link.publisher ||
+    item.catalogId !== LINK_ITEM_CATALOG_ID ||
+    item.itemId !== link.item.itemId ||
+    item.itemVersion !== link.item.version ||
+    item.kind !== link.item.kind ||
+    item.name !== link.item.name ||
+    item.summary !== link.item.summary ||
+    item.harness !== link.item.harness
+  )
+    return refuse('item_mismatch', mismatch);
+  const measured = await catalogItemDigest(crypto, item);
+  if (measured === null)
+    return refuse('not_canonical', `${item.name} has no one canonical spelling, so it cannot be checked.`);
+  if (measured.digest !== link.item.digest || measured.size !== link.item.size)
+    return refuse('item_mismatch', mismatch);
+
+  if (expected.now !== undefined && expected.now.getTime() > Date.parse(link.notAfter) + LINK_CLOCK_SKEW_MS)
+    return refuse('link_stale', 'This link has ended. Ask the person who sent it for a new one.');
+  return { ok: true, value: { link, item } };
 }

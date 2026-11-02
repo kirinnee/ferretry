@@ -1033,6 +1033,124 @@ to catalog…") and the inline Open button.
 - A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they moved
   to Sharing › Shared with me, so the lists stay uncluttered.
 
+## Links (catalogs 3f)
+
+> **NOT BUILT.** Slice 3f-1 delivers the libraries named below (`@ferretry/protocol` and `@ferretry/relay`) and
+> their unit tests, and nothing else. No daemon route, no store Worker, no app screen and no deploy exists yet, so no
+> link can be made today. This section is the contract those later slices implement against. Where a sentence says
+> "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own behind the relay
+> by service binding.
+
+A **link** is ONE skill or MCP setup, signed by its publisher and shared as a URL. Nobody joins, nothing is revised and
+the publisher is not asked again. Two kinds:
+
+- **one-time**: the first fetch uses it up. Ends within a day (default one hour).
+- **public**: anyone holding the URL can install it until its end. Default a week; `never` is allowed, and an optional
+  install cap (1 to 10,000).
+
+Owners decided (2026-11-02): the `share-link` step-up act is confirmed; a public link with no end lapses after 30 days
+of the publishing machine being off and revives when it returns; the store is its own Worker.
+
+### The URL
+
+```
+https://<app>/get#v1;b=<bundleId>;k=<key>;fp=<fy_daemon_…>[;s=<store origin>]
+```
+
+- The key `k` (32 random bytes) lives **only in the fragment**: a browser never sends it, so no server, log, preview
+  fetcher or `Referer` sees it. `b` is the bundle id (16 random bytes), `fp` the publisher the signature must be from.
+- `s` is written only for a self-hosted store, and must be a pure `https:` origin (no path, no user name). Without it
+  the app uses the store it discovers itself.
+- `formatLinkFragment`, `parseLinkFragment` and `catalogLinkUrl` (`catalog-link.ts`) write and read it with the same
+  field reader as pairing and share links. The `/get` reader **refuses** `code`, `share` and `url`; the pairing and
+  share readers refuse `k`. A fragment that is two kinds of link is read by neither.
+
+### The signed document and the bundle
+
+`shared-catalog-link.ts`. The publisher signs `SharedCatalogLink`: publisher, name, `linkId`, `bundleId`, kind,
+`sequence`, `issuedAt`, `notAfter` (`min(expiresAt, issuedAt + 30 days)`), optional `expiresAt` and the item line
+(id, kind, name, summary, version, digest, size). The signature covers
+`"ferretry-catalog-link-v1" ‖ 0x00 ‖ SHA-256(canonical JSON)`. The install cap is **not** signed: the store enforces it
+and changing it needs no re-sign. A one-time link has sequence 1 and an end within a day; an artifact is not a link
+item. The bundle is the signed document plus the one item, whose `catalogId` is `LINK_ITEM_CATALOG_ID`
+(`cat_` and 22 `A`s, the id every shared copy is stored under, so a link item is never mistaken for a catalog item).
+
+`verifyLinkBundle` (`catalog-signature.ts`) checks, in order, that the key hashes to the publisher the URL named, the
+signature, the bundle id and sequence the envelope carried, the end (with 5 minutes of clock skew), and that the item is
+exactly the one the signed line describes (digest, size, version, name, summary). Nothing is shown before it passes.
+
+### The envelope
+
+`link-bundle.ts`. What the store holds is opaque to it:
+
+```
+"FYL1" ‖ uint32be sequence ‖ nonce(12) ‖ AES-256-GCM(ciphertext ‖ tag)
+key = HKDF-SHA256(k, salt = bundleId bytes, info = "ferretry-link-bundle-key-v1/" + decimal(sequence), 32)
+AAD = "ferretry-link-envelope-v1" ‖ 0x00 ‖ bundleId(16) ‖ uint32be sequence
+plaintext = uint32be L ‖ canonical JSON (L bytes) ‖ zero padding to a multiple of 16 KiB
+```
+
+- Padding is exact and all zero, or the envelope is refused. The size class (16 KiB) is all the store learns.
+- The cap is 3 MiB (`LINK_ENVELOPE_MAX_BYTES`); over it is `link_too_big`, which the daemon reports from the preview
+  before it asks for a passkey.
+- The fetch token is `HKDF-SHA256(k, salt = bundleId, info = "ferretry-link-fetch-v1", 32)`. The store keeps only
+  `SHA-256(token)`, which is useless without `k`.
+
+### The store wire
+
+`link-store.ts` (schemas, paths, refusals, transcripts) and `link-store-reducer.ts` (every rule below, as a pure
+`reduceLinkStore(state, event) → [state, response]`; the Worker in 3f-2 only wraps it). Signed requests use the
+transcripts below and the labels listed in [relay-protocol.md](relay-protocol.md) (signing domains); the full
+"hosted link store" chapter of that document is written with the Worker in 3f-2. Each transcript is its label, then
+length-prefixed (uint32be) fields: protocol id `ferretry-link-store/1`, daemon id, the host the store is serving, the
+32-byte nonce, then the action's own fields (an absent optional is the empty string; status ids are sorted and joined
+with `,`). The labels are `ferretry-link-store-upload-v1`, `-delete-v1` and `-status-v1`.
+
+- **Gone is one answer.** Every failed peek or fetch (unknown id, wrong or malformed token, used, ended, lapsed,
+  expired, capped) is the same frozen `410 link_gone`, byte for byte. A public link at its cap stays `live` in its
+  owner's status, and answers 410 to peek and fetch alike.
+- **The token is matched before the wrong-token window.** A request that presents the link's real token is never
+  refused for wrong guesses at its id, so a stranger who knows only a bundle id cannot lock the recipient out or burn
+  a one-time link. Only a wrong token counts toward, and is stopped by, that window.
+- **Limits answer 429 by the id asked for, whether or not it exists**, so a 429 says nothing about an id. Defaults are
+  operator configuration: per daemon 50 live links, 64 MiB and 100 uploads a day; per link 120 fetches a minute, 5,000
+  a day and 20 wrong tokens a minute; per address 60 peeks and fetches and 20 challenges a minute; across the store
+  20,000 live links, 4 GiB, 5,000 uploads and 200,000 fetches a day (one-time fetches count in that last figure).
+- **One-time is serialised.** The first fetch sets `used` and drops the bytes in one step; a racing second fetch gets
+  the uniform 410. A lost response costs the link, which is declared below.
+- **Replace** (public only) is compare-and-swap on `expectSequence`, needs a higher sequence (the store refuses one that
+  does not go up), keeps the kind and keeps the open count. Every upload's clear envelope sequence must equal the
+  sequence the request names, and a sequence never exceeds 2^32 − 1. A **lapsed** public link is revived only by its own owner with a sequence above the stored one. Any
+  other existing id, whatever its state, is `link_exists`.
+- **Delete** ends a link, is idempotent and keeps a tombstone until `max(notAfter, now) + 30 days`, so a replayed URL
+  stays 410 and the id cannot be reused.
+- **Kill switches.** `available: false` refuses challenges and uploads; peek, fetch, delete and status keep working.
+  `serving: false` answers peek and fetch 503, as an emergency act of the operator.
+- **Uploads** may be at most 5 minutes in the past and must end within 30 days (one-time: one day). Every challenge nonce
+  is spent by its first use.
+
+### The owner's wire
+
+`catalog-link.ts` holds the schemas for `/v1/catalog-links` (create, preview, move, update, list, copy, store status) and
+their refusals. An owned link carries **no URL, no key, no bundle id and no store address**; the URL appears only in the
+create answer (once; a one-time URL is never shown again) and in a public link's Copy answer. Making, moving and
+widening a link want a passkey proved for the act `share-link` alone, so a `share-catalog` proof never buys a link and
+the reverse. Copying needs only the unlock; turning a link off never asks.
+
+### Declared gaps
+
+- **A link cannot be recalled from what was already downloaded.** Turning it off stops new fetches; a copy already
+  fetched stays with whoever has it.
+- **A malicious store can withhold or replay until `notAfter`.** It cannot read or alter an item (it holds no key and
+  every check is signed), but it can answer 410 early or serve an older signed copy; the reader refuses a lower
+  sequence it has seen.
+- **A one-time link whose response is lost is spent.** The store cannot know the bytes arrived.
+- **The open count is fetches, not installs.**
+- **A self-hosted store (`s=`) is trusted for availability only**, and the app names its host before fetching.
+- **A lapsed "never" link's id can be squatted once its tombstone is purged.** After the tombstone window another
+  daemon could upload under the same bundle id and the old URL would then reach that daemon's link. It cannot read or
+  forge anything (the key and the signature are the publisher's), so this is an availability gap only.
+
 ## Declared gaps
 
 What this does **not** protect against, said plainly (more in design §4.8):
