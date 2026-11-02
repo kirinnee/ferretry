@@ -1009,17 +1009,18 @@ describe('a repeat copy (update) over real files', () => {
     const review = await target.setup.reviewClone({ bundle });
     should(review.items.find(row => row.ref === ref)?.choice).be.undefined();
 
-    const unchosen = await target.catalog.propose({
-      kind: 'clone.import',
-      mode: 'update',
-      bundle,
-      reviewed: review.fingerprint,
-      decisions: {},
-    } as never);
-    await target.catalog.apply(unchosen.id, { governed: false } as never).then(
-      () => should.fail(undefined, undefined, 'expected the unchosen item to be refused'),
-      (error: Error) => should(error.message).containEql(ref),
-    );
+    await target.catalog
+      .propose({
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: {},
+      } as never)
+      .then(
+        () => should.fail(undefined, undefined, 'expected the unchosen item to be refused'),
+        (error: Error) => should(error.message).containEql(ref),
+      );
     should(await instructionsFile(target)).equal('Edited here.\n');
 
     await apply(target, {
@@ -1060,17 +1061,18 @@ describe('a repeat copy (update) over real files', () => {
     const review = await target.setup.reviewClone({ bundle });
     await editInstructions(target, 'Edited here after the review.\n');
 
-    const staged = await target.catalog.propose({
-      kind: 'clone.import',
-      mode: 'update',
-      bundle,
-      reviewed: review.fingerprint,
-      decisions: {},
-    } as never);
-    await target.catalog.apply(staged.id, { governed: false } as never).then(
-      () => should.fail(undefined, undefined, 'expected a stale review to be refused'),
-      (error: Error) => should(error.message).equal('Something changed since you reviewed. Review again.'),
-    );
+    await target.catalog
+      .propose({
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: {},
+      } as never)
+      .then(
+        () => should.fail(undefined, undefined, 'expected a stale review to be refused'),
+        (error: Error) => should(error.message).equal('Something changed since you reviewed. Review again.'),
+      );
     should(await instructionsFile(target)).equal('Edited here after the review.\n');
   });
 
