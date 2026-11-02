@@ -27,7 +27,6 @@ import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
-import { readFleetRuntimes } from '../catalog-api.ts';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
@@ -181,89 +180,6 @@ export function AgentPermissionsSection({
         >
           <Button type="button" data-agent-permissions-undo="" onClick={() => setDraft(current)}>
             Keep {AGENT_PERMISSION_WORDS[current]}
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
-    </SetupSection>
-  );
-}
-
-/** "Default runtime for new agents" (T): every agent runtime on this machine, read once for the
- *  picker. `null` while loading or on a read that failed — the section just stays hidden then,
- *  same as a machine with no agent runtime yet, because there is nothing useful to pick from. */
-function useAgentRuntimeNames(machine: FleetMachineView, access: SetupAccess): readonly string[] | null {
-  const [names, setNames] = useState<readonly string[] | null>(null);
-  const { read } = access;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the machine's own facts change, not on every render
-  useEffect(() => {
-    setNames(null);
-    void read(client => readFleetRuntimes(client)).then(result => {
-      if (result.kind !== 'done') return;
-      setNames(result.value.runtimes.filter(runtime => runtime.agent).map(runtime => runtime.name));
-    });
-  }, [machine.name, machine.runtimeCount, read]);
-  return names;
-}
-
-export function DefaultRuntimeSection({
-  machine,
-  machineName,
-  access,
-  onSaved,
-}: {
-  readonly machine: FleetMachineView;
-  readonly machineName: string;
-  readonly access: SetupAccess;
-  readonly onSaved: () => void;
-}) {
-  const { changes } = access;
-  const runtimes = useAgentRuntimeNames(machine, access);
-  const current = machine.defaultRuntime;
-  const [draft, setDraft] = useState<string | null>(current);
-  const pending = draft !== current && draft !== null;
-  const save = (): void => {
-    void changes.apply(machineSettings(machine, { defaultRuntime: draft })).then(result => {
-      if (result.kind === 'refused') return;
-      onSaved();
-    });
-  };
-  if (runtimes === null) return null;
-  if (runtimes.length === 0) {
-    return (
-      <SetupSection title="Default runtime for new agents" name="default-runtime">
-        <p className="m-0 text-cell text-muted" data-default-runtime-empty="">
-          {machineName} has no agent runtime yet. Add one on the Runtimes tab, then come back here to pick it.
-        </p>
-      </SetupSection>
-    );
-  }
-  return (
-    <SetupSection title="Default runtime for new agents" name="default-runtime">
-      <RadioChoices
-        legend="Default runtime for new agents"
-        legendHidden
-        name="default-runtime"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
-          changes.clear();
-        }}
-        options={runtimes.map(name => ({ id: name, title: name }))}
-      />
-      <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="">
-        A session started with no runtime named uses this one.
-      </p>
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save default runtime"
-          onSubmit={save}
-        >
-          <Button type="button" data-default-runtime-undo="" onClick={() => setDraft(current)}>
-            Keep {current ?? 'automatic'}
           </Button>
         </ChangeApplyPanel>
       ) : null}
@@ -629,14 +545,6 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-5" data-machine-settings="">
-      <DefaultRuntimeSection
-        key={machine.defaultRuntime}
-        machine={machine}
-        machineName={machineName}
-        access={access}
-        onSaved={onSaved}
-      />
-
       <AgentPermissionsSection
         key={machine.agentPermissions}
         machine={machine}
