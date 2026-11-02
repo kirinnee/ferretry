@@ -539,6 +539,7 @@ import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader
 import {
   ManagedTerminalService,
   RedactingTerminalStreamService,
+  StorageTerminalOwnerDirectory,
   runProgram,
   systemLoginShell,
   TerminalRuntimeError,
@@ -749,6 +750,7 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
+  type AuditSink,
   AutoResumeService,
   adoptAgendaDefault,
   adoptedTranscriptProvenance,
@@ -6762,6 +6764,7 @@ function createTerminalSubsystem(
   clock: MillisecondClockPort,
   redactor: TextRedactor,
   quarantine: QuarantineRegistry,
+  audit: AuditSink,
 ): TerminalSubsystem {
   const sessions: TerminalSessionResolver = {
     resolve: async reference => {
@@ -6789,6 +6792,16 @@ function createTerminalSubsystem(
           return false;
         }
       },
+      owners: new StorageTerminalOwnerDirectory(storage),
+      onClosed: async (holder, trigger) =>
+        await audit.record({
+          event: 'terminal.closed',
+          actor: { kind: 'host' },
+          cause: 'daemon',
+          subject: holder.sessionId,
+          outcome: 'succeeded',
+          detail: { count: holder.count, status: holder.status, trigger },
+        }),
     },
   );
   /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
@@ -6798,6 +6811,8 @@ function createTerminalSubsystem(
     throw error;
   };
   return {
+    holders: async () => await service.holders().catch(translate),
+    closeFinished: async trigger => await service.closeFinished(trigger).catch(translate),
     list: async sessionId => await service.list(sessionId).catch(translate),
     // The opener the mount DERIVED from the request's credential, forwarded unchanged. The service
     // is deliberately not given the request body's `agentSessionId`: ownership is decided where the
@@ -11804,6 +11819,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { now: () => Date.now() },
         secretRedactor,
         quarantined,
+        auditLog,
       );
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
@@ -14403,7 +14419,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // a second after that, on the lane, and a slow backstop catches anything else (a session finished while
   // the daemon was down, a write another path made).
   const terminalReaper = world.createTerminalReaper(opened.storage);
-  const reapNow = (): void => lane.submit('terminal reaper', () => terminalReaper.sweep());
+  // The same moments also free the web terminals a finished ferret left behind (`fy-webterm-*`), which
+  // would otherwise hold the global capacity until the owner closed them by hand. Boot runs it first, so
+  // orphans of sessions that ended while the daemon was down go at start.
+  const reapNow = (): void => {
+    lane.submit('terminal reaper', () => terminalReaper.sweep());
+    lane.submit('terminal reclaim', async () => {
+      await subsystems.terminals.closeFinished('sweep');
+    });
+  };
   let reapSoon: ReturnType<typeof setTimeout> | undefined;
   const reapAfterChange = (): void => {
     if (reapSoon !== undefined) return;

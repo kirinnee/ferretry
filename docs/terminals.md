@@ -42,3 +42,23 @@ vouches for, and cannot make the daemon run an arbitrary program for a terminal.
 terminal opens, then the command is **typed into it with Enter**, as you would. So it runs the same in
 zsh, bash and fish, sees your rc files' `PATH` and functions, and stays in the shell after it exits.
 Write it in your shell's own syntax.
+
+## How many, and who holds them
+
+The daemon keeps at most 24 terminals open across every session (and a smaller number per session). A
+terminal is a tmux session of its own, so it would outlive the ferret that opened it; the daemon closes
+the ones whose owner is **finished** (`completed` or `stopped`) or **gone** (no longer in the session
+store). It does so when it starts, whenever a session settles into one of those states, and on its
+60-second sweep. A session in any other state, or one whose state cannot be read, is treated as live and
+is never closed. A terminal opened on purpose on an already-finished session is closed by the next sweep.
+
+Each close writes a `terminal.closed` audit line per owner (count, status, and whether it was the
+`boot`, `sweep` or `owner` that asked). When the limit is hit anyway, the refusal names who holds the
+slots, for example `24 terminals open: 6 by fitzgerald (stopped), …`.
+
+To look and to clear by hand:
+
+- `fy terminal slots` — who holds the slots.
+- `fy terminal close --all-finished` — close every finished or gone owner's terminals now.
+- Settings › Machine › Terminals — the same view with a close button.
+- `GET /v1/terminals` and `POST /v1/terminals/close-finished` — the routes behind both (operator, capability `terminal` / use).

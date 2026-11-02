@@ -728,6 +728,15 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     keywords: ['performance', 'slow', 'lag', 'laggy', 'profile', 'diagnostics', 'report', 'cpu', 'requests', 'speed'],
   },
   {
+    // "Limit", "capacity" and "stuck" are what somebody types after a terminal refuses to open.
+    id: 'terminals',
+    label: 'Terminals',
+    description:
+      'Who holds the machine’s terminal slots, and closing the terminals finished ferrets left behind. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#terminals`,
+    keywords: ['terminal', 'terminals', 'limit', 'capacity', 'full', 'slots', 'close', 'stuck', 'tmux', 'finished'],
+  },
+  {
     // "Who paired", "log" and "history" are what somebody types after a new-device notice they did not expect.
     id: 'security-log',
     label: 'Security log',

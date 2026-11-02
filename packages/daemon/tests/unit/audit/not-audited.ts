@@ -149,6 +149,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'only narrows; audited by the task-plan service: security.changed task-plan-ended',
   'POST /v1/sessions/:sessionId/input-quarantines/:key/end':
     'audited by the input-request service: input.quarantine_ended, names and flags only',
+  'POST /v1/terminals/close-finished':
+    'audited by the terminal service: terminal.closed, a count and the stopped ferret only',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
     'closes a terminal, which removes access rather than adding it',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',

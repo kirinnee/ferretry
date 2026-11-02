@@ -16,6 +16,7 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'step-up.failed': 'Passkey confirmation failed',
   'passkey.registered': 'A passkey was added',
   'terminal.opened': 'A terminal was opened',
+  'terminal.closed': 'A finished ferret’s terminals were closed',
   'terminal.input': 'Keystrokes reached a terminal',
   'fleet.configured': 'Agent settings were changed',
   'grants.changed': 'Remote permissions were changed',

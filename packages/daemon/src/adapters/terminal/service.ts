@@ -1,8 +1,20 @@
 import { isAbsolute, resolve } from 'node:path';
-import type { SurfaceOpener, TerminalListView, TerminalSize, TerminalView } from '@ferretry/protocol';
+import type {
+  CloseFinishedTerminalsResponse,
+  SurfaceOpener,
+  TerminalHolder,
+  TerminalHoldersView,
+  TerminalListView,
+  TerminalSize,
+  TerminalView,
+} from '@ferretry/protocol';
+import { describeCapacity, groupTerminalHolders, isReclaimable } from '../../lib/terminal/holders.ts';
 import type {
   TerminalClock,
+  TerminalCloseTrigger,
   TerminalIdSource,
+  TerminalOwnerDirectory,
+  TerminalOwnerStanding,
   TerminalRecord,
   TerminalRuntimePort,
   TerminalSession,
@@ -37,6 +49,13 @@ export interface TerminalServiceOptions {
    * exist, so the folder is checked here rather than trusted. Without it, such a request is refused.
    */
   readonly isDirectory?: (path: string) => Promise<boolean>;
+  /**
+   * Whether each terminal's owner is still a live ferret. Without it every owner is taken to be live,
+   * which can only ever keep a terminal open — never close one a person might still be using.
+   */
+  readonly owners?: TerminalOwnerDirectory;
+  /** Told, once per owner, when its terminals were closed for being finished: the audit line. */
+  readonly onClosed?: (holder: TerminalHolder, trigger: TerminalCloseTrigger) => Promise<void>;
 }
 
 function key(ownerId: string, terminalId: string): string {
@@ -51,6 +70,8 @@ export class ManagedTerminalService {
   private readonly maximumGlobal: number;
   private readonly idleTimeoutMs: number;
   private readonly isDirectory: ((path: string) => Promise<boolean>) | undefined;
+  private readonly owners: TerminalOwnerDirectory | undefined;
+  private readonly onClosed: TerminalServiceOptions['onClosed'];
 
   constructor(
     private readonly runtime: TerminalRuntimePort,
@@ -63,6 +84,8 @@ export class ManagedTerminalService {
     this.maximumGlobal = options.maximumGlobal ?? 24;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 60 * 60_000;
     this.isDirectory = options.isDirectory;
+    this.owners = options.owners;
+    this.onClosed = options.onClosed;
   }
 
   private async session(reference: string): Promise<TerminalSession> {
@@ -162,7 +185,12 @@ export class ManagedTerminalService {
   ): Promise<TerminalView> {
     // ONE CREATE AT A TIME. The name and capacity checks below read the listing and then await the
     // runtime, so two opens racing for one name would both pass and leave two `dev` terminals.
-    const turn = this.creating.then(async () => await this.createNow(sessionReference, input));
+    return await this.inTurn(async () => await this.createNow(sessionReference, input));
+  }
+
+  /** Runs `work` after every earlier create or reclaim has settled, so none reads a listing another is about to change. */
+  private async inTurn<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.creating.then(work);
     this.creating = turn.catch(() => undefined);
     return await turn;
   }
@@ -180,7 +208,10 @@ export class ManagedTerminalService {
     if (owned.length >= this.maximumPerSession)
       throw new TerminalServiceError('capacity', 'terminal capacity reached for this session');
     if (this.records.size >= this.maximumGlobal)
-      throw new TerminalServiceError('capacity', 'global terminal capacity reached');
+      throw new TerminalServiceError(
+        'capacity',
+        describeCapacity(this.records.size, await this.holdersOf([...this.records.values()]).catch(() => [])),
+      );
     const size = normalizeTerminalSize(
       input.cols ?? DEFAULT_TERMINAL_SIZE.cols,
       input.rows ?? DEFAULT_TERMINAL_SIZE.rows,
@@ -251,6 +282,60 @@ export class ManagedTerminalService {
 
   async foreground(sessionReference: string, terminalId: string): Promise<string> {
     return await this.runtime.foreground(await this.record(sessionReference, terminalId));
+  }
+
+  /** Every owner's standing, asked once per owner. An owner the directory cannot place is live. */
+  private async standings(records: readonly TerminalRecord[]): Promise<ReadonlyMap<string, TerminalOwnerStanding>> {
+    const known = new Map<string, TerminalOwnerStanding>();
+    if (this.owners === undefined) return known;
+    for (const ownerId of new Set(records.map(record => record.ownerId)))
+      known.set(ownerId, await this.owners.standing(ownerId));
+    return known;
+  }
+
+  private async holdersOf(records: readonly TerminalRecord[]): Promise<TerminalHolder[]> {
+    return groupTerminalHolders(records, await this.standings(records));
+  }
+
+  /** Who holds the open terminals, across every session. */
+  async holders(): Promise<TerminalHoldersView> {
+    await this.refresh();
+    const records = [...this.records.values()];
+    return { limit: this.maximumGlobal, open: records.length, holders: await this.holdersOf(records) };
+  }
+
+  /**
+   * Closes every terminal whose owner is finished or gone, and tells `onClosed` which owners lost how many.
+   *
+   * A terminal is a tmux session of its own, so it outlives the ferret that opened it unless something
+   * ends it; this is that something. A kill tmux refuses is counted, not thrown: the rest still close and
+   * the next sweep tries again.
+   */
+  async closeFinished(trigger: TerminalCloseTrigger): Promise<CloseFinishedTerminalsResponse> {
+    return await this.inTurn(async () => {
+      await this.refresh();
+      const records = [...this.records.values()];
+      const standings = await this.standings(records);
+      const closedBy = new Map<string, number>();
+      let failed = 0;
+      for (const record of records) {
+        const standing = standings.get(record.ownerId);
+        if (standing === undefined || !isReclaimable(standing.standing)) continue;
+        try {
+          await this.runtime.kill(record);
+          this.records.delete(key(record.ownerId, record.id));
+          closedBy.set(record.ownerId, (closedBy.get(record.ownerId) ?? 0) + 1);
+        } catch {
+          failed += 1;
+        }
+      }
+      const holders = groupTerminalHolders(
+        records.filter(record => closedBy.has(record.ownerId)),
+        standings,
+      ).map(holder => ({ ...holder, count: closedBy.get(holder.sessionId) ?? 0 }));
+      for (const holder of holders) await this.onClosed?.(holder, trigger).catch(() => undefined);
+      return { closed: [...closedBy.values()].reduce((sum, count) => sum + count, 0), failed, holders };
+    });
   }
 
   async close(sessionReference: string, terminalId: string): Promise<void> {

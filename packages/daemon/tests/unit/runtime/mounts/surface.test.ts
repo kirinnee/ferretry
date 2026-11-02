@@ -916,6 +916,7 @@ describe('the mounted daemon surface', () => {
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
       109 + // the session table and everything that is not the account model (one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       6 + // the project boards: the board query, its card ids, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
@@ -1367,6 +1368,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sign-in-rules/:id/narrow',
       'DELETE /v1/sign-in-rules/:id',
       'POST /v1/accounts/:id/sign-in-rules/revoke',
+      'GET /v1/terminals',
+      'POST /v1/terminals/close-finished',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',

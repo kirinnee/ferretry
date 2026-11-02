@@ -126,6 +126,7 @@ import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { performanceSettingsTab } from './features/settings/performance-settings.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
+import { terminalSlotsSettingsTab } from './features/settings/terminal-slots-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { ViewportOverlay } from './features/settings/viewport-details.tsx';
@@ -1998,6 +1999,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
       securityLogSettingsTab(createDaemonClient),
+      terminalSlotsSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
       { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
       // Sub-ferrets, who picks their model, and the routing prompt (docs/pack-mode.md).

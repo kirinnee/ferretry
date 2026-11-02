@@ -34,6 +34,8 @@ import {
   type SurfaceOpener,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
+  type CloseFinishedTerminalsResponse,
+  type TerminalHoldersView,
   type TerminalListView,
   type TerminalView,
   TotpParametersSchema,
@@ -189,6 +191,7 @@ import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
 import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
 import type { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import { catalog, inventory } from '../../core/fixtures.ts';
+import type { TerminalCloseTrigger } from '../../../../src/lib/terminal/contracts.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
 
@@ -475,6 +478,24 @@ export class FakeTerminals implements TerminalSubsystem {
 
   async close(sessionId: string, terminalId: string): Promise<void> {
     this.records.delete(this.require(this.session(sessionId), terminalId).id);
+  }
+
+  /** What the owner-facing capacity view reports, and what a reclaim closes. */
+  readonly holding: { limit: number; open: number; holders: TerminalHoldersView['holders'] } = {
+    limit: 24,
+    open: 0,
+    holders: [],
+  };
+  /** The triggers a reclaim was asked for, in order. */
+  readonly reclaims: TerminalCloseTrigger[] = [];
+
+  async holders(): Promise<TerminalHoldersView> {
+    return { ...this.holding };
+  }
+
+  async closeFinished(trigger: TerminalCloseTrigger): Promise<CloseFinishedTerminalsResponse> {
+    this.reclaims.push(trigger);
+    return { closed: this.holding.open, failed: 0, holders: [...this.holding.holders] };
   }
 
   /** The folder each terminal was opened in, when it was given one. */

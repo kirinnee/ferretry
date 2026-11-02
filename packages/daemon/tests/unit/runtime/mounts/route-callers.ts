@@ -313,6 +313,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sign-in-rules/:id/narrow operator person',
   'DELETE /v1/sign-in-rules/:id operator person',
   'POST /v1/accounts/:id/sign-in-rules/revoke operator person',
+  'GET /v1/terminals operator any',
+  'POST /v1/terminals/close-finished operator any',
   'GET /v1/sessions/:sessionId/terminals operator any',
   'POST /v1/sessions/:sessionId/terminals operator any',
   'GET /v1/sessions/:sessionId/terminals/:terminalId operator any',

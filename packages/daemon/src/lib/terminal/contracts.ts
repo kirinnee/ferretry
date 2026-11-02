@@ -1,4 +1,4 @@
-import type { SurfaceOpener, TerminalSize } from '@ferretry/protocol';
+import type { SurfaceOpener, TerminalHolderStanding, TerminalSize } from '@ferretry/protocol';
 import type { TerminalCapture } from './redraw.ts';
 
 export interface TerminalRecord extends TerminalSize {
@@ -27,6 +27,22 @@ export interface TerminalSession {
 export interface TerminalSessionResolver {
   resolve(sessionReference: string): Promise<TerminalSession | undefined>;
 }
+
+/** Where one terminal owner stands: finished and gone owners' terminals are the ones that may be reclaimed. */
+export interface TerminalOwnerStanding {
+  readonly standing: TerminalHolderStanding;
+  /** The session's status word, or `removed`. */
+  readonly status: string;
+  /** What a person calls the owner: its callsign, else its name, else its id. */
+  readonly label: string;
+}
+
+export interface TerminalOwnerDirectory {
+  standing(ownerId: string): Promise<TerminalOwnerStanding>;
+}
+
+/** What asked for finished terminals to be closed: the daemon starting, its periodic sweep, or the owner. */
+export type TerminalCloseTrigger = 'boot' | 'sweep' | 'owner';
 
 export interface TerminalRuntimePort {
   list(): Promise<readonly TerminalRecord[]>;
