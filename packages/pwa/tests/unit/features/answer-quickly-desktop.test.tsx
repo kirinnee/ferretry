@@ -376,15 +376,12 @@ describe('Answer quickly on a phone — unchanged', () => {
   });
 });
 
-const mouse = (type: string, x: number, y = 300): PointerEvent =>
-  new PointerEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: y,
-    pointerId: 9,
-    pointerType: 'mouse',
-  });
+const pointerOf =
+  (pointerType: string, pointerId: number) =>
+  (type: string, x: number, y = 300): PointerEvent =>
+    new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId, pointerType });
+const mouse = pointerOf('mouse', 9);
+const touch = pointerOf('touch', 3);
 
 const selectionSpy = () => {
   const released: number[] = [];
@@ -396,71 +393,93 @@ const selectionSpy = () => {
   return { released, restore: () => spy.mockRestore() };
 };
 
-describe('Answer quickly on a wide screen — a mouse drag', () => {
-  it('swipes an agenda card: right is its right-hand answer, and the drag is not a text selection', async () => {
+const drag = async (
+  target: HTMLElement,
+  make: (type: string, x: number, y?: number) => PointerEvent,
+  from: readonly [number, number],
+  to: readonly [number, number],
+): Promise<PointerEvent[]> => {
+  const sent = [
+    make('pointerdown', from[0], from[1]),
+    make('pointermove', (from[0] + to[0]) / 2, (from[1] + to[1]) / 2),
+    make('pointermove', to[0], to[1]),
+    make('pointerup', to[0], to[1]),
+  ];
+  for (const event of sent) await interact(() => target.dispatchEvent(event));
+  return sent;
+};
+
+describe('Answer quickly on a wide screen — a mouse or trackpad never swipes', () => {
+  it('leaves a drag on an agenda card’s head to text selection: nothing answered, nothing released, nothing prevented', async () => {
     const { root, fake } = await open();
     await start(root);
     const grip = must(root.querySelector<HTMLElement>('[data-agenda-frame] .fy-card-head'), 'the head');
     const selection = selectionSpy();
-    await interact(() => grip.dispatchEvent(mouse('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 200)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 450)));
-    expect(selection.released.length).toBeGreaterThan(0);
-    await interact(() => grip.dispatchEvent(mouse('pointerup', 450)));
+    const sent = await drag(grip, mouse, [100, 300], [450, 300]);
     selection.restore();
-    expect(pending(fake)).toEqual(['Wait']);
+    expect(selection.released).toEqual([]);
+    expect(sent.some(event => event.defaultPrevented)).toBe(false);
+    expect(root.querySelector('[data-dragging]')).toBeNull();
+    expect(pending(fake)).toEqual([]);
+    expect(where(root)).toBe('1/2');
   });
 
-  it('never pulls down from the body: that drag selects text', async () => {
+  it('leaves a drag on the body, down or sideways, to text selection', async () => {
     const { root, fake } = await open();
     await start(root);
     const body = must(root.querySelector<HTMLElement>('[data-agenda-frame] [data-agenda-body]'), 'the body');
-    await interact(() => body.dispatchEvent(mouse('pointerdown', 100, 300)));
-    await interact(() => body.dispatchEvent(mouse('pointermove', 100, 340)));
-    await interact(() => body.dispatchEvent(mouse('pointermove', 100, 450)));
-    await interact(() => body.dispatchEvent(mouse('pointerup', 100, 450)));
+    await drag(body, mouse, [100, 300], [100, 450]);
+    await drag(body, mouse, [100, 300], [450, 300]);
+    expect(root.querySelector('[data-dragging]')).toBeNull();
     expect(where(root)).toBe('1/2');
     expect(pending(fake)).toEqual([]);
   });
 
-  it('swipes a card to test: right is Done', async () => {
+  it('leaves a card to test alone too, from its head and from its body', async () => {
     const { root, actions } = await open({ cards: [], toTest: true });
     await start(root);
     const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
     const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
-    const selection = selectionSpy();
-    await interact(() => grip.dispatchEvent(mouse('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 200)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 450)));
-    expect(row.getAttribute('data-swipe-answer')).toBe('Done');
-    expect(selection.released.length).toBeGreaterThan(0);
-    await interact(() => grip.dispatchEvent(mouse('pointerup', 450)));
-    selection.restore();
-    await interact(() => flush());
-    expect(actions.calls).toEqual(['moveTask:["closed"]']);
-  });
-
-  it('does not pull a card to test down from its body with a mouse', async () => {
-    const { root, actions } = await open({ cards: [], toTest: true });
-    await start(root);
-    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
     const body = must(row.querySelector<HTMLElement>('.fy-totest__body, .fy-totest__steps, p, li'), 'the body');
-    await interact(() => body.dispatchEvent(mouse('pointerdown', 100, 300)));
-    await interact(() => body.dispatchEvent(mouse('pointermove', 100, 340)));
-    await interact(() => body.dispatchEvent(mouse('pointermove', 100, 450)));
-    await interact(() => body.dispatchEvent(mouse('pointerup', 100, 450)));
+    const selection = selectionSpy();
+    await drag(grip, mouse, [100, 300], [450, 300]);
+    await drag(body, mouse, [100, 300], [100, 450]);
+    selection.restore();
+    expect(selection.released).toEqual([]);
+    expect(row.getAttribute('data-swipe-answer')).toBeNull();
     expect(step(root)?.textContent).toContain('Try the board');
     expect(actions.calls).toEqual([]);
   });
 
-  it('does nothing for a mouse on a phone', async () => {
+  it('does nothing for a mouse on a phone either', async () => {
     const { root, fake } = await open({ phone: true });
     await start(root);
     const grip = must(root.querySelector<HTMLElement>('[data-agenda-frame] .fy-card-head'), 'the head');
-    await interact(() => grip.dispatchEvent(mouse('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 200)));
-    await interact(() => grip.dispatchEvent(mouse('pointermove', 450)));
-    await interact(() => grip.dispatchEvent(mouse('pointerup', 450)));
+    await drag(grip, mouse, [100, 300], [450, 300]);
     expect(pending(fake)).toEqual([]);
+  });
+});
+
+describe('Answer quickly on a wide screen — a finger still swipes', () => {
+  it('swipes an agenda card with touch, as a touchscreen laptop does', async () => {
+    const { root, fake } = await open();
+    await start(root);
+    const grip = must(root.querySelector<HTMLElement>('[data-agenda-frame] .fy-card-head'), 'the head');
+    await drag(grip, touch, [100, 300], [450, 300]);
+    expect(pending(fake)).toEqual(['Wait']);
+  });
+
+  it('swipes a card to test with touch: right is Done', async () => {
+    const { root, actions } = await open({ cards: [], toTest: true });
+    await start(root);
+    const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
+    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
+    await interact(() => grip.dispatchEvent(touch('pointerdown', 100)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 200)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 450)));
+    expect(row.getAttribute('data-swipe-answer')).toBe('Done');
+    await interact(() => grip.dispatchEvent(touch('pointerup', 450)));
+    await interact(() => flush());
+    expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 });

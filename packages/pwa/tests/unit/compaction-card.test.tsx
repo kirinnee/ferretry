@@ -70,6 +70,23 @@ describe('CompactionCard', () => {
     run(() => real.unmount());
   });
 
+  test('keeps counting from the daemon’s start through a re-render, a sample without the bar and a fresh sample', () => {
+    const scheduler = manualScheduler(START_MS + 34_000);
+    const view = render(<CompactionCard compaction={{ ...running, percent: 34 }} scheduler={scheduler} />);
+    expect(textOf(view.toJSON())).toContain('34s');
+    run(() => scheduler.advance(2_000));
+
+    // A sample that painted no bar, then the next one: new objects, the same compaction.
+    run(() => view.update(<CompactionCard compaction={{ ...running }} scheduler={scheduler} />));
+    expect(textOf(view.toJSON())).toContain('36s');
+    expect(textOf(view.toJSON())).not.toMatch(/(^|[^\d])[0-5]s ·/);
+    run(() => scheduler.advance(1_000));
+    run(() => view.update(<CompactionCard compaction={{ ...running, percent: 38 }} scheduler={scheduler} />));
+    expect(textOf(view.toJSON())).toContain('37s');
+    expect(view.root.findByProps({ role: 'progressbar' }).props['aria-valuenow']).toBe(38);
+    run(() => view.unmount());
+  });
+
   test('runs on the browser’s clock when none is injected', () => {
     const view = render(
       <CompactionCard compaction={{ ...running, startedAt: new Date().toISOString(), percent: 3 }} />,
