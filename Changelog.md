@@ -1,3 +1,9 @@
+## [4.236.0](https://github.com/kirinnee/ferretry/compare/v4.235.1...v4.236.0) (2026-11-02)
+
+### Features
+
+* **catalogs:** a member's name is their ID, unique on this machine ([#1339](https://github.com/kirinnee/ferretry/issues/1339)) ([2b8fd30](https://github.com/kirinnee/ferretry/commit/2b8fd3017fba9b6286cbacff766643cd2f2ea7b0))
+
 ## [4.235.1](https://github.com/kirinnee/ferretry/compare/v4.235.0...v4.235.1) (2026-11-02)
 
 ### Fixes
