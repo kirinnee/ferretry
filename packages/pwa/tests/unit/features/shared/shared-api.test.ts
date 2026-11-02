@@ -11,6 +11,7 @@ import {
   readMe,
   readSharedItem,
   readSharedManifest,
+  readSharedVersions,
   redeemShare,
   registerPasskey,
   unlockMember,
@@ -80,6 +81,13 @@ describe('the shared api', () => {
     await readSharedItem(client, 'cat_a', 'itm_b', 3);
     should(calls[0]?.path).equal('/v1/shared/catalogs/cat_a%2Fb/manifest');
     should(calls[1]?.path).equal('/v1/shared/catalogs/cat_a/items/itm_b/3');
+  });
+
+  it('should read the signed list of versions of one item', async () => {
+    const { calls, client } = recording({});
+    await readSharedVersions(client, 'cat_a/b', 'itm_b');
+    should(calls[0]?.path).equal('/v1/shared/catalogs/cat_a%2Fb/items/itm_b/versions');
+    should(calls[0]?.init).be.undefined();
   });
 
   it('should redeem a code and leave', async () => {

@@ -1,6 +1,7 @@
 /**
  * The Sharing page as a marketplace (docs/catalogs.md, &B131 A3): Subscriptions with a store page (one item Installed,
- * the rest with Install), My catalogs, a catalog with + Publish skills and its picker, and People; and the places that
+ * the rest with Install; an install with a newer version offers See changes, Update, Stay, Skip and Move to version, and
+ * a local edit offers keep or replace), My catalogs, a catalog with + Publish skills and its picker, and People; and the places that
  * lead to it: the phone's More sheet, the desktop top bar, the sidebar footer and the narrow rail. On a phone and a
  * desktop, light and dark.
  *
@@ -38,7 +39,9 @@ import { FleetNavigationRail } from '../../src/shell/fleet-navigation-rail.tsx';
 import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
 import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { sessionView } from '../../tests/support/sessions.ts';
-import { sharedItemFixture } from '../../tests/support/shared-screens.ts';
+import { FyHttpError } from '@ferretry/protocol/client';
+import { catalogChanges } from '../../tests/support/catalog-views.ts';
+import { installedAtV1, machinePreview, sharedItemFixture, updateFixture } from '../../tests/support/shared-screens.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
 const NOW = Date.parse(AT);
@@ -85,9 +88,23 @@ const SHARES = [
   },
 ];
 
+const params = new URLSearchParams(location.search);
+const view = params.get('view') ?? 'catalogs';
+const updating = view === 'update';
+const edited = params.get('edited') === '1';
+const upd = await updateFixture();
+
 const client = {
   request: async (path, schema, init) => {
     const method = init?.method ?? 'GET';
+    if (path.startsWith('/v1/catalog-installs/runtime')) {
+      if (method === 'PATCH') return installedAtV1(upd).install;
+      const body = JSON.parse(init.body);
+      if (path.endsWith('/preview')) {
+        if (edited && body.replaceEdited !== true) throw new FyHttpError('SKILL.md was edited', 409, 'catalog_install_edited');
+        return machinePreview(upd, body.item.itemVersion, { changes: catalogChanges(), ...(body.replaceEdited === true ? { edited: { paths: ['SKILL.md'] } } : {}) });
+      }
+    }
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return schema.parse({ publisher: PUBLISHER, catalogs: CATALOGS });
     if (method === 'GET' && path === '/v1/catalog-members') return { members: MEMBERS };
     if (method === 'GET' && path === '/v1/catalog-shares') return { shares: SHARES };
@@ -99,7 +116,7 @@ const createClient = async () => client;
 
 const fixture = await sharedItemFixture();
 // The first item a paired machine already installed, so the store page shows Installed beside Install.
-const INSTALLS = [{
+const INSTALLS = updating ? [installedAtV1(upd).install] : [{
   installId: 'cin_' + 'i'.repeat(22), installedAt: AT,
   provenance: {
     publisher: fixture.identity.daemonId, publisherName: 'kirin-box', catalogId: 'cat_' + 'x'.repeat(22),
@@ -112,16 +129,28 @@ const INSTALLS = [{
 }];
 const ok = value => ({ kind: 'ok', value });
 const never = new Promise(() => undefined);
+const shown = updating ? upd : fixture;
 const SUBSCRIPTION = {
-  daemonId: fixture.identity.daemonId, daemonName: 'kirin-box', daemonUrl: 'https://box.example.test', ownLabel: 'Kirin’s box',
+  daemonId: shown.identity.daemonId, daemonName: 'kirin-box', daemonUrl: 'https://box.example.test', ownLabel: 'Kirin’s box',
   keyId: 'mk_' + 'A'.repeat(22), memberId: 'mbr_' + 'A'.repeat(22), memberLabel: 'Alice', status: 'active',
   joinedAt: AT, passkeyWindowEndsAt: '2026-10-31T10:10:00.000Z', unlockDays: 30, carriers: [],
   publicKey: 'AAAA', boxKey: 'AAAA', signingKey: 'AAAA', boxPrivateKey: 'AAAA',
 };
 const members = {
   list: async () => [SUBSCRIPTION],
-  browse: async () => ok(fixture.browse),
+  browse: async () => ok(shown.browse),
   openItem: async () => await never,
+  versions: async () => ok(upd.signedVersions),
+  openVersion: async (_sub, _view, _entry, version) => {
+    const offered = upd.signedVersions.versions.offered.find(line => line.version === version);
+    return ok({
+      item: version === 1 ? upd.v1 : upd.v2,
+      manifest: upd.opened.manifest,
+      signedManifest: upd.view.signed,
+      ...(version === 2 ? {} : { signedVersions: upd.signedVersions }),
+      expectedDigest: offered.digest,
+    });
+  },
   unlock: async () => await never,
   leave: async () => await never,
   forget: async () => undefined,
@@ -140,8 +169,6 @@ const loadMachineSkills = async () => [
   skill('run', 'Launch the project app.', { scope: 'project', path: '/work/app/.claude/skills/run/SKILL.md', project: { root: '/work/app' } }),
 ];
 
-const params = new URLSearchParams(location.search);
-const view = params.get('view') ?? 'catalogs';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 const noop = () => undefined;
@@ -166,8 +193,8 @@ const sessions = [
   sessionView('ora', { config: { teammate: 'ora', label: 'Plain chores', mode: 'interactive', cwd: '/work/chores' }, state: { lastActivityAt: AT } }),
 ];
 
-if (['catalogs', 'shared', 'people'].includes(view)) {
-  createRoot(root).render(page(view));
+if (['catalogs', 'shared', 'people', 'update'].includes(view)) {
+  createRoot(root).render(page(updating ? 'shared' : view));
 } else if (view === 'full') {
   createRoot(root).render(
     <div className="kt-shell flex flex-row overflow-hidden" data-shot="" style={{ height: 900, width: window.innerWidth }}>
@@ -306,6 +333,28 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-shared-item-row]').first().waitFor({ state: 'visible' });
   await page.locator('[data-shared-item-installed]').first().waitFor({ state: 'visible' });
   await shot(page, 'tab-subscriptions', theme, vp);
+  await shot(page, 'store-installed-current', theme, vp, '[data-shared-item-row]');
+
+  await open(page, theme, 'update');
+  await page.locator('[data-shared-item-status="update"]').waitFor({ state: 'visible' });
+  await shot(page, 'store-update-available', theme, vp, '[data-shared-item-row]');
+  await page.locator('[data-shared-item-act="changes"]').click();
+  await page.locator('[data-update-changes]').waitFor({ state: 'visible' });
+  await shot(page, 'store-see-changes', theme, vp, '[role="dialog"]');
+  await page.locator('[data-update-go]').click();
+  await page.locator('[data-catalog-install]').waitFor({ state: 'visible' });
+  await shot(page, 'store-update-passkey', theme, vp, '[role="dialog"]');
+
+  await open(page, theme, 'update');
+  await page.locator('[data-shared-item-act="move"]').click();
+  await page.locator('[data-move-version]').first().waitFor({ state: 'visible' });
+  await shot(page, 'store-move-to-version', theme, vp, '[role="dialog"]');
+
+  await page.goto(`${server.url}?theme=${theme}&view=update&edited=1`);
+  await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
+  await page.locator('[data-shared-item-act="update"]').click();
+  await page.locator('[data-update-edited]').waitFor({ state: 'visible' });
+  await shot(page, 'store-keep-or-replace', theme, vp, '[role="dialog"]');
 
   await open(page, theme, 'people');
   await page.locator('[data-members-person]').first().waitFor({ state: 'visible' });
@@ -342,7 +391,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
               })),
             ),
         );
-      await shot(page, 'phone-more-sheet-' + label + '-top', theme, vp, '[role="dialog"]');
+      await shot(page, `phone-more-sheet-${label}-top`, theme, vp, '[role="dialog"]');
       await list.evaluate(node => {
         node.scrollTop = node.scrollHeight;
       });
@@ -351,8 +400,8 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
         const box = node.getBoundingClientRect();
         return box.top >= 0 && box.bottom <= window.innerHeight;
       });
-      if (!inView) fail('What’s new is not reachable by scrolling at ' + label);
-      await shot(page, 'phone-more-sheet-' + label + '-bottom', theme, vp, '[role="dialog"]');
+      if (!inView) fail(`What’s new is not reachable by scrolling at ${label}`);
+      await shot(page, `phone-more-sheet-${label}-bottom`, theme, vp, '[role="dialog"]');
     }
   } else {
     await page.setViewportSize({ width: 1440, height: 900 });

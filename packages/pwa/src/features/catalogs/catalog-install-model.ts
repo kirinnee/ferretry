@@ -268,6 +268,8 @@ export interface InstallRefusal {
   readonly previewAgain: boolean;
   /** The version is older than the one installed: offer "Install the older version anyway". */
   readonly olderOffered: boolean;
+  /** Files of this install were edited here: offer Keep my edits or Replace my edits. */
+  readonly editedOffered: boolean;
 }
 
 const INSTALL_REFUSALS: Readonly<Record<string, string>> = {
@@ -286,6 +288,7 @@ const INSTALL_REFUSALS: Readonly<Record<string, string>> = {
   catalog_bindings_invalid: 'The secrets you chose do not fit this item. Nothing was installed.',
   catalog_install_conflict:
     'Something is already where this would go, and this install did not put it there. Or it was edited here since. Nothing was changed.',
+  catalog_install_edited: 'This install was edited here, so it was not updated.',
   catalog_install_unknown: 'That install is already gone.',
   grant_step_up_required:
     'Nothing was installed: the passkey wasn’t confirmed. Press Install and confirm again. Each install needs its own passkey.',
@@ -298,6 +301,7 @@ const WITH_REASON = new Set([
   'catalog_target_unknown',
   'catalog_bindings_invalid',
   'catalog_install_conflict',
+  'catalog_install_edited',
 ]);
 
 export function installRefusal(error: unknown): InstallRefusal {
@@ -309,6 +313,7 @@ export function installRefusal(error: unknown): InstallRefusal {
     sentence: known === undefined ? changeRefusalSentence(error) : reason === '' ? known : `${known} ${reason}`,
     previewAgain: code === 'catalog_preview_unknown' || code === 'catalog_preview_expired',
     olderOffered: code === 'catalog_downgrade',
+    editedOffered: code === 'catalog_install_edited',
   };
 }
 

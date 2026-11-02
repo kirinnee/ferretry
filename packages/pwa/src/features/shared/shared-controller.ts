@@ -22,10 +22,17 @@ import {
   type SharedMe,
   type SharedRedeemResponse,
   type ShareLinkSeed,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { type RelayCrypto, verifyCatalogItem, verifySignedCatalogManifest } from '@ferretry/relay';
+import {
+  type RelayCrypto,
+  verifyCatalogItem,
+  verifyCatalogItemAgainstVersions,
+  verifySignedCatalogItemVersions,
+  verifySignedCatalogManifest,
+} from '@ferretry/relay';
 import type { MemberClient } from '../../lib/member-client.ts';
 import type { MemberKeyStore, MemberSubscription, MintedMemberKeys } from '../../lib/member-keys.ts';
 import { assertPasskey, type CredentialsPort, createPasskey } from '../../lib/passkeys.ts';
@@ -37,6 +44,7 @@ import {
   readMe,
   readSharedItem,
   readSharedManifest,
+  readSharedVersions,
   redeemShare,
   registerPasskey,
   unlockMember,
@@ -56,6 +64,20 @@ import {
 class ItemNotVerifiedError extends Error {}
 
 export const ITEM_NOT_THE_LISTED_ONE = 'This item is not the one the catalog lists, so it was not opened.';
+
+export const VERSIONS_NOT_THE_LISTED_ONES =
+  'This list of versions is not the one for this catalog, so it was not used. Nothing was changed.';
+
+/** One version of an item, verified, ready to be previewed over an install of it. */
+export interface UpdateSource {
+  readonly item: SharedCatalogItem;
+  readonly manifest: SharedCatalogManifest;
+  readonly signedManifest: SignedCatalogManifest;
+  /** Present exactly when `item` is not the version the manifest lists as current. */
+  readonly signedVersions?: SignedCatalogItemVersions;
+  /** The digest this version has in this catalog, which the installing machine's own answer must match. */
+  readonly expectedDigest: string;
+}
 
 export interface OpenedItemValue {
   readonly item: SharedCatalogItem;
@@ -265,6 +287,73 @@ export class SharedController {
           },
         },
       };
+    });
+  }
+
+  /**
+   * The versions the publisher still offers for one item, signed. Believed only when it is signed by the publisher and
+   * is for THIS catalog, item and revision of the manifest this browser holds and has verified.
+   */
+  async versions(
+    subscription: MemberSubscription,
+    view: SharedCatalogView,
+    itemId: string,
+  ): Promise<Attempt<SignedCatalogItemVersions>> {
+    const { signed, manifest } = view;
+    if (signed === undefined || manifest === undefined) {
+      return { kind: 'failed', problem: { kind: 'gone', sentence: NOT_SHOWN_SENTENCE } };
+    }
+    return await this.#attempt(subscription, async client => {
+      const list = await readSharedVersions(client, view.catalogId, itemId);
+      const checked = await verifySignedCatalogItemVersions(this.#ports.crypto, list);
+      if (!checked.ok) throw new ItemNotVerifiedError(checked.reason);
+      const { versions } = list;
+      if (
+        list.spki !== signed.spki ||
+        versions.publisher !== manifest.publisher ||
+        versions.catalogId !== manifest.catalogId ||
+        versions.itemId !== itemId ||
+        versions.revision !== manifest.revision
+      )
+        throw new ItemNotVerifiedError(VERSIONS_NOT_THE_LISTED_ONES);
+      return list;
+    });
+  }
+
+  /**
+   * One version of an item, ready to install over an install of it. The current version is opened as a store row opens
+   * it. Any other offered version needs the signed list it is offered in and is verified against it and the manifest.
+   */
+  async openVersion(
+    subscription: MemberSubscription,
+    view: SharedCatalogView,
+    entry: SharedCatalogManifestEntry,
+    version: number,
+    signedVersions?: SignedCatalogItemVersions,
+  ): Promise<Attempt<UpdateSource>> {
+    const { signed, manifest } = view;
+    if (signed === undefined || manifest === undefined) {
+      return { kind: 'failed', problem: { kind: 'gone', sentence: NOT_SHOWN_SENTENCE } };
+    }
+    if (version === entry.version) {
+      const opened = await this.openItem(subscription, view, entry);
+      if (opened.kind !== 'ok') return opened;
+      const { item } = opened.value;
+      return { kind: 'ok', value: { item, manifest, signedManifest: signed, expectedDigest: entry.digest } };
+    }
+    return await this.#attempt(subscription, async (client): Promise<UpdateSource> => {
+      if (signedVersions === undefined) throw new ItemNotVerifiedError(VERSIONS_NOT_THE_LISTED_ONES);
+      const item = await readSharedItem(client, view.catalogId, entry.itemId, version);
+      const checked = await verifyCatalogItemAgainstVersions(
+        this.#ports.crypto,
+        manifest,
+        signed.spki,
+        signedVersions,
+        item,
+      );
+      if (!checked.ok) throw new ItemNotVerifiedError(checked.reason);
+      if (item.itemVersion !== version) throw new ItemNotVerifiedError(ITEM_NOT_THE_LISTED_ONE);
+      return { item, manifest, signedManifest: signed, signedVersions, expectedDigest: checked.value.digest };
     });
   }
 

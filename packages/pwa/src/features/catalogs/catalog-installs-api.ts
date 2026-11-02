@@ -8,8 +8,11 @@
 
 import {
   CATALOG_INSTALLS_PATH,
+  type CatalogInstall,
   type CatalogInstallList,
   CatalogInstallListSchema,
+  type CatalogInstallPrefsRequest,
+  CatalogInstallPrefsRequestSchema,
   type CatalogInstallPreview,
   type CatalogInstallPreviewRequest,
   CatalogInstallPreviewRequestSchema,
@@ -18,9 +21,11 @@ import {
   CatalogInstallRemovedSchema,
   type CatalogInstallRequest,
   CatalogInstallRequestSchema,
+  CatalogInstallSchema,
   type CatalogInstallScope,
   type CatalogInstalled,
   CatalogInstalledSchema,
+  catalogInstallPath,
   catalogInstallsPath,
 } from '@ferretry/protocol';
 import type { CatalogClient } from './catalogs-api.ts';
@@ -68,4 +73,17 @@ export async function removeCatalogInstall(
     CatalogInstallRemovedSchema,
     { method: 'DELETE' },
   );
+}
+
+/** Stay on a version or skip one. Touches no file, and asks for no passkey. */
+export async function setCatalogInstallPrefs(
+  client: CatalogClient,
+  scope: CatalogInstallScope,
+  installId: string,
+  prefs: CatalogInstallPrefsRequest,
+): Promise<CatalogInstall> {
+  return await client.request(catalogInstallPath(scope, installId), CatalogInstallSchema, {
+    method: 'PATCH',
+    ...jsonBody(CatalogInstallPrefsRequestSchema.parse(prefs)),
+  });
 }

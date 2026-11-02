@@ -41,7 +41,7 @@ const COLUMN_CLASS = 'w-full max-w-[680px]';
 
 type SharedPort = Pick<
   SharedController,
-  'list' | 'browse' | 'unlock' | 'openItem' | 'leave' | 'forget' | 'rename' | 'tryAgain'
+  'list' | 'browse' | 'unlock' | 'openItem' | 'versions' | 'openVersion' | 'leave' | 'forget' | 'rename' | 'tryAgain'
 >;
 
 export interface SharingPageProps {

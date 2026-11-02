@@ -2,7 +2,6 @@ import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { SharedWithMe } from '../../../../src/features/shared/shared-with-me.tsx';
 import {
   INSTALL,
-  INSTALLED,
   LEAVE_NOTE,
   LEFT_SENTENCE,
   NOTHING_SHARED,
@@ -588,7 +587,7 @@ describe('the store page', () => {
     );
     await settle();
     const row = q(`[data-shared-item-row="${firstItem()}"]`);
-    expect(row?.querySelector('[data-shared-item-installed]')?.textContent).toBe(INSTALLED);
+    expect(row?.querySelector('[data-shared-item-installed]')?.textContent).toBe('Installed v1');
     expect(row?.querySelector('[data-shared-item-install]')).toBeNull();
     await view.unmount();
   });

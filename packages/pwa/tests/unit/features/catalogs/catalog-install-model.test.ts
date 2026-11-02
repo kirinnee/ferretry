@@ -245,6 +245,11 @@ describe('installRefusal', () => {
     should(refuse('catalog_downgrade').olderOffered).be.true();
     should(refuse('catalog_item_mismatch').olderOffered).be.false();
   });
+  it('offers keep or replace only for an install that was edited here', () => {
+    should(refuse('catalog_install_edited').editedOffered).be.true();
+    should(refuse('catalog_install_edited').sentence).match(/edited here/u);
+    should(refuse('catalog_downgrade').editedOffered).be.false();
+  });
   it('adds the daemon’s reason where it names one', () => {
     should(refuse('catalog_install_conflict', 'SKILL.md was edited').sentence).match(/SKILL\.md was edited/u);
     should(refuse('catalog_install_conflict', '  ').sentence).not.match(/ {2}$/u);

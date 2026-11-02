@@ -5,7 +5,7 @@
  */
 
 import type { CatalogInstall } from '@ferretry/protocol';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { listCatalogInstalls } from '../catalogs/catalog-installs-api.ts';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -20,18 +20,61 @@ export function installedNames(installs: readonly CatalogInstall[], publisher: s
   return names;
 }
 
+/** One install of an item on one paired machine, as that machine recorded it. */
+export interface InstalledItem {
+  readonly name: string;
+  readonly version: number;
+  readonly install: CatalogInstall;
+  readonly machine: InstallMachine;
+}
+
+/**
+ * Item id → the install the store row speaks for. An item installed in several places shows the oldest copy, since
+ * that is the one an update helps most; a tie keeps the first machine listed.
+ */
+export function installedItems(
+  lists: readonly { readonly machine: InstallMachine; readonly installs: readonly CatalogInstall[] }[],
+  publisher: string,
+): ReadonlyMap<string, InstalledItem> {
+  const items = new Map<string, InstalledItem>();
+  for (const { machine, installs } of lists) {
+    for (const install of installs) {
+      const { provenance } = install;
+      if (provenance.publisher !== publisher) continue;
+      const held = items.get(provenance.itemId);
+      if (held === undefined || provenance.version < held.version)
+        items.set(provenance.itemId, { name: provenance.name, version: provenance.version, install, machine });
+    }
+  }
+  return items;
+}
+
+/** Item id → name, for the sentences that name an item only by its record. */
+export function itemNames(items: ReadonlyMap<string, InstalledItem>): ReadonlyMap<string, string> {
+  return new Map([...items].map(([itemId, item]) => [itemId, item.name]));
+}
+
+export interface InstalledFromPublisher {
+  readonly items: ReadonlyMap<string, InstalledItem>;
+  /** Reads the machines' records again, after a change. */
+  readonly refresh: () => void;
+}
+
 /** What the paired machines installed from `publisher`. Empty until read, and where nothing can be read. */
 export function useInstalledFromPublisher(
   publisher: string,
   machines: readonly InstallMachine[],
   host: InstallHost | undefined,
-): ReadonlyMap<string, string> {
+): InstalledFromPublisher {
   const routed = useDaemonClient();
   const createClient = host?.createClient ?? routed;
-  const [names, setNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [items, setItems] = useState<ReadonlyMap<string, InstalledItem>>(() => new Map());
+  const [reads, setReads] = useState(0);
+  const refresh = useCallback(() => setReads(count => count + 1), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` is the trigger; a change of the records asks for a new read
   useEffect(() => {
     if (machines.length === 0) {
-      setNames(new Map());
+      setItems(new Map());
       return;
     }
     let live = true;
@@ -39,17 +82,17 @@ export function useInstalledFromPublisher(
       machines.map(async machine => {
         try {
           const { installs } = await listCatalogInstalls(await createClient(machine.connection));
-          return Array.isArray(installs) ? installs : [];
+          return { machine, installs: Array.isArray(installs) ? installs : [] };
         } catch {
-          return [];
+          return { machine, installs: [] };
         }
       }),
     ).then(lists => {
-      if (live) setNames(installedNames(lists.flat(), publisher));
+      if (live) setItems(installedItems(lists, publisher));
     });
     return () => {
       live = false;
     };
-  }, [machines, createClient, publisher]);
-  return names;
+  }, [machines, createClient, publisher, reads]);
+  return { items, refresh };
 }
