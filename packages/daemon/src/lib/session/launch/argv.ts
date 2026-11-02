@@ -251,15 +251,14 @@ function inlineOverlay(overlay: string): Record<string, unknown> | undefined {
 
 /**
  * What an inline overlay says that a Restart would change: the compaction trigger as a `--compact-at=<n>` marker,
- * then every OTHER setting in it as an overlay of its own. Only fast mode, a run fact, is left out. An overlay
- * with no trigger is fast mode's alone and is dropped whole, as it always was.
+ * when it has one, then every OTHER setting in it as an overlay of its own. Only fast mode, a run fact, is left
+ * out, whether or not the trigger rides beside it.
  */
 function overlaySettings(overlay: string): readonly string[] {
   const parsed = inlineOverlay(overlay);
   const { fastMode: _fast, [CLAUDE_COMPACT_KEY]: compactAt, ...others } = parsed ?? {};
-  if (typeof compactAt !== 'number') return [];
   return [
-    `--compact-at=${compactAt}`,
+    ...(typeof compactAt === 'number' ? [`--compact-at=${compactAt}`] : []),
     ...(Object.keys(others).length === 0
       ? []
       : [
@@ -271,22 +270,25 @@ function overlaySettings(overlay: string): readonly string[] {
 
 /**
  * The compaction trigger a recorded launch command carries, in tokens, or `auto` when it carries none — what the
- * RUNNING process was started with (Claude's inline `--settings` `autoCompactWindow`; Codex's `-c` pair).
+ * RUNNING process was started with. The LAST word wins, as it does for the process: Claude honours one
+ * `--settings`, the last, so a later one (an owner's own flag) replaces the whole overlay and its trigger with
+ * it; for Codex the last `-c` pair wins.
  */
 export function launchedCompactAt(command: readonly string[]): CompactAt {
+  let launched: CompactAt = 'auto';
   for (let index = 0; index < command.length; index += 1) {
     const next = command[index + 1];
     if (next === undefined) break;
     if (command[index] === '--settings') {
       const value = inlineOverlay(next)?.[CLAUDE_COMPACT_KEY];
-      if (typeof value === 'number') return value;
+      launched = typeof value === 'number' ? value : 'auto';
     }
     if (command[index] === '-c' && next.startsWith(`${CODEX_COMPACT_KEY}=`)) {
       const value = Number(next.slice(CODEX_COMPACT_KEY.length + 1));
-      if (Number.isSafeInteger(value)) return value;
+      if (Number.isSafeInteger(value)) launched = value;
     }
   }
-  return 'auto';
+  return launched;
 }
 
 /**

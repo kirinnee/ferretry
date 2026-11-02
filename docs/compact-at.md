@@ -41,7 +41,9 @@ It is a **launch setting** ([launch-settings.md](launch-settings.md)): it reache
 launched — **Restart CLI**, a revive, a restart after `fy daemon restart` or a migration all build it again from
 the ferret's saved config. A change on a running ferret says so ("takes effect when the ferret restarts"), and keeps saying so — on a read
 and on a repeat of the same change — for as long as the process still runs on the value it launched with (read
-from the launch arguments the daemon recorded). A
+from the launch arguments the daemon recorded). That value is the one the process actually uses, so the
+last word wins: an owner's own `harnessFlags` come last, and a later Codex `-c` pair or a later Claude
+`--settings` replaces the one the daemon wrote. A
 ferret that is not running takes it at its next launch.
 
 It is **not** sent to a running harness. Claude Code's `/autocompact` would do that, but it writes the login's

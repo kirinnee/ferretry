@@ -194,3 +194,80 @@ describe('launchedCompactAt', () => {
     should(launchedCompactAt([WRAPPER, '--settings', '[250000]'])).equal('auto');
   });
 });
+
+describe('settingsArguments with a fast-only overlay', () => {
+  const overlay = (settings: Record<string, unknown>): readonly string[] => [
+    WRAPPER,
+    '--settings',
+    JSON.stringify(settings),
+  ];
+
+  it('should see a change to another setting beside fast mode when no trigger is named', () => {
+    // Act
+    const before = settingsArguments(overlay({ disableAllHooks: false, fastMode: true }));
+    const after = settingsArguments(overlay({ disableAllHooks: true, fastMode: true }));
+
+    // Assert
+    should(before).not.eql(after);
+    should(before.some(token => token.startsWith('--compact-at'))).be.false();
+  });
+
+  it('should still ignore fast mode itself when it rides alone with the login’s settings', () => {
+    // Act
+    const fast = settingsArguments(overlay({ disableAllHooks: false, fastMode: true }));
+    const standard = settingsArguments(overlay({ disableAllHooks: false, fastMode: false }));
+
+    // Assert
+    should(fast).eql(standard);
+  });
+});
+
+describe('launchedCompactAt when the last word wins', () => {
+  it('should read the later Codex -c pair over the earlier one', () => {
+    // Act
+    const launched = launchedCompactAt(
+      buildLaunchArgv({
+        ...claudeParts({ compactAt: 250_000, harnessFlags: ['-c', 'model_auto_compact_token_limit=400000'] }),
+        harness: 'codex' as const,
+      }),
+    );
+
+    // Assert
+    should(launched).equal(400_000);
+  });
+
+  it('should keep the earlier Codex pair when a later one is not a number', () => {
+    // Act / Assert
+    should(
+      launchedCompactAt([
+        WRAPPER,
+        '-c',
+        'model_auto_compact_token_limit=300000',
+        '-c',
+        'model_auto_compact_token_limit=x',
+      ]),
+    ).equal(300_000);
+  });
+
+  it('should read the later Claude overlay over the earlier one', () => {
+    // Act
+    const launched = launchedCompactAt(
+      buildLaunchArgv(
+        claudeParts({ compactAt: 250_000, harnessFlags: ['--settings', '{"autoCompactWindow":400000}'] }),
+      ),
+    );
+
+    // Assert
+    should(launched).equal(400_000);
+  });
+
+  it('should be auto when a later --settings replaces the overlay and names no trigger', () => {
+    // Act
+    const launched = launchedCompactAt(
+      buildLaunchArgv(claudeParts({ compactAt: 250_000, harnessFlags: ['--settings', '{"theme":"dark"}'] })),
+    );
+
+    // Assert
+    should(launched).equal('auto');
+  });
+});
