@@ -38,6 +38,34 @@ describe('freeMemberName', () => {
 });
 
 describe('uniqueMemberNames', () => {
+  it('should never rename a person whose name was already unique, nor hand anyone an ID somebody holds', () => {
+    const members = [
+      storedMember(1, { label: 'Alice', createdAt: iso(T0) }),
+      storedMember(2, { label: 'alice', createdAt: iso(T0 + 1_000) }),
+      storedMember(3, { label: 'Alice (2)', createdAt: iso(T0 + 2_000) }),
+    ];
+
+    const result = uniqueMemberNames(members);
+
+    should(result.members.map(member => member.label)).eql(['Alice', 'alice (3)', 'Alice (2)']);
+    should(result.renames).eql([{ memberId: memberId(2), from: 'alice', to: 'alice (3)' }]);
+  });
+
+  it('should change nobody whose name is unique, whatever the others hold', () => {
+    const members = [
+      storedMember(1, { label: 'Sam', createdAt: iso(T0) }),
+      storedMember(2, { label: 'Sam (2)', createdAt: iso(T0 + 1_000) }),
+      storedMember(3, { label: 'sam', createdAt: iso(T0 + 2_000) }),
+      storedMember(4, { label: 'SAM (3)', createdAt: iso(T0 + 3_000) }),
+      storedMember(5, { label: 'Bea', createdAt: iso(T0 + 4_000) }),
+    ];
+
+    const result = uniqueMemberNames(members);
+
+    should(result.members.map(member => member.label)).eql(['Sam', 'Sam (2)', 'sam (4)', 'SAM (3)', 'Bea']);
+    should(result.renames.map(rename => rename.memberId)).eql([memberId(3)]);
+  });
+
   it('should answer the same members when no two share a name', () => {
     const members = [storedMember(1, { label: 'Alice' }), storedMember(2, { label: 'Bob' })];
 

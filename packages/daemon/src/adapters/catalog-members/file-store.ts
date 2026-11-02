@@ -60,6 +60,11 @@ class JsonDocumentFile<T> {
     await this.writeFile(this.file, `${JSON.stringify(document, undefined, 2)}\n`);
   }
 
+  /** The text of `file`, or `undefined` when it is not there. */
+  async textOf(file: string): Promise<string | undefined> {
+    return await this.files.readText(file);
+  }
+
   async writeFile(file: string, text: string): Promise<void> {
     await this.files.ensureDirectory(this.paths.catalogs, DIRECTORY_MODE);
     await this.files.writeTextAtomic(file, text);
@@ -101,8 +106,8 @@ export class FileCatalogMembersStore implements CatalogMembersStore {
         this.upgrade = {
           renames: unique.renames,
           commit: async () => {
-            await this.document.writeFile(this.paths.catalogMembersBeforeUniqueNames, raw);
-            await this.document.write(data);
+            await this.document.writeFile(await this.backupFile(raw), raw);
+            await this.write(data);
           },
         };
         return { success: true, data };
@@ -121,8 +126,29 @@ export class FileCatalogMembersStore implements CatalogMembersStore {
     return upgrade;
   }
 
+  /** Refused, with nothing written, when two people would share a name or any other rule of the file is broken. */
   async write(document: MembersDocument): Promise<void> {
+    const parsed = MembersDocumentSchema.safeParse(document);
+    if (!parsed.success)
+      throw new CatalogMemberRefusal(
+        'store_damaged',
+        `members.json was not written: ${documentProblem(parsed) ?? 'it is malformed'}. Nothing was changed.`,
+      );
     await this.document.write(document);
+  }
+
+  /**
+   * Where the original goes: the plain name when nothing is there, the same place when it already holds exactly this
+   * file, and otherwise the first numbered name that is free. A backup is never replaced, so an earlier original
+   * survives a later upgrade.
+   */
+  private async backupFile(raw: string): Promise<string> {
+    const plain = this.paths.catalogMembersBeforeUniqueNames;
+    for (let n = 1; ; n += 1) {
+      const file = n === 1 ? plain : plain.replace(/\.json$/u, `.${String(n)}.json`);
+      const held = await this.document.textOf(file);
+      if (held === undefined || held === raw) return file;
+    }
   }
 }
 
