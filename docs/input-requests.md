@@ -1110,6 +1110,12 @@ own challenge view (see below). It may also pass `secretHint`, `factor` and `wai
 waits with `input_wait` on that id and is told `waiting`, `moved-on` (with `secondFactor: 'push'` when the daemon
 kept that fact), `timed-out`, `refused` or `gone`. It is never told the number.
 
+**How a ferret knows to.** Three places say it, each in one sentence, so a ferret need not have a `push` 2FA key on the
+account to find it: the fixed-layer prompt ("Phone prompt (tap Yes, a number): request_input push: true"), the `push`
+flag's own MCP description ("Approve on your phone"), and `account_hint`'s result (`ACCOUNT_HINT_PHONE`, appended whether or
+not a sign-in is saved). Without it a ferret polled Google's own phone-number prompt with `browser_read` for about two
+minutes and the owner saw no number on a card; with it the card and its high-priority push are raised in seconds.
+
 **Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
 
 - where: a page or a terminal;
