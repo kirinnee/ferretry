@@ -6,8 +6,15 @@
  *   PR facts, a refile, `fy signal done`) and once at boot ({@link GateItems.backfill}), a card waiting at a gate
  *   has exactly one gate item: raised as the daemon on its ferret's agenda (the assignee's, else its owner ferret's,
  *   stopped or not) under `gate:<card>:<lane>:<entry>`, so raising it again is no change.
+ * - **One per machine.** A card changes hands (reassigned, handed down) and its items stay where they were raised, so
+ *   a card's gate items are looked for on EVERY agenda that ever held one, not only its ferrets' of today. One gate
+ *   asks once across all of them: an open item elsewhere is MOVED to the card's ferret, carrying its snooze and its
+ *   conversation, and closed where it was; a duplicate is closed; and a gate the owner already answered on any agenda
+ *   is never asked again. A one-time sweep ({@link GateItems.backfill}) closed the duplicates raised before this held.
  * - **Leaving.** A card no longer at that gate (moved on by anyone, dropped, refiled) has its open gate item
  *   resolved quietly: "the card moved on".
+ * - **Back at a gate.** The Not good conversations of EARLIER rounds are closed wherever they are, unless one is
+ *   still going with the owner (their turn, or anything said since the card came back).
  * - **Answering** ({@link GateItems.answer}): only a human. The card moves FIRST, as the owner, through the board;
  *   only a move that went through closes the item, so an item is never answered while its card stayed put.
  *
@@ -71,11 +78,26 @@ interface GateWords {
   told(task: BoardTask, message: string, key: string): Promise<void>;
 }
 
+/** Every session on this machine whose agenda may hold a card's gate item: a card changes hands, its items do not. */
+interface GateSessions {
+  all(): Promise<readonly string[]>;
+}
+
+/** Where the one-time sweep of duplicate gate items records that it ran: once, for this daemon's home. */
+export interface GateItemsMigrationMarker {
+  ran(): Promise<boolean>;
+  /** Records that it ran, and every item it closed (`<session> !A<n>`). */
+  record(at: string, closed: readonly string[]): Promise<void>;
+}
+
 export interface GateItemsDependencies {
   readonly agenda: GateAgenda;
   readonly board: GateBoard;
   readonly lanes: GateLanes;
   readonly words: GateWords;
+  readonly sessions: GateSessions;
+  readonly marker: GateItemsMigrationMarker;
+  readonly now: () => string;
   readonly diagnostics: { warn(message: string): void };
 }
 
@@ -123,10 +145,66 @@ interface OpenItem {
   readonly item: AgendaItem;
 }
 
-/** The sessions whose agendas may hold a card's gate items: its assignee's first, then its owner ferret's. */
+/** A card's gate items and follow-ups on the agendas that hold any, and the gates already asked and closed. */
+interface HeldItems {
+  readonly gates: readonly OpenItem[];
+  readonly followups: readonly OpenItem[];
+  /** The `gate:` references of the card's closed gate items: each of those gates has been asked. */
+  readonly asked: ReadonlySet<string>;
+}
+
+/** The sessions whose agendas a card's gate item belongs on: its assignee's first, then its owner ferret's. */
 const sessionsOf = (task: Pick<BoardTask, 'assignee' | 'owner'>): readonly string[] => [
   ...new Set([effectiveAssignee(task), task.owner]),
 ];
+
+/** The card a gate item or a follow-up (the daemon's `task` source) is about, else `undefined`. */
+const gateCardOf = (item: AgendaItem): string | undefined => {
+  if (item.raisedBy !== 'daemon' || item.source !== 'task') return undefined;
+  return parseGateReference(item.sourceRef)?.cardId ?? parseGateFollowupReference(item.sourceRef)?.cardId;
+};
+
+/** The resolution note of a gate item another one stands in for: where the card's one gate item is now. */
+const supersededNote = (kept: OpenItem): string =>
+  `the card changed hands; its gate item is now !${kept.item.id} on ${kept.sessionId}'s agenda`;
+
+/** The newer of two items of one gate: the one raised (or woken) later, the later session on a tie. */
+const newer = (one: OpenItem, other: OpenItem): OpenItem => {
+  const order = Date.parse(other.item.waitingSince) - Date.parse(one.item.waitingSince);
+  return order > 0 || (order === 0 && other.sessionId > one.sessionId) ? other : one;
+};
+
+/** Whether a follow-up is still going with the owner: on their turn, or with anything said after `since`. */
+const talking = (item: AgendaItem, since: number): boolean =>
+  (item.waitingOn === undefined && item.parked === undefined) || lastActivity(item) > since;
+
+/** Runs `work` once every earlier one queued under `key` has settled: one at a time per key. */
+const serially = async <T>(
+  queues: Map<BoardTaskId, Promise<unknown>>,
+  key: BoardTaskId,
+  work: () => Promise<T>,
+): Promise<T> => {
+  const turn = (queues.get(key) ?? Promise.resolve()).then(work);
+  const tail = turn.catch(() => undefined);
+  queues.set(key, tail);
+  try {
+    return await turn;
+  } finally {
+    if (queues.get(key) === tail) queues.delete(key);
+  }
+};
+
+/** When anything last happened on an item: raised, woken, asked, talked over, edited or parked. */
+const lastActivity = (item: AgendaItem): number =>
+  Math.max(
+    ...[
+      item.waitingSince,
+      item.askedAt,
+      item.parked?.at,
+      ...(item.history ?? []).map(each => each.at),
+      ...(item.revisions ?? []).map(each => each.at),
+    ].flatMap(at => (at === undefined ? [] : [Date.parse(at)])),
+  );
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -135,6 +213,12 @@ export class GateItems implements CardWriteObserver {
   private readonly answering = new Set<BoardTaskId>();
   /** One answer per card at a time: the tail of each card's queue of answers. */
   private readonly answers = new Map<BoardTaskId, Promise<unknown>>();
+  /** One pass over a card's gate items at a time, so two writes of one card never raise its gate twice. */
+  private readonly passes = new Map<BoardTaskId, Promise<unknown>>();
+  /** Which agendas hold (or held) each card's gate items and follow-ups: read once from all, then kept as raised. */
+  private readonly holders = new Map<string, Set<string>>();
+  /** The one read of every agenda behind {@link holders}, once it has started. */
+  private scanning: Promise<void> | undefined;
 
   constructor(private readonly ports: GateItemsDependencies) {}
 
@@ -155,10 +239,14 @@ export class GateItems implements CardWriteObserver {
   }
 
   /**
-   * At boot: every card already waiting at a gate gets its one item, and every open gate item whose card moved on
-   * while the daemon was down is resolved. Each card on its own; returns how many items it raised.
+   * At boot: the duplicates sweep runs if it never has, every card already waiting at a gate gets its one item, and
+   * every open gate item whose card moved on while the daemon was down is resolved. Each card on its own; returns
+   * how many items it raised.
    */
   async backfill(): Promise<number> {
+    await this.sweepDuplicates().catch((error: unknown) =>
+      this.ports.diagnostics.warn(`the sweep of duplicate gate items failed: ${errorText(error)}`),
+    );
     const cards = await this.ports.board.cards();
     let raised = 0;
     for (const card of cards) {
@@ -182,15 +270,7 @@ export class GateItems implements CardWriteObserver {
     const cardId = listed.ok ? listed.value.items.find(each => each.id === answer.id)?.gate?.cardId : undefined;
     if (cardId === undefined) return { handled: false };
     // Answers to one card's gate take turns: the second reads the board the first one left.
-    const before = this.answers.get(cardId) ?? Promise.resolve();
-    const turn = before.then(async () => await this.answerAlone(answer));
-    const tail = turn.catch(() => undefined);
-    this.answers.set(cardId, tail);
-    try {
-      return await turn;
-    } finally {
-      if (this.answers.get(cardId) === tail) this.answers.delete(cardId);
-    }
+    return await serially(this.answers, cardId, async () => await this.answerAlone(answer));
   }
 
   private async answerAlone(answer: GateAnswer): Promise<GateAnswerOutcome> {
@@ -235,35 +315,94 @@ export class GateItems implements CardWriteObserver {
     }
   }
 
-  /** Brings one card's gate items in line with its lane; `true` when it raised one. */
+  /** Brings one card's gate items in line with its lane, one pass per card at a time; `true` when it raised one. */
   private async reconcile(card: GateCard): Promise<boolean> {
+    return await serially(this.passes, card.task.id, async () => await this.reconcileAlone(card));
+  }
+
+  private async reconcileAlone(card: GateCard): Promise<boolean> {
+    const { task } = card;
     const gate = gateOf(card, this.ports.lanes);
     const wanted = gate === undefined ? undefined : gateReference(gate);
-    const sessions = sessionsOf(card.task);
-    const open = await this.openItems(card.task.id, sessions);
-    for (const stale of open.gates.filter(each => each.item.sourceRef !== wanted)) {
+    const home = sessionsOf(task);
+    const held = await this.held(task.id, home);
+    for (const stale of held.gates.filter(each => each.item.sourceRef !== wanted)) {
       await this.ports.agenda.resolve(stale.sessionId, stale.item.id, DAEMON, GATE_MOVED_ON);
     }
     if (gate === undefined) return false;
-    const current = open.gates.find(each => each.item.sourceRef === wanted);
-    if (current !== undefined) {
-      // Already asked: brought up to date (an open PR said or unsaid), never raised a second time.
-      await this.ports.agenda.raise(current.sessionId, gateRaise(gate, card.task), DAEMON);
-      return false;
-    }
-    const raised = await this.raise(card.task, gate, sessions);
-    // Back at a gate: the conversation the last Not good opened has done its work.
-    if (raised) {
-      for (const followup of open.followups) {
-        await this.ports.agenda.resolve(
-          followup.sessionId,
-          followup.item.id,
-          DAEMON,
-          `the card is back in ${gate.laneName}`,
-        );
-      }
-    }
+    const asking = held.gates.filter(each => each.item.sourceRef === wanted);
+    let raised = false;
+    if (asking.length > 0) await this.keepOne(task, gate, home, asking);
+    // A gate asks once on every agenda: one the owner answered (or set aside) anywhere is never asked again.
+    else if (!held.asked.has(gateReference(gate))) raised = await this.raise(task, gate, home);
+    await this.closeEarlierRounds(task, gate, held.followups);
     return raised;
+  }
+
+  /**
+   * The gate is asked already, on one agenda or more, and ONE item stays: the one on the card's ferret's agenda,
+   * brought up to date; else the newest, moved there as it stood. Every other one is closed, saying which one stands.
+   */
+  private async keepOne(
+    task: BoardTask,
+    gate: AgendaGate,
+    home: readonly string[],
+    asking: readonly OpenItem[],
+  ): Promise<void> {
+    const request = gateRaise(gate, task);
+    const atHome = home.flatMap(sessionId => asking.filter(each => each.sessionId === sessionId))[0];
+    const newest = asking.reduce(newer);
+    const kept = atHome ?? (await this.move(task, gate, request, newest, home)) ?? newest;
+    // Already asked: brought up to date (an open PR said or unsaid), never raised a second time.
+    if (asking.includes(kept)) await this.ports.agenda.raise(kept.sessionId, request, DAEMON);
+    for (const other of asking.filter(each => each !== kept)) {
+      await this.ports.agenda.resolve(other.sessionId, other.item.id, DAEMON, supersededNote(kept));
+    }
+  }
+
+  /**
+   * The gate raised on the card's ferret's agenda as `from` stood — its snooze, whose turn it is, its conversation —
+   * so the owner is not asked afresh. The new item, or `undefined` when no agenda of the card's took it.
+   */
+  private async move(
+    task: BoardTask,
+    gate: AgendaGate,
+    request: RaiseAgendaRequest,
+    from: OpenItem,
+    home: readonly string[],
+  ): Promise<OpenItem | undefined> {
+    const refusals: string[] = [];
+    for (const sessionId of home) {
+      const mutation = await this.ports.agenda.raise(sessionId, { ...request, carried: from.item }, DAEMON);
+      if (mutation.ok && mutation.item !== undefined) {
+        this.remember(task.id, sessionId);
+        return { sessionId, item: mutation.item };
+      }
+      refusals.push(`${sessionId}: ${mutation.ok ? 'already asked there' : mutation.error.message}`);
+    }
+    this.ports.diagnostics.warn(
+      `the gate item of ${formatTaskRef(task)} in ${gate.laneName} stays on ${from.sessionId}'s agenda: ${refusals.join('; ')}`,
+    );
+    return undefined;
+  }
+
+  /**
+   * Back at a gate: the Not good conversations of EARLIER rounds have done their work, wherever they are — but never
+   * one still going with the owner: on the owner's turn, or with anything said since the card came back.
+   */
+  private async closeEarlierRounds(task: BoardTask, gate: AgendaGate, followups: readonly OpenItem[]): Promise<void> {
+    const back = task.history.find(each => each.seq === gate.entry)?.at;
+    if (back === undefined) return;
+    for (const followup of followups) {
+      const round = parseGateFollowupReference(followup.item.sourceRef)?.entry ?? gate.entry;
+      if (round >= gate.entry || talking(followup.item, Date.parse(back))) continue;
+      await this.ports.agenda.resolve(
+        followup.sessionId,
+        followup.item.id,
+        DAEMON,
+        `the card is back in ${gate.laneName}`,
+      );
+    }
   }
 
   /** Raises the gate item on the first of the card's sessions that takes it; `true` when one was created. */
@@ -272,32 +411,102 @@ export class GateItems implements CardWriteObserver {
     const refusals: string[] = [];
     for (const sessionId of sessions) {
       const mutation = await this.ports.agenda.raise(sessionId, request, DAEMON);
-      if (mutation.ok) return mutation.change === 'created';
+      if (mutation.ok) {
+        this.remember(task.id, sessionId);
+        return mutation.change === 'created';
+      }
       refusals.push(`${sessionId}: ${mutation.error.message}`);
     }
     this.ports.diagnostics.warn(`no gate item for ${formatTaskRef(task)} in ${gate.laneName}: ${refusals.join('; ')}`);
     return false;
   }
 
-  /** The card's open gate items and follow-ups on its sessions' agendas. A board that cannot be read holds none. */
-  private async openItems(
-    cardId: BoardTaskId,
-    sessions: readonly string[],
-  ): Promise<{ readonly gates: readonly OpenItem[]; readonly followups: readonly OpenItem[] }> {
+  /**
+   * The card's gate items and follow-ups, on its ferrets' agendas and on every other that ever held one of its items:
+   * open ones, and the gates already asked and closed. An agenda that cannot be read holds none.
+   */
+  private async held(cardId: BoardTaskId, home: readonly string[]): Promise<HeldItems> {
+    await this.scanned();
     const gates: OpenItem[] = [];
     const followups: OpenItem[] = [];
-    for (const sessionId of sessions) {
+    const asked = new Set<string>();
+    for (const sessionId of new Set([...home, ...(this.holders.get(cardId) ?? [])])) {
       const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
       if (listed === undefined || !listed.ok) continue;
       for (const item of listed.value.items) {
-        // Only the gate items' own producer: the daemon's `task` source (a gate item also carries its `gate`).
-        if (item.raisedBy !== 'daemon' || item.source !== 'task') continue;
-        if (item.gate !== undefined && parseGateReference(item.sourceRef)?.cardId === cardId)
-          gates.push({ sessionId, item });
-        else if (parseGateFollowupReference(item.sourceRef)?.cardId === cardId) followups.push({ sessionId, item });
+        if (gateCardOf(item) !== cardId) continue;
+        if (item.gate !== undefined) gates.push({ sessionId, item });
+        else followups.push({ sessionId, item });
+      }
+      for (const item of listed.value.resolved) {
+        if (item.gate !== undefined && item.sourceRef !== null && gateCardOf(item) === cardId)
+          asked.add(item.sourceRef);
       }
     }
-    return { gates, followups };
+    return { gates, followups, asked };
+  }
+
+  /** Every agenda read once for the cards whose items it holds; a pass that could not list them is tried again. */
+  private async scanned(): Promise<void> {
+    this.scanning ??= this.scan().catch((error: unknown) => {
+      this.scanning = undefined;
+      this.ports.diagnostics.warn(`the agendas holding gate items could not be listed: ${errorText(error)}`);
+    });
+    await this.scanning;
+  }
+
+  private async scan(): Promise<void> {
+    for (const sessionId of await this.ports.sessions.all()) {
+      const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
+      if (listed === undefined || !listed.ok) continue;
+      for (const item of [...listed.value.items, ...listed.value.resolved]) {
+        const cardId = gateCardOf(item);
+        if (cardId !== undefined) this.remember(cardId, sessionId);
+      }
+    }
+  }
+
+  /** `sessionId`'s agenda holds one of the card's gate items or follow-ups: where to look after it changes hands. */
+  private remember(cardId: string, sessionId: string): void {
+    const sessions = this.holders.get(cardId) ?? new Set<string>();
+    sessions.add(sessionId);
+    this.holders.set(cardId, sessions);
+  }
+
+  /**
+   * THE ONE-TIME SWEEP (B138): before a card's gate items were looked for on every agenda, each change of hands asked
+   * the gate again on the new ferret's. Every gate asked on more than one agenda keeps its NEWEST item, and the others
+   * are closed saying which one stands. Once: the marker is written only when every agenda was read and every
+   * duplicate closed, and a start that finds it does nothing.
+   */
+  private async sweepDuplicates(): Promise<void> {
+    if (await this.ports.marker.ran()) return;
+    const byGate = new Map<string, OpenItem[]>();
+    let complete = true;
+    for (const sessionId of await this.ports.sessions.all()) {
+      const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
+      if (listed === undefined || !listed.ok) {
+        complete = false;
+        continue;
+      }
+      for (const item of listed.value.items) {
+        if (item.gate === undefined || item.sourceRef === null || gateCardOf(item) === undefined) continue;
+        byGate.set(item.sourceRef, [...(byGate.get(item.sourceRef) ?? []), { sessionId, item }]);
+      }
+    }
+    const closed: string[] = [];
+    for (const items of byGate.values()) {
+      const kept = items.reduce(newer);
+      for (const other of items.filter(each => each !== kept)) {
+        const mutation = await this.ports.agenda
+          .resolve(other.sessionId, other.item.id, DAEMON, `closed as a duplicate: ${supersededNote(kept)}`)
+          .catch(() => undefined);
+        if (mutation?.ok === true) closed.push(`${other.sessionId} !${other.item.id}`);
+        else complete = false;
+      }
+    }
+    if (complete) await this.ports.marker.record(this.ports.now(), closed);
+    else this.ports.diagnostics.warn('the sweep of duplicate gate items is unfinished; the next start tries again');
   }
 
   /** Moves the card as the answer says; a refusal when the board would not. */
@@ -393,6 +602,7 @@ export class GateItems implements CardWriteObserver {
       );
       return undefined;
     }
+    this.remember(task.id, sessionId);
     return { sessionId, item: mutation.item };
   }
 

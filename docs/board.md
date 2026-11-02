@@ -672,6 +672,22 @@ entry is never raised twice, open or closed, so a restart, a second write or the
 again. At boot every card already waiting at a gate gets its item once, in the background. A card none of whose
 sessions the daemon knows gets no item and the daemon log says so.
 
+**One item per machine, whoever has the card.** A card changes hands — the owner reassigns it, its assignee hands
+it down (`fy new --card`) — and the items already raised stay on the agendas they were raised on. So a card's gate
+items are looked for on **every** agenda that holds one of them (read once from every session at boot, then kept as
+they are raised), and the "never twice" rule holds across all of them:
+
+- an open item on the card's ferret's agenda (assignee or owner ferret) is the one; any other is closed, its note
+  naming the one that stands;
+- an open item only on a former ferret's agenda is **moved**: raised on the card's ferret's agenda as it stood — when
+  it began waiting, the owner's snooze, whose turn it is, the conversation and edits so far — and closed where it was,
+  keeping its own history there. When no agenda of the card's takes it, it stays where it is and the log says why;
+- a gate the owner already answered or set aside on any agenda is never asked again.
+
+A one-time sweep at boot (`gate-items-duplicates-migration.json` in the daemon's home) closed the duplicates raised
+before this held: each gate open on more than one agenda kept its newest item. It records nothing until every agenda
+was read and every duplicate closed, so a start that could not finish tries again.
+
 **Answering** is the owner's alone: at the machine (the admin token, recorded `admin-token` on the card) or from a
 paired device the `fleet` grant lets use the board — exactly who could have moved the card on the Board. The card
 moves FIRST, through `BoardService` as the owner, so authority, history and the done and reopen ladders are the
@@ -690,7 +706,9 @@ board's own; only a move that went through answers the item, and a refused move 
 of the card's ferret (`sourceRef` `gate-followup:<card>:<entry>`), on the ferret's turn in discussion, raised only once the
 reopen went through (a refused Not good opens none). The ferret answers it like its own: `edit` or `surface` hands it to
 the owner, `done` closes it (a sub-ferret's lead does that, as with every item on a sub-ferret's agenda). The owner's
-answer reaches the ferret as on its own item. It closes by itself when the card next reaches the gate.
+answer reaches the ferret as on its own item. It closes by itself when the card next reaches a gate, on whichever
+agenda it is — unless the conversation is still going with the owner: on the owner's turn, or with anything said
+since the card came back. A conversation of the gate's current round is never closed this way.
 
 **Leaving.** A card that leaves the gate any other way — the owner's move on the Board, a drop, a refile —
 has its open gate item resolved quietly: "the card moved on".

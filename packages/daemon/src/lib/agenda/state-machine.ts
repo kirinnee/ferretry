@@ -159,7 +159,47 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
    * gate's follow-up conversation, which the owner opened by saying Not good. Only the daemon raises one so.
    */
   readonly discussion?: true;
+  /**
+   * The gate item this new one REPLACES on another ferret's agenda, because its card changed hands: the new item
+   * goes on as that one stood (`AgendaCarried`). Only the daemon carries one, and only onto a new gate item.
+   */
+  readonly carried?: AgendaCarried;
 }
+
+/**
+ * What a gate item moved to its card's new ferret keeps of the one it replaces (docs/board.md § Gates ask the
+ * owner): when it began waiting, the owner's snooze, whose turn it is, and the conversation and edits so far.
+ */
+export type AgendaCarried = Pick<
+  AgendaItem,
+  | 'waitingSince'
+  | 'parked'
+  | 'waitingOn'
+  | 'askedAt'
+  | 'waitingFor'
+  | 'infoRequests'
+  | 'history'
+  | 'revisions'
+  | 'urgentAt'
+>;
+
+const CARRIED_FIELDS = [
+  'waitingSince',
+  'parked',
+  'waitingOn',
+  'askedAt',
+  'waitingFor',
+  'infoRequests',
+  'history',
+  'revisions',
+  'urgentAt',
+] as const satisfies readonly (keyof AgendaCarried)[];
+
+/** The carried fields an item has, and only those: an absent one stays absent. */
+const agendaCarriedOf = (item: AgendaCarried): AgendaCarried =>
+  Object.fromEntries(
+    CARRIED_FIELDS.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]])),
+  ) as AgendaCarried;
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
 export interface EditAgendaPatch extends AgendaBrief {
@@ -750,6 +790,10 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if ((request.gate !== undefined || request.discussion === true) && actor.kind !== 'daemon') {
     return failure('forbidden', 'only the daemon raises a gate item or its follow-up');
   }
+  // A gate item is the daemon's alone (above), so only the daemon ever carries one over.
+  if (request.carried !== undefined && request.gate === undefined) {
+    return failure('invalid', 'only a gate item is carried over to its card’s new ferret');
+  }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
   const offerCloseProblem = agendaOfferCloseProblems(request)[0];
@@ -858,6 +902,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.discussion === true
         ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
         : {}),
+      // A gate item moved to its card's new ferret goes on as the one it replaces stood.
+      ...(request.carried === undefined ? {} : agendaCarriedOf(request.carried)),
     },
     actor,
   );
