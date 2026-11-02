@@ -95,6 +95,34 @@ Each read opens the vault **once**: a whole page of a journal or a transcript is
 open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
 caches them between reads, so plaintext lives no longer than the read that needed it.
 
+### Text a component shows: recognised by shape
+
+A component's text on the fleet view (a settings file, an instructions file, a server's command) was
+never put in the store, so the daemon does not know its values. `redactText` finds them by **shape** and
+replaces each with `‹hidden›`:
+
+- a value beside a name that announces a secret (`API_KEY=…`, `password: …`, `"token": "…"`), on the
+  same line or the next, or the block under `password: |`;
+- a **well-known token** (`ghp_…`, `sk-…`, `AKIA…`, `xox…-`, `github_pat_…`) and a **private-key
+  block**, wherever they stand. A token is cut only when no letter or digit stands right before it and
+  its body holds a digit, so `task-plan-ended` and `vosk-model-small-en-us-0` are left alone (they hold
+  `sk-plan-ended` and `sk-model-small-en-us-0`);
+- the default of `${NAME-default}` (also `:-` `=` `:=` `+` `:+` `?` `:?`), read as NAME's value.
+
+A **pointer** is only `$NAME`, `${NAME}` or `${secret:NAME}`; it holds no secret and is left as it is.
+
+Every rule is **linear**: a name is found where a run of name characters starts, a value is looked at
+through a capped look-ahead and consumed once it is hidden, and no pattern backtracks, so a long run of
+one character costs one pass, not one per character. The rule is held to what it replaced by a
+differential test (`redact-differential.test.ts`) that generates text and fails if a value the old rule
+hid survives the new one; CI runs 20 000 cases per shape, and a review can run more:
+`REDACT_FUZZ_SEED=7 REDACT_FUZZ_CASES=100000 bun test redact-differential --timeout 1800000`.
+
+Known gaps, the same as before this rule: a name `looksSecret` does not list (`pass: x`, so a value under
+`db:⏎  pass: x` stays), the items of a list under a secret key (`secrets:⏎  - x`), and a secret in prose with
+no name and no well-known shape. A token glued to the end of a longer word (`mask-sk-…`) is a word, not a
+token, by the rule above. Shape is a floor, not a guarantee: the store is the only place a secret is safe.
+
 ## Threat model
 
 ### What this protects against
