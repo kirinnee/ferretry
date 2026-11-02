@@ -7,6 +7,7 @@ import {
   BoardService,
   BoardSweep,
   type CardContext,
+  closedLaneOf,
   EMPTY_SWEEP_MEMORY,
   gateOf,
   HELPER_ENDED_GRACE_MS,
@@ -408,5 +409,13 @@ describe('no gate item for a sub-card the owner would test', () => {
     // Act / Assert
     should(gate(sub('released', [mergedPr(RELEASE)]))).be.undefined();
     should(gate(sub('released', [mergedPr(RELEASE)], { parent: null }))).not.be.undefined();
+  });
+});
+
+describe('the lane a finished sub-card closes into', () => {
+  it('should be the Done lane, else the first closed lane when Done is not a closed one', () => {
+    should(closedLaneOf(lanes())?.id).equal('closed');
+    const set = lanes();
+    should(closedLaneOf({ ...set, doneLane: set.lanes[0]?.id ?? '' })?.id).equal('closed');
   });
 });
