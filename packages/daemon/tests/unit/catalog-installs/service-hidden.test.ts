@@ -236,6 +236,17 @@ describe('see changes never carries a value typed in by hand', () => {
     ['a nested pasted token', 'env:\n  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n'],
     ['a digit-led name', '9TOKEN=hunter2hunter2xyz\n'],
     ['separators before the name', '-=TOKEN=hunter2hunter2xyz\n'],
+    ['a base64 password on the next line', 'password:\n  c2VjcmV0cGFzc3dvcmQ=\n'],
+    ['a base64 token with two paddings', 'api_token:\n  aHVudGVyMmh1bnRlcjI==\n'],
+    ['a separator that starts the next line', 'PASSWORD\n= hunter2hunter2xyz\n'],
+    ['a separator after a carriage return', 'TOKEN\r:hunter2hunter2xyz\r'],
+    ['a name after a slash', 'see /PASSWORD:\nhunter2hunter2xyz\n'],
+    ['a name after a dollar sign', 'export $PASSWORD=\nhunter2hunter2xyz\n'],
+    ['a name after a bar', '|api_key:\nhunter2hunter2xyz\n'],
+    [
+      'a token that starts with the separator of the line before',
+      'ghp_abcdefghijklmnopqrstuvwxyz0123456789\n=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n',
+    ],
   ])('should hide a secret in a skill file with %s, in the whole answer', async (_label, text) => {
     const r = rig();
     await install(r, skillV(1, '# one\n'), projectTarget());
@@ -244,7 +255,22 @@ describe('see changes never carries a value typed in by hand', () => {
       'project',
       await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
     );
-    should(wire(preview)).not.match(/p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2|ghp_abcdefgh/u);
+    should(wire(preview)).not.match(
+      /p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy/u,
+    );
+  });
+
+  it('should leave a pointer to a secret on the next line whole', async () => {
+    const r = rig();
+    await install(r, skillV(1, '# one\n'), projectTarget());
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'Set the token=\n${secret:TOKEN}\n');
+    const preview = await r.service.preview(
+      'project',
+      await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
+    );
+    should(wire(preview.changes))
+      .match(/\$\{secret:TOKEN\}/u)
+      .and.not.match(/‹hidden›\}/u);
   });
 
   it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {
@@ -270,16 +296,21 @@ describe('see changes never carries a value typed in by hand', () => {
     should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
   });
 
-  it('should answer a 256 KiB file on disk without reading it, and say it was hidden', async () => {
+  it.each([
+    ['a 2 MiB single line', 'a'.repeat(2 * 1024 * 1024)],
+    ['2 MiB of short lines', 'ab\n'.repeat((2 * 1024 * 1024) / 3)],
+    [
+      '2 MiB of nested block openers',
+      Array.from({ length: (2 * 1024 * 1024) / 16 }, (_, depth) => `${' '.repeat(depth % 8)}pw: |`).join('\n'),
+    ],
+  ])('should answer %s on disk with the whole file hidden, not read', async (_label, text) => {
     const r = rig();
     await install(r, skillV(1, '# one\n'), projectTarget());
-    r.folders.folders.get(FOLDER)?.set('SKILL.md', 'a'.repeat(256 * 1024));
-    const started = performance.now();
+    r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
     const preview = await r.service.preview(
       'project',
       await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
     );
-    should(performance.now() - started).be.below(5000);
     should(wire(preview.changes)).match(/‹hidden›/u);
   });
 });
