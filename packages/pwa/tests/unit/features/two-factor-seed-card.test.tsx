@@ -65,6 +65,8 @@ interface Served {
   readonly flag?: boolean;
   /** A daemon from before the flag existed: the view carries no `mismatch`. */
   readonly omitFlag?: boolean;
+  /** The accounts list no longer holds the staged account. */
+  readonly noAccount?: boolean;
 }
 
 const served = ({
@@ -75,10 +77,11 @@ const served = ({
   failReads = 0,
   flag = false,
   omitFlag = false,
+  noAccount = false,
 }: Served = {}) => {
   let failed = 0;
   const machine = fakeClient((call: Call) => {
-    if (call.path === '/v1/accounts') return accountList();
+    if (call.path === '/v1/accounts') return noAccount ? { ...accountList(), accounts: [] } : accountList();
     if (call.method === 'DELETE') {
       if (failDrop !== undefined) throw failDrop;
       return { stage: STAGE, dropped: true };
@@ -167,6 +170,13 @@ describe('the owner card for a staged 2FA seed', () => {
 
     await click(card.q('[data-seed-warning-tick]'));
     expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('should keep the daemon’s place-only words when the account cannot be named from the reads (C3)', async () => {
+    const card = await draw({ noAccount: true });
+
+    expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to your account on github.com?');
+    expect(card.q('[data-seed-subject]')?.textContent).not.toContain('kirinnee');
   });
 
   it('should ask for the passkey bound to THIS stage, then commit with no body', async () => {

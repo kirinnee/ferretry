@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { TWO_FACTOR_STAGE_TTL_SECONDS } from '../../src/lib/accounts.ts';
 import { durationWords, timesWords } from '../../src/lib/common.ts';
+import { DAEMON_FEATURES, terminalRulesOffered } from '../../src/lib/daemon-features.ts';
 import {
   AUTOMATED_CODE_ACK_WORDS,
   AUTOMATED_CODE_WARNING,
@@ -30,6 +31,7 @@ import { PASSKEY_CHALLENGE_TTL_SECONDS } from '../../src/lib/step-up.ts';
 import {
   agendaDeepLinkFragment,
   agendaDeepLinkFromFragment,
+  grantFilledLineFor,
   STILL_ASKED_ITEMS,
   stillAskedFor,
   TASK_PLAN_FIRST_FILL_WORDS,
@@ -199,5 +201,24 @@ describe('one source per fact: task-plan words', () => {
     }
     should(rule).not.containEql('A paste that would replace a secret the store already holds');
     should(plan).not.containEql('A sign-in whose form changed since you approved it');
+  });
+});
+
+describe('one decision for terminal rules, and one sentence for a pre-approved fill (C29, C9)', () => {
+  it('should offer terminal rules only while both names are reported', () => {
+    const page = DAEMON_FEATURES.signInRules;
+    const terminal = DAEMON_FEATURES.signInRulesTerminal;
+    should([[page, terminal], [terminal], [page], []].map(terminalRulesOffered)).eql([true, false, false, false]);
+  });
+
+  it('should say a plan fill and a rule fill in their own words, with the place when there is one', () => {
+    should(grantFilledLineFor({ by: 'plan', line: 1 }, 'github.com')).equal(
+      'Filled under your task plan (line 2) on github.com.',
+    );
+    should(grantFilledLineFor({ by: 'plan', line: 0 })).equal('Filled under your task plan (line 1).');
+    should(grantFilledLineFor({ by: 'rule' }, 'sudo@kirin-box')).equal(
+      'Filled under your standing sign-in rule on sudo@kirin-box.',
+    );
+    should(grantFilledLineFor({ by: 'rule' }, '')).equal('Filled under your standing sign-in rule.');
   });
 });

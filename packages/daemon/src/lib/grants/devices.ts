@@ -99,11 +99,6 @@ export class DeviceGrantService {
         'widen-step-up-required',
         'giving another device more access needs a passkey confirmation for it, from this device.',
       );
-    if (verdict.kind === 'step-up-required')
-      throw new GrantError(
-        'step-up-required',
-        "changing a device's grants needs a passkey confirmation from this device.",
-      );
     const changes = grantChanges(current, next).map(change => `${deviceId}/${change}`);
     if (changes.length === 0) return 'changed';
     if (!(await this.deps.devices.setDeviceGrants(deviceId, next))) return 'not-found';

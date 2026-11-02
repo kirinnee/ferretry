@@ -285,7 +285,7 @@ describe('the account routes, the rest of their answers', () => {
     ).be.false();
   });
 
-  it('should ask no per-act passkey to delete a 2FA key, a sign-in or an account, and one to add or change any (C31)', async () => {
+  it('should still ask the per-act passkey to delete a 2FA key, a sign-in or an account, and to add or change any (C31)', async () => {
     const w = await world();
     const routes = secretRoutes(w.subsystem);
     const askedAgain = (method: string, path: string): boolean | undefined => {
@@ -301,10 +301,11 @@ describe('the account routes, the rest of their answers', () => {
       changeSignIn: askedAgain('PUT', '/v1/accounts/sign-ins/:signIn'),
       addSignIn: askedAgain('POST', '/v1/accounts/:id/sign-ins'),
     }).eql({
-      removeKey: false,
-      removeSignIn: false,
-      removeAccount: false,
-      removeLogin: false,
+      // Deleting stored data cannot be undone: it is not a narrowing, and "ask again for each act" asks for it.
+      removeKey: true,
+      removeSignIn: true,
+      removeAccount: true,
+      removeLogin: true,
       changeSignIn: true,
       addSignIn: true,
     });

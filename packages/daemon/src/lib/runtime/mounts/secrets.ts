@@ -382,7 +382,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       path: '/v1/secrets/logins/:id',
       minimum: 'operator',
       caller: 'person',
-      capability: SECRETS_REMOVE,
+      capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await removeLogin(logins, context),
     },
@@ -559,7 +559,6 @@ function accountRoutes(
       method: 'DELETE',
       path: '/v1/accounts/sign-ins/:signIn',
       ...configure,
-      capability: SECRETS_REMOVE,
       handle: owned('remove a sign-in', async context => {
         const signIn = pathSignInId(context);
         if (!(await accounts.removeSignIn(signIn)))
@@ -639,7 +638,6 @@ function accountRoutes(
       method: 'DELETE',
       path: '/v1/accounts/:id',
       ...configure,
-      capability: SECRETS_REMOVE,
       handle: owned('delete an account', async context => {
         const id = pathAccountId(context);
         if (!(await accounts.removeAccount(id))) throw new ApiError(404, `there is no account ${id}`, 'unknown_login');
@@ -888,7 +886,6 @@ function factorRoutes(
       method: 'DELETE',
       path: '/v1/accounts/:id/factors/:factor',
       ...configure,
-      capability: SECRETS_REMOVE,
       handle: owned('remove a 2FA key', async context => {
         const id = pathAccountId(context);
         const factor = pathFactorId(context);
@@ -1007,11 +1004,6 @@ async function exportSecrets(exports: SecretExportService, context: RouteContext
 
 const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
-/**
- * Deleting a 2FA key, a sign-in or an account: `secrets.configure`, but never a per-act passkey, because removing one
- * only takes away (docs/grants.md § Narrowing never asks again).
- */
-const SECRETS_REMOVE: CapabilityDemand = { ...SECRETS_CONFIGURE, narrowing: true };
 
 /** Everything this mount needs, already built. */
 export interface SecretSubsystem {

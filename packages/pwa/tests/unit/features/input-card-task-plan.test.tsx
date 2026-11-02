@@ -74,6 +74,21 @@ describe('an input card a standing sign-in rule touched', () => {
     expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule on github.com.');
   });
 
+  it('says no place when the page’s origin cannot be read', async () => {
+    const page: InputRequest['observed'] = {
+      kind: 'browser',
+      pageId: 'page-1',
+      origin: 'not a url',
+      secure: true,
+      navigationId: 'nav-1',
+      fields: [browserField('password')],
+    };
+    const q = await show(
+      request({ observed: page, preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'filled' } }),
+    );
+    expect(q('[data-input-plan-filled]')?.textContent).toBe('Filled under your standing sign-in rule.');
+  });
+
   it('says in the daemon’s fixed words why the rule did not apply', async () => {
     const q = await show(
       request({ preapproval: { by: 'rule', rule: RULE, revision: 1, outcome: 'did-not-apply', reason: 'rate' } }),

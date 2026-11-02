@@ -231,6 +231,29 @@ describe('a ferret’s suggestion', () => {
     }
   });
 
+  it('still names the rule it replaces when the rule list cannot be read, in words without its status', async () => {
+    const world: RuleWorld = {
+      ...withRule,
+      fail: (key, body) => (key === 'GET /v1/sign-in-rules' ? refused('offline') : withRule.fail?.(key, body)),
+    };
+    const { fake, element } = host(world);
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      expect(q(mounted.container, '[data-rule-replaces]').textContent).toBe(
+        'This sign-in already has a standing rule. Approving here replaces it.',
+      );
+      await click(q(mounted.container, '[data-rule-tick="password"]'));
+      await click(q(mounted.container, '[data-rule-approve]'));
+      await settle();
+      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body?.['replaces']).toBe(RULE_ID);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('cannot be approved on a device with no passkey', async () => {
     const { element } = host({}, {}, null);
     const mounted = await mount(element);

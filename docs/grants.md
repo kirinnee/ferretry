@@ -578,11 +578,12 @@ A route that only **takes away** declares it (`narrowing: true` on its capabilit
 the boundary still asks its grant, and an unlock still stands in front of it, but it never asks a per-act passkey
 — whatever "ask again for each act" (`stepUpOnActions`) says, and on a machine with the unlock off too. Those
 routes are: revoking a task plan (`POST …/task-plans/:planId/revoke`); narrowing or revoking a standing sign-in
-rule, one or an account's; deleting a 2FA key, a sign-in or an account (`DELETE /v1/accounts/:id/factors/:factor`,
-`DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`);
-revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a device's grants
+rule, one or an account's; revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a device's grants
 (`PATCH /v1/pair/devices/:deviceId/grants`), where a widen in the same patch is judged inside and still wants a
-passkey proved for it. **Not** on the list, deliberately: removing an account default (it changes which account a
+passkey proved for it. These must be instant in an emergency. **Not** on the list, deliberately: **deleting stored
+data** (a 2FA key, a sign-in or an account: `DELETE /v1/accounts/:id/factors/:factor`,
+`DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`), which
+cannot be undone, so "ask again for each act" still asks for it; removing an account default (it changes which account a
 card offers first, so it asks `loosen-config` like every change to that file) and paste rules — both are open
 owner calls.
 

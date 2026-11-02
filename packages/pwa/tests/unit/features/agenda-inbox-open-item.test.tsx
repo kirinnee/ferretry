@@ -123,6 +123,24 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
+  it('offers Skip and no Not needed on a ferret’s rule suggestion: its card’s own Dismiss says no (C2)', async () => {
+    const suggested = inboxCard(
+      agendaItem('A5', {
+        kind: 'permission',
+        subject: 'A ferret suggests a standing rule for a sign-in on github.com.',
+        signInRuleSuggestion: { suggestion: 'srg_dddddddddddddddd' },
+      } as never),
+      sessionView('sess-3', { config: { teammate: 'pip', name: 'Deploy' } as never }),
+    );
+    const mounted = await mount(page(fakeInbox(), [suggested], { initialOpen: suggested.key }));
+    await interact(() =>
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+    );
+    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    await mounted.unmount();
+  });
+
   it('says who and where on one line that cuts its facts, not the way to the chat', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
     const who = whoLine(mounted);

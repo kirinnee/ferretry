@@ -290,7 +290,6 @@ export interface DeviceGrantJudgement {
 /** Why a device-grant change was refused, in a vocabulary the service turns into a status. */
 export type DeviceGrantVerdict =
   | { readonly kind: 'allowed' }
-  | { readonly kind: 'step-up-required' }
   /** A legal widen, without a passkey proved for it alone. */
   | { readonly kind: 'widen-step-up-required' }
   | { readonly kind: 'forbidden'; readonly widened: readonly string[] };
