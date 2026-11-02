@@ -124,6 +124,7 @@ export function InboxHarness({
   resolved = [],
   resolvedReading = false,
   parked = [],
+  parkedWhole = false,
   loadResolved = () => undefined,
   toTest = [],
   toTestSnoozed = [],
@@ -136,6 +137,7 @@ export function InboxHarness({
   readonly resolved?: AgendaInbox['resolved'];
   readonly resolvedReading?: boolean;
   readonly parked?: AgendaInbox['parked'];
+  readonly parkedWhole?: boolean;
   readonly loadResolved?: () => void;
   readonly toTest?: AgendaInbox['toTest'];
   readonly toTestSnoozed?: AgendaInbox['toTestSnoozed'];
@@ -159,6 +161,7 @@ export function InboxHarness({
     resolved,
     resolvedReading,
     parked: parked.filter(card => !hidden.has(card.key)),
+    parkedWhole,
     loadResolved,
     deferred: fake.deferred,
     deferredState: state,

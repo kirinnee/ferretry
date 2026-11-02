@@ -161,6 +161,7 @@ describe('daemon features', () => {
     // The app offers snooze only where this name is listed (an older daemon refuses it as an unknown action).
     should(list).containEql('agenda.snooze.1');
     should(list).containEql('agenda.clear-agents.1');
+    should(list).containEql('agenda.open.1');
     // The app offers files on "Not good" only where this name is listed (an older daemon refuses the field).
     should(list).containEql('board.reopen.attachments.1');
     // The app draws "Done · closes &F12" only where this name is listed (an older daemon refuses `offerClose`).

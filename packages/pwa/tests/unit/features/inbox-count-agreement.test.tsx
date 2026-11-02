@@ -11,6 +11,7 @@ import { type AgendaInboxMachine, useAgendaInboxModel } from '../../../src/hooks
 import type { DaemonAgendaClient } from '../../../src/lib/agenda-client.ts';
 import type { DeferredTimers } from '../../../src/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
+import { AgendaRollupStore } from '../../../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
@@ -120,7 +121,8 @@ const fakeClient = (hold: Gate[] | null = null) => {
     const value = BOARDS.get(`${daemon.daemonId}/${scope.sessionId}`);
     if (value !== undefined) store.applySnapshot(scope, value);
   };
-  return { store, wires: new AgendaWireDirectory(), revalidate } as unknown as DaemonAgendaClient;
+  const rollup = new AgendaRollupStore(async () => new Response('{}', { status: 404 }));
+  return { store, wires: new AgendaWireDirectory(), rollup, revalidate } as unknown as DaemonAgendaClient;
 };
 
 const quietTimers: DeferredTimers = { setTimeout: () => 0, clearTimeout: () => undefined, now: () => NOW };

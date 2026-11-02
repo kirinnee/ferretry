@@ -36,7 +36,7 @@ const replied = (id: string): InboxCard =>
   );
 
 const mountPage = async (
-  extra: { parked?: readonly InboxCard[]; resolvedReading?: boolean } = {},
+  extra: { parked?: readonly InboxCard[]; resolvedReading?: boolean; parkedWhole?: boolean } = {},
   navigated: string[] = [],
   fake: FakeInbox = fakeInbox(),
   initialOpen?: string,
@@ -224,6 +224,65 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
     const { view, choose } = await mountPage({ parked: [snoozed('A2', 'nonsense')] });
     await choose('snoozed');
     expect(view.container.querySelector('[data-agenda-parked-status]')?.textContent).toBe('Snoozed');
+    await view.unmount();
+  });
+});
+
+describe('AgendaInboxPage counts what it lists', () => {
+  const fromConversation = (n: number, id: string): InboxCard =>
+    inboxCard(
+      agendaItem(id, {
+        subject: `Snoozed in conversation ${n}`,
+        parked: { reason: 'snoozed', at: '2026-08-01T11:00:00.000Z', until: LATER },
+      }),
+      sessionView(`conv-${n}`, { config: { teammate: `ferret${n}`, name: `Conversation ${n}` } }),
+    );
+  const many = Array.from({ length: 45 }, (_, index) => fromConversation(index + 1, `A${index + 1}`));
+
+  it('lists every conversation’s snoozed item, and the badge and the header are the rows listed', async () => {
+    const { view, menu, choose, openMenu, option, rowIds } = await mountPage({ parked: many, parkedWhole: true });
+    await openMenu();
+    expect(option('snoozed').textContent).toBe('Snoozed (45)');
+    await openMenu();
+    await choose('snoozed');
+    expect(menu().textContent).toBe('Snoozed (45)');
+    expect(rowIds()).toHaveLength(45);
+    expect(rowIds()).toContain('A45');
+    await view.unmount();
+  });
+
+  it('drops the “most recent conversations” caveat once the list is every conversation', async () => {
+    const whole = await mountPage({ parked: many, parkedWhole: true });
+    await whole.choose('snoozed');
+    expect(whole.view.container.textContent).not.toContain('most recent conversations');
+    await whole.view.unmount();
+    const windowed = await mountPage({ parked: many.slice(0, 5) });
+    await windowed.choose('snoozed');
+    expect(windowed.view.container.querySelector('[data-agenda-parked-window]')?.textContent).toContain(
+      'From your 30 most recent conversations',
+    );
+    await windowed.view.unmount();
+  });
+
+  it('says it is still reading beside a whole list, without the caveat', async () => {
+    const { view, choose } = await mountPage({ parked: many.slice(0, 3), parkedWhole: true, resolvedReading: true });
+    await choose('snoozed');
+    expect(view.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe('Reading more…');
+    await view.unmount();
+  });
+
+  it('counts only the rows Find keeps, so the badge never claims more than the list shows', async () => {
+    const { view, menu, choose, openMenu, option, rowIds } = await mountPage({
+      parked: [...many.slice(0, 40), replied('A90')],
+      parkedWhole: true,
+    });
+    await choose('snoozed');
+    await typeInto(await openFind(view.container), '!A7');
+    expect(rowIds()).toEqual(['A7']);
+    expect(menu().textContent).toBe('Snoozed (1)');
+    await openMenu();
+    expect(option('snoozed').textContent).toBe('Snoozed (1)');
+    expect(option('replied').textContent).toBe('Replied (0)');
     await view.unmount();
   });
 });

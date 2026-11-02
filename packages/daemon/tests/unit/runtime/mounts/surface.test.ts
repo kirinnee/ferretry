@@ -379,6 +379,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     preview: async () => ({ cleared: 0, sessions: 0 }),
     clear: async () => ({ cleared: 0, sessions: 0 }),
   } as never,
+  agendaRollup: { page: async () => ({ sessions: [] }) } as never,
   notifications: {
     agendaDelivered: async () => 0,
     enrolledDevices: async () => 0,
@@ -1001,7 +1002,8 @@ describe('the mounted daemon surface', () => {
       19 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, the preview and publish of an update, making a version current and retiring one (docs/catalogs.md)
       10 + // the people a catalog is shared with: mint, list and end a share, approve a new passkey for an invite; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
-      3; // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
+      3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
+      1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1318,6 +1320,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/attention/replies',
       'POST /v1/sessions/:sessionId/notify',
       'POST /v1/agenda/clear-agents',
+      'GET /v1/agenda/open',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
       'GET /v1/sessions/:sessionId/shared-draft',

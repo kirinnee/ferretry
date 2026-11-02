@@ -482,6 +482,7 @@ function Inbox({
     resolved: [],
     resolvedReading: false,
     parked: PARKED,
+    parkedWhole: true,
     loadResolved: () => undefined,
     deferred,
     deferredState: state,

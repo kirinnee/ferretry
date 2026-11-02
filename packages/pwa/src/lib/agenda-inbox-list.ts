@@ -63,11 +63,12 @@ export interface InboxWho {
 }
 
 /**
- * Who an item is from, never the callsign alone: the ferret, what it works on and the machine. The card is the
+ * Who an item is from, never the callsign alone: the ferret, what it works on and the machine. The ferret and its
+ * task are the OWNER's thread (the lineage root, `root`), not a sub-ferret's task title or callsign. The card is the
  * item's own (`task`, the card it was raised about) when it names one, else the conversation's focus card.
  */
 export const inboxWho = (card: InboxCard): InboxWho => {
-  const names = sessionsBarNames(card.view);
+  const names = sessionsBarNames(card.root ?? card.view);
   return {
     ferret: names.ferret ?? names.title,
     task: names.ferret === null ? null : names.title,
@@ -87,7 +88,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
   }
   const groups = [...grouped.entries()].map(([key, members]): FerretGroup => {
     const head = members[0] as InboxCard;
-    const names = sessionsBarNames(head.view);
+    const names = sessionsBarNames(head.root ?? head.view);
     const ordered = sortAgenda(members.filter(card => !isNoticeCard(card)).map(card => card.item));
     const byItem = new Map(members.map(card => [card.item, card] as const));
     return {
@@ -207,10 +208,12 @@ const matchesWords = (haystack: readonly (string | null | undefined)[], query: s
 /** The facts Find searches on a row: its item's words, its reference, its conversation and its machine. */
 const searchable = (
   view: SessionView,
+  root: SessionView | undefined,
   machineName: string,
   item: Pick<InboxCard['item'], 'id' | 'subject' | 'why'> & { readonly title?: string | undefined },
 ): readonly (string | undefined)[] => {
   const names = sessionsBarNames(view);
+  const rootNames = root === undefined || root === view ? undefined : sessionsBarNames(root);
   return [
     item.title,
     item.subject,
@@ -219,6 +222,8 @@ const searchable = (
     `!${item.id}`,
     names.title,
     names.ferret ?? undefined,
+    rootNames?.title,
+    rootNames?.ferret ?? undefined,
     machineName,
   ];
 };
@@ -230,7 +235,7 @@ export const filterInboxCards = (cards: readonly InboxCard[], filter: InboxListF
       (filter.machine === null || card.daemonId === filter.machine) &&
       fromKept(filter, card.item) &&
       matchesMode(card.view, filter.mode ?? 'all') &&
-      matchesWords(searchable(card.view, card.machineName, card.item), filter.query),
+      matchesWords(searchable(card.view, card.root, card.machineName, card.item), filter.query),
   );
 
 /** The resolved rows the same filter keeps, in their order. */
@@ -243,7 +248,7 @@ export const filterInboxResolved = (
       (filter.machine === null || row.daemonId === filter.machine) &&
       fromKept(filter, row.record) &&
       matchesMode(row.view, filter.mode ?? 'all') &&
-      matchesWords(searchable(row.view, row.machineName, row.record), filter.query),
+      matchesWords(searchable(row.view, row.root, row.machineName, row.record), filter.query),
   );
 
 /** The selection past the last item: "You skipped N — review them?" rather than a jump back to the top. */

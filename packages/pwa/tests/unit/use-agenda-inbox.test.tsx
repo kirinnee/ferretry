@@ -15,7 +15,9 @@ import {
 import type { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { type DeferredTimers, DISMISS_ACTION, DONE_ACTION, inboxOptions } from '../../src/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
+import { AgendaRollupStore } from '../../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
+import type { DaemonHealthRead } from '../../src/lib/daemon-health.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
@@ -73,7 +75,21 @@ interface Call {
 }
 
 /** The one agenda client, faked at its seams: a real store, and every call recorded. */
-const fakeClient = (boards: Map<string, AgendaSnapshot>) => {
+const fakeClient = (
+  boards: Map<string, AgendaSnapshot>,
+  /** What each machine's roll-up answers: its conversations' items by session id. */
+  rollups: Record<string, Record<string, readonly AgendaItem[]>> = {},
+) => {
+  const rolled: string[] = [];
+  const rollup = new AgendaRollupStore(async input => {
+    const host = new URL(String(input)).host.split('.')[0] ?? '';
+    rolled.push(host);
+    const held = rollups[host] ?? {};
+    return new Response(
+      JSON.stringify({ sessions: Object.entries(held).map(([sessionId, items]) => ({ sessionId, items })) }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  });
   const calls: Call[] = [];
   const store = new DaemonAgendaStore();
   const record =
@@ -88,6 +104,7 @@ const fakeClient = (boards: Map<string, AgendaSnapshot>) => {
   const client = {
     store,
     wires: new AgendaWireDirectory(),
+    rollup,
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),
@@ -96,7 +113,7 @@ const fakeClient = (boards: Map<string, AgendaSnapshot>) => {
     snooze: record('snooze'),
     unsnooze: record('unsnooze'),
   } as unknown as DaemonAgendaClient;
-  return { client, calls };
+  return { client, calls, rolled };
 };
 
 /** A hand-cranked undo window. */
@@ -779,5 +796,79 @@ describe('useInboxMachines', () => {
       ['Studio', sessions],
       ['Laptop', null],
     ]);
+  });
+});
+
+describe('the roll-up lists every conversation’s parked items', () => {
+  const snoozedItem = (id: string): AgendaItem =>
+    ({ ...item(id, 1), parked: { reason: 'snoozed', at: at(2), until: at(600) } }) as AgendaItem;
+  const OPEN: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.140.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOpen]),
+  };
+  const mountWith = async (client: DaemonAgendaClient, machines: readonly AgendaInboxMachine[]) => {
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+    );
+    await settle();
+    return () => inbox as unknown as AgendaInbox;
+  };
+  const oldBoard = sessionView('old', { config: { parent: 'root' } as never });
+  const root = sessionView('root', { config: { name: 'Billing rewrite', teammate: 'ada' } });
+
+  test('lists an old conversation’s snoozed item from the roll-up, named for its root, and says the list is whole', async () => {
+    const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
+    client.wires.note(studio.daemonId, OPEN);
+    const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
+    await settle();
+    expect(rolled).toEqual(['studio']);
+    expect(latest().parked.map(card => [card.view.config.id, card.item.id, card.root?.config.id])).toEqual([
+      ['old', 'A4', 'root'],
+    ]);
+    expect(latest().parkedWhole).toBe(true);
+  });
+
+  test('prefers a board this device holds over the roll-up for the same conversation', async () => {
+    const held = new Map([['studio/old', board('old', [snoozedItem('A9')])]]);
+    const { client } = fakeClient(held, { studio: { old: [snoozedItem('A4')] } });
+    client.wires.note(studio.daemonId, OPEN);
+    const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(latest().parked.map(card => card.item.id)).toEqual(['A9']);
+  });
+
+  test('asks no machine that does not roll up, and keeps the recent window', async () => {
+    const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
+    client.wires.note(studio.daemonId, { kind: 'read', health: healthOf('4.100.0') });
+    const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(rolled).toEqual([]);
+    expect(latest().parked).toEqual([]);
+    expect(latest().parkedWhole).toBe(false);
+  });
+
+  test('is whole only when every machine rolls up and was read to the end', async () => {
+    const { client } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
+    client.wires.note(studio.daemonId, OPEN);
+    client.wires.note(laptop.daemonId, { kind: 'read', health: healthOf('4.100.0') });
+    const latest = await mountWith(client, [
+      { connection: studio, name: 'Studio', sessions: [root, oldBoard] },
+      { connection: laptop, name: 'Laptop', sessions: [] },
+    ]);
+    expect(latest().parkedWhole).toBe(false);
+  });
+
+  test('reads the roll-up again when the owner opens a filter beyond Open, and says it is reading', async () => {
+    const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
+    client.wires.note(studio.daemonId, OPEN);
+    const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(rolled).toEqual(['studio', 'studio']);
+    expect(latest().resolvedReading).toBe(false);
   });
 });

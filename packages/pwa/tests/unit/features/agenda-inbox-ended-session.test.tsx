@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary, SessionView } from '@ferretry/protocol';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { type AgendaInbox, type AgendaInboxMachine, useAgendaInboxModel } from '../../../src/hooks/use-agenda-inbox.ts';
+import { AgendaRollupStore } from '../../../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import type { DaemonAgendaClient } from '../../../src/lib/agenda-client.ts';
 import type { DeferredTimers } from '../../../src/lib/agenda-inbox.ts';
@@ -77,6 +78,7 @@ const fakeClient = (boards: ReadonlyMap<string, AgendaSnapshot>) => {
   const client = {
     store,
     wires: new AgendaWireDirectory(),
+    rollup: new AgendaRollupStore(async () => new Response('{}', { status: 404 })),
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),

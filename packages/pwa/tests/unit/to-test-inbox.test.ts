@@ -3,6 +3,8 @@ import {
   isSnoozed,
   nextWake,
   releaseWords,
+  rootSessionIds,
+  rootTaskNames,
   sessionTaskNames,
   splitSnoozed,
   type ToTestCard,
@@ -191,5 +193,31 @@ describe('the project a card to test belongs to', () => {
     if (row === undefined) throw new Error('expected a row');
     expect(withProjectName(row, undefined)).toBe(row);
     expect(withProjectName(row, new Map())).toBe(row);
+  });
+});
+
+describe('the owner’s thread a card to test is named for', () => {
+  const named = (id: string, name: string, parent?: string) =>
+    sessionView(id, { config: { name, ...(parent === undefined ? {} : { parent }) } as never });
+  const sessions = [named('root', 'Credentials work'), named('kid', 'Revive Button Flaky', 'root')];
+
+  test('names a sub-ferret for the root of its lineage, and the root for itself', () => {
+    const names = rootTaskNames(sessions);
+    expect(names.get('kid')).toBe('Credentials work');
+    expect(names.get('root')).toBe('Credentials work');
+    expect(rootSessionIds(sessions).get('kid')).toBe('root');
+  });
+
+  test('leaves out a lineage whose root has no task of its own', () => {
+    expect(rootTaskNames([named('root', 'interactive'), named('kid', 'Revive Button Flaky', 'root')]).size).toBe(0);
+  });
+
+  test('opens the root’s chat from a card the assignee holds', async () => {
+    const [row] = toTestCards(await boardModelOf([card('F1', { laneId: 'tested', owner: 'root', assignee: 'kid' })]));
+    const named = withTaskName(row as ToTestCard, rootTaskNames(sessions), rootSessionIds(sessions));
+    expect(named.taskName).toBe('Credentials work');
+    expect(named.taskSession).toBe('root');
+    const unrooted = withTaskName(row as ToTestCard, rootTaskNames(sessions));
+    expect(unrooted.taskSession).toBe('kid');
   });
 });

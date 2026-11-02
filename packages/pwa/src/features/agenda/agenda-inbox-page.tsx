@@ -920,16 +920,22 @@ function InboxParkedList({
           <SnoozedToTestRow answers={answers} key={row.key} now={now} onNavigate={onNavigate} row={row} />
         ))}
       </ul>
-      <p className="fy-attn-inbox__hint">
-        From your {RESOLVED_READ_LIMIT} most recent conversations
-        {inbox.resolvedReading ? ' · reading more…' : ''}
-      </p>
+      {inbox.parkedWhole ? (
+        inbox.resolvedReading ? (
+          <p className="fy-attn-inbox__hint">Reading more…</p>
+        ) : null
+      ) : (
+        <p className="fy-attn-inbox__hint" data-agenda-parked-window="">
+          From your {RESOLVED_READ_LIMIT} most recent conversations
+          {inbox.resolvedReading ? ' · reading more…' : ''}
+        </p>
+      )}
     </div>
   );
 }
 
 const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) => {
-  const names = sessionsBarNames(row.view);
+  const names = sessionsBarNames(row.root ?? row.view);
   return {
     ferret: names.ferret ?? names.title,
     machine: row.machineName,
@@ -1327,7 +1333,10 @@ export function AgendaInboxPage({
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
-  const parkedCounts = { snoozed: snoozed.length + inbox.toTestSnoozed.length, replied: replied.length };
+  // A count is the length of what is listed under it: the rows the machine, who and Find filters keep.
+  const snoozedShown = filterInboxCards(snoozed, listFilter);
+  const repliedShown = filterInboxCards(replied, listFilter);
+  const parkedCounts = { snoozed: snoozedShown.length + snoozedToTest.length, replied: repliedShown.length };
 
   // The deck deals what waits on the owner, in the order the page lists it: the agenda items, then the cards to test.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
@@ -1830,7 +1839,7 @@ export function AgendaInboxPage({
           now={now}
           onClear={clearFilters}
           onNavigate={onNavigate}
-          rows={filterInboxCards(filter === 'snoozed' ? snoozed : replied, listFilter)}
+          rows={filter === 'snoozed' ? snoozedShown : repliedShown}
           toTestRows={filter === 'snoozed' ? snoozedToTest : []}
         />
       ) : filter === 'resolved' ? (
