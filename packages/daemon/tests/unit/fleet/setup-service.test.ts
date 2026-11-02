@@ -285,6 +285,7 @@ function world(
       },
     },
     cloneBase: {
+      read: async path => state.assets[path],
       write: async (path, text) => {
         should(path).equal(BASE_PATH);
         state.baseWrites.push(text);

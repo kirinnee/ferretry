@@ -187,6 +187,7 @@ export interface FleetSetupServiceDeps {
   };
   /** `setup/clone-base.json` outside a copy: only forgetting a source writes it alone (a copy writes it in its own batch). */
   readonly cloneBase: {
+    read(path: string): Promise<string | undefined>;
     write(path: string, text: string): Promise<void>;
   };
 }
@@ -723,7 +724,7 @@ export class FleetSetupService {
   ): Promise<{ readonly path: string; readonly content: string } | undefined> {
     if (source === undefined || plan.sourceKeys.size === 0) return undefined;
     const path = this.#cloneBasePath();
-    const next = applyCloneToBase(parseCloneBase(await this.deps.catalog.readAsset(path)), {
+    const next = applyCloneToBase(parseCloneBase(await this.deps.cloneBase.read(path)), {
       source,
       at: new Date(this.deps.catalog.now()).toISOString(),
       replace: change.mode === 'replace',
@@ -740,7 +741,7 @@ export class FleetSetupService {
    */
   async forgetCloneSource(sourceId: string): Promise<boolean> {
     const path = this.#cloneBasePath();
-    const before = parseCloneBase(await this.deps.catalog.readAsset(path));
+    const before = parseCloneBase(await this.deps.cloneBase.read(path));
     if (before.sources[sourceId] === undefined) return false;
     await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, sourceId)));
     return true;

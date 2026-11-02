@@ -178,7 +178,10 @@ export function cloneSourceIdentity(
   verifiedDaemon: string | undefined,
   displayName: string | undefined,
 ): CloneSourceIdentity | undefined {
-  const reported = bundle.version === 2 ? bundle.daemon : undefined;
+  const claimed = bundle.version === 2 ? bundle.daemon : undefined;
+  // The id is the key of a record entry, so one the record cannot hold is not an identity at all.
+  const reported = claimed !== undefined && CloneSourceIdSchema.safeParse(claimed).success ? claimed : undefined;
+  if (verifiedDaemon !== undefined && claimed !== undefined && reported === undefined) throw new CloneSourceMismatch();
   if (verifiedDaemon !== undefined && reported !== undefined && verifiedDaemon !== reported) {
     throw new CloneSourceMismatch();
   }

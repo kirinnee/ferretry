@@ -206,6 +206,12 @@ describe('cloneSourceIdentity', () => {
     should(attempt).throw('That export says it is from another machine than the one you picked.');
   });
 
+  it('should read an oversized self-reported id as no identity, and refuse it beside a verified id', () => {
+    const huge = { ...V2(), daemon: 'd'.repeat(201) } as ReturnType<typeof V2>;
+    should(cloneSourceIdentity(huge, undefined, undefined)).be.undefined();
+    should(() => cloneSourceIdentity(huge, 'daemon-source', undefined)).throw(CloneSourceMismatch);
+  });
+
   it('should cut a display name to 120 characters', () => {
     should(cloneSourceIdentity(V2(), undefined, 'x'.repeat(300))?.name).have.length(120);
   });
