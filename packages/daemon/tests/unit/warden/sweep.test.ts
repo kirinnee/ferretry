@@ -1290,6 +1290,78 @@ describe('escalating to a human, and clearing it again', () => {
     should(journalTypes(subject)).containEql('fleet.warden_escalation_blind_node');
   });
 
+  it('should not clear as recovered a sub-ferret’s escalation that stands on its agenda home', async () => {
+    // Arrange — s1 is a sub-ferret whose notifications sit on the lead's board, named for it.
+    const subject = escalating({
+      fleet: [unattended('s1'), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
+  it('should clear the home’s row for a sub-ferret that stopped being flagged, and only that one', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' }), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's2') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert — s1 recovered, and s2 is no longer in the fleet.
+    should(subject.resolved.map(each => [each.sessionId, each.sourceRef])).eql([
+      ['lead', wardenEscalationSourceRef('unattended_question', 's1')],
+      ['lead', wardenEscalationSourceRef('unattended_question', 's2')],
+    ]);
+  });
+
+  it('should leave a home’s row about a ferret whose own board could not be read', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' }), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+      unreadableBoards: ['s1'],
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
+  it('should fall back to a ferret’s own board when its home cannot be found', async () => {
+    // Arrange
+    const subject = escalating({
+      homeOf: async () => {
+        throw new Error('unreadable');
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(subject.raises[0]?.request.sourceRef).eql(wardenEscalationSourceRef('unattended_question'));
+  });
+
   it('should report a write the board refused rather than swallow it', async () => {
     // Arrange
     const subject = escalating({ raiseWrite: 'rejected' });

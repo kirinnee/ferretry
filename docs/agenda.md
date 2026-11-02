@@ -368,30 +368,44 @@ Their prompt carries no Agenda mode section even when the switch is on
 Only the owner's own ferret's agenda asks the owner. The **home** of a session (`AgendaHomes`,
 `packages/daemon/src/lib/agenda/home.ts`) is where the daemon raises on its behalf:
 
-1. Walk `config.parent` up to the root. A parent that cannot be read stops the walk at the last known session; a loop
-   is walked once, to a bounded depth.
-2. A root the owner started (`provenance.origin` `human`, or no stamp) is the home.
-3. Otherwise (a Warden's or another session's orphan) the home is the owner's most recently active interactive
-   session on the same project: mode `interactive`, no parent, owner-started, same `projectId`. Recency is the
-   session's `config.updatedAt`.
-4. Otherwise the machine-wide agenda (the `MachineAgendaHome` port; not wired yet, so the root itself).
+1. Walk `config.parent` up to the root. The walk is **rooted** only if it ends at a session with no parent. A parent
+   that cannot be read, a loop and a chain past the depth bound leave it **broken**: a broken lineage is never an
+   owner's root.
+2. A rooted lineage whose root the owner started (`provenance.origin` `human`, or no stamp) has that root as home.
+3. Otherwise (a Warden's or another session's orphan, or a broken lineage) the home is the owner's most recently
+   active interactive session on the same project: mode `interactive`, no parent, owner-started, same `projectId`.
+   Recency is the session's `config.updatedAt`.
+4. Otherwise the machine-wide agenda (the `MachineAgendaHome` port; not wired yet). It is for notices only: a
+   Warden escalation or notice may land there; a gate item or a follow-up never does.
+5. Otherwise the root, if the lineage is rooted; for a broken one, the session itself, with a warning naming where
+   the chain broke.
 
 `AgendaService.raise` and `resolveSource` apply it to a daemon actor on a sub-ferret, so a gate item, a Not good
 follow-up and a Warden escalation or notice land on the home. A redirected Warden item's title starts with the
 sub-ferret's callsign (`<callsign>: <title>`) so the owner can tell which ferret it is about. The mutation's
-snapshot `sessionId` says where it landed.
+snapshot `sessionId` says where it landed, and the agenda-delivered count pairs that session with the item.
+
+**A Warden notification about a sub-ferret names it.** On the home its `sourceRef` is
+`warden:ask:<kind>:<sessionId>`, so the home's own `warden:ask:<kind>` and each sibling's are separate rows, and
+one recovering clears only its own. The Warden plan reads each ferret's home (`homeOf`) and looks for the row there:
+a standing escalation is never cleared as "recovered" for sitting on a board that is not the ferret's, and a row
+about a ferret whose own board could not be read is neither judged nor cleared.
 
 **Hands-on cards stay on the sub-ferret** because only that session can consume the answer: a request with `input`,
-`phoneApproval`, `copyPlan`, `taskPlan`, `signInRuleSuggestion`, `twoFactorSeed` or `confirms`, and any raise with
+`phoneApproval`, `copyPlan`, `taskPlan`, `signInRuleSuggestion`, `signInRuleSuspended` (on an existing item), `twoFactorSeed` or `confirms`, and any raise with
 the cause `harness-prompt`, `input-request`, `phone-approval`, `secure-copy` or `login-recipe`. A password, a code or an
 approval the daemon asks for is the only thing that reaches the owner from a sub-ferret.
 
 **One-time migration.** At boot, once (`agenda-homes-migration.json` in the daemon's home; written only when every
-session was read and every item moved, so an unfinished start tries again), each open item that is not hands-on on a
+session was read and every item moved, so an unfinished start tries again), each open item that the **daemon** raised, and that is not hands-on, on a
 session with a parent is raised on its home carrying its waiting time, snooze, conversation and history (`carried`, a
 daemon-only field: an agent can never set it) and resolved where it was with "moved to !A<n> on <home callsign>'s
 agenda". Gate items keep their `gate` and `sourceRef`, so duplicates collapse by the one-item-per-gate rule; other
-items get the sub-ferret's callsign in front of the title. The boot log says how many moved.
+items get the sub-ferret's callsign in front of the title, and a Warden notification is renamed to the scoped form
+above. An item a ferret or the owner raised stays where it is (the daemon may not close it, and a copy would be
+the daemon's, which the owner could not discuss); the ferret closes its own with `fy tidy`. A resolve that fails
+after a move is logged with the session and the item and holds the marker back; an item the home refuses for good
+(`forbidden`, `invalid`, `too-long`) is logged, stays, and does not. The boot log says how many moved.
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
 items on the board of a session it started (never a [gate item](#gate-items)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the

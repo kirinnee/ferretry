@@ -399,6 +399,8 @@ export type WardenAgendaWrite = 'created' | 'refreshed' | 'unchanged' | 'rejecte
  */
 export interface WardenAgendaPort {
   board(sessionId: string): Promise<WardenEscalationBoard | undefined>;
+  /** Where a notification about this ferret sits: its agenda home. Absent, or its own, when it is not a sub-ferret. */
+  homeOf?(sessionId: string): Promise<string>;
   raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAgendaWrite>;
   /** A plain notice to the owner tied to a board card (`orphans.ts`), deduped by its `sourceRef`. */
   notice(sessionId: string, notice: WardenCardNotice): Promise<WardenAgendaWrite>;
@@ -2858,6 +2860,15 @@ export class WardenSweepService {
       nodes.push(session);
     }
 
+    // Where each ferret's notification sits: a sub-ferret's is on its agenda home, so the plan looks for it there.
+    const homes = new Map<string, string>();
+    for (const { session } of read) {
+      const id = session.config.id;
+      const home = await this.ports.attention.homeOf?.(id).catch(() => id);
+      if (home !== undefined && home !== id) homes.set(id, home);
+    }
+    const unreadable = new Set(read.filter(each => each.board === undefined).map(each => each.session.config.id));
+
     // Why each standing flag is the owner's, from what this sweep decided (`owner-routes.ts`).
     const nowMs = this.ports.nowMs();
     const live = new Set([...this.liveWardens(fleet, sweep.state).map(warden => warden.wardenId), ...sweep.spawned]);
@@ -2880,6 +2891,8 @@ export class WardenSweepService {
       remedy: planWardenRemedy({ mayAct: this.settings.mayAct }),
       clientName: this.settings.clientName,
       routes,
+      homes,
+      unreadable,
       notified: new Set(Object.keys(sweep.state.notified ?? {})),
       ...(machine === undefined || machine === '' ? {} : { machine }),
       at: sweep.at,

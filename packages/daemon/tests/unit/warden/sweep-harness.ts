@@ -177,6 +177,8 @@ export function harness(
     readonly verdicts?: () => Promise<readonly WardenEscalationVerdict[] | undefined>;
     /** Nodes whose agenda board cannot be read this sweep. */
     readonly unreadableBoards?: readonly string[];
+    /** Where a ferret's notification sits (its agenda home); absent, the port has no `homeOf`. */
+    readonly homeOf?: (sessionId: string) => Promise<string>;
     /** Auto-revive, when a test is about it. */
     readonly revive?: WardenReviveService;
     /** Moving a ferret that hit a limit, when a test is about it. */
@@ -344,6 +346,7 @@ export function harness(
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
     attention: {
+      ...(options.homeOf === undefined ? {} : { homeOf: options.homeOf }),
       board: async sessionId => {
         if (options.unreadableBoards?.includes(sessionId) === true) return undefined;
         return { sessionId, items: boards.get(sessionId) ?? [] };

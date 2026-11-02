@@ -7,6 +7,7 @@ import {
   MAX_AGENDA_TITLE_LENGTH,
 } from '@ferretry/protocol';
 import type { SubFerretDirectory } from '../sub-ferret/index.ts';
+import { parseWardenEscalationSourceRef, wardenEscalationSourceRef } from '../warden/escalation.ts';
 import { type AgendaHomeResolver, handsOnItem } from './home.ts';
 import type { AgendaQueryResult } from './service.ts';
 import type { AgendaActor, AgendaMutation, RaiseAgendaRequest } from './state-machine.ts';
@@ -39,12 +40,26 @@ export interface AgendaHomeMigrationOutcome {
 
 const DAEMON: AgendaActor = { kind: 'daemon', cause: 'system' };
 
-const requestOf = (item: AgendaItem, callsign: string): RaiseAgendaRequest => {
+/**
+ * The reference an item carries on the home: a Warden notification about this ferret names it, because the home
+ * holds its siblings' (and its own) of the same class (`escalation.ts`).
+ */
+const refOnHome = (item: AgendaItem, sessionId: string): string | null => {
+  const identity = item.raisedBy === 'daemon' ? parseWardenEscalationSourceRef(item.sourceRef) : undefined;
+  return identity?.scope === 'session' && identity.sessionId === undefined
+    ? wardenEscalationSourceRef(identity.kind, sessionId)
+    : item.sourceRef;
+};
+
+/** The refusals no retry will change: the item cannot live on the home, so waiting for the next start is pointless. */
+const PERMANENT_REFUSALS: ReadonlySet<string> = new Set(['forbidden', 'invalid', 'too-long']);
+
+const requestOf = (item: AgendaItem, sourceRef: string | null, callsign: string): RaiseAgendaRequest => {
   const title = item.title ?? item.subject;
   return {
     ...agendaBriefOf(item),
     source: item.source,
-    sourceRef: item.sourceRef,
+    sourceRef,
     ...(item.sourceSeq === undefined ? {} : { sourceSeq: item.sourceSeq }),
     subject: item.subject,
     why: item.why,
@@ -68,22 +83,28 @@ const standing = async (
   ports: AgendaHomeMigrationPorts,
   home: string,
   item: AgendaItem,
+  sourceRef: string | null,
 ): Promise<AgendaItem | undefined> => {
-  if (item.sourceRef === null) return undefined;
+  if (sourceRef === null) return undefined;
   const listed = await ports.agenda.list(home).catch(() => undefined);
   return listed?.ok === true
-    ? listed.value.items.find(each => each.source === item.source && each.sourceRef === item.sourceRef)
+    ? listed.value.items.find(each => each.source === item.source && each.sourceRef === sourceRef)
     : undefined;
 };
 
 /**
- * THE ONE-TIME MOVE TO AGENDA HOMES (docs/agenda.md § Sub-ferret agenda): every open item on a sub-ferret's agenda
- * that is not a hands-on card goes to the agenda home of that sub-ferret, as it stood (its snooze, whose turn it is,
- * its conversation), and is closed where it was, saying where it went. A gate item keeps its reference, so copies of
- * one gate collapse by the one-per-gate rule; any other item gets the sub-ferret's callsign in its title.
+ * THE ONE-TIME MOVE TO AGENDA HOMES (docs/agenda.md § Sub-ferret agenda): every open item the DAEMON raised on a
+ * sub-ferret's agenda that is not a hands-on card goes to the agenda home of that sub-ferret, as it stood (its
+ * snooze, whose turn it is, its conversation), and is closed where it was, saying where it went. A gate item keeps
+ * its reference, so copies of one gate collapse by the one-per-gate rule; any other item gets the sub-ferret's
+ * callsign in its title.
  *
- * ONCE: the marker is written only when every agenda was read and every item moved; an unfinished pass tries again
- * on the next start. Total: it never rejects.
+ * An item a ferret or the owner raised stays where it is: the daemon may not close it, and a copy raised by the
+ * daemon would leave the owner unable to discuss it. The ferret closes its own (`fy tidy`).
+ *
+ * ONCE: the marker is written only when every agenda was read and every item that can move did; an unfinished pass
+ * tries again on the next start. An item the home refuses for good does not hold the marker back. Total: it never
+ * rejects.
  */
 export async function migrateToAgendaHomes(ports: AgendaHomeMigrationPorts): Promise<AgendaHomeMigrationOutcome> {
   try {
@@ -101,9 +122,19 @@ export async function migrateToAgendaHomes(ports: AgendaHomeMigrationPorts): Pro
       if (home === sessionId) continue;
       const callsign = await ports.subFerrets.addressOf(sessionId).catch(() => sessionId);
       const homeName = await ports.subFerrets.addressOf(home).catch(() => home);
-      for (const item of listed.value.items.filter(each => !handsOnItem(each))) {
-        const raised = await ports.agenda.raise(home, requestOf(item, callsign), DAEMON).catch(() => undefined);
-        const landed = raised?.ok === true ? (raised.item ?? (await standing(ports, home, item))) : undefined;
+      for (const item of listed.value.items.filter(each => each.raisedBy === 'daemon' && !handsOnItem(each))) {
+        const sourceRef = refOnHome(item, sessionId);
+        const raised = await ports.agenda
+          .raise(home, requestOf(item, sourceRef, callsign), DAEMON)
+          .catch(() => undefined);
+        if (raised?.ok === false && PERMANENT_REFUSALS.has(raised.error.code)) {
+          ports.diagnostics.warn(
+            `!${item.id} on ${sessionId} cannot move to ${home}'s agenda and stays: ${raised.error.message}`,
+          );
+          continue;
+        }
+        const landed =
+          raised?.ok === true ? (raised.item ?? (await standing(ports, home, item, sourceRef))) : undefined;
         if (landed === undefined) {
           complete = false;
           ports.diagnostics.warn(`!${item.id} on ${sessionId} could not move to ${home}'s agenda`);
@@ -113,7 +144,12 @@ export async function migrateToAgendaHomes(ports: AgendaHomeMigrationPorts): Pro
           .resolve(sessionId, item.id, DAEMON, `moved to !${landed.id} on ${homeName}'s agenda`)
           .catch(() => undefined);
         if (closed?.ok === true) moved.push(`${sessionId} !${item.id}`);
-        else complete = false;
+        else {
+          complete = false;
+          ports.diagnostics.warn(
+            `!${item.id} on ${sessionId} moved to !${landed.id} on ${home}'s agenda but could not be closed where it was`,
+          );
+        }
       }
     }
     if (!complete) {

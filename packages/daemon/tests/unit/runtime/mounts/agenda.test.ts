@@ -2,7 +2,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import type { AgendaLedger, AgendaLedgerRepository, AgendaMutation } from '../../../../src/lib/agenda/index.ts';
+import {
+  type AgendaLedger,
+  type AgendaLedgerRepository,
+  type AgendaMutation,
+  AgendaService,
+} from '../../../../src/lib/agenda/index.ts';
 import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
@@ -10,6 +15,7 @@ import {
   agendaService,
   CREDENTIALS,
   FERRET_ARRIVAL,
+  FakeLedgerRepository,
   FERRET_SESSION,
   ferretOwn,
   human,
@@ -559,6 +565,43 @@ describe('attention routes', () => {
     should(items.length).equal(2);
     for (const item of items) should(item).containDeep({ notice: true, kind: 'info' });
     for (const item of items) should(item.ask).be.undefined();
+  });
+
+  it('should count a human notify on a sub-ferret against its agenda home, where the item landed', async () => {
+    // Arrange
+    const notifications = new FakeNotifications();
+    notifications.delivered = 1;
+    const service = new AgendaService(
+      new FakeLedgerRepository(),
+      { now: () => '2024-05-01T10:00:00.000Z' },
+      { has: async () => true },
+      { raised: async () => undefined },
+      undefined,
+      undefined,
+      { leadOf: async id => (id === 's1' ? 'lead1' : undefined), addressOf: async id => id },
+      undefined,
+      { of: async () => 'lead1' },
+    );
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...agendaRoutes(service, notifications, NO_HELD_REPLIES)]),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/notify',
+        headers: human,
+        body: JSON.stringify({ body: 'The backup finished.' }),
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ sessionId: 's1', delivered: 1 });
+    should(notifications.asked).deepEqual([{ sessionId: 'lead1', agendaId: 'A1' }]);
   });
 
   it('should not raise the same notify twice while its item is still open, and report no devices', async () => {

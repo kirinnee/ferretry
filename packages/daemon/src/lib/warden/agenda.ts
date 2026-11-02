@@ -84,14 +84,16 @@ export function buildWardenAgendaView(input: WardenAgendaInput): WardenAgendaVie
   const sessionsById = new Map(input.sessions.map(session => [session.config.id, session]));
   const items: WireFleetAgendaItem[] = [];
   for (const board of input.boards) {
-    const session = sessionsById.get(board.sessionId);
-    // A finished ferret's notification is cleared by the next sweep; it is never the owner's to act on now.
-    if (session?.state.status !== undefined && isTerminalStatus(session.state.status)) continue;
     for (const item of board.items) {
       if (!isWardenEscalationItem({ ...item, sourceRef: item.sourceRef ?? null })) continue;
       const identity = parseWardenEscalationSourceRef(item.sourceRef);
+      // The ferret it is about: a sub-ferret's notification sits on its agenda home and names it in its reference.
+      const about = (identity?.scope === 'session' ? identity.sessionId : undefined) ?? board.sessionId;
+      const session = sessionsById.get(about);
+      // A finished ferret's notification is cleared by the next sweep; it is never the owner's to act on now.
+      if (session?.state.status !== undefined && isTerminalStatus(session.state.status)) continue;
       items.push({
-        sessionId: board.sessionId,
+        sessionId: about,
         ...(session?.config.teammate === undefined ? {} : { teammate: session.config.teammate }),
         ...(session?.config.label === undefined ? {} : { label: session.config.label }),
         ...(session?.state.status === undefined ? {} : { sessionStatus: session.state.status }),

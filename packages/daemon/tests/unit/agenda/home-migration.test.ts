@@ -192,6 +192,82 @@ describe('migrateToAgendaHomes', () => {
     should((await migrateToAgendaHomes(refusing)).ran).be.false();
   });
 
+  it('leaves an item a ferret or the owner raised where it is, and still writes the marker', async () => {
+    const world = build();
+    const byAgent = await world.service.raise(
+      'kid',
+      request({
+        source: 'agent-raised',
+        sourceRef: null,
+        premise: 'A release waits.',
+        context: 'The deploy is green.',
+      }),
+      {
+        kind: 'agent',
+        sessionId: 'kid',
+        name: null,
+      },
+    );
+    should(byAgent.ok).be.true();
+    await world.service.raise('kid', request({ sourceRef: 'daemon:1' }), daemon);
+
+    const outcome = await migrateToAgendaHomes(world.ports());
+
+    should(outcome).eql({ ran: true, moved: 1 });
+    should(world.ledgers.open('kid').map(each => each.raisedBy)).eql(['agent']);
+    should(world.ledgers.open('lead').map(each => each.sourceRef)).eql(['daemon:1']);
+    should(world.marker.records).have.length(1);
+  });
+
+  it('scopes a warden notification to the ferret it is about, and leaves a scoped or machine one as it is', async () => {
+    const world = build();
+    const warden: AgendaActor = { kind: 'daemon', cause: 'warden-escalation' };
+    const raise = (sourceRef: string) =>
+      world.service.raise('kid', request({ source: 'agent-raised', sourceRef }), warden);
+    await raise('warden:ask:sus_thinking');
+    await raise('warden:ask:sus_subprocess:kid');
+    await raise('warden:ask:fleet:dead_monitor:daemon:liveness-stalled');
+
+    const outcome = await migrateToAgendaHomes(world.ports());
+
+    should(outcome).eql({ ran: true, moved: 3 });
+    should(world.ledgers.open('lead').map(each => each.sourceRef)).eql([
+      'warden:ask:sus_thinking:kid',
+      'warden:ask:sus_subprocess:kid',
+      'warden:ask:fleet:dead_monitor:daemon:liveness-stalled',
+    ]);
+  });
+
+  it('warns, naming the session and the item, when an item moved but could not be closed where it was', async () => {
+    const world = build({ failResolve: true });
+    await world.service.raise('kid', request(), daemon);
+
+    const outcome = await migrateToAgendaHomes(world.ports());
+
+    should(outcome.ran).be.false();
+    should(world.marker.records).be.empty();
+    should(world.warnings.join('\n')).containEql(
+      "!A1 on kid moved to !A1 on lead's agenda but could not be closed where it was",
+    );
+  });
+
+  it('does not hold the marker back for an item the home refuses for good', async () => {
+    const world = build();
+    await world.service.raise('kid', request(), daemon);
+    for (const code of ['forbidden', 'invalid', 'too-long'] as const) {
+      const refusing = world.ports({
+        agenda: { ...world.ports().agenda, raise: async () => ({ ok: false, error: { code, message: 'no' } }) },
+      });
+      world.marker.already = false;
+
+      const outcome = await migrateToAgendaHomes(refusing);
+
+      should(outcome).eql({ ran: true, moved: 0 });
+    }
+    should(world.ledgers.open('kid')).have.length(1);
+    should(world.warnings.join('\n')).containEql('!A1 on kid cannot move to lead');
+  });
+
   it('never rejects', async () => {
     const world = build();
     const broken = world.ports({

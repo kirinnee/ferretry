@@ -113,6 +113,16 @@ describe('a Warden notification’s identity', () => {
     );
   });
 
+  it('should write and parse a notification scoped to the ferret it is about', () => {
+    // Act / Assert
+    should(wardenEscalationSourceRef('agent_frozen', 's1')).equal('warden:ask:agent_frozen:s1');
+    should(parseWardenEscalationSourceRef('warden:ask:agent_frozen:s1')).deepEqual({
+      scope: 'session',
+      kind: 'agent_frozen',
+      sessionId: 's1',
+    });
+  });
+
   it('should parse both identities back, every kind included', () => {
     // Act / Assert
     should(parseWardenEscalationSourceRef('warden:ask:agent_frozen')).deepEqual({
@@ -140,6 +150,8 @@ describe('a Warden notification’s identity', () => {
     ['a machine ref with no kind', 'warden:ask:fleet::key'],
     ['a machine ref with no separator', 'warden:ask:fleet:dead_monitor'],
     ['a machine ref of an unknown kind', 'warden:ask:fleet:not_a_kind:key'],
+    ['a scoped ref of an unknown kind', 'warden:ask:not_a_kind:s1'],
+    ['a scoped ref naming no ferret', 'warden:ask:sus_thinking:'],
   ])('should parse %s as no Warden notification', (_label, sourceRef) => {
     // Act / Assert
     should(parseWardenEscalationSourceRef(sourceRef)).be.undefined();
@@ -479,6 +491,19 @@ describe('a fault that names several ferrets', () => {
     should(actual.raise[0]?.howToResolve).containEql('about the machine, not one ferret');
     should(actual.raise[0]?.terms).match([{ term: 'Jev' }]);
     should(actual.standing).deepEqual([fleetRef]);
+  });
+
+  it('should keep it on the agenda home that already holds it, without clearing it as recovered', () => {
+    // Act — s07 is a sub-ferret whose notifications live on the lead's board.
+    const actual = fleetPlan({
+      homes: new Map([['s07', 'lead']]),
+      boards: [...ids.map(id => board(id)), board('lead', [item(fleetRef)])],
+    });
+
+    // Assert
+    should(actual.resolve).deepEqual([]);
+    should(actual.raise).have.length(1);
+    should(actual.raise[0]).match({ sessionId: 's07', sourceRef: fleetRef });
   });
 
   it('should keep it where the owner first saw it while that ferret still qualifies', () => {

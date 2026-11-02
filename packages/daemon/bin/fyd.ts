@@ -4821,6 +4821,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             ? { sessionId, items: listed.value.items, resolved: listed.value.resolved }
             : undefined;
         },
+        homeOf: async sessionId => await parts.attention.homeOf(sessionId),
         raise: async (sessionId, request) => {
           const mutation = await parts.attention
             .raise(
@@ -10757,7 +10758,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
       // Where the daemon asks the owner for a sub-ferret: the owner's own ferret at the root of its lineage.
-      const agendaHomes = new AgendaHomes(new StorageHomeSessions(storage));
+      const agendaHomes = new AgendaHomes(new StorageHomeSessions(storage), undefined, boardDiagnostics);
       const agenda = new AgendaService(
         agendaBoards,
         clock,

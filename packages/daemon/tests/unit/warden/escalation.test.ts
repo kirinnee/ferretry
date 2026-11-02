@@ -769,3 +769,154 @@ describe('clearing an escalation whose reason has gone', () => {
     ]);
   });
 });
+
+describe('a sub-ferret’s escalation, kept on its agenda home', () => {
+  const HOMES = new Map([
+    ['kid1', 'lead'],
+    ['kid2', 'lead'],
+  ]);
+  const KIND = 'sus_thinking';
+  const scoped = (sessionId: string): string => wardenEscalationSourceRef(KIND, sessionId);
+  const row = (sourceRef: string) => ({ source: 'agent-raised' as const, sourceRef, raisedBy: 'daemon' as const });
+  const nodes = [node({ id: 'lead' }), node({ id: 'kid1' }), node({ id: 'kid2' })];
+  const flagged = (...ids: string[]) => ({
+    anomalies: ids.map(id => anomaly({ sessionId: id })),
+    verdicts: ids.map(id => verdict({ targetSession: id })),
+  });
+
+  it('should name the ferret in the reference it raises, which the service moves to the home', () => {
+    // Arrange / Act
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1')],
+    });
+
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.raise[0]).match({ sessionId: 'kid1', sourceRef: scoped('kid1') });
+  });
+
+  it('should keep the ferret’s own reference when it is its own agenda home', () => {
+    // Arrange / Act
+    const result = plan({ ...flagged('lead'), nodes, homes: HOMES, boards: [board('lead')] });
+
+    // Assert
+    should(result.raise[0]).match({ sessionId: 'lead', sourceRef: wardenEscalationSourceRef(KIND) });
+  });
+
+  it('should never clear as recovered a standing escalation that sits on the home', () => {
+    // Arrange — sweep 2: the item the service moved to the lead is still there, and the kid is still flagged.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.resolve).be.empty();
+    should(result.raise).have.length(1);
+    should(result.raise[0]).match({ sessionId: 'kid1', sourceRef: scoped('kid1') });
+  });
+
+  it('should not raise a second row for a standing escalation, nor re-tell a person who was told', () => {
+    // Arrange — the lead's item was read (resolved) so the board has nothing; the subject was already told.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.resolve).be.empty();
+  });
+
+  it('should keep two sub-ferrets and the lead itself on separate rows', () => {
+    // Arrange / Act
+    const result = plan({
+      ...flagged('kid1', 'kid2', 'lead'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1'), board('kid2')],
+    });
+
+    // Assert
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef])).eql([
+      ['kid1', scoped('kid1')],
+      ['kid2', scoped('kid2')],
+      ['lead', wardenEscalationSourceRef(KIND)],
+    ]);
+  });
+
+  it('should clear only the row of the ferret that recovered', () => {
+    // Arrange — both kids and the lead have a row on the lead; only kid1 has recovered.
+    const result = plan({
+      ...flagged('kid2', 'lead'),
+      nodes,
+      homes: HOMES,
+      boards: [
+        board('lead', {
+          items: [row(scoped('kid1')), row(scoped('kid2')), row(wardenEscalationSourceRef(KIND))],
+        }),
+      ],
+    });
+
+    // Assert
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]).match({ sessionId: 'lead', sourceRef: scoped('kid1'), anomalyKind: KIND });
+    should(result.resolve[0]?.note).match(/recovered/u);
+  });
+
+  it('should clear the row of a ferret that is stopped, and of one that is gone', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes: [node({ id: 'lead' }), node({ id: 'kid1', status: 'stopped' })],
+      homes: HOMES,
+      boards: [board('lead', { items: [row(scoped('kid1')), row(scoped('kid3'))] })],
+    });
+
+    // Assert
+    should(result.resolve.map(entry => entry.note)).eql([
+      'Cleared by the daemon: this node is stopped and is no longer running.',
+      'Cleared by the daemon: this node is no longer in the fleet.',
+    ]);
+  });
+
+  it('should neither judge nor clear a row about a ferret whose board could not be read', () => {
+    // Arrange — kid1's board is unreadable, so whether its home has the row says nothing about kid1.
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes,
+      homes: HOMES,
+      unreadable: new Set(['kid1']),
+      boards: [board('lead', { items: [row(scoped('kid1'))] })],
+    });
+
+    // Assert
+    should(result.resolve).be.empty();
+  });
+
+  it('should clear a row about a ferret whose board could be read', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes,
+      homes: HOMES,
+      unreadable: new Set(['kid2']),
+      boards: [board('lead', { items: [row(scoped('kid1'))] })],
+    });
+
+    // Assert
+    should(result.resolve).have.length(1);
+  });
+});

@@ -118,6 +118,65 @@ describe('AgendaService agenda homes', () => {
     should(ledgers.open('kid')).be.empty();
   });
 
+  it('keeps two sub-ferrets and the lead itself, with one kind, on separate rows of the home', async () => {
+    const { ledgers, service } = build();
+    const escalation = (sessionId: string, sourceRef: string) =>
+      service.raise(sessionId, request({ source: 'agent-raised', sourceRef }), daemon('warden-escalation'));
+    await escalation('kid', 'warden:ask:sus_thinking:kid');
+    await escalation('grandkid', 'warden:ask:sus_thinking:grandkid');
+    await escalation('lead', 'warden:ask:sus_thinking');
+    // A second sweep refreshes its own row and no other.
+    await escalation('kid', 'warden:ask:sus_thinking:kid');
+
+    should(ledgers.open('lead').map(each => each.sourceRef)).eql([
+      'warden:ask:sus_thinking:kid',
+      'warden:ask:sus_thinking:grandkid',
+      'warden:ask:sus_thinking',
+    ]);
+    should(ledgers.open('lead').map(each => each.title?.split(':')[0])).eql([
+      'becki',
+      'grandkid',
+      'A ferret needs a human',
+    ]);
+  });
+
+  it('resolves only the row of the sub-ferret that recovered', async () => {
+    const { ledgers, service } = build();
+    for (const [session, ref] of [
+      ['kid', 'warden:ask:sus_thinking:kid'],
+      ['grandkid', 'warden:ask:sus_thinking:grandkid'],
+      ['lead', 'warden:ask:sus_thinking'],
+    ] as const) {
+      await service.raise(session, request({ source: 'agent-raised', sourceRef: ref }), daemon('warden-escalation'));
+    }
+
+    // The Warden resolves on the board that holds the row, which is the lead's: the service does not move it again.
+    const cleared = await service.resolveSource(
+      'lead',
+      'agent-raised',
+      'warden:ask:sus_thinking:kid',
+      daemon('warden-escalation'),
+      'recovered',
+    );
+
+    should(cleared).match({ ok: true, change: 'resolved' });
+    should(ledgers.open('lead').map(each => each.sourceRef)).eql([
+      'warden:ask:sus_thinking:grandkid',
+      'warden:ask:sus_thinking',
+    ]);
+  });
+
+  it('says where a session’s asks land: its home for a sub-ferret, itself for a lead or an unknown session', async () => {
+    const { service } = build();
+    should(await service.homeOf('kid')).equal('lead');
+    should(await service.homeOf('lead')).equal('lead');
+    should(await service.homeOf('not valid!')).equal('not valid!');
+    const failing = build(async () => {
+      throw new Error('no');
+    });
+    should(await failing.service.homeOf('kid')).equal('kid');
+  });
+
   it('never lets an agent carry an item over', async () => {
     const { ledgers, service } = build();
     await service.raise('lead', request(), daemon('system'));

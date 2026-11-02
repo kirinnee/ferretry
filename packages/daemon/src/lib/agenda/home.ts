@@ -2,12 +2,13 @@
  * A SESSION'S AGENDA HOME (docs/agenda.md § Sub-ferret agenda): the one session whose agenda the daemon asks the
  * owner on behalf of `sessionId`. Never a sub-ferret.
  *
- * 1. Walk `parent` up to the root. A parent that cannot be read stops the walk at the last known session; a loop is
- *    walked once.
+ * 1. Walk `parent` up to the root. A walk that stops short of a root (a parent that cannot be read, a loop, a chain
+ *    past the bound) found no owner: it is BROKEN, not rooted at the last session it reached.
  * 2. A root the owner started (origin `human`, or no stamp: never hide an item on a guess) is the home.
- * 3. Else (a Warden's or another session's orphan): the owner's most recently updated interactive session on the
- *    same project.
- * 4. Else the machine-wide agenda, when it exists; until then the root itself.
+ * 3. Else (a Warden's or another session's orphan, or a broken lineage): the owner's most recently updated
+ *    interactive session on the same project.
+ * 4. Else the machine-wide agenda, when it exists.
+ * 5. Else the root itself; a broken lineage keeps the item on the session it was raised for, and says so.
  */
 import type { AgendaItem } from '@ferretry/protocol';
 import type { AgendaActor, RaiseAgendaRequest } from './state-machine.ts';
@@ -51,35 +52,57 @@ export const SELF_AGENDA_HOME: AgendaHomeResolver = { of: async sessionId => ses
 
 const ownerStarted = (session: HomeSession): boolean => session.origin === undefined || session.origin === 'human';
 
+/** Where a daemon diagnostic goes: the daemon's log. */
+export interface AgendaHomeDiagnostics {
+  warn(message: string): void;
+}
+
 export class AgendaHomes implements AgendaHomeResolver {
   constructor(
     private readonly sessions: HomeSessions,
     private readonly machine: MachineAgendaHome = NO_MACHINE_AGENDA,
+    private readonly diagnostics: AgendaHomeDiagnostics = { warn: () => undefined },
   ) {}
 
   async of(sessionId: string): Promise<string> {
-    const root = await this.rootOf(sessionId);
-    if (root === undefined || ownerStarted(root)) return root?.id ?? sessionId;
-    const latest = await this.latestInteractive(root);
+    const { first, last, rooted } = await this.walk(sessionId);
+    if (first === undefined || last === undefined) return sessionId;
+    if (rooted && ownerStarted(last)) return last.id;
+    const latest = await this.latestInteractive((rooted ? last : first).projectId);
     if (latest !== undefined) return latest.id;
-    return (await this.machine.home().catch(() => undefined)) ?? root.id;
+    const machine = await this.machine.home().catch(() => undefined);
+    if (machine !== undefined) return machine;
+    if (rooted) return last.id;
+    this.diagnostics.warn(
+      `the lineage of ${sessionId} is broken at ${last.id} (its parent cannot be read, or the chain loops), and the owner has no interactive session for its project: its asks stay on ${sessionId}`,
+    );
+    return sessionId;
   }
 
-  private async rootOf(sessionId: string): Promise<HomeSession | undefined> {
+  /** The session itself, the last one the walk reached, and whether that one is a root (has no parent). */
+  private async walk(sessionId: string): Promise<{
+    readonly first?: HomeSession;
+    readonly last?: HomeSession;
+    readonly rooted: boolean;
+  }> {
     const seen = new Set<string>();
-    let root: HomeSession | undefined;
+    let first: HomeSession | undefined;
+    let last: HomeSession | undefined;
+    let rooted = false;
     let next: string | undefined = sessionId;
     while (next !== undefined && !seen.has(next) && seen.size < MAX_HOME_CHAIN) {
       const session: HomeSession | undefined = await this.sessions.get(next).catch(() => undefined);
       if (session === undefined) break;
       seen.add(next);
-      root = session;
+      first ??= session;
+      last = session;
       next = session.parent === undefined || session.parent === '' ? undefined : session.parent;
+      rooted = next === undefined;
     }
-    return root;
+    return { ...(first === undefined ? {} : { first }), ...(last === undefined ? {} : { last }), rooted };
   }
 
-  private async latestInteractive(root: HomeSession): Promise<HomeSession | undefined> {
+  private async latestInteractive(projectId: string | undefined): Promise<HomeSession | undefined> {
     let latest: HomeSession | undefined;
     for (const id of await this.sessions.all().catch(() => [] as readonly string[])) {
       const session: HomeSession | undefined = await this.sessions.get(id).catch(() => undefined);
@@ -88,7 +111,7 @@ export class AgendaHomes implements AgendaHomeResolver {
         session.mode !== 'interactive' ||
         (session.parent !== undefined && session.parent !== '') ||
         !ownerStarted(session) ||
-        session.projectId !== root.projectId
+        session.projectId !== projectId
       )
         continue;
       if (latest === undefined || Date.parse(session.updatedAt) > Date.parse(latest.updatedAt)) latest = session;
@@ -130,5 +153,6 @@ export const handsOnItem = (item: AgendaItem): boolean =>
   item.copyPlan !== undefined ||
   item.taskPlan !== undefined ||
   item.signInRuleSuggestion !== undefined ||
+  item.signInRuleSuspended !== undefined ||
   item.twoFactorSeed !== undefined ||
   item.confirms !== undefined;

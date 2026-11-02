@@ -19,8 +19,10 @@ const session = (id: string, overrides: Partial<HomeSession> = {}): HomeSession 
   ...overrides,
 });
 
-const homes = (sessions: readonly HomeSession[], machine?: string, unreadable: readonly string[] = []) =>
-  new AgendaHomes(
+const warnings: string[] = [];
+const homes = (sessions: readonly HomeSession[], machine?: string, unreadable: readonly string[] = []) => {
+  warnings.length = 0;
+  return new AgendaHomes(
     {
       get: async id => {
         if (unreadable.includes(id)) throw new Error('unreadable');
@@ -29,7 +31,9 @@ const homes = (sessions: readonly HomeSession[], machine?: string, unreadable: r
       all: async () => sessions.map(each => each.id),
     },
     machine === undefined ? undefined : { home: async () => machine },
+    { warn: message => void warnings.push(message) },
   );
+};
 
 describe('AgendaHomes', () => {
   it('is the owner-started root of the lineage, never a sub-ferret', async () => {
@@ -88,25 +92,41 @@ describe('AgendaHomes', () => {
     should(await failing.of('kid')).equal('spawned');
   });
 
-  it('stops at the last known session when a parent cannot be read', async () => {
-    should(await homes([session('kid', { parent: 'gone' })]).of('kid')).equal('kid');
+  it('is never the sub-ferret itself, nor an owner root, when a parent cannot be read', async () => {
+    const kid = session('kid', { parent: 'gone', projectId: 'P1' });
+    const latest = session('latest', { mode: 'interactive', projectId: 'P1' });
+    should(await homes([kid, latest]).of('kid')).equal('latest');
+    should(warnings).be.empty();
+    should(
+      await homes([kid, session('elsewhere', { mode: 'interactive', projectId: 'P2' })], 'machine').of('kid'),
+    ).equal('machine');
     should(
       await homes([session('kid', { parent: 'broken' }), session('broken')], undefined, ['broken']).of('kid'),
     ).equal('kid');
+  });
+
+  it('keeps the item on the session it was raised for, and says so, when nothing else can hold it', async () => {
+    const world = homes([session('kid', { parent: 'gone' })]);
+    should(await world.of('kid')).equal('kid');
+    should(warnings).have.length(1);
+    should(warnings[0]).match(/lineage of kid is broken at kid/u);
     should(await homes([]).of('nobody')).equal('nobody');
+    should(warnings).be.empty();
   });
 
-  it('walks a loop once', async () => {
-    const world = homes([session('a', { parent: 'b' }), session('b', { parent: 'a' })]);
-    should(['a', 'b']).containEql(await world.of('a'));
+  it('reads a loop as a broken lineage too', async () => {
+    const loop = [session('a', { parent: 'b' }), session('b', { parent: 'a' })];
+    should(await homes(loop).of('a')).equal('a');
+    should(warnings).have.length(1);
+    should(await homes([...loop, session('lead', { mode: 'interactive' })]).of('a')).equal('lead');
   });
 
-  it('stops a chain longer than the bound', async () => {
+  it('reads a chain longer than the bound as a broken lineage', async () => {
     const chain = Array.from({ length: 30 }, (_, index) =>
       session(`s${String(index)}`, { parent: `s${String(index + 1)}` }),
     );
-    const found = await homes(chain).of('s0');
-    should(found).equal('s15');
+    should(await homes(chain).of('s0')).equal('s0');
+    should(warnings).have.length(1);
   });
 
   it('treats an empty parent as none', async () => {
@@ -166,6 +186,7 @@ describe('handsOnItem', () => {
       'copyPlan',
       'taskPlan',
       'signInRuleSuggestion',
+      'signInRuleSuspended',
       'twoFactorSeed',
       'confirms',
     ]) {

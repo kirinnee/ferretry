@@ -194,7 +194,12 @@ export class AgendaService {
 
   /** The session a daemon act about `sessionId` belongs on: its home when it is a sub-ferret and the act is not hands-on. */
   private async redirected(sessionId: string, handsOn: boolean, actor: AgendaActor): Promise<string> {
-    if (actor.kind !== 'daemon' || handsOn || invalidSession(sessionId) !== null) return sessionId;
+    return actor.kind !== 'daemon' || handsOn ? sessionId : await this.homeOf(sessionId);
+  }
+
+  /** Where the daemon's non-hands-on asks about `sessionId` land: its agenda home when it is a sub-ferret, else itself. */
+  async homeOf(sessionId: string): Promise<string> {
+    if (invalidSession(sessionId) !== null) return sessionId;
     if (!(await isSubFerret(this.subFerrets, sessionId))) return sessionId;
     return await this.homes.of(sessionId).catch(() => sessionId);
   }
