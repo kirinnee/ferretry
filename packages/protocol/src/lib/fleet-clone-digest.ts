@@ -13,7 +13,9 @@
  *   where it came from changes nothing it does;
  * - `file` and `directory` REPLACED BY THEIR CONTENTS, as sorted `[relativePath, sha256(content)]`
  *   pairs, so a folder that was renamed to `guard-2` here still compares equal, and one changed byte
- *   in one script does not;
+ *   in one script does not. A document the bundle did not carry (outside the asset tree, or dropped by
+ *   the size budget) has no contents to stand for it, so its literal path stays in the digest instead:
+ *   re-pointing a hook at another script is a change;
  * - a skills component's items, each with its files the same way;
  * - a profile's layers as IDENTITIES, in order (order is what the harness reads);
  * - a runtime as `{ login identity, profile identity, agent, harness }`.
@@ -84,18 +86,28 @@ const indexOf = (documents: readonly FleetCloneFile[]): DocumentIndex => {
   return index;
 };
 
-/** A document's contents as one pair, or a `null` hash when the bundle did not carry it. */
-const fileContents = (index: DocumentIndex, path: string): ContentPairs => {
-  const content = index.byPath.get(plain(path));
-  return [['', content === undefined ? null : sha256Hex(content)]];
+/** Spelled outside the asset tree: absolute, or under the home folder. Such a path is never carried. */
+const outsideAssets = (path: string): boolean => path.startsWith('/') || path.startsWith('~');
+
+/** A document's contents as one pair, or its literal path when the bundle did not carry it. */
+const fileContents = (index: DocumentIndex, path: string): ContentPairs | { readonly uncarried: string } => {
+  const content = outsideAssets(path) ? undefined : index.byPath.get(plain(path));
+  return content === undefined ? { uncarried: path } : [['', sha256Hex(content)]];
 };
 
 /** Every carried file under a folder, relative to it, with its hash; sorted by path. */
 const directoryContents = (index: DocumentIndex, path: string): ContentPairs => {
+  if (outsideAssets(path)) return [];
   const prefix = `${plain(path)}/`;
   return index.sorted
     .filter(([file]) => file.startsWith(prefix))
     .map(([file, content]) => [file.slice(prefix.length), sha256Hex(content)] as const);
+};
+
+/** A folder's carried contents, or its literal path when none of it was carried. */
+const folderContents = (index: DocumentIndex, path: string): ContentPairs | { readonly uncarried: string } => {
+  const carried = directoryContents(index, path);
+  return carried.length === 0 ? { uncarried: path } : carried;
 };
 
 const withoutProvenance = (value: Readonly<Record<string, unknown>>): Record<string, unknown> => {
@@ -115,7 +127,7 @@ const componentContent = (
 ): Record<string, unknown> => {
   const content: Record<string, unknown> = { ...value };
   if (typeof value.file === 'string') content.file = fileContents(index, value.file);
-  if (typeof value.directory === 'string') content.directory = directoryContents(index, value.directory);
+  if (typeof value.directory === 'string') content.directory = folderContents(index, value.directory);
   if (kind === 'skills' && Array.isArray(value.items)) {
     content.items = strings(value.items).map(item => ({
       item,

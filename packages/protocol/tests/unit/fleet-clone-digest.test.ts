@@ -99,6 +99,32 @@ describe('cloneItemDigest', () => {
       );
     });
 
+    it('should keep the path of a file the bundle did not carry, so a re-pointed script is a change', () => {
+      should(cloneItemDigest(instructions('/usr/local/bin/guard.sh'), NONE)).not.equal(
+        cloneItemDigest(instructions('/usr/local/bin/evil.sh'), NONE),
+      );
+      should(cloneItemDigest(instructions('~/scripts/a.sh'), NONE)).not.equal(
+        cloneItemDigest(instructions('~/scripts/b.sh'), NONE),
+      );
+      should(cloneItemDigest(instructions('/usr/local/bin/guard.sh'), NONE)).equal(
+        cloneItemDigest(instructions('/usr/local/bin/guard.sh'), NONE),
+      );
+    });
+
+    it('should not read an absolute path as the asset-relative file that spells the same', () => {
+      const store = [file('usr/local/bin/guard.sh', 'echo hi')];
+      should(cloneItemDigest(instructions('/usr/local/bin/guard.sh'), store)).not.equal(
+        cloneItemDigest(instructions('usr/local/bin/guard.sh'), store),
+      );
+    });
+
+    it('should keep the path of a folder the bundle did not carry', () => {
+      const hooks = (directory: string): CloneDigestItem => ({ kind: 'hooks', value: { directory } });
+      should(cloneItemDigest(hooks('/opt/a'), NONE)).not.equal(cloneItemDigest(hooks('/opt/b'), NONE));
+      should(cloneItemDigest(hooks('hooks/guard'), NONE)).not.equal(cloneItemDigest(hooks('hooks/other'), NONE));
+      should(cloneItemDigest(hooks('/opt/a'), NONE)).equal(cloneItemDigest(hooks('/opt/a'), NONE));
+    });
+
     it('should read a directory as its sorted relative paths and hashes, whatever the folder is called', () => {
       const hooks = (directory: string): CloneDigestItem => ({ kind: 'hooks', value: { directory } });
       const files = (root: string, order: readonly string[]): FleetCloneFile[] =>
