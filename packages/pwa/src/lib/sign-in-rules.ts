@@ -270,6 +270,7 @@ export function ruleWordsOf(rule: SignInRuleView): { readonly does: string; read
     scope: rule.scope,
     expiresAt: rule.expiresAt,
     uses: rule.uses,
+    codeKey: rule.codeKey,
     revision: 1,
   });
   const last = rule.usage.lastUsedAt === undefined ? '' : `, last ${timeWords(rule.usage.lastUsedAt)}`;
@@ -318,7 +319,10 @@ export function sheetWords(input: {
     codeKey: input.codeKey,
     revision: 1,
   });
-  return { does: words.does, rows: words.rows.filter(row => ['Machine', 'Site', 'Code key'].includes(row.label)) };
+  return {
+    does: words.does,
+    rows: words.rows.filter(row => ['Machine', 'Site', 'Account', 'Code key'].includes(row.label)),
+  };
 }
 
 /** The label of the 2FA key a code rule would pin: the newest key Ferretry makes codes for (the daemon pins the same). */

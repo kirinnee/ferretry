@@ -79,9 +79,11 @@ const scopeKey = (scope: SignInRuleScope): string =>
 /** What a rule can't cover, said on every sheet. */
 export function RuleStillAsked() {
   return (
-    <details className="rounded-control border border-border p-3" data-rule-still-asked="" open>
-      <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-fg">You’ll still be asked</summary>
-      <ul className="m-0 mt-1 flex list-none flex-col gap-2 p-0 text-meta text-muted">
+    <details className="text-meta text-muted" data-rule-still-asked="">
+      <summary className="min-h-[44px] cursor-pointer py-3 text-meta font-medium text-muted">
+        You’ll still be asked
+      </summary>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0 text-meta text-muted">
         {RULE_STILL_ASKED.map(each => (
           <li className="min-w-0 break-words" key={each}>
             {each}

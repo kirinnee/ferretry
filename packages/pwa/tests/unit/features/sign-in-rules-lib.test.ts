@@ -66,7 +66,7 @@ describe('flags come from the structured fields', () => {
 
   it('puts a row that looks like a warning, or holds a blank line, in the rows and never in the red block', () => {
     const rows = [
-      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Machine', value: 'kirin-box' },
       { label: 'Types', value: 'the sudo password' },
       { label: 'Who', value: SIGN_IN_RULE_ROOT_WARNING },
       { label: 'Until', value: `2026-11-02\n\n${SIGN_IN_RULE_TERMINAL_RESIDUAL}` },
@@ -225,7 +225,10 @@ describe('the words the sheet and the card draw', () => {
       ticks,
       codeKey: 'GitHub authenticator',
     });
-    expect(plain.rows).toEqual([{ label: 'Site', value: 'github.com' }]);
+    expect(plain.rows).toEqual([
+      { label: 'Site', value: 'github.com' },
+      { label: 'Account', value: 'github work · kirin@atomi.cloud' },
+    ]);
     expect(plain.does).toBe('Ferretry signs in to github.com as github work for any ferret, without asking.');
     const withCode = sheetWords({
       accountName: 'github work',
@@ -233,8 +236,8 @@ describe('the words the sheet and the card draw', () => {
       ticks: { ...ticks, totp: true },
       codeKey: 'GitHub authenticator',
     });
-    expect(withCode.rows.map(row => row.label)).toEqual(['Site', 'Code key']);
-    expect(withCode.rows[1]?.value).toBe('GitHub authenticator');
+    expect(withCode.rows.map(row => row.label)).toEqual(['Site', 'Account', 'Code key']);
+    expect(withCode.rows[2]?.value).toBe('GitHub authenticator');
   });
 
   it('names the machine on a terminal sheet, and whose password it is', () => {
@@ -245,7 +248,7 @@ describe('the words the sheet and the card draw', () => {
       ticks: initialRuleTicks({ surface: 'terminal', origin: 'owner', hasUsername: false }),
     });
     expect(words.does).toBe("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
-    expect(words.rows).toEqual([{ label: 'Machine', value: 'sudo on kirin-box' }]);
+    expect(words.rows).toEqual([{ label: 'Machine', value: 'kirin-box' }]);
   });
 
   it('pins the NEWEST automatic key, as the daemon does', () => {

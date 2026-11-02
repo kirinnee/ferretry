@@ -1444,8 +1444,8 @@ What it does NOT do, said plainly:
   reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
   could start another such program (`passwd`, say) as `sudo`:
 
-> Any ferret on this machine gets root while this rule lasts. In the split second before it types, a ferret could swap in
-> its own program and read the password once. Ferretry then stops the rule.
+> Any ferret on this machine gets root while this rule lasts. In the split second before typing, a ferret could swap in
+> another program and read the password once. Ferretry stops the rule if it notices.
 
 > Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
 > process gave itself. A ferret starts that program, so it could start another program root installed under the name

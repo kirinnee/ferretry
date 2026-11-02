@@ -228,7 +228,7 @@ describe('fy rules (controller)', () => {
       place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
       does: 'Ferretry types your sudo password for any ferret on kirin-box, without asking.',
       rows: [
-        { label: 'Machine', value: 'sudo on kirin-box' },
+        { label: 'Machine', value: 'kirin-box' },
         { label: 'Types', value: 'the sudo password' },
         { label: 'Who', value: 'Any ferret on this machine' },
         { label: 'Until', value: '2026-11-02 09:55 UTC' },
@@ -238,7 +238,7 @@ describe('fy rules (controller)', () => {
     await controller.add(SIGN_IN, {});
     should(said.slice(0, 11)).eql([
       '  Ferretry types your sudo password for any ferret on kirin-box, without asking.',
-      '  Machine  sudo on kirin-box',
+      '  Machine  kirin-box',
       '  Types    the sudo password',
       '  Who      Any ferret on this machine',
       '  Until    2026-11-02 09:55 UTC',

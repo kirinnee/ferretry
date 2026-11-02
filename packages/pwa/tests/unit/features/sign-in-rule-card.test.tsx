@@ -36,6 +36,18 @@ const card = (rule: SignInRuleCardProps['rule'], extra: Partial<SignInRuleCardPr
 );
 
 describe('narrowing a rule', () => {
+  it('titles a terminal rule by its machine and a page rule by its account and username', async () => {
+    const terminal = await mount(card(terminalRule({ username: 'kirin' })));
+    const page = await mount(card(pageRule()));
+    try {
+      expect(q(terminal.container, '[data-rule-title]').textContent).toBe('sudo on kirin-box');
+      expect(q(page.container, '[data-rule-title]').textContent).toBe('github work · kirin@atomi.cloud');
+    } finally {
+      await terminal.unmount();
+      await page.unmount();
+    }
+  });
+
   it('refuses an end that is not earlier than the rule’s own, in whole days', async () => {
     const mounted = await mount(card(codeRule()));
     try {

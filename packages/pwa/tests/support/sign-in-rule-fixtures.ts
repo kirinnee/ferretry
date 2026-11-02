@@ -49,8 +49,17 @@ export const pageRule = (extra: Partial<SignInRuleView> = {}): SignInRuleView =>
     ...extra,
   });
 
+export const CODE_KEY = 'Authenticator key';
+
 export const codeRule = (): SignInRuleView =>
-  pageRule({ fields: ['username', 'password', 'totp'], totp: true, flags: ['one-factor'], uses: 5, remaining: 4 });
+  pageRule({
+    fields: ['username', 'password', 'totp'],
+    totp: true,
+    codeKey: CODE_KEY,
+    flags: ['one-factor'],
+    uses: 5,
+    remaining: 4,
+  });
 
 export const terminalRule = (extra: Partial<SignInRuleView> = {}): SignInRuleView =>
   SignInRuleViewSchema.parse({
@@ -102,10 +111,12 @@ export const stagedRule = (extra: Partial<SignInRuleStaged> = {}, facts: StageWo
     stageExpiresAt: STAGE_EXPIRES,
     ...extra,
   } as const;
+  const username = facts.username ?? (base.place.kind === 'site' ? 'kirin@atomi.cloud' : undefined);
+  const codeKey = facts.codeKey ?? ((base.fields as readonly string[]).includes('totp') ? CODE_KEY : undefined);
   const words = signInRuleWords({
     ...base,
-    ...(facts.username === undefined ? {} : { username: facts.username }),
-    ...(facts.codeKey === undefined ? {} : { codeKey: facts.codeKey }),
+    ...(username === undefined ? {} : { username }),
+    ...(codeKey === undefined ? {} : { codeKey }),
   });
   return SignInRuleStagedSchema.parse({ ...base, does: extra.does ?? words.does, rows: extra.rows ?? words.rows });
 };

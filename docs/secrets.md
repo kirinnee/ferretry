@@ -678,7 +678,7 @@ rule to the matcher, so a terminal rule already in the file never fills there.
 write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
 foreground command and the cursor row. **A program swapped in between the last kernel check and the typing can still
 read the password once.** Holding Enter back does not stop that: a reader that takes the bytes as they arrive has them
-before anything is checked again. What a rule adds is that the swap is SEEN and the rule then stops:
+before anything is checked again. What a rule adds is that a swap is SEEN, when it is still there to see, and the rule then stops:
 
 1. it types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads
    the foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
@@ -687,12 +687,17 @@ before anything is checked again. What a rule adds is that the swap is SEEN and 
    screen that merely changed before the write still just redraws the card.
 
 Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
-audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
+audited and shown to the owner only, so the rule **cannot be retried under that approval**.
 
-**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before it types, a ferret could swap in its own program and read the password once. Ferretry then stops the rule.").** The owner switched sudo rules on knowing this: in the split second between
+**A swap that puts everything back is not seen.** A program that takes the place of sudo, reads the password the moment it
+is typed, and then puts the real sudo back before the second kernel check has nothing left for that check to find, so
+the rule carries on as if nothing happened. That is why the rule says it stops "if it notices", never "then". Nothing
+more is claimed.
+
+**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.").** The owner switched sudo rules on knowing this: in the split second between
 Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
-and that program could read the password once. Ferretry then notices, stops the rule and tells the owner, so the same
-approval can never be used to try again. A sudo rule also means every ferret can get root on this machine while the rule
+and that program could read the password once. If Ferretry notices, it stops the rule and tells the owner, so the same
+approval can never be used to try again; a swap that is put back before the check is not noticed. A sudo rule also means every ferret can get root on this machine while the rule
 lasts, which is why it is red, lasts one day unless the owner picks longer, and never more than seven.
 
 ### Strict, and fails closed

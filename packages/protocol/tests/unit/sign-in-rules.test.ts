@@ -140,6 +140,7 @@ const staged = {
   does: 'Ferretry signs in to github.com as GitHub for any ferret, without asking.',
   rows: [
     { label: 'Site', value: 'github.com' },
+    { label: 'Account', value: 'GitHub · kirinnee' },
     { label: 'Types', value: 'username, password and 2FA code' },
     { label: 'Who', value: 'Any ferret on this machine' },
     { label: 'Until', value: '2026-12-01 14:00 UTC' },
@@ -249,6 +250,7 @@ const cases: SchemaCase[] = [
     value: {
       ...view,
       fields: ['username', 'password', 'totp'],
+      codeKey: 'Authenticator',
       totp: true,
       flags: ['one-factor', 'auto-recipe'],
       uses: 20,
@@ -290,7 +292,7 @@ const cases: SchemaCase[] = [
     value: {
       ...staged,
       place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
-      rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1, 5)],
+      rows: [{ label: 'Machine', value: 'kirin-box' }, ...staged.rows.slice(2, 6)],
       fields: ['password'],
       totp: false,
       root: true,
@@ -546,7 +548,7 @@ describe('standing sign-in rules: the wire', () => {
       'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.',
     );
     should(SIGN_IN_RULE_TERMINAL_RESIDUAL).equal(
-      'In the split second before it types, a ferret could swap in its own program and read the password once. Ferretry then stops the rule.',
+      'In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.',
     );
   });
 
@@ -569,7 +571,7 @@ describe('standing sign-in rules: the wire', () => {
       fields: ['password'],
       totp: false,
       root: true,
-      rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1, 5)],
+      rows: [{ label: 'Machine', value: 'kirin-box' }, ...staged.rows.slice(2, 6)],
     };
     const sudoView = { ...view, place: sudoPlace, fields: ['password'], flags: ['root'] };
 
@@ -1208,17 +1210,31 @@ const labels = (result: ReturnType<typeof words>): string[] => result.rows.map(r
 describe('standing sign-in rules: the words of a rule', () => {
   it('should say a page rule in one plain line and the facts the passkey binds, in order', () => {
     // Act
-    const result = words();
+    const result = words({ username: 'kirinnee' });
 
     // Assert
     should(result.does).equal('Ferretry signs in to github.com as GitHub for any ferret, without asking.');
     should(result.rows).deepEqual([
       { label: 'Site', value: 'github.com, login.github.com' },
+      { label: 'Account', value: 'GitHub · kirinnee' },
       { label: 'Types', value: 'username and password' },
       { label: 'Who', value: 'Any ferret on this machine' },
       { label: 'Until', value: '2026-12-01 14:00 UTC' },
       { label: 'Uses', value: 'No limit' },
     ]);
+  });
+
+  it('should name the account of a page rule by label and username, so two accounts of one label read apart', () => {
+    // Act
+    const one = words({ username: 'kirinnee', account: { id: 'GITHUB_ONE', label: 'GitHub' } });
+    const other = words({ username: 'work@atomi.cloud', account: { id: 'GITHUB_TWO', label: 'GitHub' } });
+    const unnamed = words();
+
+    // Assert
+    should(one.rows.find(row => row.label === 'Account')?.value).equal('GitHub · kirinnee');
+    should(other.rows.find(row => row.label === 'Account')?.value).equal('GitHub · work@atomi.cloud');
+    should(unnamed.rows.find(row => row.label === 'Account')?.value).equal('GitHub');
+    should(labels(words({ place: sudo, fields: ['password'], username: 'kirin' }))).not.containEql('Account');
   });
 
   it('should say a terminal rule as the password of the tool on the machine, yours or the account’s', () => {
@@ -1230,7 +1246,7 @@ describe('standing sign-in rules: the words of a rule', () => {
     should(mine.does).equal('Ferretry types your sudo password for any ferret on kirin-box, without asking.');
     should(theirs.does).equal("Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.");
     should(mine.rows.slice(0, 2)).deepEqual([
-      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Machine', value: 'kirin-box' },
       { label: 'Types', value: 'the sudo password' },
     ]);
     should(mine.rows.find(row => row.label === 'Until')).deepEqual({ label: 'Until', value: '2026-11-02 09:55 UTC' });
@@ -1317,10 +1333,20 @@ describe('standing sign-in rules: the words of a rule', () => {
   });
 });
 
+describe('standing sign-in rules: the 2FA key a listed rule names', () => {
+  it('should name the key of a rule that types the code, and only that rule', () => {
+    const code = { ...view, fields: ['username', 'password', 'totp'], totp: true, flags: ['one-factor'] };
+    should(SignInRuleViewSchema.safeParse({ ...code, codeKey: 'Authenticator' }).success).be.true();
+    should(SignInRuleViewSchema.safeParse(code).success).be.false();
+    should(SignInRuleViewSchema.safeParse({ ...view, codeKey: 'Authenticator' }).success).be.false();
+    should(SignInRuleViewSchema.safeParse(view).success).be.true();
+  });
+});
+
 describe('standing sign-in rules: the rows the passkey binds are strict', () => {
   const without = (label: string): typeof staged.rows => staged.rows.filter(row => row.label !== label);
   const sudoStagedRows = [
-    { label: 'Machine', value: 'sudo on kirin-box' },
+    { label: 'Machine', value: 'kirin-box' },
     { label: 'Types', value: 'the sudo password' },
     { label: 'Who', value: 'Any ferret on this machine' },
     { label: 'Until', value: '2026-12-01 14:00 UTC' },
@@ -1354,7 +1380,7 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
       {
         name: 'a Machine row on a page rule',
         schema: SignInRuleStagedSchema,
-        value: { ...staged, rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows.slice(1)] },
+        value: { ...staged, rows: [{ label: 'Machine', value: 'kirin-box' }, ...staged.rows.slice(1)] },
       },
       {
         name: 'a Site row on a terminal rule',
@@ -1364,7 +1390,7 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
       {
         name: 'both a Site and a Machine row',
         schema: SignInRuleStagedSchema,
-        value: { ...staged, rows: [{ label: 'Machine', value: 'sudo on kirin-box' }, ...staged.rows] },
+        value: { ...staged, rows: [{ label: 'Machine', value: 'kirin-box' }, ...staged.rows] },
       },
       {
         name: 'three notes',
@@ -1385,6 +1411,26 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
         value: { ...staged, fields: ['username', 'password'], totp: false, rows: staged.rows },
       },
       {
+        name: 'a page rule with no Account row',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: without('Account') },
+      },
+      {
+        name: 'an Account row twice',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: [...staged.rows, { label: 'Account', value: 'GitHub · other' }] },
+      },
+      {
+        name: 'an Account row on a terminal rule',
+        schema: SignInRuleStagedSchema,
+        value: { ...sudoStaged, rows: [...sudoStagedRows, { label: 'Account', value: 'kirin' }] },
+      },
+      {
+        name: 'a code rule with no Code key row',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, rows: without('Code key') },
+      },
+      {
         name: 'a row label nobody defined',
         schema: SignInRuleStagedSchema,
         value: { ...staged, rows: [...staged.rows, { label: 'Secret', value: 'x' }] },
@@ -1395,6 +1441,12 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
         value: { ...staged, rows: without('Until'), state: 'waiting' },
       },
     ]);
+  });
+
+  it('should hold a page rule to exactly one Account row and a code rule to exactly one Code key row', () => {
+    const plain = { ...staged, fields: ['username', 'password'], totp: false, rows: without('Code key') };
+    should(SignInRuleStagedSchema.safeParse(plain).success).be.true();
+    should(SignInRuleStagedSchema.safeParse({ ...plain, rows: without('Account') }).success).be.false();
   });
 
   it('should accept a rule with its code key and up to two notes', () => {

@@ -1272,6 +1272,8 @@ export class SignInRuleService {
       ...(signIn?.autoApplyRecipe === true ? (['auto-recipe'] as const) : []),
     ];
     const device = await this.ports.devices?.label(record.body.approvedBy.deviceId).catch(() => undefined);
+    const pinnedKeyLabel =
+      account?.factors.find(each => each.id === record.body.pins.factor)?.label ?? 'Key no longer listed';
     return {
       id: record.body.id,
       revision: record.body.revision,
@@ -1281,6 +1283,7 @@ export class SignInRuleService {
       place,
       fields: [...effective.fields],
       totp,
+      ...(totp ? { codeKey: pinnedKeyLabel } : {}),
       scope: record.body.scope,
       createdAt: record.body.createdAt,
       expiresAt: effective.expiresAt,

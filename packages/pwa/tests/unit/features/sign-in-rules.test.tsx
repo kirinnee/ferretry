@@ -16,6 +16,7 @@ import {
 } from '../../../src/lib/sign-in-rules.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 import {
+  CODE_KEY,
   codeRule,
   machineStage,
   pageRule,
@@ -93,6 +94,18 @@ describe('the create sheet', () => {
     }
   });
 
+  it('keeps both detail lists closed until they are opened', async () => {
+    const mounted = await mount(
+      sheet({ place: sudoPlace, username: undefined, codeAvailable: false, eligibility: { ...eligible } }),
+    );
+    try {
+      for (const hook of ['[data-rule-checked]', '[data-rule-still-asked]'])
+        expect((q(mounted.container, hook) as HTMLDetailsElement).open).toBe(false);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('says why a sign-in cannot have a rule and offers no tick', async () => {
     const mounted = await mount(
       sheet({ eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } }),
@@ -142,6 +155,11 @@ describe('the rule card', () => {
     try {
       expect(q(mounted.container, '[data-rule-flag="one-factor"]').textContent).toContain(SIGN_IN_RULE_TOTP_WARNING);
       expect(q(mounted.container, '[data-rule-row="Types"]').textContent).toContain('2FA code');
+      expect(q(mounted.container, '[data-rule-row="Code key"]').textContent).toContain(CODE_KEY);
+      expect(mounted.container.querySelectorAll('[data-rule-row="Code key"]')).toHaveLength(1);
+      expect(q(mounted.container, '[data-rule-row="Account"]').textContent).toContain(
+        'github work · kirin@atomi.cloud',
+      );
     } finally {
       await mounted.unmount();
     }

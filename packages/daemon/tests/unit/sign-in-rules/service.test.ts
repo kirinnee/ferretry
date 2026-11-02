@@ -357,10 +357,31 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should(staged).containDeep({ totp: true, fields: ['username', 'password', 'totp'] });
     should(staged.rows.find(row => row.label === 'Types')?.value).equal('username, password and 2FA code');
     should(staged.rows.find(row => row.label === 'Code key')?.value).equal('key tf_000000000002');
+    should(staged.rows.filter(row => row.label === 'Code key')).have.length(1);
+    should(staged.rows.find(row => row.label === 'Account')?.value).equal(`GitHub work · ${USERNAME}`);
     const challenge = w.service.challengeOf(staged.stage, DEVICE) ?? new Uint8Array();
     const view = await w.service.commit(deviceOwner(), staged.stage, () => evidenceFor(challenge));
     should(rules(w)[0]?.body.pins.factor).equal('tf_000000000002');
     should(view.flags).eql(['one-factor']);
+    should(view.codeKey).equal('key tf_000000000002');
+    should((await w.service.list(deviceOwner())).rules[0]?.codeKey).equal('key tf_000000000002');
+  });
+
+  it('should say the pinned key is no longer listed when the account has lost it, never leave the code rule unnamed', async () => {
+    // Arrange
+    const base = listing();
+    const keys = [totpKey('tf_000000000002', T)];
+    const w = await world({
+      listing: { ...base, accounts: base.accounts.map(each => ({ ...each, factors: keys })) } as never,
+    });
+    await approved(w, { ...DRAFT, totp: true, totpAcknowledged: true });
+    w.state.listing = { ...base, accounts: base.accounts.map(each => ({ ...each, factors: [] })) } as never;
+
+    // Act
+    const listed = await w.service.list(deviceOwner());
+
+    // Assert
+    should(listed.rules[0]?.codeKey).equal('Key no longer listed');
   });
 
   it('should refuse a lifetime past 90 days or under an hour (the draft schema)', async () => {
@@ -683,7 +704,7 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
     });
     should(staged.does).equal('Ferretry types your sudo password for any ferret on kirin-box, without asking.');
     should(staged.rows.slice(0, 5)).eql([
-      { label: 'Machine', value: 'sudo on kirin-box' },
+      { label: 'Machine', value: 'kirin-box' },
       { label: 'Types', value: 'the sudo password' },
       { label: 'Who', value: 'Any ferret on this machine' },
       { label: 'Until', value: staged.expiresAt.slice(0, 16).replace('T', ' ') + ' UTC' },

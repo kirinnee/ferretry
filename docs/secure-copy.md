@@ -303,11 +303,11 @@ a ferret's words: a plain item with the same text is a plain item.
 - **The honest-client line**, on every plan card: "This stops misuse through a ferret's tools and page text; it can't
   stop a ferret that reads Ferretry's own files."
 - **The passkey.** A sign-in tick asks the daemon to stage the selection, then runs the `approve-task-plan` passkey bound
-  to that stage. The dialog shows the DAEMON's `does` line and `rows` (Types, Who, Until, Uses, plus Machine or Site) and the one red block, passed
-  structured, never text a ferret wrote or the app built. Dismissing the passkey drops the stage (`DELETE …/approval/:stage`); nothing is approved.
+  to that stage. The dialog lists the DAEMON's `summary` lines under "This approves exactly:", never text a ferret
+  wrote. Dismissing the passkey drops the stage (`DELETE …/approval/:stage`); nothing is approved.
 - **Staged at the machine.** A selection `fy plan approve` made shows on the same card as "Asked at the machine by
   `fy` at HH:MM: lines 1, 3. If you didn't just run this, Deny." with _Confirm with passkey_ and _Deny_, and every warning the
-  ticked lines would carry (root, no history, a code). The rows are the daemon's own, from `signInRuleWords` in the protocol. Only a stage
+  ticked lines would carry (root, no history, a code). The list is the daemon's own summary of that stage. Only a stage
   the machine made is shown this way. A merged passkey prompt (several acts at once) never claims to cover "exactly
   what is listed, once": only a prompt bound to one act says so.
 - **Approved, settled, stopped.** An approved line shows its uses left and when it ends, with _Revoke_ per line and
@@ -355,7 +355,7 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
   the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
   made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
   answers `waiting`, `approved`, `denied` or `expired`, and carries `codes`: the staged lines that also type the
-  6-digit code, so the app's red code warning never depends on the words. The machine reads and drops only the stages it made; a
+  6-digit code, so the app's red code warning never depends on the (clipped) summary text. The machine reads and drops only the stages it made; a
   paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
 - **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
   with none; a plan still waiting is declined whole. Its pastes and grants go at once. A plan also ends at its

@@ -17,6 +17,7 @@ const STAGED = {
   does: 'Ferretry signs in to github.com as work github for any ferret, without asking.',
   rows: [
     { label: 'Site', value: 'github.com' },
+    { label: 'Account', value: 'work github' },
     { label: 'Types', value: 'password' },
     { label: 'Who', value: 'Any ferret on this machine' },
     { label: 'Until', value: '2026-12-01 12:00 UTC' },
