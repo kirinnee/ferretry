@@ -701,8 +701,11 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   neither moves. The chat's own composer keeps today's behaviour: the daemon parks the item, with no toast.
   - **The overlay never outlives the boards.** It drops when a board read shows the item parked or gone, or open under a
     new ask (`waitingSince` moved: the ferret brought it back — its new ask wins), and at the latest after 30 s.
-  - **Toast: "Replied — moved to Replied · Undo"**, the answer toast's look and five-second window; a polite status
-    (`role="status"`) for screen readers.
+  - **Toast: "Moved to Replied · Undo"**, the answer toast's look and five-second window; a polite status
+    (`role="status"`) for screen readers. It sits in its own row **between the open
+    card and the composer** (on a phone and on a wide screen alike), so it never covers the input, the send button or the
+    keys hint; where no composer row is drawn (the end of the run, a to-test step) it floats at the bottom as the answer
+    toast does.
   - **Undo** brings the card back at once (the owner `unsnooze`, "Back to my list"), opens it, and puts the words back
     in **that card's** composer — once, and only when the ferret has not read the message: the message is taken out of
     the session queue by the route the chat uses to cancel a waiting message (`DELETE /v1/sessions/:id/queue/:messageId`;

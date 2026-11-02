@@ -66,8 +66,12 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // The app's own self-hosted fonts: `theme-fonts.css` names them `../assets/fonts/…`, which lands on `/assets/fonts/…`
+    // here and lives in src. Without this route every face 404s and the page is drawn in the fallback font.
     const built = Bun.file(join(buildDir, url.pathname));
-    return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
+    if (await built.exists()) return new Response(built);
+    const font = Bun.file(join(packageDir, 'src', url.pathname));
+    return new Response((await font.exists()) ? font : Bun.file(join(packageDir, 'public', url.pathname)));
   },
 });
 
@@ -110,7 +114,18 @@ const backgroundLightness = (page: Page): Promise<number> =>
   });
 
 const shot = async (page: Page, step: string, form: Form, theme: string): Promise<void> => {
+  await page.evaluate(async () => document.fonts.ready.then(() => undefined));
   await page.waitForTimeout(150);
+  const loaded = await page.evaluate(() =>
+    [...document.fonts].filter(face => face.status === 'loaded').map(face => face.family.replaceAll(/["']/gu, '')),
+  );
+  const stack = (await page.evaluate(() => getComputedStyle(document.body).fontFamily))
+    .split(',')
+    .map(name => name.replaceAll(/["']/gu, '').trim());
+  check(
+    loaded.some(family => stack.includes(family)),
+    `${step} ${form} ${theme}: none of the app's fonts (${stack.join(', ')}) loaded (loaded: ${loaded.join(', ') || 'none'})`,
+  );
   const light = await backgroundLightness(page);
   check(
     theme.endsWith('-dark') ? light < 0.35 : light > 0.65,
@@ -159,7 +174,7 @@ for (const form of ['phone', 'desktop'] as const) {
     check(second !== first, `${form} ${theme}: Send left the same card on top ("${first}")`);
     const toast = page.locator('[data-agenda-replied-toast] [role=status]').first();
     check(
-      ((await toast.textContent()) ?? '').includes('Replied — moved to Replied'),
+      ((await toast.textContent()) ?? '').includes('Moved to Replied'),
       `${form} ${theme}: the toast does not name the move`,
     );
     check(
@@ -167,6 +182,24 @@ for (const form of ['phone', 'desktop'] as const) {
         (await page.evaluate(() => document.activeElement !== document.body)),
       `${form} ${theme}: focus fell to the page after the card went`,
     );
+    const overlap = await page.evaluate(() => {
+      const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+      const toast = rect('[data-agenda-replied-toast]');
+      if (toast === undefined) return ['the toast is not drawn'];
+      const covered = (name: string, other: DOMRect | undefined): string[] =>
+        other !== undefined &&
+        toast.left < other.right &&
+        toast.right > other.left &&
+        toast.top < other.bottom &&
+        toast.bottom > other.top
+          ? [name]
+          : [];
+      return [
+        ...covered('the composer box', rect('[data-inbox-composer] [data-live-editor]')),
+        ...covered('the send button', rect('[data-inbox-composer] [data-composer-send]')),
+      ];
+    });
+    check(overlap.length === 0, `${form} ${theme}: the toast covers ${overlap.join(' and ')}`);
     await shot(page, '2-after-send', form, theme);
 
     await page.locator('[data-agenda-undo-button]').first().click();

@@ -9,7 +9,7 @@
  * and "+2 more" — Undo takes back the most recent, and the toast then shows the one before it. Each
  * answer keeps its own deadline; undoing one never restarts another.
  *
- * A REPLY has the same toast: "Replied — moved to Replied" with Undo for the same window, and once Undo ran, one
+ * A REPLY has the same toast: "Moved to Replied" with Undo for the same window, and once Undo ran, one
  * sentence saying what it did ("Back on your list — zoe already read your reply"). Nothing is held there — the
  * message is already sent — so Undo takes it back out of the queue when it can (`lib/agenda-replied.ts`).
  *
@@ -41,9 +41,16 @@ export interface AgendaUndoToastProps {
   readonly inbox: Pick<AgendaInbox, 'deferred' | 'deferredState' | 'replied' | 'repliedState'>;
   /** The clock the countdown reads; the browser's otherwise. Tests pass the deferral's own. */
   readonly clock?: () => number;
+  /**
+   * Take the toast's own room in the page instead of floating over it. The open Inbox card puts it between the card and the
+   * composer, so it can never sit on the input or the send button; without it the toast floats at the bottom as ever.
+   */
+  readonly inline?: boolean;
 }
 
-export function AgendaUndoToast({ inbox, clock = Date.now }: AgendaUndoToastProps) {
+const toastClass = (inline: boolean): string => `fy-attn-undo kt-panel${inline ? ' fy-attn-undo--inline' : ''}`;
+
+export function AgendaUndoToast({ inbox, clock = Date.now, inline = false }: AgendaUndoToastProps) {
   const pending = inbox.deferredState.pending;
   const latest = pending.at(-1);
   const [, setTick] = useState(0);
@@ -53,11 +60,11 @@ export function AgendaUndoToast({ inbox, clock = Date.now }: AgendaUndoToastProp
     return () => clearInterval(timer);
   }, [pending.length]);
 
-  if (latest === undefined) return <RepliedToast clock={clock} inbox={inbox} />;
+  if (latest === undefined) return <RepliedToast clock={clock} inbox={inbox} inline={inline} />;
   const sentence = actionSentence(latest.action, latest.card.item.id);
   const others = pending.length - 1;
   return (
-    <div className="fy-attn-undo kt-panel" data-agenda-undo="" data-pending={pending.length}>
+    <div className={toastClass(inline)} data-agenda-undo="" data-pending={pending.length}>
       <p className="fy-attn-undo__text" role="status">
         {sentence}
       </p>
@@ -113,7 +120,7 @@ const undoableReply = (entries: readonly RepliedEntry[], now: number): RepliedEn
   entries.findLast(entry => entry.phase === 'replied' && entry.undoUntil > now);
 
 /** The reply's toast: Undo while the window is open, then the one sentence about what Undo did. */
-function RepliedToast({ inbox, clock }: Required<AgendaUndoToastProps>) {
+function RepliedToast({ inbox, clock, inline }: Required<AgendaUndoToastProps>) {
   const { entries, notice } = inbox.repliedState;
   const [, setTick] = useState(0);
   const active = entries.some(entry => entry.phase === 'replied') || notice !== null;
@@ -135,7 +142,7 @@ function RepliedToast({ inbox, clock }: Required<AgendaUndoToastProps>) {
   if (shown !== null) {
     const sentence = repliedNoticeSentence(shown);
     return (
-      <div className="fy-attn-undo kt-panel" data-agenda-replied-notice="" data-agenda-undo="">
+      <div className={toastClass(inline)} data-agenda-replied-notice="" data-agenda-undo="">
         <p className="fy-attn-undo__text fy-attn-undo__text--wide" role="status">
           {sentence}
         </p>
@@ -149,9 +156,9 @@ function RepliedToast({ inbox, clock }: Required<AgendaUndoToastProps>) {
       </div>
     );
   }
-  const sentence = 'Replied — moved to Replied';
+  const sentence = 'Moved to Replied';
   return (
-    <div className="fy-attn-undo kt-panel" data-agenda-replied-toast="" data-agenda-undo="">
+    <div className={toastClass(inline)} data-agenda-replied-toast="" data-agenda-undo="">
       <p className="fy-attn-undo__text" role="status">
         {sentence}
       </p>

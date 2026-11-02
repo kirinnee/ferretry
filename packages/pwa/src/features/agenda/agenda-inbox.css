@@ -911,6 +911,17 @@ a.fy-inbox-row:focus-visible {
     bottom: calc(52px + 12px + var(--safe-bottom, 0px));
   }
 }
+/* In the page's flow (the open Inbox card): its own row above the composer, never over the input or its send button;
+   relative, not static, so the draining line stays anchored to the toast. */
+.fy-attn-undo--inline {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  transform: none;
+}
 .fy-attn-undo__text {
   min-width: 0;
   margin: 0;

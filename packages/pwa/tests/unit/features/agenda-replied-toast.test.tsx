@@ -55,7 +55,8 @@ describe('what the reply toast says after Undo', () => {
     await interact(async () => {
       run.replied.mark(card, { words: 'hi', sendId: 'm1', disposition: 'queued' });
     });
-    expect(run.text()).toBe('Replied — moved to Replied');
+    expect(run.text()).toBe('Moved to Replied');
+    expect(run.container().querySelector('.fy-attn-undo--inline')).toBeNull();
     await run.wait(300, 6_000);
     expect(run.text()).toBe('');
   });

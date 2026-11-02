@@ -1832,6 +1832,9 @@ export function AgendaInboxPage({
     // The phone's quick answers: the card the reader started at on top, the ones AFTER it next in line —
     // never the ones before it, so the queue only moves forward; past the last, the skipped ones are offered.
     const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
+    // The toast takes a row of its own between the card and the composer (never over the input, Send or the keys hint);
+    // wherever the deck foot is not drawn (the end of the run, a to-test step) it floats at the bottom as before.
+    const toastInFoot = !atEnd && stepRow === undefined;
     return (
       <main
         {...(phone ? { 'aria-label': 'Inbox' } : { 'aria-labelledby': headingId })}
@@ -1933,6 +1936,9 @@ export function AgendaInboxPage({
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
+              {toastInFoot ? (
+                <AgendaUndoToast inbox={inbox} inline {...(clock === undefined ? {} : { clock })} />
+              ) : null}
               {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
                 <GateWhy
                   card={deck[0]}
@@ -1979,7 +1985,7 @@ export function AgendaInboxPage({
             </div>
           </div>
         )}
-        <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
+        {toastInFoot ? null : <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />}
       </main>
     );
   }

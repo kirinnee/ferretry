@@ -166,9 +166,26 @@ describe('a reply from an Inbox card moves the Inbox on', () => {
     expect(deckAbout(run.mounted)).not.toContain('Ship it?');
     expect(words(run.mounted)).toBe('');
     const shown = must(toast(run.mounted), 'the replied toast');
-    expect(shown.textContent).toContain('Replied — moved to Replied');
+    expect(shown.textContent).toContain('Moved to Replied');
     expect(shown.querySelector('[role="status"]')).not.toBeNull();
     expect(shown.querySelector('[data-agenda-undo-button]')).not.toBeNull();
+    await run.mounted.unmount();
+  });
+
+  it('puts the toast in its own row BEFORE the composer, so it never covers the box or Send', async () => {
+    const run = await rig([shipIt, rebase], async () => ({ disposition: 'queued', sendId: 'm1' }));
+    await type(run.mounted, 'only after lunch');
+    await send(run.mounted);
+
+    const shown = must(toast(run.mounted), 'the replied toast');
+    const foot = must(shown.parentElement, 'the toast\x27s parent');
+    expect(foot.matches('[data-inbox-deck-foot]')).toBe(true);
+    const composer = must(foot.querySelector<HTMLElement>('[data-inbox-composer]'), 'the composer row');
+    expect(shown.classList.contains('fy-attn-undo--inline')).toBe(true);
+    expect(shown.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(composer.contains(shown)).toBe(false);
+    expect(shown.contains(composer)).toBe(false);
+    expect(run.mounted.container.querySelectorAll('[data-agenda-undo]').length).toBe(1);
     await run.mounted.unmount();
   });
 
