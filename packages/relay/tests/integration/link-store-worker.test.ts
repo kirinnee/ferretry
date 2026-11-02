@@ -12,6 +12,7 @@ import {
   toBase64Url,
 } from '../../src/lib/index.ts';
 import { LINK_JSON_MAX_BYTES } from '../../src/adapters/index.ts';
+import linkStoreWorker from '../../src/adapters/link-store-worker.ts';
 import { newDaemonIdentity, relayCrypto } from '../support/identities.ts';
 import {
   bytesOf,
@@ -1016,5 +1017,15 @@ describe('link store worker: an object that fails', () => {
     world.faults.push({ target: 'owner', route: '/spend', mode: 'garble' });
     should((await client.upload({ nonce })).response.status).equal(503);
     finish(world);
+  });
+});
+
+describe('link store worker: the deployed entry', () => {
+  it('should serve nobody from the default export when it has no mode', async () => {
+    const response = await linkStoreWorker.fetch(
+      new Request(`https://link.example.test${LINK_STORE_SERVICE_PATH}`),
+      {},
+    );
+    should(response.status).equal(503);
   });
 });
