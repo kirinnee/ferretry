@@ -51,8 +51,17 @@ export const pageRule = (extra: Partial<SignInRuleView> = {}): SignInRuleView =>
 
 export const CODE_KEY = 'Authenticator key';
 
+export const CODE_RULE_ID = `sr_${'e'.repeat(24)}`;
+const CODE_SIGN_IN = 'si_0000000000000002';
+
+/** A different sign-in from the page rule's (one rule per sign-in), with one of its five uses spent. */
 export const codeRule = (): SignInRuleView =>
   pageRule({
+    id: CODE_RULE_ID,
+    signIn: CODE_SIGN_IN,
+    account: { id: 'GITLAB_WORK', label: 'gitlab work' },
+    place: { kind: 'site', domains: ['gitlab.com'], match: [] },
+    usage: { count: 1, lastUsedAt: '2026-10-31T09:00:00.000Z' },
     fields: ['username', 'password', 'totp'],
     totp: true,
     codeKey: CODE_KEY,

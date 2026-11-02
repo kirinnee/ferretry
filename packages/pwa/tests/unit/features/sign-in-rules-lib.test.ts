@@ -265,7 +265,10 @@ describe('the words the sheet and the card draw', () => {
 
   it('says what is left and who approved it on a listed rule', () => {
     const words = ruleWordsOf(codeRule());
-    expect(words.rows.find(row => row.label === 'Uses')?.value).toContain('4 of 5');
+    expect(words.rows.find(row => row.label === 'Uses')?.value).toBe(
+      '4 of 5 uses left · used 1×, last 2026-10-31 09:00 UTC',
+    );
+    expect(ruleWordsOf(pageRule()).rows.find(row => row.label === 'Uses')?.value).toBe('No limit · not used yet');
     expect(words.rows.at(-1)).toEqual({ label: 'Approved with', value: 'Kirin’s phone' });
     expect(ruleWordsOf(terminalRule()).does).toBe(
       "Ferretry types kirin's sudo password for any ferret on kirin-box, without asking.",

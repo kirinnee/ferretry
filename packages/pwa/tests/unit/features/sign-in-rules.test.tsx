@@ -158,7 +158,7 @@ describe('the rule card', () => {
       expect(q(mounted.container, '[data-rule-row="Code key"]').textContent).toContain(CODE_KEY);
       expect(mounted.container.querySelectorAll('[data-rule-row="Code key"]')).toHaveLength(1);
       expect(q(mounted.container, '[data-rule-row="Account"]').textContent).toContain(
-        'github work · kirin@atomi.cloud',
+        'gitlab work · kirin@atomi.cloud',
       );
     } finally {
       await mounted.unmount();

@@ -70,13 +70,17 @@ const accounts = accountList();
 
 const rulesFor = () => {
   switch (view) {
-    case 'settings': return { rules: [pageRule(), codeRule2(), terminalRule(), suspendedRule2()], stages: [machineStage()] };
+    case 'settings': return { rules: [pageRule(), codeRule(), terminalRule(), suspendedRule2()], stages: [machineStage()] };
     case 'site-panel': case 'edit-warning': case 'device-revoke': return { rules: [pageRule(), terminalRule()], stages: [] };
     default: return { rules: [], stages: [] };
   }
 };
-function codeRule2() { return { ...codeRule(), id: 'sr_' + 'e'.repeat(24), signIn: 'si_0000000000000002' }; }
-function suspendedRule2() { return { ...suspendedRule(), id: 'sr_' + 'f'.repeat(24), signIn: 'si_0000000000000003' }; }
+function suspendedRule2() {
+  return {
+    ...suspendedRule(), id: 'sr_' + 'f'.repeat(24), signIn: 'si_0000000000000004',
+    account: { id: 'VERCEL_WORK', label: 'vercel work' }, place: { kind: 'site', domains: ['vercel.com'], match: [] },
+  };
+}
 
 const answerFor = (path, method) => {
   if (path === '/v1/accounts') return accounts;

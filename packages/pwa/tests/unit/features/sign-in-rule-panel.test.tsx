@@ -22,6 +22,7 @@ import { type RuleWorld, refused, ruleClient } from '../../support/sign-in-rule-
 import {
   codeRule,
   pageRule,
+  CODE_RULE_ID,
   RULE_ID,
   ruleList,
   SITE_SIGN_IN,
@@ -32,6 +33,8 @@ import {
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 const accounts = accountList();
+/** The code rule, standing on the sign-in the panel under test shows. */
+const codeRuleHere = () => ({ ...codeRule(), signIn: SITE_SIGN_IN });
 const signIn = must(
   accounts.signIns.find(each => each.id === SITE_SIGN_IN),
   'the github sign-in',
@@ -228,7 +231,7 @@ describe('making a rule', () => {
 
 describe('a rule that exists', () => {
   it('narrows it with only what the owner took away, then reads the list again', async () => {
-    const rules = binding({ list: ruleList({ rules: [codeRule()] }) });
+    const rules = binding({ list: ruleList({ rules: [codeRuleHere()] }) });
     const mounted = await mount(panel(rules));
     try {
       await settle();
@@ -238,7 +241,7 @@ describe('a rule that exists', () => {
       await click(q(mounted.container, '[data-rule-narrow-apply]'));
       await settle();
       const narrow = must(
-        rules.calls.find(call => call.key === `POST /v1/sign-in-rules/${RULE_ID}/narrow`),
+        rules.calls.find(call => call.key === `POST /v1/sign-in-rules/${CODE_RULE_ID}/narrow`),
         'the narrow call',
       );
       expect(narrow.body).toEqual({ dropTotp: true, uses: 2 });
@@ -325,7 +328,7 @@ describe('a rule that exists', () => {
 
   it('approves an ended rule again, never ticking the code back on', async () => {
     const rules = binding({
-      list: ruleList({ rules: [{ ...codeRule(), status: 'expired' }] }),
+      list: ruleList({ rules: [{ ...codeRuleHere(), status: 'expired' }] }),
       staged: stagedRule({ totp: false }),
     });
     const mounted = await mount(panel(rules));
@@ -429,7 +432,7 @@ describe('the sheet host', () => {
 
 describe('the warning on the Method and Recipe tabs', () => {
   it('counts the live rules of this sign-in that a save would suspend', async () => {
-    const rules = binding({ list: ruleList({ rules: [pageRule(), codeRule()] }) });
+    const rules = binding({ list: ruleList({ rules: [pageRule(), codeRuleHere()] }) });
     const mounted = await mount(<RuleEditWarning rules={rules} signIn={SITE_SIGN_IN} />);
     try {
       await settle();

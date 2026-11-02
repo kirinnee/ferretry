@@ -694,7 +694,7 @@ is typed, and then puts the real sudo back before the second kernel check has no
 the rule carries on as if nothing happened. That is why the rule says it stops "if it notices", never "then". Nothing
 more is claimed.
 
-**Accepted risk (owner, 2026-11-01; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.").** The owner switched sudo rules on knowing this: in the split second between
+**Accepted risk (owner, 2026-11-01, re-confirmed 2026-11-02 (!A239) knowing a swap that puts everything back before the re-check may go UNDETECTED; `SIGN_IN_RULE_TERMINAL_RESIDUAL`, the second sentence of the one red block, drawn from the structured root flag on the sheet, the machine view, the passkey dialog and Settings, and printed by `fy rules`: "In the split second before typing, a ferret could swap in another program and read the password once. Ferretry stops the rule if it notices.").** The owner switched sudo rules on knowing this: in the split second between
 Ferretry's last check of who is reading the terminal and the moment it types, a ferret could swap in its own program,
 and that program could read the password once. If Ferretry notices, it stops the rule and tells the owner, so the same
 approval can never be used to try again; a swap that is put back before the check is not noticed. A sudo rule also means every ferret can get root on this machine while the rule

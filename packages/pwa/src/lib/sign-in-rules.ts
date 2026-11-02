@@ -274,13 +274,12 @@ export function ruleWordsOf(rule: SignInRuleView): { readonly does: string; read
     revision: 1,
   });
   const last = rule.usage.lastUsedAt === undefined ? '' : `, last ${timeWords(rule.usage.lastUsedAt)}`;
+  const used = rule.usage.count === 0 ? 'not used yet' : `used ${String(rule.usage.count)}×${last}`;
   return {
     does: words.does,
     rows: [
       ...words.rows.map(row =>
-        row.label === 'Uses'
-          ? { label: row.label, value: `${usesLeftWords(rule)} · used ${String(rule.usage.count)}×${last}` }
-          : row,
+        row.label === 'Uses' ? { label: row.label, value: `${usesLeftWords(rule)} · ${used}` } : row,
       ),
       { label: 'Approved with', value: rule.approvedWith.device ?? 'a paired device' },
     ],
