@@ -69,6 +69,7 @@ export const AUDIT_EVENTS = [
   'catalog.member.revoked',
   'catalog.member.key-removed',
   'catalog.member.catalog-removed',
+  'catalog.member.renamed',
   'catalog.share.cross-member',
   'security.changed',
   'device.key-rotated',

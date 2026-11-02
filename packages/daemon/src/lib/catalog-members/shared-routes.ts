@@ -138,6 +138,7 @@ const REDEEM_REFUSAL: Readonly<Record<CatalogShareRefusal, string>> = {
   members_full: 'this machine holds as many people as it may',
   member_unknown: 'this browser is not a member here any more',
   member_key_unknown: 'this browser is not registered here any more',
+  member_exists: 'someone here already has that user ID',
   catalog_unknown: 'a catalog in that code is gone',
   share_unknown: 'that code is not one this machine will take',
 };
