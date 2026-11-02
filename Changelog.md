@@ -1,3 +1,25 @@
+## [4.251.0](https://github.com/kirinnee/ferretry/compare/v4.250.0...v4.251.0) (2026-11-02)
+
+### Features
+
+* **agenda:** attach files to a gate item's Not good ([#1390](https://github.com/kirinnee/ferretry/issues/1390)) ([da83030](https://github.com/kirinnee/ferretry/commit/da83030ac8722361c85ea57650f8504170913e9e))
+
+## [4.250.0](https://github.com/kirinnee/ferretry/compare/v4.249.0...v4.250.0) (2026-11-02)
+
+### Features
+
+* **board:** sub-cards close themselves and hide from the board ([#1389](https://github.com/kirinnee/ferretry/issues/1389)) ([8a53b30](https://github.com/kirinnee/ferretry/commit/8a53b3018f7855bd997d9ecbe2b9d3724d49ddcc))
+* **fleet:** reuse a login the target already has on clone ([#1369](https://github.com/kirinnee/ferretry/issues/1369)) ([5591fcd](https://github.com/kirinnee/ferretry/commit/5591fcdd8312602e902473e4e92bb76e9c0fe6d0))
+* **pwa:** Add skills as a page with catalog grouping, filter and refresh ([#1372](https://github.com/kirinnee/ferretry/issues/1372)) ([2c8a165](https://github.com/kirinnee/ferretry/commit/2c8a165dfec2795833934c673a5e20226f4dcdbe))
+* **pwa:** polish the This machine tabs after the regroup ([#1391](https://github.com/kirinnee/ferretry/issues/1391)) ([d0f3a40](https://github.com/kirinnee/ferretry/commit/d0f3a4024aff4d8ab8fdde87ef16d52f1b680277))
+* **pwa:** regroup the This machine tabs by what a person looks for ([#1388](https://github.com/kirinnee/ferretry/issues/1388)) ([894e8b0](https://github.com/kirinnee/ferretry/commit/894e8b0cf61072acb3bea0f42c2009f8b4e50f58))
+* **pwa:** the Inbox moves on at once after a reply, with Undo ([#1380](https://github.com/kirinnee/ferretry/issues/1380)) ([5aed8a8](https://github.com/kirinnee/ferretry/commit/5aed8a8d484951c3b0f97ebb497f81dd7315911c))
+
+### Fixes
+
+* **fleet:** keep clone links on edit and harden the last-copied record ([#1383](https://github.com/kirinnee/ferretry/issues/1383)) ([db92fe2](https://github.com/kirinnee/ferretry/commit/db92fe268b86079fa267a072326a015aae08ea52))
+* **pwa:** agenda ask is a short bold line; headings demoted; reduced-motion title ends at a word ([#1374](https://github.com/kirinnee/ferretry/issues/1374)) ([9734497](https://github.com/kirinnee/ferretry/commit/97344979f1a4755a2dba3c71ed970c1f348635eb))
+
 ## [4.249.0](https://github.com/kirinnee/ferretry/compare/v4.248.0...v4.249.0) (2026-11-02)
 
 ### Features

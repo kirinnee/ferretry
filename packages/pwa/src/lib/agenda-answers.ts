@@ -30,6 +30,7 @@ import {
   type AgendaItem,
   type AgendaResponse,
   type AgendaUndeliveredReply,
+  type BoardReopenAttachments,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaKindLabel,
@@ -48,6 +49,8 @@ export type InboxAction =
       readonly note?: string;
       /** The answer is to the gate attached to this thread (`gateAttached`), not to the thread: the daemon moves the card. */
       readonly gate?: true;
+      /** Files already uploaded to the item's session, sent with a Not good: the daemon carries them to the card's ferret. */
+      readonly attachments?: BoardReopenAttachments;
     }
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
   | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }

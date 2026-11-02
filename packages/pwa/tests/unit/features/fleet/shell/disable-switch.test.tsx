@@ -305,7 +305,7 @@ describe('the switch on a runtime', () => {
     expect(switchOf(view.container, 'claude-review').getAttribute('aria-checked')).toBe('false');
     expect(
       view.container.querySelector('[data-runtime-card="claude-review"] [data-runtime-disabled-badge]'),
-    ).not.toBeNull();
+    ).toBeNull();
 
     // Act
     await click(switchOf(view.container, 'claude-review'), 'switch');

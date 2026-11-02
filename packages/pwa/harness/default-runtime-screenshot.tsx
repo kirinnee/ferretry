@@ -1,15 +1,15 @@
 /**
- * The Runtimes tab (docs/design/account-model.md §4.2) on a machine with 13 runtimes: the one-row "Default for new
- * agents" select with its hint, the inline Save / Keep panel after a change, and the two-line runtime cards (name row
- * with Default / Disabled / Not an agent, the switch and the ⋯ menu; details row) with the menu open. At a 390px phone and a 1440px desktop, light and dark. Review
- * evidence; nothing compares the PNGs.
+ * The Runtimes tab (docs/design/account-model.md §4.2) on a machine with 14 runtimes: the one-row "Default for new
+ * agents" select with its hint, the inline Save / Keep panel after a change, and the runtime cards (name row with
+ * Default / Not agent badges — a switched-off runtime has none — the switch and the ⋯ menu; details row) with the menu
+ * open. At a 390px phone and a 1440px desktop, light and dark. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/default-runtime-screenshot.tsx [out-dir]   # writes <state>-<390|1440>-<light|dark>.png
  *
- * It renders the REAL `RuntimesTab` against the harness catalogue with a 13-runtime overlay. Nothing touches a
+ * It renders the REAL `RuntimesTab` against the harness catalogue with a 14-runtime overlay. Nothing touches a
  * network (every request off the loopback origin is aborted) and serves the app's own font files, so the shots draw
  * in Inter as the app does. It fails if any state scrolls sideways, if the label, select and hint do not share one
- * row on the desktop or do not stack on the phone, if a card's name row is not one line, if a card's text does not
+ * row on the desktop or do not stack on the phone, if a runtime's name is ever cut, if a card's text does not
  * start at the name's left edge, or if Make default is offered on a switched-off runtime.
  */
 import { spawnSync } from 'node:child_process';
@@ -58,6 +58,7 @@ const RUNTIMES = {
     row('claude-llm1', 'claude', 'claude-personal', 'ready'),
     row('claude-llm2', 'claude', 'claude-personal', 'refresh_due'),
     row('claude-lab', 'claude', 'claude-personal', 'ready', { agent: false }),
+    row('claude-research-sandbox-experimental', 'claude', 'claude-personal', 'ready', { agent: false }),
     row('claude-scratch', 'claude', 'claude-personal', 'checking'),
     row('codex-default', 'codex', 'codex', 'ready'),
     row('codex-kirin', 'codex', 'codex', 'ready'),
@@ -76,7 +77,7 @@ const MACHINE = {
     { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
     { harness: 'codex', label: 'Codex', installed: true, command: '/usr/local/bin/codex' },
   ],
-  runtimeCount: 13,
+  runtimeCount: 14,
   runningSessions: 0,
   authority: { mayApply: true, applyRefusal: 'granted' },
 };
@@ -232,8 +233,13 @@ try {
             const lines = ['[data-runtime-details]', '[data-disable-note]', '[data-runtime-skipped]'].flatMap(
               selector => [...card.querySelectorAll(selector)].map(element => textLeft(element) - left(nameText)),
             );
+            const shownName = card.querySelector<HTMLElement>('[data-runtime-name]');
             return {
               name,
+              nameCut:
+                shownName === null ||
+                shownName.scrollWidth > shownName.clientWidth ||
+                getComputedStyle(shownName).textOverflow === 'ellipsis',
               nameRowHeight: nameRow?.getBoundingClientRect().height ?? 0,
               menus: card.querySelectorAll('[data-runtime-actions]').length,
               looseButtons: card.querySelectorAll(
@@ -245,8 +251,9 @@ try {
         });
         for (const card of cards) {
           if (card.menus !== 1 || card.looseButtons !== 0) fail(`${card.name} does not keep its actions in one ⋯ menu`);
-          if (card.nameRowHeight > (vp === '390' ? 96 : 56))
-            fail(`${card.name}'s name row wraps (${card.nameRowHeight}px) at ${vp}/${theme}`);
+          if (card.nameCut) fail(`${card.name}'s name is cut at ${vp}/${theme}`);
+          if (vp === '1440' && card.nameRowHeight > 56)
+            fail(`${card.name}'s badge does not sit beside its name (${card.nameRowHeight}px) at ${vp}/${theme}`);
           for (const offset of card.offsets)
             if (Math.abs(offset) > 1)
               fail(`${card.name} has a line ${offset}px off the name's left edge at ${vp}/${theme}`);

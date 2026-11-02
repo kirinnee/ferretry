@@ -52,7 +52,6 @@ import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
-import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MotionSetting, OpenLinksInSetting, SessionsListSetting } from './conversation-settings.tsx';
@@ -62,6 +61,7 @@ import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
 import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
+import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
@@ -650,7 +650,7 @@ export function SettingsPage({
     () =>
       selectedRecord === undefined
         ? undefined
-        : (panel, onOpenPanel, group) => (
+        : (panel, onOpenPanel, group, lead) => (
             <DaemonSettingsFrame
               key={String(daemonId)}
               connection={selectedRecord}
@@ -666,6 +666,7 @@ export function SettingsPage({
               panel={panel}
               onOpenPanel={onOpenPanel}
               {...(group === undefined ? {} : { group: panelGroup(group) })}
+              {...(lead === undefined ? {} : { lead })}
               {...(backLabel(panel) === undefined ? {} : { backLabel: backLabel(panel) })}
               additionalTabs={daemonSettingsTabs}
               carrier={carrier}

@@ -5,7 +5,7 @@ import {
   SignInRuleSuggestionIdSchema,
   TwoFactorStageIdSchema,
 } from './account-ids.ts';
-import { TaskRefSchema } from './board-refs.ts';
+import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const AGENDA_SCHEMA_VERSION = 1 as const;
@@ -1346,6 +1346,12 @@ export const AgendaActionRequestSchema = z
       response: AgendaResponseSchema.optional(),
       /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
+      /**
+       * Files the owner sent with a Not good on a card's gate (`from` is this agenda's own session, where the app
+       * uploaded them): carried to the card's ferret with the reopen. Only an answer to a gate takes them, and only a
+       * daemon that reports `agenda.gate.attachments.1`; any other answer is refused.
+       */
+      attachments: BoardReopenAttachmentsSchema.optional(),
     }),
     /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
     z.strictObject({
@@ -1400,6 +1406,13 @@ export const AgendaActionRequestSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (value.action === 'resolve' && value.attachments !== undefined && value.response === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'files go with an answer, not with a bare close',
+        path: ['attachments'],
+      });
+    }
     if (value.action === 'edit') {
       for (const field of value.clear ?? []) {
         if (value[field] !== undefined)

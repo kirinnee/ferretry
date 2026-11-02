@@ -10245,6 +10245,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // deletes its draft through this, which reads nothing until requests flow.
       const sharedDraftsHolder: { service?: SharedDraftService } = {};
       let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
+      // One carrier for both halves: a Not good from the Board and one answered on the agenda move files the same way.
+      const boardAttachments = new StoreBoardAttachments(attachmentStore);
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -10264,7 +10266,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { register: async request => await catalogs.registerProject(request) },
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
-        new StoreBoardAttachments(attachmentStore),
+        boardAttachments,
         // The owner's words a card's ask is matched against: the queue, the send ledger (who sent each turn) and
         // every turn document no send accounts for.
         new SessionOwnerWords(sessionQueue, sendLedger, new StorageSessionParents(storage), id =>
@@ -11025,6 +11027,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions: { all: agendaSessionIds },
         homes: agendaHomes,
         marker: new FileGateItemsMigrationMarker(join(paths.home, 'gate-items-duplicates-migration.json')),
+        files: boardAttachments,
         now: () => clock.now(),
         words: {
           told: async (task, message, key) => {

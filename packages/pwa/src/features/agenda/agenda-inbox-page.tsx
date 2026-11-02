@@ -126,7 +126,7 @@ import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
-import { BoardSendBack } from '../board/board-send-back.tsx';
+import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
@@ -583,6 +583,7 @@ function GateWhy({
   daemon,
   error,
   optional,
+  ports,
   onSend,
   onCancel,
 }: {
@@ -591,16 +592,28 @@ function GateWhy({
   readonly daemon: DaemonConnection | undefined;
   readonly error: string | null;
   readonly optional: boolean;
-  readonly onSend: (reason: string) => void;
+  /** What the machine needs to take files with the answer; absent, the box is words alone. */
+  readonly ports: SendBackPorts | undefined;
+  readonly onSend: (sent: SendBack, sessionId: string | null) => void;
   readonly onCancel: () => void;
 }) {
+  // The files ride the answer to the item's own session; the daemon carries them to the card's ferret.
+  const answerPorts = useMemo(
+    () =>
+      ports?.answerFiles === undefined
+        ? undefined
+        : { sendBackFiles: ports.answerFiles, uploadAttachment: ports.uploadAttachment },
+    [ports?.answerFiles, ports?.uploadAttachment],
+  );
+  const files = useSendBackFiles(answerPorts, daemon, card.view.config.id);
   if (daemon === undefined) return null;
   return (
     <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>
       <BoardSendBack
         busy={false}
         error={error}
-        files={null}
+        // "Not yet" leaves the card where it is: there is no ferret to show a picture to.
+        files={optional ? null : files}
         heading={
           optional
             ? `Not yet: anything to add about ${card.item.subject ?? card.item.id}?`
@@ -611,7 +624,7 @@ function GateWhy({
         placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
         onCancel={onCancel}
         onSubmit={sent => {
-          onSend(sent.reason);
+          onSend(sent, files?.sessionId ?? null);
           return null;
         }}
         target={{ daemon, sessionId: card.view.config.id }}
@@ -1936,8 +1949,9 @@ export function AgendaInboxPage({
                   daemon={inbox.connectionFor(deck[0].daemonId)}
                   optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
                   error={failureFor(inbox.deferredState.failed, deck[0].key)}
+                  ports={toTestHost?.ports}
                   onCancel={() => setGateWhy(null)}
-                  onSend={reason => {
+                  onSend={(sent, from) => {
                     const label = choiceLabel(gateWhy.action);
                     if (label === null || deck[0] === undefined) return;
                     answerCard(
@@ -1945,8 +1959,11 @@ export function AgendaInboxPage({
                       deck[0],
                       gateAnswerAction(
                         label,
-                        reason,
+                        sent.reason,
                         gateWhy.action.kind === 'respond' && gateWhy.action.gate === true,
+                        from === null || sent.attachmentIds.length === 0
+                          ? undefined
+                          : { from, ids: [...sent.attachmentIds] },
                       ),
                     );
                     setGateWhy(null);

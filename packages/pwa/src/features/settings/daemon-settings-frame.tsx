@@ -46,18 +46,18 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineLacks, machineOffers } from '../../lib/daemon-health.ts';
 import { needsNewerFerretry } from '../../lib/machine-update-words.ts';
+import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import {
   useAddKeyStepUp,
   useApprovePasteRuleStepUp,
   useApproveSignInRuleStepUp,
   useDaemonClient,
 } from '../../lib/store.tsx';
-import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { PANEL_NAMES } from '../fleet/shell/machine-panels.ts';
 import { AccountsSurface } from '../accounts/accounts-surface.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
+import { PANEL_NAMES } from '../fleet/shell/machine-panels.ts';
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
@@ -465,6 +465,8 @@ export interface DaemonSettingsFrameProps {
   readonly backLabel?: string;
   /** Draw only these panels, as one titled list, instead of every panel. */
   readonly group?: { readonly label: string; readonly panels: readonly string[] };
+  /** Rows the tab adds at the head of the group's list (list items): they share its one heading and card. */
+  readonly lead?: ReactNode;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -500,6 +502,7 @@ export function DaemonSettingsFrame({
   onOpenPanel,
   backLabel = 'Machine',
   group,
+  lead,
   additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
@@ -595,7 +598,7 @@ export function DaemonSettingsFrame({
           const tab = tabs.find(candidate => candidate.id === id);
           return tab === undefined ? [] : [tab];
         });
-  if (group !== undefined && shown.length === 0) return null;
+  if (group !== undefined && shown.length === 0 && lead === undefined) return null;
   const heading = group === undefined ? 'Connection and security' : group.label;
 
   return (
@@ -616,6 +619,7 @@ export function DaemonSettingsFrame({
         ) : null}
       </div>
       <ul className="kt-groupcard m-0 list-none p-0" aria-label={`${name} ${heading.toLowerCase()}`}>
+        {group === undefined ? null : lead}
         {shown.map(tab =>
           group === undefined ? (
             <li key={tab.id}>

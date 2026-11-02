@@ -12,7 +12,13 @@ import {
 } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { laptop } from '../board-support.ts';
-import { sendBackBox, sendBackSubmit, plainSendBackEditor, writeSendBack } from './send-back-support.ts';
+import {
+  mouseIsLastPointer,
+  sendBackBox,
+  sendBackSubmit,
+  plainSendBackEditor,
+  writeSendBack,
+} from './send-back-support.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 plainSendBackEditor();
@@ -251,6 +257,122 @@ describe('a gate item in the Inbox', () => {
     await press(send);
     expect(pending(fake)).toEqual(['Not yet']);
     await mounted.unmount();
+  });
+
+  describe('with files', () => {
+    const attachId = `att_${'b'.repeat(64)}`;
+    const ports = (takes: boolean) => {
+      const uploaded: Array<[string, string]> = [];
+      return {
+        uploaded,
+        ports: {
+          sendBackFiles: async () => false,
+          answerFiles: async () => takes,
+          uploadAttachment: async (_daemon: unknown, sessionId: string, file: File) => {
+            uploaded.push([sessionId, file.name]);
+            return {
+              id: attachId,
+              filename: file.name,
+              mime: file.type,
+              size: file.size,
+              sha256: '0'.repeat(64),
+              createdAt: '2026-10-30T10:00:00.000Z',
+            };
+          },
+        },
+      };
+    };
+    const host = (given: ReturnType<typeof ports>['ports'] | undefined) => ({
+      actions: {} as never,
+      ports: given,
+      connectionOf: () => laptop,
+    });
+    const attach = (mounted: Mounted) =>
+      mounted.container.querySelector<HTMLButtonElement>('[data-inbox-gate-why] button[data-composer-attach]');
+    const pick = async (mounted: Mounted) => {
+      const picker = must(
+        mounted.container.querySelector<HTMLInputElement>('[data-inbox-gate-why] input[type="file"]:not([capture])'),
+        'the file picker',
+      );
+      Object.defineProperty(picker, 'files', {
+        configurable: true,
+        value: [new File(['png'], 'blank.png', { type: 'image/png' })],
+      });
+      await interact(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+      await flush();
+    };
+
+    it('offers "+" on a Not good once the machine takes them, and sends the ids from the item’s session', async () => {
+      await mouseIsLastPointer();
+      const fake = fakeInbox();
+      const given = ports(true);
+      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(given.ports) }));
+      await press(buttonNamed(mounted, 'Not good'));
+      await flush();
+      expect(attach(mounted)).not.toBeNull();
+      await pick(mounted);
+      expect(given.uploaded).toEqual([['sess-g', 'blank.png']]);
+      const why = sendBackBox(mounted.container);
+      await writeSendBack(why, 'The code is blank');
+      await press(sendBackSubmit(why));
+      expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
+        note: 'The code is blank',
+        attachments: { from: 'sess-g', ids: [attachId] },
+      });
+      await mounted.unmount();
+    });
+
+    it('sends no files when none were attached', async () => {
+      await mouseIsLastPointer();
+      const fake = fakeInbox();
+      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(ports(true).ports) }));
+      await press(buttonNamed(mounted, 'Not good'));
+      await flush();
+      const why = sendBackBox(mounted.container);
+      await writeSendBack(why, 'The code is blank');
+      await press(sendBackSubmit(why));
+      expect(fake.deferred.getSnapshot().pending[0]?.action).not.toHaveProperty('attachments');
+      await mounted.unmount();
+    });
+
+    it('draws no "+" on a machine that has not got them, or on a page with no way to upload', async () => {
+      for (const given of [
+        host(ports(false).ports),
+        host(undefined),
+        host({ sendBackFiles: async () => true } as never),
+      ]) {
+        const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, toTestHost: given }));
+        await press(buttonNamed(mounted, 'Not good'));
+        await flush();
+        expect(attach(mounted)).toBeNull();
+        await mounted.unmount();
+      }
+    });
+
+    it('draws no "+" on "Not yet": it leaves the card where it is', async () => {
+      const plan = inboxCard(
+        gateItem('G3', 'F3', {
+          subject: 'OK to build? Pairing QR',
+          ask: choices('OK to build', 'Not yet'),
+          gate: {
+            cardId: 'F3',
+            laneId: 'plan',
+            laneName: 'Plan',
+            entry: 1,
+            projectId: 'p1',
+            options: [{ id: 'o0', label: 'OK to build', outcome: 'next' }],
+          },
+        }),
+        sessionView('sess-p', { config: { teammate: 'judson', name: 'Plan' } as never }),
+      );
+      const mounted = await mount(
+        page(fakeInbox(), [plan], { initialOpen: plan.key, toTestHost: host(ports(true).ports) }),
+      );
+      await press(buttonNamed(mounted, 'Not yet'));
+      await flush();
+      expect(attach(mounted)).toBeNull();
+      await mounted.unmount();
+    });
   });
 
   it('Cancel on the why composer sends nothing and keeps the card', async () => {

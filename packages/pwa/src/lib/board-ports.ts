@@ -30,6 +30,8 @@ export const boardPorts = (
   // The app ships before the daemon: only a machine that lists the feature takes files with a move back.
   sendBackFiles: async daemon =>
     hasFeature(await (await clientFor(daemon)).health(), DAEMON_FEATURES.boardReopenAttachments),
+  answerFiles: async daemon =>
+    hasFeature(await (await clientFor(daemon)).health(), DAEMON_FEATURES.agendaGateAttachments),
   uploadAttachment: async (daemon, sessionId, file) =>
     await upload(daemon, daemonSessionScope(daemon, sessionId), file, fetcher),
 });

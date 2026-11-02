@@ -21,7 +21,6 @@ import {
   BoardPrStateFilterSchema,
   BoardQuarantinedCardSchema,
   BoardQuerySchema,
-  BoardReopenAttachmentsSchema,
   BoardResponseSchema,
   BoardSkipRequestSchema,
   BoardSkipResponseSchema,
@@ -60,7 +59,7 @@ import {
   taskIdPrefix,
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
-import { BoardActorViaSchema } from '../../src/lib/board-refs.ts';
+import { BoardActorViaSchema, BoardReopenAttachmentsSchema } from '../../src/lib/board-refs.ts';
 import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';

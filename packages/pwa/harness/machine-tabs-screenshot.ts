@@ -1,7 +1,8 @@
 /**
  * Every This-machine tab (Runtimes, Agents, Sign-ins, Profiles, Browser, Machine) at 390 and 1440, light and dark,
  * from the real Settings page in the shell harness (`?settings-harness=1`) with no real daemon. Serves the app's own
- * font files, waits for them, and fails if any tab scrolls sideways or the font did not load.
+ * font files, waits for them, and fails if any tab scrolls sideways or the font did not load. The Agents tab is shot a second time with
+ * the Page scripts (i) open (`agents-info-<vp>-<theme>.png`).
  * Run from packages/pwa: `bun harness/machine-tabs-screenshot.ts [outDir]`.
  */
 import { spawnSync } from 'node:child_process';
@@ -117,8 +118,26 @@ try {
             animations: 'disabled',
             clip: { x: 0, y: 0, width, height: Math.min(4000, Math.ceil(bottom) + 24) },
           });
-          await page.setViewportSize({ width, height: vp === '390' ? 844 : 900 });
           process.stdout.write(`📸 ${file}\n`);
+          if (tab === 'agents') {
+            // One (i) open: the Page scripts warning is one tap away, not gone.
+            await surface.locator('[data-switch-row="Page scripts"] [data-switch-info]').click();
+            await surface
+              .locator('[data-switch-row="Page scripts"] [data-switch-explanation]')
+              .waitFor({ state: 'visible' });
+            await page.waitForTimeout(150);
+            const openBottom = await page.evaluate(
+              () => document.querySelector('[data-machine-tab-panel="agents"]')?.getBoundingClientRect().bottom ?? 900,
+            );
+            const infoFile = join(outDir, `agents-info-${vp}-${theme}.png`);
+            await page.screenshot({
+              path: infoFile,
+              animations: 'disabled',
+              clip: { x: 0, y: 0, width, height: Math.min(4000, Math.ceil(openBottom) + 24) },
+            });
+            process.stdout.write(`📸 ${infoFile}\n`);
+          }
+          await page.setViewportSize({ width, height: vp === '390' ? 844 : 900 });
         }
       } finally {
         await context.close();

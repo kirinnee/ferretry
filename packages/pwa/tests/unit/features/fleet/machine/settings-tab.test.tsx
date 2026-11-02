@@ -117,6 +117,18 @@ describe('runningSessionsSentence', () => {
   });
 });
 
+/** Records every group and panel the tab asks for, and draws a marker for each, with the rows it was handed. */
+const panelsSpy = () => {
+  const asked: (string | undefined)[] = [];
+  let open: ((panel: string | null) => void) | undefined;
+  const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen, group, lead) => {
+    asked.push(group ?? panel);
+    open = onOpen;
+    return panel === undefined ? <ul data-panels-group={group}>{lead}</ul> : <section data-panel-shown={panel} />;
+  };
+  return { asked, daemonPanels, open: (panel: string | null) => must(open, 'the open callback')(panel) };
+};
+
 describe('MachineSettingsTab', () => {
   it('waits for a machine that has not answered, saying whether it is checking', async () => {
     await withTab({ machine: null, checking: true }, async ({ q }) => {
@@ -131,7 +143,7 @@ describe('MachineSettingsTab', () => {
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');
-      expect(tools.querySelector('h4')?.textContent).toBe('Tools on studio-mac');
+      expect(tools.querySelector('h4')?.textContent).toBe('Tools');
       expect(tools.querySelector('[data-setup-row="tool-claude"]')?.textContent).toContain('Claude Code');
       expect(tools.querySelector('[data-setup-row="tool-claude"]')?.textContent).toContain('Installed');
       expect(tools.querySelector('[data-tool-install="claude"]')).toBeNull();
@@ -141,6 +153,23 @@ describe('MachineSettingsTab', () => {
       expect(install?.disabled).toBe(false);
       await click(install, 'install codex');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-codex');
+    });
+  });
+
+  it('draws one Tools section, never a second one named for the machine', async () => {
+    await withTab({}, async ({ container }) => {
+      const headings = [...container.querySelectorAll('h4')].map(node => node.textContent);
+      expect(headings.filter(text => text?.startsWith('Tools'))).toEqual(['Tools']);
+      expect(container.querySelectorAll('[data-setup-section="tools"]')).toHaveLength(1);
+    });
+    const spy = panelsSpy();
+    await withTab({ daemonPanels: spy.daemonPanels }, async ({ q, container }) => {
+      // With the panel frame the tool rows are the head of the frame's own Tools list: still one section.
+      const tools = must(q('[data-panels-group="tools"]'), 'the Tools group');
+      expect(tools.querySelector('[data-setup-row="tool-claude"]')).not.toBeNull();
+      expect(tools.querySelector('[data-setup-row="tool-codex"]')).not.toBeNull();
+      expect(container.querySelectorAll('[data-setup-row^="tool-"]')).toHaveLength(2);
+      expect(container.querySelector('[data-setup-section="tools"]')).toBeNull();
     });
   });
 
@@ -311,35 +340,14 @@ describe('MachineSettingsTab', () => {
   });
 
   describe('the daemon panels the Machine tab draws as groups', () => {
-    /** Records every group and panel the tab asks for, and draws a marker for each. */
-    const panelsSpy = () => {
-      const asked: (string | undefined)[] = [];
-      let open: ((panel: string | null) => void) | undefined;
-      const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen, group) => {
-        asked.push(group ?? panel);
-        open = onOpen;
-        return panel === undefined ? <ul data-panels-group={group} /> : <section data-panel-shown={panel} />;
-      };
-      return { asked, daemonPanels, open: (panel: string | null) => must(open, 'the open callback')(panel) };
-    };
-
-    it('asks for Devices & access and Health first, then Tools, the advanced list and About around Setup and the facts', async () => {
+    it('asks for Devices & access and Health first, then Tools, Setup, the advanced list and About', async () => {
       const spy = panelsSpy();
       await withTab({ daemonPanels: spy.daemonPanels }, async ({ q }) => {
         expect([...new Set(spy.asked)]).toEqual(['devices-access', 'health', 'tools', 'advanced', 'about']);
         const order = [
           ...(q('[data-machine-settings]')?.querySelectorAll('[data-panels-group], [data-setup-section]') ?? []),
         ].map(node => node.getAttribute('data-panels-group') ?? `section:${node.getAttribute('data-setup-section')}`);
-        expect(order).toEqual([
-          'devices-access',
-          'health',
-          'section:tools',
-          'tools',
-          'section:setup',
-          'advanced',
-          'section:facts',
-          'about',
-        ]);
+        expect(order).toEqual(['devices-access', 'health', 'tools', 'section:setup', 'advanced', 'about']);
       });
     });
 
@@ -399,20 +407,58 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('states the machine facts', async () => {
-    await withTab({}, async ({ q }) => {
-      const facts = must(q('[data-setup-section="facts"]'), 'facts');
-      expect(facts.querySelector('h4')?.textContent).toBe('This machine');
+  it('holds the machine facts in the one About section, not a box of their own', async () => {
+    await withTab({}, async ({ q, container }) => {
+      expect(q('[data-setup-section="facts"]')).toBeNull();
+      expect([...container.querySelectorAll('h4')].map(node => node.textContent)).not.toContain('This machine');
+      const facts = must(q('[data-setup-section="about"]'), 'about');
+      expect(facts.querySelector('h4')?.textContent).toBe('About');
       expect(facts.textContent).toContain('Namestudio-mac');
       expect(facts.textContent).toContain('StatusOnline');
       expect(facts.textContent).toContain('Runtimes2');
       expect(facts.textContent).toContain('FormatThe new account format');
     });
     await withTab({ machine: FRESH_MACHINE, online: false }, async ({ q }) => {
-      const facts = must(q('[data-setup-section="facts"]'), 'facts');
+      const facts = must(q('[data-setup-section="about"]'), 'about');
       expect(facts.textContent).toContain('StatusOffline');
       expect(facts.textContent).toContain('RuntimesNot set up yet');
       expect(facts.textContent).toContain('FormatNot set up yet');
+    });
+  });
+
+  it('puts the facts at the head of the frame\u2019s About list, so Version and updates shares the section', async () => {
+    const spy = panelsSpy();
+    await withTab({ daemonPanels: spy.daemonPanels }, async ({ q, container }) => {
+      const about = must(q('[data-panels-group="about"]'), 'the About group');
+      expect(about.querySelector('[data-about-facts]')?.textContent).toContain('Namestudio-mac');
+      expect(container.querySelectorAll('[data-about-facts]')).toHaveLength(1);
+      expect(q('[data-setup-section="about"]')).toBeNull();
+    });
+  });
+
+  it('gives every row the tab draws itself an icon, the same size and slot', async () => {
+    await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q }) => {
+      const rows = [
+        ...(q('[data-setup-section="setup"]')?.querySelectorAll('[data-settings-action]') ?? []),
+        ...(q('[data-setup-section="tools"]')?.querySelectorAll('[data-setup-row]') ?? []),
+      ];
+      expect(rows.map(row => row.getAttribute('data-settings-action') ?? row.getAttribute('data-setup-row'))).toEqual([
+        'setup',
+        'import',
+        'clone',
+        'export',
+        'tool-claude',
+        'tool-codex',
+      ]);
+      for (const row of rows) {
+        const slot = must(row.querySelector('[data-row-icon]'), 'the icon slot');
+        expect(slot.className).toContain('w-5');
+        expect(slot.querySelector('svg')?.getAttribute('width')).toBe('16');
+      }
+    });
+    await withTab({ machine: FRESH_MACHINE }, async ({ q }) => {
+      expect(q('[data-settings-action="setup"] [data-row-icon] svg')).not.toBeNull();
+      expect(q('[data-settings-action="clone"] [data-row-icon] svg')).not.toBeNull();
     });
   });
 

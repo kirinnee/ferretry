@@ -1,12 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  BoardAttachmentSchema,
-  BoardReopenAttachmentsSchema,
-  BoardTaskActionRequestSchema,
-  BoardTaskEventSchema,
-  MAX_BOARD_REOPEN_ATTACHMENTS,
-} from '../../src/lib/board.ts';
+import { BoardAttachmentSchema, BoardTaskActionRequestSchema, BoardTaskEventSchema } from '../../src/lib/board.ts';
+import { BoardReopenAttachmentsSchema, MAX_BOARD_REOPEN_ATTACHMENTS } from '../../src/lib/board-refs.ts';
 
 /** The files the owner sends with "Not good": on the request, and named in the card's history. */
 

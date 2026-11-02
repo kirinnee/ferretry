@@ -100,7 +100,7 @@ describe('Runtimes tab list', () => {
     // "Agent" says nothing on a list of agent runtimes; only the exceptions are marked.
     expect(card('claude-agent').textContent).not.toMatch(/\bAgent\b(?! work)/);
     expect(card('claude-agent').querySelector('[data-runtime-kind-badge]')).toBeNull();
-    expect(card('claude-default').querySelector('[data-runtime-kind-badge]')?.textContent).toBe('Not an agent');
+    expect(card('claude-default').querySelector('[data-runtime-kind-badge]')?.textContent).toBe('Not agent');
     expect(view.container.querySelector('[data-runtime-missing-harness]')).toBeNull();
     expect(text(view.container, '[data-add-runtime]')).toBe('Add runtime');
     await view.unmount();

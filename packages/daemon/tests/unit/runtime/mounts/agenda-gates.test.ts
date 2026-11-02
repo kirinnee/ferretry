@@ -198,6 +198,37 @@ describe('a gate answer on the agenda route', () => {
     should(ordinary).match({ status: 404, body: { code: 'not-found' } });
   });
 
+  it('hands a Not good’s files to the gate items as they came', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: true, refused: { code: 'invalid', message: 'x' } }));
+    const files = { from: 's1', ids: [`att_${'a'.repeat(64)}`] };
+
+    // Act
+    await post(gates, HOST, {
+      ...answer,
+      response: { kind: 'multiple-choice', choice: 'Not good' },
+      attachments: files,
+    });
+
+    // Assert
+    should(gates.asked[0]?.attachments).eql(files);
+  });
+
+  it('refuses files with an answer that is not a gate item’s, rather than dropping them', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: false }));
+    const files = { from: 's1', ids: [`att_${'a'.repeat(64)}`] };
+
+    // Act
+    const response = await post(gates, HOST, { ...answer, attachments: files });
+
+    // Assert
+    should(response).eql({
+      status: 400,
+      body: { error: 'files can only come with the answer to a gate item', code: 'invalid' },
+    });
+  });
+
   it('is not asked about anything but an answer', async () => {
     // Arrange
     const gates = new FakeGates(async () => ({ handled: false }));

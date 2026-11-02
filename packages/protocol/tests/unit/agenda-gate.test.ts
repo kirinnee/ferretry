@@ -222,6 +222,48 @@ describe('gate items', () => {
       should(daemonFeatureList()).containEql('board.gate-items.1');
     });
   });
+
+  describe('files with a gate answer', () => {
+    const file = (digit: string): string => `att_${digit.repeat(64)}`;
+    const answer = (extra: Record<string, unknown>) => ({
+      action: 'resolve',
+      id: 'A1',
+      response: { kind: 'multiple-choice', choice: 'Not good' },
+      gate: true,
+      ...extra,
+    });
+
+    it('takes the files the composer sent, with the answer', () => {
+      const parsed = AgendaActionRequestSchema.safeParse(
+        answer({ attachments: { from: 'agenda-1', ids: [file('a'), file('b')] } }),
+      );
+      should(parsed.success).be.true();
+    });
+
+    it('stays valid without files', () => {
+      should(AgendaActionRequestSchema.safeParse(answer({})).success).be.true();
+    });
+
+    it('refuses files on a bare close, a repeat, an empty list, or too many', () => {
+      const bare = { action: 'resolve', id: 'A1', attachments: { from: 'agenda-1', ids: [file('a')] } };
+      should(AgendaActionRequestSchema.safeParse(bare).success).be.false();
+      should(
+        AgendaActionRequestSchema.safeParse(answer({ attachments: { from: 'agenda-1', ids: [file('a'), file('a')] } }))
+          .success,
+      ).be.false();
+      should(
+        AgendaActionRequestSchema.safeParse(answer({ attachments: { from: 'agenda-1', ids: [] } })).success,
+      ).be.false();
+      const eleven = '0123456789a'.split('').map(file);
+      should(
+        AgendaActionRequestSchema.safeParse(answer({ attachments: { from: 'agenda-1', ids: eleven } })).success,
+      ).be.false();
+    });
+
+    it('names the feature the app waits for', () => {
+      should(DAEMON_FEATURES.agendaGateAttachments).equal('agenda.gate.attachments.1');
+    });
+  });
 });
 
 describe('gatesAnsweredOn', () => {

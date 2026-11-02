@@ -5,6 +5,7 @@ import {
   type AgendaResponse,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
+  type BoardReopenAttachments,
   FY_REQUEST_ID_HEADER,
   isMachineAgendaId,
 } from '@ferretry/protocol';
@@ -287,6 +288,7 @@ export class DaemonAgendaClient {
     response: AgendaResponse,
     note?: string,
     gate?: true,
+    attachments?: BoardReopenAttachments,
   ): Promise<void> {
     return this.#mutate(daemon, scope, {
       action: 'resolve',
@@ -294,6 +296,7 @@ export class DaemonAgendaClient {
       response,
       ...(note === undefined ? {} : { note }),
       ...(gate === undefined ? {} : { gate }),
+      ...(attachments === undefined ? {} : { attachments }),
     });
   }
 
