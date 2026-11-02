@@ -14,6 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ConnectionChoice } from '@ferretry/relay';
 import type { ComponentProps } from 'react';
 
 import {
@@ -277,7 +278,7 @@ describe('daemon settings panel list', () => {
 
 describe('daemon settings panel group', () => {
   const opened: Array<string | null> = [];
-  const grouped = (group: { label: string; panels: readonly string[] }) => (
+  const grouped = (group: { label: string; panels: readonly string[] }, carrier?: ConnectionChoice) => (
     <DaemonSettingsFrame
       connection={alpha}
       name="Alpha"
@@ -286,8 +287,15 @@ describe('daemon settings panel group', () => {
       createWardenClient={unavailable}
       onOpenPanel={panel => opened.push(panel)}
       group={group}
+      {...(carrier === undefined ? {} : { carrier })}
     />
   );
+  const chosen = (method: Extract<ConnectionChoice, { ok: true }>['method']): ConnectionChoice => ({
+    ok: true,
+    method,
+    reason: 'Reached it.',
+    passedOver: [],
+  });
 
   beforeEach(() => {
     opened.length = 0;
@@ -323,6 +331,33 @@ describe('daemon settings panel group', () => {
       expect(names[1]).toContain('Connection');
       expect(view.container.querySelector('[data-daemon-panel-value="security"]')).toBeNull();
       expect(view.container.querySelector('[data-daemon-panel-value="devices"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says the live carrier on the Connection row, from what this browser already measured', async () => {
+    const cases: Array<[Extract<ConnectionChoice, { ok: true }>['method'], string]> = [
+      [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }, 'Direct'],
+      [{ kind: 'webrtc' }, 'WebRTC'],
+      [{ kind: 'relay', relayUrl: 'wss://relay.example.test/ws' }, 'Relay'],
+    ];
+    for (const [method, word] of cases) {
+      const view = await mount(grouped({ label: 'Devices and access', panels: ['carrier'] }, chosen(method)));
+      try {
+        expect(view.container.querySelector('[data-daemon-panel-value="carrier"]')?.textContent).toBe(word);
+      } finally {
+        await view.unmount();
+      }
+    }
+  });
+
+  it('says nothing on the Connection row when no carrier is live', async () => {
+    const failed: ConnectionChoice = { ok: false, reason: 'Nothing answered.', passedOver: [] };
+    const view = await mount(grouped({ label: 'Devices and access', panels: ['carrier'] }, failed));
+    try {
+      expect(view.container.querySelector('[data-daemon-panel="carrier"]')).not.toBeNull();
+      expect(view.container.querySelector('[data-daemon-panel-value="carrier"]')).toBeNull();
     } finally {
       await view.unmount();
     }

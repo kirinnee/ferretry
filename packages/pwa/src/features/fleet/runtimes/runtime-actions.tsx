@@ -58,7 +58,7 @@ export interface RuntimeActionButtonsProps {
 }
 
 /**
- * Make default (when offered), Rename, and Remove in the destructive style, always on ONE line: icons alone below `sm`, named
+ * Rename and Remove in the destructive style, always on ONE line: icons alone below `sm`, named
  * by `aria-label`, so a row never grows taller for its actions. Disabled, with the reason, when the caller may not.
  */
 export function RuntimeActionButtons({
@@ -66,25 +66,10 @@ export function RuntimeActionButtons({
   refusal,
   onRename,
   onRemove,
-  onMakeDefault,
-}: RuntimeActionButtonsProps) {
+}: Omit<RuntimeActionButtonsProps, 'onMakeDefault'>) {
   const reason = refusal ?? undefined;
   return (
     <span className="flex gap-2" data-runtime-actions={runtime.name}>
-      {onMakeDefault === undefined ? null : (
-        <Button
-          type="button"
-          size="sm"
-          disabled={refusal !== null}
-          title={reason}
-          aria-label={`Make ${runtime.name} the default runtime`}
-          data-runtime-make-default={runtime.name}
-          onClick={onMakeDefault}
-        >
-          <Star size={14} aria-hidden="true" />
-          <span className="hidden sm:inline">Make default</span>
-        </Button>
-      )}
       <Button
         type="button"
         size="sm"

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { ProfilesSurface } from '../../../../../src/features/fleet/profiles/profiles-surface.tsx';
+import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
+import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, must } from '../../../../support/dom.ts';
 import { click, followHash, mountSettled, scriptedMachine, tabProps, text } from '../components/view-support.tsx';
 
@@ -31,6 +34,22 @@ describe('ProfilesSurface', () => {
     expect(section(root, 'components').querySelector('[data-component-kind]')).not.toBeNull();
     expect(section(root, 'profiles').hidden).toBe(false);
     expect(section(root, 'components').hidden).toBe(false);
+  });
+
+  it('reads machine names from the connection list when the shell supplies none', async () => {
+    const work = daemonConnection({ daemonId: 'sha256:work', baseUrl: 'https://work.example.test', deviceId: 'd' });
+    const connections = new DaemonConnectionStore({
+      connections: [{ ...work, label: 'Work laptop', pairedAt: 1, lastSelectedAt: 1 }],
+      selectedDaemonId: work.daemonId,
+    });
+    mounted = await mountSettled(
+      <StoreProvider store={{ connections } as unknown as AppStore}>
+        <ProfilesSurface {...tabProps(scriptedMachine())} />
+      </StoreProvider>,
+    );
+    const root = mounted.container;
+    expect(text(section(root, 'components'), 'h3')).toBe('Built from');
+    expect(section(root, 'components').querySelector('[data-component-kind]')).not.toBeNull();
   });
 
   it('gives a profile’s page the whole tab, and the components return on the list', async () => {
