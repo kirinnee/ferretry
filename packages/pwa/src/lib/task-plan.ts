@@ -6,13 +6,14 @@
  */
 
 import {
+  AUTOMATED_CODE_WARNING,
   type GrantMissReason,
   grantMissWords,
   type IFyApiClient,
-  LOGIN_TOTP_WARNING,
   type Place,
   placeWords,
   type SignInId,
+  stillAskedFor,
   TASK_PLAN_ERROR_CODES,
   TASK_PLAN_HONEST_LIMIT,
   type TaskPlan,
@@ -25,11 +26,13 @@ import {
   TaskPlanListSchema,
   TaskPlanSchema,
   type TaskPlanStageId,
+  type TaskPlanStaged,
   type TaskPlanStageView,
   TaskPlanStageViewSchema,
   taskPlanSelection,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { StepUpWords } from './step-up-gate.ts';
 
 export type TaskPlanClient = Pick<IFyApiClient, 'request'>;
 
@@ -109,8 +112,8 @@ export async function revokeLines(
 /** Under the title of every plan card while no ferret here can be walled off from Ferretry's own files (RF-5). */
 export const HONEST_CLIENT_LINE = TASK_PLAN_HONEST_LIMIT;
 
-/** The one-factor warning under a ticked code. */
-export const TOTP_TICK_WARNING = LOGIN_TOTP_WARNING;
+/** The one-factor warning under a ticked code: the sentence a standing rule's code tick says, from the protocol. */
+export const TOTP_TICK_WARNING = AUTOMATED_CODE_WARNING;
 
 export const TOTP_IMPOSSIBLE_WORDS = 'No automatic codes for this account';
 export const NO_HISTORY_WORDS = 'First time Ferretry fills this sign-in: it checks the page and remembers the form';
@@ -124,20 +127,8 @@ export const NO_PASSKEY_TICK_WORDS =
   'This device cannot confirm with a passkey, so a sign-in line cannot be approved here.';
 const STAGE_GONE_WORDS = 'That selection timed out or was already answered. Tick the lines again.';
 
-/** What a plan can't cover, listed on every plan card under "You'll still be asked" (r3a-plan §5). */
-export const STILL_ASKED: readonly { readonly what: string; readonly instead: string }[] = [
-  { what: 'Push approvals (Okta Verify, Duo, a Google prompt)', instead: 'you approve on your phone' },
-  { what: 'Security keys and passkeys', instead: 'handed to you; passkeys stay off in the agent browser' },
-  { what: 'Captchas and human checks', instead: 'the ferret asks you to do it' },
-  { what: 'Sign-ins not in Accounts, and sign-ins through another account', instead: 'the normal card' },
-  {
-    what: 'A paste that would replace a secret the store already holds',
-    instead: 'the normal card, in amber, every time',
-  },
-  { what: 'ssh, scp, npm or docker login, gh and any program but sudo, su and doas', instead: 'the normal card' },
-  { what: 'SMS and email codes, and a code you did not tick', instead: 'the ferret reads its inbox, or you type it' },
-  { what: 'Anything after a line stopped', instead: 'the normal card, with the reason' },
-];
+/** What a plan can't cover, listed on every plan card under "You'll still be asked": the protocol's one list. */
+export const STILL_ASKED = stillAskedFor('plan');
 
 /** "kirin-box" from `sudo@kirin-box`, or the place's own words. */
 const placeLabel = (place: Place): string => placeWords(place);
@@ -503,9 +494,10 @@ export interface ApprovalPorts {
   readonly client: TaskPlanClient;
   /**
    * Asks for the `approve-task-plan` passkey bound to the stage. `words` is the DAEMON's summary of the staged bytes,
-   * one line each; nothing a ferret wrote reaches it. `undefined` when this device cannot ask.
+   * one row per ticked line, and the red warnings the plan's structure gives (a root line, a ticked code), as separate
+   * lists; nothing a ferret wrote reaches it. `undefined` when this device cannot ask.
    */
-  readonly askPasskey: ((stage: TaskPlanStageId, words: string) => Promise<boolean>) | undefined;
+  readonly askPasskey: ((stage: TaskPlanStageId, words: StepUpWords) => Promise<boolean>) | undefined;
   readonly report?: (progress: ApprovalProgress) => void;
 }
 
@@ -530,15 +522,49 @@ function approvalFailureWords(cause: unknown): string {
   }
 }
 
-/** The passkey dialog's body: the daemon's lines, one per line. */
-const summaryWords = (summary: readonly string[]): string => summary.join('\n');
+/** "Line 1: sign in as …" is drawn as the row "Line 1" and the rest, so the lines read as a list of facts. */
+const summaryRow = (number: number, summary: string): { readonly label: string; readonly value: string } => {
+  const label = `Line ${String(number + 1)}`;
+  return summary.startsWith(`${label}: `)
+    ? { label, value: summary.slice(label.length + 2) }
+    : { label, value: summary };
+};
+
+/**
+ * The passkey dialog's body for a staged selection, as STRUCTURE: the daemon's summary lines as rows, and the red
+ * warnings drawn from the plan's own structure (a terminal line gives root; a ticked code is one factor), never from
+ * the summary's words, which may be clipped at 240 characters (secrev-1268 N1).
+ */
+export function planPasskeyWords(
+  plan: Pick<TaskPlan, 'lines'>,
+  staged: Pick<TaskPlanStaged, 'lines' | 'codes' | 'summary'>,
+  approval?: TaskPlanApproval,
+): StepUpWords {
+  const root = staged.lines.flatMap(number => {
+    const line = plan.lines.find(each => each.line === number);
+    if (line === undefined || line.kind !== 'terminal-sign-in') return [];
+    const picked = approval?.lines.find(each => each.line === number)?.signIn;
+    const candidate = line.candidates.find(each => each.signIn === picked);
+    return [
+      `Line ${String(number + 1)}: ${rootWords(rootHost(candidate, line), undefined, rootTool(candidate, line))}`,
+    ];
+  });
+  return {
+    does:
+      staged.lines.length === 1
+        ? 'Let the ferret use this line without asking'
+        : 'Let the ferret use these lines without asking',
+    rows: staged.summary.map((summary, index) => summaryRow(staged.lines[index] ?? index, summary)),
+    warnings: [...root, ...(staged.codes.length > 0 ? [AUTOMATED_CODE_WARNING] : [])],
+  };
+}
 
 /** Asks for the passkey bound to a stage and, once it is given, commits the stage. */
 async function confirmStage(
   ports: ApprovalPorts,
   plan: Pick<TaskPlan, 'id' | 'sessionId'>,
   stage: TaskPlanStageId,
-  summary: readonly string[],
+  words: StepUpWords,
   dropOnDismiss: boolean,
 ): Promise<ApprovalOutcome> {
   const { client, askPasskey, report } = ports;
@@ -549,7 +575,7 @@ async function confirmStage(
   report?.('passkey');
   let given: boolean;
   try {
-    given = await askPasskey(stage, summaryWords(summary));
+    given = await askPasskey(stage, words);
   } catch (cause) {
     if (dropOnDismiss) await dropStage(client, plan, stage).catch(() => undefined);
     return { kind: 'failed', words: failureWords(cause) };
@@ -570,14 +596,14 @@ async function confirmStage(
  */
 export async function runApproval(
   ports: ApprovalPorts,
-  plan: Pick<TaskPlan, 'id' | 'sessionId'>,
+  plan: Pick<TaskPlan, 'id' | 'sessionId' | 'lines'>,
   approval: TaskPlanApproval,
 ): Promise<ApprovalOutcome> {
   try {
     ports.report?.('staging');
     const answer = await stageApproval(ports.client, plan, approval);
     if (answer.outcome === 'answered') return { kind: 'settled', plan: answer.plan };
-    return await confirmStage(ports, plan, answer.staged.stage, answer.staged.summary, true);
+    return await confirmStage(ports, plan, answer.staged.stage, planPasskeyWords(plan, answer.staged, approval), true);
   } catch (cause) {
     return { kind: 'failed', words: approvalFailureWords(cause) };
   }
@@ -589,14 +615,14 @@ export async function runApproval(
  */
 export async function runMachineConfirm(
   ports: ApprovalPorts,
-  plan: Pick<TaskPlan, 'id' | 'sessionId'>,
+  plan: Pick<TaskPlan, 'id' | 'sessionId' | 'lines'>,
   stage: TaskPlanStageId,
 ): Promise<ApprovalOutcome> {
   try {
     ports.report?.('staging');
     const view = await readStage(ports.client, plan, stage);
     if (view.state !== 'waiting') return { kind: 'failed', words: STAGE_GONE_WORDS };
-    return await confirmStage(ports, plan, stage, view.summary, false);
+    return await confirmStage(ports, plan, stage, planPasskeyWords(plan, view), false);
   } catch (cause) {
     return { kind: 'failed', words: approvalFailureWords(cause) };
   }

@@ -488,7 +488,7 @@ describe('the settled card', () => {
         'Account: github work · kirin@atomi.cloud',
       );
       expect(q(mounted.container, '[data-task-plan-one-factor]', 'code').textContent).toContain(
-        'Includes the 6-digit code',
+        'Includes the 2FA code',
       );
       expect(text).toContain('Answered at ');
       expect(q(mounted.container, '[data-task-plan-honest]', 'honest').textContent).toContain(HONEST_CLIENT_LINE);

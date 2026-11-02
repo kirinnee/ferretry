@@ -595,12 +595,13 @@ export interface SettingsLinkDefinition {
 
 export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
   {
-    // The words somebody types when they want to change what runs: the account model's own nouns,
-    // plus the old ones ("account", "fleet", "login") a person who has used Ferretry before reaches for.
+    // The words somebody types when they want to change what runs: the account model's own nouns, plus the
+    // old ones ("fleet", "login") a person who has used Ferretry before reaches for. "Account" is NOT one of them:
+    // an account is a site sign-in (the Accounts tab); these are AI logins.
     id: 'machines',
     label: 'Machines',
     description:
-      'The runtimes you launch, the logins they use, and the profiles and components they are built from, per machine.',
+      'The runtimes you launch, the AI logins they use, and the profiles and components they are built from, per machine.',
     href: daemon => `${daemonSettingsPath(daemon)}#machines`,
     keywords: [
       'machine',
@@ -620,10 +621,68 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'instructions',
       'model set',
       'agent permissions',
-      'account',
-      'accounts',
+      'ai login',
+      'ai logins',
       'fleet',
     ],
+  },
+  {
+    id: 'accounts',
+    label: 'Accounts',
+    description:
+      'Who ferrets sign in as: a username, a password and 2FA keys per site, and the standing rules that let a sign-in go without asking. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#accounts`,
+    keywords: [
+      'account',
+      'accounts',
+      'sign in',
+      'sign-in',
+      'sign-ins',
+      'login',
+      'logins',
+      'credential',
+      'credentials',
+      'username',
+      'password',
+      '2fa',
+      'two-factor',
+      'code',
+      'totp',
+      'site',
+    ],
+  },
+  {
+    id: 'secure-copy',
+    label: 'Secure copy',
+    description:
+      'Values moved without a ferret seeing them: standing sign-in rules, task plans (lines approved in advance) and paste rules. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#secure-copy`,
+    keywords: [
+      'secure copy',
+      'rule',
+      'rules',
+      'standing rule',
+      'standing sign-in rule',
+      'sign-in rule',
+      'don’t ask again',
+      'pre-approve',
+      'task plan',
+      'plan',
+      'paste',
+      'paste rule',
+      'paste rules',
+      'clipboard',
+      'sudo',
+      'revoke',
+    ],
+  },
+  {
+    id: 'secrets',
+    label: 'Secrets',
+    description:
+      'Env vars for the programs ferrets run: a ferret names one and Ferretry runs the command with it, so the ferret never holds the value. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#secrets`,
+    keywords: ['secret', 'secrets', 'env', 'environment', 'variable', 'variables', 'token', 'api key', 'key'],
   },
   {
     /**
@@ -694,9 +753,9 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'warden',
     label: 'Warden',
     description:
-      'Supervision, current checks, account failover, and policy for this daemon. On this machine — opens its Machine tab.',
+      'Supervision, current checks, AI login failover, and policy for this daemon. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#warden`,
-    keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
+    keywords: ['warden', 'failover', 'round robin', 'fallback', 'ai login', 'quota', 'token', 'wrapper', 'supervision'],
   },
   {
     // Words for the passkey panel: what a person types after a prompt asks them to "confirm it's you".

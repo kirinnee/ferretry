@@ -114,7 +114,7 @@ describe('WardenStrip', () => {
     const view = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
     try {
       // Act
-      const chips = [...view.container.querySelectorAll('[aria-label="Warden accounts"] li')];
+      const chips = [...view.container.querySelectorAll('[aria-label="Warden AI logins"] li')];
 
       // Assert
       expect(chips.map(chip => chip.textContent)).toEqual(['claude-default · in use', 'codex-default']);
@@ -136,7 +136,7 @@ describe('WardenStrip', () => {
     const exhausted = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
     try {
       // Act
-      const group = none.container.querySelector('[aria-label="Warden accounts"]');
+      const group = none.container.querySelector('[aria-label="Warden AI logins"]');
 
       // Assert
       expect(group).toBeNull();

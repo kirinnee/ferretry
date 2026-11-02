@@ -10,13 +10,14 @@ import {
 import { SignInRuleCard, type SignInRuleCardProps } from '../../../src/features/accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheet, type SignInRuleSheetProps } from '../../../src/features/accounts/sign-in-rule-sheet.tsx';
 import { RULE_HONEST_LIMIT as SIGN_IN_RULE_HONEST_LIMIT } from '../../../src/lib/sign-in-rules.ts';
-import { mount, must } from '../../support/dom.ts';
+import { interact, mount, must } from '../../support/dom.ts';
 import { click, typeInto } from '../../support/dom-form.ts';
 import {
   codeRule,
   pageRule,
   SITE_SIGN_IN,
   sitePlace,
+  suspendedRule,
   sudoPlace,
   terminalRule,
 } from '../../support/sign-in-rule-fixtures.ts';
@@ -255,6 +256,72 @@ describe('the page sheet shows its facts as rows', () => {
       expect(rule.container.querySelector('[data-rule-note]')).toBeNull();
     } finally {
       await rule.unmount();
+    }
+  });
+});
+
+const pick = async (element: Element | null, value: string): Promise<void> => {
+  const select = must(element, 'a select') as HTMLSelectElement;
+  await interact(() => {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+
+describe('narrowing a rule in hours', () => {
+  it('sends the earlier end in whole hours from now', async () => {
+    const narrowed: unknown[] = [];
+    const mounted = await mount(card(codeRule(), { onNarrow: narrow => narrowed.push(narrow) }));
+    try {
+      await click(q(mounted.container, '[data-rule-narrow]'));
+      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await typeInto(q(mounted.container, '[data-rule-end-days]'), '5');
+      expect(mounted.container.querySelector('[role="status"]')).toBeNull();
+      await click(q(mounted.container, '[data-rule-narrow-apply]'));
+      expect(narrowed).toEqual([{ expiresAt: new Date(Date.now() + 5 * 3_600_000).toISOString() }]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('refuses an end under the shortest a rule can last, and one that is not earlier', async () => {
+    const mounted = await mount(card(codeRule()));
+    try {
+      await click(q(mounted.container, '[data-rule-narrow]'));
+      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await typeInto(q(mounted.container, '[data-rule-end-days]'), '0');
+      expect(q(mounted.container, '[role="status"]').textContent).toBe(
+        'End earlier than it does now, in whole hours (at least 1).',
+      );
+      await typeInto(q(mounted.container, '[data-rule-end-days]'), '9999');
+      expect(q<HTMLButtonElement>(mounted.container, '[data-rule-narrow-apply]').disabled).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('changing a live rule', () => {
+  it('asks to change an active rule with a passkey, as a widen', async () => {
+    const asked: string[] = [];
+    const mounted = await mount(card(pageRule(), { onReapprove: why => asked.push(why) }));
+    try {
+      await click(q(mounted.container, '[data-rule-widen]'));
+      expect(asked).toEqual(['widen']);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('cannot change a rule from a device with no passkey, and offers nothing for a suspended one', async () => {
+    const without = await mount(card(pageRule(), { canUsePasskey: false }));
+    const suspended = await mount(card(suspendedRule()));
+    try {
+      expect(q<HTMLButtonElement>(without.container, '[data-rule-widen]').disabled).toBe(true);
+      expect(suspended.container.querySelector('[data-rule-widen]')).toBeNull();
+    } finally {
+      await without.unmount();
+      await suspended.unmount();
     }
   });
 });

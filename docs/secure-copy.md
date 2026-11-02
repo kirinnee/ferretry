@@ -387,7 +387,7 @@ ferret's.
 
 ## Programs in your own profile
 
-Settings › Secure copy › "Copy rules may target programs in my own profile" (`allowProfileTargets`, owner decision
+Settings › Secure copy › "Paste rules may target programs in my own profile" (`allowProfileTargets`, owner decision
 !A182). **Off** unless you turn it on.
 
 - **The risk, plainly:** every process running as you, so every ferret, can change your profile. `~/.nix-profile`

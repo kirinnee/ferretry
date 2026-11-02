@@ -1,3 +1,4 @@
+import type { DaemonId } from '@ferretry/protocol';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
   clearRuleDeepLink,
@@ -6,30 +7,42 @@ import {
   subscribeRuleDeepLink,
 } from '../lib/rule-deep-link.ts';
 
-/** The machine a `#rules/<stage>` link opens on: the link names none, so it is the selected one, else the only one. */
+/** A paired machine a `#rules/<stage>` link can open on, and where its Secure copy panel is. */
 export interface RuleLinkMachine {
-  /** Where that machine's Secure copy panel is: its Settings path and the hash that opens the panel. */
+  readonly daemonId: DaemonId;
+  /** Its Settings path and the hash that opens the panel. */
   readonly secureCopyPath: string;
 }
 
 /**
- * Sends a `#rules/<stage>` link to the active machine's Secure copy panel, once. With no paired machine there is
- * nowhere to look, so the link is dropped rather than held. The panel itself decides whether the stage is listed.
+ * Sends a `#rules/<stage>` link to the machine's Secure copy panel, once. A link that names a machine opens on that
+ * one; a link that names none opens on the selected machine, else the first. A link that names a machine this device is
+ * not paired with is dropped and said so (`onElsewhere`), and with no paired machine there is nowhere to look. The
+ * panel itself decides whether the stage is listed.
  */
 export function useRuleDeepLink(
-  machine: RuleLinkMachine | null,
-  paired: boolean,
+  machines: readonly RuleLinkMachine[],
+  selected: DaemonId | undefined,
   navigate: (to: string, options?: { readonly replace?: boolean }) => void,
+  onElsewhere: (machine: DaemonId) => void,
 ): void {
   const link = useSyncExternalStore(subscribeRuleDeepLink, pendingRuleDeepLink, pendingRuleDeepLink);
   useEffect(() => {
     if (link === null || link.routed) return;
-    if (!paired) {
+    if (machines.length === 0) {
       clearRuleDeepLink();
       return;
     }
-    if (machine === null) return;
+    const target =
+      link.machine === undefined
+        ? (machines.find(each => each.daemonId === selected) ?? machines[0])
+        : machines.find(each => each.daemonId === link.machine);
+    if (target === undefined) {
+      clearRuleDeepLink();
+      if (link.machine !== undefined) onElsewhere(link.machine);
+      return;
+    }
     markRuleDeepLinkRouted();
-    navigate(machine.secureCopyPath);
-  }, [link, machine, paired, navigate]);
+    navigate(target.secureCopyPath);
+  }, [link, machines, selected, navigate, onElsewhere]);
 }

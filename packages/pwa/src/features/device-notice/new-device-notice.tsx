@@ -18,7 +18,7 @@
  * ## A READ THAT FAILS SAYS NOTHING
  *
  * This is a notice, not a panel: a machine that is unreachable, or that does not let this device read
- * its device list, simply has nothing to announce here. Settings › Add a device is where those reasons
+ * its device list, simply has nothing to announce here. Settings › Devices is where those reasons
  * are explained, and repeating every outage above every page would bury the one notice that matters.
  *
  * ## ON A PHONE IT IS ONE LINE

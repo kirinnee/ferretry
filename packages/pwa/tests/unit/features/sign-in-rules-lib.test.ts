@@ -16,6 +16,7 @@ import {
   codeKeyLabel,
   draftOf,
   initialRuleTicks,
+  narrowEnd,
   passkeyWords,
   RULE_HONEST_LIMIT,
   ruleFailureWords,
@@ -88,12 +89,17 @@ describe('flags come from the structured fields', () => {
   it('draws no flag from the words when the booleans are false', () => {
     const staged = stagedRule({ does: 'root one-factor auto recipe' });
     expect(stagedFlags(staged)).toEqual([]);
-    expect(passkeyWords(staged)).toEqual({ does: 'root one-factor auto recipe', rows: staged.rows, warnings: [] });
+    expect(passkeyWords(staged)).toEqual({
+      does: 'root one-factor auto recipe',
+      rows: staged.rows,
+      warnings: [],
+      cautions: [],
+    });
   });
 
   it('names the proof behind a collapsed line, root or not', () => {
-    expect(checkedWords(true)).toBe(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT);
-    expect(checkedWords(false)).toBe(RULE_HONEST_LIMIT);
+    expect(checkedWords(true)).toEqual([SIGN_IN_RULE_TERMINAL_HONEST_LIMIT, RULE_HONEST_LIMIT]);
+    expect(checkedWords(false)).toEqual([RULE_HONEST_LIMIT]);
   });
 
   it('reads a listed rule from its flags array', () => {
@@ -301,5 +307,27 @@ describe('each refusal its own sentence (C1)', () => {
     expect(ruleFailureWords(as(SIGN_IN_RULE_ERROR_CODES.terminalOff))).toBe(
       SIGN_IN_RULE_INELIGIBLE_WORDS['terminal-off'],
     );
+  });
+});
+
+describe('narrowing a rule to an end the owner typed', () => {
+  const NOW = Date.parse('2026-05-01T00:00:00.000Z');
+  const ENDS = '2026-05-03T00:00:00.000Z';
+
+  it('takes whole hours and whole days that end before the rule now does', () => {
+    expect(narrowEnd('3', 'hours', ENDS, NOW)).toEqual({ ok: true, at: '2026-05-01T03:00:00.000Z' });
+    expect(narrowEnd('1', 'days', ENDS, NOW)).toEqual({ ok: true, at: '2026-05-02T00:00:00.000Z' });
+  });
+
+  it('refuses a fraction, zero, less than the one-hour minimum, and an end that is not earlier', () => {
+    for (const [typed, unit] of [
+      ['1.5', 'hours'],
+      ['0', 'hours'],
+      ['', 'hours'],
+      ['48', 'hours'],
+      ['2', 'days'],
+      ['0', 'days'],
+    ] as const)
+      expect(narrowEnd(typed, unit, ENDS, NOW).ok).toBe(false);
   });
 });

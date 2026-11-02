@@ -1,15 +1,16 @@
 /** `<app>/#rules/<stage>` (printed by `fy rules add`): routed to a machine's Secure copy panel, highlighted only if listed, never a passkey ask. */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { type DaemonId, ruleDeepLinkFragment } from '@ferretry/protocol';
 import { SignInRulesSurface } from '../../../src/features/secure-copy/sign-in-rules-surface.tsx';
-import { useRuleDeepLink } from '../../../src/hooks/use-rule-deep-link.ts';
+import { type RuleLinkMachine, useRuleDeepLink } from '../../../src/hooks/use-rule-deep-link.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   captureRuleDeepLink,
   clearRuleDeepLink,
   markRuleDeepLinkRouted,
   pendingRuleDeepLink,
-  ruleStageFromHash,
+  listenForRuleDeepLinks,
   subscribeRuleDeepLink,
 } from '../../../src/lib/rule-deep-link.ts';
 import { RULE_LINKED_STAGE_GONE_WORDS } from '../../../src/lib/sign-in-rules.ts';
@@ -20,22 +21,12 @@ import { machineStage, ruleList, STAGE_ID } from '../../support/sign-in-rule-fix
 
 const hereAt = (hash: string) => ({ hash, pathname: '/app/', search: '?x=1' });
 const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' });
+const daemon = (letter: string): DaemonId => `fy_daemon_${letter.repeat(43)}` as DaemonId;
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 
 afterEach(() => clearRuleDeepLink());
 
 describe('reading the fragment', () => {
-  it('accepts a stage id and nothing else', () => {
-    expect(ruleStageFromHash(`#rules/${STAGE_ID}`)).toBe(STAGE_ID);
-    expect(ruleStageFromHash(`rules/${STAGE_ID}`)).toBe(STAGE_ID);
-    expect(ruleStageFromHash('#rules/not-a-stage')).toBeNull();
-    expect(ruleStageFromHash('#rules/')).toBeNull();
-    expect(ruleStageFromHash('#rules')).toBeNull();
-    expect(ruleStageFromHash(`#rules/${STAGE_ID}/extra`)).toBeNull();
-    expect(ruleStageFromHash(`#agenda/${STAGE_ID}`)).toBeNull();
-    expect(ruleStageFromHash('#rules/%E0%A4%A')).toBeNull();
-  });
-
   it('holds a valid link, tells the listeners and takes the fragment out of the address bar', () => {
     let heard = 0;
     const stop = subscribeRuleDeepLink(() => {
@@ -54,62 +45,113 @@ describe('reading the fragment', () => {
     expect(heard).toBe(2);
   });
 
+  it('keeps the machine the link names', () => {
+    captureRuleDeepLink(hereAt(ruleDeepLinkFragment(STAGE_ID, daemon('s'))));
+    expect(pendingRuleDeepLink()).toEqual({ stage: STAGE_ID, machine: daemon('s'), routed: false });
+  });
+
   it('ignores an invalid stage id, leaving the address alone', () => {
     captureRuleDeepLink(hereAt('#rules/bogus'));
     expect(pendingRuleDeepLink()).toBeNull();
     markRuleDeepLinkRouted();
     expect(pendingRuleDeepLink()).toBeNull();
   });
+
+  it('reads a link followed while the app is already open, and stops listening when asked', () => {
+    const target = new EventTarget() as unknown as Window;
+    Object.defineProperty(target, 'location', { value: hereAt(`#rules/${STAGE_ID}`) });
+    const stop = listenForRuleDeepLinks(target);
+    target.dispatchEvent(new Event('hashchange'));
+    expect(pendingRuleDeepLink()).toEqual({ stage: STAGE_ID, routed: false });
+    clearRuleDeepLink();
+    stop();
+    target.dispatchEvent(new Event('hashchange'));
+    expect(pendingRuleDeepLink()).toBeNull();
+  });
 });
 
 describe('routing the link', () => {
   function Probe({
-    machine,
-    paired,
+    machines,
+    selected,
     navigate,
+    elsewhere = () => undefined,
   }: {
-    readonly machine: { readonly secureCopyPath: string } | null;
-    readonly paired: boolean;
+    readonly machines: readonly RuleLinkMachine[];
+    readonly selected?: DaemonId;
     readonly navigate: (to: string) => void;
+    readonly elsewhere?: (machine: DaemonId) => void;
   }) {
-    useRuleDeepLink(machine, paired, navigate);
+    useRuleDeepLink(machines, selected, navigate, elsewhere);
     return null;
   }
-  const here = { secureCopyPath: '/m/studio/settings#machine-secure-copy' };
+  const studio: RuleLinkMachine = {
+    daemonId: daemon('s'),
+    secureCopyPath: '/m/studio/settings#machine-secure-copy',
+  };
+  const laptop: RuleLinkMachine = {
+    daemonId: daemon('l'),
+    secureCopyPath: '/m/laptop/settings#machine-secure-copy',
+  };
 
-  it('goes to the active machine’s Secure copy panel once, keeping the stage for the panel', async () => {
+  it('goes to the selected machine’s Secure copy panel once, keeping the stage for the panel', async () => {
     const went: string[] = [];
     captureRuleDeepLink(hereAt(`#rules/${STAGE_ID}`));
-    const mounted = await mount(<Probe machine={here} navigate={to => went.push(to)} paired />);
+    const mounted = await mount(
+      <Probe machines={[studio, laptop]} navigate={to => went.push(to)} selected={laptop.daemonId} />,
+    );
     try {
-      expect(went).toEqual([here.secureCopyPath]);
+      expect(went).toEqual([laptop.secureCopyPath]);
       expect(pendingRuleDeepLink()).toEqual({ stage: STAGE_ID, routed: true });
     } finally {
       await mounted.unmount();
     }
   });
 
-  it('waits while no machine is known, and drops the link when nothing is paired', async () => {
+  it('opens on the machine the link names, not the selected one', async () => {
+    const went: string[] = [];
+    captureRuleDeepLink(hereAt(ruleDeepLinkFragment(STAGE_ID, laptop.daemonId)));
+    const mounted = await mount(
+      <Probe machines={[studio, laptop]} navigate={to => went.push(to)} selected={studio.daemonId} />,
+    );
+    try {
+      expect(went).toEqual([laptop.secureCopyPath]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('says so, and goes nowhere, when the link names a machine this device is not paired with', async () => {
+    const went: string[] = [];
+    const told: string[] = [];
+    captureRuleDeepLink(hereAt(ruleDeepLinkFragment(STAGE_ID, daemon('e'))));
+    const mounted = await mount(
+      <Probe elsewhere={machine => told.push(machine)} machines={[studio]} navigate={to => went.push(to)} />,
+    );
+    try {
+      expect(went).toEqual([]);
+      expect(told).toEqual([daemon('e')]);
+      expect(pendingRuleDeepLink()).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('drops the link when nothing is paired', async () => {
     const went: string[] = [];
     captureRuleDeepLink(hereAt(`#rules/${STAGE_ID}`));
-    const waiting = await mount(<Probe machine={null} navigate={to => went.push(to)} paired />);
-    try {
-      expect(pendingRuleDeepLink()).not.toBeNull();
-    } finally {
-      await waiting.unmount();
-    }
-    const unpaired = await mount(<Probe machine={null} navigate={to => went.push(to)} paired={false} />);
+    const mounted = await mount(<Probe machines={[]} navigate={to => went.push(to)} />);
     try {
       expect(pendingRuleDeepLink()).toBeNull();
       expect(went).toEqual([]);
     } finally {
-      await unpaired.unmount();
+      await mounted.unmount();
     }
   });
 
   it('does nothing without a link', async () => {
     const went: string[] = [];
-    const mounted = await mount(<Probe machine={here} navigate={to => went.push(to)} paired />);
+    const mounted = await mount(<Probe machines={[studio]} navigate={to => went.push(to)} />);
     try {
       expect(went).toEqual([]);
     } finally {

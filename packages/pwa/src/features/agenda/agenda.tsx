@@ -413,7 +413,14 @@ export const useAgenda = ({
             : {})}
           {...(cardItem.signInRuleSuggestion !== undefined
             ? {
-                planForm: <SignInRuleSuggestionHost agentName={ferret} connection={connection} item={cardItem} />,
+                planForm: (
+                  <SignInRuleSuggestionHost
+                    agentName={ferret}
+                    connection={connection}
+                    item={cardItem}
+                    sessionId={scope.sessionId}
+                  />
+                ),
               }
             : {})}
           {...(cardItem.phoneApproval !== undefined

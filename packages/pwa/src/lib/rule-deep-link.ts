@@ -5,10 +5,12 @@
  * for a passkey; the owner still taps Confirm on the row.
  */
 
-import { type SignInRuleStageId, SignInRuleStageIdSchema } from '@ferretry/protocol';
+import { type DaemonId, ruleDeepLinkFromFragment, type SignInRuleStageId } from '@ferretry/protocol';
 
 export interface RuleDeepLink {
   readonly stage: SignInRuleStageId;
+  /** The machine the link names (`?machine=<daemon id>`), when the printer knew which one holds the stage. */
+  readonly machine?: DaemonId;
   /** Whether the shell has already sent the page to a machine's Secure copy panel. */
   readonly routed: boolean;
 }
@@ -20,28 +22,23 @@ const notify = (): void => {
   for (const listener of listeners) listener();
 };
 
-/** The stage a `#rules/<stage>` fragment names, or `null` for any other address or a stage id that is not one. */
-export function ruleStageFromHash(hash: string): SignInRuleStageId | null {
-  const [section, segment, ...rest] = hash.replace(/^#/u, '').split('/');
-  if (section !== 'rules' || segment === undefined || segment === '' || rest.length > 0) return null;
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
-  const parsed = SignInRuleStageIdSchema.safeParse(decoded);
-  return parsed.success ? parsed.data : null;
-}
-
 /** Reads the address bar's fragment into the pending link, and takes it out of the address bar. */
 export function captureRuleDeepLink(location: Pick<Location, 'hash' | 'pathname' | 'search'> = window.location): void {
-  const stage = ruleStageFromHash(location.hash);
-  if (stage === null) return;
-  pending = { stage, routed: false };
+  const found = ruleDeepLinkFromFragment(location.hash);
+  if (found === null) return;
+  pending = { ...found, routed: false };
   // `replaceState`, so Back never returns to the link and a reload does not open the row again.
   window.history.replaceState(window.history.state, '', `${location.pathname}${location.search}`);
   notify();
+}
+
+/** Reads a link the owner followed while the app was already open (the fragment changed under the page). */
+export function listenForRuleDeepLinks(
+  target: Pick<Window, 'addEventListener' | 'removeEventListener' | 'location'> = window,
+): () => void {
+  const onChange = (): void => captureRuleDeepLink(target.location);
+  target.addEventListener('hashchange', onChange);
+  return () => target.removeEventListener('hashchange', onChange);
 }
 
 export const pendingRuleDeepLink = (): RuleDeepLink | null => pending;

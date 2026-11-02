@@ -737,6 +737,17 @@ const rowLine = (text: string): string => {
     : `${flat.slice(0, TASK_PLAN_SUMMARY_LINE_MAX_CHARS - 1)}…`;
 };
 
+/**
+ * THE "WHO" OF A RULE, one wording on every surface (the rows' Who line, the app's cards and the CLI): any ferret on the
+ * machine, the ferrets of one board project, or one session. The ids are the ones the rule pins.
+ */
+export const signInRuleScopeWords = (scope: SignInRuleScope): string =>
+  scope.kind === 'any'
+    ? 'Any ferret on this machine'
+    : scope.kind === 'project'
+      ? `Ferrets in board project ${scope.project}`
+      : `Session ${scope.session}`;
+
 /** The facts {@link signInRuleWords} turns into words: all resolved by the daemon, none a value. */
 export interface SignInRuleWordsFacts {
   readonly fields: readonly SignInField[];
@@ -773,12 +784,7 @@ export function signInRuleWords(facts: SignInRuleWordsFacts): {
   readonly rows: SignInRuleRow[];
 } {
   const { place, scope } = facts;
-  const who =
-    scope.kind === 'any'
-      ? 'Any ferret on this machine'
-      : scope.kind === 'project'
-        ? `Ferrets in board project ${scope.project}`
-        : `Session ${scope.session}`;
+  const who = signInRuleScopeWords(scope);
   const forWhom =
     scope.kind === 'any'
       ? 'any ferret'
@@ -987,8 +993,7 @@ export const SignInRuleNarrowSchema = z
 export type SignInRuleNarrow = z.infer<typeof SignInRuleNarrowSchema>;
 
 export type SignInRuleNarrowing =
-  | { readonly ok: true; readonly narrowed: SignInRuleNarrowed }
-  | { readonly ok: false; readonly reason: string };
+  { readonly ok: true; readonly narrowed: SignInRuleNarrowed } | { readonly ok: false; readonly reason: string };
 
 /**
  * The overlay after a narrowing, or why it isn't one: every part must be STRICTLY narrower than what is in force now
@@ -1025,8 +1030,7 @@ export function signInRuleNarrowed(
 // ── The bytes the passkey is bound to ────────────────────────────────────────────────────────────────
 
 export type SignInRuleCanonical =
-  | { readonly ok: true; readonly text: string }
-  | { readonly ok: false; readonly reason: string };
+  { readonly ok: true; readonly text: string } | { readonly ok: false; readonly reason: string };
 
 /**
  * THE BYTES A RULE'S PASSKEY IS BOUND TO: RFC 8785 JSON ({@link canonicalJson}) of the whole parsed body, with its

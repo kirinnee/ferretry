@@ -17,8 +17,7 @@ import {
   type InputDeliverResult,
   InputDeliverResultSchema,
   type InputRequest,
-  type InputRequestList,
-  InputRequestListSchema,
+  InputRequestSchema,
   type InputShot,
   InputShotSchema,
   type PhoneApproval,
@@ -44,8 +43,15 @@ export type InputClient = Pick<IFyApiClient, 'request'>;
 
 const sessionPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/input-requests`;
 
-async function listSessionInputRequests(client: InputClient, sessionId: string): Promise<InputRequestList> {
-  return await client.request(sessionPath(sessionId), InputRequestListSchema);
+const OpenRequestsSchema = z.object({ requests: z.array(z.unknown()) });
+
+/** Each request is read on its own: one card this build cannot parse is dropped, it does not fail the whole list. */
+async function listSessionInputRequests(client: InputClient, sessionId: string): Promise<readonly InputRequest[]> {
+  const { requests } = await client.request(sessionPath(sessionId), OpenRequestsSchema);
+  return requests.flatMap(each => {
+    const parsed = InputRequestSchema.safeParse(each);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
 
 /** The request an `input` agenda item points at, or `undefined` once the daemon no longer lists it. */
@@ -54,7 +60,7 @@ export async function readInputRequest(
   sessionId: string,
   requestId: string,
 ): Promise<InputRequest | undefined> {
-  const { requests } = await listSessionInputRequests(client, sessionId);
+  const requests = await listSessionInputRequests(client, sessionId);
   return requests.find(request => request.id === requestId);
 }
 

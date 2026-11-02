@@ -3,6 +3,7 @@ import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema 
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
+import { STEP_UP_DEFAULT_WINDOW_MINUTES } from './security.ts';
 
 /**
  * THE PASSKEY STEP-UP, ON THE WIRE (`docs/design/zero-trust.md` B1–B2).
@@ -19,7 +20,7 @@ import { PairedDeviceIdSchema } from './pairing.ts';
  * How long one verified step-up covers the acts that ask for one, for one running copy of the app, on a
  * machine whose owner never changed it: the default of the `stepUpWindowMinutes` setting (`./security.ts`).
  */
-export const STEP_UP_TTL_SECONDS = 900 as const;
+export const STEP_UP_TTL_SECONDS = STEP_UP_DEFAULT_WINDOW_MINUTES * 60;
 
 /** How long a challenge the daemon issued may be answered. It is spent on its first answer either way. */
 export const PASSKEY_CHALLENGE_TTL_SECONDS = 120 as const;

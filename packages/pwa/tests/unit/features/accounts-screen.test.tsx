@@ -836,7 +836,7 @@ describe('the last two branches', () => {
     await screen.tab('sites');
     await click(screen.q('[data-accounts-signin="si_0000000000000004"] button'));
 
-    expect(screen.q('[data-accounts-panel="method"]')?.textContent).toContain('Where it signs in: sudo@kirin-box');
+    expect(screen.q('[data-accounts-panel="method"]')?.textContent).toContain('Machine: sudo@kirin-box');
   });
 });
 

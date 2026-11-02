@@ -20,6 +20,8 @@ export interface RuleWorld {
   readonly suggestions?: readonly SignInRuleSuggestionView[];
   readonly staged?: SignInRuleStaged;
   readonly committed?: SignInRuleView;
+  /** How many rules the machine says it revoked for an account. */
+  readonly revoked?: number;
   /** Returns an error to throw for a call (with its body), or nothing to answer it. */
   readonly fail?: (key: string, body?: Record<string, unknown>) => Error | undefined;
 }
@@ -44,6 +46,8 @@ const answerFor =
       return world.eligibility ?? { signIn: SITE_SIGN_IN, eligible: true };
     if (key === 'GET /v1/sign-in-rules/suggestions') return { suggestions: world.suggestions ?? [suggestion()] };
     if (key === 'GET /v1/accounts') return accountList();
+    if (key.startsWith('POST /v1/accounts/') && key.endsWith('/sign-in-rules/revoke'))
+      return { account: key.split('/')[3], revoked: world.revoked ?? 1 };
     if (key === 'POST /v1/sign-in-rules/stages' || key.endsWith('/bind')) return world.staged ?? stagedRule();
     if (key.endsWith('/commit')) return world.committed ?? pageRule();
     if (key.endsWith('/narrow')) return pageRule();

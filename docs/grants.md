@@ -651,7 +651,7 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
 `PATCH /v1/pair/devices/:deviceId/grants` with a partial `DeviceGrantsPatch`, answering the whole device
 list. At the machine — `fy` with the admin token, the only ungoverned caller (B4):
 `fy device grant <device> <capability> --use|--no-use|--configure|--no-configure`. In the app, Settings →
-Add a device shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
+The Devices tab shows each device's capabilities as toggles; a browser is a governed device wherever it runs, so
 its toggles follow the remote column below — a toggle it may not turn on says so, with the `fy` command.
 
 | change                        | the owner (`fy`) | any device (a browser on the host too)                                                 |

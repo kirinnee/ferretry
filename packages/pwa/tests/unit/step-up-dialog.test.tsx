@@ -378,7 +378,7 @@ describe('the passkey prompt bound to a task plan, once another request joins it
       await interact(async () => await Promise.resolve());
       const scope = must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope').textContent;
       expect(scope).toBe(sharedBoundNote(STEP_UP_SCOPE_NOTE));
-      expect(scope).toContain('15 minutes');
+      expect(scope).toContain('the time it is set to');
       expect(scope).toContain('confirm the staged request again');
       expect(scope).not.toContain('Allow again');
       expect(scope).not.toContain('exactly');

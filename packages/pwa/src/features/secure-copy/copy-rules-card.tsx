@@ -1,5 +1,5 @@
 /**
- * Settings › Secure copy › Pastes approved in advance (docs/secure-copy.md).
+ * Settings › Secure copy › Paste rules (docs/secure-copy.md).
  *
  * A rule lets a ferret paste a value it sealed (a token it minted, say) from one place into another WITHOUT a card
  * each time: from what a program prints, or a page, into the program reading a terminal or a page's field. Every
@@ -318,7 +318,7 @@ function RuleRow({
   );
 }
 
-/** "Copy rules may target programs in my own profile": off by default, and turning it on is a loosening. */
+/** "Paste rules may target programs in my own profile": off by default, and turning it on is a loosening. */
 function ProfileTargetsSetting({
   settings,
   busy,
@@ -346,7 +346,7 @@ function ProfileTargetsSetting({
       />
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={id} className="text-ui font-medium text-fg">
-          Copy rules may target programs in my own profile
+          Paste rules may target programs in my own profile
         </label>
         <p id={`${id}-help`} className="m-0 text-meta leading-base text-muted">
           {PROFILE_TARGETS_HELP}
@@ -377,16 +377,16 @@ export function CopyRulesCard({
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="copy-rules-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
-          Pastes approved in advance
+          Paste rules
         </h2>
       </div>
       <p className="m-0 text-cell text-muted">Pastes allowed without asking. Every paste is still logged.</p>
       {rules.length === 0 ? (
         <p className="m-0 text-ui text-faint" data-testid="copy-rules-empty">
-          No pastes are approved in advance: every paste asks you.
+          No paste rules: every paste asks you.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Pastes approved in advance">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules">
           {rules.map(rule => (
             <RuleRow
               key={rule.id}

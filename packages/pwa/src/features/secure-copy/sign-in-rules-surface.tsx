@@ -17,6 +17,7 @@ import {
   listRules,
   narrowRule,
   RULE_DAMAGED_WORDS,
+  RULE_HONEST_LIMIT,
   RULE_LINKED_STAGE_GONE_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
   type RuleAsk,
@@ -164,7 +165,7 @@ export function SignInRulesSurface({
   const [failures, setFailures] = useState<Readonly<Record<string, string>>>({});
   const [stagePhases, setStagePhases] = useState<Readonly<Record<string, StagePhase>>>({});
   const [again, setAgain] = useState<
-    { readonly rule: SignInRuleView; readonly origin: 'resume' | 'renew' } | undefined
+    { readonly rule: SignInRuleView; readonly origin: 'resume' | 'renew' | 'widen' } | undefined
   >(undefined);
   const [reads, setReads] = useState(0);
   const forbidden = useRef(false);
@@ -174,14 +175,15 @@ export function SignInRulesSurface({
   // A `#rules/<stage>` link only picks a row to show. It is settled once the daemon's list has been read: listed, the row
   // is highlighted; not listed, the owner is told so. Nothing here binds or asks for a passkey.
   useEffect(() => {
-    if (link === null || (read.kind !== 'ready' && read.kind !== 'forbidden')) return;
+    if (link === null || (link.machine !== undefined && link.machine !== connection.daemonId)) return;
+    if (read.kind !== 'ready' && read.kind !== 'forbidden') return;
     setLinked(
       read.kind === 'ready'
         ? { stage: link.stage, listed: read.list.stages.some(each => each.stage === link.stage) }
         : undefined,
     );
     clearRuleDeepLink();
-  }, [link, read]);
+  }, [link, read, connection.daemonId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` re-runs the read after a change
   useEffect(() => {
@@ -274,6 +276,9 @@ export function SignInRulesSurface({
       <p className="mb-0 mt-1 text-cell leading-base text-muted">
         Sign-ins you approved once, for any ferret, with a passkey. They end on time, on their cap, or the moment you
         revoke them.
+      </p>
+      <p className="mb-0 mt-1 text-cell leading-base text-muted" data-sign-in-rules-limit="">
+        {RULE_HONEST_LIMIT}
       </p>
       {read.kind === 'forbidden' ? (
         <p className="mb-0 mt-3 text-ui text-warn" data-sign-in-rules-forbidden="" role="status">
