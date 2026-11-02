@@ -3,8 +3,8 @@
  * count one, or finish one a crash cut short (docs/catalogs.md § Links).
  *
  * It holds NO URL, NO KEY and no fetch token. A public link's key is in `link-keys.json`, sealed; a one-time link's
- * key is held by nobody. `bundleId` is here because the store names a link by it and an owner cannot turn a link off
- * without it, but it is not the key and opens nothing.
+ * key is held by nobody. `bundleId` IS here, because the store names a link by it and an owner cannot turn a link off
+ * without it. It is an address, not a secret: it opens nothing without the key.
  */
 import {
   CatalogItemNameSchema,
@@ -12,11 +12,13 @@ import {
   CatalogLinkKindSchema,
   CatalogLinkStateSchema,
   CATALOG_LINKS_MAX_LIVE,
+  DaemonIdSchema,
   InstantSchema,
   LinkBundleIdSchema,
   SharedCatalogItemIdSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { linkStoreSiteProblem } from './store-origin.ts';
 
 export const LINKS_SCHEMA_VERSION = 1;
 /** Links that are not live and are still remembered, so the list can say what happened to them. */
@@ -55,8 +57,13 @@ export const StoredLinkSchema = z.strictObject({
   opens: z.number().int().min(0),
   opensCheckedAt: InstantSchema.optional(),
   bundleId: LinkBundleIdSchema,
+  /**
+   * The daemon id that signed the upload. The store answers `link_unknown` to a delete from anyone but the uploader,
+   * so that answer means "already gone" only while this is still the current identity.
+   */
+  publisher: DaemonIdSchema,
   /** The store this link was uploaded to: later operations go here, never to a store discovered afterwards. */
-  storeOrigin: z.string().min(1),
+  storeOrigin: z.string().refine(value => linkStoreSiteProblem(value) === null, { message: 'not an https origin' }),
   /** Whether the URL names the store (`s=`): true only for a self-hosted one. */
   emitsStoreOrigin: z.boolean(),
   sequence: Sequence,

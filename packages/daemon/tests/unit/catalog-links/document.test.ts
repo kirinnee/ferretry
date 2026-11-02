@@ -41,6 +41,18 @@ describe('links.json document', () => {
     should(problem(Array.from({ length: 51 }, () => storedLink({ state: 'live' })))).containEql('more links are live');
   });
 
+  it('should require the uploader and hold the store to an https origin', () => {
+    const live = storedLink({ state: 'live' });
+    const { publisher: _gone, ...unsigned } = live;
+    should(LinksDocumentSchema.safeParse({ schemaVersion: 1, links: [unsigned] }).success).equal(false);
+    should(problem([{ ...live, publisher: 'someone' }])).be.a.String();
+    for (const storeOrigin of ['http://links.example.test', 'ftp://links.example.test', 'links.example.test'])
+      should(LinksDocumentSchema.safeParse({ schemaVersion: 1, links: [{ ...live, storeOrigin }] }).success).equal(
+        false,
+      );
+    should(problem([{ ...live, storeOrigin: 'http://127.0.0.1:8787' }])).equal(undefined);
+  });
+
   it('should count what is held, find, add, replace and remove', () => {
     const a = storedLink({ state: 'live' });
     const b = storedLink({ state: 'pending' });

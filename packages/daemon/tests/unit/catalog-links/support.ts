@@ -18,6 +18,10 @@ export { SKILL_PATH };
 
 export const APP_ORIGIN = 'https://app.example.test';
 export const STORE_ORIGIN = 'https://links.example.test';
+/** The daemon id of the rig's one fixed identity: the machine that made every stored link below. */
+export const RIG_DAEMON_ID = 'fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA';
+/** Another machine's daemon id, as after an identity reset. */
+export const OTHER_DAEMON_ID = `fy_daemon_${'A'.repeat(43)}`;
 
 class MemoryLinkDocuments implements LinkDocumentStore {
   document: LinksDocument = EMPTY_LINKS_DOCUMENT;
@@ -174,6 +178,7 @@ export function storedLink(over: Partial<StoredLink> & Pick<StoredLink, 'state'>
     createdAt: at,
     opens: 0,
     bundleId: id(22),
+    publisher: RIG_DAEMON_ID,
     storeOrigin: STORE_ORIGIN,
     emitsStoreOrigin: false,
     sequence: 1,

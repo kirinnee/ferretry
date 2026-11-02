@@ -36,6 +36,8 @@ interface SignedFields {
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+/** The store's biggest honest answer is a status of 64 entries, a few kilobytes. */
+const MAX_BODY_BYTES = 64 * 1024;
 const UNREACHABLE = { ok: false, reason: 'unreachable' } as const;
 
 /**
@@ -189,9 +191,30 @@ export class HttpLinkStoreClient implements LinkStoreClient {
     }
   }
 
+  /**
+   * The body as JSON, or `undefined` when it is not JSON, is over the cap, or does not arrive within the deadline
+   * (the request's abort signal runs until the body ends). Nothing past the cap is buffered.
+   */
   async #json(response: Response): Promise<unknown> {
+    if (response.body === null || Number(response.headers.get('content-length')) > MAX_BODY_BYTES) {
+      await response.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
     try {
-      return await response.json();
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value.length;
+        if (size > MAX_BODY_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          return undefined;
+        }
+        chunks.push(part.value);
+      }
+      return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
     } catch {
       return undefined;
     }

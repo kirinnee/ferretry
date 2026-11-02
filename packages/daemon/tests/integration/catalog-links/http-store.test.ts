@@ -193,6 +193,41 @@ describe('HttpLinkStoreClient over HTTP', () => {
     should(await client.status(origin, [BUNDLE])).deepEqual({ ok: false, reason: 'unreachable' });
   });
 
+  it('should refuse a body over the cap, declared or streamed, and still read an honest one', async () => {
+    reset();
+    const big = JSON.stringify({
+      version: 1,
+      available: true,
+      maxEnvelopeBytes: 1000,
+      maxLiveLinks: 50,
+      pad: 'x'.repeat(200_000),
+    });
+    const declared = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(big, { status: 200 }) });
+    const streamed = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const chunk = new TextEncoder().encode(big.slice(0, 40_000));
+              for (let i = 0; i < 4; i += 1) controller.enqueue(chunk);
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    try {
+      should(await clientFor().available(`http://127.0.0.1:${declared.port}`)).equal(false);
+      should(await clientFor().available(`http://127.0.0.1:${streamed.port}`)).equal(false);
+      should(await clientFor().available(origin)).equal(true);
+    } finally {
+      await declared.stop(true);
+      await streamed.stop(true);
+    }
+  });
+
   it('should be unreachable once the store has stopped answering', async () => {
     reset();
     const gone = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => json({}) });

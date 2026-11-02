@@ -1,4 +1,5 @@
 import type { LinkStoreClient, LinkStoreLocator, LinkStoreSite } from '../../lib/catalog-links/ports.ts';
+import { linkStoreSiteProblem } from '../../lib/catalog-links/store-origin.ts';
 
 /** `catalogs.linkStore` in `config/daemon.json`, as the config schema parses it. */
 export type LinkStoreSetting =
@@ -9,6 +10,8 @@ export type LinkStoreSetting =
 const OFF = 'Download links are turned off on this machine (catalogs.linkStore).';
 const NO_DIRECTORY =
   'This machine has no link store to ask: the relay directory is off. Set catalogs.linkStore.url to use your own.';
+const NOT_HTTPS =
+  'The link store address is not a plain https address, so no link can be made through it. Check the relay directory or catalogs.linkStore.url.';
 const DOWN = 'The link store is not taking new links right now. Try again later.';
 
 /**
@@ -29,6 +32,8 @@ export class ConfiguredLinkStoreLocator implements LinkStoreLocator {
     const selfHosted = 'url' in setting;
     const origin = 'url' in setting ? setting.url : this.directoryOrigin();
     if (origin === undefined) return { kind: 'unavailable', reason: NO_DIRECTORY };
+    // Signed uploads and deletes go here, and a spoofed answer to a delete would read as "turned off".
+    if (linkStoreSiteProblem(origin) !== null) return { kind: 'unavailable', reason: NOT_HTTPS };
     const taking = await this.client.available(origin);
     return taking
       ? { kind: 'ready', origin: new URL(origin).origin, selfHosted }

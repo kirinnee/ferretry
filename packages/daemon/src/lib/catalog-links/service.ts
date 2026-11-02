@@ -88,7 +88,10 @@ export const LINK_RETRY_MIN_MS = 30_000;
 export const LINK_RETRY_MAX_MS = 10 * 60_000;
 const STATUS_BATCH = 64;
 
-const STORE_DOWN = 'The link store could not be reached, so no link was made.';
+const STORE_SILENT =
+  'The link store did not answer, so the link may have been made. Check your links, and turn it off if you do not want it.';
+const NOT_THE_PUBLISHER =
+  "This link was made under this machine's previous identity, so it cannot be turned off from here.";
 const REVOKE_UNREACHABLE =
   'Turning it off could not reach the link store, so the link may still work. Ferretry keeps trying.';
 const SIGNING_UNAVAILABLE =
@@ -98,6 +101,16 @@ const instant = (ms: number): string => new Date(ms).toISOString();
 
 const isHeld = (link: StoredLink): boolean =>
   link.state === 'pending' || link.state === 'live' || link.state === 'ending';
+
+/** When the store stops serving a link by itself: its own end, or its lease, whichever comes first. */
+const linkEnd = (link: StoredLink): number =>
+  Math.min(Date.parse(link.expiresAt ?? link.notAfter), Date.parse(link.notAfter));
+
+interface EndAttempt {
+  readonly link: StoredLink;
+  /** `not-publisher`: the store refused as it does a stranger, and this machine is not the one that made the link. */
+  readonly outcome: 'settled' | 'retry' | 'not-publisher';
+}
 
 /** What the owner sees of a stored link: never the bundle id, the store, a key or a URL. */
 function owned(link: StoredLink, storeState?: 'ok' | 'unreachable'): OwnedCatalogLink {
@@ -129,6 +142,8 @@ export class CatalogLinkService {
   #queue: Promise<unknown> = Promise.resolve();
   readonly #retries = new Map<string, { readonly attempts: number; readonly nextAt: number }>();
   #storeAnswer: { readonly at: number; readonly status: CatalogLinkStoreStatus } | undefined;
+  /** When each store last failed a status call: it is not asked again for a minute, so a polling reader cannot hammer it. */
+  readonly #statusFailedAt = new Map<string, number>();
 
   constructor(private readonly deps: CatalogLinkDeps) {}
 
@@ -242,6 +257,7 @@ export class CatalogLinkService {
         ...(request.installCap === undefined ? {} : { installCap: request.installCap }),
         opens: 0,
         bundleId,
+        publisher: identity.daemonId,
         storeOrigin: site.origin,
         emitsStoreOrigin: site.selfHosted,
         sequence: 1,
@@ -275,7 +291,7 @@ export class CatalogLinkService {
           ? new CatalogLinkRefusal('link_too_big', LINK_TOO_BIG_SENTENCE)
           : new CatalogLinkRefusal(
               'link_store_unavailable',
-              uploaded.reason === 'refused' ? LINK_STORE_REFUSAL_DETAIL[uploaded.code].message : STORE_DOWN,
+              uploaded.reason === 'refused' ? LINK_STORE_REFUSAL_DETAIL[uploaded.code].message : STORE_SILENT,
             );
       }
 
@@ -346,9 +362,14 @@ export class CatalogLinkService {
     return this.#serially(async () => {
       const link = this.#found(await this.deps.documents.read(), linkId);
       if (!isHeld(link)) return owned(link);
-      const settled = await this.#attemptEnd(link, 'owner');
-      if (settled.state === 'ending') throw new CatalogLinkRefusal('link_store_unavailable', REVOKE_UNREACHABLE);
-      return owned(settled);
+      const attempt = await this.#attemptEnd(link, 'owner');
+      if (attempt.outcome === 'not-publisher')
+        throw new CatalogLinkRefusal(
+          'signing_unavailable',
+          `${NOT_THE_PUBLISHER} It stops working by ${instant(linkEnd(link))}.`,
+        );
+      if (attempt.outcome === 'retry') throw new CatalogLinkRefusal('link_store_unavailable', REVOKE_UNREACHABLE);
+      return owned(attempt.link);
     });
   }
 
@@ -407,15 +428,31 @@ export class CatalogLinkService {
   }
 
   /**
-   * Deletes the bundle, then ends the link. A store that says it has no such bundle, or that it is gone, has
-   * already done what was asked. Any other failure leaves the link `ending` and schedules the next try.
+   * Deletes the bundle, then ends the link. A store that says the bundle is gone has already done what was asked.
+   *
+   * `link_unknown` is what the store says both to "no such bundle" and to "not your bundle", so it counts as done
+   * ONLY while the identity that uploaded the link is still this machine's. Under another identity the link may be
+   * live and cannot be touched from here: it keeps its record and its key, retries slowly, and is ended as `expired`
+   * once its own end has passed. Any other failure leaves the link `ending` and schedules the next try.
    */
-  async #attemptEnd(link: StoredLink, reason: NonNullable<StoredLink['endReason']>): Promise<StoredLink> {
+  async #attemptEnd(link: StoredLink, reason: NonNullable<StoredLink['endReason']>): Promise<EndAttempt> {
     const answer = await this.deps.client.remove(link.storeOrigin, link.bundleId);
-    const done =
-      answer.ok || (answer.reason === 'refused' && (answer.code === 'link_unknown' || answer.code === 'link_gone'));
     const now = this.deps.now();
-    if (done) {
+    const refusal = !answer.ok && answer.reason === 'refused' ? answer.code : undefined;
+    const notPublisher =
+      refusal === 'link_unknown' && (await this.deps.identity.identity())?.daemonId !== link.publisher;
+    if (notPublisher && linkEnd(link) <= now) {
+      this.#retries.delete(link.linkId);
+      const lapsed = await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
+        ...rest,
+        state: 'expired',
+        endedAt: instant(linkEnd(link)),
+        endReason: 'expired',
+      }));
+      if (link.keyRef !== undefined) await this.deps.vault.forget(link.keyRef);
+      return { link: lapsed, outcome: 'settled' };
+    }
+    if (answer.ok || ((refusal === 'link_unknown' || refusal === 'link_gone') && !notPublisher)) {
       this.#retries.delete(link.linkId);
       const ended = await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
         ...rest,
@@ -424,16 +461,17 @@ export class CatalogLinkService {
         endReason: reason,
       }));
       if (link.keyRef !== undefined) await this.deps.vault.forget(link.keyRef);
-      return ended;
+      return { link: ended, outcome: 'settled' };
     }
     const attempts = (this.#retries.get(link.linkId)?.attempts ?? 0) + 1;
     const base = Math.min(LINK_RETRY_MIN_MS * 2 ** (attempts - 1), LINK_RETRY_MAX_MS);
     this.#retries.set(link.linkId, { attempts, nextAt: now + base / 2 + (this.deps.random() * base) / 2 });
-    return await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
+    const waiting = await this.#write(link.linkId, ({ pendingUpload: _dropped, ...rest }) => ({
       ...rest,
       state: 'ending',
       endReason: reason,
     }));
+    return { link: waiting, outcome: notPublisher ? 'not-publisher' : 'retry' };
   }
 
   // ── The file ───────────────────────────────────────────────────────────────────────────────────
@@ -467,9 +505,7 @@ export class CatalogLinkService {
       const forgotten: string[] = [];
       let links = original.links.map(link => {
         if (link.state !== 'live') return link;
-        const end = [link.expiresAt, link.notAfter]
-          .map(value => Date.parse(value ?? link.notAfter))
-          .reduce((a, b) => Math.min(a, b));
+        const end = linkEnd(link);
         if (end > now) return link;
         if (link.keyRef !== undefined) forgotten.push(link.keyRef);
         return { ...link, state: 'expired' as const, endedAt: instant(end), endReason: 'expired' as const };
@@ -485,14 +521,20 @@ export class CatalogLinkService {
         const here = stale.filter(link => link.storeOrigin === origin);
         for (let at = 0; at < here.length; at += STATUS_BATCH) {
           const batch = here.slice(at, at + STATUS_BATCH);
-          const answer = await this.deps.client.status(
-            origin,
-            batch.map(link => link.bundleId),
-          );
-          if (!answer.ok) {
+          const failedAt = this.#statusFailedAt.get(origin);
+          const answer =
+            failedAt !== undefined && now - failedAt < LINK_REFRESH_MS
+              ? undefined
+              : await this.deps.client.status(
+                  origin,
+                  batch.map(link => link.bundleId),
+                );
+          if (answer === undefined || !answer.ok) {
+            if (answer !== undefined) this.#statusFailedAt.set(origin, now);
             for (const link of batch) states.set(link.linkId, 'unreachable');
             continue;
           }
+          this.#statusFailedAt.delete(origin);
           links = links.map(link => {
             const entry = batch.some(candidate => candidate.linkId === link.linkId)
               ? answer.value.links.find(candidate => candidate.bundleId === link.bundleId)

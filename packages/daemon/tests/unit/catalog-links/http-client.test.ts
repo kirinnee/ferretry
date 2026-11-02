@@ -219,6 +219,75 @@ describe('HttpLinkStoreClient', () => {
     should(await client.status(ORIGIN, [BUNDLE])).deepEqual({ ok: false, reason: 'unreachable' });
   });
 
+  it('should refuse a body over 64 KiB, declared or streamed, and not buffer it', async () => {
+    const { client, store } = await rig();
+    const declared = new Response('{}', { status: 200, headers: { 'content-length': String(64 * 1024 + 1) } });
+    store.answer = () => declared;
+    should(await client.status(ORIGIN, [BUNDLE])).deepEqual({ ok: false, reason: 'unreachable' });
+    should(declared.bodyUsed).equal(true);
+
+    let pulled = 0;
+    let cancelled = false;
+    store.answer = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(new Uint8Array(16 * 1024).fill(32));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 200 },
+      );
+    should(await client.status(ORIGIN, [BUNDLE])).deepEqual({ ok: false, reason: 'unreachable' });
+    should(cancelled).equal(true);
+    should(pulled).be.below(10);
+
+    store.answer = () => json({ error: { code: 'link_exists', message: 'x'.repeat(70_000) } }, 409);
+    should(await client.remove(ORIGIN, BUNDLE)).deepEqual({ ok: false, reason: 'unreachable' });
+  });
+
+  it('should refuse an oversize advertisement or challenge, and a body that is not there', async () => {
+    const identity = await newIdentity();
+    const serve = (path: string, response: () => Response): HttpLinkStoreClient =>
+      new HttpLinkStoreClient(
+        relayCrypto,
+        { identity: async () => identity, publisherName: () => 'me' },
+        { fetcher: async input => (new URL(input).pathname === path ? response() : json({})) },
+      );
+    const big = (): Response => new Response(' '.repeat(70_000), { status: 200 });
+    should(await serve(LINK_STORE_SERVICE_PATH, big).available(ORIGIN)).equal(false);
+    should(await serve(LINK_STORE_SERVICE_PATH, () => new Response(null, { status: 200 })).available(ORIGIN)).equal(
+      false,
+    );
+    should(await serve(LINK_STORE_CHALLENGE_PATH, big).remove(ORIGIN, BUNDLE)).deepEqual({
+      ok: false,
+      reason: 'unreachable',
+    });
+  });
+
+  it('should give up on a body that stops arriving once the deadline passes', async () => {
+    const identity = await newIdentity();
+    const fetcher: LinkStoreFetch = async (_input, init) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"version":'));
+            init?.signal?.addEventListener('abort', () => controller.error(new Error('timed out')));
+          },
+        }),
+        { status: 200 },
+      );
+    const client = new HttpLinkStoreClient(
+      relayCrypto,
+      { identity: async () => identity, publisherName: () => 'me' },
+      { fetcher, timeoutMs: 40 },
+    );
+    should(await client.available(ORIGIN)).equal(false);
+  });
+
   it('should use the global fetch and its default deadline when none is given', async () => {
     const identity = await newIdentity();
     const client = new HttpLinkStoreClient(relayCrypto, { identity: async () => identity, publisherName: () => 'me' });

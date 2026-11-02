@@ -189,6 +189,24 @@ describe('ConfiguredLinkStoreLocator', () => {
     should(site).deepEqual({ kind: 'ready', origin: 'https://mine.example.test', selfHosted: true });
   });
 
+  it('should not use an address that is not https, and ask no one at it', async () => {
+    for (const directory of [
+      'http://dir.example.test',
+      'ftp://dir.example.test',
+      'not an address',
+      'https://user:pw@dir.example.test',
+    ]) {
+      const { site, asked } = await locate({ source: 'discovery' }, directory);
+      should(site.kind).equal('unavailable');
+      should(site.kind === 'unavailable' && site.reason).containEql('https');
+      should(asked).deepEqual([]);
+    }
+    const own = await locate({ url: 'http://mine.example.test' }, undefined);
+    should(own.site.kind).equal('unavailable');
+    const local = await locate({ source: 'discovery' }, 'http://localhost:8787/');
+    should(local.site).deepEqual({ kind: 'ready', origin: 'http://localhost:8787', selfHosted: false });
+  });
+
   it('should say why there is none: turned off, no directory, or the store not taking links', async () => {
     const off = await locate({ enabled: false }, 'https://dir.example.test');
     should(off.site.kind).equal('unavailable');

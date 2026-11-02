@@ -12,6 +12,7 @@ import {
   mintPublic,
   previewSkill,
   refused,
+  RIG_DAEMON_ID,
   SKILL_PATH,
   SKILL_SOURCE,
   storedLink,
@@ -135,6 +136,7 @@ describe('CatalogLinkService mint', () => {
     const stored = r.documents.document.links[0];
     should(stored?.pendingUpload).equal(undefined);
     should(stored?.keyRef).equal(made.link.linkId);
+    should(stored?.publisher).equal(RIG_DAEMON_ID);
     should(r.client.uploads[0]?.origin).equal(STORE_ORIGIN);
     should(r.client.uploads[0]?.upload.action).equal('create');
     should(await r.items.service.holdsLinkVersion(made.link.itemId, 1)).equal(true);
@@ -283,7 +285,8 @@ describe('CatalogLinkService mint', () => {
     r.client.uploadAnswer = UNREACHABLE;
     const out = await refusal(() => mintPublic(r));
     should(out.refusal).equal('link_store_unavailable');
-    should(out.message).equal('The link store could not be reached, so no link was made.');
+    should(out.message).containEql('may have been made');
+    should(out.message).not.containEql('no link was made');
     should(r.documents.document.links[0]?.state).equal('pending');
     should(r.vault.keys.size).equal(1);
   });

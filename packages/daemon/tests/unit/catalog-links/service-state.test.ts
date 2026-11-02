@@ -8,6 +8,7 @@ import {
   linkRig,
   mintOneTime,
   mintPublic,
+  OTHER_DAEMON_ID,
   refused,
   SKILL_SOURCE,
   storedLink,
@@ -73,6 +74,26 @@ describe('CatalogLinkService list and get', () => {
     should(link.storeState).equal('unreachable');
     should(link.opens).equal(0);
     should(r.documents.document.links[0]?.opensCheckedAt).equal(undefined);
+  });
+
+  it('should not ask a failing store again for a minute, and serve the last count meanwhile', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r);
+    r.client.statusAnswer = () => UNREACHABLE;
+    should((await r.service.get(made.link.linkId)).storeState).equal('unreachable');
+    should((await r.service.list()).links[0]?.storeState).equal('unreachable');
+    should(r.client.statuses.length).equal(1);
+    r.items.clock.ms += LINK_REFRESH_MS;
+    await r.service.get(made.link.linkId);
+    should(r.client.statuses.length).equal(2);
+    const bundleId = r.documents.document.links[0]?.bundleId ?? '';
+    r.client.statusAnswer = () => ({ ok: true, value: { version: 1, links: [{ bundleId, state: 'live', opens: 2 }] } });
+    r.items.clock.ms += LINK_REFRESH_MS;
+    should((await r.service.get(made.link.linkId)).opens).equal(2);
+    r.client.statusAnswer = () => UNREACHABLE;
+    r.items.clock.ms += LINK_REFRESH_MS;
+    should((await r.service.get(made.link.linkId)).storeState).equal('unreachable');
+    should(r.client.statuses.length).equal(4);
   });
 
   it('should leave a link the store did not report as it was', async () => {
@@ -216,6 +237,53 @@ describe('CatalogLinkService revoke', () => {
     should(out.message).containEql('may still work');
     should(r.documents.document.links[0]?.state).equal('ending');
     should(r.vault.keys.size).equal(1);
+  });
+
+  it('should not call a link off when a store answers link_unknown to a machine that did not make it', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r);
+    const mine = r.items.identity;
+    if (mine === undefined) throw new Error('the rig has an identity');
+    r.items.identity = { ...mine, daemonId: OTHER_DAEMON_ID };
+    r.client.removeAnswer = refused('link_unknown');
+    const out = await refusal(() => r.service.revoke(made.link.linkId));
+    should(out.refusal).equal('signing_unavailable');
+    should(out.message).containEql('previous identity');
+    should(out.message).containEql('It stops working by');
+    should(r.documents.document.links[0]?.state).equal('ending');
+    should(r.vault.keys.size).equal(1);
+  });
+
+  it('should keep trying a link made under another identity slowly, then lapse it once its own end has passed', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, '1d');
+    const mine = r.items.identity;
+    if (mine === undefined) throw new Error('the rig has an identity');
+    r.items.identity = { ...mine, daemonId: OTHER_DAEMON_ID };
+    r.client.removeAnswer = refused('link_unknown');
+    await refusal(() => r.service.revoke(made.link.linkId));
+    r.items.clock.ms += LINK_RETRY_MAX_MS;
+    await r.service.reconcile();
+    should(r.client.removes.length).equal(2);
+    should(r.documents.document.links[0]?.state).equal('ending');
+    r.items.clock.ms += 2 * 86_400_000;
+    await r.service.reconcile();
+    const lapsed = r.documents.document.links[0];
+    should(lapsed?.state).equal('expired');
+    should(lapsed?.endReason).equal('expired');
+    should(r.vault.keys.size).equal(0);
+    should((await r.service.revoke(made.link.linkId)).state).equal('expired');
+  });
+
+  it('should answer a revoke past the end of a link made elsewhere with the link as it lapsed', async () => {
+    const r = await linkRig();
+    const made = await mintPublic(r, '1d');
+    const mine = r.items.identity;
+    if (mine === undefined) throw new Error('the rig has an identity');
+    r.items.identity = { ...mine, daemonId: OTHER_DAEMON_ID };
+    r.items.clock.ms += 2 * 86_400_000;
+    r.client.removeAnswer = refused('link_unknown');
+    should((await r.service.revoke(made.link.linkId)).state).equal('expired');
   });
 
   it('should treat a store that has no such bundle, or lost it, as done', async () => {
