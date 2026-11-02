@@ -128,6 +128,49 @@ export const CloseTerminalResponseSchema = z.object({
 });
 export type CloseTerminalResponse = z.infer<typeof CloseTerminalResponseSchema>;
 
+/**
+ * WHO IS HOLDING THE TERMINALS, across every session on this machine.
+ *
+ * The daemon allows {@link TERMINAL_MAX_GLOBAL} shells at once, and a shell outlives nothing it should not:
+ * the ones a COMPLETED or STOPPED ferret left behind used to fill the limit until nothing new could open.
+ * `finished` is a holder whose session has ended (`completed`, `stopped`) and `gone` one whose session no
+ * longer exists; both are reclaimable. `live` is everything else and is never touched.
+ */
+export const TERMINAL_HOLDER_STANDINGS = ['live', 'finished', 'gone'] as const;
+export const TerminalHolderStandingSchema = z.enum(TERMINAL_HOLDER_STANDINGS);
+export type TerminalHolderStanding = z.infer<typeof TerminalHolderStandingSchema>;
+
+export const TerminalHolderSchema = z.strictObject({
+  sessionId: z.string().min(1).max(128),
+  /** The ferret's callsign, else its name, else its id: what a person recognises it by. */
+  label: z.string().min(1).max(128),
+  standing: TerminalHolderStandingSchema,
+  /** The session's status word, or `removed` when the session is gone. */
+  status: z.string().min(1).max(32),
+  count: NonNegativeIntegerSchema,
+});
+export type TerminalHolder = z.infer<typeof TerminalHolderSchema>;
+
+export const TerminalHoldersViewSchema = z.strictObject({
+  /** The most terminals the daemon allows at once. */
+  limit: NonNegativeIntegerSchema,
+  /** How many are open now. */
+  open: NonNegativeIntegerSchema,
+  /** Largest holder first. */
+  holders: z.array(TerminalHolderSchema),
+});
+export type TerminalHoldersView = z.infer<typeof TerminalHoldersViewSchema>;
+
+export const CloseFinishedTerminalsResponseSchema = z.strictObject({
+  /** How many terminals were closed. */
+  closed: NonNegativeIntegerSchema,
+  /** How many a finished session still holds because tmux refused to end them. */
+  failed: NonNegativeIntegerSchema,
+  /** What was closed, by holder. */
+  holders: z.array(TerminalHolderSchema),
+});
+export type CloseFinishedTerminalsResponse = z.infer<typeof CloseFinishedTerminalsResponseSchema>;
+
 /** JSON control frame; raw terminal input and output use Uint8Array frames. */
 export const TerminalResizeFrameSchema = z.strictObject({
   type: z.literal('resize'),

@@ -1,9 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type {
+  CloseFinishedTerminalsResponse,
   CloseTerminalResponse,
   CreateTerminalRequest,
   RenameTerminalRequest,
+  TerminalHolder,
+  TerminalHoldersView,
   TerminalListView,
   TerminalResizeFrame,
   TerminalSize,
@@ -58,6 +61,26 @@ const emptyListView = { ...listView, terminals: [], limits: { ...listView.limits
 const createRequest = { title: 'build', cols: size.cols, rows: size.rows } satisfies CreateTerminalRequest;
 const renameRequest = { title: 'tests' } satisfies RenameTerminalRequest;
 const closeResponse = { closed: true, id: VIEWED_ID } satisfies CloseTerminalResponse;
+const finishedHolder = {
+  sessionId: SESSION_ID,
+  label: 'Fitzgerald',
+  standing: 'finished',
+  status: 'stopped',
+  count: 6,
+} satisfies TerminalHolder;
+const holdersView = {
+  limit: terminal.TERMINAL_MAX_GLOBAL,
+  open: 8,
+  holders: [
+    finishedHolder,
+    { ...finishedHolder, sessionId: 'session-2', label: 'Rashaud', standing: 'live', status: 'running', count: 2 },
+  ],
+} satisfies TerminalHoldersView;
+const closeFinishedResponse = {
+  closed: 6,
+  failed: 0,
+  holders: [finishedHolder],
+} satisfies CloseFinishedTerminalsResponse;
 const resizeFrame = { type: 'resize', cols: 120, rows: 40 } satisfies TerminalResizeFrame;
 const binaryFrame = new Uint8Array([0x1b, 0x5b, 0x30, 0x6d]);
 
@@ -71,6 +94,14 @@ const terminalCases: SchemaCase[] = [
   { name: 'close response', schema: terminal.CloseTerminalResponseSchema, value: closeResponse },
   { name: 'resize frame', schema: terminal.TerminalResizeFrameSchema, value: resizeFrame },
   { name: 'binary frame', schema: terminal.TerminalBinaryFrameSchema, value: binaryFrame },
+  { name: 'holder standing', schema: terminal.TerminalHolderStandingSchema, value: 'gone' },
+  { name: 'holder', schema: terminal.TerminalHolderSchema, value: finishedHolder },
+  { name: 'holders view', schema: terminal.TerminalHoldersViewSchema, value: holdersView },
+  {
+    name: 'close-finished response',
+    schema: terminal.CloseFinishedTerminalsResponseSchema,
+    value: closeFinishedResponse,
+  },
   { name: 'error code', schema: terminal.TerminalErrorCodeSchema, value: 'capacity' },
 ];
 
@@ -493,6 +524,31 @@ describe('terminal schemas', () => {
     should(parsed).equal(binaryFrame);
     should(terminal.TerminalBinaryFrameSchema.safeParse(new Uint8Array()).success).be.true();
     should(terminal.CloseTerminalResponseSchema.parse(closeResponse)).deepEqual(closeResponse);
+    assertRejects(cases);
+  });
+});
+
+describe('terminal holder schemas', () => {
+  it('should refuse a holder with an unknown standing, an empty label or an extra key', () => {
+    // Arrange
+    const cases: SchemaCase[] = [
+      {
+        name: 'unknown standing',
+        schema: terminal.TerminalHolderSchema,
+        value: { ...finishedHolder, standing: 'idle' },
+      },
+      { name: 'empty label', schema: terminal.TerminalHolderSchema, value: { ...finishedHolder, label: '' } },
+      { name: 'negative count', schema: terminal.TerminalHolderSchema, value: { ...finishedHolder, count: -1 } },
+      { name: 'extra key', schema: terminal.TerminalHolderSchema, value: { ...finishedHolder, token: 'x' } },
+      { name: 'view without holders', schema: terminal.TerminalHoldersViewSchema, value: { limit: 24, open: 0 } },
+      {
+        name: 'response with a fractional count',
+        schema: terminal.CloseFinishedTerminalsResponseSchema,
+        value: { ...closeFinishedResponse, closed: 1.5 },
+      },
+    ];
+
+    // Act + Assert
     assertRejects(cases);
   });
 });

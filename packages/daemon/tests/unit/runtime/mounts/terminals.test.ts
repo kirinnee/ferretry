@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
+  CloseFinishedTerminalsResponseSchema,
   CloseTerminalResponseSchema,
+  TerminalHoldersViewSchema,
   TerminalListViewSchema,
   type TerminalView,
   TerminalViewSchema,
@@ -366,6 +368,12 @@ describe('the terminal mount', () => {
       const failing = new ApiDispatcher(
         new ApiRouter(
           terminalRoutes({
+            holders: async () => {
+              throw new Error('unreachable');
+            },
+            closeFinished: async () => {
+              throw new Error('unreachable');
+            },
             list: async () => {
               throw new TerminalMountError('upstream_failed', 'tmux command failed');
             },
@@ -412,6 +420,12 @@ describe('the terminal mount', () => {
       const broken = new ApiDispatcher(
         new ApiRouter(
           terminalRoutes({
+            holders: async () => {
+              throw new Error('unreachable');
+            },
+            closeFinished: async () => {
+              throw new Error('unreachable');
+            },
             list: async () => {
               throw new Error('the session index is closed');
             },
@@ -464,6 +478,75 @@ describe('the terminal mount', () => {
       // Assert
       should(listed.status).equal(403);
     });
+  });
+});
+
+describe('the owner’s view of the terminal slots', () => {
+  const holder = { sessionId: 's-1', label: 'fitzgerald', standing: 'finished', status: 'stopped', count: 6 } as const;
+
+  it('should say who holds the open terminals and what the limit is', async () => {
+    // Arrange
+    const terminals = new FakeTerminals();
+    terminals.holding.open = 6;
+    terminals.holding.holders = [holder];
+
+    // Act
+    const answered = await dispatcher(terminals).dispatch(request({ path: '/v1/terminals', headers: human }));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(TerminalHoldersViewSchema.parse(jsonBody(answered))).deepEqual({ limit: 24, open: 6, holders: [holder] });
+  });
+
+  it('should close the finished ferrets’ terminals as the owner and report who held them', async () => {
+    // Arrange
+    const terminals = new FakeTerminals();
+    terminals.holding.open = 6;
+    terminals.holding.holders = [holder];
+
+    // Act
+    const answered = await dispatcher(terminals).dispatch(post('/v1/terminals/close-finished'));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(CloseFinishedTerminalsResponseSchema.parse(jsonBody(answered))).deepEqual({
+      closed: 6,
+      failed: 0,
+      holders: [holder],
+    });
+    should(terminals.reclaims).deepEqual(['owner']);
+  });
+
+  it('should report a failing tmux as an upstream failure on both routes', async () => {
+    // Arrange
+    const failing = new FakeTerminals();
+    failing.holders = async () => {
+      throw new TerminalMountError('upstream_failed', 'tmux command failed');
+    };
+    failing.closeFinished = async () => {
+      throw new TerminalMountError('upstream_failed', 'tmux command failed');
+    };
+    const dispatch = dispatcher(failing);
+
+    // Act
+    const read = await dispatch.dispatch(request({ path: '/v1/terminals', headers: human }));
+    const closed = await dispatch.dispatch(post('/v1/terminals/close-finished'));
+
+    // Assert
+    should([read.status, closed.status]).deepEqual([502, 502]);
+  });
+
+  it('should refuse a warden-scoped caller, as for every other terminal route', async () => {
+    // Arrange / Act
+    const answered = await dispatcher().dispatch(
+      request({
+        path: '/v1/terminals',
+        headers: { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' },
+      }),
+    );
+
+    // Assert
+    should(answered.status).equal(403);
   });
 });
 

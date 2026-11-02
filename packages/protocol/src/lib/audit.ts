@@ -52,6 +52,7 @@ export const AUDIT_EVENTS = [
   'step-up.failed',
   'passkey.registered',
   'terminal.opened',
+  'terminal.closed',
   'terminal.input',
   'fleet.configured',
   'grants.changed',

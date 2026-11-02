@@ -9,9 +9,22 @@ import {
   wholeNumber,
 } from '../../../src/lib/agent-tools/commands';
 import type { AgentToolsCommand } from '../../../src/lib/agent-tools/controller';
+import { TerminalSlotsController } from '../../../src/lib/terminal-slots/controller';
+import { capturedPresenter } from '../session/controller-doubles';
 
-function harness() {
+function harness(reply: unknown = { closed: 0, failed: 0, holders: [] }) {
   const calls: AgentToolsCommand[] = [];
+  const requests: string[] = [];
+  const { io, presenter } = capturedPresenter();
+  const slots = new TerminalSlotsController(
+    {
+      request: (async (path: string) => {
+        requests.push(path);
+        return reply;
+      }) as never,
+    },
+    presenter,
+  );
   const runner = {
     run: async (command: AgentToolsCommand) => {
       calls.push(command);
@@ -20,13 +33,53 @@ function harness() {
   };
   const program = new Command().exitOverride().configureOutput({ writeOut: () => {}, writeErr: () => {} });
   registerBrowserCommands(program, { run: async () => 0 });
-  registerTerminalCommands(program, runner);
+  registerTerminalCommands(program, runner, slots);
   registerBrowserPageCommands(program, runner);
   const run = (...argv: string[]) => program.parseAsync(['node', 'fy', ...argv]);
-  return { calls, run };
+  return { calls, requests, io, run };
 }
 
 describe('fy terminal', () => {
+  it('should close the finished ferrets’ terminals as the owner, not as an agent tool call', async () => {
+    // Arrange
+    const { calls, requests, io, run } = harness({ closed: 2, failed: 0, holders: [] });
+
+    // Act
+    await run('terminal', 'close', '--all-finished');
+
+    // Assert
+    should(calls).deepEqual([]);
+    should(requests).deepEqual(['/v1/terminals/close-finished']);
+    should(io.out).deepEqual(['Closed 2 terminals.']);
+  });
+
+  it('should refuse to close by name and --all-finished together, or neither', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    const both = await run('terminal', 'close', 'dev', '--all-finished').catch((error: unknown) => error);
+    const neither = await run('terminal', 'close').catch((error: unknown) => error);
+
+    // Assert
+    should(String(both)).containEql('close one terminal by name, or pass --all-finished');
+    should(String(neither)).containEql('close one terminal by name, or pass --all-finished');
+    should(calls).deepEqual([]);
+  });
+
+  it('should show who holds the terminal slots', async () => {
+    // Arrange
+    const { requests, io, run } = harness({ limit: 24, open: 0, holders: [] });
+
+    // Act
+    await run('terminal', 'slots');
+    await run('terminal', 'slots', '--json');
+
+    // Assert
+    should(requests).deepEqual(['/v1/terminals', '/v1/terminals']);
+    should(io.out[0]).equal('No terminals are open (limit 24).');
+  });
+
   it('should turn every verb into the matching tool call', async () => {
     // Arrange
     const { calls, run } = harness();

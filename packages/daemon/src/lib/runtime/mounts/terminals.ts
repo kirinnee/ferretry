@@ -1,10 +1,12 @@
 import {
+  type CloseFinishedTerminalsResponse,
   type CloseTerminalResponse,
   type CreateTerminalRequest,
   CreateTerminalRequestSchema,
   RenameTerminalRequestSchema,
   type SurfaceOpener,
   type TerminalErrorCode,
+  type TerminalHoldersView,
   TerminalIdSchema,
   type TerminalListView,
   type TerminalView,
@@ -16,6 +18,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
+import type { TerminalCloseTrigger } from '../../terminal/contracts.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
 import { answered, ownerOf } from './input-requests.ts';
@@ -46,6 +49,10 @@ import { answered, ownerOf } from './input-requests.ts';
  * hands one over behind a thin translation of its error taxonomy — see `TerminalMountError`.
  */
 export interface TerminalSubsystem {
+  /** Who holds the open terminals across every session, and how many slots remain. */
+  holders(): Promise<TerminalHoldersView>;
+  /** Closes the terminals of every finished or removed ferret; the live ones are never touched. */
+  closeFinished(trigger: TerminalCloseTrigger): Promise<CloseFinishedTerminalsResponse>;
   list(sessionId: string): Promise<TerminalListView>;
   /**
    * Opens a terminal, recording the opener the MOUNT derived — not one the body
@@ -153,6 +160,16 @@ function pathTerminalId(context: RouteContext): string {
   return parsed.data;
 }
 
+/** Who holds the open terminals across every session. */
+async function holders(subsystem: TerminalSubsystem): Promise<ApiResponse> {
+  return jsonResponse(await subsystem.holders().catch(reraise));
+}
+
+/** Closes what finished ferrets left open, and says who held it. */
+async function closeFinished(subsystem: TerminalSubsystem): Promise<ApiResponse> {
+  return jsonResponse(await subsystem.closeFinished('owner').catch(reraise));
+}
+
 /** Every terminal the session owns, with the limits the caller is being held to. */
 async function list(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -217,6 +234,24 @@ async function close(subsystem: TerminalSubsystem, context: RouteContext): Promi
  */
 export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[] {
   return [
+    {
+      method: 'GET',
+      path: '/v1/terminals',
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async () => await holders(subsystem),
+    },
+    {
+      method: 'POST',
+      path: '/v1/terminals/close-finished',
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async () => await closeFinished(subsystem),
+    },
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/terminals',

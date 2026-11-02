@@ -228,6 +228,8 @@ export * from '../features/settings/security-log-settings.tsx';
 export * from '../features/settings/security-settings.tsx';
 export * from '../features/settings/settings-catalog.ts';
 export * from '../features/settings/settings-page.tsx';
+export * from '../features/settings/terminal-slots-api.ts';
+export * from '../features/settings/terminal-slots-settings.tsx';
 export * from '../features/settings/voice-engine-choice.tsx';
 export * from '../features/skills/session-skills-store.ts';
 export * from '../features/skills/session-skills-surface.tsx';

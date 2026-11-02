@@ -1,6 +1,7 @@
 import { AGENT_TOOL_DEFAULT_WAIT_MS, ATTACHMENT_ID_PATTERN, BROWSER_REF_PATTERN } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { AgentToolsCommandError } from './client.ts';
+import type { TerminalSlotsController } from '../terminal-slots/controller.ts';
 import type { AgentToolsCommand, IAgentToolsRunner } from './controller.ts';
 
 interface SessionOption {
@@ -133,7 +134,11 @@ function verbs(group: Command, runner: IAgentToolsRunner, parents: readonly Comm
  * `fy terminal`: the session's terminals, by name — the same actions an agent's `terminal.*` tools
  * take, for scripts and for people.
  */
-export function registerTerminalCommands(program: Command, runner: IAgentToolsRunner): void {
+export function registerTerminalCommands(
+  program: Command,
+  runner: IAgentToolsRunner,
+  slots: TerminalSlotsController,
+): void {
   const terminal = program
     .command('terminal')
     .description('open, type into, read and close terminals by name (%terminal:<name>)')
@@ -215,10 +220,26 @@ export function registerTerminalCommands(program: Command, runner: IAgentToolsRu
       });
     });
 
-  verb('close', 'close a terminal')
-    .argument('<name>', 'the terminal’s name or id')
-    .action(async (name: string, options: SessionOption) => {
-      await call({ tool: 'terminal.close', name }, options);
+  verb('close', 'close a terminal, or with --all-finished every terminal a finished ferret left open')
+    .argument('[name]', 'the terminal’s name or id')
+    .option(
+      '--all-finished',
+      'the owner’s cleanup: close the terminals of ferrets that completed, stopped or were removed',
+    )
+    .option('--json', 'print the --all-finished result as JSON')
+    .action(async (name: string | undefined, options: SessionOption & { allFinished?: boolean; json?: boolean }) => {
+      if ((name === undefined) === (options.allFinished !== true))
+        throw new AgentToolsCommandError('close one terminal by name, or pass --all-finished (not both)');
+      if (name === undefined) await slots.closeFinished({ json: options.json === true });
+      else await call({ tool: 'terminal.close', name }, options);
+    });
+
+  terminal
+    .command('slots')
+    .description('show who holds the open terminals, across every ferret, against the machine’s limit')
+    .option('--json', 'print the result as JSON')
+    .action(async (options: { json?: boolean }) => {
+      await slots.slots({ json: options.json === true });
     });
 
   verb('ask', 'hand a terminal to the owner: their tab comes forward with “Your turn here”')

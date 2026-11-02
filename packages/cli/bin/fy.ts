@@ -269,6 +269,7 @@ import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
+import { TerminalSlotsController } from '../src/lib/terminal-slots/controller';
 import { registerTunnelCommands } from '../src/lib/tunnel/commands';
 import { TunnelController } from '../src/lib/tunnel/controller';
 import { ProtocolTunnelGateway, ProtocolTunnelStatusReader } from '../src/lib/tunnel/gateway';
@@ -1258,7 +1259,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       ...(ownSessionId === undefined ? {} : { ownSessionId }),
     });
     const tools = new AgentToolsController(toolsClient, world.io, new FileScreenshotWriter());
-    registerTerminalCommands(program, tools);
+    registerTerminalCommands(
+      program,
+      tools,
+      new TerminalSlotsController(client, new SessionPresenter(world.io, new SystemClock())),
+    );
     registerBrowserPageCommands(program, tools);
     // `fy lesson suggest`: the same agent route and credential as the MCP tool below.
     registerLessonCommands(program, new LessonController(toolsClient, world.io));
