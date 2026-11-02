@@ -918,6 +918,10 @@ a.fy-inbox-row:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.fy-attn-undo__text--wide {
+  padding-right: 8px;
+  white-space: normal;
+}
 .fy-attn-undo__more,
 .fy-attn-undo__count {
   flex-shrink: 0;

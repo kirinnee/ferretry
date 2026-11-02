@@ -120,6 +120,13 @@ const sendFailure = (cause: unknown): SendFailure => {
   return { text: cause instanceof Error ? cause.message : 'Message could not be sent', outage: false };
 };
 
+/** What a finished send tells its host: the owner's words, the queue id it went under, and what the transport did. */
+export interface ComposerSent {
+  readonly words: string;
+  readonly sendId?: string | undefined;
+  readonly disposition?: string | undefined;
+}
+
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
@@ -147,7 +154,15 @@ export interface ComposerProps {
   readonly draftSlot?: AgendaId;
   /** Whether the machine keeps drafts per slot; read from its health when not given (tests give it). */
   readonly sharedSlots?: boolean;
-  readonly onSent?: () => void;
+  /** Told when a send went: what the owner wrote and what the transport made of it (see {@link ComposerSent}). */
+  readonly onSent?: (sent: ComposerSent) => void;
+  /**
+   * Words to put back in the box, once: a reply the owner took back (Inbox Undo). They go in front of anything
+   * already there, unless the box already holds them. `onRestored` fires when they are in, so the host can stop
+   * offering them.
+   */
+  readonly restore?: string | undefined;
+  readonly onRestored?: (() => void) | undefined;
   /** Escape in the composer, when no completion list or Vim mode used it: set while an agenda item is open, to go back. */
   readonly onEscape?: () => void;
   /** Told the draft's text whenever it changes — the agenda sends it along as the note of an option picked outside the composer. */
@@ -431,6 +446,8 @@ export function Composer({
   draftSlot,
   sharedSlots,
   onSent,
+  restore,
+  onRestored,
   onEscape,
   onDraftChange,
   clearSignal = 0,
@@ -855,6 +872,14 @@ export function Composer({
     draftStore.clear(scope);
   }, [clearSignal, draftStore, scope, setDraft]);
 
+  // Declared after the scope-change load above, so on a fresh mount the restored words land on top of the stored draft.
+  useEffect(() => {
+    if (restore === undefined || restore === '') return;
+    const base = draftStore.load(scope);
+    setDraft(base.includes(restore) ? base : base.trim() === '' ? restore : `${restore}\n\n${base}`);
+    onRestored?.();
+  }, [restore, draftStore, scope, setDraft, onRestored]);
+
   useEffect(() => {
     const timer = setTimeout(() => draftStore.save(scope, draft), 400);
     return () => clearTimeout(timer);
@@ -890,11 +915,16 @@ export function Composer({
    * saved draft is let go. Otherwise exactly the sent words leave the draft — on every device — and anything
    * typed since, here or elsewhere, stays.
    */
-  const finishSent = (mark: SharedDraftSendMark, sentScope: DaemonSessionScope, requestId?: string): void => {
+  const finishSent = (
+    mark: SharedDraftSendMark,
+    sentScope: DaemonSessionScope,
+    sent: ComposerSent,
+    requestId?: string,
+  ): void => {
     const left = shared.sent(mark, requestId);
     if (left === null || daemonSessionKey(sentScope) !== scopeKeyNow.current) {
       draftStore.clear(sentScope);
-      onSent?.();
+      onSent?.(sent);
       return;
     }
     setRecalled(false);
@@ -907,7 +937,7 @@ export function Composer({
     // The next message starts as text, not as commands.
     setVim(initialVimState);
     if (left === '') draftStore.clear(sentScope);
-    onSent?.();
+    onSent?.(sent);
   };
 
   const submit = async (interrupt = false) => {
@@ -987,7 +1017,13 @@ export function Composer({
       }
       // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
       lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
-      finishSent(mark, sentScope, requestId);
+      const disposition = typeof sent?.disposition === 'string' ? sent.disposition : undefined;
+      const sendId =
+        requestId ??
+        (typeof (sent as { sendId?: unknown } | undefined)?.sendId === 'string'
+          ? (sent as { sendId: string }).sendId
+          : undefined);
+      finishSent(mark, sentScope, { words: typed, sendId, disposition }, requestId);
     } catch (cause) {
       shared.abandonSend(mark);
       const held = occupiedDraftOf(cause);
@@ -1071,7 +1107,7 @@ export function Composer({
       else await api.retrySend?.(sessionId, pending.sendId, true);
       lastQueued.current = null;
       setUnconfirmed(null);
-      finishSent(mark, sentScope);
+      finishSent(mark, sentScope, { words: draft.trim(), sendId: pending.sendId, disposition: 'delivered' });
     } catch (cause) {
       shared.abandonSend(mark);
       const again = unconfirmedSendOf(cause) !== undefined;

@@ -312,3 +312,27 @@ export const joinOutbox = (
     ),
   ];
 };
+
+/** What taking one message back out of a session's queue came to: gone, or already in the agent's hands. */
+export type QueueWithdrawal = 'withdrawn' | 'taken';
+
+/**
+ * Takes a message the owner just sent back out of the queue, the same way the chat cancels a waiting message:
+ * this device's outbox first, then the machine's queue route. The machine saying it was already typed (409) or no
+ * longer knows it (404) means the agent has it — `taken`, not a failure. Any other refusal throws.
+ */
+export const withdrawQueued = async (
+  client: Pick<IFyApiClient, 'request'> | null,
+  sessionId: string,
+  sendId: string,
+  outbox?: Pick<SendOutbox, 'edit' | 'cancel'>,
+): Promise<QueueWithdrawal> => {
+  try {
+    const done = await queueActions(client, sessionId, () => undefined, outbox).cancel({ sendId });
+    if (!done) throw new Error('That machine is not reachable from this browser.');
+    return 'withdrawn';
+  } catch (reason) {
+    if (reason instanceof QueueActionError && reason.kind !== 'other') return 'taken';
+    throw reason;
+  }
+};

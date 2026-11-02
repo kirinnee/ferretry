@@ -5,8 +5,15 @@
  */
 
 import { type AgendaAsk, type AgendaItem, agendaTurn, type SessionView } from '@ferretry/protocol';
-import { type ReactElement, useSyncExternalStore } from 'react';
+import { type ReactElement, useEffect, useSyncExternalStore } from 'react';
 import type { AgendaInbox } from '../../src/hooks/use-agenda-inbox.ts';
+import {
+  type BoardItemRead,
+  RepliedAgenda,
+  type Withdrawal,
+  withRepliedCards,
+  withRepliedParked,
+} from '../../src/lib/agenda-replied.ts';
 import {
   DeferredAgendaActions,
   type DeferredTimers,
@@ -96,6 +103,14 @@ export interface FakeInbox {
   readonly commits: Commit[];
   /** Makes the next commit fail with this message. */
   failNext: string | null;
+  /** The replies the owner sent from an Inbox card, held for their Undo like the shell holds them. */
+  readonly replied: RepliedAgenda;
+  /** What the queue says to the next withdrawal: it was waiting (`withdrawn`), the ferret has it (`taken`), or a refusal. */
+  withdrawal: Withdrawal | Error;
+  /** The queued messages Undo withdrew, by the card they were about. */
+  readonly withdrawn: { readonly card: InboxCard; readonly sendId: string }[];
+  /** The cards Undo put back on the owner's list. */
+  readonly unsnoozed: InboxCard[];
 }
 
 export const fakeInbox = (): FakeInbox => {
@@ -105,6 +120,25 @@ export const fakeInbox = (): FakeInbox => {
     clock,
     commits,
     failNext: null,
+    withdrawal: 'withdrawn',
+    withdrawn: [],
+    unsnoozed: [],
+    replied: new RepliedAgenda(
+      {
+        withdraw: async (card, sendId) => {
+          fake.withdrawn.push({ card, sendId });
+          if (fake.withdrawal instanceof Error) throw fake.withdrawal;
+          return fake.withdrawal;
+        },
+        unsnooze: async card => {
+          const failure = fake.failNext;
+          fake.failNext = null;
+          if (failure !== null) throw new Error(failure);
+          fake.unsnoozed.push(card);
+        },
+      },
+      clock,
+    ),
     deferred: new DeferredAgendaActions(async (card, action) => {
       commits.push({ card, action });
       const failure = fake.failNext;
@@ -145,7 +179,26 @@ export function InboxHarness({
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
   const hidden = new Set([...state.pending.map(entry => entry.key), ...state.sending]);
-  const shown = cards.filter(card => !hidden.has(card.key));
+  const replied = useSyncExternalStore(fake.replied.subscribe, fake.replied.getSnapshot);
+  const shown = withRepliedCards(
+    cards.filter(card => !hidden.has(card.key)),
+    replied,
+  );
+  const shownParked = withRepliedParked(
+    parked.filter(card => !hidden.has(card.key)),
+    replied,
+  );
+  // As the shell does: the overlay goes once what the boards say agrees with it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `replied` is the trigger -- a new entry must be checked against the boards at once
+  useEffect(() => {
+    fake.replied.reconcile(
+      (card): BoardItemRead => {
+        const found = [...cards, ...parked].find(each => each.key === card.key);
+        return found === undefined ? undefined : found.item;
+      },
+      new Set(cards.filter(card => isOnOwner(card.item)).map(card => card.key)),
+    );
+  }, [fake, cards, parked, replied]);
   const inbox: AgendaInbox = {
     unread: [],
     // As the shell counts: the deck that shows, plus what an unreadable machine holds, plus the cards to test.
@@ -160,11 +213,13 @@ export function InboxHarness({
     unavailable,
     resolved,
     resolvedReading,
-    parked: parked.filter(card => !hidden.has(card.key)),
+    parked: shownParked,
     parkedWhole,
     loadResolved,
     deferred: fake.deferred,
     deferredState: state,
+    replied: fake.replied,
+    repliedState: replied,
     connectionFor: () => undefined,
     toTest,
     toTestSnoozed,

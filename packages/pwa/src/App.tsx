@@ -189,7 +189,12 @@ import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { useWorkProjectNames } from './hooks/use-work-project-names.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
-import { agendaConversationPath, agendaTargetFromSearch, inboxTargetFromSearch } from './lib/agenda-inbox.ts';
+import {
+  agendaConversationPath,
+  agendaTargetFromSearch,
+  type InboxCard,
+  inboxTargetFromSearch,
+} from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
@@ -267,7 +272,7 @@ import { captureRuleDeepLink, listenForRuleDeepLinks } from './lib/rule-deep-lin
 import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
-import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
+import { joinOutbox, joinQueue, queueActions, readSessionQueue, withdrawQueued } from './lib/send-queue.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   type AppStore,
@@ -2310,6 +2315,9 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}
             key={card.key}
+            onReplied={sent => inbox.replied.mark(card, sent)}
+            onRestored={() => inbox.replied.takeRestore(card.key)}
+            restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
             phoneEnterKeyPreference={controls.composerPhoneEnterKey}
             usage={store.usage}
             view={card.view}
@@ -2626,7 +2634,17 @@ export function AppShell() {
   );
   const noteRuleLinkElsewhere = useCallback(() => setRuleLinkNotice(RULE_LINKED_ELSEWHERE_WORDS), []);
   useRuleDeepLink(ruleLinkMachines, ruleLinkRecord?.daemonId, navigate, noteRuleLinkElsewhere);
-  const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest);
+  // Undo of an Inbox reply takes the message back out of that ferret's queue, the way the chat cancels a waiting one.
+  const withdrawReply = useCallback(
+    async (card: InboxCard, sendId: string) => {
+      const machine = inboxMachines.find(each => each.connection.daemonId === card.daemonId);
+      if (machine === undefined) throw new Error('That machine is no longer paired with this browser.');
+      const api = await store.clients.client(machine.connection);
+      return await withdrawQueued(api, card.view.config.id, sendId, store.outbox);
+    },
+    [inboxMachines, store],
+  );
+  const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest, withdrawReply);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>

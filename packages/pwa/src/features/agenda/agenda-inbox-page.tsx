@@ -52,7 +52,18 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  type MutableRefObject,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
@@ -1389,6 +1400,27 @@ function RunDone({ onBack }: { readonly onBack: () => void }) {
   );
 }
 
+/**
+ * Remembers that the focus was in the composer when its card left: the composer is removed with the card, and a
+ * removed node leaves the focus on the page body. Rendered once per card, so it unmounts with that card's composer.
+ */
+function FocusHandoff({
+  root,
+  flag,
+}: {
+  readonly root: RefObject<HTMLElement | null>;
+  readonly flag: MutableRefObject<boolean>;
+}) {
+  useLayoutEffect(
+    () => () => {
+      const element = root.current;
+      if (element?.contains(document.activeElement)) flag.current = true;
+    },
+    [root, flag],
+  );
+  return null;
+}
+
 export function AgendaInboxPage({
   inbox,
   onNavigate,
@@ -1596,6 +1628,29 @@ export function AgendaInboxPage({
     const timer = setTimeout(giveUp, OPEN_WAIT_MS);
     return () => clearTimeout(timer);
   }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
+  // A reply moves the deck on by itself (the card leaves, `nextSelection` deals the one after it). Undo brings the card
+  // back and the deck opens it, so the owner sees the words it restored.
+  const revealKey = inbox.repliedState.entries.find(entry => entry.reveal)?.key;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key to reveal and the order it may now be listed in are the inputs
+  useEffect(() => {
+    if (revealKey === undefined) return;
+    if (deckCards.some(card => card.key === revealKey)) {
+      setFilter('open');
+      setAllDone(false);
+      openAt(revealKey);
+    }
+    inbox.replied.revealed(revealKey);
+  }, [revealKey, orderKey]);
+  // The composer that sent a reply goes away with its card; the keyboard keeps its place on the next card's frame.
+  const composerRoot = useRef<HTMLDivElement | null>(null);
+  const composerHandoff = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the card on top changing is the only trigger
+  useEffect(() => {
+    if (!composerHandoff.current) return;
+    composerHandoff.current = false;
+    document.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-frame]')?.focus();
+  }, [deckPlace]);
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
@@ -1911,7 +1966,9 @@ export function AgendaInboxPage({
                   className="fy-inbox-composer"
                   data-inbox-composer={deck[0].key}
                   onKeyDown={escapeCloses(() => setDeckOpen(false))}
+                  ref={composerRoot}
                 >
+                  <FocusHandoff key={deck[0].key} flag={composerHandoff} root={composerRoot} />
                   {renderComposer(
                     deck[0],
                     deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,

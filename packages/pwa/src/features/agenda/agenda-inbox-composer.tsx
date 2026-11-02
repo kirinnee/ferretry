@@ -10,6 +10,10 @@
  *   on the item takes THIS draft as its note (`agenda-inbox-page.tsx`). Closing the item discards its draft; a
  *   reply that leaves it open empties only what was sent.
  *
+ * A REPLY MOVES THE INBOX ON: once a chat message about the item is accepted, `onReplied` tells the host (the item
+ * is marked replied at once, `lib/agenda-replied.ts`). A form item's Send is an answer, not a reply, and tells nothing.
+ * `restore` is the words of a reply the owner took back: they go into the box once.
+ *
  * A FORM ITEM'S Send answers the form: `answerForm` (the page's) combines the picks on the card with what is typed, and
  * the message is not sent as chat. It may throw the one sentence the composer shows (empty fields, asked once).
  *
@@ -17,8 +21,8 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
-import { Composer, type ComposerProps } from '../../components/composer.tsx';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Composer, type ComposerProps, type ComposerSent } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
@@ -54,6 +58,11 @@ export interface AgendaInboxComposerProps {
   /** This device's dictation settings, the chat composer's own: present, the box carries the same mic. */
   readonly dictationSettings?: ComposerProps['dictationSettings'];
   readonly phoneEnterKeyPreference?: ComposerProps['phoneEnterKeyPreference'];
+  /** A chat message about the item was accepted. Not called for a form's answer. */
+  readonly onReplied?: ((sent: ComposerSent) => void) | undefined;
+  /** The words of a reply that was taken back, for the box; `onRestored` fires once they are in. */
+  readonly restore?: string | undefined;
+  readonly onRestored?: (() => void) | undefined;
 }
 
 export function AgendaInboxComposer({
@@ -70,6 +79,9 @@ export function AgendaInboxComposer({
   enterKeyPreference = null,
   dictationSettings,
   phoneEnterKeyPreference = null,
+  onReplied,
+  restore,
+  onRestored,
 }: AgendaInboxComposerProps) {
   const quota = useOptionalSessionQuota(usage, connection, view);
   const [client, setClient] = useState<{ readonly daemonId: string; readonly api: ComposerProps['api'] } | null>(null);
@@ -99,6 +111,9 @@ export function AgendaInboxComposer({
       daemon={connection}
       disabled={disabled}
       draftSlot={itemId}
+      {...(forForm || onReplied === undefined ? {} : { onSent: onReplied })}
+      {...(restore === undefined ? {} : { restore })}
+      {...(onRestored === undefined ? {} : { onRestored })}
       {...(dictationSettings === undefined ? {} : { dictationSettings })}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
