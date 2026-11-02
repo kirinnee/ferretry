@@ -68,9 +68,9 @@ one line, and every type's full spec is one `fy render guide <type>` away, print
 [fy-render.md](fy-render.md). Change it there and here together.
 
 ````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, layout, change over time), show it as well as saying it. Do not overdo it: simple answers stay plain text.
+Hypermedia: when you teach, explain, compare or walk through anything not straightforward (a flow, architecture, state machine, change over time), show it, not just say it. Do not overdo it: simple answers stay plain.
 Always inline: never publish an artifact, page, gist or link to explain, unless asked.
-Let the reader drive it: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
+Let the reader drive: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
 Write a fenced block whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, a `---` line, then the payload.
 - mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
 - svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.

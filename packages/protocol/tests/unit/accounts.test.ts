@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   ACCOUNT_HINT_FACTOR_NEXT,
+  ACCOUNT_HINT_PHONE,
   accountSeedFields,
   addTwoFactorKeySubject,
   automaticKeysInOfferOrder,
@@ -867,6 +868,13 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(summaryText).toContain('passkeys are off');
     expect(summaryText).toContain('Seen: vercel.com: password field (seen 3×, 2026-10-31).');
     expect(accountHintSummary('nothing.example', [])).toContain('No account for nothing.example');
+  });
+
+  it('should point to Approve on your phone (push: true) whether or not a sign-in exists or holds a push key', () => {
+    expect(accountHintSummary('vercel.com', accountHintsFor('vercel.com', LIST))).toContain(ACCOUNT_HINT_PHONE);
+    expect(accountHintSummary('nothing.example', [])).toContain(ACCOUNT_HINT_PHONE);
+    expect(ACCOUNT_HINT_PHONE).toContain('push: true');
+    expect(ACCOUNT_HINT_PHONE).toContain('Approve on your phone');
   });
 });
 

@@ -1431,11 +1431,19 @@ export const ACCOUNT_HINT_FACTOR_NEXT =
 export const ACCOUNT_HINT_NEXT =
   'Name the account when you request input (secretHint) if your brief says which; propose recipe fixes with account_propose and the sign-in id.';
 
+/**
+ * The phone-approval sentence every hint ends with, whether or not the account holds a push 2FA key: a sign-in page that
+ * says check your phone, tap Yes or tap the number is answered by a `push: true` request (docs/input-requests.md,
+ * "Approve on your phone"), which shows the owner the number at once, not by polling the page or `ask_owner`.
+ */
+export const ACCOUNT_HINT_PHONE =
+  'Phone prompt (check your phone, tap Yes, a number): request input with push: true, which raises "Approve on your phone" with the number at once, then input_wait; never poll the page or ask_owner.';
+
 /** What `account_hint` says: each sign-in's line, or that none is saved, and the passkey rule. */
 export function accountHintSummary(site: string, hints: readonly AccountHint[]): string {
   return hints.length === 0
-    ? `No account for ${site}; request the values as usual and the owner can save them. ${LOGIN_HINT_PASSKEYS_OFF}`
-    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')} ${ACCOUNT_HINT_NEXT} ${LOGIN_HINT_PASSKEYS_OFF}`;
+    ? `No account for ${site}; request the values as usual and the owner can save them. ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`
+    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')} ${ACCOUNT_HINT_NEXT} ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`;
 }
 
 // ── `account.propose` ───────────────────────────────────────────────────────────────────────────

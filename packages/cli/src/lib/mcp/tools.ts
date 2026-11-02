@@ -70,7 +70,7 @@ const INPUT_PROMPT = {
 };
 const SENSITIVITY = { type: 'string', enum: ['secret', 'code', 'private', 'plain'] };
 /** A push approval: no prompt, nothing typed; the daemon reads the number, never the ferret. */
-const PUSH = { type: 'boolean', description: 'A push to approve on their phone: no prompt. Wait on its pa_ id.' };
+const PUSH = { type: 'boolean', description: 'Approve on your phone (tap Yes/number): no prompt. Wait: pa_ id.' };
 const INPUT_OPTIONS = {
   submit: {
     type: 'string',

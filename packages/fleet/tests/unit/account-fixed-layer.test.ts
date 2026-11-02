@@ -922,6 +922,16 @@ describe('AGENT_TOOLS_INSTRUCTION — saved logins', () => {
   });
 });
 
+describe('AGENT_TOOLS_INSTRUCTION — phone prompts', () => {
+  it('should send a phone prompt (tap Yes, a number) to request_input with push: true', () => {
+    // Act
+    const text = AGENT_TOOLS_INSTRUCTION;
+
+    // Assert
+    should(text).containEql('Phone prompt (tap Yes, a number): request_input push: true.');
+  });
+});
+
 describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
   it('should teach sensitivity code for a 2FA or email code, reading it from an inbox, typed only on its own sign-in', () => {
     // Act

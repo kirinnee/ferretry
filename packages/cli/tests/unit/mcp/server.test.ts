@@ -485,6 +485,22 @@ describe('McpServer — the tools', () => {
     should(tool?.description.length).belowOrEqual(300);
   });
 
+  it('should name Approve on your phone on the push flag of both request tools, inside the budget', async () => {
+    // Arrange
+    const { request } = harness();
+
+    // Act
+    const listed = (await request('tools/list')) as {
+      result: { tools: { name: string; inputSchema: { properties: Record<string, { description?: string }> } }[] };
+    };
+
+    // Assert
+    for (const name of ['terminal_request_input', 'browser_request_input']) {
+      const tool = listed.result.tools.find(candidate => candidate.name === name);
+      should(tool?.inputSchema.properties.push?.description).containEql('Approve on your phone');
+    }
+  });
+
   it('should pass preapprove on as a boolean, with no recipe, and say the owner decides', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Suggested; the owner decides.' }));
