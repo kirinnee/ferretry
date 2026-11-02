@@ -27,6 +27,21 @@ import {
   type IFyHttpTransport,
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
+import {
+  LocalSkillInstalledSchema,
+  LocalSkillInstallIdSchema,
+  LocalSkillInstallListSchema,
+  type LocalSkillInstalled,
+  type LocalSkillInstallList,
+  type LocalSkillInstallRequest,
+  LocalSkillInstallRequestSchema,
+  type LocalSkillPreview,
+  LocalSkillPreviewRequestSchema,
+  type LocalSkillPreviewRequest,
+  LocalSkillPreviewSchema,
+  type LocalSkillRemoved,
+  LocalSkillRemovedSchema,
+} from '../lib/local-skill-install.ts';
 import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   classifyDaemonUnreachable,
@@ -744,6 +759,31 @@ export class FyApiClient implements IFyApiClient {
     return scope === 'project'
       ? this.request(`/v1/catalog-installs/project/${id}`, CatalogInstallRemovedSchema, { method: 'DELETE' })
       : this.request(`/v1/catalog-installs/runtime/${id}`, CatalogInstallRemovedSchema, { method: 'DELETE' });
+  }
+
+  previewLocalSkillInstall(scope: CatalogInstallScope, request: LocalSkillPreviewRequest): Promise<LocalSkillPreview> {
+    const init = jsonRequest('POST', LocalSkillPreviewRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/skill-installs/local/project/preview', LocalSkillPreviewSchema, init)
+      : this.request('/v1/skill-installs/local/runtime/preview', LocalSkillPreviewSchema, init);
+  }
+
+  applyLocalSkillInstall(scope: CatalogInstallScope, request: LocalSkillInstallRequest): Promise<LocalSkillInstalled> {
+    const init = jsonRequest('POST', LocalSkillInstallRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/skill-installs/local/project', LocalSkillInstalledSchema, init)
+      : this.request('/v1/skill-installs/local/runtime', LocalSkillInstalledSchema, init);
+  }
+
+  localSkillInstalls(): Promise<LocalSkillInstallList> {
+    return this.request('/v1/skill-installs/local', LocalSkillInstallListSchema);
+  }
+
+  removeLocalSkillInstall(scope: CatalogInstallScope, installId: string): Promise<LocalSkillRemoved> {
+    const id = encodeURIComponent(LocalSkillInstallIdSchema.parse(installId));
+    return scope === 'project'
+      ? this.request(`/v1/skill-installs/local/project/${id}`, LocalSkillRemovedSchema, { method: 'DELETE' })
+      : this.request(`/v1/skill-installs/local/runtime/${id}`, LocalSkillRemovedSchema, { method: 'DELETE' });
   }
 
   daemonUpdate(): Promise<DaemonUpdateView> {
