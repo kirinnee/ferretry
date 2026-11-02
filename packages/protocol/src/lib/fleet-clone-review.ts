@@ -13,9 +13,10 @@
  * EVERY CARRIED FILE IS SHOWN, OR THE BUNDLE IS REFUSED. The review and the write must agree on which
  * file belongs to which component, so both read {@link cloneFileOwned}, and {@link cloneBundleProblem}
  * refuses a bundle a byte-for-byte match could misread: a path spelled two ways (`./x`, `a//b`, `a/./b`,
- * a trailing `/`) that the provisioner would normalise into one, the same path twice, or a file no
+ * a trailing `/`) that the provisioner would normalise into one, the same path twice, a file no
  * carried component owns — which would otherwise overwrite one of the TARGET's own documents while the
- * review listed nothing.
+ * review listed nothing — or a file both carried and listed as not copied, whose omission marker would
+ * otherwise stand in for the bytes a repeat copy compares and writes.
  *
  * ONE OWNER, TWO READERS. The app's Clone preview and the target's own `describeClone` both read
  * {@link cloneRunnables}, so the screen and the change the target applies can never disagree about
@@ -31,7 +32,7 @@
  * shown whole instead (a recursive walk was a stack overflow at depth 20,000). A component that names
  * nothing the bundle carries is not listed: it can only point at what the target already has.
  */
-import type { FleetCloneBundle } from './fleet-setup.ts';
+import type { FleetCloneBundle, FleetCloneCredential } from './fleet-setup.ts';
 
 /** The component kinds whose content can make the target run something: every kind but a model set. */
 export const CLONE_RUNNABLE_KINDS = ['instructions', 'mcp', 'skills', 'settings', 'hooks'] as const;
@@ -242,7 +243,44 @@ export function cloneBundleProblem(bundle: FleetCloneBundle): string | null {
   if (orphan !== undefined) {
     return `${from} carries ${orphan.path}, which none of its components uses, so none of it can be copied.`;
   }
+  // A file is carried or it is not: one marked both would let the omission stand in for the bytes a review compares.
+  const masked = bundle.notCopied.find(entry => seen.has(plainAssetPath(entry.path)));
+  if (masked !== undefined) {
+    return `${from} carries ${masked.path} and also says it could not carry it, so none of it can be copied.`;
+  }
   return null;
+}
+
+/** An asset path with its empty and `.` segments dropped (`./a//b/` → `a/b`), to compare two spellings of one. */
+const plainAssetPath = (path: string): string =>
+  path
+    .split('/')
+    .filter(segment => segment !== '' && segment !== '.')
+    .join('/');
+
+/**
+ * What an ENVIRONMENT login a copy would add here makes its runtimes run with: the harness, the provider,
+ * every variable (a `${secret:NAME}` stays the reference it is — no value is ever resolved) and each
+ * harness half in full. `undefined` for a sign-in login: that one carries no configuration, only a slot.
+ */
+export function cloneLoginRunnable(credential: FleetCloneCredential): readonly CloneRunnableEntry[] | undefined {
+  if (credential.store !== 'environment') return undefined;
+  const entries: CloneRunnableEntry[] = [{ label: 'Harness', text: credential.harness, document: false }];
+  if (credential.preset !== undefined) entries.push({ label: 'Provider', text: credential.preset, document: false });
+  if (credential.cloudCredential !== undefined) {
+    entries.push({ label: 'Cloud credential', text: credential.cloudCredential, document: false });
+  }
+  entries.push(...envEntries(credential.env));
+  if (credential.codexProvider !== undefined) {
+    entries.push({ label: 'Codex provider', text: JSON.stringify(credential.codexProvider, null, 2), document: true });
+  }
+  for (const half of ['claude', 'codex'] as const) {
+    const given = credential[half];
+    if (given === undefined) continue;
+    entries.push(...envEntries(given.env).map(entry => ({ ...entry, label: `${half} ${entry.label}` })));
+    entries.push({ label: `What ${half} is given`, text: JSON.stringify(given, null, 2), document: true });
+  }
+  return entries;
 }
 
 /**

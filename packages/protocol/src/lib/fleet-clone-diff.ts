@@ -72,12 +72,14 @@ export const CloneReviewFileSchema = z.strictObject({
   lines: z.strictObject({ added: z.number().int().nonnegative(), removed: z.number().int().nonnegative() }).optional(),
 });
 
+const CloneRunnableEntrySchema = z.strictObject({ label: z.string(), text: z.string(), document: z.boolean() });
+
 const CloneRunnableSchema = z.strictObject({
   reference: NonEmptyStringSchema,
   kind: z.enum(['instructions', 'mcp', 'skills', 'settings', 'hooks']),
   name: NonEmptyStringSchema,
   harness: z.enum(['claude', 'codex']).optional(),
-  entries: z.array(z.strictObject({ label: z.string(), text: z.string(), document: z.boolean() })),
+  entries: z.array(CloneRunnableEntrySchema),
 });
 
 export const CloneReviewItemSchema = z.strictObject({
@@ -107,6 +109,12 @@ export const CloneReviewLoginSchema = z.strictObject({
   outcome: z.enum(['matched', 'slot', 'ask']),
   target: NonEmptyStringSchema.optional(),
   candidates: z.array(NonEmptyStringSchema).optional(),
+  /**
+   * Only for an ENVIRONMENT login the copy would add as a new login here: everything its runtimes run
+   * with — harness, provider, every variable and both harness halves, `${secret:NAME}` as the reference,
+   * never a value. A sign-in login carries none: it becomes an empty slot.
+   */
+  runnable: z.strictObject({ entries: z.array(CloneRunnableEntrySchema) }).optional(),
 });
 export type CloneReviewLogin = z.infer<typeof CloneReviewLoginSchema>;
 
