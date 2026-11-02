@@ -17,11 +17,13 @@ import {
   CatalogItemPreviewRequestSchema,
   CreateCatalogRequestSchema,
   ExportCatalogRequestSchema,
+  MakeCurrentRequestSchema,
   PreviewSharedItemVersionRequestSchema,
   PublishCatalogVersionRequestSchema,
   PublishSharedItemVersionRequestSchema,
   QuickAddRequestSchema,
   QuickAddUndoRequestSchema,
+  RetireVersionRequestSchema,
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
   UpdateCatalogRequestSchema,
@@ -55,6 +57,8 @@ export interface SharedCatalogSubsystem {
     | 'itemChanges'
     | 'previewItemVersion'
     | 'publishItemVersion'
+    | 'makeCurrent'
+    | 'setRetired'
     | 'withdraw'
     | 'exportCatalog'
     | 'quickAdd'
@@ -84,6 +88,9 @@ const STATUS: Readonly<Record<CatalogRefusalCode, number>> = {
   nothing_to_publish: 409,
   same_as_version: 409,
   version_unknown: 404,
+  version_current: 409,
+  version_retired: 409,
+  version_before_join: 409,
   signing_unavailable: 503,
   store_damaged: 500,
   export_failed: 500,
@@ -255,6 +262,35 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
         const item = itemId(context);
         const request = await parseBody(context.request, PublishSharedItemVersionRequestSchema);
         return await answer(() => catalogs.publishItemVersion(item, request), 201);
+      },
+    },
+    {
+      method: 'PUT',
+      path: '/v1/catalog-items/:itemId/current',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'choose which version of an item is current');
+        const item = itemId(context);
+        const request = await parseBody(context.request, MakeCurrentRequestSchema);
+        return await answer(() => catalogs.makeCurrent(item, request));
+      },
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/catalog-items/:itemId/versions/:version',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'retire a version of an item');
+        const item = itemId(context);
+        const version = versionNumber(context.params.get('version'));
+        const request = await parseBody(context.request, RetireVersionRequestSchema);
+        return await answer(() => catalogs.setRetired(item, version, request.retired));
       },
     },
     {

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SharedCatalogItem, SignedCatalogManifest } from '@ferretry/protocol';
+import type { SharedCatalogItem, SignedCatalogItemVersions, SignedCatalogManifest } from '@ferretry/protocol';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/index.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
@@ -37,6 +37,8 @@ const access = (overrides: Partial<MemberAccess> = {}): MemberAccess => ({
 
 const manifest = (revision: number): SignedCatalogManifest =>
   ({ manifest: { revision } }) as unknown as SignedCatalogManifest;
+const versionList = (revision: number): SignedCatalogItemVersions =>
+  ({ versions: { revision } }) as unknown as SignedCatalogItemVersions;
 const item = { id: ITEM, version: 2 } as unknown as SharedCatalogItem;
 
 const deferred = () => {
@@ -133,6 +135,11 @@ function rig(): Rig {
       if (failing.signing !== undefined) throw failing.signing;
       return manifest(7);
     },
+    signedVersions: async (id, itemId) => {
+      calls.push(`signedVersions:${id}:${itemId}`);
+      if (failing.signing !== undefined) throw failing.signing;
+      return versionList(7);
+    },
     frozenItem: async (id, itemId, version) => {
       calls.push(`frozenItem:${id}:${itemId}:${String(version)}`);
       if (failing.signing !== undefined) throw failing.signing;
@@ -219,6 +226,7 @@ const call = (
 
 const ME = '/v1/shared/me';
 const manifestPath = (id = catalogId(1)) => `/v1/shared/catalogs/${id}/manifest`;
+const versionsPath = (id = catalogId(1), itemId = ITEM) => `/v1/shared/catalogs/${id}/items/${itemId}/versions`;
 const itemPath = (id = catalogId(1), itemId = ITEM, version = '2') =>
   `/v1/shared/catalogs/${id}/items/${itemId}/${version}`;
 
@@ -251,13 +259,14 @@ const KEY_TIER: readonly (readonly [string, unknown])[] = [
 const UNLOCKED_TIER: readonly (readonly [string, string, unknown])[] = [
   ['GET', ME, undefined],
   ['GET', manifestPath(), undefined],
+  ['GET', versionsPath(), undefined],
   ['GET', itemPath(), undefined],
   ['POST', '/v1/shared/redeem', { code: CODE }],
   ['DELETE', '/v1/shared/me/keys/self', undefined],
 ];
 
 describe('the member route table', () => {
-  it('should be the nine routes the sessions serve, none of them under another prefix', () => {
+  it('should be the ten routes the sessions serve, none of them under another prefix', () => {
     // Act
     const routes = sharedRoutes(rig().deps);
 
@@ -269,11 +278,12 @@ describe('the member route table', () => {
       'POST /v1/shared/unlock key',
       'GET /v1/shared/me unlocked',
       'GET /v1/shared/catalogs/:catalogId/manifest unlocked',
+      'GET /v1/shared/catalogs/:catalogId/items/:itemId/versions unlocked',
       'GET /v1/shared/catalogs/:catalogId/items/:itemId/:version unlocked',
       'POST /v1/shared/redeem unlocked',
       'DELETE /v1/shared/me/keys/self unlocked',
     ]);
-    should(new MemberDispatcher(rig().deps).routes.length).equal(9);
+    should(new MemberDispatcher(rig().deps).routes.length).equal(10);
   });
 });
 
@@ -321,7 +331,7 @@ describe('the member dispatcher at its boundary', () => {
     ];
 
     // Assert
-    should(answers).length(9);
+    should(answers).length(10);
     for (const answer of answers) {
       should(answer.status).equal(401);
       should(jsonBody(answer).code).equal('unauthorized');
@@ -586,6 +596,98 @@ describe('GET /v1/shared/catalogs/:catalogId/manifest', () => {
 
     // Assert
     should(response.status).equal(404);
+  });
+});
+
+describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/versions', () => {
+  it('should sign and serve the version list, tagged with its revision', async () => {
+    // Arrange
+    const { dispatcher, calls } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath());
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('etag')).equal('"7"');
+    should(calls).containEql(`signedVersions:${catalogId(1)}:${ITEM}`);
+    should(calls.filter(entry => entry.startsWith('frozenItem'))).length(0);
+  });
+
+  it('should answer 304 when the tag asked for is the revision it would serve', async () => {
+    // Arrange
+    const { dispatcher } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath(), { headers: { 'if-none-match': '"7"' } });
+
+    // Assert
+    should(response.status).equal(304);
+    should(response.body).equal('');
+    should(response.headers.get('etag')).equal('"7"');
+  });
+
+  it('should serve the whole list when the tag asked for is an old revision', async () => {
+    // Arrange
+    const { dispatcher } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath(), { headers: { 'if-none-match': '"2"' } });
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should answer 404 item_unknown for a malformed item id, before any read', async () => {
+    // Arrange
+    const { dispatcher, calls } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath(catalogId(1), 'itm_short'));
+
+    // Assert
+    should(response.status).equal(404);
+    should(jsonBody(response).code).equal('item_unknown');
+    should(calls.filter(entry => entry.startsWith('signedVersions'))).length(0);
+  });
+
+  it('should answer 404 catalog_unknown for a catalog the member is not granted, before any read', async () => {
+    // Arrange
+    const { dispatcher, state, calls } = rig();
+    state.access = access({ catalogIds: [] });
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath());
+
+    // Assert
+    should(response.status).equal(404);
+    should(jsonBody(response).code).equal('catalog_unknown');
+    should(calls.filter(entry => entry.startsWith('signedVersions'))).length(0);
+  });
+
+  it('should answer a withdrawn or unlisted item 404 item_unknown, whatever tag was sent', async () => {
+    // Arrange
+    const { dispatcher, failing } = rig();
+    failing.signing = new CatalogRefusal('item_unknown', 'not offered');
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath(), { headers: { 'if-none-match': '"7"' } });
+
+    // Assert
+    should(response.status).equal(404);
+    should(jsonBody(response).code).equal('item_unknown');
+  });
+
+  it('should not take the word versions for a version number', async () => {
+    // Arrange
+    const { dispatcher, calls } = rig();
+
+    // Act
+    await call(dispatcher, 'GET', versionsPath());
+    await call(dispatcher, 'GET', itemPath());
+
+    // Assert
+    should(calls.filter(entry => entry.startsWith('frozenItem'))).deepEqual([`frozenItem:${catalogId(1)}:${ITEM}:2`]);
   });
 });
 

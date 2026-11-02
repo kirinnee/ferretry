@@ -2,7 +2,14 @@ import { describe, it } from 'bun:test';
 import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDeviceView } from '@ferretry/protocol';
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
-import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
+import {
+  ApiDispatcher,
+  ApiError,
+  type ApiRoute,
+  ApiRouter,
+  jsonResponse,
+  jsonTextResponse,
+} from '../../../src/lib/api/index.ts';
 import type { RouteContext } from '../../../src/lib/api/route.ts';
 import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import {
@@ -860,6 +867,89 @@ describe('auditedRoutes', () => {
       revisions: '4,7',
     });
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
+  });
+
+  it('should record making a version current and retiring one by ids only, telling retire from unretire', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const answers: ReturnType<typeof jsonResponse>[] = [
+      jsonResponse({
+        itemId: ITEM,
+        itemVersion: 1,
+        current: 1,
+        catalogs: [{ catalogId: CAT, revision: 5 }],
+        item: { name: 'secret name text' },
+      }),
+      jsonResponse({
+        itemId: ITEM,
+        version: 2,
+        retiredAt: '2026-01-01T00:00:00.000Z',
+        catalogs: [{ catalogId: CAT, revision: 6 }],
+      }),
+      jsonResponse({ itemId: ITEM, version: 2, catalogs: [{ catalogId: CAT, revision: 7 }] }),
+      jsonResponse('not an object'),
+      jsonTextResponse('{not json'),
+    ];
+    const { journal, routes } = decorated({
+      'PUT /v1/catalog-items/:itemId/current': async () => answers[0] as ReturnType<typeof jsonResponse>,
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+        answers.splice(1, 1)[0] as ReturnType<typeof jsonResponse>,
+    });
+    const api = await dispatcher(routes);
+    const ask = async (method: string, path: string, body: unknown) =>
+      await api.dispatch(request({ method, path, headers: ADMIN, loopback: true, body: JSON.stringify(body) }));
+
+    // Act
+    await ask('PUT', `/v1/catalog-items/${ITEM}/current`, { version: 1, from: 2 });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: false });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+    await ask('PATCH', `/v1/catalog-items/${ITEM}/versions/2`, { retired: true });
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual(Array(5).fill('catalog.changed'));
+    should(logged[0]?.detail).containEql({
+      action: 'make-current',
+      itemId: ITEM,
+      itemVersion: 1,
+      catalogIds: CAT,
+      revisions: 5,
+    });
+    should(logged[1]?.detail).containEql({ action: 'retire', itemId: ITEM, itemVersion: 2, revisions: 6 });
+    should(logged[2]?.detail).containEql({ action: 'unretire', itemId: ITEM, itemVersion: 2, revisions: 7 });
+    should(logged[3]?.detail).containEql({ action: 'retire' });
+    should(logged[4]?.detail).containEql({ action: 'retire' });
+    should(logged[0]?.subject).equal(ITEM);
+    should(JSON.stringify(logged)).not.match(/secret name/u);
+  });
+
+  it('should keep the rule’s own action when a retire is refused, because nothing was done', async () => {
+    // Arrange
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const { journal, routes } = decorated({
+      'PATCH /v1/catalog-items/:itemId/versions/:version': async () =>
+        jsonResponse({ code: 'version_current', message: 'refused' }, 409),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'PATCH',
+        path: `/v1/catalog-items/${ITEM}/versions/3`,
+        headers: ADMIN,
+        loopback: true,
+        body: JSON.stringify({ retired: false }),
+      }),
+    );
+
+    // Assert
+    const logged = records(journal);
+    should(logged).have.length(1);
+    should(logged[0]?.detail).containEql({ action: 'retire' });
+    should(logged[0]?.outcome).not.equal('succeeded');
   });
 
   it('should record a one-tap Add and its Undo by id, and nothing for an answer that changed nothing', async () => {

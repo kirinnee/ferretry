@@ -554,3 +554,60 @@ describe('what the second security review found (PR #1166)', () => {
     }
   });
 });
+
+describe('the signed version list', () => {
+  const offered = (version: number) => ({
+    version,
+    digest: DIGEST,
+    size: 5,
+    publishedAt: AT,
+    summary: 'a summary',
+  });
+  const list = (over: Record<string, unknown> = {}) => ({
+    format: 'ferretry-catalog-versions',
+    version: 1,
+    publisher: PUBLISHER,
+    catalogId: CATALOG,
+    itemId: SKILL_ID,
+    revision: 3,
+    issuedAt: AT,
+    current: 3,
+    offered: [offered(2), offered(3)],
+    ...over,
+  });
+  const parses = (value: unknown) => catalog.SharedCatalogItemVersionsSchema.safeParse(value).success;
+
+  it('should hold the versions oldest first, once each, with the current one among them', () => {
+    expect(parses(list())).toBe(true);
+    expect(parses(list({ offered: [offered(3), offered(2)] }))).toBe(false);
+    expect(parses(list({ offered: [offered(2), offered(2), offered(3)] }))).toBe(false);
+    expect(parses(list({ current: 4 }))).toBe(false);
+    expect(parses(list({ offered: [] }))).toBe(false);
+    expect(parses(list({ offered: [offered(0)], current: 0 }))).toBe(false);
+  });
+
+  it('should hold at most as many versions as one item keeps, and nothing it does not name', () => {
+    const many = Array.from({ length: catalog.CATALOG_VERSIONS_MAX_OFFERED }, (_, index) => offered(index + 1));
+    expect(parses(list({ offered: many, current: many.length }))).toBe(true);
+    expect(parses(list({ offered: [...many, offered(many.length + 1)], current: many.length }))).toBe(false);
+    expect(parses(list({ extra: 1 }))).toBe(false);
+    expect(parses(list({ format: 'ferretry-catalog-manifest' }))).toBe(false);
+  });
+
+  it('should be signed by a key and a signature, nothing else', () => {
+    const signed = { versions: list(), spki: SPKI, sig: SIG };
+    expect(catalog.SignedCatalogItemVersionsSchema.safeParse(signed).success).toBe(true);
+    expect(catalog.SignedCatalogItemVersionsSchema.safeParse({ ...signed, extra: 1 }).success).toBe(false);
+  });
+
+  it('should sign its own label, one zero byte and the 32-byte digest, a different label than a manifest’s', () => {
+    const digest = new Uint8Array(32).fill(9);
+    const bytes = catalog.catalogVersionsSignedBytes(digest);
+    const label = new TextEncoder().encode(catalog.CATALOG_VERSIONS_SIGNATURE_LABEL);
+    expect(catalog.CATALOG_VERSIONS_SIGNATURE_LABEL).toBe('ferretry-catalog-versions-v1');
+    expect(Array.from(bytes.slice(0, label.length))).toEqual(Array.from(label));
+    expect(bytes[label.length]).toBe(0);
+    expect(Array.from(bytes.slice(label.length + 1))).toEqual(Array.from(digest));
+    expect(Array.from(bytes)).not.toEqual(Array.from(catalogManifestSignedBytes(digest)));
+  });
+});

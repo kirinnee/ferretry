@@ -16,15 +16,20 @@
  */
 import {
   CATALOG_MANIFEST_SIGNATURE_LABEL,
+  CATALOG_VERSIONS_SIGNATURE_LABEL,
   type CatalogDigest,
   catalogCanonicalText,
   catalogDigestOf,
   catalogManifestSignedBytes,
+  catalogVersionsSignedBytes,
   type SharedCatalogFile,
   type SharedCatalogItem,
+  type SharedCatalogItemVersions,
+  SharedCatalogItemVersionsSchema,
   type SharedCatalogManifest,
   SharedCatalogManifestSchema,
   type SharedCatalogManifestEntry,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
 } from '@ferretry/protocol';
 import { fromBase64UrlFixed, toBase64Url, utf8Bytes } from './binary.ts';
@@ -32,7 +37,7 @@ import { ED25519_SIGNATURE_BYTES, ED25519_SPKI_BYTES } from './constants.ts';
 import type { DaemonIdentity, RelayCrypto } from './crypto.ts';
 import { publicKeyMatchesDaemonId } from './identity.ts';
 
-export { CATALOG_MANIFEST_SIGNATURE_LABEL };
+export { CATALOG_MANIFEST_SIGNATURE_LABEL, CATALOG_VERSIONS_SIGNATURE_LABEL };
 
 /** Why a catalog did not verify. Each is a different sentence for the person. */
 export type CatalogVerificationRefusal = 'signature_invalid' | 'item_mismatch' | 'not_canonical' | 'manifest_invalid';
@@ -168,4 +173,108 @@ export async function verifySharedCatalogFile(
     if (!checked.ok) return checked;
   }
   return manifest;
+}
+
+// ── The signed version list of one item in one catalog ───────────────────────────────────────────
+
+/** What a version-list signature signs, for this list. */
+async function versionsSignedBytes(
+  crypto: RelayCrypto,
+  versions: SharedCatalogItemVersions,
+): Promise<Uint8Array | null> {
+  const bytes = canonicalBytes(versions);
+  return bytes === null ? null : catalogVersionsSignedBytes(await crypto.sha256(bytes));
+}
+
+/**
+ * Sign a version list as this daemon, under the version-list label. Refused when the list names another
+ * publisher, as a manifest is.
+ */
+export async function signCatalogItemVersions(
+  crypto: RelayCrypto,
+  identity: DaemonIdentity,
+  versions: SharedCatalogItemVersions,
+): Promise<CatalogVerification<SignedCatalogItemVersions>> {
+  const parsed = SharedCatalogItemVersionsSchema.safeParse(versions);
+  if (!parsed.success)
+    return refuse(
+      'manifest_invalid',
+      `This version list cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
+    );
+  if (versions.publisher !== identity.daemonId)
+    return refuse('signature_invalid', 'A machine signs only version lists for catalogs it publishes itself.');
+  const signed = await versionsSignedBytes(crypto, versions);
+  if (signed === null)
+    return refuse('not_canonical', 'This version list has no one canonical spelling, so it cannot be signed.');
+  const sig = await crypto.signEd25519(identity.privateKey, signed);
+  return { ok: true, value: { versions, spki: toBase64Url(identity.publicKeySpki), sig: toBase64Url(sig) } };
+}
+
+/**
+ * Check a signed version list on its own: its key hashes to the publisher it names, and the signature
+ * holds over its canonical JSON under the version-list label (a manifest signature never does).
+ */
+export async function verifySignedCatalogItemVersions(
+  crypto: RelayCrypto,
+  signed: SignedCatalogItemVersions,
+): Promise<CatalogVerification<SharedCatalogItemVersions>> {
+  const spki = fromBase64UrlFixed(signed.spki, ED25519_SPKI_BYTES);
+  const sig = fromBase64UrlFixed(signed.sig, ED25519_SIGNATURE_BYTES);
+  const notSigned = 'This version list was not signed by the machine it names.';
+  if (spki === null || sig === null) return refuse('signature_invalid', notSigned);
+  if (!(await publicKeyMatchesDaemonId(crypto, spki, signed.versions.publisher)))
+    return refuse('signature_invalid', notSigned);
+  const bytes = await versionsSignedBytes(crypto, signed.versions);
+  if (bytes === null)
+    return refuse('not_canonical', 'This version list has no one canonical spelling, so it cannot be checked.');
+  if (!(await crypto.verifyEd25519(spki, sig, bytes))) return refuse('signature_invalid', notSigned);
+  return { ok: true, value: signed.versions };
+}
+
+/**
+ * Check one item against a manifest that ALREADY VERIFIED and the signed version list that goes with it:
+ * the same key signed both, the list is for this catalog and item at the manifest's revision and instant,
+ * its current version and digest are the manifest line's, and the item is exactly the version it offers.
+ * Answers the offered line.
+ */
+export async function verifyCatalogItemAgainstVersions(
+  crypto: RelayCrypto,
+  manifest: SharedCatalogManifest,
+  manifestSpki: string,
+  signedVersions: SignedCatalogItemVersions,
+  item: SharedCatalogItem,
+): Promise<CatalogVerification<SharedCatalogItemVersions['offered'][number]>> {
+  const mismatch = `${item.name} is not a version ${manifest.name} offers, so it was not used.`;
+  if (signedVersions.spki !== manifestSpki)
+    return refuse('signature_invalid', 'This version list was not signed by the machine that signed the catalog.');
+  const checked = await verifySignedCatalogItemVersions(crypto, signedVersions);
+  if (!checked.ok) return checked;
+  const list = checked.value;
+  const line = manifest.items.find(candidate => candidate.itemId === list.itemId);
+  if (
+    list.publisher !== manifest.publisher ||
+    list.catalogId !== manifest.catalogId ||
+    line === undefined ||
+    list.revision !== manifest.revision ||
+    list.issuedAt !== manifest.issuedAt ||
+    list.current !== line.version ||
+    list.offered.find(offered => offered.version === list.current)?.digest !== line.digest
+  )
+    return refuse('item_mismatch', mismatch);
+  const offered = list.offered.find(candidate => candidate.version === item.itemVersion);
+  if (
+    offered === undefined ||
+    item.itemId !== list.itemId ||
+    item.publisher !== manifest.publisher ||
+    item.catalogId !== manifest.catalogId ||
+    item.kind !== line.kind ||
+    item.name !== line.name ||
+    item.harness !== line.harness
+  )
+    return refuse('item_mismatch', mismatch);
+  const measured = await catalogItemDigest(crypto, item);
+  if (measured === null)
+    return refuse('not_canonical', `${item.name} has no one canonical spelling, so it cannot be checked.`);
+  if (measured.digest !== offered.digest || measured.size !== offered.size) return refuse('item_mismatch', mismatch);
+  return { ok: true, value: offered };
 }

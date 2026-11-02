@@ -45,6 +45,8 @@ function stubbed(failWith?: CatalogRefusalCode) {
     itemChanges: act('itemChanges'),
     previewItemVersion: act('previewItemVersion'),
     publishItemVersion: act('publishItemVersion'),
+    makeCurrent: act('makeCurrent'),
+    setRetired: act('setRetired'),
     withdraw: act('withdraw'),
     exportCatalog: act('exportCatalog'),
     quickAdd: act('quickAdd'),
@@ -79,6 +81,8 @@ const WRITES: readonly (readonly [string, string, unknown])[] = [
   ['POST', `/v1/catalogs/${CAT}/items`, { source: { kind: 'skill', skill: 'demo' }, digest: DIGEST }],
   ['POST', `/v1/catalogs/${CAT}/items/${ITEM}/versions`, { digest: DIGEST }],
   ['POST', `/v1/catalog-items/${ITEM}/versions`, { digest: DIGEST }],
+  ['PUT', `/v1/catalog-items/${ITEM}/current`, { version: 1, from: 2 }],
+  ['PATCH', `/v1/catalog-items/${ITEM}/versions/1`, { retired: true }],
   ['DELETE', `/v1/catalogs/${CAT}/items/${ITEM}`, undefined],
   ['POST', `/v1/catalogs/${CAT}/export`, {}],
   ['POST', '/v1/catalog-items/quick-add', { source: { kind: 'skill', skill: 'demo' } }],
@@ -87,7 +91,7 @@ const WRITES: readonly (readonly [string, string, unknown])[] = [
 ];
 
 describe('the shared catalogs routes', () => {
-  it('should serve seventeen routes, all behind sharing/use', () => {
+  it('should serve nineteen routes, all behind sharing/use', () => {
     const routes = sharedCatalogRoutes(stubbed().dispatch as never as SharedCatalogSubsystem);
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual([
       'GET /v1/catalogs',
@@ -97,6 +101,8 @@ describe('the shared catalogs routes', () => {
       'GET /v1/catalog-items/:itemId/changes',
       'POST /v1/catalog-items/:itemId/versions/preview',
       'POST /v1/catalog-items/:itemId/versions',
+      'PUT /v1/catalog-items/:itemId/current',
+      'PATCH /v1/catalog-items/:itemId/versions/:version',
       'POST /v1/catalogs',
       'PATCH /v1/catalogs/:id',
       'DELETE /v1/catalogs/:id',
@@ -114,7 +120,7 @@ describe('the shared catalogs routes', () => {
   it('should never let a cache keep what an item publish or a version read answered', () => {
     const routes = sharedCatalogRoutes(stubbed().dispatch as never as SharedCatalogSubsystem);
     const itemRoutes = routes.filter(route => route.path.startsWith('/v1/catalog-items/:itemId'));
-    should(itemRoutes).have.length(5);
+    should(itemRoutes).have.length(7);
     for (const route of itemRoutes) should(route.noStore).equal(true);
     should(
       routes.find(route => route.method === 'POST' && route.path === '/v1/catalog-items/:itemId/versions')?.noStore,
@@ -126,7 +132,7 @@ describe('the shared catalogs routes', () => {
     const statuses: number[] = [];
     for (const [method, path, body] of WRITES)
       statuses.push((await dispatch.dispatch(call(method, path, body))).status);
-    should(statuses).deepEqual([201, 200, 200, 201, 200, 201, 201, 201, 200, 200, 200, 200, 200]);
+    should(statuses).deepEqual([201, 200, 200, 201, 200, 201, 201, 201, 200, 200, 200, 200, 200, 200, 200]);
     const listed = await dispatch.dispatch(call('GET', '/v1/catalogs'));
     should(listed.status).equal(200);
     const previewed = await dispatch.dispatch(
@@ -136,7 +142,7 @@ describe('the shared catalogs routes', () => {
     should(
       (await dispatch.dispatch(call('GET', '/v1/catalog-items', undefined, human, [['sourceState', '1']]))).status,
     ).equal(200);
-    should(calls).have.length(16);
+    should(calls).have.length(18);
   });
 
   it('should answer 201 for a quick add that added, 200 for one that did not, and tie Undo to the caller', async () => {
@@ -329,6 +335,48 @@ describe('the shared catalogs routes', () => {
       should(calls).have.length(1);
     });
 
+    it('should hand a make-current and a retire to the service, and refuse a ferret, with nothing called', async () => {
+      const { dispatch, calls } = stubbed();
+      const current = await dispatch.dispatch(
+        call('PUT', `/v1/catalog-items/${ITEM}/current`, { version: 1, from: 2 }),
+      );
+      should(current.status).equal(200);
+      const retired = await dispatch.dispatch(call('PATCH', `${VERSIONS}/1`, { retired: true }));
+      should(retired.status).equal(200);
+      const back = await dispatch.dispatch(call('PATCH', `${VERSIONS}/3`, { retired: false }));
+      should(back.status).equal(200);
+      should(calls).deepEqual([
+        `makeCurrent ["${ITEM}",{"version":1,"from":2}]`,
+        `setRetired ["${ITEM}",1,true]`,
+        `setRetired ["${ITEM}",3,false]`,
+      ]);
+      for (const [method, path, body] of [
+        ['PUT', `/v1/catalog-items/${ITEM}/current`, { version: 1, from: 2 }],
+        ['PATCH', `${VERSIONS}/1`, { retired: true }],
+      ] as const) {
+        const refused = await dispatch.dispatch(call(method, path, body, ferret));
+        should(refused.status).equal(403);
+        should(jsonBody(refused)).containEql({ code: 'owner_only' });
+      }
+      should(calls).have.length(3);
+    });
+
+    it('should refuse a bad make-current or retire request with nothing called', async () => {
+      const { dispatch, calls } = stubbed();
+      const current = (body: unknown) => call('PUT', `/v1/catalog-items/${ITEM}/current`, body);
+      for (const body of [{}, { version: 1 }, { version: 0, from: 2 }, { version: 1, from: 2, extra: 1 }])
+        should((await dispatch.dispatch(current(body))).status).be.within(400, 422);
+      for (const body of [{}, { retired: 'yes' }, { retired: true, extra: 1 }])
+        should((await dispatch.dispatch(call('PATCH', `${VERSIONS}/1`, body))).status).be.within(400, 422);
+      const bad = await dispatch.dispatch(call('PATCH', `${VERSIONS}/x`, { retired: true }));
+      should(bad.status).equal(404);
+      should(jsonBody(bad)).containEql({ code: 'version_unknown' });
+      should(
+        (await dispatch.dispatch(call('PUT', '/v1/catalog-items/nope/current', { version: 1, from: 2 }))).status,
+      ).equal(404);
+      should(calls).deepEqual([]);
+    });
+
     it('should refuse a bad body, a bad item id and a bad version with nothing called', async () => {
       const { dispatch, calls } = stubbed();
       should((await dispatch.dispatch(call('POST', VERSIONS, {}))).status).be.within(400, 422);
@@ -414,6 +462,9 @@ describe('the shared catalogs routes', () => {
       nothing_to_publish: 409,
       same_as_version: 409,
       version_unknown: 404,
+      version_current: 409,
+      version_retired: 409,
+      version_before_join: 409,
       signing_unavailable: 503,
       store_damaged: 500,
       export_failed: 500,

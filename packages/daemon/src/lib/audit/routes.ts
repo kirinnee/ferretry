@@ -65,6 +65,12 @@ export interface AuditedRouteRule {
    */
   readonly recordOnlyWhen?: { readonly field: string; readonly equals: string };
   /**
+   * One route does two opposite things (retire a version, bring it back) and its answer says which by whether a
+   * top-level field is there. On a success `detail.action` becomes `present` when the field is, `absent` when it is
+   * not; a refusal keeps the rule's own `detail.action`, because nothing was done.
+   */
+  readonly actionByField?: { readonly field: string; readonly present: string; readonly absent: string };
+  /**
    * A top-level field of a successful JSON response holding a configuration file PATH, copied into `detail.kind`
    * as the file's KIND only (`warden`, `login`, `accountDefaults` …) — never the path or the name in it, which a
    * person chose. A path that is not one the daemon classifies adds nothing.
@@ -603,6 +609,33 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     },
   },
   {
+    method: 'PUT',
+    path: '/v1/catalog-items/:itemId/current',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'make-current' },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['itemVersion'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
+    },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/catalog-items/:itemId/versions/:version',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'retire' },
+    actionByField: { field: 'retiredAt', present: 'retire', absent: 'unretire' },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['version'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+      revisions: ['catalogs', '*', 'revision'],
+    },
+  },
+  {
     method: 'DELETE',
     path: '/v1/catalogs/:id/items/:itemId',
     event: 'catalog.changed',
@@ -911,6 +944,8 @@ async function record(
     outcome === 'succeeded' && rule.responseFields !== undefined
       ? fieldsIn(answer.body, rule.responseFields)
       : undefined;
+  const action =
+    outcome === 'succeeded' && rule.actionByField !== undefined ? actionIn(answer.body, rule.actionByField) : undefined;
   const configKind =
     outcome === 'succeeded' && rule.responseConfigKind !== undefined
       ? configKindIn(answer.body, rule.responseConfigKind)
@@ -920,6 +955,7 @@ async function record(
     ...agentAuditDetail(credential),
     ...settings,
     ...fields,
+    ...(action === undefined ? {} : { action }),
     ...(configKind === undefined ? {} : { kind: configKind }),
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
     ...(names === undefined ? {} : { [(rule.responseNames ?? 'names').split('.').at(-1) as string]: names }),
@@ -1041,6 +1077,20 @@ function fieldsIn(
       else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
     }
     return Object.keys(detail).length === 0 ? undefined : detail;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Which of two words a successful answer chooses, by whether its top-level `field` is there; nothing when the answer is unreadable. */
+function actionIn(
+  body: string | undefined,
+  choice: NonNullable<AuditedRouteRule['actionByField']>,
+): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body ?? '');
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    return choice.field in parsed ? choice.present : choice.absent;
   } catch {
     return undefined;
   }

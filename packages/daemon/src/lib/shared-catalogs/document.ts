@@ -69,7 +69,7 @@ const StoredVersionSchema = z.strictObject({
   /** Bytes of that shared copy. For display only. */
   size: z.number().int().min(1),
   fileCount: z.number().int().min(0).optional(),
-  /** Set by a later slice (retiring a version); the schema is ready for it. */
+  /** When the version was retired: it stays kept and installs of it keep working, but no catalog offers it. */
   retiredAt: InstantSchema.optional(),
   bindings: z.record(SharedCatalogIdSchema, BindingSchema),
 });
@@ -487,6 +487,126 @@ export function withPublishedVersion(
     catalogs: document.catalogs.map(catalog =>
       liveEntries(catalog).some(live => live.itemId === itemId) ? bumped(catalog, now) : catalog,
     ),
+  };
+}
+
+/** The live catalogs that list an item, in the order the store keeps them. */
+const liveCatalogsOf = (document: CatalogsDocument, itemId: string): readonly StoredCatalog[] =>
+  document.catalogs.filter(catalog => liveEntries(catalog).some(live => live.itemId === itemId));
+
+/** The first version a catalog serves for an entry: its `sinceVersion`, or 1 for a line made before there was one. */
+export const sinceVersionOf = (entry: CatalogEntry): number => entry.sinceVersion ?? 1;
+
+/**
+ * The versions a catalog offers for one of its lines: from the line's `sinceVersion` on, not retired, and always the
+ * current one. A catalog that joined at version 3 never offers 1 or 2, retired or not.
+ */
+export const offeredVersions = (item: StoredSharedItem, entry: CatalogEntry): readonly StoredVersion[] =>
+  item.versions.filter(
+    version =>
+      version.version >= sinceVersionOf(entry) && (version.version === item.current || version.retiredAt === undefined),
+  );
+
+/** Every live catalog's new revision after a change to an item's versions. */
+export const revisionsOf = (document: CatalogsDocument, itemId: string): readonly CatalogRevision[] =>
+  liveCatalogsOf(document, itemId).map(catalog => ({ catalogId: catalog.id, revision: catalog.revision }));
+
+export interface CatalogRevision {
+  readonly catalogId: string;
+  readonly revision: number;
+}
+
+const bumpLive = (document: CatalogsDocument, itemId: string, now: string): StoredCatalog[] =>
+  document.catalogs.map(catalog =>
+    liveEntries(catalog).some(live => live.itemId === itemId) ? bumped(catalog, now) : catalog,
+  );
+
+/**
+ * Makes a kept version the one every live catalog serves. Every catalog that lists the item live rises a revision in
+ * this one change, as a publish does.
+ *
+ * - `current_changed` when `from` is no longer the current version (the person saw a stale page).
+ * - `version_unknown` for a number the item never had; `version_retired` for a retired one (bring it back first).
+ * - `nothing_to_publish` when it already is the current version.
+ * - `version_before_join` when any live catalog joined later than that version: a catalog never serves a version below
+ *   its `sinceVersion`, and nothing here lowers it. The sentence names the catalogs.
+ */
+export function withCurrentVersion(
+  document: CatalogsDocument,
+  itemId: string,
+  version: number,
+  from: number,
+  now: string,
+): CatalogsDocument {
+  const item = findItem(document, itemId);
+  if (item.current !== from)
+    throw new CatalogRefusal(
+      'current_changed',
+      `${item.name} is at version ${String(item.current)} now, not ${String(from)}. Look again before choosing.`,
+    );
+  const target = item.versions.find(candidate => candidate.version === version);
+  if (target === undefined)
+    throw new CatalogRefusal('version_unknown', `${item.name} has no version ${String(version)}.`);
+  if (target.retiredAt !== undefined)
+    throw new CatalogRefusal(
+      'version_retired',
+      `Version ${String(version)} of ${item.name} is retired. Bring it back before making it current.`,
+    );
+  if (version === item.current)
+    throw new CatalogRefusal(
+      'nothing_to_publish',
+      `Version ${String(version)} of ${item.name} is already the current version.`,
+    );
+  const joinedLater = liveCatalogsOf(document, itemId).filter(
+    catalog => sinceVersionOf(findEntry(catalog, itemId)) > version,
+  );
+  if (joinedLater.length > 0)
+    throw new CatalogRefusal(
+      'version_before_join',
+      `Version ${String(version)} of ${item.name} is older than when ${joinedLater.map(catalog => catalog.name).join(', ')} began serving it, and a catalog never serves a version from before that.`,
+    );
+  return {
+    ...document,
+    items: document.items.map(other => (other.itemId === itemId ? { ...item, current: version } : other)),
+    catalogs: bumpLive(document, itemId, now),
+  };
+}
+
+/**
+ * Retires a version (it stops being offered; installs of it keep working) or brings it back. Every live catalog rises a
+ * revision, because the signed version list each one serves changes. Asking for the state the version is already in
+ * changes nothing and raises nothing.
+ *
+ * - `version_unknown` for a number the item never had.
+ * - `version_current` when the version is the current one: make another current first.
+ */
+export function withRetired(
+  document: CatalogsDocument,
+  itemId: string,
+  version: number,
+  retired: boolean,
+  now: string,
+): CatalogsDocument {
+  const item = findItem(document, itemId);
+  const target = item.versions.find(candidate => candidate.version === version);
+  if (target === undefined)
+    throw new CatalogRefusal('version_unknown', `${item.name} has no version ${String(version)}.`);
+  if (retired && version === item.current)
+    throw new CatalogRefusal(
+      'version_current',
+      `Version ${String(version)} of ${item.name} is the current version. Make another version current before retiring it.`,
+    );
+  if ((target.retiredAt !== undefined) === retired) return document;
+  const { retiredAt: _was, ...kept } = target;
+  const next: StoredVersion = retired ? { ...kept, retiredAt: now } : kept;
+  return {
+    ...document,
+    items: document.items.map(other =>
+      other.itemId === itemId
+        ? { ...item, versions: item.versions.map(stored => (stored.version === version ? next : stored)) }
+        : other,
+    ),
+    catalogs: bumpLive(document, itemId, now),
   };
 }
 

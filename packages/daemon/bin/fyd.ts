@@ -13261,6 +13261,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               catalogs: async () =>
                 (await sharedCatalogs.list()).catalogs.map(({ id, name, revision }) => ({ id, name, revision })),
               signedManifest: async catalogId => await sharedCatalogs.signedManifest(catalogId),
+              signedVersions: async (catalogId, itemId) => await sharedCatalogs.signedVersions(catalogId, itemId),
               frozenItem: async (catalogId, itemId, version) =>
                 await sharedCatalogs.frozenItem(catalogId, itemId, version),
             },

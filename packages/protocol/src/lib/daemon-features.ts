@@ -170,6 +170,12 @@ export const DAEMON_FEATURES = {
    */
   catalogVersions: 'catalogs.versions.1',
   /**
+   * Making a version current, retiring one, and the signed version list (docs/catalogs.md § Making a version current):
+   * `PUT /v1/catalog-items/:itemId/current`, `PATCH …/versions/:version` and the member route
+   * `GET /v1/shared/catalogs/:catalogId/items/:itemId/versions`. A daemon without this name answers 404.
+   */
+  catalogVersions2: 'catalogs.versions.2',
+  /**
    * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
    * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
    * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.

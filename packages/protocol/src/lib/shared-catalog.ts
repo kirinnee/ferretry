@@ -51,6 +51,14 @@ export const SHARED_CATALOG_FILE_FORMAT = 'ferretry-catalog-file' as const;
  */
 export const CATALOG_MANIFEST_SIGNATURE_LABEL = 'ferretry-catalog-manifest-v1' as const;
 
+export const SHARED_CATALOG_VERSIONS_FORMAT = 'ferretry-catalog-versions' as const;
+
+/** The domain label a version-list signature covers: new, so a manifest signature never verifies as a list or the reverse. */
+export const CATALOG_VERSIONS_SIGNATURE_LABEL = 'ferretry-catalog-versions-v1' as const;
+
+/** One item holds at most this many versions, so a list offers at most as many. */
+export const CATALOG_VERSIONS_MAX_OFFERED = 1000;
+
 /** Clone's bounds where Clone has one (docs/cross-daemon.md §3a). */
 export const CATALOG_SKILL_FILE_MAX_BYTES = 256 * 1024;
 export const CATALOG_SKILL_MAX_BYTES = 2 * 1024 * 1024;
@@ -552,6 +560,55 @@ export const SignedCatalogManifestSchema = z.strictObject({
 });
 export type SignedCatalogManifest = z.infer<typeof SignedCatalogManifestSchema>;
 
+// ── The signed version list of one item in one catalog ──────────────────────────────────────────────
+
+/** One version a catalog offers: its digest in THIS catalog (the signed item names its catalog). */
+export const SharedCatalogOfferedVersionSchema = z.strictObject({
+  version: z.number().int().min(1),
+  digest: CatalogDigestSchema,
+  size: z.number().int().min(1),
+  publishedAt: InstantSchema,
+  summary: CatalogSummarySchema,
+});
+export type SharedCatalogOfferedVersion = z.infer<typeof SharedCatalogOfferedVersionSchema>;
+
+/**
+ * The versions of one item a catalog offers at one revision. It carries the manifest's `revision` and
+ * `issuedAt` and the manifest line's `current`, so a reader proves it belongs to a manifest it holds.
+ * It lists only versions from the catalog's `sinceVersion` on that are not retired; `current` is always in it.
+ */
+export const SharedCatalogItemVersionsSchema = z
+  .strictObject({
+    format: z.literal(SHARED_CATALOG_VERSIONS_FORMAT),
+    version: z.literal(1),
+    publisher: DaemonIdSchema,
+    catalogId: SharedCatalogIdSchema,
+    itemId: SharedCatalogItemIdSchema,
+    revision: z.number().int().min(1),
+    issuedAt: InstantSchema,
+    current: z.number().int().min(1),
+    offered: z.array(SharedCatalogOfferedVersionSchema).min(1).max(CATALOG_VERSIONS_MAX_OFFERED),
+  })
+  .check(ctx => {
+    const { offered, current } = ctx.value;
+    const issue = (message: string) =>
+      ctx.issues.push({ code: 'custom', message, input: ctx.value, path: ['offered'] });
+    for (let index = 1; index < offered.length; index += 1)
+      if ((offered[index]?.version ?? 0) <= (offered[index - 1]?.version ?? 0))
+        issue('versions must be listed once each, oldest first');
+    if (!offered.some(entry => entry.version === current)) issue('the current version must be offered');
+  });
+export type SharedCatalogItemVersions = z.infer<typeof SharedCatalogItemVersionsSchema>;
+
+export const SignedCatalogItemVersionsSchema = z.strictObject({
+  versions: SharedCatalogItemVersionsSchema,
+  /** The publisher's Ed25519 identity, SubjectPublicKeyInfo DER. Must be the manifest's. */
+  spki: CatalogSpkiSchema,
+  /** Ed25519 over {@link catalogVersionsSignedBytes}. */
+  sig: CatalogSignatureSchema,
+});
+export type SignedCatalogItemVersions = z.infer<typeof SignedCatalogItemVersionsSchema>;
+
 // ── The catalog file (phase 1: install from a file, no people yet) ─────────────────────────────────
 
 /**
@@ -651,6 +708,16 @@ export function catalogManifestSignedBytes(manifestSha256: Uint8Array): Uint8Arr
   bytes.set(label, 0);
   bytes[label.length] = 0;
   bytes.set(manifestSha256, label.length + 1);
+  return bytes;
+}
+
+/** What a version-list signature signs: its own label, one zero byte, and the SHA-256 of the list's canonical JSON. */
+export function catalogVersionsSignedBytes(versionsSha256: Uint8Array): Uint8Array {
+  const label = new TextEncoder().encode(CATALOG_VERSIONS_SIGNATURE_LABEL);
+  const bytes = new Uint8Array(label.length + 1 + versionsSha256.length);
+  bytes.set(label, 0);
+  bytes[label.length] = 0;
+  bytes.set(versionsSha256, label.length + 1);
   return bytes;
 }
 

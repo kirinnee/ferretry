@@ -2605,17 +2605,18 @@ The publisher answers with exactly one sealed outcome and then `4440`, as a pair
   forgotten capability is still unreachable to a member. Its requests carry a member principal that
   meets **no** credential minimum of the main table (`authenticated`, `operator`, `admin-token`), and
   a test sweeps the main table to prove it.
-- **The member route table, as built** (`/v1/shared/*`, nine routes, no other):
+- **The member route table, as built** (`/v1/shared/*`, ten routes, no other):
 
-  | Route                                                          | Needs                                                       |
-  | -------------------------------------------------------------- | ----------------------------------------------------------- |
-  | `POST /v1/shared/passkeys/options`, `POST /v1/shared/passkeys` | the key; inside its window with no passkey yet, or unlocked |
-  | `POST /v1/shared/unlock/options`, `POST /v1/shared/unlock`     | the key (and a registered passkey)                          |
-  | `GET /v1/shared/me`                                            | unlocked                                                    |
-  | `GET /v1/shared/catalogs/:catalogId/manifest`                  | unlocked; `ETag` is the revision, `304` on a match          |
-  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/:version`    | unlocked                                                    |
-  | `POST /v1/shared/redeem`                                       | unlocked                                                    |
-  | `DELETE /v1/shared/me/keys/self`                               | unlocked (a browser leaving)                                |
+  | Route                                                          | Needs                                                                                                                                                |
+  | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `POST /v1/shared/passkeys/options`, `POST /v1/shared/passkeys` | the key; inside its window with no passkey yet, or unlocked                                                                                          |
+  | `POST /v1/shared/unlock/options`, `POST /v1/shared/unlock`     | the key (and a registered passkey)                                                                                                                   |
+  | `GET /v1/shared/me`                                            | unlocked                                                                                                                                             |
+  | `GET /v1/shared/catalogs/:catalogId/manifest`                  | unlocked; `ETag` is the revision, `304` on a match                                                                                                   |
+  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/versions`    | unlocked; the signed version list, `ETag` is the revision, `304` on a match; `404 item_unknown` when withdrawn or below the catalog's `sinceVersion` |
+  | `GET /v1/shared/catalogs/:catalogId/items/:itemId/:version`    | unlocked; `404 item_unknown` for a retired version                                                                                                   |
+  | `POST /v1/shared/redeem`                                       | unlocked                                                                                                                                             |
+  | `DELETE /v1/shared/me/keys/self`                               | unlocked (a browser leaving)                                                                                                                         |
 
   Every request re-reads the member's current grants before its handler runs; a key that is gone, or whose
   member changed, is one `401`. A locked session asking for an unlocked route gets `403 member_locked`.

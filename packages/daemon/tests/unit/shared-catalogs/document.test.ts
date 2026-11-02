@@ -13,10 +13,15 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  offeredVersions,
+  revisionsOf,
+  sinceVersionOf,
   type StoredSharedItem,
   type StoredVersion,
   withCatalog,
   withCatalogPatch,
+  withCurrentVersion,
+  withRetired,
   withNewItem,
   withoutCatalog,
   withPublishedVersion,
@@ -357,5 +362,132 @@ describe('deleting a catalog', () => {
     should(withoutCatalog({ ...shared, defaultCatalogId: undefined }, catalogId(2))).not.have.property(
       'defaultCatalogId',
     );
+  });
+});
+
+describe('making a version current and retiring one', () => {
+  const T3 = '2026-01-03T00:00:00.000Z';
+  const three = (sinces: readonly (number | undefined)[]): CatalogsDocument => ({
+    ...two,
+    items: [
+      {
+        ...item(1, 'item1', [1, 2]),
+        current: 3,
+        versions: [version(1, 'a', [1, 2]), version(2, 'b', [1, 2]), version(3, 'c', [1, 2])],
+      },
+    ],
+    catalogs: two.catalogs.map((catalog, index) => ({
+      ...catalog,
+      entries: [
+        { itemId: itemId(1), addedAt: T1, ...(sinces[index] === undefined ? {} : { sinceVersion: sinces[index] }) },
+      ],
+    })),
+  });
+  const retire = (document: CatalogsDocument, n: number): CatalogsDocument =>
+    withRetired(document, itemId(1), n, true, T2);
+
+  it('should leave every other item as it was when one version is retired', () => {
+    const base = three([undefined, undefined]);
+    const other = { ...item(2, 'item2', []), current: 1, versions: [version(1, 'd', [])] };
+    const document: CatalogsDocument = { ...base, items: [...base.items, other] };
+    const next = retire(document, 1);
+    should(next.items[1]).equal(other);
+    should(itemOf(next, itemId(1)).versions[0]?.retiredAt).equal(T2);
+  });
+
+  it('should make an older kept version current for every live catalog in one change', () => {
+    const next = withCurrentVersion(three([undefined, undefined]), itemId(1), 2, 3, T2);
+    should(itemOf(next, itemId(1)).current).equal(2);
+    should(next.catalogs.map(catalog => catalog.revision)).deepEqual([2, 2]);
+    should(next.catalogs.map(catalog => catalog.issuedAt)).deepEqual([T2, T2]);
+    should(CatalogsDocumentSchema.safeParse(next).success).be.true();
+    should(revisionsOf(next, itemId(1))).deepEqual([
+      { catalogId: catalogId(1), revision: 2 },
+      { catalogId: catalogId(2), revision: 2 },
+    ]);
+  });
+
+  it('should leave a catalog that took the item out alone, and never lower where a catalog began serving', () => {
+    const out = withWithdrawn(three([undefined, 2]), catalogId(2), itemId(1), T2);
+    const next = withCurrentVersion(out, itemId(1), 1, 3, T3);
+    should(next.catalogs[1]).equal(out.catalogs[1]);
+    should(next.catalogs[0]?.revision).equal(out.catalogs[0]?.revision ? out.catalogs[0].revision + 1 : -1);
+    const kept = withCurrentVersion(three([undefined, 2]), itemId(1), 2, 3, T2);
+    should(kept.catalogs.map(catalog => catalog.entries[0]?.sinceVersion)).deepEqual([undefined, 2]);
+    should(revisionsOf(out, itemId(1))).deepEqual([{ catalogId: catalogId(1), revision: 1 }]);
+  });
+
+  it('should refuse, naming the catalogs, a version older than when any live catalog began serving the item', () => {
+    const joined = three([undefined, 3]);
+    let message = '';
+    try {
+      withCurrentVersion(joined, itemId(1), 2, 3, T2);
+    } catch (error) {
+      message = (error as Error).message;
+      should((error as CatalogRefusal).refusal).equal('version_before_join');
+    }
+    should(message).match(/Other/u);
+    should(message).not.match(/Team/u);
+    should(refusalOf(() => withCurrentVersion(joined, itemId(1), 1, 3, T2))).equal('version_before_join');
+    const both = three([2, 3]);
+    should(refusalOf(() => withCurrentVersion(both, itemId(1), 1, 3, T2))).equal('version_before_join');
+  });
+
+  it('should refuse a stale page, an unknown version, a retired one, and the one already current', () => {
+    const start = three([undefined, undefined]);
+    should(refusalOf(() => withCurrentVersion(start, itemId(1), 2, 2, T2))).equal('current_changed');
+    should(refusalOf(() => withCurrentVersion(start, itemId(1), 9, 3, T2))).equal('version_unknown');
+    should(refusalOf(() => withCurrentVersion(retire(start, 1), itemId(1), 1, 3, T2))).equal('version_retired');
+    should(refusalOf(() => withCurrentVersion(start, itemId(1), 3, 3, T2))).equal('nothing_to_publish');
+  });
+
+  it('should retire a version, stamp when, and raise every live catalog once', () => {
+    const next = retire(three([undefined, undefined]), 2);
+    should(itemOf(next, itemId(1)).versions.map(each => each.retiredAt)).deepEqual([undefined, T2, undefined]);
+    should(next.catalogs.map(catalog => catalog.revision)).deepEqual([2, 2]);
+    should(CatalogsDocumentSchema.safeParse(next).success).be.true();
+  });
+
+  it('should bring a retired version back, clearing the stamp and raising every live catalog', () => {
+    const retired = retire(three([undefined, undefined]), 2);
+    const back = withRetired(retired, itemId(1), 2, false, T3);
+    should(itemOf(back, itemId(1)).versions.map(each => each.retiredAt)).deepEqual([undefined, undefined, undefined]);
+    should('retiredAt' in (itemOf(back, itemId(1)).versions[1] ?? {})).be.false();
+    should(back.catalogs.map(catalog => catalog.revision)).deepEqual([3, 3]);
+  });
+
+  it('should change nothing when the version already is in the state asked for', () => {
+    const start = three([undefined, undefined]);
+    should(withRetired(start, itemId(1), 2, false, T2)).equal(start);
+    const retired = retire(start, 2);
+    should(withRetired(retired, itemId(1), 2, true, T3)).equal(retired);
+  });
+
+  it('should refuse to retire the current version or one the item never had', () => {
+    const start = three([undefined, undefined]);
+    should(refusalOf(() => retire(start, 3))).equal('version_current');
+    should(refusalOf(() => retire(start, 9))).equal('version_unknown');
+    should(refusalOf(() => withRetired(start, itemId(1), 3, false, T2))).equal('none');
+  });
+
+  it('should offer a catalog only the versions from where it began serving, never a retired one, and always the current', () => {
+    const document = retire(three([undefined, 3]), 2);
+    const item1 = itemOf(document, itemId(1));
+    const numbers = (index: number): number[] =>
+      offeredVersions(item1, findEntry(document.catalogs[index] as never, itemId(1))).map(each => each.version);
+    should(numbers(0)).deepEqual([1, 3]);
+    should(numbers(1)).deepEqual([3]);
+    should(sinceVersionOf({ itemId: itemId(1), addedAt: T1 })).equal(1);
+    should(sinceVersionOf({ itemId: itemId(1), addedAt: T1, sinceVersion: 4 })).equal(4);
+    const retiredCurrent = { ...item1, versions: item1.versions.map(each => ({ ...each, retiredAt: T2 })) };
+    should(offeredVersions(retiredCurrent, { itemId: itemId(1), addedAt: T1 }).map(each => each.version)).deepEqual([
+      3,
+    ]);
+  });
+
+  it('should refuse a document in which a live line begins after the version the item serves', () => {
+    const document = three([undefined, 3]);
+    const broken = { ...document, items: document.items.map(each => ({ ...each, current: 2 })) };
+    should(problemOf(broken)).match(/newer than its current version 2/u);
   });
 });

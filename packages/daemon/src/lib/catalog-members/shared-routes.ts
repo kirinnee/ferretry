@@ -26,6 +26,7 @@ import {
   SharedMeSchema,
   SharedRedeemRequestSchema,
   SharedRedeemResponseSchema,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
   type SharedCatalogItem,
   StepUpAssertionSchema,
@@ -57,6 +58,7 @@ import type { CatalogMemberService, MemberAccess } from './service.ts';
 export interface SharedCatalogReader {
   catalogs(): Promise<readonly { readonly id: string; readonly name: string; readonly revision: number }[]>;
   signedManifest(catalogId: string): Promise<SignedCatalogManifest>;
+  signedVersions(catalogId: string, itemId: string): Promise<SignedCatalogItemVersions>;
   frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem>;
 }
 
@@ -256,6 +258,24 @@ export function sharedRoutes(deps: SharedRouteDeps): readonly SharedRoute[] {
           return { status: 304, headers: new Map([['etag', tag]]), body: '' };
         const signed = await deps.catalogs.signedManifest(catalogId);
         return jsonResponse(signed, 200, { etag: `"${String(signed.manifest.revision)}"` });
+      },
+    },
+    {
+      // Before `:version`, which would otherwise take the word "versions" and answer 404.
+      method: 'GET',
+      path: '/v1/shared/catalogs/:catalogId/items/:itemId/versions',
+      needs: 'unlocked',
+      handle: async context => {
+        const catalogId = requireCatalog(context, context.params.get('catalogId'));
+        const itemId = SharedCatalogItemIdSchema.safeParse(decodeParameter(context.params.get('itemId') ?? ''));
+        if (!itemId.success) throw new ApiError(404, 'no such item', 'item_unknown');
+        // Signed first, so an item this catalog does not offer answers 404 whatever tag was sent.
+        const signed = await deps.catalogs.signedVersions(catalogId, itemId.data);
+        const tag = `"${String(signed.versions.revision)}"`;
+        const asked = context.request.headers.get('if-none-match');
+        if (asked !== undefined && namesTag(asked, tag))
+          return { status: 304, headers: new Map([['etag', tag]]), body: '' };
+        return jsonResponse(signed, 200, { etag: tag });
       },
     },
     {

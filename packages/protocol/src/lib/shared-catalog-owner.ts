@@ -478,3 +478,24 @@ export const PublishedSharedItemSchema = z.strictObject({
   item: OwnedSharedItemSchema,
 });
 export type PublishedSharedItem = z.infer<typeof PublishedSharedItemSchema>;
+
+/** `PUT /v1/catalog-items/:itemId/current`: make a kept version the one every live catalog serves, only if `from` is still current. */
+export const MakeCurrentRequestSchema = z.strictObject({
+  version: z.number().int().min(1),
+  from: z.number().int().min(1),
+});
+export type MakeCurrentRequest = z.infer<typeof MakeCurrentRequestSchema>;
+
+/** `PATCH /v1/catalog-items/:itemId/versions/:version`: retire a version (it stops being offered) or bring it back. */
+export const RetireVersionRequestSchema = z.strictObject({ retired: z.boolean() });
+export type RetireVersionRequest = z.infer<typeof RetireVersionRequestSchema>;
+
+/** The answer to retiring or unretiring: the version's new state and every live catalog the change raised. */
+export const RetiredVersionSchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  version: z.number().int().min(1),
+  /** When it was retired; unset when it is in use again. */
+  retiredAt: InstantSchema.optional(),
+  catalogs: z.array(z.strictObject({ catalogId: SharedCatalogIdSchema, revision: z.number().int().min(1) })).readonly(),
+});
+export type RetiredVersion = z.infer<typeof RetiredVersionSchema>;

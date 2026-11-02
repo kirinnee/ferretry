@@ -47,21 +47,31 @@ import {
   type QuickAddAnswer,
   type QuickAddRequest,
   type QuickAddUndone,
+  type RetiredVersion,
   SHARED_CATALOG_FILE_FORMAT,
   SHARED_CATALOG_FILE_MAX_BYTES,
   SHARED_CATALOG_MANIFEST_FORMAT,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
   type SharedCatalogItem,
+  type SharedCatalogItemVersions,
   SharedCatalogItemSchema,
+  SHARED_CATALOG_VERSIONS_FORMAT,
   type SharedCatalogManifestEntry,
   type SharedItemPreview,
   type SharedItemVersionDetail,
+  type SignedCatalogItemVersions,
   type SignedCatalogManifest,
   type UpdateCatalogRequest,
   type WithdrawnCatalogItem,
 } from '@ferretry/protocol';
-import { type DaemonIdentity, type RelayCrypto, signCatalogManifest, verifySharedCatalogFile } from '@ferretry/relay';
+import {
+  type DaemonIdentity,
+  type RelayCrypto,
+  signCatalogItemVersions,
+  signCatalogManifest,
+  verifySharedCatalogFile,
+} from '@ferretry/relay';
 import {
   bindingOf,
   type CatalogBinding,
@@ -77,18 +87,22 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  offeredVersions,
+  revisionsOf,
   roleOf,
   type StoredCatalog,
   type StoredSharedItem,
   type StoredVersion,
   withCatalog,
   withCatalogPatch,
+  withCurrentVersion,
   withDefault,
   withListedItem,
   withNewItem,
   withoutCatalog,
   withoutEntry,
   withPublishedVersion,
+  withRetired,
   withWithdrawn,
 } from './document.ts';
 import {
@@ -727,6 +741,54 @@ export class SharedCatalogService {
   }
 
   /**
+   * Makes a kept version the one every live catalog serves, each rising a revision in the one write. Only if `from` is
+   * still the current version, the version is not retired, and no live catalog joined after it (see `withCurrentVersion`).
+   */
+  makeCurrent(
+    itemId: string,
+    request: { readonly version: number; readonly from: number },
+  ): Promise<PublishedSharedItem> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      const next = withCurrentVersion(document, itemId, request.version, request.from, instant(this.deps.now()));
+      await this.#commit(next);
+      const stored = itemOf(next, itemId);
+      const current = currentVersion(stored);
+      return {
+        itemId,
+        itemVersion: current.version,
+        current: stored.current,
+        catalogs: next.catalogs.flatMap(catalog =>
+          liveEntries(catalog).some(entry => entry.itemId === itemId)
+            ? [{ catalogId: catalog.id, revision: catalog.revision, digest: bindingOf(current, catalog.id).digest }]
+            : [],
+        ),
+        item: await this.#sharedItem(next, identity, stored, true),
+      };
+    });
+  }
+
+  /**
+   * Retires a version, or brings it back. Every live catalog rises a revision (the version list it signs changes);
+   * asking for the state it is already in writes nothing.
+   */
+  setRetired(itemId: string, version: number, retired: boolean): Promise<RetiredVersion> {
+    return this.#serially(async () => {
+      const document = await this.#writable();
+      const next = withRetired(document, itemId, version, retired, instant(this.deps.now()));
+      if (next !== document) await this.#commit(next);
+      const stored = itemOf(next, itemId).versions.find(candidate => candidate.version === version) as StoredVersion;
+      return {
+        itemId,
+        version,
+        ...(stored.retiredAt === undefined ? {} : { retiredAt: stored.retiredAt }),
+        catalogs: revisionsOf(next, itemId),
+      };
+    });
+  }
+
+  /**
    * Re-reads the source, refuses unless it still hashes to the digest the person previewed, and writes the next
    * version: refused when it is the same as the current one (`nothing_to_publish`) or as an older one
    * (`same_as_version`). The document comes back with every live catalog bumped.
@@ -845,6 +907,46 @@ export class SharedCatalogService {
     });
   }
 
+  /**
+   * The versions of one item this catalog offers, signed as of the manifest's revision. Made from the same document read
+   * as the manifest, so the two always agree: the revision and instant are the catalog's, the current version is its line's.
+   */
+  signedVersions(catalogId: string, itemId: string): Promise<SignedCatalogItemVersions> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      const catalog = findCatalog(document, catalogId);
+      const entry = findEntry(catalog, itemId);
+      const item = itemOf(document, itemId);
+      if (entry.withdrawnAt !== undefined)
+        throw new CatalogRefusal('item_unknown', `${item.name} is not offered by ${catalog.name}.`);
+      const versions: SharedCatalogItemVersions = {
+        format: SHARED_CATALOG_VERSIONS_FORMAT,
+        version: 1,
+        publisher: identity.daemonId,
+        catalogId: catalog.id,
+        itemId,
+        revision: catalog.revision,
+        issuedAt: catalog.issuedAt,
+        current: item.current,
+        offered: offeredVersions(item, entry).map(stored => {
+          const binding = bindingOf(stored, catalog.id);
+          return {
+            version: stored.version,
+            digest: binding.digest,
+            size: binding.size,
+            publishedAt: stored.publishedAt,
+            summary: stored.summary,
+          };
+        }),
+      };
+      const signed = await signCatalogItemVersions(this.deps.crypto, identity, versions);
+      if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
+      this.#ledger.noteSigned(catalog.id, catalog.revision);
+      return signed.value;
+    });
+  }
+
   /** One frozen version of a live item, checked against the digests the document lists for it. */
   async frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem> {
     const document = await this.#document();
@@ -855,6 +957,8 @@ export class SharedCatalogService {
     const stored = item.versions.find(candidate => candidate.version === version);
     if (stored === undefined)
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
+    if (stored.retiredAt !== undefined)
+      throw new CatalogRefusal('item_unknown', `Version ${String(version)} of ${item.name} is not offered.`);
     // A catalog serves the versions from the one it joined (or was relisted) at onward: the person who added the
     // item reviewed that version, and nothing older.
     if (version < (entry.sinceVersion ?? 1))
@@ -1065,6 +1169,7 @@ export class SharedCatalogService {
         size: version.size,
         publishedAt: version.publishedAt,
         summary: version.summary,
+        ...(version.retiredAt === undefined ? {} : { retiredAt: version.retiredAt }),
         ...(version.fileCount === undefined ? {} : { fileCount: version.fileCount }),
         usedBy: { catalogIds: version.version === item.current ? live : [] },
       })),
@@ -1333,6 +1438,7 @@ export class SharedCatalogService {
           digest: binding.digest,
           size: binding.size,
           publishedAt: version.publishedAt,
+          ...(version.retiredAt === undefined ? {} : { retiredAt: version.retiredAt }),
         };
       }),
     };
