@@ -339,6 +339,10 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
     - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
       (`started: false`) and the row swaps **Start a ferret** for **Open its chat**.
     - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.
+  - `warden:input-stuck` — one item naming every ferret idle with a message of Ferretry's own typed in its box and
+    never submitted, after the Warden's Enter did not submit it (the `input_stuck` flag,
+    [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message)). A ferret leaves it
+    once it takes a turn again; the item resolves when the list is empty.
   - `budget:<login>:<window>` — one per login per budget window. (It used to double because the notice was
     de-duplicated only inside the agenda of the ferret it was anchored to, and the anchor differed.)
 - **Waking.** A machine item's member list is kept beside it. An update that **adds** a member to an item the owner
@@ -788,8 +792,10 @@ nothing: no summary line, no chip, no restated ask. Its body is the card's _How 
 options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.
 
 - **→** is the forward option (Done, OK to build, Yes), the same as the side panel's Cards view and the to-test rows; **←** is **Not good**, which reopens the card with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
-- **Not good needs words.** Pressing it (or ←) answers nothing yet: the "why" composer opens where the answer row was, and
-  Send back stays disabled until something is written. The words go as the answer's note. Cancel changes nothing.
+- **Not good needs words.** Pressing it (or ←) answers nothing yet: the "why" box opens where the answer row was, and
+  Send back stays disabled until something is written. The words go as the answer's note. Cancel (or Esc) changes nothing.
+  The box is the chat's own composer — the same field, mic, Enter to send and Shift+Enter for a new line — with the same
+  inset as the card above it, so it is exactly as wide. It is the one send-back box ([board.md](board.md#done-and-not-good)).
 - On a **one-option gate** the left answer is **Not yet** — not one of `gate.options`: the card stays where it is, and words
   are welcome but not required.
 - Answering is a plain choice, `{ kind: 'multiple-choice', choice: <label> }`, held in the undo window like any answer. A
@@ -802,7 +808,7 @@ card in a gate lane **with no open gate item** keeps its to-test row even on a m
 waiting on the owner is ever lost between the two lists.
 
 **GAP — attachments.** The board's Not good takes pictures and files. The agenda's resolve carries a choice and a note but no
-attachment ids, so **Not good from the Inbox is words only**; the composer says nothing about pictures. Sending pictures with
+attachment ids, so **Not good from the Inbox is words only**; the composer draws no "+" for pictures. Sending pictures with
 it needs the resolve contract to carry attachment ids; until then the owner opens the card on the Board for that.
 
 ### What the side panel's Cards view shows

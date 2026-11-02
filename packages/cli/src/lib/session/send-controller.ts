@@ -1,14 +1,16 @@
-import type { SendDisposition, SendResult } from '@ferretry/protocol';
+import type { SendDisposition, SendRecord, SendResult } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { SessionCommandError } from './errors.ts';
 import type { ISessionApi, ISessionFiles, SendWaitClock, SessionEnvironment } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
 import {
-  describeDisposition,
   describeFate,
   describePark,
+  describeSendResult,
   planSend,
   SETTLED_SEND_FATES,
   type SendFlags,
+  waitingInFerretryQueue,
 } from './send-plan.ts';
 
 export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
@@ -47,7 +49,7 @@ export class SendMessageController {
       ...(plan.replyExpected ? { replyExpected: true } : {}),
     });
 
-    this.presenter.note(describeDisposition(result.disposition));
+    this.presenter.note(describeSendResult(result));
     if (plan.park !== undefined)
       await this.park(plan.park, {
         disposition: result.disposition,
@@ -73,8 +75,21 @@ export class SendMessageController {
       return;
     }
     const deadline = this.clock.nowMs() + WAIT_LIMIT_MS;
+    const untyped = waitingInFerretryQueue(result);
     for (;;) {
-      const record = await this.api.sendStatus(result.config.id, sendId);
+      const record = await this.status(result.config.id, sendId, untyped);
+      if (record === undefined) {
+        // Still in Ferretry's queue: the ledger has no row until a key goes to the pane. That is waiting,
+        // never "no such send" — and never a failure a script would answer by sending it again.
+        if (this.clock.nowMs() >= deadline) {
+          this.presenter.note(
+            `still not typed into the agent after ${WAIT_LIMIT_MS / 60_000}m: it is waiting in Ferretry's queue (see \`fy queue ${result.config.teammate ?? result.config.id}\`); do not resend`,
+          );
+          return;
+        }
+        await this.clock.sleep(WAIT_INTERVAL_MS);
+        continue;
+      }
       if (SETTLED_SEND_FATES.has(record.fate)) {
         // A cancelled message was not delivered either; it fails the wait as a proven absence does.
         if (record.fate === 'timed_out' || record.fate === 'cancelled')
@@ -87,6 +102,18 @@ export class SendMessageController {
         return;
       }
       await this.clock.sleep(WAIT_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * The send's ledger row, or `undefined` while a message still in Ferretry's queue has none yet.
+   */
+  private async status(id: string, sendId: string, untyped: boolean): Promise<SendRecord | undefined> {
+    try {
+      return await this.api.sendStatus(id, sendId);
+    } catch (error) {
+      if (untyped && error instanceof FyHttpError && error.status === 404) return undefined;
+      throw error;
     }
   }
 

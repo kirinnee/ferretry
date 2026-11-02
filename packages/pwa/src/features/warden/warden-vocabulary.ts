@@ -35,6 +35,7 @@ export const ANOMALY_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   owner_request: chip('you asked', 'accent'),
   orphaned_card: chip('card orphaned', 'err'),
   report_overdue: chip('no reply', 'warn'),
+  input_stuck: chip('stuck unsent', 'err'),
 };
 
 /**

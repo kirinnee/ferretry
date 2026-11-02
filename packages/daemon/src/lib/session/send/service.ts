@@ -19,7 +19,7 @@ import {
 } from './policy.ts';
 import { sameSendId } from './send-id.ts';
 import type { SessionSendSettings } from './settings.ts';
-import { sameComposerText, showsOwnPointer, strandablePointer, strandedPointerSend } from './stranded.ts';
+import { sameComposerText, showsOwnText, strandablePointer, strandableText, strandedSend } from './stranded.ts';
 import {
   type ComposerDraftAction,
   type ComposerDraftOutcome,
@@ -183,6 +183,33 @@ interface HeldRelease {
 
 /** Fates still being looked for, which only the daemon's tracker may re-attempt. */
 const OPEN_FATES: ReadonlySet<SendRecord['fate']> = new Set(['accepted', 'queued']);
+
+/**
+ * The most Enters the daemon presses, across all its callers, for one send's own text left typed in the
+ * composer — the tracker's nudges, the queue clearing its way, a new send finishing it first. Counted on the
+ * record BEFORE each key, so a daemon that dies mid-press cannot come back and press without limit. Past
+ * it the text stays where it is and the Warden says so (`input-stuck.ts`).
+ */
+export const STRANDED_ENTER_LIMIT = 5;
+
+/**
+ * The next turn number a turn file may take: past the session's own, and past every turn a send of this
+ * session still points at.
+ *
+ * B144: a pointer whose landing was unconfirmed never started its turn, so the session stayed on 62 while
+ * `turn-063.md` was the file its pointer named. Five hours later a person pressed Enter on that pointer, and
+ * the next send — claiming 63 again — overwrote the very file the agent was about to read. A withdrawn
+ * send typed nothing, so nothing can point at its file.
+ */
+export function nextTurnNumber(target: Pick<SendTarget, 'turn'>, records: readonly SendRecord[]): number {
+  let claimed = target.turn;
+  for (const record of records)
+    if (record.turn !== undefined && record.fate !== 'withdrawn' && record.turn > claimed) claimed = record.turn;
+  return claimed + 1;
+}
+
+/** What one Enter on a send's own stranded text did, for a caller that is not a send. */
+export type StrandedEnterOutcome = ComposerSubmitOutcome | 'refused';
 
 /**
  * Handing a running session its next turn.
@@ -520,7 +547,7 @@ export class SessionSendService {
     sender: SendTarget | undefined,
     release?: HeldRelease,
   ): Promise<Extract<LockedOutcome, { kind: 'settled' }>> {
-    const turn = target.turn + 1;
+    const turn = nextTurnNumber(target, await this.ports.ledger.list(target.id));
     const turnFile = await this.ports.turns.writeTurn(target.id, turn, `${payload}\n`);
     const direct = isDirectPayload(payload, directLimitFor(target, this.settings));
     const text = direct ? payload : turnInstruction(turnFile);
@@ -721,6 +748,7 @@ export class SessionSendService {
    * for exactly this send rather than a terminal error naming a tmux session.
    */
   private async unconfirmed(id: SessionId, record: SendRecord): Promise<SendUnconfirmed> {
+    await this.reserveTurn(id, record);
     await this.ports.ledger.settle(id, record.sendId, {
       fate: 'unaccounted',
       fateAt: this.ports.clock.now(),
@@ -810,27 +838,96 @@ export class SessionSendService {
   }
 
   /**
-   * Presses Enter for this send's own POINTER, still sitting typed in the composer — the tracker's
-   * bounded nudge for an Enter the harness swallowed.
+   * Presses Enter for this send's own text — its pointer, or the message typed as itself — still
+   * sitting typed in the composer: the tracker's bounded nudge for an Enter the harness swallowed.
    *
    * Every condition is re-read under the session's lock, because the look that asked was not holding
    * it: the record must still be unsettled, the pane idle and undialogued, and the composer must hold
-   * exactly this pointer. The nudge is counted BEFORE the key, as an attempt is, so a daemon that dies
-   * mid-press cannot come back and press without limit. Anything else answers the record unchanged.
+   * exactly this send's text. The nudge is counted BEFORE the key, as an attempt is, so a daemon that
+   * dies mid-press cannot come back and press without limit. Anything else answers the record unchanged.
    */
   async resubmit(id: SessionId, sendId: string): Promise<SendRecord | undefined> {
     const record = await this.ports.serial.run(id, async () => {
       const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
-      const pointer = current === undefined ? undefined : strandablePointer(current);
-      if (current === undefined || pointer === undefined) return current;
-      const pane = await this.ports.terminal.observe(id);
-      if (!this.finishable(pane) || pane.draft === undefined || !showsOwnPointer(pane.draft, pointer)) return current;
-      const counted = await this.ports.ledger.settle(id, sendId, { submitNudges: (current.submitNudges ?? 0) + 1 });
-      const outcome = await this.finishStranded(await this.require(id), counted ?? current, 'daemon');
+      if (current === undefined) return undefined;
+      const outcome = await this.enterOwnText(id, current, 'daemon', STRANDED_ENTER_LIMIT);
       return outcome.record;
     });
     if (record !== undefined) this.ports.tracking.track(id);
     return record;
+  }
+
+  /**
+   * B144 — NEVER QUEUE BEHIND A GHOST. The queue found the composer holding text and was about to wait for
+   * a person to clear it. When the text is a send of THIS session's own that the daemon typed and whose
+   * Enter never took, waiting is waiting on nobody: on 2026-11-02 a ferret sat idle for five hours with its
+   * own turn pointer typed in its box while thirteen messages waited behind it as a "draft". So it is
+   * finished here — one verified Enter, counted against {@link STRANDED_ENTER_LIMIT} — and the queue goes
+   * on. Answers what blocks the box now: nothing (`submitted`), or the send whose text is still there, with
+   * whether an Enter was tried, so the sender can be told plainly what its message is waiting behind.
+   */
+  async finishOwnDraft(
+    id: SessionId,
+  ): Promise<
+    | { readonly kind: 'clear' }
+    | { readonly kind: 'foreign' }
+    | { readonly kind: 'stuck'; readonly sendId: string; readonly tried: boolean }
+  > {
+    const result = await this.ports.serial.run(id, async () => {
+      const pane = await this.ports.terminal.observe(id);
+      if (pane.draft === undefined) return { kind: 'clear' as const };
+      const stranded = strandedSend(pane.draft, await this.ports.ledger.list(id));
+      if (stranded === undefined) return { kind: 'foreign' as const };
+      const outcome = await this.enterOwnText(id, stranded, 'queue', STRANDED_ENTER_LIMIT, pane);
+      return outcome.outcome === 'submitted'
+        ? { kind: 'clear' as const }
+        : { kind: 'stuck' as const, sendId: stranded.sendId, tried: outcome.outcome !== 'refused' };
+    });
+    if (result.kind !== 'foreign') this.ports.tracking.track(id);
+    return result;
+  }
+
+  /**
+   * The Warden's one press for a send it found stuck (`input-stuck.ts`): the same verified Enter, allowed
+   * one past {@link STRANDED_ENTER_LIMIT} because the Warden presses once per episode and then escalates.
+   * `absent` when an idle, undialogued pane shows an EMPTY box: the message is not sitting there at all.
+   */
+  async resubmitStuck(id: SessionId, sendId: string): Promise<StrandedEnterOutcome> {
+    const outcome = await this.ports.serial.run(id, async (): Promise<StrandedEnterOutcome> => {
+      const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
+      if (current === undefined) return 'refused';
+      const pane = await this.ports.terminal.observe(id);
+      if (this.finishable(pane) && pane.draft === undefined) return 'absent';
+      return (await this.enterOwnText(id, current, 'warden', STRANDED_ENTER_LIMIT + 1, pane)).outcome;
+    });
+    if (outcome !== 'refused') this.ports.tracking.track(id);
+    return outcome;
+  }
+
+  /**
+   * One verified Enter for a send's own text left typed in the composer, under the caller's lock. Refused —
+   * nothing pressed — unless the send can still be stranded, the pane is idle and undialogued, the
+   * composer holds EXACTLY this send's text, and the send has Enters left under `limit`. `observed` is a
+   * frame the caller read under the same lock, so the pane is not captured twice for one decision.
+   */
+  private async enterOwnText(
+    id: SessionId,
+    record: SendRecord,
+    by: 'send' | 'daemon' | 'queue' | 'warden',
+    limit: number,
+    observed?: SendPaneObservation,
+  ): Promise<{ readonly outcome: StrandedEnterOutcome; readonly record: SendRecord }> {
+    const text = strandableText(record);
+    if (text === undefined || (record.submitNudges ?? 0) >= limit) return { outcome: 'refused', record };
+    const pane = observed ?? (await this.ports.terminal.observe(id));
+    if (!this.finishable(pane) || pane.draft === undefined || !showsOwnText(pane.draft, text))
+      return { outcome: 'refused', record };
+    // The same uniqueness every caller gets: when another unsettled send could equally be what the box holds
+    // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
+    if (strandedSend(pane.draft, await this.ports.ledger.list(id))?.sendId !== record.sendId)
+      return { outcome: 'refused', record };
+    const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
+    return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
 
   /**
@@ -874,12 +971,13 @@ export class SessionSendService {
   }
 
   /**
-   * The pane with any pointer of OURS cleared out of its composer, and the session as it then stands.
+   * The pane with any text of OURS cleared out of its composer, and the session as it then stands.
    *
-   * A pointer this session's ledger proves the daemon typed, and whose Enter never took, is pressed
-   * once more with the usual verification, its send settled as entered, and the pane read again. Any
-   * other draft — a person's, an edited pointer, one that will not leave — is refused before a key,
-   * exactly as before. `except` is the send being retried, whose own text is never finished here.
+   * A pointer — or a message typed as itself — that this session's ledger proves the daemon typed, and
+   * whose Enter never took, is pressed once more with the usual verification (counted against
+   * {@link STRANDED_ENTER_LIMIT}), its send settled as entered, and the pane read again. Any other draft —
+   * a person's, an edited pointer, one that will not leave — is refused before a key, exactly as before.
+   * `except` is the send being retried, whose own text is never finished here.
    */
   private async withoutStrandedPointer(
     target: SendTarget,
@@ -889,9 +987,9 @@ export class SessionSendService {
     if (pane.draft === undefined) return { target, pane };
     const draft = pane.draft;
     const records = (await this.ports.ledger.list(target.id)).filter(record => record.sendId !== except);
-    const stranded = this.finishable(pane) ? strandedPointerSend(draft, records) : undefined;
+    const stranded = this.finishable(pane) ? strandedSend(draft, records) : undefined;
     if (stranded === undefined) throw composerOccupiedRefusal(draft);
-    const finished = await this.finishStranded(target, stranded, 'send');
+    const finished = await this.enterOwnText(target.id, stranded, 'send', STRANDED_ENTER_LIMIT, pane);
     if (finished.outcome !== 'submitted') throw composerOccupiedRefusal(draft);
     this.ports.tracking.track(target.id);
     return { target: await this.require(target.id), pane: await this.ports.terminal.observe(target.id) };
@@ -902,18 +1000,18 @@ export class SessionSendService {
     return pane.alive && !pane.dead && !pane.activeWork && pane.blockingPrompt === undefined;
   }
 
-  /** One verified Enter for a stranded pointer, journalled, and the send settled when it left. */
+  /** One verified Enter for a send's stranded text, journalled, and the send settled when it left. */
   private async finishStranded(
     target: SendTarget,
     record: SendRecord,
-    by: 'send' | 'daemon',
+    by: 'send' | 'daemon' | 'queue' | 'warden',
   ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
     const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message);
     await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
       sendId: record.sendId,
       outcome,
       by,
-      reason: 'pointer typed but not submitted',
+      reason: strandablePointer(record) === undefined ? 'typed but not submitted' : 'pointer typed but not submitted',
     });
     return { outcome, record: outcome === 'submitted' ? await this.entered(target, record) : record };
   }
@@ -937,7 +1035,14 @@ export class SessionSendService {
         : {}),
     });
     const turn = record.turn;
-    if (turn !== undefined && (record.path === 'turn-file' || record.path === 'direct') && target.turn < turn)
+    // A turn an unconfirmed typing RESERVED (`reserveTurn`) has its number already and has not started yet.
+    const reserved =
+      target.turn === turn && record.fate === 'unaccounted' && record.unaccountedReason === 'landing_unconfirmed';
+    if (
+      turn !== undefined &&
+      (record.path === 'turn-file' || record.path === 'direct') &&
+      (target.turn < turn || reserved)
+    )
       await this.turnStarted(target.id, {
         sendId: record.sendId,
         message: record.message,
@@ -990,7 +1095,7 @@ export class SessionSendService {
         sendId: request.sendId,
         path: 'revive',
         message: payload,
-        turn: target.turn + 1,
+        turn: await this.revivedTurn(target, request.sendId),
       });
     });
     if (!accepted.created) return this.settledAs(accepted.record, false);
@@ -1012,6 +1117,43 @@ export class SessionSendService {
       ...this.attribution(sender),
     });
     return { kind: 'settled', path: 'revive', applied: true, record, held: true };
+  }
+
+  /**
+   * B144 — A TYPED POINTER'S TURN IS TAKEN, started or not. A typing whose landing no frame proved never
+   * reached the turn bookkeeping, so the session stayed on the previous turn while the pointer — which the
+   * pane may draw and somebody may submit at any time — named the next turn's file. Every later turn file
+   * (a send, a revive, the resume domain's own) was numbered from the session's turn, and the next one
+   * overwrote it. So the number is reserved on the session itself, its reason left alone; the turn starts
+   * when an Enter is seen to take it (`entered`).
+   */
+  private async reserveTurn(id: SessionId, record: SendRecord): Promise<void> {
+    const turn = record.turn;
+    if (turn === undefined || (record.path !== 'turn-file' && record.path !== 'direct')) return;
+    const target = await this.ports.repository.read(id);
+    if (target === undefined || target.turn >= turn) return;
+    await this.ports.repository.transition(id, { event: 'control.turn_reserved', turn, keepReason: true });
+  }
+
+  /**
+   * The turn a revive's message is carried as. The resume domain numbers its turn file from the session's
+   * turn, so a turn a send still names that the session has not reserved (one recorded before reservations
+   * existed) is reserved first: the relaunch's file and this record then agree, and neither overwrites it.
+   */
+  private async revivedTurn(target: SendTarget, sendId: string): Promise<number> {
+    const records = await this.ports.ledger.list(target.id);
+    // A replayed request is answered from its first record by `accept`: nothing is reserved for it again,
+    // and its own record is not a turn some OTHER send names.
+    const replayed = records.find(record => record.sendId === sendId && record.fate !== 'withdrawn');
+    if (replayed !== undefined) return replayed.turn ?? target.turn + 1;
+    const turn = nextTurnNumber(target, records);
+    if (turn > target.turn + 1)
+      await this.ports.repository.transition(target.id, {
+        event: 'control.turn_reserved',
+        turn: turn - 1,
+        keepReason: true,
+      });
+    return turn;
   }
 
   /**

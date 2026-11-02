@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import should from 'should';
 import {
   type ComposerCursor,
+  composerHoldsOtherText,
   composerInput,
   composerLanding,
   composerRows,
@@ -644,5 +645,31 @@ describe('a multi-paragraph Codex draft the cursor reaches', () => {
     const ruled = '› hello\n\n────────\n  more\n';
     should(readComposer(ruled, { x: 4, y: 3 })?.text).equal('hello');
     should(readComposer('› hello\n', { x: 4, y: 9 })?.text).equal('hello');
+  });
+});
+
+describe('B144: whether the composer holds text that is not the payload, right before an Enter', () => {
+  const typedAt = (text: string): [string, ComposerCursor] => [
+    `› ${text}\n\n  gpt-5 default`,
+    { x: 2 + text.length, y: 0 },
+  ];
+  const PASTE = 'first line of the message\nsecond line of the message';
+
+  it('should say no for the payload alone, an empty composer, or one it cannot read', () => {
+    should(composerHoldsOtherText(...typedAt('please rerun the suite'), 'please rerun the suite')).be.false();
+    should(composerHoldsOtherText('› \n', { x: 2, y: 0 }, 'please rerun the suite')).be.false();
+    should(composerHoldsOtherText('no prompt here\n', {}, 'please rerun the suite')).be.false();
+  });
+
+  it('should say yes for a person’s words beside the payload', () => {
+    should(
+      composerHoldsOtherText(...typedAt('please rerun the suite and delete my draft'), 'please rerun the suite'),
+    ).be.true();
+  });
+
+  it('should take a paste’s lone placeholder only when its count agrees, never a replacement paste', () => {
+    should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), PASTE)).be.false();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #999 +30 lines]'), PASTE)).be.true();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), 'a literal message')).be.true();
   });
 });

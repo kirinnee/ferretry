@@ -3,7 +3,7 @@ import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SendScheduler } from '../send/tracker.ts';
 import type { SendFate } from '../send/types.ts';
-import { type DeliveryView, type HandOver, movesFrom, waitReasonOf } from './delivery.ts';
+import { type DeliveryView, type HandOver, movesFrom, type OwnDraft, waitReasonOf } from './delivery.ts';
 import { foldQueue, type QueueEvent } from './model.ts';
 import { deliveryOrder, nextToDeliver } from './policy.ts';
 import type { SessionQueueStore } from './ports.ts';
@@ -35,6 +35,11 @@ export interface QueueTransport {
   handOver(id: SessionId, message: QueuedMessage): Promise<HandOver>;
   /** Where a message handed over before now stands, per the send ledger; `undefined` when it never got there. */
   fate(id: SessionId, messageId: string): Promise<SendFate | undefined>;
+  /**
+   * The composer holds text: finishes it when it is a send of this session's own left unsubmitted — one
+   * verified, counted Enter — and says whose it is (`OwnDraft`).
+   */
+  clearOwnDraft(id: SessionId): Promise<OwnDraft>;
 }
 
 export interface QueueDeliveryPorts {
@@ -163,8 +168,25 @@ export class QueueDeliverer {
     }
     const next = nextToDeliver(messages, view.target.mode);
     if (next === undefined) return false;
-    const reason = waitReasonOf(view);
-    await this.waiting(id, deliveryOrder(messages, view.target.mode), reason);
+    let reason = waitReasonOf(view);
+    let behind: string | undefined;
+    // NEVER QUEUE BEHIND A GHOST (B144). A "draft" that is a send of this session's own, typed by the daemon
+    // and never submitted, is nobody's to clear: it is finished here and the box read again. One that will
+    // not leave is named, so the sender is told exactly what its message is waiting behind.
+    if (reason === 'draft') {
+      const own = await this.ports.transport.clearOwnDraft(id).catch((): OwnDraft => ({ kind: 'foreign' }));
+      if (own.kind === 'stuck') behind = own.sendId;
+      if (own.kind === 'clear') {
+        try {
+          view = await this.ports.view(id);
+        } catch {
+          await this.waiting(id, messages, 'unreadable');
+          return false;
+        }
+        reason = waitReasonOf(view);
+      }
+    }
+    await this.waiting(id, deliveryOrder(messages, view.target.mode), reason, behind);
     if (reason !== undefined) return false;
     await this.move(id, next.id, 'typing');
     const outcome = await this.ports.transport.handOver(id, next).catch(
@@ -198,15 +220,17 @@ export class QueueDeliverer {
     id: SessionId,
     messages: readonly QueuedMessage[],
     reason: QueueWaitReason | undefined,
+    behind?: string,
   ): Promise<void> {
     for (const message of messages) {
-      if (message.state !== 'queued' || message.waitReason === reason) continue;
+      if (message.state !== 'queued' || (message.waitReason === reason && message.waitBehind === behind)) continue;
       await this.append(id, {
         v: 1,
         kind: 'waiting',
         at: this.ports.clock.now(),
         id: message.id,
         ...(reason === undefined ? {} : { reason }),
+        ...(reason === undefined || behind === undefined ? {} : { behind }),
       });
     }
   }

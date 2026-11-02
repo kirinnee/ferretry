@@ -50,6 +50,7 @@ function transport(answer: SendDisposition | Error, records: readonly SendRecord
           ReturnType<SessionSendService['send']>
         >;
       },
+      finishOwnDraft: async () => ({ kind: 'clear' as const }),
     },
     { list: async () => records },
   );
@@ -135,6 +136,12 @@ describe('SendPathQueueTransport', () => {
 
     should(await subject.fate(ID, 'q-1')).equal('queued');
     should(await subject.fate(ID, 'q-9')).be.undefined();
+  });
+
+  it('should ask the send path to finish a draft of the session’s own, and pass on what it says (B144)', async () => {
+    const { subject } = transport('delivered');
+
+    should(await subject.clearOwnDraft(ID)).deepEqual({ kind: 'clear' });
   });
 });
 

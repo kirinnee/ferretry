@@ -233,6 +233,25 @@ export interface ComposerProps {
   readonly compacting?: boolean;
   /** Where a tap on the context ring goes (Info › Usage). */
   readonly onOpenContext?: () => void;
+  /**
+   * This composer belongs to no chat: a host takes its words (the send-back box under a card). It keeps the
+   * chat composer's whole editing surface, and none of what is the chat's alone: no draft shared with the
+   * owner's other devices, no device outbox, no quote target, no usage readout. Its send is the host's own,
+   * so a failed one throws the sentence the box shows, and its draft is the host's `draftStore`.
+   */
+  readonly detached?: DetachedComposer;
+  /** Focus the field when the composer first appears: a box opened by a press is there to be typed in. */
+  readonly autoFocus?: boolean;
+}
+
+/** What a host says about a detached composer. */
+export interface DetachedComposer {
+  /** What the send button says and does: "Send back", where the chat says "Send". */
+  readonly sendLabel: string;
+  /** Whether files may be added (the plus, a drop, a paste); the host's `uploadAttachment` takes them. */
+  readonly attachable: boolean;
+  /** How many files one send takes; more are left out when they are added. */
+  readonly maxAttachments?: number;
 }
 
 /**
@@ -440,16 +459,28 @@ export function Composer({
   context,
   compacting,
   onOpenContext,
+  detached,
+  autoFocus = false,
 }: ComposerProps) {
+  const isDetached = detached !== undefined;
+  const canAttach = detached?.attachable ?? true;
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId, draftSlot), [daemon, sessionId, draftSlot]);
   const uploader = useMemo<ComposerAttachmentUploader>(
     () =>
       uploadAttachment ?? (file => uploadSessionAttachment(daemon, scope, file, autocompleteFetcher ?? browserFetch)),
     [autocompleteFetcher, daemon, scope, uploadAttachment],
   );
-  const outbox = useSendOutbox();
+  const deviceOutbox = useSendOutbox();
+  // A detached send is the host's own: parked in the device outbox it would be sent again later as a chat message.
+  const outbox = isDetached ? null : deviceOutbox;
   // Beside a device outbox a file can wait for the connection: it goes up with the message, later.
   const attachments = useComposerAttachments(uploader, daemonSessionKey(scope), undefined, outbox !== null);
+  // A detached composer that takes no files ignores a paste, a drop and a picked file alike.
+  const addFiles = (files: readonly File[]): void => {
+    if (!canAttach) return;
+    const room = Math.max(0, (detached?.maxAttachments ?? Number.POSITIVE_INFINITY) - attachments.entries.length);
+    attachments.add(files.slice(0, room));
+  };
   const fileInput = useRef<HTMLInputElement | null>(null);
   const photoInput = useRef<HTMLInputElement | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -632,16 +663,17 @@ export function Composer({
    * thrown to the end by somebody typing there.
    */
   const slotWanted = draftSlot !== undefined && sharedSlots === undefined;
-  const health = useDaemonHealth(sharedUploads === undefined || slotWanted ? daemon : undefined);
+  const health = useDaemonHealth((sharedUploads === undefined && !isDetached) || slotWanted ? daemon : undefined);
   // An item's draft needs a machine that keeps one per slot; an older one would answer with the chat's.
   const slotShared =
     draftSlot === undefined || (sharedSlots ?? machineOffers(health, DAEMON_FEATURES.sharedDraftSlots));
   const shared = useSharedDraft({
     daemon,
     scope,
-    enabled: slotShared,
+    enabled: slotShared && !isDetached,
     text: draft,
     setText: setDraft,
+    // A detached draft is the host's own: nothing of it may reach the session's draft on any device.
     ...(openDraftStream === undefined ? {} : { open: openDraftStream }),
     // The app ships before the daemon: an older machine closes the stream on a file still uploading.
     reportUploads: sharedUploads ?? machineOffers(health, DAEMON_FEATURES.sharedDraftUploading),
@@ -711,41 +743,47 @@ export function Composer({
   // two panes can belong to different daemons.
   useEffect(
     () =>
-      registerComposerQuoteTarget({
-        ...scope,
-        draft: () => draftRef.current,
-        replaceDraft: next => {
-          // A quote or an "Add to chat" delivery is a reader who is about to
-          // TYPE. Landing them in normal mode would answer their next letter
-          // with a command, so every programmatic draft delivery returns to
-          // insert — the same rule dictation follows below.
-          setVim(initialVimState);
-          // THE CARET GOES AFTER THE RENDER, as for every other programmatic edit.
-          // Placed now it would land in the OLD draft: the live editor (Markdown and
-          // Rich text) clamps it to the old text and keeps it there through the
-          // repaint, so the reader's next word went in FRONT of the delivered
-          // reference and welded onto it. A draft that does not change has no render
-          // to wait for, so its caret goes now.
-          const changed = next !== draftRef.current;
-          if (changed) {
-            pendingSelection.current = { value: next, start: next.length, end: next.length };
-            setDraft(next);
-          }
-          const input = inputRef.current;
-          if (input === null) return;
-          input.focus();
-          if (changed) return;
-          // A detached or hidden textarea can refuse a selection; the draft is
-          // unchanged either way, so the caret is a nicety rather than the contract.
-          try {
-            input.setSelectionRange(next.length, next.length);
-          } catch {
-            // Intentionally ignored — see above.
-          }
-        },
-      }),
-    [scope, setDraft],
+      isDetached
+        ? undefined
+        : registerComposerQuoteTarget({
+            ...scope,
+            draft: () => draftRef.current,
+            replaceDraft: next => {
+              // A quote or an "Add to chat" delivery is a reader who is about to
+              // TYPE. Landing them in normal mode would answer their next letter
+              // with a command, so every programmatic draft delivery returns to
+              // insert — the same rule dictation follows below.
+              setVim(initialVimState);
+              // THE CARET GOES AFTER THE RENDER, as for every other programmatic edit.
+              // Placed now it would land in the OLD draft: the live editor (Markdown and
+              // Rich text) clamps it to the old text and keeps it there through the
+              // repaint, so the reader's next word went in FRONT of the delivered
+              // reference and welded onto it. A draft that does not change has no render
+              // to wait for, so its caret goes now.
+              const changed = next !== draftRef.current;
+              if (changed) {
+                pendingSelection.current = { value: next, start: next.length, end: next.length };
+                setDraft(next);
+              }
+              const input = inputRef.current;
+              if (input === null) return;
+              input.focus();
+              if (changed) return;
+              // A detached or hidden textarea can refuse a selection; the draft is
+              // unchanged either way, so the caret is a nicety rather than the contract.
+              try {
+                input.setSelectionRange(next.length, next.length);
+              } catch {
+                // Intentionally ignored — see above.
+              }
+            },
+          }),
+    [scope, setDraft, isDetached],
   );
+
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus();
+  }, [autoFocus]);
 
   useEffect(() => {
     if (clearErrorOn !== undefined) setError(null);
@@ -834,7 +872,8 @@ export function Composer({
     attachments.failed.length === 0 &&
     (canSubmitComposer(draft, disabled, sending) ||
       (allowEmptySend && !disabled && !sending) ||
-      ((attachmentIds.length > 0 || attachments.deferred.length > 0 || location?.kind === 'ready') &&
+      (!isDetached &&
+        (attachmentIds.length > 0 || attachments.deferred.length > 0 || location?.kind === 'ready') &&
         !disabled &&
         !sending));
   /**
@@ -891,8 +930,9 @@ export function Composer({
       const typed = draft.trim();
       // The block is plain text in the message: that is how an agent receives it, and how the sent
       // message redraws it as a chip.
-      const message =
-        location?.kind === 'ready'
+      const message = isDetached
+        ? typed
+        : location?.kind === 'ready'
           ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
           : typed || 'See the attached files.';
       // The clear the send carries, once this device's last keystroke is answered — a second at most, and
@@ -1257,9 +1297,9 @@ export function Composer({
     onPaste: (event: { readonly clipboardData: DataTransfer | null; preventDefault(): void }) => {
       // A pasted screenshot is an attachment; pasted text stays the editor's to insert.
       const files = Array.from(event.clipboardData?.files ?? []);
-      if (files.length === 0) return;
+      if (files.length === 0 || !canAttach) return;
       event.preventDefault();
-      attachments.add(files);
+      addFiles(files);
     },
   };
 
@@ -1302,12 +1342,16 @@ export function Composer({
 
   const modifierLabel = shortcutModifier();
   const sendKeyLabel = bareEnterAction === 'send' ? '↵' : '⇧↵';
-  const sendLabel = sending ? 'Sending…' : 'Send';
+  const sendLabel = sending ? 'Sending…' : (detached?.sendLabel ?? 'Send');
   const sendTitle = busy
     ? `Send — queued for the agent's next turn (${sendKeyLabel} or ${modifierLabel}↵)`
     : `Send (${sendKeyLabel} or ${modifierLabel}↵)`;
   const interruptTitle = `Interrupt & send — stops the agent's turn and sends now (${modifierLabel}⇧↵)`;
   const fieldDisabled = disabled || sending;
+  const newLineChip = inputModality.touchAffected && bareEnterAction === 'send';
+  // A detached composer has no session readouts: its status row is drawn only when it holds a control, so the box
+  // ends at the field instead of keeping an empty band under it.
+  const hasStatusRow = !isDetached || vimMode || newLineChip;
 
   // ONE attach control, placed by layout: before the field on a desktop, at the top of the phone's
   // left-hand column.
@@ -1317,9 +1361,9 @@ export function Composer({
     photos: () => photoInput.current?.click(),
     files: () => fileInput.current?.click(),
     camera: (offerCamera ?? inputModality.touchAffected) ? () => cameraInput.current?.click() : undefined,
-    location: locationHost === null ? undefined : shareLocation,
+    location: locationHost === null || isDetached ? undefined : shareLocation,
   });
-  const attachButton = (
+  const attachButton = canAttach ? (
     <button
       aria-expanded={plusOpen}
       aria-haspopup="dialog"
@@ -1344,7 +1388,7 @@ export function Composer({
     >
       <Plus aria-hidden="true" size={18} />
     </button>
-  );
+  ) : null;
 
   const dictation = dictationSettings ? (
     <DictationControl
@@ -1384,7 +1428,7 @@ export function Composer({
         setDropping(false);
         if (!hasFiles(event.dataTransfer)) return;
         event.preventDefault();
-        attachments.add(Array.from(event.dataTransfer.files));
+        addFiles(Array.from(event.dataTransfer.files));
       }}
       onSubmit={event => {
         event.preventDefault();
@@ -1485,7 +1529,7 @@ export function Composer({
           className="hidden"
           onChange={event => {
             const input = event.currentTarget as unknown as HTMLInputElement;
-            attachments.add(Array.from(input.files ?? []));
+            addFiles(Array.from(input.files ?? []));
             input.value = '';
           }}
           ref={cameraInput}
@@ -1499,7 +1543,7 @@ export function Composer({
           multiple
           onChange={event => {
             const input = event.currentTarget as unknown as HTMLInputElement;
-            attachments.add(Array.from(input.files ?? []));
+            addFiles(Array.from(input.files ?? []));
             input.value = '';
           }}
           ref={photoInput}
@@ -1512,7 +1556,7 @@ export function Composer({
           multiple
           onChange={event => {
             const input = event.currentTarget as unknown as HTMLInputElement;
-            attachments.add(Array.from(input.files ?? []));
+            addFiles(Array.from(input.files ?? []));
             // Cleared so choosing the same file again is still a change.
             input.value = '';
           }}
@@ -1603,54 +1647,56 @@ export function Composer({
           </button>
         </div>
       </div>
-      <div className="fy-composer-actions" data-composer-status="">
-        {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an
+      {hasStatusRow ? (
+        <div className="fy-composer-actions" data-composer-status="">
+          {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an
             unmount, so an open chip keeps its state), leaving the transcript the room. */}
-        <span className="fy-composer-status-chrome" data-composer-status-chrome="">
-          {statusSlot}
-          {context === undefined ? null : (
-            <ContextRing
-              context={context}
-              {...(compacting === undefined ? {} : { compacting })}
-              {...(onOpenContext === undefined ? {} : { onOpen: onOpenContext })}
-            />
-          )}
-          <ComposerQuota quota={quota} />
-        </span>
-        <span className="fy-composer-spacer" />
-        {vimMode ? (
-          <>
-            {/* One transition, one polite announcement. The word itself is the
+          <span className="fy-composer-status-chrome" data-composer-status-chrome="">
+            {statusSlot}
+            {context === undefined ? null : (
+              <ContextRing
+                context={context}
+                {...(compacting === undefined ? {} : { compacting })}
+                {...(onOpenContext === undefined ? {} : { onOpen: onOpenContext })}
+              />
+            )}
+            {isDetached ? null : <ComposerQuota quota={quota} />}
+          </span>
+          <span className="fy-composer-spacer" />
+          {vimMode ? (
+            <>
+              {/* One transition, one polite announcement. The word itself is the
                 state — a colour alone would say nothing to half the readers who
                 need this most, and Escape is not reachable on a phone at all,
                 which is why the indicator is also the toggle. */}
-            <span aria-atomic="true" aria-live="polite" className="sr-only">
-              {`${VIM_MODE_LABEL[vim.mode]} mode`}
-            </span>
-            <button
-              aria-label={`Vim ${VIM_MODE_LABEL[vim.mode]} mode. Switch to ${
-                vim.mode === 'insert' ? VIM_MODE_LABEL.normal : VIM_MODE_LABEL.insert
-              } mode`}
-              className="fy-composer-vim"
-              data-composer-vim-mode={vim.mode}
-              disabled={fieldDisabled}
-              onClick={() => {
-                setVim(vim.mode === 'insert' ? normalVimState(vim) : { ...vim, mode: 'insert', operator: null });
-                inputRef.current?.focus();
-              }}
-              title={vim.mode === 'insert' ? 'Insert mode — Esc for normal mode' : 'Normal mode — i, a or o to type'}
-              type="button"
-            >
-              {`-- ${VIM_MODE_LABEL[vim.mode].toUpperCase()} --`}
+              <span aria-atomic="true" aria-live="polite" className="sr-only">
+                {`${VIM_MODE_LABEL[vim.mode]} mode`}
+              </span>
+              <button
+                aria-label={`Vim ${VIM_MODE_LABEL[vim.mode]} mode. Switch to ${
+                  vim.mode === 'insert' ? VIM_MODE_LABEL.normal : VIM_MODE_LABEL.insert
+                } mode`}
+                className="fy-composer-vim"
+                data-composer-vim-mode={vim.mode}
+                disabled={fieldDisabled}
+                onClick={() => {
+                  setVim(vim.mode === 'insert' ? normalVimState(vim) : { ...vim, mode: 'insert', operator: null });
+                  inputRef.current?.focus();
+                }}
+                title={vim.mode === 'insert' ? 'Insert mode — Esc for normal mode' : 'Normal mode — i, a or o to type'}
+                type="button"
+              >
+                {`-- ${VIM_MODE_LABEL[vim.mode].toUpperCase()} --`}
+              </button>
+            </>
+          ) : null}
+          {newLineChip ? (
+            <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={fieldDisabled}>
+              New line
             </button>
-          </>
-        ) : null}
-        {inputModality.touchAffected && bareEnterAction === 'send' ? (
-          <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={fieldDisabled}>
-            New line
-          </button>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
       {recalled && draft !== '' ? (
         <p className="fy-composer-recalled" data-composer-recalled="" role="status">
           Editing a copy of your queued message. The original is still in the agent’s queue and will arrive too unless

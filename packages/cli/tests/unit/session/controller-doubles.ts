@@ -71,6 +71,8 @@ export class RecordingApi implements ISessionApi {
       start?: SessionView;
       send?: SendResult;
       sendStatus?: SendRecord[];
+      /** Thrown by `sendStatus` polls, in order, before the stubbed rows answer. */
+      sendStatusFailures?: Error[];
       answer?: SessionView;
       interrupt?: SessionView;
       resume?: SessionView;
@@ -111,6 +113,11 @@ export class RecordingApi implements ISessionApi {
 
   /** Answers each poll with the next stubbed row, repeating the last. */
   sendStatus(id: string, sendId: string): Promise<SendRecord> {
+    const failure = this.responses.sendStatusFailures?.shift();
+    if (failure !== undefined) {
+      this.calls.push({ method: 'sendStatus', args: [id, sendId] });
+      return Promise.reject(failure);
+    }
     const rows = this.responses.sendStatus;
     return this.record(
       'sendStatus',

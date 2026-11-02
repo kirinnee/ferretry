@@ -30,6 +30,9 @@ class BusyPane implements TmuxCommandPort {
   accepts = true;
   /** Seconds on the spinner, which a LIVE busy pane redraws as it ticks. */
   spinnerSeconds = 34;
+  /** A person's words joining the composer once the pane has been looked at this often since the fill. */
+  joinsAfterLooks: { readonly looks: number; readonly text: string } | undefined;
+  private looksSinceFill = 0;
 
   constructor(
     private readonly enterSubmits: boolean,
@@ -41,6 +44,12 @@ class BusyPane implements TmuxCommandPort {
     this.calls.push(argv);
     const command = argv[0];
     if (command === 'has-session') return ok('');
+    if (command === 'display-message' && this.joinsAfterLooks !== undefined && this.composer !== '') {
+      if (++this.looksSinceFill > this.joinsAfterLooks.looks) {
+        this.composer += this.joinsAfterLooks.text;
+        this.joinsAfterLooks = undefined;
+      }
+    }
     if (command === 'display-message')
       return ok(`0||${2 + this.composer.length}|${this.lines().findIndex(line => /^[>❯] /u.test(line))}|24|80\n`);
     if (command === 'capture-pane') return ok(this.frame());
@@ -119,6 +128,18 @@ describe('tmux pane queue', () => {
     should(outcome).equal('held');
     should(pane.keysSent()).deepEqual(['Enter']);
     should(pane.queued).be.true();
+  });
+
+  it('should press nothing when a person typed beside the message after it landed (B144)', async () => {
+    const pane = new BusyPane(true);
+    pane.joinsAfterLooks = { looks: 1, text: ' and my draft' };
+    const { subject } = queue(pane);
+
+    const failure = await subject.queue(SESSION, 'read the queued brief').catch((error: unknown) => error);
+
+    should((failure as Error).name).equal('ComposerUnconfirmedError');
+    should(pane.keysSent()).deepEqual([]);
+    should(pane.composer).equal('read the queued brief and my draft');
   });
 
   it('should report a message that left the composer of a working pane as left, never as held', async () => {

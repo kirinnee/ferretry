@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 import { QueueAuthorSchema, SendSenderKindSchema } from './session.ts';
+import { QueueWaitReasonSchema } from './session-queue-wait.ts';
 
 /**
  * ONE DURABLE QUEUE PER SESSION: every message to a ferret — the owner's, another ferret's, the daemon's —
@@ -27,28 +28,6 @@ export const QueuedMessageStateSchema = z.enum([
   'failed',
 ]);
 export type QueuedMessageState = z.infer<typeof QueuedMessageStateSchema>;
-
-/**
- * Why a `queued` message has not gone yet, in words a person can act on. Absent when nothing is in its way
- * but its turn: another message ahead of it.
- */
-export const QueueWaitReasonSchema = z.enum([
-  /** The agent is still starting. */
-  'launching',
-  /** The agent is mid-turn and its own queue cannot take the message yet. */
-  'busy',
-  /** The agent asked a question, and only its answer may go into the pane. */
-  'question',
-  /** A harness dialog (trust, permission, rate limit) holds the pane. */
-  'dialog',
-  /** The composer holds text that is not this message: a person's draft, most often. */
-  'draft',
-  /** The pane could not be read well enough to prove the composer empty. */
-  'unreadable',
-  /** The session is not running; it is delivered when it is revived. */
-  'stopped',
-]);
-export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;
 
 /** The caller's own id for a message, the idempotency key a retried request is answered from. */
 export const QueuedMessageIdSchema = z.string().min(1).max(128);
@@ -81,6 +60,11 @@ export const QueuedMessageSchema = z.object({
   /** 1 as sent; each edit while still `queued` adds one. */
   revision: PositiveIntegerSchema,
   waitReason: QueueWaitReasonSchema.optional(),
+  /**
+   * Beside a `draft` wait: the send of this session's own whose text sits typed and unsubmitted in the
+   * box — Ferretry's, not a person's. The daemon has pressed Enter on it (bounded) and it did not take.
+   */
+  waitBehind: z.string().min(1).optional(),
   /** Why a `failed` message failed, in a sentence. */
   failure: z.string().optional(),
 });

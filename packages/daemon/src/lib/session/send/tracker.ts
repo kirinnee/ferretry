@@ -3,7 +3,7 @@ import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
 import { paneMidTurn, typedIntoBusyPane } from './policy.ts';
-import { strandablePointer } from './stranded.ts';
+import { strandablePointer, strandableText } from './stranded.ts';
 import {
   attemptsAllowed,
   deadlineOf,
@@ -196,6 +196,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (record.held === true) return false;
     if (isOpenSend(record)) return true;
     const age = now - Date.parse(record.acceptedAt);
+    // Text of ours SEEN sitting in the composer stays watched past the hold ceiling (B144): a turn longer
+    // than it ends with the text still there, and only a look can press its Enter or see it go.
+    if (record.fate === 'unaccounted' && record.typedNotSent === true && strandableText(record) !== undefined)
+      return age < this.settings.repairLimitMs;
     if (isRepairableSend(record)) return age < this.settings.repairLimitMs;
     return (record.fate === 'unaccounted' || record.fate === 'timed_out') && age < this.settings.holdLimitMs;
   }
@@ -221,7 +225,13 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         await this.deliver(id, record, verdict);
         continue;
       }
-      if (!isOpenSend(record)) continue;
+      if (!isOpenSend(record)) {
+        // An UNCONFIRMED send may still be sitting typed in the composer: its keys reached a stalled pane
+        // after the fill stopped looking (B144). Its Enter is finished here, like an open send's.
+        const look = await this.unconfirmedInComposer(id, record, now);
+        if (look !== undefined) next = next === undefined ? look : Math.min(next, look);
+        continue;
+      }
       const proven =
         verdict?.queuedAt !== undefined && record.fate === 'accepted'
           ? await this.queued(id, record, verdict.queuedAt, 'transcript')
@@ -230,15 +240,24 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       const current = await this.observed(id, nudged, hold, now);
       const deadline = deadlineOf(current, this.settings);
       const after = now < deadline ? current : await this.expire(id, current, reading, verdict, hold, now);
-      if (!isOpenSend(after)) continue;
+      if (!isOpenSend(after)) {
+        // Settled unconfirmed at the hold ceiling with its text still in the composer: the long watch of
+        // `unconfirmedInComposer` takes over, and must be armed now — nothing else would schedule it.
+        if (after.fate === 'unaccounted' && after.typedNotSent === true && strandableText(after) !== undefined) {
+          const look = now + this.settings.busyExtensionMs;
+          next = next === undefined ? look : Math.min(next, look);
+        }
+        continue;
+      }
       // A send this look re-typed is looked at again soon, like any fresh transport.
       const due = deadlineOf(after, this.settings);
+      const composerLook = hold === 'composer' ? this.composerLookAt(after, now) : undefined;
       const at =
         after.attempt !== current.attempt
           ? now + this.settings.firstCheckMs
-          : hold === 'composer' && after.typedNotSent !== true
-            ? Math.min(due, this.composerLookAt(after, now))
-            : due;
+          : composerLook === undefined
+            ? due
+            : Math.min(due, composerLook);
       next = next === undefined ? at : Math.min(next, at);
     }
     if (next !== undefined)
@@ -333,15 +352,15 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     now: number,
   ): Promise<{ readonly record: SendRecord; readonly hold: PaneHold }> {
     const due = this.nudgeDue(record);
-    if (hold !== 'composer' || record.typedNotSent === true || due === undefined || now < due) return { record, hold };
+    if (hold !== 'composer' || due === undefined || now < due) return { record, hold };
     const after = await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined);
     if (after === undefined) return { record, hold };
     return { record: after, hold: await this.paneHold(id, after) };
   }
 
-  /** When this send's next Enter nudge is due, or `undefined` when it is not a pointer or has none left. */
+  /** When this send's next Enter nudge is due, or `undefined` when it cannot be stranded or has none left. */
   private nudgeDue(record: SendRecord): number | undefined {
-    if (strandablePointer(record) === undefined) return undefined;
+    if (strandableText(record) === undefined) return undefined;
     const offset = this.settings.submitNudgesMs[record.submitNudges ?? 0];
     return offset === undefined ? undefined : this.typedSince(record) + offset;
   }
@@ -357,10 +376,65 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    * and not sent. A nudge already due — one the pane deferred, mid-turn or behind a dialog — is looked
    * at again no sooner than a first check would be, so a pane that stays busy is not polled hot.
    */
-  private composerLookAt(record: SendRecord, now: number): number {
-    const typed = this.typedSince(record) + this.typedAfterMs(record);
+  private composerLookAt(record: SendRecord, now: number): number | undefined {
+    const typed = record.typedNotSent === true ? undefined : this.typedSince(record) + this.typedAfterMs(record);
+    const pressed = this.pressLookAt(record, now);
+    if (typed === undefined) return pressed;
+    return pressed === undefined ? typed : Math.min(typed, pressed);
+  }
+
+  /**
+   * B144 — THE SEND THE FILL GAVE UP ON. A typing the pane did not draw in time is settled `unaccounted`
+   * (`landing_unconfirmed`) at once, and the tracker used to look at such a send only for a transcript record
+   * proving it delivered. But a stalled pane draws the keys LATER: on 2026-11-02 a ferret's turn pointer
+   * appeared in its composer after the fill had stopped looking, nothing ever pressed Enter on it, and the
+   * ferret sat idle for five hours with it typed there. So while the send is young enough for its keys to
+   * still be arriving, its composer is looked at, and its own text found there exactly gets the same
+   * verified, counted Enter an open send's does (`resubmit`, which re-opens it once the text leaves).
+   *
+   * Answers when to look again, or `undefined` when there is nothing left to wait for here: no Enters
+   * left, or the send older than `strandedWatchMs` — the Warden watches the long tail (`input-stuck.ts`).
+   */
+  private async unconfirmedInComposer(id: SessionId, record: SendRecord, now: number): Promise<number | undefined> {
+    if (record.fate !== 'unaccounted' || record.held === true || strandableText(record) === undefined) return undefined;
+    const seen = record.typedNotSent === true;
+    // Seen in the composer, it is watched as long as a repair is; never seen, only while its keys could still
+    // be arriving.
+    const window = seen ? this.settings.repairLimitMs : this.settings.strandedWatchMs;
+    if (now - this.typedSince(record) > window) return undefined;
+    const hold = await this.paneHold(id, record);
+    if (hold === 'unreadable') return now + this.settings.busyExtensionMs;
+    if (hold !== 'composer') {
+      // Gone from the composer: the flag the app and the Warden read is dropped, so neither calls it stuck.
+      if (seen) await this.ports.ledger.settle(id, record.sendId, { typedNotSent: undefined });
+      return seen ? undefined : now + this.settings.busyExtensionMs;
+    }
+    // There: said so on the record, so the Warden reads a fresh fact rather than a guess from the turn clock.
+    let current = record;
+    if (!seen) {
+      current = (await this.ports.ledger.settle(id, record.sendId, { typedNotSent: true })) ?? record;
+      await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
+    }
+    const due = this.nudgeDue(current);
+    if (due !== undefined && now >= due) {
+      const after = (await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined)) ?? current;
+      // Entered: it is an open send again, and `resubmit` asked for the look that follows it.
+      if (isOpenSend(after)) return undefined;
+      current = after;
+    }
+    // No Enter left: still looked at, slowly, so the flag stays true to the screen until it goes.
+    return this.pressLookAt(current, now) ?? now + this.settings.busyExtensionMs;
+  }
+
+  /**
+   * The next look a send's Enter nudge needs: when it falls due, or — for one already due that the pane
+   * deferred, mid-turn or behind a dialog — after `deferredNudgeMs`, so a pane that stays busy for a long
+   * turn is not polled hot. `undefined` when it has no nudge left.
+   */
+  private pressLookAt(record: SendRecord, now: number): number | undefined {
     const nudge = this.nudgeDue(record);
-    return nudge === undefined ? typed : Math.min(typed, Math.max(nudge, now + this.settings.firstCheckMs));
+    if (nudge === undefined) return undefined;
+    return nudge > now ? Math.max(nudge, now + this.settings.firstCheckMs) : now + this.settings.deferredNudgeMs;
   }
 
   /**

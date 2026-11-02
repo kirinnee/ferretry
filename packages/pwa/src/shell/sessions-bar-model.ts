@@ -22,6 +22,10 @@
  * WHAT A ROW SAYS: the status mark, its task as the title with the ferret's name beneath, and its project DIRECTORY — the folder
  * it runs in, which tells two agents on one project apart (a worktree each).
  *
+ * PINNED. A session the owner pinned (`pinnedAt`, set by the daemon that owns it) is lifted into "Pinned"
+ * above everything, in the order it was pinned, and is not repeated below. It stays listed though stopped —
+ * a pin is the owner's own word that it matters — and the kind filter still applies to it.
+ *
  * ONE SIGNAL THAT A SESSION NEEDS YOU: OPEN ATTENTION.
  *
  *   The daemon puts `state.attention` on a session while it has open Agenda items and removes it when
@@ -58,6 +62,13 @@ export interface SessionsListFilter {
 
 /** Stopped sessions hidden, only the sessions a person drives: what a new device's bar opens with. */
 export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'interactive', showStopped: false };
+
+/** The owner pinned this session to the top of the bar. */
+export const isPinned = (view: SessionView): boolean => view.pinnedAt !== undefined;
+
+/** Oldest pin first; the session id breaks a tie so the order never shuffles between reads. */
+export const byPinOrder = (left: SessionView, right: SessionView): number =>
+  Date.parse(left.pinnedAt ?? '') - Date.parse(right.pinnedAt ?? '') || left.config.id.localeCompare(right.config.id);
 
 /** The session has open Attention: the daemon's summary is on it. Clears only when the items resolve. */
 export const hasAgenda = (view: SessionView): boolean => sessionAgenda(view) !== undefined;
@@ -108,6 +119,15 @@ export const rowPreview = (
   return question === undefined ? undefined : { kind: 'question', text: question };
 };
 
+/** Pulls the pinned sessions out of `rows`, oldest pin first, leaving the rest in their order. */
+export const pullPinned = <T>(
+  rows: readonly T[],
+  viewOf: (row: T) => SessionView,
+): { readonly pinned: readonly T[]; readonly rest: readonly T[] } => ({
+  pinned: rows.filter(row => isPinned(viewOf(row))).sort((left, right) => byPinOrder(viewOf(left), viewOf(right))),
+  rest: rows.filter(row => !isPinned(viewOf(row))),
+});
+
 /**
  * Pulls the sessions with open Attention out of `rows`, newest `latestAt` first (ties keep the order
  * they arrived in), leaving the rest in their order. This is "Needs you" at the top of a list.
@@ -138,12 +158,15 @@ export const isGuideBuilder = (view: SessionView): boolean => view.config.label 
  * ticked, and the open session always. `keep` names the open one — a caller that has none passes nothing.
  * A guide builder is not listed unless it is the open one; its link still opens it. A session with open
  * Attention is listed though it is stopped: an unread row that vanished would be an unanswered ferret.
+ * So is a pinned one: it stays until the owner unpins it.
  */
 export const listedBeforeMode = (
   view: SessionView,
   { showStopped }: SessionsListFilter,
   keep?: (view: SessionView) => boolean,
-): boolean => keep?.(view) === true || (!isGuideBuilder(view) && (showStopped || !isStopped(view) || hasAgenda(view)));
+): boolean =>
+  keep?.(view) === true ||
+  (!isGuideBuilder(view) && (showStopped || !isStopped(view) || hasAgenda(view) || isPinned(view)));
 
 /** The tallies the filter controls print, from the sessions already past the stopped rule. */
 export interface ListTallies {
@@ -174,6 +197,8 @@ export const listTallies = (
 };
 
 export interface SessionsBarView extends ListTallies {
+  /** The owner's pinned sessions, oldest pin first: the "Pinned" group above all. Not repeated below. */
+  readonly pinned: readonly SessionView[];
   /** Sessions with open Attention, newest first: the "Needs you" group at the top. Not repeated in `groups`. */
   readonly needsYou: readonly SessionView[];
   readonly groups: readonly SessionGroup[];
@@ -190,12 +215,17 @@ export const sessionsBarView = (
   keep?: (view: SessionView) => boolean,
   groupNeedsYou = true,
 ): SessionsBarView => {
-  const { waiting, rest } = pullNeedsYou(
+  const { pinned, rest: unpinned } = pullPinned(
     sessions.filter(view => listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode)),
     view => view,
-    groupNeedsYou,
   );
-  return { needsYou: waiting, groups: groupByProject(rest, projects, true), ...listTallies(sessions, filter, keep) };
+  const { waiting, rest } = pullNeedsYou(unpinned, view => view, groupNeedsYou);
+  return {
+    pinned,
+    needsYou: waiting,
+    groups: groupByProject(rest, projects, true),
+    ...listTallies(sessions, filter, keep),
+  };
 };
 
 /**

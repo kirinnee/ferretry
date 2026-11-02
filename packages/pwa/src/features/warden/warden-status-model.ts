@@ -23,6 +23,7 @@ import type {
   WardenStatusView,
   WardenTriageReason,
 } from '@ferretry/protocol';
+import { wardenFlags } from '@ferretry/protocol';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { ANOMALY_CHIPS, layersLabel } from './warden-vocabulary.ts';
 
@@ -112,7 +113,7 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
   );
   const blessed = new Set(status.blessings.map(blessing => blessing.sessionId));
   const sessions = new Set(status.actions.filter(entry => entry.outcome === 'held').map(entry => entry.sessionId));
-  for (const anomaly of status.anomalies)
+  for (const anomaly of wardenFlags(status))
     if (!watched.has(anomaly.sessionId) && !blessed.has(anomaly.sessionId)) sessions.add(anomaly.sessionId);
   return sessions.size;
 };

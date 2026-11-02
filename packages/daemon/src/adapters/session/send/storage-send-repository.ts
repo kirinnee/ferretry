@@ -91,7 +91,7 @@ export class StorageSendRepository implements SendRepository {
       // CLEARED MEANS ABSENT, NOT `null`: this writes the document `SessionStateSchema` governs, and a
       // `null` in an optional STRING field makes every surface that parses before serving drop the
       // session it just saw. The resume repository learned this the expensive way.
-      if (change.reason === undefined) delete next.reason;
+      if (change.reason === undefined && change.keepReason !== true) delete next.reason;
       if (change.restartTurnClock) {
         // A new turn is a new liveness episode. The turn clock restarts, the activity ledger is
         // re-anchored, and the previous turn's nudge mark goes — otherwise a stale nudge lets the

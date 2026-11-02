@@ -220,6 +220,46 @@ describe('labels and order', () => {
   });
 });
 
+describe('pinned ferrets across machines', () => {
+  const pinned = (id: string, minutes: number, extra: Parameters<typeof sessionView>[1] = {}) =>
+    sessionView(id, { ...extra, config: { cwd: '/work/ferretry', ...extra.config }, pinnedAt: at(minutes) });
+
+  test('are not lifted unless asked', () => {
+    const view = allMachinesView([machine(STUDIO, [pinned('p', 1)])]);
+    expect(view.pinned).toEqual([]);
+    expect(view.machines[0]?.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['p']);
+  });
+
+  test('merge oldest pin first across machines, each naming its machine, and leave their project group', () => {
+    const view = allMachinesView([machine(STUDIO, [pinned('s', 7), busy]), machine(LAPTOP, [pinned('l', 2)])], {
+      pinnedFirst: true,
+    });
+    expect(view.pinned.map(entry => [entry.daemonId, entry.machineName, entry.view.config.id])).toEqual([
+      [LAPTOP, 'laptop', 'l'],
+      [STUDIO, 'studio', 's'],
+    ]);
+    expect(view.machines[0]?.pinned).toBe(1);
+    expect(view.machines[0]?.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['b']);
+  });
+
+  test('a pinned ferret with open Attention is in Pinned only, and a finished one stays', () => {
+    const asking = pinned('q2', 4, { state: { status: 'awaiting_question', turnStateAt: at(5), attention: open(5) } });
+    const done = pinned('d', 6, { state: { status: 'completed' } });
+    const view = allMachinesView([machine(STUDIO, [asking, done])], {
+      filter: { mode: 'all', showStopped: false },
+      pinnedFirst: true,
+    });
+    expect(view.pinned.map(entry => entry.view.config.id)).toEqual(['q2', 'd']);
+    expect(view.needsYou).toEqual([]);
+  });
+
+  test('on a machine that is down stay among its own rows', () => {
+    const view = allMachinesView([machine(STUDIO, [pinned('p', 1)], 'offline')], { pinnedFirst: true });
+    expect(view.pinned).toEqual([]);
+    expect(view.machines[0]?.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['p']);
+  });
+});
+
 describe('needs-you is only open Attention', () => {
   test('a Your turn session with no Attention item is not pinned, and grouping off pins nothing', () => {
     const turn = sessionView('t', { state: { status: 'awaiting_user', turnStateAt: at(0) } });

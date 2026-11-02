@@ -195,6 +195,10 @@ function RowActions({
         ),
       );
     },
+    setPinned: async pinned => {
+      const daemon = await routedClient(connection);
+      publish(await (pinned ? daemon.pinSession(sessionId) : daemon.unpinSession(sessionId)));
+    },
     stop: async () => {
       publish(await (await routedClient(connection)).stop(sessionId, 'stopped from the sessions bar'));
     },

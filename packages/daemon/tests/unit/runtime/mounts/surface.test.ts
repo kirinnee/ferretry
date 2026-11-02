@@ -470,6 +470,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  sessionPin: {
+    pin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    unpin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionAgendaMode: {
     get: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -964,6 +972,7 @@ describe('the mounted daemon surface', () => {
       1 + // the permission prompt's answer: a digit or Escape into the same pane, governed the same way
       1 + // a harness dialog's answer (hooks review, an update, a sign-in): arrows then Enter into the same pane, governed the same way
       1 + // an agent's rename: a new first name or task title
+      2 + // pinning an agent to the top of the sidebar, and unpinning it (docs/grants.md)
       1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
       2 + // a ferret's agenda mode: its read and its switch, from its next launch (docs/notifications.md)
       5 + // Pack mode: its view, recommend, a sub-ferret start, a result and a ferret's switch (docs/pack-mode.md)
@@ -1273,6 +1282,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/rename',
+      'POST /v1/sessions/:sessionId/pin',
+      'POST /v1/sessions/:sessionId/unpin',
       'PATCH /v1/sessions/:sessionId/hypermedia',
       'GET /v1/sessions/:sessionId/agenda-mode',
       'PATCH /v1/sessions/:sessionId/agenda-mode',

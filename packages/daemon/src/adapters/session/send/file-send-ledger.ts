@@ -29,9 +29,12 @@ interface ReadLedger {
  * line — the signature of a crash during the append — is skipped rather than allowed to poison the
  * whole ledger.
  *
- * READ-MODIFY-WRITE IS SAFE HERE because every caller holds the session's own serial lock: the send
- * service takes it before accepting, revising or withdrawing. This class does not take one of its
- * own, which would be a second lock ordering to reason about for no benefit.
+ * READ-MODIFY-WRITE IS ONE TRANSACTION, serialized per session HERE. The send service writes under its
+ * session lock, but the tracker writes under its own (it calls the send service, so the two cannot share
+ * one), and a tracker write that read a record before the service counted an Enter used to append after it
+ * and put the count back (B144: seven Enters against a limit of five). So every accept, revise, withdraw and
+ * settle reads the latest record and appends its successor with no other write to that session between. It
+ * is a leaf lock — nothing is awaited under it but this file — so it adds no ordering to reason about.
  *
  * READS ARE INCREMENTAL. The tracker, the service and every chat page's poll read the whole ledger, and a
  * long-lived lead's was 5.9 MB, parsed line by line on every look. What was parsed is kept per session with
@@ -46,6 +49,8 @@ export class FileSendLedger implements SendLedger {
   private readonly read = new Map<SessionId, ReadLedger>();
   /** One read of a session's file at a time, so two never move the same offset. */
   private readonly reading = new Map<SessionId, Promise<unknown>>();
+  /** One read-modify-append per session at a time: the tail of each session's chain of writes. */
+  private readonly writing = new Map<SessionId, Promise<unknown>>();
 
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
@@ -57,6 +62,10 @@ export class FileSendLedger implements SendLedger {
   }
 
   async accept(id: SessionId, record: SendRecord): Promise<{ record: SendRecord; created: boolean }> {
+    return await this.transaction(id, async () => await this.acceptNow(id, record));
+  }
+
+  private async acceptNow(id: SessionId, record: SendRecord): Promise<{ record: SendRecord; created: boolean }> {
     const existing = (await this.all(id)).get(record.sendId);
     // The whole of idempotency: a retried request finds the first record and nothing is typed twice.
     // A WITHDRAWN record is the one exception — nothing was ever typed for it, so the same id may
@@ -71,6 +80,14 @@ export class FileSendLedger implements SendLedger {
     sendId: string,
     patch: Partial<Pick<SendRecord, 'path' | 'matchText' | 'payloadFile' | 'held' | 'turn'>>,
   ): Promise<SendRecord | undefined> {
+    return await this.transaction(id, async () => await this.reviseNow(id, sendId, patch));
+  }
+
+  private async reviseNow(
+    id: SessionId,
+    sendId: string,
+    patch: Partial<Pick<SendRecord, 'path' | 'matchText' | 'payloadFile' | 'held' | 'turn'>>,
+  ): Promise<SendRecord | undefined> {
     const current = (await this.all(id)).get(sendId);
     // Only a LIVE accepted record may be revised. Revising a withdrawn or delivered one would rewrite
     // a settled fate as though it were still in flight.
@@ -81,6 +98,10 @@ export class FileSendLedger implements SendLedger {
   }
 
   async withdraw(id: SessionId, sendId: string, reason: string): Promise<SendRecord | undefined> {
+    return await this.transaction(id, async () => await this.withdrawNow(id, sendId, reason));
+  }
+
+  private async withdrawNow(id: SessionId, sendId: string, reason: string): Promise<SendRecord | undefined> {
     const current = (await this.all(id)).get(sendId);
     if (current === undefined || current.fate !== 'accepted') return undefined;
     const next: SendRecord = { ...current, fate: 'withdrawn' };
@@ -93,6 +114,22 @@ export class FileSendLedger implements SendLedger {
   }
 
   async settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {
+    return await this.transaction(id, async () => await this.settleNow(id, sendId, patch));
+  }
+
+  /** Runs one read-modify-append after every earlier one for this session has finished. */
+  private async transaction<T>(id: SessionId, work: () => Promise<T>): Promise<T> {
+    const previous = this.writing.get(id) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(work);
+    this.writing.set(id, result);
+    try {
+      return await result;
+    } finally {
+      if (this.writing.get(id) === result) this.writing.delete(id);
+    }
+  }
+
+  private async settleNow(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {
     const current = (await this.all(id)).get(sendId);
     // A tombstone is never settled again, and neither is a cancelled send — a tracker look that began
     // before the cancel must not write a stale fate over it — EXCEPT by proof it was delivered: then

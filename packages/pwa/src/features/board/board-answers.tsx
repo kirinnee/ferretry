@@ -31,14 +31,18 @@ export interface BoardAnswersInput {
   readonly onNotice: (message: string | null) => void;
   /** Draw the composer over the whole page (a chat's side pane would clip it), rather than in place. */
   readonly portal?: boolean;
+  /** The host draws the composer itself, under the card (`composerFor`), as wide as the card: no sheet, no popup. */
+  readonly inline?: boolean;
 }
 
 export interface BoardAnswers {
   /** One answer on one card; `answer` names the control that asked, which words the composer and spins. */
   readonly requestMove: (card: BoardCardOf, group: BoardGroupOf, laneId: string, answer?: BoardAnswer) => void;
   readonly answerFor: (card: BoardCardOf) => BoardAnswerState;
-  /** The send-back composer while a move back waits for its words; `null` otherwise. */
+  /** The send-back composer while a move back waits for its words; `null` otherwise, and always `null` when `inline`. */
   readonly composer: ReactNode;
+  /** The composer under this card while its move back waits for words (`inline` only); `null` for any other card. */
+  readonly composerFor: (card: BoardCardOf) => ReactNode;
 }
 
 interface PendingMove {
@@ -58,20 +62,20 @@ const sendBackWords = (pending: PendingMove) => {
     case 'send-back':
       return {
         heading: `Send ${title} back to ${pending.toName}`,
-        placeholder: 'What should change in the plan? The ferret reads this.',
+        placeholder: 'What should change?',
         submitLabel: 'Send back',
       };
     case 'reopen':
       return {
         heading: `Reopen ${title}: back to ${pending.toName}`,
-        placeholder: 'Why is it going back? The ferret reads this.',
+        placeholder: 'Why is it going back?',
         submitLabel: 'Reopen',
         busyLabel: 'Reopening…',
       };
     default:
       return {
         heading: `Move ${title} back to ${pending.toName}`,
-        placeholder: 'Why is it going back? The ferret reads this.',
+        placeholder: 'Why is it going back?',
         submitLabel: 'Move back',
         busyLabel: 'Moving…',
       };
@@ -92,9 +96,9 @@ export function useBoardAnswers({
   phone,
   onNotice,
   portal = false,
+  inline = false,
 }: BoardAnswersInput): BoardAnswers {
   const [pending, setPending] = useState<PendingMove | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   // Per card: the answer in flight, and the last refusal. Several cards can be settling at once.
   const [settling, setSettling] = useState<ReadonlyMap<string, BoardAnswer>>(() => new Map());
   const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -135,14 +139,17 @@ export function useBoardAnswers({
         return;
       }
       if (plan.kind === 'ask-reason') {
+        if (connectionOf(card.daemonId) === undefined) {
+          onNotice('That machine is not connected here, so the card cannot be sent back from this page.');
+          return;
+        }
         const toName = group.laneSet?.lanes.find(lane => lane.id === plan.to)?.name ?? plan.to;
-        setProblem(null);
         setPending({ card, group, to: plan.to, toName, answer });
         return;
       }
       if (plan.kind === 'send') void send(card, group, plan.to, answer);
     },
-    [send, settling, onNotice],
+    [send, settling, onNotice, connectionOf],
   );
 
   // The composer's files go to the card's ferret: its assignee, else its owner ferret (where the daemon looks).
@@ -152,14 +159,13 @@ export function useBoardAnswers({
     pending === null ? null : (pending.card.task.assignee ?? pending.card.task.owner),
   );
 
-  const submit = async ({ reason, attachmentIds }: SendBack): Promise<void> => {
-    if (pending === null) return;
-    setProblem(null);
+  const submit = async ({ reason, attachmentIds }: SendBack): Promise<string | null> => {
+    if (pending === null) return null;
     const attachments =
       attachmentIds.length === 0 || files === null ? undefined : { from: files.sessionId, ids: [...attachmentIds] };
     const refused = await send(pending.card, pending.group, pending.to, pending.answer, reason, attachments);
     if (refused === null) setPending(null);
-    else setProblem(refused);
+    return refused;
   };
 
   const answerFor = useCallback(
@@ -171,27 +177,36 @@ export function useBoardAnswers({
     [settling, refusals],
   );
 
+  const daemon = pending === null ? undefined : connectionOf(pending.card.daemonId);
+  const box =
+    pending === null || daemon === undefined ? null : (
+      <BoardSendBack
+        busy={settling.has(pending.card.key)}
+        error={null}
+        files={files}
+        key={pending.card.key}
+        onCancel={() => setPending(null)}
+        onSubmit={submit}
+        target={{
+          daemon,
+          sessionId: files?.sessionId ?? pending.card.task.assignee ?? pending.card.task.owner ?? pending.card.task.id,
+        }}
+        {...sendBackWords(pending)}
+      />
+    );
   const drawn =
-    pending === null ? null : (
+    box === null || inline ? null : (
       <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
-        <BoardSendBack
-          busy={settling.has(pending.card.key)}
-          error={problem}
-          files={files}
-          key={pending.card.key}
-          onCancel={() => {
-            setPending(null);
-            setProblem(null);
-          }}
-          onSubmit={sendBack => void submit(sendBack)}
-          {...sendBackWords(pending)}
-        />
+        {box}
       </div>
     );
+  const composerFor = (card: BoardCardOf): ReactNode =>
+    inline && pending !== null && pending.card.key === card.key ? box : null;
 
   return {
     requestMove,
     answerFor,
     composer: drawn === null || !portal ? drawn : createPortal(drawn, document.body),
+    composerFor,
   };
 }

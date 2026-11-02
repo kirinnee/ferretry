@@ -18,6 +18,8 @@ import {
   History,
   KeyRound,
   Pencil,
+  Pin,
+  PinOff,
   Play,
   Plug,
   RotateCw,
@@ -50,6 +52,11 @@ export interface CoreActionContext {
    * the menu then has no such row.
    */
   readonly restartOnEarlierConversation?: () => Promise<void>;
+  /**
+   * Pins or unpins the ferret to the top of the sessions bar. Absent where a host cannot reach the
+   * route; the menu then has no such row.
+   */
+  readonly setPinned?: (pinned: boolean) => Promise<void>;
   readonly stop: () => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly renderRename: (host: SessionActionFormHost) => ReactNode;
@@ -63,6 +70,7 @@ export const SESSION_ACTION_IDS = {
   rename: 'rename',
   fork: 'fork',
   copyId: 'copy-id',
+  pin: 'pin',
   migrate: 'move-login',
   convert: 'move-harness',
   machine: 'move-machine',
@@ -77,6 +85,22 @@ const terminal = (view: SessionView): boolean => TERMINAL_STATUSES.has(view.stat
 const killFailed = (view: SessionView): boolean => view.state.status === 'kill_failed';
 
 export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreActionContext>[] = [
+  {
+    group: 'session',
+    order: 7,
+    build: context => {
+      const { setPinned } = context;
+      if (!context.canControl || setPinned === undefined) return null;
+      const pinned = context.view.pinnedAt !== undefined;
+      return {
+        kind: 'run',
+        id: SESSION_ACTION_IDS.pin,
+        label: pinned ? 'Unpin' : 'Pin to top',
+        icon: pinned ? PinOff : Pin,
+        run: () => setPinned(!pinned),
+      };
+    },
+  },
   {
     group: 'session',
     order: 10,

@@ -29,3 +29,27 @@ describe('what a queued send is answered', () => {
     should(answerOf(record({ fate: 'withdrawn' })).fate).equal('accepted');
   });
 });
+
+describe('B144: a message still in Ferretry’s queue says why', () => {
+  it('should carry the queue’s reason, and the send of ours it waits behind', () => {
+    should(answerOf(undefined, { state: 'queued', waitReason: 'draft', waitBehind: 'send-0' })).deepEqual({
+      disposition: 'queued',
+      fate: 'accepted',
+      waitReason: 'draft',
+      waitBehind: 'send-0',
+    });
+    should(answerOf(undefined, { state: 'queued', waitReason: 'question' })).deepEqual({
+      disposition: 'queued',
+      fate: 'accepted',
+      waitReason: 'question',
+    });
+  });
+
+  it('should say no reason once a key has gone, or while it is being typed', () => {
+    should(answerOf(undefined, { state: 'typing' })).deepEqual({ disposition: 'queued', fate: 'accepted' });
+    should(answerOf(record({}), { state: 'queued', waitReason: 'draft' })).deepEqual({
+      disposition: 'delivered',
+      fate: 'accepted',
+    });
+  });
+});

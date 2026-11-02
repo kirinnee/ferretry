@@ -2,7 +2,13 @@ import type { SendDisposition } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
-import { describeDisposition, describePark, planSend } from '../../../src/lib/session/send-plan.ts';
+import {
+  describeDisposition,
+  describePark,
+  describeSendResult,
+  planSend,
+  waitingInFerretryQueue,
+} from '../../../src/lib/session/send-plan.ts';
 
 const HUMAN: SessionEnvironment = { cwd: '/work/repo' };
 const IN_PANE: SessionEnvironment = { cwd: '/work/repo', callerSessionId: 'ses-caller' };
@@ -112,6 +118,34 @@ describe('describeDisposition', () => {
       should(actual).match(expected);
     });
   }
+});
+
+describe('describeSendResult', () => {
+  it('should say a message still in Ferretry’s queue is not delivered, and why, never the agent’s own queue', () => {
+    const said = describeSendResult({ disposition: 'queued', fate: 'accepted', waitReason: 'question' });
+    should(said).match(
+      /^NOT delivered yet: it is waiting in Ferretry's queue \(not the agent's\), because the agent is asking a question/,
+    );
+    should(said).not.match(/auto-submits/);
+  });
+
+  it('should name the unconfirmed send it waits behind, and the re-submit that was attempted', () => {
+    const said = describeSendResult({
+      disposition: 'queued',
+      fate: 'accepted',
+      waitReason: 'draft',
+      waitBehind: 'send-0',
+    });
+    should(said).match(/behind an unconfirmed earlier send \(send-0\)/);
+    should(said).match(/attempted a re-submit \(pressed Enter\)/);
+  });
+
+  it('should read an older daemon’s untyped answer the same way, and leave a typed one as it was', () => {
+    should(describeSendResult({ disposition: 'queued', fate: 'accepted' })).match(/not typed into the agent yet/);
+    should(describeSendResult({ disposition: 'queued', fate: 'queued' })).match(/auto-submits at the turn boundary/);
+    should(describeSendResult({ disposition: 'delivered', fate: 'accepted' })).equal('delivered');
+    should(waitingInFerretryQueue({ disposition: 'sent', fate: 'accepted' })).be.false();
+  });
 });
 
 describe('describePark', () => {
