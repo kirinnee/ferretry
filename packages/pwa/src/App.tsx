@@ -270,7 +270,7 @@ import { RouterProvider, useRouter } from './lib/router.tsx';
 import { captureRuleDeepLink, listenForRuleDeepLinks } from './lib/rule-deep-link.ts';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
-import { joinOutbox, joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
+import { joinOutbox, joinQueue, queueActions, readSessionQueue, withdrawReplyVia } from './lib/send-queue.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
 import {
@@ -2338,6 +2338,9 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}
             key={card.key}
+            onReplied={sent => inbox.replied.mark(card, sent)}
+            onRestored={() => inbox.replied.takeRestore(card.key)}
+            restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
             phoneEnterKeyPreference={controls.composerPhoneEnterKey}
             usage={store.usage}
             view={card.view}
@@ -2655,7 +2658,12 @@ export function AppShell() {
   );
   const noteRuleLinkElsewhere = useCallback(() => setRuleLinkNotice(RULE_LINKED_ELSEWHERE_WORDS), []);
   useRuleDeepLink(ruleLinkMachines, ruleLinkRecord?.daemonId, navigate, noteRuleLinkElsewhere);
-  const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest);
+  // Undo of an Inbox reply takes the message back out of that ferret's queue, the way the chat cancels a waiting one.
+  const withdrawReply = useMemo(
+    () => withdrawReplyVia(inboxMachines, store.clients, store.outbox),
+    [inboxMachines, store],
+  );
+  const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest, withdrawReply);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>

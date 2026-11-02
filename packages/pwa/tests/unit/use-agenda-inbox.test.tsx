@@ -18,7 +18,7 @@ import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import type { DaemonHealthRead } from '../../src/lib/daemon-health.ts';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import '../support/dom.ts';
@@ -144,15 +144,17 @@ function Probe({
   machines,
   timers,
   toTest,
+  withdraw,
   onInbox,
 }: {
   readonly client: DaemonAgendaClient;
   readonly machines: readonly AgendaInboxMachine[];
   readonly timers: DeferredTimers;
   readonly toTest?: AgendaInbox['toTest'];
+  readonly withdraw?: Parameters<typeof useAgendaInboxModel>[4];
   readonly onInbox: (inbox: AgendaInbox) => void;
 }) {
-  onInbox(useAgendaInboxModel(client, machines, timers, toTest));
+  onInbox(useAgendaInboxModel(client, machines, timers, toTest, withdraw));
   return null;
 }
 
@@ -706,6 +708,79 @@ describe('useAgendaInboxModel', () => {
     expect(read.parked.map(entry => entry.item.id)).toEqual(['A5']);
     expect(read.total).toBe(read.cards.length + read.toTest.length);
     expect(read.total).toBe(3);
+  });
+});
+
+describe('a reply the owner takes back', () => {
+  const replying = async (withdraw?: Parameters<typeof useAgendaInboxModel>[4]) => {
+    const { client, calls } = fakeClient(new Map([['studio/a', board('a', [item('A1', 1)])]]));
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const machines: readonly AgendaInboxMachine[] = [
+      { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+    ];
+    view = await mount(
+      <Probe
+        client={client}
+        machines={machines}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+        withdraw={withdraw}
+      />,
+    );
+    await settle();
+    const read = (): AgendaInbox => inbox as unknown as AgendaInbox;
+    return { calls, read };
+  };
+
+  test('hides the card at once, withdraws the waiting message from its machine, and unsnoozes the item there', async () => {
+    const taken: string[] = [];
+    const { calls, read } = await replying(async (card, sendId) => {
+      taken.push(`${card.daemonId}/${card.view.config.id}/${sendId}`);
+      return 'withdrawn';
+    });
+    const first = read().cards[0];
+    if (first === undefined) throw new Error('no card');
+    await interact(async () => {
+      read().replied.mark(first, { words: 'later', sendId: 'm1', disposition: 'queued' });
+    });
+    await settle();
+    expect(read().cards).toEqual([]);
+    expect(read().parked.map(each => each.key)).toEqual([first.key]);
+    expect(read().repliedState.entries).toHaveLength(1);
+
+    await interact(async () => read().replied.undo());
+    await settle();
+    expect(taken).toEqual(['studio/a/m1']);
+    expect(calls.some(call => call.method === 'unsnooze' && call.sessionId === 'a')).toBe(true);
+    expect(read().repliedState.restores).toEqual([{ key: first.key, text: 'later' }]);
+    expect(read().cards.map(each => each.key)).toEqual([first.key]);
+  });
+
+  test('says so when this browser has no way to withdraw, and still brings the card back', async () => {
+    const { calls, read } = await replying();
+    const first = read().cards[0];
+    if (first === undefined) throw new Error('no card');
+    await interact(async () => {
+      read().replied.mark(first, { words: 'later', sendId: 'm1', disposition: 'queued' });
+    });
+    await interact(async () => read().replied.undo());
+    await settle();
+    expect(read().repliedState.notice?.kind).toBe('refused');
+    expect(calls.some(call => call.method === 'unsnooze')).toBe(true);
+  });
+
+  test('says it could not put the card back when its machine is no longer paired', async () => {
+    const { read } = await replying(async () => 'withdrawn');
+    const first = read().cards[0];
+    if (first === undefined) throw new Error('no card');
+    const stranger = { ...first, daemonId: daemonId('gone'), key: 'gone/a/A1' };
+    await interact(async () => {
+      read().replied.mark(stranger, { words: 'later', sendId: 'm1', disposition: 'queued' });
+    });
+    await interact(async () => read().replied.undo());
+    await settle();
+    expect(read().repliedState.notice).toMatchObject({ kind: 'not-back' });
   });
 });
 

@@ -18,6 +18,8 @@
  *   ?view=input           an INPUT item open (a short typed value: the Type in chip)
  *   ?view=open-headings   an item with a LONG ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
+ *   ?view=open            doubles as the reply run (`inbox-reply-screenshot.ts`): Send moves on to the next card with
+ *                         the "Replied" toast, Undo brings the card back with its words restored
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
  */
@@ -31,6 +33,7 @@ import type { ToTestHost } from '../src/features/agenda/to-test-rows.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import type { ClearPort } from '../src/lib/agenda-clear-agents.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
+import { RepliedAgenda, withRepliedCards, withRepliedParked } from '../src/lib/agenda-replied.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -501,12 +504,20 @@ const TO_TEST_HOST: ToTestHost = {
   ports: {},
   connectionOf: () => boardLaptop,
 };
-const FAKE_CLIENT = { send: async () => ({}) as never };
+// A send is accepted and waits in the ferret's queue: that is what makes Undo able to take it back.
+const FAKE_CLIENT = { send: async () => ({ disposition: 'queued', sendId: 'queue-1' }) as never };
 const committed: unknown[] = [];
 (window as unknown as { __committed: unknown[] }).__committed = committed;
 const deferred = new DeferredAgendaActions(async (_card, action) => {
   committed.push(action);
 });
+// No board here, so no read ever agrees: the overlay is kept for the whole visit.
+const replied = new RepliedAgenda(
+  { withdraw: async () => 'withdrawn', unsnooze: async () => undefined },
+  undefined,
+  undefined,
+  3_600_000,
+);
 
 function Inbox({
   phone,
@@ -523,21 +534,25 @@ function Inbox({
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const [source, setSource] = useState(from);
+  const repliedState = useSyncExternalStore(replied.subscribe, replied.getSnapshot);
   const held = new Set([...state.pending.map(entry => entry.key), ...state.sending]);
+  const everyCard = withRepliedCards(extra === undefined ? OWNER : [extra, ...OWNER], repliedState);
   const inbox: AgendaInbox = {
     unread: [],
-    total: OWNER.length + (extra === undefined ? 0 : 1) + TO_TEST.length,
-    cards: (extra === undefined ? OWNER : [extra, ...OWNER]).filter(card => !held.has(card.key)),
+    total: everyCard.length + TO_TEST.length,
+    cards: everyCard.filter(card => !held.has(card.key)),
     withFerret: FERRET,
     reading: false,
     unavailable: [],
     resolved: [],
     resolvedReading: false,
-    parked: PARKED,
+    parked: withRepliedParked(PARKED, repliedState),
     parkedWhole: true,
     loadResolved: () => undefined,
     deferred,
     deferredState: state,
+    replied,
+    repliedState,
     connectionFor: id => (id === LAPTOP ? { ...MACHINE, daemonId: LAPTOP } : MACHINE),
     toTest: TO_TEST,
     toTestSnoozed: TO_TEST_SNOOZED,
@@ -585,6 +600,9 @@ function Inbox({
                   formKey={open.key}
                   connection={MACHINE}
                   itemId={open.item.id}
+                  onReplied={sent => replied.mark(open, sent)}
+                  onRestored={() => replied.takeRestore(open.key)}
+                  restore={repliedState.restores.find(each => each.key === open.key)?.text}
                   view={open.view}
                 />
               )}

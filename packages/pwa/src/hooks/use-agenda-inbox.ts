@@ -44,10 +44,19 @@ import {
   inboxUnavailable,
   sessionsToReadForResolved,
   type UnreadSession,
+  UNSNOOZE_ACTION,
   unreadSessions,
   withFerretCards,
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
+import {
+  type BoardItemRead,
+  RepliedAgenda,
+  type RepliedPorts,
+  type RepliedState,
+  withRepliedCards,
+  withRepliedParked,
+} from '../lib/agenda-replied.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
@@ -104,6 +113,12 @@ export interface AgendaInbox {
   readonly loadResolved: () => void;
   readonly deferred: DeferredAgendaActions;
   readonly deferredState: DeferredAgendaState;
+  /**
+   * Replies the owner just sent from an Inbox card: the item is already out of `cards` and in `parked` while the boards
+   * catch up, and Undo takes the reply back (`lib/agenda-replied.ts`).
+   */
+  readonly replied: RepliedAgenda;
+  readonly repliedState: RepliedState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
   /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
   readonly canSnooze?: (daemonId: DaemonId) => boolean;
@@ -206,6 +221,7 @@ export function useAgendaInboxModel(
   machines: readonly AgendaInboxMachine[],
   timers?: DeferredTimers,
   toTestRead: readonly ToTestCard[] = NO_TO_TEST,
+  withdraw?: RepliedPorts['withdraw'],
 ): AgendaInbox {
   // A card to test is named for its owner's thread (the lineage root), never the sub-ferret that built it.
   const allSessions = useMemo(() => machines.flatMap(machine => machine.sessions ?? []), [machines]);
@@ -268,6 +284,28 @@ export function useAgendaInboxModel(
     };
   }, [deferred]);
   const deferredState = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot, deferred.getSnapshot);
+  const withdrawRef = useRef(withdraw);
+  withdrawRef.current = withdraw;
+  const replied = useMemo(
+    () =>
+      new RepliedAgenda(
+        {
+          withdraw: async (card, sendId) => {
+            const take = withdrawRef.current;
+            if (take === undefined) throw new Error('This browser cannot take a message back from that machine.');
+            return await take(card, sendId);
+          },
+          unsnooze: async card => {
+            const connection = connectionFor(card.daemonId);
+            if (connection === undefined) throw new Error('That machine is no longer paired with this browser.');
+            await runInboxAction(client, connection, card, UNSNOOZE_ACTION);
+          },
+        },
+        timers,
+      ),
+    [client, connectionFor, timers],
+  );
+  const repliedState = useSyncExternalStore(replied.subscribe, replied.getSnapshot, replied.getSnapshot);
 
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
@@ -341,7 +379,7 @@ export function useAgendaInboxModel(
     answeredSuggestions.getSnapshot,
     answeredSuggestions.getSnapshot,
   );
-  const freshCards = useMemo(
+  const boardCards = useMemo(
     () =>
       inboxCards(
         unread,
@@ -353,7 +391,18 @@ export function useAgendaInboxModel(
       }),
     [unread, boards, deferredState, answered],
   );
+  // A reply just sent leaves the deck at once, and an Undo's card is back at once, before any board says so.
+  const freshCards = useMemo(() => withRepliedCards(boardCards, repliedState), [boardCards, repliedState]);
   const cards = useStable(freshCards, cardsKey(freshCards));
+  // The overlay goes the moment the boards agree with it: parked or gone (or asked again), or listed open once Undo landed.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `repliedState` is the trigger -- a new entry (or Undo settling) must be checked against the boards at once
+  useEffect(() => {
+    const listed = new Set(boardCards.map(card => card.key));
+    replied.reconcile((card): BoardItemRead => {
+      const board = boards.snapshots.get(daemonSessionKey({ daemonId: card.daemonId, sessionId: card.view.config.id }));
+      return board === undefined ? undefined : (board.items.find(item => item.id === card.item.id) ?? null);
+    }, listed);
+  }, [replied, repliedState, boards, boardCards]);
   // A gate item stands in for its card's to-test row on a machine that raises them, open or parked (`gateHolders`).
   const sources = useMemo(
     () =>
@@ -422,12 +471,15 @@ export function useAgendaInboxModel(
   );
   const freshParked = useMemo(
     () =>
-      inboxParked(
-        sources,
-        itemsOf,
-        new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+      withRepliedParked(
+        inboxParked(
+          sources,
+          itemsOf,
+          new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+        ),
+        repliedState,
       ),
-    [sources, itemsOf, deferredState],
+    [sources, itemsOf, deferredState, repliedState],
   );
   const parked = useStable(freshParked, cardsKey(freshParked));
   // Every machine that rolls up its conversations' items is read to the end on mount and whenever the owner opens
@@ -495,6 +547,8 @@ export function useAgendaInboxModel(
       loadResolved,
       deferred,
       deferredState,
+      replied,
+      repliedState,
       connectionFor,
       canSnooze,
     }),
@@ -514,6 +568,8 @@ export function useAgendaInboxModel(
       loadResolved,
       deferred,
       deferredState,
+      replied,
+      repliedState,
       connectionFor,
       canSnooze,
     ],

@@ -232,7 +232,7 @@ would lose it when the ferret still needs something.
   is refused (`invalid`, naming the missing flags), and so is a bare `fy agenda surface <id>` of a replied item.
   An answer to the owner's own question (`--question-answer`) counts as new and needs no `--back`. The owner, the
   daemon's timer and a snoozed or never-replied item are unaffected.
-- The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list").
+- The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list"). The Inbox does not wait for the next board read: a reply sent from an open Inbox item is shown as replied at once, with an Undo (see "In the Inbox").
 - Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a response, as `done`.
 - **Warden items follow the same rule.** A daemon-raised item the owner replied to parks like any other; it is
   not raised again for the same anomaly while the Warden's "already told" record holds.
@@ -708,6 +708,31 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
   replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
   (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
+
+- **A reply moves the Inbox on at once.** When a message typed in an open item's composer is accepted by the machine
+  (the send resolved: queued, delivered or revived), the item is marked **replied here, at once** — an overlay on what
+  the boards say (`lib/agenda-replied.ts`), the same fact the daemon records as `parked: { reason: 'replied' }` a board
+  read later. It leaves Stopped on you, Needs you, Answer quickly and the badge, appears under Replied, and the deck
+  deals the next card (past the last one, the end card). A failed send changes nothing: the card stays and the box keeps
+  its words and shows the error. A form item's Send is an answer, not a reply, and a notice is not parked by a reply, so
+  neither moves. The chat's own composer keeps today's behaviour: the daemon parks the item, with no toast.
+  - **The overlay never outlives the boards.** It drops when a board read shows the item parked or gone, or open under a
+    new ask (`waitingSince` moved: the ferret brought it back — its new ask wins), and at the latest after 30 s.
+  - **Toast: "Moved to Replied · Undo"**, the answer toast's look and five-second window; a polite status
+    (`role="status"`) for screen readers. It sits in its own row **between the open
+    card and the composer** (on a phone and on a wide screen alike), so it never covers the input, the send button or the
+    keys hint; where no composer row is drawn (the end of the run, a to-test step) it floats at the bottom as the answer
+    toast does.
+  - **Undo** brings the card back at once (the owner `unsnooze`, "Back to my list"), opens it, and puts the words back
+    in **that card's** composer — once, and only when the ferret has not read the message: the message is taken out of
+    the session queue by the route the chat uses to cancel a waiting message (`DELETE /v1/sessions/:id/queue/:messageId`;
+    a message still on this device is cancelled in the outbox). If the ferret already took it (the transport delivered
+    it at once, or the queue answers 409/404) Undo only brings the card back and says so: "Back on your list — Zoe
+    already read your reply." (words are never duplicated). If the queue cannot be reached the card still comes back
+    and the toast says the reply may still reach the ferret. The words are put back before the card is asked back, so a
+    failed unsnooze loses nothing.
+  - **Keys and focus.** The wide-screen run keys keep working after an advance. When focus was in the composer that went,
+    it lands on the next card's frame — never on a removed node; reduced motion drops the fly-off as everywhere.
 - **The open items are a deck**, on a phone and a wide screen alike. Swipe with a finger — from the item's head or its
   who-and-what line; the body scrolls — or press the arrow keys. **Only touch swipes, on every screen size** (decided by
   the gesture's `pointerType`, never by width): a mouse or trackpad drag never swipes or pulls down anywhere — Inbox
