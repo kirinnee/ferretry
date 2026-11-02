@@ -24,8 +24,11 @@ import {
   type CatalogInstall,
   type CatalogInstalled,
   type CatalogInstallList,
+  type CatalogChanges,
+  type CatalogMcpSetup,
   type CatalogInstallPreview,
   type CatalogInstallPreviewRequest,
+  type CatalogInstallPrefsRequest,
   type CatalogInstallRemoved,
   type CatalogInstallRequest,
   type CatalogInstallScope,
@@ -33,16 +36,25 @@ import {
   type CatalogInstallWarning,
   type CatalogProvenance,
   type CatalogSecretBindings,
+  catalogItemChanges,
   catalogItemReview,
   catalogItemWarnings,
   catalogSecretPlaceholders,
+  newDiffBudget,
   type FleetComponentInput,
   mcpServerRefusal,
   type SessionMcpServer,
   type SharedCatalogItem,
+  type SharedCatalogManifest,
 } from '@ferretry/protocol';
-import { verifyCatalogItem, verifySignedCatalogManifest, type RelayCrypto } from '@ferretry/relay';
+import {
+  verifyCatalogItem,
+  verifyCatalogItemAgainstVersions,
+  verifySignedCatalogManifest,
+  type RelayCrypto,
+} from '@ferretry/relay';
 import type { CallerGovernance } from '../api/capability.ts';
+import { type McpComponentRecord, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 import type { FleetCatalogService, FreshStepUpContext } from '../fleet/catalog-service.ts';
 import { type McpProjectFiles, McpProjectFileChanged, projectRootFor } from '../session-mcp/service.ts';
 import {
@@ -51,6 +63,15 @@ import {
   projectEntry,
   renderMcpProjectFile,
 } from '../session-mcp/project-file.ts';
+import { type EditedHashes, editedView, editedWords, hasEdits, NO_EDITS, sameEdits } from './edited.ts';
+import {
+  mcpAsInstalled,
+  setupOfProjectEntry,
+  skillAsInstalled,
+  withPlaceholders,
+  withUnreadableFiles,
+} from './on-disk-item.ts';
+import { type CatalogInstallPrefsStore, mergedPref, withPref } from './prefs.ts';
 import { CatalogPreviews, type HeldPreview } from './previews.ts';
 import {
   CatalogInstallRefusalError,
@@ -70,6 +91,8 @@ import {
 export interface CatalogInstallServiceDeps {
   readonly crypto: RelayCrypto;
   readonly store: CatalogInstallStore;
+  /** Stay and skip: what the person chose about future versions. Apart from the store, which stays at version 1. */
+  readonly prefs: CatalogInstallPrefsStore;
   /** Every folder a project write may land in: registered projects and live managed worktrees. */
   projectRoots(): Promise<readonly string[]>;
   readonly mcpFiles: McpProjectFiles;
@@ -137,10 +160,20 @@ interface ResolvedTarget {
   readonly root?: string;
 }
 
-/** What is at the destination now: the install this replaces, and the folder reading that VERIFIED it. */
+/**
+ * What is at the destination now: the install this replaces, the folder reading that VERIFIED it, and what of
+ * that install's own work was edited here since (see `edited.ts`).
+ */
 interface DestinationState {
   readonly replaces: CatalogInstallRecord | undefined;
   readonly reading: SkillFolderReading | undefined;
+  readonly edited: EditedHashes;
+}
+
+/** The item as it is on disk now, for the diff, and the files that could not be read into it. */
+interface InstalledItem {
+  readonly item: SharedCatalogItem;
+  readonly unreadable: readonly string[];
 }
 
 /** What a write landed: the files it recorded, what to tell the person, and the runtime component's hash. */
@@ -174,18 +207,50 @@ export class CatalogInstallService {
   /** `GET /v1/catalog-installs`. */
   async list(): Promise<CatalogInstallList> {
     const state = await this.deps.store.read();
+    const prefs = await this.deps.prefs.read();
+    return { installs: state.installs.map(record => this.#view(record, prefs.installs[record.installId])) };
+  }
+
+  /** `PATCH /v1/catalog-installs/<scope>/:installId`: stay on this version, or skip one. Writes no file but the choice. */
+  async setPrefs(
+    scope: CatalogInstallScope,
+    installId: string,
+    request: CatalogInstallPrefsRequest,
+  ): Promise<CatalogInstall> {
+    return await this.#inTurn(async () => {
+      const state = await this.deps.store.read();
+      const record = state.installs.find(install => install.installId === installId && install.target.scope === scope);
+      if (record === undefined)
+        return refuse('catalog_install_unknown', `There is no ${scope} install ${installId} on this machine.`);
+      const prefs = await this.deps.prefs.read();
+      const pref = mergedPref(prefs.installs[installId], request);
+      await this.deps.prefs.write(withPref(prefs, installId, pref));
+      return this.#view(record, pref);
+    });
+  }
+
+  #view(record: CatalogInstallRecord, pref: { hold?: true; skippedVersion?: number } | undefined): CatalogInstall {
     return {
-      installs: state.installs.map(
-        (record): CatalogInstall => ({
-          installId: record.installId,
-          installedAt: record.installedAt,
-          provenance: record.provenance,
-          target: record.target,
-          destination: record.destination,
-          secretBindings: record.secretBindings,
-        }),
-      ),
+      installId: record.installId,
+      installedAt: record.installedAt,
+      provenance: record.provenance,
+      target: record.target,
+      destination: record.destination,
+      secretBindings: record.secretBindings,
+      ...(pref?.hold === undefined ? {} : { hold: pref.hold }),
+      ...(pref?.skippedVersion === undefined ? {} : { skippedVersion: pref.skippedVersion }),
     };
+  }
+
+  /** An install that is gone has no choices left. Best effort: the install itself is already settled. */
+  async #dropPrefs(installId: string | undefined): Promise<void> {
+    if (installId === undefined) return;
+    try {
+      const prefs = await this.deps.prefs.read();
+      if (Object.hasOwn(prefs.installs, installId)) await this.deps.prefs.write(withPref(prefs, installId, {}));
+    } catch {
+      // A damaged preferences file is reported where it is read; it must not undo an install or a removal.
+    }
   }
 
   /** Verify in the contract's order and answer the review. Writes nothing, changes no state. */
@@ -200,9 +265,8 @@ export class CatalogInstallService {
     // 1. The signature: the manifest was signed by the machine it names.
     const manifest = await verifySignedCatalogManifest(this.deps.crypto, request.signedManifest);
     if (!manifest.ok) return refuse('catalog_signature_invalid', manifest.reason);
-    // 2. The item is exactly the version, kind, name and bytes the manifest lists.
-    const line = await verifyCatalogItem(this.deps.crypto, manifest.value, item);
-    if (!line.ok) return refuse('catalog_item_mismatch', line.reason);
+    // 2. The item is exactly the version, kind, name and bytes the manifest lists, or one the signed list offers.
+    const digest = await this.#verifiedDigest(request, manifest.value);
     const provenance: CatalogProvenance = {
       publisher: manifest.value.publisher,
       publisherName: manifest.value.publisherName,
@@ -212,7 +276,7 @@ export class CatalogInstallService {
       kind: item.kind,
       name: item.name,
       version: item.itemVersion,
-      digest: line.value.digest,
+      digest,
     };
     const target = await this.#canonicalTarget(request.target);
     const state = await this.deps.store.read();
@@ -224,7 +288,14 @@ export class CatalogInstallService {
     // 7. The target is one this machine knows.
     const resolved = await this.#resolveTarget(item, target);
     // 8. Nothing sits at the destination that we did not put there, and what we did put there is untouched.
-    const { replaces } = await this.#destinationState(item, target, resolved, state, judged.replaces);
+    const { replaces, reading, edited } = await this.#destinationState(item, target, resolved, state, judged.replaces);
+    const editedNow = hasEdits(edited) ? editedView(edited, this.#editedPrefix(item, resolved), item.name) : undefined;
+    if (editedNow !== undefined && request.replaceEdited !== true)
+      refuse(
+        'catalog_install_edited',
+        `Edited on this machine since it was installed: ${editedWords(editedNow)}. Nothing was replaced. Look at what changes, then replace your edits or keep them.`,
+      );
+    const changes = replaces === undefined ? undefined : await this.#changes(replaces, item, resolved, reading);
     const placeholders = catalogSecretPlaceholders(item);
     const held = caller.mayListSecrets ? await this.deps.secretNames() : undefined;
     const now = this.deps.now();
@@ -242,6 +313,7 @@ export class CatalogInstallService {
         target,
         allowOlder,
         placeholders,
+        ...(editedNow === undefined ? {} : { edited }),
       },
       now,
     );
@@ -256,10 +328,23 @@ export class CatalogInstallService {
       secrets: placeholders.map(placeholder =>
         held === undefined ? { placeholder } : { placeholder, held: held.has(placeholder) },
       ),
-      warnings: [...judged.warnings, ...catalogItemWarnings(item)],
+      warnings: [
+        ...judged.warnings,
+        ...(editedNow === undefined
+          ? []
+          : [
+              {
+                code: 'edited-locally' as const,
+                text: `You changed ${editedWords(editedNow)} here since it was installed. Installing replaces your changes with this version.`,
+              },
+            ]),
+        ...catalogItemWarnings(item),
+      ],
       ...(replaces === undefined
         ? {}
         : { replaces: { installId: replaces.installId, version: replaces.provenance.version } }),
+      ...(changes === undefined ? {} : { changes }),
+      ...(editedNow === undefined ? {} : { edited: editedNow }),
     };
   }
 
@@ -297,13 +382,18 @@ export class CatalogInstallService {
       const state = await this.deps.store.read();
       const judged = this.#judge(state, held.provenance, held.revision, held.target, held.allowOlder);
       const resolved = await this.#resolveTarget(held.item, held.target);
-      const { replaces, reading } = await this.#destinationState(
+      const { replaces, reading, edited } = await this.#destinationState(
         held.item,
         held.target,
         resolved,
         state,
         judged.replaces,
       );
+      if (!sameEdits(edited, held.edited))
+        refuse(
+          'catalog_install_edited',
+          `Edited on this machine after the changes were reviewed: ${editedWords(editedView(edited, this.#editedPrefix(held.item, resolved), held.item.name))}. Nothing was replaced. Preview it again to see what is there now.`,
+        );
       const written =
         held.target.scope === 'project'
           ? await this.#writeProject(held, resolved, request.secretBindings, replaces, reading)
@@ -339,17 +429,8 @@ export class CatalogInstallService {
         },
       });
       this.#previews.consume(held.previewId);
-      return {
-        install: {
-          installId: record.installId,
-          installedAt,
-          provenance: record.provenance,
-          target: record.target,
-          destination: record.destination,
-          secretBindings: record.secretBindings,
-        },
-        notes: written.notes,
-      };
+      await this.#dropPrefs(replaces?.installId);
+      return { install: this.#view(record, undefined), notes: written.notes };
     });
   }
 
@@ -368,11 +449,117 @@ export class CatalogInstallService {
       if (record.target.scope === 'project') await this.#removeProject(record);
       else await this.#removeRuntime(record, governance, freshStepUp);
       await this.deps.store.write({ ...state, installs: state.installs.filter(install => install !== record) });
+      await this.#dropPrefs(record.installId);
       return { installId: record.installId, provenance: record.provenance, destination: record.destination };
     });
   }
 
   // ── The contract's checks ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * Step 2, and the digest the provenance records. The current version is checked against the manifest's own
+   * line. Any other version must come with the publisher's signed list of versions: the same key signed both,
+   * the list is for this catalog at this revision, and the item is exactly a version it offers — a retired
+   * version is not on the list, so it is refused here.
+   */
+  async #verifiedDigest(request: CatalogInstallPreviewRequest, manifest: SharedCatalogManifest): Promise<string> {
+    const { item } = request;
+    const current = manifest.items.find(candidate => candidate.itemId === item.itemId);
+    if (current === undefined || current.version === item.itemVersion) {
+      const line = await verifyCatalogItem(this.deps.crypto, manifest, item);
+      return line.ok ? line.value.digest : refuse('catalog_item_mismatch', line.reason);
+    }
+    if (request.signedVersions === undefined)
+      return refuse(
+        'catalog_item_mismatch',
+        `${item.name} version ${item.itemVersion} is not the version ${manifest.name} lists now. Another version needs the publisher's signed list of versions.`,
+      );
+    const offered = await verifyCatalogItemAgainstVersions(
+      this.deps.crypto,
+      manifest,
+      request.signedManifest.spki,
+      request.signedVersions,
+      item,
+    );
+    if (offered.ok) return offered.value.digest;
+    return refuse(
+      offered.refusal === 'signature_invalid' ? 'catalog_signature_invalid' : 'catalog_item_mismatch',
+      offered.reason,
+    );
+  }
+
+  /** The recorded path every file of a skill at this destination starts with. */
+  #editedPrefix(item: SharedCatalogItem, resolved: ResolvedTarget): string {
+    return resolved.destination.folder === undefined ? `skills/${item.name}/` : `${resolved.destination.folder}/`;
+  }
+
+  /**
+   * "See changes", on THIS machine's own bytes: the installed copy rebuilt from what is on disk (and in the
+   * stored setup), compared with the offered item. Bounded by the diff's step budget. If the rebuild fails for
+   * any reason the answer simply has no `changes`; the full review still shows the item whole.
+   */
+  async #changes(
+    replaces: CatalogInstallRecord,
+    item: SharedCatalogItem,
+    resolved: ResolvedTarget,
+    reading: SkillFolderReading | undefined,
+  ): Promise<CatalogChanges | undefined> {
+    try {
+      const installed = await this.#installedItem(replaces, item, resolved, reading);
+      if (installed === undefined) return undefined;
+      const changes = catalogItemChanges(installed.item, item, newDiffBudget());
+      return item.kind === 'skill' && installed.unreadable.length > 0
+        ? withUnreadableFiles(changes, installed.unreadable, item)
+        : changes;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #installedItem(
+    replaces: CatalogInstallRecord,
+    item: SharedCatalogItem,
+    resolved: ResolvedTarget,
+    reading: SkillFolderReading | undefined,
+  ): Promise<InstalledItem | undefined> {
+    const version = replaces.provenance.version;
+    const scope = replaces.target.scope;
+    if (item.kind === 'skill') {
+      const prefix = this.#editedPrefix(item, resolved);
+      const paths = [...this.#recorded(replaces, prefix).keys()].filter(path => reading?.files.has(path) === true);
+      const read =
+        scope === 'project'
+          ? await this.deps.skillFiles.read(replaces.root as string, resolved.destination.folder as string, paths)
+          : await this.deps.runtimeSkills.read(item.name, paths);
+      return { item: skillAsInstalled(item, version, read.files), unreadable: read.tooLarge };
+    }
+    if (item.kind !== 'mcp') return undefined;
+    let setup: CatalogMcpSetup | undefined;
+    if (scope === 'project') {
+      const { document } = await this.#readProjectMcp(replaces.root as string);
+      const servers = document.mcpServers as Record<string, unknown> | undefined;
+      setup =
+        servers !== undefined && Object.hasOwn(servers, item.name)
+          ? setupOfProjectEntry(servers[item.name])
+          : undefined;
+    } else {
+      const component = await this.deps.fleet.storedComponent('mcp', item.name);
+      const converted = mcpSetupOf({
+        id: item.name,
+        name: item.name,
+        scope: 'component',
+        harness: 'claude',
+        declaration: null,
+        component: component as McpComponentRecord | undefined,
+      });
+      setup = converted.ok ? converted.setup : undefined;
+    }
+    if (setup === undefined) return undefined;
+    return {
+      item: mcpAsInstalled(item, version, withPlaceholders(setup, item.mcp, replaces.secretBindings)),
+      unreadable: [],
+    };
+  }
 
   /** Steps 3, 4 and 5: the publisher pin, the revision, the version. */
   #judge(
@@ -543,58 +730,59 @@ export class CatalogInstallService {
     const root = resolved.root as string;
     if (target.scope === 'project') {
       if (item.kind === 'mcp') {
-        await this.#checkProjectMcp(root, item.name, replaces);
-        return { replaces, reading: undefined };
+        const entry = await this.#checkProjectMcp(root, item.name, replaces);
+        return { replaces, reading: undefined, edited: entry === undefined ? NO_EDITS : { files: new Map(), entry } };
       }
       const folder = resolved.destination.folder as string;
       const reading = await this.#inspectProjectSkill(root, folder);
-      this.#checkFolder(reading, replaces, `${folder}/`, `${folder}/`);
-      return { replaces, reading };
+      return { replaces, reading, edited: { files: this.#checkFolder(reading, replaces, `${folder}/`, `${folder}/`) } };
     }
-    return { replaces, reading: await this.#checkRuntime(item, replaces) };
+    return await this.#checkRuntime(item, replaces);
   }
 
-  async #checkProjectMcp(root: string, name: string, replaces: CatalogInstallRecord | undefined): Promise<void> {
+  /** Answers the entry's hash when it is the one of ours that was edited here since, else nothing. */
+  async #checkProjectMcp(
+    root: string,
+    name: string,
+    replaces: CatalogInstallRecord | undefined,
+  ): Promise<string | undefined> {
     const { document } = await this.#readProjectMcp(root);
     const servers = document.mcpServers as Record<string, unknown> | undefined;
     const present = servers !== undefined && Object.hasOwn(servers, name);
-    if (!present) return;
+    if (!present) return undefined;
     const recorded = replaces?.files[0]?.sha256;
     if (recorded === undefined)
       refuse(
         'catalog_install_conflict',
         `${PROJECT_MCP_FILE} already has a server called ${name} that no install of ours put there.`,
       );
-    if ((await this.#hash(JSON.stringify(servers[name]))) !== recorded)
-      refuse(
-        'catalog_install_conflict',
-        `The server ${name} in ${PROJECT_MCP_FILE} was edited on this machine since it was installed, so it was not replaced.`,
-      );
+    const now = await this.#hash(JSON.stringify(servers[name]));
+    return now === recorded ? undefined : now;
   }
 
   /** The runtime side of step 8. Answers the skill folder as it was READ, so the write is guarded by that very reading. */
-  async #checkRuntime(
-    item: SharedCatalogItem,
-    replaces: CatalogInstallRecord | undefined,
-  ): Promise<SkillFolderReading | undefined> {
+  async #checkRuntime(item: SharedCatalogItem, replaces: CatalogInstallRecord | undefined): Promise<DestinationState> {
     const kind = item.kind === 'mcp' ? 'mcp' : 'skills';
     const component = await this.deps.fleet.storedComponent(kind, item.name);
+    let edited: string | undefined;
     if (component !== undefined) {
       if (replaces === undefined)
         refuse(
           'catalog_install_conflict',
           `${item.name} is already a ${kind === 'mcp' ? 'server' : 'skill'} on this machine, and no install of ours put it there.`,
         );
-      if ((await this.#componentHash(component)) !== replaces?.componentSha256)
-        refuse(
-          'catalog_install_conflict',
-          `${item.name} was edited on this machine since it was installed, so it was not replaced.`,
-        );
+      const now = await this.#componentHash(component);
+      if (now !== replaces?.componentSha256) edited = now;
     }
-    if (item.kind !== 'skill') return undefined;
+    if (item.kind !== 'skill')
+      return {
+        replaces,
+        reading: undefined,
+        edited: edited === undefined ? NO_EDITS : { files: new Map(), component: edited },
+      };
     const reading = await this.deps.runtimeSkills.inspect(item.name);
-    this.#checkFolder(reading, replaces, `skills/${item.name}/`, `${item.name}/`);
-    return reading;
+    const files = this.#checkFolder(reading, replaces, `skills/${item.name}/`, `${item.name}/`);
+    return { replaces, reading, edited: { files, ...(edited === undefined ? {} : { component: edited }) } };
   }
 
   /**
@@ -608,14 +796,19 @@ export class CatalogInstallService {
     return recorded;
   }
 
-  /** A folder holds only files an earlier install of ours wrote, each unchanged (a missing one is not an edit). */
+  /**
+   * A folder holds only files an earlier install of ours wrote and recorded a hash for (a missing one is not an
+   * edit). A file we have no hash for is a conflict, always. A file we wrote whose hash changed is an EDIT: answered
+   * by path with the hash it has now, for the caller to refuse or the person to replace.
+   */
   #checkFolder(
     reading: SkillFolderReading,
     replaces: CatalogInstallRecord | undefined,
     prefix: string,
     where: string,
-  ): void {
-    if (!reading.exists || reading.files.size === 0) return;
+  ): Map<string, string> {
+    const edited = new Map<string, string>();
+    if (!reading.exists || reading.files.size === 0) return edited;
     if (replaces === undefined)
       refuse('catalog_install_conflict', `${where} already holds files that no install of ours put there.`);
     const recorded = this.#recorded(replaces, prefix);
@@ -623,9 +816,9 @@ export class CatalogInstallService {
       const expected = recorded.get(path);
       if (expected === undefined)
         refuse('catalog_install_conflict', `${where}${path} is here but no install of ours wrote it.`);
-      if (expected !== hash)
-        refuse('catalog_install_conflict', `${where}${path} was edited on this machine since it was installed.`);
+      if (expected !== hash) edited.set(path, hash);
     }
+    return edited;
   }
 
   #bindingsAreValid(held: HeldPreview, bindings: CatalogSecretBindings, own: ReadonlySet<string>): void {
@@ -674,7 +867,8 @@ export class CatalogInstallService {
     const next = new Set(item.skill.files.map(file => file.path));
     const stale = this.#staleFiles(replaces, `${folder}/`, next, reading);
     const expected = new Map<string, string | null>();
-    for (const path of [...next, ...stale]) expected.set(path, reading.files.get(path) ?? null);
+    for (const path of [...next, ...stale])
+      expected.set(path, held.edited?.files.get(path) ?? reading.files.get(path) ?? null);
     try {
       await this.deps.skillFiles.apply(root, folder, {
         write: item.skill.files,

@@ -210,6 +210,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/catalog-installs operator any',
   'DELETE /v1/catalog-installs/project/:installId operator person',
   'DELETE /v1/catalog-installs/runtime/:installId operator person',
+  'PATCH /v1/catalog-installs/project/:installId operator person',
+  'PATCH /v1/catalog-installs/runtime/:installId operator person',
   'POST /v1/sessions/:sessionId/send operator any',
   'POST /v1/sessions/:sessionId/interrupt operator any',
   'GET /v1/sessions/:sessionId/sends operator any',

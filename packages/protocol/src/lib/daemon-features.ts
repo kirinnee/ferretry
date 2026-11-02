@@ -176,6 +176,13 @@ export const DAEMON_FEATURES = {
    */
   catalogVersions2: 'catalogs.versions.2',
   /**
+   * The installing machine's half of versions (docs/catalogs.md § Updating an install): an install preview that takes
+   * the publisher's signed `signedVersions` and `replaceEdited`, answers `changes` and `edited`, refuses edits with
+   * `catalog_install_edited`, and `PATCH /v1/catalog-installs/<scope>/:installId` (stay or skip). A daemon without this
+   * name refuses the strict fields and answers 404: the app moves to another version only where the machine reports it.
+   */
+  catalogInstallUpdates: 'catalog-installs.updates.1',
+  /**
    * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
    * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
    * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.

@@ -9,6 +9,7 @@ import type {
   CatalogProvenance,
   SharedCatalogItem,
 } from '@ferretry/protocol';
+import type { EditedHashes } from './edited.ts';
 
 /** The most previews kept for ONE caller; that caller's oldest is dropped for a new one. */
 export const CATALOG_PREVIEW_MAX_KEPT = 8;
@@ -25,6 +26,8 @@ export interface HeldPreview {
   readonly target: CatalogInstallTarget;
   readonly allowOlder: boolean;
   readonly placeholders: readonly string[];
+  /** Only a Replace: the edits the person reviewed, by the hash each had. An apply refuses unless they are still exactly these. */
+  readonly edited?: EditedHashes;
 }
 
 export type PreviewLookup =

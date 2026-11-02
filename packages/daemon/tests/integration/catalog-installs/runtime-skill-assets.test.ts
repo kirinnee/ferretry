@@ -109,3 +109,21 @@ describe('FileRuntimeSkillAssets', () => {
     should(await readdir(join(directory, 'pdf-tools'))).deepEqual(['extra.md']);
   });
 });
+
+describe('FileRuntimeSkillAssets.read', () => {
+  it('should read the named files of a skill the fleet holds, and nothing of one it does not', async () => {
+    // Arrange
+    const { directory, assets } = await skills();
+    await mkdir(join(directory, 'pdf-tools'));
+    await writeFile(join(directory, 'pdf-tools', 'SKILL.md'), '# skill\n', 'utf8');
+
+    // Act
+    const present = await assets.read('pdf-tools', ['SKILL.md', 'other.md']);
+    const absent = await assets.read('nothing', ['SKILL.md']);
+
+    // Assert
+    should([...present.files]).deepEqual([['SKILL.md', '# skill\n']]);
+    should(present.tooLarge).deepEqual([]);
+    should(absent.files.size).equal(0);
+  });
+});

@@ -811,10 +811,13 @@ command says so at the moment somebody might be tempted to do that instead.
 
 Catalog installs use the same split as the session MCP add below: `filesystem` governs a write into a
 project folder and `fleet` governs a runtime write, each with a preview (`use`) and an apply
-(`configure`). The seven routes are listed in [catalogs.md](catalogs.md#installing-from-a-file). An
+(`configure`). The nine routes are listed in [catalogs.md](catalogs.md#installing-from-a-file). An
 apply from a governed caller demands a fresh step-up proved for the act `catalog-install`
-(`STEP_UP_ACTS.catalogInstall`), claimed at admission and not given back, for every install and every update. Removing needs
-only the capability. A ferret may preview and list but is refused an install or a remove, whatever its
+(`STEP_UP_ACTS.catalogInstall`), claimed at admission and not given back, for every install and every update,
+**Replace** (overwriting your own edits) included: a preview with `replaceEdited` is a read and needs none, its apply
+needs the passkey. Removing needs only the capability. Stay / Skip (`PATCH /v1/catalog-installs/project/:installId`
+under `filesystem.use`, `…/runtime/:installId` under `fleet.use`) records a choice about future versions and touches no
+file, so it needs the capability only, no passkey. A ferret may preview and list but is refused an install or a remove, whatever its
 grants say.
 
 ## Adding an MCP server for one ferret

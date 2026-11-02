@@ -13,7 +13,9 @@
  * the unlock's, which opens the machine and is not a proof for an act — and the proof is CLAIMED
  * atomically at admission, so one confirmation buys one install even when two applies race. The machine's
  * own `fy` is ungoverned and its CLI asks y/N instead. Removing never asks for a passkey: taking
- * something away is the safe direction.
+ * something away is the safe direction. Neither does STAY / SKIP (`PATCH …/:installId`): it records a choice about
+ * future versions and touches no file, so it is the person's act (no ferret) but needs no proof. Replacing edits
+ * you made is still an apply, so it still needs the `catalog-install` passkey.
  *
  * A PREVIEW BELONGS TO ITS CALLER. It is applied only by the caller that reviewed it (a paired device, the
  * host, or a ferret), so one caller cannot apply, or evict, what another reviewed.
@@ -22,11 +24,13 @@
  */
 import {
   CATALOG_INSTALL_PREVIEW_MAX_BODY_BYTES,
+  type CatalogInstall,
   type CatalogInstalled,
   CatalogInstallIdSchema,
   type CatalogInstallList,
   type CatalogInstallPreview,
   CatalogInstallPreviewRequestSchema,
+  CatalogInstallPrefsRequestSchema,
   CatalogInstallRequestSchema,
   type CatalogInstallRemoved,
   type CatalogInstallRefusal,
@@ -44,11 +48,15 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { CatalogInstallRefusalError } from '../../catalog-installs/ports.ts';
 import { CatalogInstallStateError } from '../../catalog-installs/store.ts';
-import type { CatalogInstallPreviewRequest, CatalogInstallRequest } from '@ferretry/protocol';
+import type {
+  CatalogInstallPrefsRequest,
+  CatalogInstallPreviewRequest,
+  CatalogInstallRequest,
+} from '@ferretry/protocol';
 import type { CatalogCaller } from '../../catalog-installs/service.ts';
 import { FleetCatalogRefusal, type FreshStepUpContext } from '../../fleet/catalog-service.ts';
 
-/** The seven acts, from the parsed request to the answer the caller sees. */
+/** The eight acts, from the parsed request to the answer the caller sees. */
 export interface CatalogInstallSubsystem {
   list(): Promise<CatalogInstallList>;
   preview(
@@ -68,6 +76,7 @@ export interface CatalogInstallSubsystem {
     governance: CallerGovernance | undefined,
     freshStepUp: FreshStepUpContext,
   ): Promise<CatalogInstallRemoved>;
+  setPrefs(scope: CatalogInstallScope, installId: string, request: CatalogInstallPrefsRequest): Promise<CatalogInstall>;
 }
 
 const FILESYSTEM_USE: CapabilityDemand = { capability: 'filesystem', axis: 'use' };
@@ -93,6 +102,7 @@ const REFUSAL_STATUS: Readonly<Record<CatalogInstallRefusal, number>> = {
   catalog_preview_expired: 410,
   catalog_bindings_invalid: 422,
   catalog_install_conflict: 409,
+  catalog_install_edited: 409,
   catalog_install_unknown: 404,
 };
 
@@ -184,6 +194,15 @@ const removeHandler =
     return await answer(() => subsystem.remove(scope, id, context.governance, freshStepUpOf(context)));
   };
 
+const prefsHandler =
+  (scope: CatalogInstallScope, subsystem: CatalogInstallSubsystem): Handler =>
+  async context => {
+    ownerOnly(context, 'change what a catalog install does about new versions');
+    const id = installId(context);
+    const request = await parseBody(context.request, CatalogInstallPrefsRequestSchema);
+    return await answer(() => subsystem.setPrefs(scope, id, request));
+  };
+
 /** This subsystem's route table. Every path is a literal, so the route-agreement pass can hold each one to a client. */
 export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readonly ApiRoute[] {
   return [
@@ -249,6 +268,24 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: removeHandler('runtime', subsystem),
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/catalog-installs/project/:installId',
+      minimum: 'operator',
+      caller: 'person',
+      capability: FILESYSTEM_USE,
+      noStore: true,
+      handle: prefsHandler('project', subsystem),
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/catalog-installs/runtime/:installId',
+      minimum: 'operator',
+      caller: 'person',
+      capability: FLEET_USE,
+      noStore: true,
+      handle: prefsHandler('runtime', subsystem),
     },
   ];
 }
