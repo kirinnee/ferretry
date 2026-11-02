@@ -1,5 +1,8 @@
 /**
- * THE COMPOSER'S SHARED DRAFT: the same words on every one of the owner's devices with this session open.
+ * THE COMPOSER'S SHARED DRAFT: the same words on every one of the owner's devices with this draft open.
+ *
+ * A session has one draft per SLOT (`scope.item`): the chat's, and one for each agenda item's Inbox card. Each
+ * is its own text, items, revisions and stream, so what is typed under a card never reaches the chat box.
  *
  * The composer keeps its own `draft` state exactly as before; this hook only keeps that state in step.
  * The files and places riding with the draft live HERE (`items`): the composer adds and removes them, and
@@ -363,8 +366,11 @@ export function useSharedDraft({
      */
     const handle = (frame: SharedDraftServerFrame): void => {
       if (stopped) return;
-      // Defence in depth: a draft that names another session is never this composer's.
-      if (frame.kind === 'snapshot' && frame.snapshot.sessionId !== scope.sessionId) {
+      // Defence in depth: a draft that names another session or another slot is never this composer's.
+      if (
+        frame.kind === 'snapshot' &&
+        (frame.snapshot.sessionId !== scope.sessionId || frame.snapshot.slot !== scope.item)
+      ) {
         link.current?.close();
         return;
       }
@@ -496,6 +502,7 @@ export function useSharedDraft({
         if (current.resyncing) return undefined;
         ours.carried = true;
         return {
+          ...(scopeObjectNow.current.item === undefined ? {} : { slot: scopeObjectNow.current.item }),
           generation: current.position.generation,
           epoch: current.position.epoch,
           base: current.position.rev,

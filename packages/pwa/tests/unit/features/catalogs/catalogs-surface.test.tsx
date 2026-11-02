@@ -4,17 +4,17 @@ import { CatalogsSurface } from '../../../../src/features/catalogs/catalogs-surf
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import {
-  catalogChanges,
   CATALOG,
+  catalogChanges,
   DIGEST,
   ITEM,
   itemPreview,
   ownedCatalog,
   sharedItem,
 } from '../../../support/catalog-views.ts';
-import { healthOf } from '../../../support/health.ts';
-import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
+import { click, settle, typeInto } from '../../../support/dom-form.ts';
+import { healthOf } from '../../../support/health.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
 beforeEach(() => {
@@ -343,9 +343,10 @@ describe('CatalogsSurface detail', () => {
   it('opens the share sheet from a catalog and closes it', async () => {
     const { view } = await open(both({ 'GET /v1/catalog-members': () => ({ members: [] }) }));
     await tap('[data-catalog-open]');
+    expect(q('[data-catalog-share]')?.textContent).toContain('Invite people…');
     await tap('[data-catalog-share]');
     expect(q('[data-catalog-sheet="share"]')).not.toBeNull();
-    await tap('[aria-label="Close the share sheet"]');
+    await tap('[aria-label="Close the invite sheet"]');
     expect(q('[data-catalog-sheet="share"]')).toBeNull();
     await view.unmount();
   });

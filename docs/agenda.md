@@ -659,9 +659,16 @@ the whole list.
   picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
 - **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
   it as it is; the next Send goes through. Nothing filled in at all is not sent.
-- **No swipes** except ↓ Skip. Recommended values start picked and say "Recommended".
-- **In the chat** (the Sessions page's compact card) the fields are drawn read-only with "Open this in the Inbox to fill it
-  in, or answer in the reply box, numbered."
+- **No swipes** except ↓ Skip. Recommended values start picked and carry a "Recommended" tag; what is picked is the
+  filled row (or the filled Yes/No half, with a check), so a recommendation never reads as a pick.
+- **What is left is said.** A required field with nothing picked says "Needs an answer", and a foot pinned to the bottom
+  of the open item counts the fields answered on the card ("2 of 3 answered") above how to send, so neither hides under
+  the composer. Once the answer has gone, the Inbox's undo toast and the chat's "Sent to …" line name what was picked
+  ("Region: US · Alerts: Page, Mail").
+- **In the chat** the item's view is the Inbox's: the same fields, the same picks (one key per item, so a pick made in
+  one place is there in the other), and the chat's reply box is the form's one Send. The view stays open until the
+  answer lands, so a refusal is read on the card. Only a form nothing can answer from here (settled, or a chat without
+  an agenda client) is drawn read-only, with "Open this in the Inbox to fill it in, or answer in the reply box, numbered."
 - **Stored `ask` is still `open-question`**, so an app that predates forms still reads the item as an open-question reply item;
   `kind: form` is what makes a current app draw the fields.
 
@@ -693,6 +700,14 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
   `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
+- **Each card has its own draft.** The composer under an item is **not** the chat's composer: its unsent text is a
+  synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly
+  today's draft) or the item's id (`A5`). Typing in a card never shows in the ferret's chat, typing in the chat never
+  shows in a card, and two cards of one ferret hold two drafts, each in step across the owner's devices (route
+  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`; a daemon without it gives the
+  card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
+  replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
+  (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
 - **The open items are a deck**, on a phone and a wide screen alike. Swipe with a finger — from the item's head or its
   who-and-what line; the body scrolls — or press the arrow keys. **Only touch swipes, on every screen size** (decided by
   the gesture's `pointerType`, never by width): a mouse or trackpad drag never swipes or pulls down anywhere — Inbox

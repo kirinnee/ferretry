@@ -6,6 +6,7 @@ import {
   listShares,
   mintShare,
   removeMemberBrowser,
+  renameMember,
   revokeMember,
   takeAwayCatalog,
 } from '../../../../src/features/catalogs/catalog-shares-api.ts';
@@ -34,7 +35,7 @@ describe('owner sharing routes', () => {
     const { client, calls } = recorder(mintResponse());
     const made = await mintShare(client, {
       catalogIds: [CATALOG],
-      member: { kind: 'new', label: 'Alice' },
+      member: { name: 'alice' },
       expiresIn: '1h',
       uses: { kind: 'single' },
     });
@@ -89,6 +90,25 @@ describe('owner sharing routes', () => {
     const revoked = recorder({ memberId: MEMBER_A, keysRemoved: 2, sharesEnded: 1 });
     should(await revokeMember(revoked.client, MEMBER_A)).match({ keysRemoved: 2, sharesEnded: 1 });
     should(revoked.calls[0]?.path).equal(`/v1/catalog-members/${MEMBER_A}`);
+  });
+
+  it('changes a user ID with the validated label and returns the person', async () => {
+    const { client, calls } = recorder(memberView({ label: 'alicia' }));
+    should((await renameMember(client, MEMBER_A, 'alicia')).label).equal('alicia');
+    should(calls[0]).match({ path: `/v1/catalog-members/${MEMBER_A}`, init: { method: 'PATCH' } });
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({ label: 'alicia' });
+  });
+
+  it('refuses to send a user ID with hidden characters', async () => {
+    const { client, calls } = recorder(memberView());
+    let thrown: unknown;
+    try {
+      await renameMember(client, MEMBER_A, 'ali\u200Bcia');
+    } catch (error) {
+      thrown = error;
+    }
+    should(thrown).be.an.Error();
+    should(calls).have.length(0);
   });
 
   it('encodes ids that are not path-safe', async () => {

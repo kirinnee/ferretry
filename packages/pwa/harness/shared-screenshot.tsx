@@ -59,7 +59,7 @@ const subscription = (daemonId, change) => ({
   ownLabel: 'Kirin’s box',
   keyId: 'mk_' + 'A'.repeat(22),
   memberId: 'mbr_' + 'A'.repeat(22),
-  memberLabel: 'Alice',
+  memberLabel: 'alice',
   status: 'active',
   joinedAt: THEN,
   passkeyWindowEndsAt: WINDOW_ENDS,
@@ -74,7 +74,7 @@ const FIRST = subscription(fixture.identity.daemonId, { ownLabel: 'Kirin’s box
 const SECOND = subscription('fy_daemon_' + 'r'.repeat(43), {
   ownLabel: 'Ines at the studio',
   daemonName: 'studio-mac',
-  memberLabel: 'Alice',
+  memberLabel: 'alice',
 });
 const REFUSED = subscription(fixture.identity.daemonId, { ownLabel: 'Kirin’s box', status: 'refused' });
 
@@ -190,6 +190,22 @@ const joinScreen = members => (
 if (view === 'join-ready' || view === 'join-progress') mountPage(joinScreen(joinMembers({})));
 else if (view === 'join-refused')
   mountPage(joinScreen(joinMembers({ join: async () => ({ kind: 'refused', sentence: JOIN_REFUSED_SENTENCE }) })));
+else if (view === 'join-later')
+  mountPage(
+    joinScreen(joinMembers({ join: async () => ({ kind: 'prove', memberLabel: 'alice', prove: async () => await never }) })),
+  );
+else if (view === 'join-nopasskey')
+  mountPage(
+    joinScreen(
+      joinMembers({
+        join: async () => ({
+          kind: 'prove',
+          memberLabel: 'alice',
+          prove: async () => ({ kind: 'no-passkey', memberLabel: 'alice' }),
+        }),
+      }),
+    ),
+  );
 else if (view === 'passkey')
   mountPage(joinScreen(joinMembers({ join: async () => ({ kind: 'joined', subscription: FIRST }) })));
 else if (view === 'access-refused')
@@ -303,6 +319,24 @@ const open = async (page: Page, theme: string, view: string): Promise<void> => {
 };
 
 const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
+  // A returning person's three join screens (&B131 B3): a first invite, a later invite, no passkey here.
+  await open(page, theme, 'passkey');
+  await page.locator('[data-join-button]').click();
+  await page.locator('[data-passkey-countdown]').waitFor({ state: 'visible' });
+  await shot(page, 'join-first', theme, vp, PAGE);
+
+  await open(page, theme, 'join-later');
+  await page.locator('[data-join-button]').click();
+  await page.locator('[data-join-prove-button]').waitFor({ state: 'visible' });
+  await shot(page, 'join-later', theme, vp, PAGE);
+
+  await open(page, theme, 'join-nopasskey');
+  await page.locator('[data-join-button]').click();
+  await page.locator('[data-join-prove-button]').click();
+  await page.locator('[data-join-no-passkey]').waitFor({ state: 'visible' });
+  await shot(page, 'join-nopasskey', theme, vp, PAGE);
+  if (process.argv.includes('--join-only')) return;
+
   await open(page, theme, 'join-ready');
   await page.locator('[data-join-button]').waitFor({ state: 'visible' });
   await shot(page, 'join-ready', theme, vp, PAGE);

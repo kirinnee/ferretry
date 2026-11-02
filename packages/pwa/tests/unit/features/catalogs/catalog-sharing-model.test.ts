@@ -7,26 +7,34 @@ import {
   CAP_PROBLEM,
   capFromText,
   catalogTakenNote,
+  changeUserIdProblem,
+  changeUserIdSentence,
   DEFAULT_CAP_TEXT,
   DEFAULT_EXPIRY,
   EXPIRY_CHOICES,
   effectiveShareState,
   emptyDraft,
-  existingMemberWarning,
   expiryLine,
   formatWhen,
+  hasNoPasskeyLeft,
   liveShareCount,
   mintRequest,
   multiShareOf,
   multiSummary,
+  newPasskeyChoice,
+  newPasskeyHelp,
+  newPasskeyPreTicked,
   orderedShares,
+  personFacts,
+  personWithId,
   recipientName,
   removeBrowserConfirm,
   revokeConfirm,
   revokedNote,
   revokeLabel,
   SHARE_EXPIRED_LINE,
-  SHARE_MANY_NEEDS_NEW,
+  SHARE_USER_ID_EMPTY,
+  SHARE_USER_ID_TOO_LONG,
   type ShareDraft,
   shareCountdown,
   shareEndedNote,
@@ -37,29 +45,31 @@ import {
   shareSheetTitle,
   sharingRefusal,
   shownOnceLine,
+  suggestPeople,
   takeAwayChoices,
   takeAwayConfirm,
+  takenUserIdLine,
+  userIdChangedNote,
+  userIdLine,
+  userIdProblem,
   usesNote,
+  whatTheyHave,
 } from '../../../../src/features/catalogs/catalog-sharing-model.ts';
-import {
-  KEY_A1,
-  MEMBER_A,
-  MEMBER_B,
-  memberView,
-  SHARE_2,
-  shareView,
-  T0,
-  T0_MS,
-} from '../../../support/catalog-sharing.ts';
+import { KEY_A1, MEMBER_B, memberView, SHARE_2, shareView, T0, T0_MS } from '../../../support/catalog-sharing.ts';
 import { CATALOG, ownedCatalog } from '../../../support/catalog-views.ts';
 
 const http = (code: string, status = 409) => new FyHttpError(`refused ${code}`, status, code);
 const alice = memberView();
 const bob = memberView({ memberId: MEMBER_B, label: 'Bob', keys: [alice.keys[0]], catalogIds: [] });
-const named = (name: string, change: Partial<ShareDraft> = {}): ShareDraft => ({
+const named = (userId: string, change: Partial<ShareDraft> = {}): ShareDraft => ({
   ...emptyDraft(),
-  who: { kind: 'new', name },
+  userId,
   ...change,
+});
+const noPasskey = memberView({
+  memberId: MEMBER_B,
+  label: 'Sam',
+  keys: [{ ...(alice.keys[0] as (typeof alice.keys)[number]), passkeys: 0 }],
 });
 
 describe('expiry and how many', () => {
@@ -81,79 +91,156 @@ describe('expiry and how many', () => {
 });
 
 describe('the share draft', () => {
-  it('starts as a new, unnamed person, one use, fifteen minutes', () => {
-    should(emptyDraft()).eql({
-      who: { kind: 'new', name: '' },
-      expiresIn: '15m',
-      howMany: { kind: 'single' },
-    });
+  it('starts with no user ID, one use, fifteen minutes', () => {
+    should(emptyDraft()).eql({ userId: '', newPasskey: null, expiresIn: '15m', howMany: { kind: 'single' } });
   });
-  it('needs a name for a new person', () => {
-    should(shareProblem(named('  '), [])).match(/Type the name/);
-    should(shareProblem(named('Carol'), [])).be.null();
+  it('needs a user ID', () => {
+    should(shareProblem(named('  '))).equal(SHARE_USER_ID_EMPTY);
+    should(shareProblem(named('carol'))).be.null();
   });
-  it('refuses a name with hidden characters', () => {
-    should(shareProblem(named('Ca\u0000rol'), [])).match(/shorter name/);
-  });
-  it('says why a name that mixes look-alike scripts cannot be used', () => {
-    should(shareProblem(named('Team Москва'), [])).match(/mix scripts/);
-  });
-  it('refuses a name someone already has, ignoring case, and says where to find them', () => {
-    should(shareProblem(named('alice'), [alice])).match(/already have someone called alice/);
-  });
-  it('needs an existing person to still exist', () => {
-    const draft: ShareDraft = { ...emptyDraft(), who: { kind: 'existing', memberId: MEMBER_A } };
-    should(shareProblem(draft, [])).match(/gone/);
-    should(shareProblem(draft, [alice])).be.null();
-  });
-  it('does not let one code for many people name an existing person', () => {
-    const draft: ShareDraft = {
-      ...emptyDraft(),
-      who: { kind: 'existing', memberId: MEMBER_A },
-      howMany: { kind: 'multi', cap: '50' },
-    };
-    should(shareProblem(draft, [alice])).equal(SHARE_MANY_NEEDS_NEW);
+  it('refuses hidden characters, look-alike scripts and a long ID in the machine’s words, never echoing the text', () => {
+    should(userIdProblem('Ca\u0000rol')).equal(
+      "A user ID can't contain hidden or invisible characters. Type it again.",
+    );
+    should(shareProblem(named('Ca\u200brol'))).match(/hidden or invisible/);
+    should(userIdProblem('Team Москва')).match(/mix scripts/);
+    should(userIdProblem('x'.repeat(81))).equal(SHARE_USER_ID_TOO_LONG);
+    should(userIdProblem('   ')).be.null();
+    should(userIdProblem('alice')).be.null();
   });
   it('checks the cap for many people', () => {
-    should(shareProblem(named('Crew', { howMany: { kind: 'multi', cap: '1' } }), [])).equal(CAP_PROBLEM);
-    should(shareProblem(named('Crew', { howMany: { kind: 'multi', cap: '30' } }), [])).be.null();
+    should(shareProblem(named('crew', { howMany: { kind: 'multi', cap: '1' } }))).equal(CAP_PROBLEM);
+    should(shareProblem(named('crew', { howMany: { kind: 'multi', cap: '30' } }))).be.null();
   });
-  it('warns, by name, that an existing member reads everything they can read', () => {
-    should(existingMemberWarning('Alice')).equal(
-      'Whoever opens this link can read everything Alice can read, not only this catalog.',
+  it('finds the person a typed ID already is, ignoring case and spacing', () => {
+    should(personWithId(' alice ', [alice, bob])).equal(alice);
+    should(personWithId('ALICE', [alice])).equal(alice);
+    should(personWithId('carol', [alice])).be.undefined();
+    should(personWithId('  ', [alice])).be.undefined();
+  });
+  it('suggests people whose ID holds what was typed, those that start with it first, never for an exact match', () => {
+    const malice = memberView({ memberId: MEMBER_B, label: 'Malice' });
+    should(suggestPeople('ali', [malice, alice]).map(person => person.label)).eql(['Alice', 'Malice']);
+    should(suggestPeople('alice', [alice])).eql([]);
+    should(suggestPeople('', [alice])).eql([]);
+    should(suggestPeople('zed', [alice])).eql([]);
+    const many = Array.from({ length: 8 }, (_, index) =>
+      memberView({ memberId: `mbr_${String(index).repeat(22)}`, label: `al${String(index)}` }),
     );
+    should(suggestPeople('al', many)).have.length(5);
   });
-  it('builds the request for a new person with a trimmed name', () => {
-    should(mintRequest(CATALOG, named('  Carol ', { expiresIn: '3h' }))).eql({
+  it('knows a person with no passkey on any browser has none left', () => {
+    should(hasNoPasskeyLeft(alice)).be.false();
+    should(hasNoPasskeyLeft(noPasskey)).be.true();
+    should(hasNoPasskeyLeft(memberView({ keys: [] }))).be.true();
+  });
+  it('offers the new-passkey box only for an existing person on a single-use invite', () => {
+    should(newPasskeyChoice(named('carol'), [alice])).eql({ offered: false, ticked: false, preTicked: false });
+    should(newPasskeyChoice(named('alice', { howMany: { kind: 'multi', cap: '5' } }), [alice]).offered).be.false();
+    should(newPasskeyChoice(named('alice'), [alice])).eql({ offered: true, ticked: false, preTicked: false });
+  });
+  it('pre-ticks it when the daemon would say the person has no passkey left, until the owner touches it', () => {
+    should(newPasskeyChoice(named('sam'), [noPasskey])).eql({ offered: true, ticked: true, preTicked: true });
+    should(newPasskeyChoice(named('sam', { newPasskey: false }), [noPasskey])).eql({
+      offered: true,
+      ticked: false,
+      preTicked: false,
+    });
+    should(newPasskeyChoice(named('alice', { newPasskey: true }), [alice])).eql({
+      offered: true,
+      ticked: true,
+      preTicked: false,
+    });
+  });
+  it('says the new-passkey words', () => {
+    should(newPasskeyHelp('alice')).equal(
+      "Only tick this if alice can't use their passkey any more. Whoever opens this invite can then sign in as alice.",
+    );
+    should(newPasskeyPreTicked('alice')).equal('alice has no passkey left, so this invite lets them create one.');
+  });
+  it('says what an existing person already has', () => {
+    const catalogs = [ownedCatalog()];
+    should(whatTheyHave(alice, catalogs)).equal('2 browsers · Team skills');
+    should(whatTheyHave(memberView({ keys: [], catalogIds: [] }), catalogs)).equal('no browsers yet');
+    should(whatTheyHave(alice, [])).equal('2 browsers · 1 catalog');
+  });
+  it('says what the typed ID means: the same person, or a new one', () => {
+    const catalogs = [ownedCatalog()];
+    should(userIdLine(named('alice'), [alice], catalogs)).eql({
+      kind: 'existing',
+      id: 'Alice',
+      before: '',
+      after:
+        ' already has access here (2 browsers · Team skills). This invite reaches the same person: they sign in with their Alice passkey.',
+    });
+    should(userIdLine(named(' carol '), [alice], catalogs)).eql({
+      kind: 'new',
+      id: 'carol',
+      before: 'New user ID. The person who opens this invite creates a passkey for ',
+      after: '.',
+    });
+    should(userIdLine(named(''), [alice], catalogs)).be.null();
+    should(userIdLine(named('Ca\u200brol'), [alice], catalogs)).be.null();
+  });
+  it('builds the request with the typed ID as the name, trimmed', () => {
+    should(mintRequest(CATALOG, named('  carol ', { expiresIn: '3h' }), [])).eql({
       catalogIds: [CATALOG],
-      member: { kind: 'new', label: 'Carol' },
+      member: { name: 'carol' },
       expiresIn: '3h',
       uses: { kind: 'single' },
     });
   });
-  it('builds the request for an existing person and for many people', () => {
-    const existing: ShareDraft = { ...emptyDraft(), who: { kind: 'existing', memberId: MEMBER_A } };
-    should(mintRequest(CATALOG, existing).member).eql({ kind: 'existing', memberId: MEMBER_A });
-    should(mintRequest(CATALOG, named('Crew', { howMany: { kind: 'multi', cap: '30' } })).uses).eql({
+  it('asks for a new passkey only when it is ticked, and never for many', () => {
+    should(mintRequest(CATALOG, named('alice'), [alice]).newPasskey).be.undefined();
+    should(mintRequest(CATALOG, named('alice', { newPasskey: true }), [alice]).newPasskey).be.true();
+    should(mintRequest(CATALOG, named('sam'), [noPasskey]).newPasskey).be.true();
+    should(mintRequest(CATALOG, named('sam', { newPasskey: false }), [noPasskey]).newPasskey).be.undefined();
+    should(
+      mintRequest(CATALOG, named('sam', { newPasskey: true, howMany: { kind: 'multi', cap: '9' } }), [noPasskey])
+        .newPasskey,
+    ).be.undefined();
+  });
+  it('builds the request for many people', () => {
+    should(mintRequest(CATALOG, named('crew', { howMany: { kind: 'multi', cap: '30' } }), []).uses).eql({
       kind: 'multi',
       cap: 30,
     });
-    should(mintRequest(CATALOG, named('Crew', { howMany: { kind: 'multi', cap: 'x' } })).uses).eql({
+    should(mintRequest(CATALOG, named('crew', { howMany: { kind: 'multi', cap: 'x' } }), []).uses).eql({
       kind: 'multi',
       cap: 50,
     });
   });
-  it('names who the link is for', () => {
-    should(recipientName(named(' Carol '), [])).equal('Carol');
-    should(recipientName({ ...emptyDraft(), who: { kind: 'existing', memberId: MEMBER_A } }, [alice])).equal('Alice');
-    should(recipientName({ ...emptyDraft(), who: { kind: 'existing', memberId: MEMBER_B } }, [alice])).equal(
-      'this person',
-    );
+  it('names who the invite is for', () => {
+    should(recipientName(named(' carol '), [])).equal('carol');
+    should(recipientName(named('ALICE'), [alice])).equal('Alice');
   });
   it('titles the sheet', () => {
-    should(shareSheetTitle('Team skills')).equal('Share “Team skills”');
-    should(shareResultTitle('Carol')).equal('Share link for Carol');
-    should(shownOnceLine('Carol')).equal('This is shown once. Send it to Carol only.');
+    should(shareSheetTitle('Team skills')).equal('Invite people to “Team skills”');
+    should(shareResultTitle('carol')).equal('Invite for carol');
+    should(shownOnceLine('carol')).equal('This is shown once. Send it to carol only.');
+  });
+});
+
+describe('user IDs on the People list', () => {
+  it('writes the facts under a card: since, browsers, passkeys', () => {
+    should(personFacts(alice, 'UTC')).equal('since Oct 31 · 2 browsers · 1 passkey');
+    should(personFacts(memberView({ keys: [] }), 'UTC')).equal('since Oct 31 · 0 browsers · 0 passkeys');
+    should(personFacts(alice).startsWith('since ')).be.true();
+  });
+  it('says what a rename does before it is done, and after', () => {
+    should(changeUserIdSentence('alice', 'alicia')).equal(
+      'alice becomes alicia. They keep their browsers, passkeys and installs.',
+    );
+    should(userIdChangedNote('alice', 'alicia')).equal('alice is now alicia.');
+  });
+  it('says why a new ID cannot be saved: empty, hidden, the same, or taken by somebody else', () => {
+    should(changeUserIdProblem(' ', alice, [alice, bob])).equal(SHARE_USER_ID_EMPTY);
+    should(changeUserIdProblem('a\u200bb', alice, [alice, bob])).match(/hidden or invisible/);
+    should(changeUserIdProblem('Alice', alice, [alice, bob])).equal('That is already their user ID.');
+    should(changeUserIdProblem('bob', alice, [alice, bob])).equal(takenUserIdLine('bob'));
+    should(takenUserIdLine('sam')).equal('Someone here already has the user ID sam. Pick another.');
+    should(changeUserIdProblem('ALICE', alice, [alice, bob])).be.null();
+    should(changeUserIdProblem('alicia', alice, [alice, bob])).be.null();
   });
 });
 
@@ -204,6 +291,7 @@ describe('shares', () => {
   it('shows an unused single-use share with its end time and a way to end it', () => {
     const row = shareRow(shareView(), T0_MS, 'UTC');
     should(row.line).equal('for Alice · 1 hour · unused · ends Oct 31, 10:00');
+    should(shareRow(shareView({ newPasskey: true }), T0_MS, 'UTC').line).match(/unused · new passkey · ends/);
     should(row).match({ state: 'live', canEnd: true, usedBy: [] });
   });
   it('shows how many of a multi-use share are used, and who used it', () => {

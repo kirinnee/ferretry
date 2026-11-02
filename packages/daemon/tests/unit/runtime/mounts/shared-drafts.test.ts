@@ -251,6 +251,65 @@ describe('shared draft routes', () => {
   });
 });
 
+describe('shared draft routes per item (&B142)', () => {
+  it('reads and edits one item draft apart from the chat draft', async () => {
+    // Arrange
+    const { dispatch } = fixture();
+    await dispatch(edit({ epoch: 0, base: 0, text: ['chat words'] }));
+
+    // Act
+    const written = await dispatch({ ...edit({ epoch: 0, base: 0, text: ['card words'] }), query: [['item', 'A1']] });
+    const card = await dispatch({ path: PATH, query: [['item', 'A1']], headers: human });
+    const chat = await dispatch({ path: PATH, headers: human });
+
+    // Assert
+    should(written.status).equal(200);
+    should(jsonBody(card)).match({ slot: 'A1', text: 'card words', rev: 1 });
+    should(jsonBody(chat)).match({ text: 'chat words' });
+    should(jsonBody(chat)).not.have.property('slot');
+  });
+
+  it('refuses a malformed item with 422, an item that is not open with 404, and a repeated one with 400', async () => {
+    // Arrange
+    const { dispatch } = fixture();
+    const status = async (query: [string, string][], method: 'GET' | 'POST') =>
+      (
+        await dispatch(
+          method === 'GET'
+            ? { path: PATH, headers: human, query }
+            : { ...edit({ epoch: 0, base: 0, text: ['x'] }), query },
+        )
+      ).status;
+
+    // Act / Assert
+    for (const method of ['GET', 'POST'] as const) {
+      should(await status([['item', 'A0']], method)).equal(422);
+      should(await status([['item', 'chat']], method)).equal(422);
+      should(await status([['item', '../x']], method)).equal(422);
+      should(await status([['item', 'A9']], method)).equal(404);
+      should(
+        await status(
+          [
+            ['item', 'A1'],
+            ['item', 'A2'],
+          ],
+          method,
+        ),
+      ).equal(400);
+    }
+  });
+
+  it('keeps the owner-only gate on item drafts: an agent learns nothing, not even whether the item is open', async () => {
+    const { dispatch } = fixture();
+    await dispatch({ ...edit({ epoch: 0, base: 0, text: ['secret card'] }), query: [['item', 'A1']] });
+    for (const item of ['A1', 'A9']) {
+      const response = await dispatch({ path: PATH, query: [['item', item]], headers: agentIn('s1') });
+      should(response.status).equal(403);
+      should(JSON.stringify(jsonBody(response))).not.containEql('secret');
+    }
+  });
+});
+
 describe('shared draft stream route', () => {
   const STREAM = '/v1/sessions/s1/shared-draft/stream';
 
@@ -352,6 +411,24 @@ describe('shared draft stream route', () => {
     ]);
   });
 
+  it('opens on one item draft with ?item=, and refuses a bad or closed one before switching', async () => {
+    // Arrange
+    const { connect, drafts } = socketFixture();
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['chat'] });
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['card'] }, undefined, { slot: 'A1' });
+
+    // Act
+    const card = await connect({ headers: human, query: [['item', 'A1']] });
+    const bad = await connect({ headers: human, query: [['item', 'nope']] });
+    const closed = await connect({ headers: human, query: [['item', 'A9']] });
+
+    // Assert
+    should(card.frames).match([{ kind: 'snapshot', snapshot: { slot: 'A1', text: 'card' } }]);
+    should(
+      [bad, closed].map(({ decision }) => (decision.outcome === 'refused' ? decision.response.status : 0)),
+    ).deepEqual([422, 404]);
+  });
+
   it("names each composer by the device the owner paired, so the others can say where they're typing", async () => {
     // Arrange
     const named = `fy_device_id_${'n'.repeat(22)}`;
@@ -413,6 +490,21 @@ describe('sentDraftClearer (&F331 H1)', () => {
 
     // Assert
     should(await drafts.read('s1')).match({ text: ' world', epoch: 0 });
+  });
+
+  it('clears the item draft a send names, and no other draft of the session', async () => {
+    // Arrange — the same words in the chat draft and in an item's.
+    const drafts = sharedDraftService(['s1']);
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['hello'] });
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['hello'] }, undefined, { slot: 'A1' });
+    const clear = sentDraftClearer(drafts);
+
+    // Act — a send from the item's card.
+    await clear('s1', 'device:phone', 'req-1', { slot: 'A1', generation: 'gen-1', epoch: 0, base: 1, text: [-5] });
+
+    // Assert
+    should(await drafts.read('s1', 'A1')).match({ text: '', epoch: 1 });
+    should(await drafts.read('s1')).match({ text: 'hello', epoch: 0 });
   });
 
   it('never applies a "clear" that would add words', async () => {

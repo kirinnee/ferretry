@@ -7,7 +7,12 @@
  * offline: a publisher that cannot be reached says so in one line.
  */
 
-import type { CatalogInstall, SessionSkillsInventory } from '@ferretry/protocol';
+import type {
+  CatalogInstall,
+  LocalSkillInstall,
+  MachineSkillsInventory,
+  SessionSkillsInventory,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { FleetProject } from '../../lib/fleet-grouping.ts';
@@ -18,7 +23,9 @@ import { Button } from '../../shell/primitives.tsx';
 import { listCatalogInstalls } from '../catalogs/catalog-installs-api.ts';
 import { CatalogSheet, FailureLine } from '../catalogs/catalog-parts.tsx';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
+import { listLocalSkillInstalls } from '../catalogs/local-skill-installs-api.ts';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
+import { readMachineSkills } from '../mcp/mcp-api.ts';
 import type { SharedController } from '../shared/shared-controller.ts';
 import { installedNames } from '../shared/shared-installs.ts';
 import { type OpenedSharedItem, SharedItemSheet } from '../shared/shared-item-sheet.tsx';
@@ -34,6 +41,7 @@ import {
   INSTALLED_LABEL,
   installPlan,
   landedSentence,
+  landingSentence,
   newInstalls,
   NO_SKILLS_FOUND,
   NO_SUBSCRIPTIONS,
@@ -45,6 +53,9 @@ import {
   skillRows,
   SUBSCRIBE_WITH_LINK,
 } from './add-skills-model.ts';
+import { LocalSkillInstallSheet } from './local-skill-install-sheet.tsx';
+import { MachineGroup } from './machine-skills-group.tsx';
+import { filterMachineRows, type MachineSkillRow, machineRows, targetOptions } from './machine-skills-model.ts';
 
 type SharedPort = Pick<SharedController, 'list' | 'browse' | 'unlock' | 'openItem'>;
 
@@ -123,6 +134,9 @@ function AddSkillsBody({
   const [failure, setFailure] = useState<string | null>(null);
   const [landed, setLanded] = useState<string | null>(null);
   const [shown, setShown] = useState<Shown | null>(null);
+  const [machine, setMachine] = useState<MachineSkillsInventory | null | undefined>(undefined);
+  const [copies, setCopies] = useState<readonly LocalSkillInstall[] | null>(null);
+  const [copying, setCopying] = useState<MachineSkillRow | null>(null);
   const before = useRef<readonly CatalogInstall[] | null>(null);
 
   const machines = useMemo(
@@ -194,6 +208,39 @@ function AddSkillsBody({
     };
   }, [createClient, host.connection]);
 
+  useEffect(() => {
+    let live = true;
+    void createClient(host.connection)
+      .then(async client => await readMachineSkills(client))
+      .then(read => {
+        if (live) setMachine(read);
+      })
+      .catch(() => {
+        if (live) setMachine(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [createClient, host.connection]);
+
+  const readCopies = useCallback(async (): Promise<readonly LocalSkillInstall[] | null> => {
+    try {
+      return (await listLocalSkillInstalls(await createClient(host.connection))).installs;
+    } catch {
+      return null;
+    }
+  }, [createClient, host.connection]);
+
+  useEffect(() => {
+    let live = true;
+    void readCopies().then(read => {
+      if (live) setCopies(read);
+    });
+    return () => {
+      live = false;
+    };
+  }, [readCopies]);
+
   const unlock = async (sub: MemberSubscription): Promise<void> => {
     setBusy(sub.daemonId);
     const attempt = await members.unlock(sub);
@@ -229,6 +276,37 @@ function AddSkillsBody({
     onInstalled();
   };
 
+  const options = targetOptions(projects, runtimes);
+  const allMachine = useMemo(
+    () =>
+      machine === undefined || machine === null
+        ? machine
+        : machineRows(machine, inventory, new Set((copies ?? []).map(copy => copy.origin.path))),
+    [machine, inventory, copies],
+  );
+  const shownMachine =
+    allMachine === undefined || allMachine === null ? allMachine : filterMachineRows(allMachine, query);
+
+  const closeCopy = async (installed: LocalSkillInstall | null): Promise<void> => {
+    setCopying(null);
+    if (installed === null) return;
+    setCopies(await readCopies());
+    setLanded(landingSentence(installed, plan, inventory, inventory.harness));
+    onInstalled();
+  };
+
+  if (copying !== null)
+    return (
+      <LocalSkillInstallSheet
+        row={copying}
+        connection={host.connection}
+        createClient={createClient}
+        initial={plan.draft}
+        options={options}
+        onClose={installed => void closeCopy(installed)}
+      />
+    );
+
   if (shown !== null)
     return (
       <SharedItemSheet
@@ -259,6 +337,7 @@ function AddSkillsBody({
         <input
           id={searchId}
           type="search"
+          placeholder={ADD_SKILLS_SEARCH_LABEL}
           className="kt-input"
           value={query}
           onChange={event => setQuery(event.target.value)}
@@ -286,6 +365,12 @@ function AddSkillsBody({
           onInstall={(sub, row) => void install(sub, row)}
         />
       )}
+      <MachineGroup
+        rows={shownMachine}
+        all={allMachine === undefined || allMachine === null ? 0 : allMachine.length}
+        truncated={machine !== undefined && machine !== null && machine.truncated}
+        onInstall={setCopying}
+      />
       <div>
         <Button
           type="button"

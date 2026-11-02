@@ -185,7 +185,8 @@ second copy of the route table, and a second copy is how the two stop agreeing.
 `…/shared-draft/stream` are `operator` with **no capability**, exactly like the send-ledger routes: a draft
 is the owner's own unsent message, strictly less than a send, and a device that may send a message may
 draft one. What guards them is **who acts** — `caller: 'person'` refuses every ferret, and the route admits
-only the owner's shell and paired devices — not a grant. A test pins this choice
+only the owner's shell and paired devices — not a grant. An Inbox card's own draft rides the same routes with
+`?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. A test pins this choice
 (`tests/unit/runtime/mounts/shared-drafts.test.ts`), so making drafts governed is a reviewed decision.
 
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.

@@ -1,0 +1,127 @@
+name: Smoke darwin-arm64 (reusable)
+
+# The darwin-arm64 smoke, and the one policy for GitHub's macOS pool running dry.
+#
+# macOS is the one pool this repository cannot buy out of (docs/standards/ci-cd, "macOS runner
+# shortage"). When it has no runner for a job, GitHub CANCELS the job after about 15 minutes with
+# "job not acquired by Runner": no step ran, so nothing failed and nothing was proved. Treating that
+# as a red build blocked every pull request. So this workflow tells "could not start" from "ran and
+# failed", and treats them differently:
+#
+#   - a pull request (`advisory: true`) tries ONCE. A smoke that ran and failed is red; a smoke that
+#     could not get a runner is a warning and a summary line, never a red required check;
+#   - `main` and a release tag (`advisory: false`) keep it REQUIRED, and re-queue the job when it
+#     could not start, up to 3 attempts with 2 and 5 minutes of backoff between them. Only when every
+#     attempt is cancelled does the verdict fail, and its message says the runner was unavailable.
+#     A smoke that ran and failed is never retried: a flake there is a bug, fixed at the root.
+#
+# Called from ci.yaml (needs `compile`) and cd.yaml (needs its own `compile`); both leave the
+# `cli-binaries` artifact for the attempts to download.
+on:
+  workflow_call:
+    inputs:
+      advisory:
+        description: A runner that never starts is a warning, not a failure (pull requests).
+        type: boolean
+        required: true
+
+jobs:
+  attempt-1:
+    name: Attempt 1
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    runs-on: macos-15
+    # Empty when the job was cancelled before it got a runner: the verdict reads that as "not available".
+    outputs:
+      started: ${{ steps.started.outputs.started }}
+    steps:
+      - id: started
+        run: echo "started=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/smoke-darwin
+
+  backoff-1:
+    name: Backoff before attempt 2
+    timeout-minutes: 5
+    needs: attempt-1
+    if: ${{ !cancelled() && !inputs.advisory && needs.attempt-1.result == 'cancelled' && needs.attempt-1.outputs.started != 'true' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::warning::macOS runner not available for attempt 1; re-queueing in 120s"
+          sleep 120
+
+  attempt-2:
+    name: Attempt 2
+    timeout-minutes: 10
+    needs: backoff-1
+    if: ${{ !cancelled() && needs.backoff-1.result == 'success' }}
+    permissions:
+      contents: read
+    runs-on: macos-15
+    outputs:
+      started: ${{ steps.started.outputs.started }}
+    steps:
+      - id: started
+        run: echo "started=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/smoke-darwin
+
+  backoff-2:
+    name: Backoff before attempt 3
+    timeout-minutes: 8
+    needs: attempt-2
+    if: ${{ !cancelled() && needs.attempt-2.result == 'cancelled' && needs.attempt-2.outputs.started != 'true' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::warning::macOS runner not available for attempt 2; re-queueing in 300s"
+          sleep 300
+
+  attempt-3:
+    name: Attempt 3
+    timeout-minutes: 10
+    needs: backoff-2
+    if: ${{ !cancelled() && needs.backoff-2.result == 'success' }}
+    permissions:
+      contents: read
+    runs-on: macos-15
+    outputs:
+      started: ${{ steps.started.outputs.started }}
+    steps:
+      - id: started
+        run: echo "started=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/smoke-darwin
+
+  # The one check that stands for the smoke: green when an attempt passed, red when one ran and failed
+  # (or, off a pull request, when no runner ever came), a warning when a pull request had no runner.
+  verdict:
+    name: Verdict
+    timeout-minutes: 5
+    needs: [attempt-1, attempt-2, attempt-3]
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Judge the attempts
+        env:
+          ADVISORY: ${{ inputs.advisory }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: ./scripts/ci/macos-smoke-verdict.sh

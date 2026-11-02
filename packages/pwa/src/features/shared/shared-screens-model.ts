@@ -56,6 +56,53 @@ export const INSTALL_ON_LABEL = 'Install on';
 export const OPENING_ITEM = 'Opening…';
 export const NOT_PAIRED_NOTE = 'To install this, pair a machine with this browser first.';
 
+/** A sentence with one person's name in it, kept in three pieces so the screen can set the name in bold. */
+export interface NamedSentence {
+  readonly before: string;
+  /** The name as it is shown: every hidden character already spelled out. */
+  readonly name: string;
+  readonly after: string;
+}
+
+/** The sentence as plain text: a title, a label or a test reads it in one piece. */
+export const plainSentence = (sentence: NamedSentence): string => `${sentence.before}${sentence.name}${sentence.after}`;
+
+/** Who the person is signing in as, and where. `machine` is the machine's name, or its address until it has told us. */
+export const signingInAs = (memberLabel: string, machine: string): NamedSentence => ({
+  before: "You're signing in as ",
+  name: revealHidden(memberLabel),
+  after: ` on ${revealHidden(machine)}.`,
+});
+
+/** A first invite for this person: no passkey of theirs exists yet. */
+export const createPasskeyFor = (memberLabel: string): NamedSentence => ({
+  before: 'Create a passkey for ',
+  name: revealHidden(memberLabel),
+  after: ". You'll use it to sign in here.",
+});
+
+/** A later invite: one of the person's passkeys vouches for this browser. */
+export const signInWithPasskey = (memberLabel: string): NamedSentence => ({
+  before: 'Sign in with your ',
+  name: revealHidden(memberLabel),
+  after: ' passkey to add this browser.',
+});
+
+/** Who to ask for a fresh start: the invite's sender is the only person this browser knows of before joining. */
+export const INVITE_SENDER = 'the person who sent you this link';
+
+/** This device cannot sign the publisher's challenge: none here, dismissed, or not the one asked for. */
+export const noPasskeyHere = (memberLabel: string, owner: string): NamedSentence => {
+  const name = revealHidden(memberLabel);
+  return {
+    before: 'This invite is for ',
+    name,
+    after: `. Use ${name}'s passkey (on another device: choose "use a phone or tablet"), or ask ${owner} to let you set up a new one.`,
+  };
+};
+
+export const SIGN_IN_BUTTON = 'Sign in with passkey';
+
 /** The host of the publisher's address, to read beside the fingerprint. */
 export function shareHost(url: string): string {
   try {

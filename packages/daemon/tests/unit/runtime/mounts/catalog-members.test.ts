@@ -828,7 +828,7 @@ describe('a person’s user ID on the wire', () => {
 
     should(answer.status).equal(400);
     should(answer.code).equal('invalid_name');
-    should(answer.message).equal("A user ID can't contain hidden characters. Type it again.");
+    should(answer.message).equal("A user ID can't contain hidden or invisible characters. Type it again.");
     should(members.calls).deepEqual([]);
   });
 

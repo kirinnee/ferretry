@@ -91,6 +91,14 @@ describe('a join session', () => {
     should(await daemon.proves(record, (await testDevice()).publicKey)).be.false();
   });
 
+  it('should carry the passkey assertion on the join record when one was signed', async () => {
+    const passkey = { credentialId: 'qg', clientDataJSON: 'e30', authenticatorData: 'AQ', signature: 'Ag' };
+    const { socket, daemon } = await opened({ ...joinMode(), passkey } as RelayClientSessionDependencies['mode']);
+    const record = (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    should(record).have.property('passkey', passkey);
+    should(await daemon.proves(record, member.publicKey)).be.true();
+  });
+
   it('should latch the sealed joined outcome and ignore the 4440 that follows it', async () => {
     const { session, daemon, identity } = await opened(joinMode());
     const joined = session.joined();
@@ -156,6 +164,95 @@ describe('a join session', () => {
 
   it('should never answer a renew on a join session', async () => {
     const { session, socket, daemon } = await opened(joinMode());
+    const before = socket.sent.length;
+    await session.receiveBinary(
+      await daemon.record({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'bm9uY2U', expiresAt: LEASE_ENDS }),
+    );
+    await drain();
+    should(socket.sent.length).equal(before);
+  });
+});
+
+const optionsMode = (): RelayClientSessionDependencies['mode'] => ({
+  kind: 'join-options',
+  code: 'fy_share_FAKEFAKEFAKEFAKEFAKEFA',
+  memberKey: member.publicKey,
+  origin: 'https://app.ferretry.test',
+  key: member.claim.key,
+});
+
+const OPTIONS = {
+  challenge: 'AAAA',
+  rpId: 'app.ferretry.test',
+  allowCredentials: [{ type: 'public-key', id: 'qg' }],
+  timeout: 60_000,
+};
+
+const settled = async (promise: Promise<unknown>): Promise<unknown> =>
+  promise.then(
+    value => value,
+    (thrown: unknown) => thrown,
+  );
+
+describe('a join-options session', () => {
+  it('should ask with a record proved by the member key over this transcript and the page origin, spending nothing', async () => {
+    const { session, socket, daemon } = await opened(optionsMode());
+    should(session.credentialSent()).be.true();
+    const record = (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    should(record).match({
+      t: 'join-options',
+      code: 'fy_share_FAKEFAKEFAKEFAKEFAKEFA',
+      memberKey: member.publicKey,
+      origin: 'https://app.ferretry.test',
+    });
+    should(await daemon.proves(record, member.publicKey)).be.true();
+    should(await daemon.proves({ ...record, origin: 'https://evil.test' }, member.publicKey)).be.false();
+  });
+
+  it('should settle open when the publisher wants no proof', async () => {
+    const { session, daemon } = await opened(optionsMode());
+    const asked = session.joined();
+    await session.receiveBinary(
+      await daemon.record(null, pad({ t: 'join-open', protocol: SESSION_PROTOCOL_ID, why: 'owner-approved' })),
+    );
+    should(await asked).eql({ kind: 'open', why: 'owner-approved' });
+  });
+
+  it('should settle with the challenge and the name it is for', async () => {
+    const { session, daemon } = await opened(optionsMode());
+    const asked = session.joined();
+    await session.receiveBinary(
+      await daemon.record(
+        null,
+        pad({ t: 'join-challenge', protocol: SESSION_PROTOCOL_ID, memberLabel: 'Alice', options: OPTIONS }),
+      ),
+    );
+    should(await asked).eql({ kind: 'challenge', memberLabel: 'Alice', options: OPTIONS });
+  });
+
+  it('should reject with the one generic refusal', async () => {
+    const { session, daemon } = await opened(optionsMode());
+    const asked = session.joined();
+    await session.receiveBinary(
+      await daemon.record(null, pad({ t: 'join-refused', protocol: SESSION_PROTOCOL_ID, reason: 'join_refused' })),
+    );
+    should(await settled(asked)).be.instanceof(RelayJoinRefusedError);
+  });
+
+  it('should refuse a joined answer to a question that spends nothing', async () => {
+    const { session, daemon, identity } = await opened(optionsMode());
+    const asked = session.joined();
+    await session.receiveBinary(
+      await daemon.record(
+        null,
+        pad({ t: 'joined', protocol: SESSION_PROTOCOL_ID, response: joinedResponse(identity.daemonId) }),
+      ),
+    );
+    should(await settled(asked)).be.instanceof(RelaySessionError);
+  });
+
+  it('should never answer a renew on a join-options session', async () => {
+    const { session, socket, daemon } = await opened(optionsMode());
     const before = socket.sent.length;
     await session.receiveBinary(
       await daemon.record({ t: 'renew', protocol: SESSION_PROTOCOL_ID, nonce: 'bm9uY2U', expiresAt: LEASE_ENDS }),

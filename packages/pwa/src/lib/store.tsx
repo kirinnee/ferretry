@@ -26,15 +26,16 @@ import {
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
+import { SharedController } from '../features/shared/shared-controller.ts';
 import {
   checkAccountPickerHealth,
   readAccountPickerCatalog,
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
-import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
-import { AgendaWireDirectory } from './agenda-wire.ts';
 import { DaemonAgendaClient } from './agenda-client.ts';
+import { AgendaWireDirectory } from './agenda-wire.ts';
+import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { BackgroundChatFreshener, type BackgroundFreshEnvironment } from './background-fresh.ts';
 import { daemonBoardPort } from './board-client.ts';
 import { DaemonBoardStore } from './board-store.ts';
@@ -67,6 +68,7 @@ import { documentDraftStore, documentRestoreStore } from './drafts.ts';
 import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
+import { boundedReads } from './machine-deadline.ts';
 import { openMemberClient } from './member-client.ts';
 import {
   IndexedDbMemberKeyStore,
@@ -74,8 +76,6 @@ import {
   mintMemberKeys,
   webCryptoMemberKeyGenerator,
 } from './member-keys.ts';
-import { joinPublisher } from './relay-join.ts';
-import { boundedReads } from './machine-deadline.ts';
 import { DeviceNotificationFilterStore } from './notification-filter.ts';
 import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
@@ -99,22 +99,23 @@ import {
   type RelayDial,
   type RelayHeartbeatSchedule,
 } from './relay-carrier.ts';
+import { askJoinOptions, joinPublisher } from './relay-join.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
+import type { PasteRuleStageAct } from './secure-copy.ts';
 import {
   fetchSecuritySettings,
   stepUpStaysSentence,
   UNLOCK_STAYS_FALLBACK,
   unlockStaysSentence,
 } from './security-settings-client.ts';
-import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
-import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { MemoryOutboxBackend, type OutboxBackend, SendOutbox } from './send-outbox.ts';
 import { browserOutboxBackend } from './send-outbox-storage.ts';
 import { type OutboxWatchEnvironment, outboxSender, watchOutbox } from './send-outbox-wiring.ts';
-import { SharedController } from '../features/shared/shared-controller.ts';
+import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
+import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   browserCredentials,
@@ -123,7 +124,6 @@ import {
   stepUpCeremony,
   unlockCeremony,
 } from './step-up-ceremony.ts';
-import type { PasteRuleStageAct } from './secure-copy.ts';
 import { StepUpGate, type StepUpWords } from './step-up-gate.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
@@ -1041,11 +1041,21 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     members: new SharedController({
       keys: options.memberKeys ?? new IndexedDbMemberKeyStore(),
       mint: async () => await mintMemberKeys(webCryptoMemberKeyGenerator()),
-      join: async ({ seed, clientName, keys }) =>
+      join: async ({ seed, clientName, keys, passkey }) =>
         await joinPublisher({
           crypto: relayCrypto,
           seed,
           clientName,
+          keys,
+          hostedRelayUrl: await hostedRelayUrl,
+          ...(passkey === undefined ? {} : { passkey }),
+          ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+        }),
+      joinOptions: async ({ seed, keys }) =>
+        await askJoinOptions({
+          crypto: relayCrypto,
+          seed,
+          origin: appOrigin,
           keys,
           hostedRelayUrl: await hostedRelayUrl,
           ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),

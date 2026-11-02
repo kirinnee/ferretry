@@ -77,9 +77,9 @@ export function uniqueMemberNames(members: readonly StoredMember[]): {
  * only ever shown here and never written to the audit log.
  */
 export function renameNotice(renames: readonly MemberRename[]): string {
-  const fix = 'Rename or remove whichever is wrong in Sharing › People.';
+  const tail = 'Each still signs in with their passkeys. Rename or remove whichever is wrong in Sharing › People.';
   const [only] = renames;
   if (renames.length === 1 && only !== undefined)
-    return `Two people here had the same name, so one is now ${only.to}. ${fix}`;
-  return `Several people here had the same name, so ${String(renames.length)} are now ${renames.map(rename => rename.to).join(', ')}. ${fix}`;
+    return `2 people had the same user ID, so the later one was renamed: ${only.from} → ${only.to}. ${tail}`;
+  return `Several people had the same user ID, so the later ones were renamed: ${renames.map(rename => `${rename.from} → ${rename.to}`).join(', ')}. ${tail}`;
 }

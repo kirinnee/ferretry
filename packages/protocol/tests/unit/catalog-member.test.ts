@@ -456,7 +456,7 @@ describe('a person’s user ID', () => {
       expect(parsed.success).toBe(false);
       expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_HIDDEN_MESSAGE);
     }
-    expect(MEMBER_NAME_HIDDEN_MESSAGE).toBe("A user ID can't contain hidden characters. Type it again.");
+    expect(MEMBER_NAME_HIDDEN_MESSAGE).toBe("A user ID can't contain hidden or invisible characters. Type it again.");
     expect(CatalogMemberNameSchema.safeParse('Alice (2)').success).toBe(true);
   });
 

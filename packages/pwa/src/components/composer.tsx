@@ -1,4 +1,5 @@
 import {
+  type AgendaId,
   DAEMON_FEATURES,
   type IFyApiClient,
   type SessionContext,
@@ -138,6 +139,14 @@ export interface ComposerProps {
   /** This session's own daemon reading; composer quota is never ambient state. */
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
+  /**
+   * The agenda item whose own draft this composer holds (an Inbox card). Absent is the session's chat, the
+   * draft every composer had before slots: the same words on that session's chat box on every device, never
+   * under a card. A machine that predates slots keeps an item's draft on this device only.
+   */
+  readonly draftSlot?: AgendaId;
+  /** Whether the machine keeps drafts per slot; read from its health when not given (tests give it). */
+  readonly sharedSlots?: boolean;
   readonly onSent?: () => void;
   /** Escape in the composer, when no completion list or Vim mode used it: set while an agenda item is open, to go back. */
   readonly onEscape?: () => void;
@@ -400,6 +409,8 @@ export function Composer({
   placeholder = 'Message this session',
   quota,
   draftStore = documentDraftStore,
+  draftSlot,
+  sharedSlots,
   onSent,
   onEscape,
   onDraftChange,
@@ -430,7 +441,7 @@ export function Composer({
   compacting,
   onOpenContext,
 }: ComposerProps) {
-  const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
+  const scope = useMemo(() => daemonSessionScope(daemon, sessionId, draftSlot), [daemon, sessionId, draftSlot]);
   const uploader = useMemo<ComposerAttachmentUploader>(
     () =>
       uploadAttachment ?? (file => uploadSessionAttachment(daemon, scope, file, autocompleteFetcher ?? browserFetch)),
@@ -620,10 +631,15 @@ export function Composer({
    * Another device's edit moves this caret the way the edit moved the text, so typing here is never
    * thrown to the end by somebody typing there.
    */
-  const health = useDaemonHealth(sharedUploads === undefined ? daemon : undefined);
+  const slotWanted = draftSlot !== undefined && sharedSlots === undefined;
+  const health = useDaemonHealth(sharedUploads === undefined || slotWanted ? daemon : undefined);
+  // An item's draft needs a machine that keeps one per slot; an older one would answer with the chat's.
+  const slotShared =
+    draftSlot === undefined || (sharedSlots ?? machineOffers(health, DAEMON_FEATURES.sharedDraftSlots));
   const shared = useSharedDraft({
     daemon,
     scope,
+    enabled: slotShared,
     text: draft,
     setText: setDraft,
     ...(openDraftStream === undefined ? {} : { open: openDraftStream }),

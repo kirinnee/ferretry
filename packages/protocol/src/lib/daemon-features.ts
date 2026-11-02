@@ -223,6 +223,13 @@ export const DAEMON_FEATURES = {
    */
   sharedDraftUploading: 'shared-draft.uploading.1',
   /**
+   * One shared draft per Inbox item (B142): the draft routes and stream take `?item=A5`, a snapshot and a send name their
+   * slot, and an item closing deletes its draft. A daemon without this name ignores `?item` and would hand back the CHAT
+   * draft for the item, so the app opens no shared draft for an item there: the reply box keeps its words on this device
+   * only, and never touches the chat draft.
+   */
+  sharedDraftSlots: 'shared-draft.slots.1',
+  /**
    * A paste rule is made only with a passkey bound to it (docs/secure-copy.md, owner decision !A244): staged at
    * `POST /v1/copy-rules/stages` with the daemon's rows, committed with a fresh `approve-paste-rule` proof for that stage,
    * and the old one-step `POST /v1/copy-rules` makes nothing. The app and `fy copy rules add` stage where the machine

@@ -86,7 +86,7 @@ export interface AgendaItemViewProps {
   readonly planForm?: ReactNode;
   /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
   readonly cardsForm?: ReactNode;
-  /** Names this item's form picks when a composer sends them (the Inbox); absent, a form is read, not filled in. */
+  /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
   /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
   readonly wrapTitle?: boolean;

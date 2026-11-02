@@ -20,7 +20,7 @@ import type { CardState } from '../shared/shared-screens-model.ts';
 export const ADD_SKILLS_BUTTON = '+ Add skills';
 export const ADD_SKILLS_TITLE = 'Add skills to this session';
 export const ADD_SKILLS_CLOSE = 'Close Add skills';
-export const ADD_SKILLS_SEARCH_LABEL = 'Search subscribed skills';
+export const ADD_SKILLS_SEARCH_LABEL = 'Search skills';
 export const FROM_SUBSCRIPTIONS = 'From your subscriptions';
 export const SUBSCRIBE_WITH_LINK = 'Subscribe with a link…';
 export const INSTALL_BUTTON = 'Install';
@@ -56,8 +56,8 @@ export interface InstallPlan {
   readonly runtimeId?: string;
 }
 
-export const PROJECT_SENTENCE = 'This project (every session in this folder)';
-export const accountSentence = (runtime: string): string => `This account (every session on ${runtime})`;
+export const PROJECT_SENTENCE = 'this project (every session in this folder)';
+export const accountSentence = (runtime: string): string => `this account (every session on ${runtime})`;
 
 /** The registered project that holds `cwd`, the longest path winning, so a nested folder finds its own. */
 export function projectHolding(cwd: string, projects: readonly FleetProject[]): FleetProject | undefined {
@@ -166,8 +166,14 @@ export function newInstalls(
 
 const sameFolder = (a: string, b: string): boolean => normalizeProjectPath(a) === normalizeProjectPath(b);
 
+/** What a landing sentence needs of an install: where it went, and what the skill is called. */
+export interface Landing {
+  readonly target: CatalogInstall['target'];
+  readonly name: string;
+}
+
 /** Whether the session reads the place an install went to. */
-export function readsPlace(install: CatalogInstall, plan: InstallPlan, harness: 'claude' | 'codex'): boolean {
+export function readsPlace(install: Pick<Landing, 'target'>, plan: InstallPlan, harness: 'claude' | 'codex'): boolean {
   const { target } = install;
   if (target.scope === 'project')
     return (
@@ -176,7 +182,7 @@ export function readsPlace(install: CatalogInstall, plan: InstallPlan, harness: 
   return plan.runtimeId !== undefined && target.runtime === plan.runtimeId;
 }
 
-const placeName = (install: CatalogInstall): string =>
+const placeName = (install: Pick<Landing, 'target'>): string =>
   install.target.scope === 'project'
     ? `the project ${install.target.projectRoot}`
     : `the account ${install.target.runtime}`;
@@ -185,7 +191,7 @@ const placeName = (install: CatalogInstall): string =>
  * Whether this install probably made the skills folder it went into: the session saw no skill of that kind
  * before. The daemon does not say, so this is a hint, worded as one.
  */
-export function likelyNewFolder(install: CatalogInstall, before: SessionSkillsInventory): boolean {
+export function likelyNewFolder(install: Pick<Landing, 'target'>, before: SessionSkillsInventory): boolean {
   const kind = install.target.scope === 'project' ? 'project' : 'user';
   return !before.skills.some(skill => skill.scope === kind);
 }
@@ -203,7 +209,17 @@ export function landedSentence(
   before: SessionSkillsInventory | null,
   harness: 'claude' | 'codex',
 ): string {
-  const name = revealHidden(install.provenance.name);
+  return landingSentence({ target: install.target, name: install.provenance.name }, plan, before, harness);
+}
+
+/** The same two sentences for anything that landed: a catalog install or a copy from this machine. */
+export function landingSentence(
+  install: Landing,
+  plan: InstallPlan,
+  before: SessionSkillsInventory | null,
+  harness: 'claude' | 'codex',
+): string {
+  const name = revealHidden(install.name);
   if (!readsPlace(install, plan, harness)) return `Installed ${name} on ${placeName(install)}. ${NOT_HERE}`;
   const where = install.target.scope === 'project' ? PROJECT_SENTENCE : plan.sentence;
   const activation =
