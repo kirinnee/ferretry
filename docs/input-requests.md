@@ -448,6 +448,8 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
   page that goes back to that document is held again. The write arms the same `pagehide` clear a grant fill uses, so a
   page restored from the back/forward cache shows the field empty; when the browser cannot arm it, the page keeps the
   plain full hold. Only the document is watched: a field the page empties itself does not end the hold early.
+  A page whose probe showed the test value, or did not finish, gets no such relaxation (secrev-1333 L4): the plain full
+  hold, with the probe's own reason (`probe-shown`, `probe-stopped`) at the raise and again at Send.
 - **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name). Only the
   card's own facts do, and only when every process of the foreground group is a setuid-root password program.
 - **The dummy probe** runs on a page card only, for exactly ONE secret field, after the field picture and before the

@@ -78,6 +78,7 @@ import {
   type PageSteer,
   passwordTarget,
   probeable,
+  probeOutcomeOf,
   spellsPassword,
   steeredLock,
 } from './lock.ts';
@@ -1840,10 +1841,13 @@ export class InputRequestService {
         // raised voids a page's proof as well; an act on another tab or a terminal does not (login-observer.ts). Asked
         // AFTER the store is read, so an act that began during the read counts (secrev-1333 L1).
         const facts = await this.lockFacts(seen.facts);
+        const raisedProbe = probeOutcomeOf(request.lock);
         const now = lockFor(seen.facts, fields, {
           ...facts,
           probed: held.probed === true,
           submitted,
+          // The raise-time probe is not run again, but what it found is kept (secrev-1333 L4).
+          ...(raisedProbe === undefined ? {} : { probe: raisedProbe }),
           ...this.steeredSince(request.sessionId, seen.facts, Date.parse(request.raisedAt)),
         });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);

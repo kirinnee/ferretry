@@ -280,10 +280,17 @@ export function lockFor(
   if (context.probed) return SHORT('probed-field');
   if (context.unread === true) return FULL('not-proven');
   if (history === 'contrary') return FULL('did-not-move-on');
-  if (history === 'unsubmitted') return FULL('until-moved-on');
   if (context.probe === 'shown') return FULL('probe-shown');
   if (context.probe === 'aborted') return FULL('probe-stopped');
+  // Only after the probe: a page that showed or kept the test value never earns the relaxed hold.
+  if (history === 'unsubmitted') return FULL('until-moved-on');
   return FULL('first-time');
+}
+
+/** What a card's lock says about the raise-time probe, so a later look at the same card cannot unsay it. */
+export function probeOutcomeOf(lock: InputLock | undefined): 'shown' | 'aborted' | undefined {
+  if (lock?.reason === 'probe-shown') return 'shown';
+  return lock?.reason === 'probe-stopped' ? 'aborted' : undefined;
 }
 
 /**

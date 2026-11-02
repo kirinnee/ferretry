@@ -1368,10 +1368,14 @@ export class AgentToolService {
     }
     const reference = surfaceReference('browser', surface.name ?? surface.id);
     const when = new Date(held.until).toISOString();
+    const comesBack =
+      held.documentsOnly === true
+        ? 'text reads and pictures come back once the page has moved on.'
+        : 'text reads come back once the page has moved on, pictures after that time.';
     throw new AgentToolError(
       'conflict',
       caller.kind === 'agent'
-        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; text reads come back once the page has moved on, pictures after that time.`
+        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; ${comesBack}`
         : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
     );
   }
