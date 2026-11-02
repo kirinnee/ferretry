@@ -323,7 +323,13 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   writes one at a time, so a note, a reconcile and the boot folding never overwrite each other. The Warden's sweep
   and the one-minute reconcile start only after the folding has finished.
 - **Port.** Other daemon code uses `MachineAgenda`: `raiseOrUpdate(ref, request, members?)`, `resolve(ref, note?)`
-  and `list()`. Only notice-type items belong here; gate items and Not-good follow-ups never do.
+  and `list()`. Only notice-type items belong here; gate items and Not-good follow-ups never do. A Warden notice
+  about a sub-ferret with no owner home reaches it through `AgendaService` (home rule, step 4).
+- **The open view of "could not be moved".** One place lists the ferrets: each with its reason and its action. A
+  ferret mid-turn says "Wait for it to finish its turn"; one no login can take says "Wait for a login to reset"
+  (the reason names when, if known); one a login can take shows a command that runs, `fy migrate <id> -a <login>`,
+  with the login the Warden's own auto-migrate would pick (the most headroom first). The command stays on one line,
+  copy button at the right edge. The Why, Context and What-I-need blocks do not repeat the list.
 - **Migration.** On first start after this shipped, the daemon folds the old per-ferret notices (`warden-auto-move`,
   `warden-orphan:*`, `budget:*`) into their machine item and closes the originals. It writes
   `machine-agenda-notices-migration.json` only when every agenda was read and every item folded; otherwise it tries
@@ -463,8 +469,10 @@ Only the owner's own ferret's agenda asks the owner. The **home** of a session (
 3. Otherwise (a Warden's or another session's orphan, or a broken lineage) the home is the owner's most recently
    active interactive session on the same project: mode `interactive`, no parent, owner-started, same `projectId`.
    Recency is the session's `config.updatedAt`.
-4. Otherwise the machine-wide agenda (the `MachineAgendaHome` port; not wired yet). It is for notices only: a
-   Warden escalation or notice may land there; a gate item or a follow-up never does.
+4. Otherwise, for a NOTICE only, the machine-wide agenda (the `MachineAgendaHome` port). A Warden escalation or a
+   daemon item raised with `notice: true` lands there as a machine item scoped to the ferret it is about
+   (`<sourceRef>:<sessionId>`, so two ferrets are two items, never an overwrite) and is resolved there when the
+   Warden clears it. A gate item or a follow-up never goes there: it takes step 5.
 5. Otherwise the root, if the lineage is rooted; for a broken one, the session itself, with a warning naming where
    the chain broke.
 

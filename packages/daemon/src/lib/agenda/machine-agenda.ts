@@ -1,5 +1,5 @@
 import { type AgendaId, type AgendaItem, type AgendaSnapshot, MACHINE_AGENDA_ID } from '@ferretry/protocol';
-import type { AgendaActor, RaiseAgendaRequest } from './state-machine.ts';
+import type { AgendaActor, AgendaMutation, RaiseAgendaRequest } from './state-machine.ts';
 import { agendaSnapshot, emptyAgendaLedger } from './state-machine.ts';
 import type { AgendaService } from './service.ts';
 import { SerialQueue } from './serial-queue.ts';
@@ -15,8 +15,8 @@ export interface MachineMembersStore {
 
 /** What other code is given: raise or refresh the item for one cause, close it when the cause clears. */
 export interface MachineAgendaPort {
-  raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<void>;
-  resolve(ref: string, note?: string): Promise<void>;
+  raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<AgendaMutation | undefined>;
+  resolve(ref: string, note?: string): Promise<AgendaMutation | undefined>;
   list(): Promise<AgendaSnapshot>;
 }
 
@@ -45,7 +45,7 @@ export class MachineAgenda implements MachineAgendaPort {
     return agendaSnapshot(emptyAgendaLedger(MACHINE_AGENDA_ID, this.clock.now()));
   }
 
-  raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<void> {
+  raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<AgendaMutation | undefined> {
     return this.queue.run(async () => {
       if (members?.length === 0) return await this.close(ref, undefined);
       const open = await this.open(ref);
@@ -54,7 +54,7 @@ export class MachineAgenda implements MachineAgendaPort {
       if (open === undefined && seen) {
         // The list may have shrunk: remember who is there NOW, so a member that leaves and comes back counts as new.
         if (members.length !== known.length) await this.remember(ref, members);
-        return;
+        return undefined;
       }
       const raised = await this.service.raise(
         MACHINE_AGENDA_ID,
@@ -62,10 +62,11 @@ export class MachineAgenda implements MachineAgendaPort {
         DAEMON,
       );
       if (!raised.ok) throw new Error(raised.error.message);
-      if (members === undefined) return;
+      if (members === undefined) return raised;
       const added = known === undefined || members.some(member => !known.includes(member));
       if (open?.parked?.reason === 'snoozed' && added) await this.wake(open.id);
       await this.remember(ref, members);
+      return raised;
     });
   }
 
@@ -73,19 +74,20 @@ export class MachineAgenda implements MachineAgendaPort {
     await this.members.write({ ...(await this.members.read()), [ref]: members });
   }
 
-  resolve(ref: string, note?: string): Promise<void> {
+  resolve(ref: string, note?: string): Promise<AgendaMutation | undefined> {
     return this.queue.run(async () => await this.close(ref, note));
   }
 
-  private async close(ref: string, note: string | undefined): Promise<void> {
+  private async close(ref: string, note: string | undefined): Promise<AgendaMutation | undefined> {
     const store = await this.members.read();
     if (store[ref] !== undefined) {
       const { [ref]: _gone, ...rest } = store;
       await this.members.write(rest);
     }
-    if ((await this.open(ref)) === undefined) return;
+    if ((await this.open(ref)) === undefined) return undefined;
     const closed = await this.service.resolveSource(MACHINE_AGENDA_ID, 'agent-raised', ref, DAEMON, note);
     if (!closed.ok) throw new Error(closed.error.message);
+    return closed;
   }
 
   private async open(ref: string): Promise<AgendaItem | undefined> {

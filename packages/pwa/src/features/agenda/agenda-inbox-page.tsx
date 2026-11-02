@@ -388,6 +388,7 @@ function OpenItem({
 }) {
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
       <div
@@ -401,7 +402,7 @@ function OpenItem({
         ) : (
           <InboxWhoLine card={card} onNavigate={onNavigate} />
         )}
-        {isMachineAgendaId(card.view.config.id) ? <MachineNotes item={card.item} /> : null}
+        {machineFerrets.length === 0 ? null : <MachineNotes ferrets={machineFerrets} item={card.item} />}
         <AgendaItemView
           busy={false}
           closeLabel="Back to the Inbox"
@@ -412,7 +413,7 @@ function OpenItem({
           history={history}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
           wrapTitle={isMachineAgendaId(card.view.config.id)}
-          item={card.item}
+          item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}
           onNext={skip}
@@ -433,45 +434,75 @@ function OpenItem({
 }
 
 /**
-/** The ferrets a machine notice lists, as `name (id): reason` lines; a line of any other shape is not one. */
+ * The ferrets a machine notice lists: a `name (id): reason and action` line each, and an optional `$ command` line
+ * under it that the owner can run. A line of any other shape is not one.
+ */
 const FERRET_LINE = /^(.+) \(([^()\s]+)\): (.*)$/;
+const COMMAND_LINE = /^\$ (.+)$/;
 
-const ferretsOf = (context: string | null | undefined): readonly { readonly name: string; readonly id: string }[] =>
-  (context ?? '').split('\n').flatMap(line => {
+interface MachineFerret {
+  readonly name: string;
+  readonly id: string;
+  readonly said: string;
+  readonly command?: string;
+}
+
+const ferretsOf = (context: string | null | undefined): readonly MachineFerret[] => {
+  const ferrets: MachineFerret[] = [];
+  for (const line of (context ?? '').split('\n')) {
     const match = FERRET_LINE.exec(line);
-    return match === null ? [] : [{ name: match[1] ?? '', id: match[2] ?? '' }];
-  });
+    if (match !== null) {
+      ferrets.push({ name: match[1] ?? '', id: match[2] ?? '', said: match[3] ?? '' });
+      continue;
+    }
+    const command = COMMAND_LINE.exec(line)?.[1];
+    const last = ferrets.pop();
+    if (last !== undefined) ferrets.push(command === undefined ? last : { ...last, command });
+  }
+  return ferrets;
+};
 
-/** Why a machine notice was raised and what to do about it: the owner's command per listed ferret, tap to copy. */
-function MachineNotes({ item }: { readonly item: InboxCard['item'] }) {
-  const ferrets = ferretsOf(item.context);
+/** The item without the text `MachineNotes` already says, so each fact appears once. */
+function withoutMachineRepeats(item: InboxCard['item']): InboxCard['item'] {
+  const { context: _context, body: _body, premise: _premise, ...rest } = item;
+  return { ...rest, why: '' };
+}
+
+/** A machine notice's open view: why it was raised, then each ferret with its reason, its action and its command. */
+function MachineNotes({
+  item,
+  ferrets,
+}: {
+  readonly item: InboxCard['item'];
+  readonly ferrets: readonly MachineFerret[];
+}) {
   return (
     <div className="fy-inbox-machine-notes" data-inbox-machine-notes="">
-      <section>
-        <h3 className="fy-inbox-machine-notes__title">Why</h3>
-        <p data-inbox-machine-why="">{item.why}</p>
-      </section>
-      <section>
-        <h3 className="fy-inbox-machine-notes__title">What to do</h3>
-        <p data-inbox-machine-fix="">{item.howToResolve}</p>
-        {ferrets.length === 0 ? null : (
-          <ul className="fy-inbox-machine-notes__moves" data-inbox-machine-moves="">
-            {ferrets.map(ferret => {
-              const command = `fy migrate ${ferret.id} -a <runtime>`;
-              return (
-                <li data-inbox-machine-move={ferret.id} key={ferret.id}>
-                  <span className="fy-inbox-machine-notes__ferret">{ferret.name}</span>
-                  <code>{command}</code>
-                  <CopyButton label={`Copy the move command for ${ferret.name}`} text={command} write={copyWriter} />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      <p data-inbox-machine-why="">{item.why}</p>
+      <ul className="fy-inbox-machine-notes__moves" data-inbox-machine-moves="">
+        {ferrets.map(ferret => (
+          <li data-inbox-machine-move={ferret.id} key={ferret.id}>
+            <span className="fy-inbox-machine-notes__ferret">{ferret.name}</span>
+            <span className="fy-inbox-machine-notes__said" data-inbox-machine-said="">
+              {ferret.said}
+            </span>
+            {ferret.command === undefined ? null : (
+              <div className="fy-inbox-machine-notes__command">
+                <code data-inbox-machine-command="">{ferret.command}</code>
+                <CopyButton
+                  label={`Copy the move command for ${ferret.name}`}
+                  text={ferret.command}
+                  write={copyWriter}
+                />
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
+
 /** A gate item's one quiet line: what it is (the lane's verb), the project, the ferret, and the way to its chat. */
 function GateMeta({
   card,

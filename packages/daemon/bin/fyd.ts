@@ -1086,6 +1086,7 @@ import {
   parseBackgroundDelay,
   parseDaemonTimings,
   parseSessionId,
+  parseStoredWardenConfig,
   parseWardenConfigPatch,
   parseWatchdogLimit,
   passkeyVerifier,
@@ -4466,6 +4467,8 @@ interface WardenParts {
    */
   readonly machine: {
     readonly autoMove: AutoMoveFailures;
+    /** Bound once the auto-migrate service exists: the login it would move a ferret to now. */
+    readonly candidate: { read?: (sessionId: string) => Promise<string | undefined> };
     readonly orphans: OrphanList;
     readonly folded: Promise<void>;
   };
@@ -4843,7 +4846,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             ? { sessionId, items: listed.value.items, resolved: listed.value.resolved }
             : undefined;
         },
-        homeOf: async sessionId => await parts.attention.homeOf(sessionId),
+        homeOf: async sessionId => await parts.attention.homeOf(sessionId, true),
         raise: async (sessionId, request) => {
           const mutation = await parts.attention
             .raise(
@@ -4925,6 +4928,14 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     },
   );
   // A ferret past its hard budget is offered to the Warden before it is stopped (see the budget tick).
+  const wardenConfigStore = new ConfigFileWardenConfigStore(parts.config);
+  parts.machine.candidate.read = async sessionId => {
+    const view = await parts.sessions.get(sessionId).catch(() => undefined);
+    if (view === undefined) return undefined;
+    const config = parseStoredWardenConfig(await wardenConfigStore.read()).config;
+    const [row] = await autoMigrate.migrateCandidates([view], config);
+    return row?.candidates[0];
+  };
   parts.budgetMover.relocate = async sessionId => await service.relocate(sessionId, 'budget_exceeded');
   const nextSweepAt = (): string | undefined => {
     const due = loop.nextDueAtMs();
@@ -10774,7 +10785,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
       // Where the daemon asks the owner for a sub-ferret: the owner's own ferret at the root of its lineage.
-      const agendaHomes = new AgendaHomes(new StorageHomeSessions(storage), undefined, boardDiagnostics);
+      // A notice with no owner home lands on the machine agenda; a gate item or a follow-up never does.
+      const agendaHomes = new AgendaHomes(
+        new StorageHomeSessions(storage),
+        { home: async () => MACHINE_AGENDA_ID },
+        boardDiagnostics,
+      );
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -10828,6 +10844,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ? undefined
               : await gateItems?.asking(ref.id),
         },
+        // Read lazily: the machine agenda is built just below, over its own ledger, and is only asked after boot.
+        {
+          raiseOrUpdate: async (...parameters) => await machineAgenda.raiseOrUpdate(...parameters),
+          resolve: async (...parameters) => await machineAgenda.resolve(...parameters),
+          list: async () => await machineAgenda.list(),
+        },
       );
       // The machine agenda: the same agenda machinery over its own ledger. Nothing a ferret sends reaches it (no
       // session route names it); the daemon raises through `machineAgenda`, the owner answers over /v1/machine/agenda.
@@ -10845,7 +10867,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // The Warden's two list items: ferrets it could not move, and cards with nobody on them. Each is kept in a
       // small file so a restart still names them; a stopped or moved ferret leaves the first by itself.
+      const candidateBox: { read?: (sessionId: string) => Promise<string | undefined> } = {};
       const wardenLists = {
+        candidate: candidateBox,
         autoMove: new AutoMoveFailures(
           new FileMachineMembers(stateFiles, join(paths.state, 'warden-auto-move-failed.json')),
           machineAgenda,
@@ -10854,8 +10878,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               const view = await sessions.get(sessionId).catch(() => undefined);
               return view === undefined || HYPERMEDIA_NOT_RUNNING.has(view.state.status)
                 ? undefined
-                : { agent: view.config.agent, name: view.config.name };
+                : {
+                    agent: view.config.agent,
+                    name: view.config.name,
+                    midTurn: view.state.turnState === 'working',
+                  };
             },
+            candidate: async sessionId => await candidateBox.read?.(sessionId),
           },
         ),
         orphans: new OrphanList(

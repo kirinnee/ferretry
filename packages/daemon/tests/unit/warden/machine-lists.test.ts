@@ -31,7 +31,10 @@ describe('the auto-move failures item', () => {
     ['a', 'claude-1'],
     ['b', 'claude-1'],
   ]);
-  const facts = { current: async (id: string) => (live.has(id) ? { agent: live.get(id)! } : undefined) };
+  const facts = {
+    current: async (id: string) => (live.has(id) ? { agent: live.get(id)! } : undefined),
+    candidate: async () => undefined,
+  };
 
   it('should list every ferret that could not be moved in one item', async () => {
     const { port, raised } = machine();
@@ -42,7 +45,9 @@ describe('the auto-move failures item', () => {
     should(last.ref).equal(AUTO_MOVE_FAILED_REF);
     should(last.members).eql(['a', 'b']);
     should(last.request.title).equal('2 ferrets could not be moved');
-    should(last.request.context).containEql('a (a): Not moved: no login could take it.');
+    should(last.request.context).containEql('a (a): No login could take it. Wait for a login to reset.');
+    should(last.request.context).not.containEql('$ fy migrate');
+    should(last.request.why).containEql("These 2 couldn't be moved.");
   });
 
   it('should keep every ferret when notes and reconciles run at the same time', async () => {
@@ -84,6 +89,28 @@ describe('the auto-move failures item', () => {
     should(raised[1]?.request.ping).be.true();
   });
 
+  it('should give a runnable command when a login can take the ferret', async () => {
+    const { port, raised } = machine();
+    const failures = new AutoMoveFailures(new Members(), port, {
+      ...facts,
+      candidate: async id => (id === 'a' ? 'codex-2' : undefined),
+    });
+    await failures.note('a', 'Not moved although its login hit its limit: a background job runs');
+    const request = raised.at(-1)!.request;
+    should(request.context).equal('a (a): A background job runs. A login can take it now:\n$ fy migrate a -a codex-2');
+    should(request.why).containEql("This one couldn't be moved.");
+  });
+
+  it('should say to wait for the turn, with no command, when the ferret is mid-turn', async () => {
+    const { port, raised } = machine();
+    const failures = new AutoMoveFailures(new Members(), port, {
+      current: async () => ({ agent: 'c', name: 'piper', midTurn: true }),
+      candidate: async () => 'codex-2',
+    });
+    await failures.note('p', '');
+    should(raised.at(-1)?.request.context).equal('piper (p): It could not be moved. Wait for it to finish its turn.');
+  });
+
   it('should name a single ferret in the title', async () => {
     const { port, raised } = machine();
     await new AutoMoveFailures(new Members(), port, facts).note('a', 'x');
@@ -102,6 +129,7 @@ describe('the auto-move failures item', () => {
     const agents = new Map(live);
     const failures = new AutoMoveFailures(new Members(), port, {
       current: async id => (agents.has(id) ? { agent: agents.get(id)! } : undefined),
+      candidate: async () => undefined,
     });
     await failures.note('a', 'x');
     await failures.note('b', 'y');
@@ -118,6 +146,7 @@ describe('the auto-move failures item', () => {
     const many = new Map(Array.from({ length: 15 }, (_, index) => [`s${String(index).padStart(2, '0')}`, 'c']));
     const failures = new AutoMoveFailures(new Members(), port, {
       current: async id => (many.has(id) ? { agent: 'c' } : undefined),
+      candidate: async () => undefined,
     });
     for (const id of many.keys()) await failures.note(id, 'x');
     should(raised.at(-1)?.request.context).containEql('…and 3 more.');

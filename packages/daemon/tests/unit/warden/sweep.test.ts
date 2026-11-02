@@ -1328,6 +1328,40 @@ describe('escalating to a human, and clearing it again', () => {
     ]);
   });
 
+  it('should read the machine agenda a ferret’s notice sits on, and clear its row once the ferret recovers', async () => {
+    // Arrange — s1 has no owner home, so its notice is on the machine agenda, which is no ferret of the fleet.
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'machine-agenda' : id),
+    });
+    subject.seedBoard('machine-agenda', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved.map(each => [each.sessionId, each.sourceRef])).eql([
+      ['machine-agenda', wardenEscalationSourceRef('unattended_question', 's1')],
+    ]);
+  });
+
+  it('should not judge a notice on a machine agenda that could not be read', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'machine-agenda' : id),
+      unreadableBoards: ['machine-agenda'],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
   it('should leave a home’s row about a ferret whose own board could not be read', async () => {
     // Arrange
     const subject = escalating({
@@ -1409,7 +1443,7 @@ describe('escalating to a human, and clearing it again', () => {
 
     // Assert
     should(subject.raises).have.length(1);
-    should(subject.state().notified).deepEqual({ ['s1|' + wardenEscalationSourceRef('unattended_question')]: at(0) });
+    should(subject.state().notified).deepEqual({ [`s1|${wardenEscalationSourceRef('unattended_question')}`]: at(0) });
   });
 
   it('should notify again once the subject cleared and came back', async () => {

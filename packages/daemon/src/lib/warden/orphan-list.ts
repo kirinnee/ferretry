@@ -48,7 +48,10 @@ export class OrphanList {
   private async refresh(quiet = false): Promise<void> {
     const held = await this.store.read();
     const ids = Object.keys(held).sort();
-    if (ids.length === 0) return await this.machine.resolve(ORPHANS_REF, 'A ferret is on every card again.');
+    if (ids.length === 0) {
+      await this.machine.resolve(ORPHANS_REF, 'A ferret is on every card again.');
+      return;
+    }
     const lines = ids.slice(0, MAX_LISTED).map(id => `- ${held[id]?.[1] ?? id}`);
     const more = ids.length > MAX_LISTED ? [`…and ${ids.length - MAX_LISTED} more.`] : [];
     const since = ids.map(id => held[id]?.[2] ?? '').sort()[0] ?? new Date().toISOString();

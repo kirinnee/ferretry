@@ -2875,6 +2875,12 @@ export class WardenSweepService {
       const home = await this.ports.attention.homeOf?.(id).catch(() => id);
       if (home !== undefined && home !== id) homes.set(id, home);
     }
+    // A home that is no ferret of this fleet (the machine agenda) is read too, or its notifications would never be seen.
+    for (const home of new Set(homes.values())) {
+      if (boards.some(board => board.sessionId === home)) continue;
+      const board = await this.ports.attention.board(home);
+      if (board !== undefined) boards.push(board);
+    }
     const unreadable = new Set(read.filter(each => each.board === undefined).map(each => each.session.config.id));
 
     // Why each standing flag is the owner's, from what this sweep decided (`owner-routes.ts`).

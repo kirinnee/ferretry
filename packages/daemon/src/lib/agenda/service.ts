@@ -10,8 +10,15 @@ import type {
   ResolvedAgendaItem,
   TaskRef,
 } from '@ferretry/protocol';
-import { agendaCardKind, clipAtWord, formatTaskRef, MAX_AGENDA_TITLE_LENGTH } from '@ferretry/protocol';
+import {
+  agendaCardKind,
+  clipAtWord,
+  formatTaskRef,
+  MACHINE_AGENDA_ID,
+  MAX_AGENDA_TITLE_LENGTH,
+} from '@ferretry/protocol';
 import { type AgendaHomeResolver, handsOnRaise, handsOnSource, SELF_AGENDA_HOME } from './home.ts';
+import type { MachineAgendaPort } from './machine-agenda.ts';
 import {
   isAncestorOf,
   isSubFerret,
@@ -113,6 +120,16 @@ export type AgendaQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AgendaFailure };
 
+/** Whether a daemon raise is a notice: the kind that may land on the machine agenda. A gate item or a follow-up never is. */
+const isNoticeRaise = (request: RaiseAgendaRequest, actor: AgendaActor): boolean =>
+  actor.kind === 'daemon' && (request.notice === true || actor.cause === 'warden-escalation');
+
+/** A notice's reference on the machine agenda: the ferret it is about is always part of it, so two ferrets never share a row. */
+const machineNoticeRef = (sessionId: string, sourceRef: string | null | undefined, actor: AgendaActor): string => {
+  const base = sourceRef ?? `notice:${actor.kind === 'daemon' ? actor.cause : 'agent'}`;
+  return base.endsWith(`:${sessionId}`) ? base : `${base}:${sessionId}`;
+};
+
 const SUB_FERRET_DOING: Readonly<Record<string, string>> = {
   raise: 'raise agenda items or notify the owner',
   edit: 'edit agenda items',
@@ -182,9 +199,13 @@ export class AgendaService {
     private readonly homes: AgendaHomeResolver = SELF_AGENDA_HOME,
     /** Which cards are asking the owner through their gate: a second ask about one is not raised (see {@link raise}). */
     private readonly gates: AgendaGateAsking = NO_AGENDA_GATE_ASKING,
+    /** Where a notice about a sub-ferret lands when the owner has no home for it: the machine agenda (§ The machine agenda). */
+    private readonly machine?: MachineAgendaPort,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
+    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined)
+      return { ok: true, value: await this.machine.list() };
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
     const current = await this.repository.read(sessionId);
@@ -204,13 +225,15 @@ export class AgendaService {
    * (docs/agenda.md § Sub-ferret agenda); the mutation's snapshot says where it landed.
    */
   async raise(sessionId: string, request: RaiseAgendaRequest, actor: AgendaActor): Promise<AgendaMutation> {
-    const home = await this.redirected(sessionId, handsOnRaise(request, actor), actor);
+    const home = await this.redirected(sessionId, handsOnRaise(request, actor), actor, isNoticeRaise(request, actor));
     const titled =
       actor.kind === 'daemon' && request.title === undefined
         ? { ...request, title: DAEMON_TITLES[actor.cause] }
         : request;
     const named =
-      home !== sessionId && actor.kind === 'daemon' && actor.cause === 'warden-escalation'
+      home !== sessionId &&
+      actor.kind === 'daemon' &&
+      (actor.cause === 'warden-escalation' || home === MACHINE_AGENDA_ID)
         ? {
             ...titled,
             title: clipAtWord(
@@ -219,6 +242,11 @@ export class AgendaService {
             ),
           }
         : titled;
+    if (home === MACHINE_AGENDA_ID && this.machine !== undefined)
+      return await this.onMachine(async machine => {
+        const { source: _source, sourceRef, task: _task, ...rest } = named;
+        return await machine.raiseOrUpdate(machineNoticeRef(sessionId, sourceRef, actor), rest, [sessionId]);
+      });
     // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
     const focused = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
     const asking = await this.gateAsking(focused, actor);
@@ -246,15 +274,16 @@ export class AgendaService {
   }
 
   /** The session a daemon act about `sessionId` belongs on: its home when it is a sub-ferret and the act is not hands-on. */
-  private async redirected(sessionId: string, handsOn: boolean, actor: AgendaActor): Promise<string> {
-    return actor.kind !== 'daemon' || handsOn ? sessionId : await this.homeOf(sessionId);
+  private async redirected(sessionId: string, handsOn: boolean, actor: AgendaActor, notice: boolean): Promise<string> {
+    return actor.kind !== 'daemon' || handsOn ? sessionId : await this.homeOf(sessionId, notice);
   }
 
   /** Where the daemon's non-hands-on asks about `sessionId` land: its agenda home when it is a sub-ferret, else itself. */
-  async homeOf(sessionId: string): Promise<string> {
+  async homeOf(sessionId: string, notice = false): Promise<string> {
     if (invalidSession(sessionId) !== null) return sessionId;
     if (!(await isSubFerret(this.subFerrets, sessionId))) return sessionId;
-    return await this.homes.of(sessionId).catch(() => sessionId);
+    const home = await this.homes.of(sessionId, notice).catch(() => sessionId);
+    return home === MACHINE_AGENDA_ID && this.machine === undefined ? sessionId : home;
   }
 
   /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
@@ -445,7 +474,12 @@ export class AgendaService {
   ): Promise<AgendaMutation> {
     // A row that stands on the board the daemon names is cleared there: only a row that is not there is looked for on the home.
     const here = actor.kind === 'daemon' && (await this.holdsOpenSource(sessionId, source, sourceRef));
-    const home = here ? sessionId : await this.redirected(sessionId, handsOnSource(actor), actor);
+    const notice = actor.kind === 'daemon' && actor.cause === 'warden-escalation';
+    const home = here ? sessionId : await this.redirected(sessionId, handsOnSource(actor), actor, notice);
+    if (home === MACHINE_AGENDA_ID && this.machine !== undefined)
+      return await this.onMachine(
+        async machine => await machine.resolve(machineNoticeRef(sessionId, sourceRef, actor), note ?? undefined),
+      );
     return this.apply(home, {
       action: 'resolve-source',
       actor,
@@ -454,6 +488,30 @@ export class AgendaService {
       note,
       at: this.clock.now(),
     });
+  }
+
+  /** A write to the machine agenda, answered as a mutation: nothing written reads as unchanged, a failure as a refusal. */
+  private async onMachine(
+    write: (machine: MachineAgendaPort) => Promise<AgendaMutation | undefined>,
+  ): Promise<AgendaMutation> {
+    const machine = this.machine as MachineAgendaPort;
+    try {
+      const written = await write(machine);
+      if (written !== undefined) return written;
+      const snapshot = await machine.list();
+      return {
+        ok: true,
+        changed: false,
+        change: 'unchanged',
+        ledger: emptyAgendaLedger(MACHINE_AGENDA_ID, this.clock.now()),
+        snapshot,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: { code: 'corrupt', message: `the machine agenda could not be written: ${String(error)}` },
+      };
+    }
   }
 
   private async holdsOpenSource(sessionId: string, source: AgendaSource, sourceRef: string): Promise<boolean> {

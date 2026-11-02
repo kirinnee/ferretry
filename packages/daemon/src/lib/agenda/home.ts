@@ -7,7 +7,7 @@
  * 2. A root the owner started (origin `human`, or no stamp: never hide an item on a guess) is the home.
  * 3. Else (a Warden's or another session's orphan, or a broken lineage): the owner's most recently updated
  *    LIVE interactive session on the same project, else the most recently updated one that has stopped.
- * 4. Else the machine-wide agenda, when it exists.
+ * 4. Else, for a NOTICE only, the machine-wide agenda ({@link MACHINE_AGENDA_ID}). A gate item or a follow-up never goes there.
  * 5. Else the root itself; a broken lineage keeps the item on the session it was raised for, and says so.
  */
 import type { AgendaItem } from '@ferretry/protocol';
@@ -35,18 +35,18 @@ export interface HomeSessions {
   all(): Promise<readonly string[]>;
 }
 
-/** The machine-wide agenda's session. */
+/** The machine-wide agenda's id, when it exists. */
 export interface MachineAgendaHome {
   /** `undefined` until the machine-wide agenda exists. */
   home(): Promise<string | undefined>;
 }
 
-// TODO(F439 PR 4b): wire the machine-wide agenda (feat/machine-agenda) in place of this.
 export const NO_MACHINE_AGENDA: MachineAgendaHome = { home: async () => undefined };
 
 /** Where the daemon asks the owner for a session. */
 export interface AgendaHomeResolver {
-  of(sessionId: string): Promise<string>;
+  /** `notice`: the ask is a notice, which may land on the machine agenda when the owner has no home for it. */
+  of(sessionId: string, notice?: boolean): Promise<string>;
 }
 
 /** Every session is its own home: the default for a service built without lineage. */
@@ -75,13 +75,13 @@ export class AgendaHomes implements AgendaHomeResolver {
     { readonly at: number; readonly latest: Promise<HomeSession | undefined> }
   >();
 
-  async of(sessionId: string): Promise<string> {
+  async of(sessionId: string, notice = false): Promise<string> {
     const { first, last, rooted } = await this.walk(sessionId);
     if (first === undefined || last === undefined) return sessionId;
     if (rooted && ownerStarted(last)) return last.id;
     const latest = await this.latestInteractive((rooted ? last : first).projectId);
     if (latest !== undefined) return latest.id;
-    const machine = await this.machine.home().catch(() => undefined);
+    const machine = notice ? await this.machine.home().catch(() => undefined) : undefined;
     if (machine !== undefined) return machine;
     if (rooted) return last.id;
     this.diagnostics.warn(

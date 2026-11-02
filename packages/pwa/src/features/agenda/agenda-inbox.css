@@ -1876,19 +1876,35 @@ a.fy-inbox-row:focus-visible {
 }
 .fy-inbox-machine-notes__moves li {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-inbox-machine-notes__ferret {
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-machine-notes__said {
+  overflow-wrap: anywhere;
+}
+.fy-inbox-machine-notes__command {
+  display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: var(--gap-xs);
+  min-width: 0;
 }
-.fy-inbox-machine-notes__ferret {
-  flex: none;
-  font-weight: var(--weight-strong);
-}
-.fy-inbox-machine-notes__moves code {
+.fy-inbox-machine-notes__command code {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 4px var(--gap-xs);
+  border-radius: var(--radius-control, 6px);
+  background: var(--surface-sunken, var(--surface));
   color: var(--fg);
   font-family: var(--font-mono, monospace);
   font-size: var(--text-xs, 12px);
+}
+.fy-inbox-machine-notes__command > :last-child {
+  flex: none;
 }
