@@ -1773,3 +1773,9 @@
   box-shadow: none;
   outline: none;
 }
+/* A wide screen's toolbar sits a little clear of the first section. */
+@media (min-width: 768px) {
+  .fy-attn-inbox[data-agenda-inbox='panes'] .fy-attn-inbox__head {
+    margin-bottom: var(--gap-md);
+  }
+}
