@@ -21,12 +21,17 @@ const phone = window.innerWidth < 768;
 
 const moved = agendaItem('M1', {
   notice: true,
-  subject: '3 ferrets could not be moved',
-  why: 'The Warden moves a ferret whose login hit a limit to another login, as warden.yaml (autoMigrate) allows. These stayed where they are.',
-  context:
-    'durian (7f3a91c2): Not moved: no other login could take it.\nkai (b04e55d8): Not moved: every other login is over its cap.\npiper (e29c1a60): Not moved: it is mid-turn.',
-  howToResolve:
-    'Move a ferret yourself with the command beside its name (pick the runtime to move it onto), or wait for its login to reset.',
+  subject: '4 ferrets could not be moved',
+  why: "Ferretry moves a ferret to another login when its login hits a limit. These 4 couldn't be moved.",
+  context: [
+    'durian (7f3a91c2): Its login hit its usage limit until 6pm. A login can take it now:',
+    '$ fy migrate 7f3a91c2 -a claude-llm1',
+    'kai (b04e55d8): Its login hit its usage limit until 9pm. A login can take it now:',
+    '$ fy migrate b04e55d8 -a claude-atomi-long-login-name',
+    'rho (c81d02aa): No other login could take it, every one is over its cap. Wait for a login to reset.',
+    'piper (e29c1a60): It is mid-turn. Wait for it to finish its turn.',
+  ].join('\n'),
+  howToResolve: 'Run the command under a ferret to move it yourself, or wait as its line says.',
   waitingSince: '2026-08-01T10:00:00.000Z',
   sourceRef: 'warden:auto-move-failed',
 } as never);

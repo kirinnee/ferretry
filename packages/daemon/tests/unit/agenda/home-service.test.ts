@@ -1,11 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import {
   type AgendaActor,
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
+  MachineAgenda,
+  type MachineMembersStore,
   type RaiseAgendaRequest,
 } from '../../../src/lib/agenda/index.ts';
 
@@ -265,5 +268,110 @@ describe('AgendaService agenda homes', () => {
 
     should(byAgent).match({ ok: false, error: { code: 'forbidden' } });
     should(ledgers.open('lead')).have.length(1);
+  });
+});
+
+describe('AgendaService machine fallback', () => {
+  const orphaned = () => {
+    const ledgers = new Ledgers();
+    const machineLedgers = new Ledgers();
+    let stored: Record<string, readonly string[]> = {};
+    const members: MachineMembersStore = {
+      read: async () => stored,
+      write: async next => {
+        stored = { ...next };
+      },
+    };
+    const machineService = new AgendaService(
+      machineLedgers,
+      { now: () => NOW },
+      { has: async id => id === MACHINE_AGENDA_ID },
+      { raised: async () => undefined },
+    );
+    const machine = new MachineAgenda(machineService, members, { now: () => NOW });
+    const homeOf = async (_id: string, notice?: boolean) => (notice === true ? MACHINE_AGENDA_ID : 'lead');
+    const service = new AgendaService(
+      ledgers,
+      { now: () => NOW },
+      { has: async () => true },
+      { raised: async () => undefined },
+      undefined,
+      undefined,
+      { leadOf: async id => LEADS[id], addressOf: async id => CALLSIGNS[id] ?? id },
+      undefined,
+      { of: homeOf },
+      undefined,
+      machine,
+    );
+    return { ledgers, machineLedgers, machine, service };
+  };
+
+  it('raises a Warden notice about a sub-ferret with no owner home on the machine agenda, scoped to it', async () => {
+    const { ledgers, machineLedgers, service } = orphaned();
+    const raised = await service.raise(
+      'kid',
+      request({ sourceRef: 'warden:ask:stuck:kid' }),
+      daemon('warden-escalation'),
+    );
+    should(raised).match({ ok: true, change: 'created' });
+    should(ledgers.open('lead')).be.empty();
+    const open = machineLedgers.open(MACHINE_AGENDA_ID);
+    should(open.map(each => each.sourceRef)).eql(['warden:ask:stuck:kid']);
+    should(open.map(each => each.title)).eql(['becki: A ferret needs a human']);
+  });
+
+  it('keeps two ferrets’ notices as two machine items, and a repeat refreshes rather than adds', async () => {
+    const { machineLedgers, service } = orphaned();
+    await service.raise('kid', request({ sourceRef: undefined as never, notice: true }), daemon('system'));
+    await service.raise('grandkid', request({ sourceRef: 'notice:system', notice: true }), daemon('system'));
+    await service.raise('grandkid', request({ sourceRef: 'notice:system', notice: true }), daemon('system'));
+    should(machineLedgers.open(MACHINE_AGENDA_ID).map(each => each.sourceRef)).eql([
+      'notice:system:kid',
+      'notice:system:grandkid',
+    ]);
+    const again = await service.raise('kid', request({ sourceRef: 'notice:system', notice: true }), daemon('system'));
+    should(again).match({ ok: true, changed: false, change: 'unchanged' });
+  });
+
+  it('never sends a gate item or a follow-up to the machine agenda', async () => {
+    const { ledgers, machineLedgers, service } = orphaned();
+    await service.raise('kid', request({ sourceRef: 'gate:1' }), daemon('system'));
+    await service.raise('kid', request({ sourceRef: 'gate:2' }), daemon('source-reconciliation'));
+    should(ledgers.open('lead')).have.length(2);
+    should(machineLedgers.open(MACHINE_AGENDA_ID)).be.empty();
+  });
+
+  it('resolves the machine item when the Warden clears it, and reads the machine board as the home', async () => {
+    const { machineLedgers, service } = orphaned();
+    await service.raise('kid', request({ sourceRef: 'warden:ask:stuck:kid' }), daemon('warden-escalation'));
+    const listed = await service.list(MACHINE_AGENDA_ID);
+    should(listed).match({ ok: true });
+    should(await service.homeOf('kid', true)).equal(MACHINE_AGENDA_ID);
+    const cleared = await service.resolveSource(
+      'kid',
+      'agent-raised',
+      'warden:ask:stuck',
+      daemon('warden-escalation'),
+      'ok',
+    );
+    should(cleared).match({ ok: true, change: 'resolved' });
+    should(machineLedgers.open(MACHINE_AGENDA_ID)).be.empty();
+    const again = await service.resolveSource('kid', 'agent-raised', 'warden:ask:stuck', daemon('warden-escalation'));
+    should(again).match({ ok: true, changed: false });
+  });
+
+  it('says so when the machine agenda cannot be written', async () => {
+    const { machine, service } = orphaned();
+    machine.raiseOrUpdate = async () => {
+      throw new Error('disk');
+    };
+    const refused = await service.raise('kid', request({ sourceRef: 'w:1' }), daemon('warden-escalation'));
+    should(refused).match({ ok: false, error: { code: 'corrupt' } });
+  });
+
+  it('keeps the item on the session itself when the service has no machine agenda', async () => {
+    const { ledgers, service } = build(async () => MACHINE_AGENDA_ID);
+    await service.raise('kid', request({ sourceRef: 'w:1' }), daemon('warden-escalation'));
+    should(ledgers.open('kid')).have.length(1);
   });
 });

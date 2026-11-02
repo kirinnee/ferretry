@@ -99,9 +99,13 @@ describe('the Machine group in the Inbox', () => {
     const detailed = agendaItem('M3', {
       notice: true,
       subject: '2 ferrets could not be moved',
-      why: 'The Warden moves a ferret whose login hit a limit.',
-      context: 'durian (s-1): Not moved: no login could take it.\nkai (s-2): Not moved: cap.',
-      howToResolve: 'Move a ferret yourself with the command beside its name.',
+      why: "Ferretry moves a ferret to another login when its login hits a limit. These 3 couldn't be moved.",
+      context:
+        'durian (s-1): No login could take it. Wait for a login to reset.\n' +
+        'kai (s-2): Its login is full. A login can take it now:\n$ fy migrate s-2 -a codex-2\n' +
+        'piper (s-3): Mid-turn. Wait for it to finish its turn.',
+      howToResolve: 'Run the command under a ferret to move it yourself.',
+      body: 'Run the command under a ferret to move it yourself.',
       sourceRef: 'warden:auto-move-failed',
       waitingSince: '2026-08-01T10:00:00.000Z',
     } as never);
@@ -114,10 +118,19 @@ describe('the Machine group in the Inbox', () => {
 
     // Assert
     const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
-    expect(text).toContain('durian (s-1): Not moved: no login could take it.');
-    expect(text).toContain('fy migrate s-1 -a <runtime>');
-    expect(text).toContain('fy migrate s-2 -a <runtime>');
-    expect(text).not.toContain('fy migrate <id>');
+    const said = [...(view?.container.querySelectorAll('[data-inbox-machine-said]') ?? [])].map(e => e.textContent);
+    expect(said).toEqual([
+      'No login could take it. Wait for a login to reset.',
+      'Its login is full. A login can take it now:',
+      'Mid-turn. Wait for it to finish its turn.',
+    ]);
+    const commands = [...(view?.container.querySelectorAll('[data-inbox-machine-command]') ?? [])];
+    expect(commands.map(e => e.textContent)).toEqual(['fy migrate s-2 -a codex-2']);
+    expect(text).not.toContain('<runtime>');
+    expect(text).not.toContain('warden.yaml');
+    expect(text.split('Wait for a login to reset').length).toBe(2);
+    expect(text.split('Run the command under a ferret').length).toBe(1);
+    expect(view?.container.querySelector('[data-agenda-section="context"]')).toBeNull();
     expect(view?.container.querySelector('[data-inbox-open-chat]')).toBeNull();
   });
 

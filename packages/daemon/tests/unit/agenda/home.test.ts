@@ -137,8 +137,9 @@ describe('AgendaHomes', () => {
 
   it('falls to the machine-wide agenda, and to the root while there is none', async () => {
     const sessions = [session('spawned', { origin: 'session' }), session('kid', { parent: 'spawned' })];
-    should(await homes(sessions, 'machine').of('kid')).equal('machine');
-    should(await homes(sessions).of('kid')).equal('spawned');
+    should(await homes(sessions, 'machine').of('kid', true)).equal('machine');
+    should(await homes(sessions, 'machine').of('kid')).equal('spawned');
+    should(await homes(sessions).of('kid', true)).equal('spawned');
     should(await NO_MACHINE_AGENDA.home()).equal(undefined);
     const failing = new AgendaHomes(
       {
@@ -153,7 +154,7 @@ describe('AgendaHomes', () => {
         },
       },
     );
-    should(await failing.of('kid')).equal('spawned');
+    should(await failing.of('kid', true)).equal('spawned');
   });
 
   it('is never the sub-ferret itself, nor an owner root, when a parent cannot be read', async () => {
@@ -162,7 +163,7 @@ describe('AgendaHomes', () => {
     should(await homes([kid, latest]).of('kid')).equal('latest');
     should(warnings).be.empty();
     should(
-      await homes([kid, session('elsewhere', { mode: 'interactive', projectId: 'P2' })], 'machine').of('kid'),
+      await homes([kid, session('elsewhere', { mode: 'interactive', projectId: 'P2' })], 'machine').of('kid', true),
     ).equal('machine');
     should(
       await homes([session('kid', { parent: 'broken' }), session('broken')], undefined, ['broken']).of('kid'),

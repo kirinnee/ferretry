@@ -48,7 +48,10 @@ describe('the auto-move failures through the real machine agenda', () => {
       { raised: async () => undefined },
     );
     const machine = new MachineAgenda(service, new SlowMembers(), { now: () => NOW });
-    const facts = { current: async (id: string) => ({ agent: 'claude-1', name: `ferret-${id}` }) };
+    const facts = {
+      current: async (id: string) => ({ agent: 'claude-1', name: `ferret-${id}` }),
+      candidate: async () => undefined,
+    };
     const failures = new AutoMoveFailures(new SlowMembers(), machine, facts);
 
     // Act
@@ -58,7 +61,7 @@ describe('the auto-move failures through the real machine agenda', () => {
     const items = (await machine.list()).items;
     should(items).have.length(1);
     should(items[0]?.subject).equal('a, b');
-    should(items[0]?.context).containEql('ferret-a (a): Not moved: cap.');
-    should(items[0]?.context).containEql('ferret-b (b): Not moved: busy.');
+    should(items[0]?.context).containEql('ferret-a (a): Cap. Wait for a login to reset.');
+    should(items[0]?.context).containEql('ferret-b (b): Busy. Wait for a login to reset.');
   });
 });

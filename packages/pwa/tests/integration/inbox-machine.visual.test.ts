@@ -111,7 +111,7 @@ describe('the Inbox’s Machine group', () => {
           expect(groups[0]?.icon).toBe(true);
           expect(groups[0]?.link).toBe(false);
           expect(groups[0]?.notices).toBe(0);
-          expect(groups[0]?.text).toContain('3 ferrets could not be moved');
+          expect(groups[0]?.text).toContain('4 ferrets could not be moved');
           expect(groups[0]?.text).toContain('claude-liftoff hit its hard limit');
           expect(groups[1]?.link).toBe(true);
           // The same text colour as the ferret's own row, not a muted grey.
@@ -123,7 +123,7 @@ describe('the Inbox’s Machine group', () => {
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-machine.png`) });
 
           await tab.goto(`${origin}/?theme=${theme}&open=1`);
-          await tab.waitForSelector('[data-inbox-open] [data-inbox-machine-fix] >> visible=true', { timeout: 4_000 });
+          await tab.waitForSelector('[data-inbox-open] [data-inbox-machine-why] >> visible=true', { timeout: 4_000 });
           await tab.evaluate(async () => await document.fonts.ready);
           await tab.waitForTimeout(900);
           if (shotsDir !== '')
@@ -134,31 +134,44 @@ describe('the Inbox’s Machine group', () => {
                 .map(open => open.textContent ?? '')
                 .find(text => text.includes('durian')) ?? '',
           );
-          expect(detail).toContain('durian (7f3a91c2): Not moved: no other login could take it.');
-          expect(detail).toContain('fy migrate 7f3a91c2 -a <runtime>');
-          expect(detail).toContain('fy migrate b04e55d8 -a <runtime>');
-          expect(detail).toContain('fy migrate e29c1a60 -a <runtime>');
-          expect(detail).not.toContain('fy migrate <id>');
+          expect(detail).toContain('durian');
+          expect(detail).toContain('fy migrate 7f3a91c2 -a claude-llm1');
+          expect(detail).toContain('fy migrate b04e55d8 -a claude-atomi-long-login-name');
+          expect(detail).not.toContain('fy migrate e29c1a60');
+          expect(detail).not.toContain('fy migrate c81d02aa');
+          expect(detail).not.toContain('<runtime>');
+          expect(detail).not.toContain('warden.yaml');
+          expect(detail.split('Wait for it to finish its turn').length).toBe(2);
+          expect(detail.split('Wait for a login to reset').length).toBe(2);
           const laid = await tab.evaluate(() => {
             const notes = document.querySelector('[data-inbox-machine-notes]');
             const title = document.querySelector('[data-inbox-open] [data-agenda-title]');
             const text = title?.querySelector('.fy-item-view__title-text');
+            const commands = [...document.querySelectorAll<HTMLElement>('[data-inbox-machine-command]')];
             return {
               pad: notes === null ? 0 : Number.parseFloat(getComputedStyle(notes).paddingLeft),
               rights: [...document.querySelectorAll('[data-inbox-machine-move] [data-onboarding-copy]')].map(button =>
                 Math.round(button.getBoundingClientRect().right),
               ),
-              tops: [...document.querySelectorAll('[data-inbox-machine-move]')].map(row =>
-                Math.round(row.getBoundingClientRect().height),
-              ),
+              lefts: commands.map(code => Math.round(code.getBoundingClientRect().left)),
+              heights: commands.map(code => Math.round(code.getBoundingClientRect().height)),
+              nowrap: commands.every(code => getComputedStyle(code).whiteSpace === 'nowrap'),
               copies: document.querySelectorAll('[data-inbox-machine-move] [data-onboarding-copy]').length,
+              moves: document.querySelectorAll('[data-inbox-machine-move]').length,
+              contextShown: [...document.querySelectorAll('[data-inbox-open]')]
+                .filter(open => (open.textContent ?? '').includes('durian'))
+                .some(open => open.querySelector('[data-agenda-section="context"]') !== null),
               titleCut: title === null || text === null ? true : title.scrollHeight > title.clientHeight + 1,
             };
           });
           expect(laid.pad).toBeGreaterThanOrEqual(8);
-          expect(laid.copies).toBe(3);
+          expect(laid.moves).toBe(4);
+          expect(laid.copies).toBe(2);
+          expect(laid.contextShown).toBe(false);
+          expect(laid.nowrap).toBe(true);
           expect(new Set(laid.rights).size).toBe(1);
-          expect(Math.max(...laid.tops) - Math.min(...laid.tops)).toBeLessThanOrEqual(2);
+          expect(new Set(laid.lefts).size).toBe(1);
+          expect(Math.max(...laid.heights) - Math.min(...laid.heights)).toBeLessThanOrEqual(1);
           expect(laid.titleCut).toBe(false);
           const chat = await tab.evaluate(() =>
             [...document.querySelectorAll('[data-inbox-open]')]
