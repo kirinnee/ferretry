@@ -11,10 +11,13 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat,
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  type AccountModel,
+  accountModelFiles,
   CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
   parseCloneBase,
   parseExportKeys,
+  renderConfigFile,
   resolveDefaultRuntime,
 } from '@ferretry/fleet';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
@@ -1113,5 +1116,167 @@ describe('a repeat copy (update) over real files', () => {
     await update(target, source);
 
     should(await signedInState(target)).deepEqual(before);
+  });
+
+  // ── Security review regressions (#F544) ──
+
+  it('should remove a file the source dropped from a folder it took, and leave the rest of the folder', async () => {
+    // Arrange: the source's skill carries a second file at the first copy, then drops it.
+    const source = await machine('studio', { claude: true });
+    await writeFile(path.join(source.userHome, '.claude', 'skills', 'review', 'notes.md'), 'Old notes.\n');
+    await importHost(source);
+    const target = await machine('work-linux', { claude: false });
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exported(source) });
+    const skill = path.join(target.fleet, 'assets', 'skills', 'review');
+    should(await readFile(path.join(skill, 'notes.md'), 'utf8')).equal('Old notes.\n');
+    await rm(path.join(source.fleet, 'assets', 'skills', 'review', 'notes.md'));
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert: listed as removed, gone from disk, the rest untouched, and the next review has nothing to say.
+    should(review.items.flatMap(row => row.files)).containEql({
+      path: 'skills/review/notes.md',
+      change: 'removed',
+      lines: { added: 0, removed: 2 },
+    });
+    await stat(path.join(skill, 'notes.md')).then(
+      () => should.fail(undefined, undefined, 'expected the removed file to be gone'),
+      (error: NodeJS.ErrnoException) => should(error.code).equal('ENOENT'),
+    );
+    should(await readFile(path.join(skill, 'SKILL.md'), 'utf8')).containEql('Review it.');
+    should((await target.setup.reviewClone({ bundle: await exported(source) })).items).deepEqual([]);
+  });
+
+  it('should link old copies by name and leave a signed-in login and its secrets byte-identical', async () => {
+    // Arrange: a signed-in target that took a copy before origin keys existed (a version 1 bundle).
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const target = await signedInTarget('work-linked');
+    const before = await signedInState(target);
+    const current = await exported(source);
+    if (current.version !== 2) throw new Error('expected a version 2 bundle');
+    const { daemon: _daemon, keys: _keys, ...rest } = current;
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: { ...rest, version: 1 } });
+
+    // Act: the repeat copy finds the old copies by name.
+    const { review } = await update(target, source);
+
+    // Assert
+    should(review.same.probable).be.above(0);
+    should(await signedInState(target)).deepEqual(before);
+    const linked = Object.values((await declared(target)).components.instructions).filter(
+      component => component.clonedFromKey !== undefined,
+    );
+    should(linked.length).be.above(0);
+  });
+
+  for (const choice of ['keep', 'remove'] as const) {
+    it(`should ${choice} an item the source dropped and leave a signed-in login and its secrets byte-identical`, async () => {
+      // Arrange: the source had an instructions component nothing layers, copied once, then deleted it.
+      const source = await machine('studio', { claude: true });
+      await importHost(source);
+      await apply(source, {
+        kind: 'component.put',
+        name: 'extra',
+        component: { kind: 'instructions' },
+        content: 'Extra.\n',
+        create: true,
+      });
+      const target = await signedInTarget(`work-gone-${choice}`);
+      await apply(target, { kind: 'clone.import', mode: 'alongside', bundle: await exported(source) });
+      should((await declared(target)).components.instructions.extra).not.be.undefined();
+      await apply(source, { kind: 'component.remove', componentKind: 'instructions', name: 'extra' });
+      const before = await signedInState(target);
+      const bundle = await exported(source);
+      const review = await target.setup.reviewClone({ bundle });
+      should(review.items.find(row => row.ref === 'instructions/extra')).match({ outcome: 'gone', choice: 'keep' });
+
+      // Act
+      await apply(target, {
+        kind: 'clone.import',
+        mode: 'update',
+        bundle,
+        reviewed: review.fingerprint,
+        decisions: { 'instructions/extra': choice },
+      });
+
+      // Assert
+      const after = (await declared(target)).components.instructions.extra;
+      if (choice === 'remove') should(after).be.undefined();
+      else should(after).not.be.undefined();
+      should(await signedInState(target)).deepEqual(before);
+    });
+  }
+
+  /** Rename an instructions component (and, when named, a profile) by editing the config files, as an owner would. */
+  async function renameByHand(on: Machine, component: string, to: string, profile?: { from: string; to: string }) {
+    const model = await declared(on);
+    const config = on.home.paths.config;
+    const { [component]: moved, ...others } = model.components.instructions;
+    if (moved === undefined) throw new Error(`expected instructions/${component}`);
+    const relayer = (layers: readonly string[]) =>
+      layers.map(layer => (layer === `instructions/${component}` ? `instructions/${to}` : layer));
+    const profiles = Object.fromEntries(
+      Object.entries(model.profiles).map(([name, value]) => [
+        name === profile?.from ? profile.to : name,
+        { ...value, layers: relayer(value.layers) },
+      ]),
+    );
+    const runtimes = Object.fromEntries(
+      Object.entries(model.runtimes).map(([name, value]) => [
+        name,
+        value.profile === profile?.from ? { ...value, profile: profile.to } : value,
+      ]),
+    );
+    const renamed = {
+      ...model,
+      components: { ...model.components, instructions: { ...others, [to]: moved } },
+      profiles,
+      runtimes,
+    } as AccountModel;
+    await rm(path.join(config, 'components', 'instructions', `${component}.yaml`));
+    if (profile !== undefined) await rm(path.join(config, 'profiles', `${profile.from}.yaml`));
+    for (const [file, { address, value }] of accountModelFiles(renamed)) {
+      const touched =
+        file === `components/instructions/${to}.yaml` || file.startsWith('profiles/') || file.startsWith('runtimes/');
+      const text = touched ? renderConfigFile(file, address, value, undefined) : undefined;
+      if (text !== undefined) await writeFile(path.join(config, file), text, { mode: 0o600 });
+    }
+  }
+
+  it('should still link a component renamed by hand in its YAML on the source', async () => {
+    // Arrange
+    const { source, target } = await copiedPair();
+    const mine = Object.keys((await declared(target)).components.instructions).toSorted();
+    const name = await instructionsName(source);
+    await renameByHand(source, name, `${name}-renamed`);
+    should((await declared(source)).components.instructions[`${name}-renamed`]).not.be.undefined();
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert: nothing new, nothing gone, and no second copy under another name.
+    should(review.items).deepEqual([]);
+    should(Object.keys((await declared(target)).components.instructions).toSorted()).deepEqual(mine);
+  });
+
+  it('should still link a component and a profile renamed by hand in their YAML here', async () => {
+    // Arrange
+    const { source, target } = await copiedPair();
+    const name = await instructionsName(target);
+    const [profile] = Object.keys((await declared(target)).profiles);
+    if (profile === undefined) throw new Error('expected a profile');
+    await renameByHand(target, name, `${name}-mine`, { from: profile, to: `${profile}-mine` });
+    const renamed = await declared(target);
+    should(renamed.components.instructions[`${name}-mine`]).not.be.undefined();
+    should(renamed.profiles[`${profile}-mine`]).not.be.undefined();
+
+    // Act
+    const { review } = await update(target, source);
+
+    // Assert
+    should(review.items).deepEqual([]);
+    should(Object.keys((await declared(target)).profiles)).deepEqual(Object.keys(renamed.profiles));
   });
 });
