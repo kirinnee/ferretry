@@ -473,10 +473,10 @@ export class GitHubWatcher {
       this.warned.delete(`card:${card.id}`);
       for (const nudge of outcome.nudges) {
         await this.ports.nudges
-          .send(nudge.sessionId, nudge.message)
+          .send(card, nudge.message)
           .catch((error: unknown) =>
             this.ports.diagnostics.warn(
-              `GitHub watcher: could not nudge ${nudge.sessionId} about ${formatTaskRef(card)}: ${detail(error)}`,
+              `GitHub watcher: could not nudge anyone about ${formatTaskRef(card)}: ${detail(error)}`,
             ),
           );
       }

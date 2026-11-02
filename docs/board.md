@@ -187,8 +187,10 @@ Sub-ferret: you were started by a lead ferret. Never raise agenda items or notif
 With a card: link your PR `fy task link <id> --pr <url>` (or `--branch`), progress `fy task note`; it moves itself (start, PR, merge, `fy signal done`). No card? Make none. Your final report says how the owner tests it.
 ```
 
-Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
-(`nudgeTarget`, `packages/daemon/src/lib/sub-ferret/index.ts`).
+Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
+(`nudgeTarget`, `packages/daemon/src/lib/sub-ferret/index.ts`). The three **alerts** that ask a card's people to act —
+a stale card, a red CI, a PR closed unmerged — are routed by [who a board alert is for](#who-a-board-alert-is-for)
+instead, so the sub-ferret doing the card hears them first.
 
 ## Which board a card is on, and how a project gets one
 
@@ -928,11 +930,34 @@ shipped 3 days. Verify and closed never go stale. An unassigned child card still
 never keeps its parent from being `orphaned`; an assigned or started child does.
 
 The **sweep** (`packages/daemon/src/lib/board/sweep.ts`) ticks on its own and does two things. It nudges the ferret
-of a stale card, at most once per card per `staleAfter`, never one that declared a wait, never for a waiting card.
+of a stale card ([who a board alert is for](#who-a-board-alert-is-for)), at most once per card per `staleAfter`
+however the recipient changes, never one that declared a wait, never for a waiting card.
 It also queues quiet events: a child's move, block, drop or new blocking ask goes to its lead, and `&F20 unblocked`
 goes to a dependent's assignee. Quiet events ride the next message and never start a turn
 ([ferret-messages.md](ferret-messages.md#board-events-that-ride-the-next-message)). The first sight of a card is a
 baseline, not news.
+
+### Who a board alert is for
+
+The board raises three alerts that ask a card's people to act: a **stale** card, a **red CI** on a linked PR, and a PR
+**closed unmerged**. They used to go to the session that made the card, which is usually the owner's interactive chat
+even when a lead was doing the work. Now one function, `noticeRecipient`
+(`packages/daemon/src/lib/board/notice-route.ts`), picks the session from the card and one roster read:
+
+1. the card's **assignee** (its owner when unassigned), while it is alive;
+2. else the **nearest live lead above the assignee** (`config.parent`, walked up);
+3. else the card's **owner** (its creator by default), and then the owner's leads, ONLY when nobody in that line is alive;
+4. an **interactive** session (the owner's own chat) only when no automatic session is alive anywhere in that order.
+   Such an alert is sent as it was before: it takes the direct path and never enters the chat's queue
+   ([message-delivery.md](message-delivery.md)). Folding it into the owner's agenda instead is a declared GAP: the agenda is
+   being redesigned and a daemon-written notice there has no home yet.
+
+A session that declared `fy signal waiting` is never nudged, and nobody is nudged in its place. An assignee that
+cannot be read (neither alive nor ended) gets the stale nudge withheld rather than passed to someone else. What is
+raised and how often does not change: the stale throttle is per card, and CI-red and closed-unmerged fire once on the
+change, so reassigning a card never repeats an alert. With nobody alive anywhere, a stale nudge is not
+sent, and a PR alert goes to the owner as before (the send path revives an ended session). The go-ahead
+(`&F20 can go ahead`) is not an alert and keeps going to the assignee's lead.
 
 ## Lanes follow PR facts
 

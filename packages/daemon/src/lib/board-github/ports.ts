@@ -55,9 +55,9 @@ export interface WatchedBoard {
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
 }
 
-/** Queues one message to a ferret through the ordinary send path. */
+/** Queues one message about a card to the ferret that answers for it, through the ordinary send path. */
 export interface PrNudgeSender {
-  send(sessionId: string, message: string): Promise<void>;
+  send(card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>, message: string): Promise<void>;
 }
 
 /** One-shot timers. `after` returns the cancel; `run` settles when the work it started is done. */

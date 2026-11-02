@@ -331,7 +331,9 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   out. Sizes with the default binary name: **lead 2339 characters** (3277 with Agenda mode on), **sub-ferret 1748**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
-- **Nudges** about a sub-ferret's card (the turn-check, a reopen, the GitHub watcher's and sweep's) go to its lead.
+- **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale
+  card, a red CI, a PR closed unmerged) go to the sub-ferret itself while it is alive, then its nearest live lead
+  ([board.md](board.md#who-a-board-alert-is-for)).
   The Warden's liveness checks on the sub-ferret itself are unchanged.
 
 Code: `packages/daemon/src/lib/sub-ferret/index.ts` (one directory for the board, the agenda and the lane route),

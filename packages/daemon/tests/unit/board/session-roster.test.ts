@@ -63,6 +63,24 @@ describe('the board session roster memo', () => {
     should(documents.freshness.sort()).eql(['config:heard', 'state:heard']);
   });
 
+  it("should read who started a session and whether it is the owner's interactive chat", async () => {
+    // Arrange
+    const documents = new Documents();
+    documents.set('lizzette', { status: 'running' }, { mode: 'interactive' });
+    documents.set('child', { status: 'running' }, { parent: 'lizzette', mode: 'auto' });
+    documents.set('orphan', { status: 'running' }, { parent: '' });
+
+    // Act
+    const { sessions } = await new StorageSessionRoster(documents.storage, () => undefined).roster();
+
+    // Assert
+    should(sessions.get('lizzette')).match({ interactive: true });
+    should(sessions.get('lizzette')?.lead).be.undefined();
+    should(sessions.get('child')).match({ lead: 'lizzette' });
+    should(sessions.get('child')?.interactive).be.undefined();
+    should(sessions.get('orphan')?.lead).be.undefined();
+  });
+
   it('should not look into an unchanged pair of documents again', async () => {
     // Arrange
     const documents = new Documents();

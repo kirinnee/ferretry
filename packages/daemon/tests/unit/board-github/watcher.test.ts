@@ -162,9 +162,9 @@ const rig = (options: RigOptions): Rig => {
       },
     },
     nudges: {
-      send: async (sessionId, message) => {
+      send: async (card, message) => {
         if (options.failingNudges === true) throw new Error('session gone');
-        nudges.push({ sessionId, message });
+        nudges.push({ sessionId: card.assignee ?? card.owner, message });
       },
     },
     timers: {
@@ -683,7 +683,7 @@ describe('GitHubWatcher: releases', () => {
 });
 
 describe('GitHubWatcher: nudges and refiling', () => {
-  it('should nudge the owner ferret when a PR closes unmerged, and report a nudge it could not send', async () => {
+  it('should nudge the card ferret when a PR closes unmerged, and report a nudge it could not send', async () => {
     const closed = repoAnswer({ prs: { 940: prNode(940, { state: 'CLOSED' }) } });
     const subject = rig({
       cards: [withLinks([link(940, { state: 'open', polledAt: NOW })], { laneId: 'review' })],
@@ -697,7 +697,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
       failingNudges: true,
     });
     await failing.watcher.tick();
-    should(failing.warnings).deepEqual(['GitHub watcher: could not nudge lead about &F1: session gone']);
+    should(failing.warnings).deepEqual(['GitHub watcher: could not nudge anyone about &F1: session gone']);
   });
 
   it('should refile an Unfiled card to the project that owns its PR at once, and only the first such project', async () => {

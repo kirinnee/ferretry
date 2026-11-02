@@ -1,0 +1,53 @@
+/**
+ * WHO A BOARD NOTICE IS FOR when a card needs its people to act: a stale nudge, a red CI, a PR closed unmerged.
+ *
+ * The card's ASSIGNEE answers for it. When that session has ended, the nearest live ancestor lead of the
+ * assignee does; only when nobody in that line is left does it fall to the card's owner (its creator by
+ * default) and the owner's leads. An interactive session is the owner's own chat, so it is chosen only when
+ * no automatic session is alive anywhere in that order. Pure: a function of the card and one roster read.
+ */
+import type { BoardTask } from '@ferretry/protocol';
+import { MAX_LINEAGE_DEPTH } from './lineage.ts';
+import { presenceOf, type SessionLiveness, type SessionRoster } from './activity.ts';
+
+/** The session a notice goes to, and whether it is the owner's own interactive chat. */
+export interface NoticeRecipient {
+  readonly sessionId: string;
+  readonly session: SessionLiveness;
+  readonly interactive: boolean;
+}
+
+/** `sessionId` and the leads above it, nearest first, walked up the roster's `lead`; a loop ends the walk. */
+const lineOf = (roster: SessionRoster, sessionId: string): readonly string[] => {
+  const line: string[] = [];
+  let current: string | undefined = sessionId;
+  while (current !== undefined && !line.includes(current) && line.length < MAX_LINEAGE_DEPTH) {
+    line.push(current);
+    const lead: string | undefined = roster.sessions.get(current)?.lead;
+    current = lead === undefined || lead === '' ? undefined : lead;
+  }
+  return line;
+};
+
+/**
+ * The first live session in the assignee's line, then the owner's; an automatic one before any interactive
+ * one. `null` when no session is alive in either line, or when the assignee itself could not be read (a
+ * read failure never sends a nudge to somebody else).
+ */
+export const noticeRecipient = (
+  roster: SessionRoster,
+  card: Pick<BoardTask, 'owner' | 'assignee'>,
+): NoticeRecipient | null => {
+  const assignee = card.assignee ?? card.owner;
+  if (presenceOf(roster, assignee) === 'unknown') return null;
+  const order = [...new Set([...lineOf(roster, assignee), ...lineOf(roster, card.owner)])];
+  let interactive: NoticeRecipient | null = null;
+  for (const sessionId of order) {
+    const session = roster.sessions.get(sessionId);
+    if (session === undefined || presenceOf(roster, sessionId) !== 'alive') continue;
+    const found = { sessionId, session, interactive: session.interactive === true };
+    if (!found.interactive) return found;
+    interactive ??= found;
+  }
+  return interactive;
+};

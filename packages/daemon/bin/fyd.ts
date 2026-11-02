@@ -630,6 +630,7 @@ import {
   BoardGateCheck,
   BoardService,
   BoardSweep,
+  noticeRecipient,
   BoardTurnCheck,
   type CardWriteObserver,
   DoneDeliveryLadder,
@@ -10328,11 +10329,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
         projects: { projects: async () => await catalogs.projects() },
         transcripts: createSessionTranscriptTail(storage),
-        // The board's nudge path (U5): the message as it is, from "Ferretry · Board" as metadata.
+        // The board's nudge path (U5): the message as it is, from "Ferretry · Board" as metadata. It goes to the
+        // card's assignee, else the nearest live lead above it, else the owner (lib/board/notice-route.ts).
         nudges: {
           send: async (card, message) => {
-            const sessionId = await nudgeTarget(boardSubFerrets, card);
-            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            const recipient = noticeRecipient(await boardSessions.roster(), card);
+            await boardSends.send({
+              id: parseSessionId(recipient?.sessionId ?? card.owner),
+              sendId: crypto.randomUUID(),
+              message,
+            });
           },
         },
         timers: {
@@ -11347,9 +11353,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions: boardSessions,
         memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
         nudges: {
-          send: async (card, message) => {
+          // A stale nudge was routed by the plan (assignee, else nearest live lead, else owner); a go-ahead still
+          // goes to the assignee's lead when the assignee is a sub-ferret.
+          send: async (sessionId, message, kind) => {
             await boardSends.send({
-              id: parseSessionId(await nudgeTarget(boardSubFerrets, card)),
+              id: parseSessionId(kind === 'stale' ? sessionId : await nudgeTarget(boardSubFerrets, sessionId)),
               sendId: crypto.randomUUID(),
               message,
             });

@@ -97,42 +97,72 @@ describe('the nudge words', () => {
 describe('who a stale card nudges', () => {
   const stale = (stored: Partial<BoardTask> = {}) => view({ assignee: 'child', ...stored }, { activity: 'stale' });
 
-  it('should nudge an idle assignee, and nobody while it declared a wait', () => {
+  it('should nudge a live assignee, busy or idle, and nobody while it declared a wait', () => {
+    // Arrange
+    const busy = rosterOf([liveSession('lead'), liveSession('child', { status: 'thinking' })]);
+
     // Assert
     should(nudgeRecipient(stale(), everyone)).equal('child');
+    should(nudgeRecipient(stale(), busy)).equal('child');
     should(
       nudgeRecipient(stale(), rosterOf([liveSession('lead'), liveSession('child', { declaredWait: true })])),
     ).be.null();
   });
 
-  it('should nudge the owner instead when the assignee is busy on another card or gone', () => {
+  it('should nudge the assignee’s nearest live lead when the assignee ended, and the owner only after that', () => {
     // Arrange
-    const busy = rosterOf([liveSession('lead'), liveSession('child', { status: 'thinking' })]);
-    const gone = rosterOf([liveSession('lead')]);
+    const line = (alive: readonly string[]) =>
+      rosterOf(
+        [
+          liveSession('boss'),
+          liveSession('lead', { lead: 'boss' }),
+          liveSession('child', { lead: 'lead' }),
+          liveSession('grand', { lead: 'child' }),
+        ].map(session => (alive.includes(session.id) ? session : { ...session, status: 'stopped' as const })),
+      );
+    const card = stale({ owner: 'boss', assignee: 'grand' });
 
     // Assert
-    should(nudgeRecipient(stale(), busy)).equal('lead');
-    should(nudgeRecipient(stale(), gone)).equal('lead');
+    should(nudgeRecipient(card, line(['grand', 'child', 'lead', 'boss']))).equal('grand');
+    should(nudgeRecipient(card, line(['child', 'lead', 'boss']))).equal('child');
+    should(nudgeRecipient(card, line(['lead', 'boss']))).equal('lead');
+    should(nudgeRecipient(card, line(['boss']))).equal('boss');
+    should(nudgeRecipient(card, line([]))).be.null();
   });
 
-  it('should nudge nobody when the owner is the busy assignee, is gone, waits, or the assignee is unreadable', () => {
+  it('should reach the owner only when nobody in the assignee’s line is alive', () => {
+    // Arrange
+    const roster = rosterOf([liveSession('lead'), liveSession('child', { status: 'stopped' })]);
+
     // Assert
-    should(
-      nudgeRecipient(stale({ assignee: null }), rosterOf([liveSession('lead', { status: 'thinking' })])),
-    ).be.null();
-    should(nudgeRecipient(stale(), rosterOf([liveSession('child', { status: 'thinking' })]))).be.null();
+    should(nudgeRecipient(stale(), roster)).equal('lead');
+    should(nudgeRecipient(stale(), rosterOf([liveSession('lead', { declaredWait: true })]))).be.null();
+    should(nudgeRecipient(stale({ assignee: null }), rosterOf([liveSession('lead', { status: 'thinking' })]))).equal(
+      'lead',
+    );
+  });
+
+  it('should keep an interactive creator for last, and never skip past it to a dead line', () => {
+    // Arrange
+    const owner = liveSession('lizzette', { interactive: true });
+    const card = stale({ owner: 'lizzette', assignee: 'child' });
+
+    // Assert
+    should(nudgeRecipient(card, rosterOf([owner, liveSession('child', { lead: 'lizzette' })]))).equal('child');
     should(
       nudgeRecipient(
-        stale(),
-        rosterOf([liveSession('lead', { status: 'stopped' }), liveSession('child', { status: 'thinking' })]),
+        card,
+        rosterOf([owner, liveSession('child', { lead: 'sub-lead', status: 'stopped' }), liveSession('sub-lead')]),
       ),
-    ).be.null();
+    ).equal('sub-lead');
     should(
-      nudgeRecipient(
-        stale(),
-        rosterOf([liveSession('lead', { declaredWait: true }), liveSession('child', { turnState: 'working' })]),
-      ),
-    ).be.null();
+      nudgeRecipient(card, rosterOf([owner, liveSession('child', { lead: 'lizzette', status: 'stopped' })])),
+    ).equal('lizzette');
+    should(nudgeRecipient(card, rosterOf([liveSession('child', { lead: 'lizzette', status: 'stopped' })]))).be.null();
+  });
+
+  it('should nudge nobody when the assignee is unreadable', () => {
+    // Assert
     should(nudgeRecipient(stale(), rosterOf([liveSession('lead')], ['child']))).be.null();
   });
 });

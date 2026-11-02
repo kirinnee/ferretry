@@ -24,7 +24,9 @@ this page, which is still how a message reaches the pane.
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
   one message typing at a time (`nextToDeliver`). A daemon notice to an interactive session is never in the
-  delivery order (`boardOnly`): that session is the owner's own chat, and the notice goes on its board.
+  delivery order (`boardOnly`): that session is the owner's own chat, so it takes the direct path. The board's
+  alerts therefore avoid it: they go to the card's working ferret and its leads first, and reach an interactive
+  session only when none is alive ([board.md](board.md#who-a-board-alert-is-for)).
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
   included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
   permission form on screen, a session still launching, or a pane it cannot read, and says which as the
@@ -55,6 +57,9 @@ this page, which is still how a message reaches the pane.
   `sendId`. `--now` (stop the running turn first) is a flag on the queued message (`interrupt`), not a separate path: it keeps its place, and when its turn comes AND the input box is empty the deliverer hands it over with the send path's own stop-then-type.
 - **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
   for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
+- **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
+  the card's assignee, else its nearest live lead, and to an interactive session only as the last resort
+  ([board.md](board.md#who-a-board-alert-is-for)); that last resort still takes the direct path above.
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
