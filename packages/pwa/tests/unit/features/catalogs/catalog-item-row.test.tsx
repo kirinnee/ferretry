@@ -14,7 +14,9 @@ import {
   installRecord,
   itemPreview,
   ownedCatalog,
+  sharedItem,
 } from '../../../support/catalog-views.ts';
+import { healthOf } from '../../../support/health.ts';
 import { byText, click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -424,5 +426,54 @@ describe('CatalogItemRow without a readable catalog list', () => {
     const { view } = await show(baseHandlers([withdrawn]));
     expect(q('[data-row-version]')).toBeNull();
     await view.unmount();
+  });
+});
+
+describe('CatalogItemRow Versions', () => {
+  const ITEM_PATH = `/v1/catalog-items/${ITEM}`;
+  const withFeatures = (features: string[]) => ({
+    ...baseHandlers([ownedCatalog()]),
+    'GET /v1/health': () => healthOf('1.0.0', features),
+    [`GET ${ITEM_PATH}`]: () => sharedItem(),
+  });
+
+  it('opens the versions of a held item from the ⋯, read only without versions.2', async () => {
+    const { view } = await show(withFeatures(['catalogs.items.1', 'catalogs.versions.1']));
+    await pickMenu('Versions…');
+    expect(q('[data-catalog-sheet="versions"]')).not.toBeNull();
+    expect(q('[data-version="2"][data-version-current]')).not.toBeNull();
+    expect(q('[data-version-retire]')).toBeNull();
+    await click(q('[aria-label="Close Versions"]'));
+    expect(q('[data-catalog-sheet="versions"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('can retire from there with versions.2 and reads the row again', async () => {
+    let lists = 0;
+    const { view } = await show({
+      ...withFeatures(['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
+      'GET /v1/catalogs': () => {
+        lists += 1;
+        return { catalogs: [ownedCatalog()] };
+      },
+      [`PATCH ${ITEM_PATH}/versions/1`]: () => ({ itemId: ITEM, version: 1, changed: true, catalogs: [] }),
+    });
+    await pickMenu('Versions…');
+    const before = lists;
+    await tap('[data-version-retire="1"]');
+    await tap('[data-version-confirm-yes]');
+    expect(lists).toBeGreaterThan(before);
+    await view.unmount();
+  });
+
+  it('has no Versions… without the flag, or for an item no catalog holds', async () => {
+    const off = await show(withFeatures(['catalogs.items.1']));
+    await tap('[data-row-more]');
+    expect(document.querySelector('[role="menuitem"]')?.textContent ?? '').not.toContain('Versions');
+    await off.view.unmount();
+    document.body.replaceChildren();
+    const none = await show({ ...withFeatures(['catalogs.versions.1']), 'GET /v1/catalogs': () => ({ catalogs: [] }) });
+    expect(q('[data-row-more]')).toBeNull();
+    await none.view.unmount();
   });
 });

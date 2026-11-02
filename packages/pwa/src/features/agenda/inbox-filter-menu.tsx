@@ -1,5 +1,5 @@
 /**
- * THE PHONE'S ONE-ROW FILTERS: a status menu ("Open ▾": Open / Snoozed 18 / Replied / Resolved), a who menu
+ * THE INBOX'S ONE-ROW FILTERS (phone and wide screen): a status menu ("Open ▾": Open / Snoozed 18 / Replied / Resolved), a who menu
  * ("All ▾": All / Interactive / Agents) and Find behind a search icon. The counts live inside the menus, so the row
  * stays one line wide. Each menu is a button that opens a radio list: Esc and a click outside close it, ↑ ↓ walk it.
  */

@@ -1,3 +1,15 @@
+## [4.228.0](https://github.com/kirinnee/ferretry/compare/v4.227.1...v4.228.0) (2026-11-02)
+
+### Features
+
+* **catalogs:** make a version current, retire a version, and a signed version list (catalogs 3d-2) ([#1321](https://github.com/kirinnee/ferretry/issues/1321)) ([4de7aa1](https://github.com/kirinnee/ferretry/commit/4de7aa155bd1976962f2d4c8b65a90ffb006eff7))
+* **pwa:** answer quickly on a wide screen ([#1325](https://github.com/kirinnee/ferretry/issues/1325)) ([a0302ae](https://github.com/kirinnee/ferretry/commit/a0302ae5dd45695df1b814adc7380ab0af20ac4b))
+* **sign-in-rules:** standing sign-in rules in the app, and advertise sign-in-rules.1 (R3c-6) ([#1320](https://github.com/kirinnee/ferretry/issues/1320)) ([33cb671](https://github.com/kirinnee/ferretry/commit/33cb6716743c6126b6d1fdd56bd2cd2d97bae7ab)), closes [#rules](https://github.com/kirinnee/ferretry/issues/rules)
+
+### Fixes
+
+* **pwa:** sent words leave the composer under a phone keyboard; choose the phone button layout ([#1323](https://github.com/kirinnee/ferretry/issues/1323)) ([16ba89e](https://github.com/kirinnee/ferretry/commit/16ba89ed0449975962504cac5dedd025e301e5bb))
+
 ## [4.227.1](https://github.com/kirinnee/ferretry/compare/v4.227.0...v4.227.1) (2026-11-02)
 
 ### Fixes

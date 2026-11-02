@@ -120,11 +120,8 @@ unreached PATCH /v1/accounts/:id/factors/:factor # TEMPORARY (&F291 R2-2): the 2
 unreached GET /v1/sessions/:sessionId/phone-approvals/:approvalId # TEMPORARY (&F291 R2-5): the approve card reads the list (/v1/phone-approvals); a single-approval read has no caller yet
 unreached GET /v1/sessions/:sessionId/task-plans/:planId # TEMPORARY (&F291 R3a-2): the plan card (R3a-5) reads one plan
 unreached GET /v1/catalog-items/:itemId/versions/:version # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
-unreached GET /v1/catalog-items/:itemId/changes # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
 unreached POST /v1/catalog-items/:itemId/versions/preview # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
 unreached POST /v1/catalog-items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
-unreached PUT /v1/catalog-items/:itemId/current # CORRECT: daemon-first slice (catalogs 3d-2); the app's version view dials it in a later slice
-unreached PATCH /v1/catalog-items/:itemId/versions/:version # CORRECT: daemon-first slice (catalogs 3d-2); the app's version view dials it in a later slice
 unreached GET /v1/shared/catalogs/:catalogId/items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-2); the installer and member app dial the signed version list in a later slice
 unreached PATCH /v1/catalog-installs/project/:installId # CORRECT: daemon-first slice (catalogs 3d-3); the app's update card dials stay and skip in a later slice
 unreached PATCH /v1/catalog-installs/runtime/:installId # CORRECT: daemon-first slice (catalogs 3d-3); the app's update card dials stay and skip in a later slice
