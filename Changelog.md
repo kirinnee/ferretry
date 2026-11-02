@@ -1,3 +1,9 @@
+## [4.225.0](https://github.com/kirinnee/ferretry/compare/v4.224.0...v4.225.0) (2026-11-02)
+
+### Features
+
+* **pwa:** Warden recent triggers, one row per trigger ([#1314](https://github.com/kirinnee/ferretry/issues/1314)) ([12de8c9](https://github.com/kirinnee/ferretry/commit/12de8c9b0d5c90b0d0e6bb10fc2fc73ef3187738))
+
 ## [4.224.0](https://github.com/kirinnee/ferretry/compare/v4.223.0...v4.224.0) (2026-11-01)
 
 ### Features
