@@ -6,9 +6,12 @@ import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../s
 import { chooseFromMenu, openFind } from '../../support/inbox-menus.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, flush, laptop, PROJECT } from '../board-support.ts';
-import { fakeActions, fill, refusal, submit } from './board-detail-support.tsx';
+import { fakeActions, fill, refusal } from './board-detail-support.tsx';
+import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -60,6 +63,7 @@ const open = async (
     readonly snoozeTask?: (...args: never[]) => Promise<unknown>;
     readonly snoozed?: boolean;
     readonly noHost?: boolean;
+    readonly disconnected?: boolean;
     readonly page?: Partial<AgendaInboxPageProps>;
   } = {},
 ) => {
@@ -74,7 +78,7 @@ const open = async (
   const host: ToTestHost = {
     actions,
     ports: {},
-    connectionOf: () => laptop,
+    connectionOf: () => (options.disconnected === true ? undefined : laptop),
   };
   view = await mount(
     <InboxHarness
@@ -223,15 +227,41 @@ describe('Inbox — answering a card waiting for a try', () => {
     await interact(() =>
       must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click(),
     );
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
-    expect(dialog.textContent).toContain('Try the board');
+    const box = sendBackBox(document.body);
+    expect(box.textContent).toContain('Try the board');
     expect(actions.calls).toEqual([]);
-    const form = dialog.closest('form') ?? dialog;
-    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'It crashes');
-    await submit(form as HTMLElement);
-    await interact(() => flush());
+    await sendBack(box, 'It crashes');
     expect(actions.calls).toEqual(['moveTask:["implement","It crashes"]']);
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('draws the Not good box inline, directly under its own card and as wide as the list, not as a sheet', async () => {
+    const { root } = await open();
+    await interact(() =>
+      must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click(),
+    );
+    const box = sendBackBox(root);
+    const slot = must(box.parentElement, 'the box slot');
+    const row = rowOf(root, 'F22');
+    expect(slot.getAttribute('data-to-test-compose')).toBe(row.getAttribute('data-to-test'));
+    expect(row.nextElementSibling).toBe(slot);
+    expect(slot.parentElement).toBe(row.parentElement);
+    expect(box.classList.contains('fy-board-sendback')).toBe(true);
+    expect(document.body.querySelector('.fy-board__scrim')).toBeNull();
+    expect(root.querySelectorAll('[data-to-test-compose]').length).toBe(1);
+    expect(box.querySelector('textarea')?.getAttribute('placeholder')).toBe('What went wrong?');
+  });
+
+  it('says so, and opens no box, when Not good is pressed for a machine that is not connected here', async () => {
+    const { root, actions } = await open({ disconnected: true });
+    await interact(() =>
+      must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click(),
+    );
+    expect(root.querySelector('[data-to-test-notice]')?.textContent).toBe(
+      'That machine is not connected here, so the card cannot be sent back from this page.',
+    );
+    expect(document.body.querySelector('[data-board-send-back]')).toBeNull();
+    expect(actions.calls).toEqual([]);
   });
 
   it('says a refusal on the row, as the Board does', async () => {

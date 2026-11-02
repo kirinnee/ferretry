@@ -11,7 +11,11 @@ import {
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { laptop } from '../board-support.ts';
+import { sendBackBox, sendBackSubmit, plainSendBackEditor, writeSendBack } from './send-back-support.ts';
 import { sessionView } from '../../support/sessions.ts';
+
+plainSendBackEditor();
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
@@ -64,7 +68,7 @@ const page = (
     render={inbox => (
       <AgendaInboxPage
         clock={fake.clock.now}
-        inbox={canSnooze === undefined ? inbox : { ...inbox, canSnooze }}
+        inbox={{ ...inbox, connectionFor: () => laptop, ...(canSnooze === undefined ? {} : { canSnooze }) }}
         now={NOW}
         onNavigate={() => undefined}
         phone
@@ -196,15 +200,10 @@ describe('a gate item in the Inbox', () => {
     const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
     await press(buttonNamed(mounted, 'Not good'));
     expect(pending(fake)).toEqual([]);
-    const why = must(mounted.container.querySelector('[data-inbox-gate-why]'), 'the why composer');
-    const box = must(why.querySelector<HTMLTextAreaElement>('textarea'), 'the reason box');
-    const send = must(why.querySelector<HTMLButtonElement>('button[type="submit"]'), 'Send back');
+    const why = sendBackBox(mounted.container);
+    const send = sendBackSubmit(why);
     expect(send.disabled).toBe(true);
-    await interact(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(box, 'The code is blank');
-      box.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await writeSendBack(why, 'The code is blank');
     await press(send);
     expect(pending(fake)).toEqual(['Not good']);
     expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
@@ -234,10 +233,7 @@ describe('a gate item in the Inbox', () => {
     const mounted = await mount(page(fake, [plan], { initialOpen: plan.key }));
     await press(buttonNamed(mounted, 'Not yet'));
     expect(pending(fake)).toEqual([]);
-    const send = must(
-      mounted.container.querySelector<HTMLButtonElement>('[data-inbox-gate-why] button[type="submit"]'),
-      'the send button',
-    );
+    const send = sendBackSubmit(sendBackBox(mounted.container));
     expect(send.disabled).toBe(false);
     await press(send);
     expect(pending(fake)).toEqual(['Not yet']);

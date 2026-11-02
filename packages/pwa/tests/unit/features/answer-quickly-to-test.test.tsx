@@ -5,9 +5,12 @@ import { toTestCards } from '../../../src/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, flush, laptop } from '../board-support.ts';
-import { fakeActions, fill, submit } from './board-detail-support.tsx';
+import { fakeActions } from './board-detail-support.tsx';
+import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -138,12 +141,9 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     const { root, actions } = await open({ agendaCards: [] });
     await interact(() => quick(root).click());
     await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click());
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
+    const box = sendBackBox(document.body);
     expect(actions.calls).toEqual([]);
-    const form = dialog.closest('form') ?? dialog;
-    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'It crashes');
-    await submit(form as HTMLElement);
-    await interact(() => flush());
+    await sendBack(box, 'It crashes');
     expect(actions.calls).toEqual(['moveTask:["implement","It crashes"]']);
   });
 

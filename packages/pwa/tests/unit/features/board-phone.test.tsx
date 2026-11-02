@@ -7,6 +7,7 @@ import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
 import {
   boardAnswer,
   boardModelOf,
@@ -25,6 +26,8 @@ import {
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const LEAD = 'mvuc7tsf-0c3d50df';
+
+plainSendBackEditor();
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -367,11 +370,7 @@ describe('Board on a phone — rows waiting to be tested', () => {
     expect(scrim.hasAttribute('data-phone')).toBe(true);
     expect(scrim.textContent).toContain('Not good: send Try the thing back to Implement');
 
-    const input = must(scrim.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'the reason');
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'The button is dead');
-    await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
-    await interact(() => must(scrim.querySelector<HTMLButtonElement>('button[type="submit"]'), 'submit').click());
-    await interact(() => flush());
+    await sendBack(sendBackBox(scrim), 'The button is dead');
     expect(acts).toEqual([{ id: 'F4', request: { action: 'move', to: 'implement', reason: 'The button is dead' } }]);
   });
 

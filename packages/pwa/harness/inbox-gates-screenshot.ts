@@ -264,14 +264,17 @@ for (const form of ['phone', 'desktop'] as const) {
     await gate.locator('.fy-attn-deck__top [data-agenda-option="Not good"]').click();
     await gate.locator('[data-inbox-gate-why]').waitFor({ state: 'visible' });
     check(
-      await gate.locator('[data-inbox-gate-why] button[type="submit"]').isDisabled(),
+      await gate.locator('[data-inbox-gate-why] button[data-composer-send]').isDisabled(),
       `${form} ${theme}: Send back is enabled before there are words`,
     );
     check(
       (await gate.evaluate(() => (window as unknown as { __committed: unknown[] }).__committed.length)) === 0,
       `${form} ${theme}: Not good sent before there were words`,
     );
-    await gate.locator('[data-inbox-gate-why] textarea').fill('The code never appears on the second phone.');
+    await gate
+      .locator('[data-inbox-gate-why] textarea, [contenteditable="true"]')
+      .first()
+      .fill('The code never appears on the second phone.');
     await shot(gate, 'not-good-composer', form, theme);
 
     // Not needed: a button that holds a dismissal in the undo window, and Undo takes it back.

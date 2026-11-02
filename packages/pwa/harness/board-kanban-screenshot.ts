@@ -203,11 +203,12 @@ const checkNotGood = async (page: Page, scheme: string, label: string): Promise<
     .click();
   const composer = page.locator('[data-board-send-back]');
   await composer.waitFor({ state: 'visible' });
-  await composer.locator('.fy-board-sendback__attach:not([disabled])').waitFor({ state: 'visible' });
+  await composer.locator('button[data-composer-attach]:not([disabled])').waitFor({ state: 'visible' });
   await composer
-    .locator('[aria-label="Reason"]')
+    .locator('textarea, [contenteditable="true"]')
+    .first()
     .fill('The toggle still flickers on a phone in dark mode — see the screenshot.');
-  await composer.locator('[data-send-back-picker]').setInputFiles({
+  await composer.locator('input[type="file"]:not([accept])').setInputFiles({
     name: 'flicker.png',
     mimeType: 'image/png',
     buffer: PIXEL,
