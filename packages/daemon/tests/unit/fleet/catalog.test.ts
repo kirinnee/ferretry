@@ -1799,6 +1799,25 @@ describe('redactText', () => {
   });
 });
 
+describe('redactText: where a name and its value are', () => {
+  it.each([
+    ['a nested key', 'db:\n  passwd: hunter2hunter2', 'db:\n  passwd: ‹hidden›'],
+    ['a nested key with a quoted value', 'auth:\n  api_token: "hunter2hunter2"', 'auth:\n  api_token: "‹hidden›"'],
+    ['a nested password', 'database:\n  password: hunter2hunter2xyz', 'database:\n  password: ‹hidden›'],
+    ['a nested token', 'env:\n  GITHUB_TOKEN: ghp_abcdefghijklmnop', 'env:\n  GITHUB_TOKEN: ‹hidden›'],
+    ['a name that starts with a digit', '9TOKEN=abcdefghij', '9TOKEN=‹hidden›'],
+    ['a name that starts with digits and a letter', '1API_KEY=abcdefghij', '1API_KEY=‹hidden›'],
+    ['a run of separators before the name', '-=TOKEN=abcdefghij', '-=TOKEN=‹hidden›'],
+    ['a dot run before the name', '.=.TOKEN:ghp_abcdefghijklmnop', '.=.TOKEN:‹hidden›'],
+  ])('should hide the value of %s and nothing else', (_label, text, expected) => {
+    should(redactText(text)).deepEqual({ text: expected, redacted: true });
+  });
+
+  it('should not take the next line as the value of a name at the end of a line', () => {
+    should(redactText('auth:\nlogin_page: https://example.com/signin').redacted).equal(false);
+  });
+});
+
 describe('redactText: bounded work', () => {
   // Quadratic work on a run of name characters takes minutes at this size; linear work takes milliseconds. The
   // margin is a thousandfold, so this is a bound on the pattern and not a timing of the machine.

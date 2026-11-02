@@ -225,6 +225,12 @@ describe('see changes never carries a value typed in by hand', () => {
     ['a path before the break', `see path/gh\np_abcdefghijklmnopqrstuvwxyz0123456789\n`],
     ['a short password', 'password: hunter2\n'],
     ['a short password on the next line', 'password:\nhunter2\n'],
+    ['a nested short pass', 'db:\n  pass: hunter2\n'],
+    ['a nested quoted token', 'auth:\n  api_token: "hunter2"\n'],
+    ['a nested long password', 'database:\n  password: hunter2hunter2xyz\n'],
+    ['a nested pasted token', 'env:\n  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n'],
+    ['a digit-led name', '9TOKEN=hunter2hunter2xyz\n'],
+    ['separators before the name', '-=TOKEN=hunter2hunter2xyz\n'],
   ])('should hide a secret in a skill file with %s, in the whole answer', async (_label, text) => {
     const r = rig();
     await install(r, skillV(1, '# one\n'), projectTarget());
@@ -233,7 +239,7 @@ describe('see changes never carries a value typed in by hand', () => {
       'project',
       await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
     );
-    should(wire(preview)).not.match(/p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2/u);
+    should(wire(preview)).not.match(/p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2|ghp_abcdefgh/u);
   });
 
   it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {

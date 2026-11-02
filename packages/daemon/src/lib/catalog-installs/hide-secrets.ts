@@ -28,6 +28,8 @@ const QUERY_PARAMETER = /([?&#;])([^=&#;?\s]+)=([^&#;\s]*)/gu;
 const FLAG_WITH_VALUE = /^(--?[^=\s]+)=(.+)$/u;
 const LINE_BREAK = /\r\n|\r|\n/u;
 const WORD_CHARACTER = /[A-Za-z0-9_]/u;
+const NAME_THEN_BREAK = /^["']?([A-Za-z0-9_.-]+)["']?[:=]$/u;
+const KEY_OF_ITS_OWN = /[:=]["']?$/u;
 /** Longest file, in lines, that is checked for a secret split over lines; a longer one is hidden whole. */
 const MAX_CHECKED_LINES = 20_000;
 /** How much text after a line break is joined to the word before it when looking for a split secret. */
@@ -80,26 +82,43 @@ const marked = (shown: string, raw: string, there?: { readonly shown: string; re
     ? shown.replaceAll(HIDDEN, HIDDEN_DIFFERENT)
     : shown;
 
+const significantLines = (text: string): string[] =>
+  text
+    .split(LINE_BREAK)
+    .map(line => line.trim())
+    .filter(line => line !== '');
+
+const lastWord = (line: string): string => line.split(/\s+/u).at(-1) ?? '';
+
+/**
+ * `password:⏎hunter2`: a line that ends in a name that announces a secret and `:` or `=`, with a value on the
+ * next line (a line that is a key of its own, `api_token: x`, is read on its own).
+ */
+function valueOnNextLine(last: string, next: string): boolean {
+  const name = NAME_THEN_BREAK.exec(last)?.[1];
+  const value = next.split(/\s+/u)[0] ?? '';
+  return name !== undefined && announcesSecret(name) && !isReference(value) && !KEY_OF_ITS_OWN.test(value);
+}
+
 /**
  * A secret split across lines (`gh` / `p_abc…`) is no single line's secret: at each line break the last word of the
  * line (and the part of it after its last non-word character, `path/gh`) is joined to the next `SPAN` characters
  * after it and tried again. The lines are already known to be short ({@link redacted}).
  */
 function splitSecret(text: string): boolean {
-  const lines = text
-    .replaceAll(HIDDEN, '')
-    .split(LINE_BREAK)
-    .map(line => line.trim())
-    .filter(line => line !== '');
-  if (lines.length > MAX_CHECKED_LINES) return true;
+  const kept = significantLines(text);
+  if (kept.length > MAX_CHECKED_LINES) return true;
+  if (kept.some((line, index) => valueOnNextLine(lastWord(line), kept[index + 1] ?? ''))) return true;
+  const lines = significantLines(text.replaceAll(HIDDEN, ''));
   for (let index = 0; index < lines.length - 1; index += 1) {
-    const last = (lines[index] ?? '').split(/\s+/u).at(-1) ?? '';
+    const last = lastWord(lines[index] ?? '');
     let tail = '';
     for (let next = index + 1; next < lines.length && tail.length < SPAN; next += 1) tail += lines[next] ?? '';
     tail = tail.slice(0, SPAN);
     let start = last.length;
     while (start > 0 && WORD_CHARACTER.test(last[start - 1] ?? '')) start -= 1;
     const after = last.slice(start);
+    if (NAME_THEN_BREAK.test(last)) continue;
     if (redactText(last + tail).redacted) return true;
     if (after !== last && redactText(after + tail).redacted) return true;
   }

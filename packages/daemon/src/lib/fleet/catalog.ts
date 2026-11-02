@@ -300,12 +300,15 @@ const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly Pa
 const HIDDEN_TEXT = '‹hidden›';
 
 /**
- * `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is.
+ * `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is, on ONE line (a
+ * name at the end of a line never takes the next line's text, so `db:⏎  pass: x` reads `pass: x`).
  *
- * LINEAR: a name starts only where a run of name characters starts (the look-behind), so a long run with no
- * separator after it is scanned once, not once from every character in it.
+ * LINEAR: a name starts only where a run of name characters starts (the look-behind), after any leading digits,
+ * dots and dashes (`9TOKEN=…`, `-=TOKEN=…`), so a long run with no separator after it is scanned once, not once
+ * from every character in it.
  */
-const ASSIGNMENT = /(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)(["']?\s*[:=]\s*["']?)([^\s"'`,;)}\]]+)/gu;
+const ASSIGNMENT =
+  /(?<![A-Za-z0-9_.-])([0-9.-]*)([A-Za-z_][A-Za-z0-9_.-]*)(["']?[ \t]*[:=][ \t]*["']?)([^\s"'`,;)}\]]+)/gu;
 
 /** One bare word of text, for a value whose own shape says it is a token. */
 const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
@@ -319,10 +322,10 @@ export function redactText(
   isSecret: (name: string, value: string) => boolean = looksSecret,
 ): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
-  const named = text.replace(ASSIGNMENT, (whole, name: string, separator: string, value: string) => {
+  const named = text.replace(ASSIGNMENT, (whole, lead: string, name: string, separator: string, value: string) => {
     if (!isSecret(name, value)) return whole;
     redacted = true;
-    return `${name}${separator}${HIDDEN_TEXT}`;
+    return `${lead}${name}${separator}${HIDDEN_TEXT}`;
   });
   const bare = named.replace(WORD, word => {
     if (!looksSecret('', word)) return word;
