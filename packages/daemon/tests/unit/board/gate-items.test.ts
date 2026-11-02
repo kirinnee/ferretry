@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  type AgendaId,
   type AgendaItem,
   type AgendaResponse,
   type BoardTask,
@@ -7,7 +8,6 @@ import {
   BoardTaskActionRequestSchema,
   type LaneSet,
   gateReference,
-  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiError } from '../../../src/lib/api/error.ts';
@@ -26,6 +26,7 @@ import {
   type AgendaLedgerRepository,
   type AgendaMutation,
   AgendaService,
+  type StoredResolvedAgendaItem,
   parseAgendaLedger,
 } from '../../../src/lib/agenda/index.ts';
 import {
@@ -182,6 +183,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
           if (faults.unreadable?.includes(sessionId) === true) throw new Error('the agenda is unreadable');
           return await agenda.list(sessionId);
         },
+        answerReceipt: async (sessionId, id) => await agenda.answerReceipt(sessionId, id),
         raise: async (sessionId, request, actor) => {
           if (faults.raiseThrows === true) throw new Error('the agenda is unwritable');
           return await agenda.raise(sessionId, request, actor);
@@ -255,7 +257,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       ? []
       : ledger.entries.flatMap(entry => (entry.lifecycle === 'active' ? [entry.item] : []));
   };
-  const closed = (sessionId = 'grandchild'): ResolvedAgendaItem[] => {
+  const closed = (sessionId = 'grandchild'): StoredResolvedAgendaItem[] => {
     const ledger = ledgers.ledgers.get(sessionId);
     return ledger === undefined
       ? []
@@ -546,6 +548,21 @@ describe('answering a gate item', () => {
       resolvedBy: 'human',
       response: { kind: 'multiple-choice', choice: 'Done' },
     });
+  });
+
+  it('leaves the receipt out of the answer\u2019s snapshot and item, and keeps it on the ledger', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Done'));
+
+    // Assert
+    const mutation = outcome.handled && 'mutation' in outcome ? outcome.mutation : undefined;
+    should(mutation?.ok).be.true();
+    const sent = mutation?.ok ? [mutation.snapshot, mutation.addressed] : [];
+    should(JSON.stringify(sent)).not.match(/answerReceipt/);
+    should(world.closed()[0]?.answerReceipt).match(/^[0-9a-f]{64}$/);
   });
 
   it('records the admin token’s answer as the admin token on the card', async () => {
@@ -1591,13 +1608,19 @@ describe('a Not good with files, against the real attachment store', () => {
           should(done.world.stored().laneId).equal('implement');
         });
 
-        it('keeps the receipt on the stored item', async () => {
+        it('keeps the receipt on the reloaded ledger entry, and never in a snapshot or an answer’s result', async () => {
+          // Arrange
           const done = await answered();
           done.world.restart();
 
-          const [item] = done.world.closed(done.session);
+          // Act
+          const listed = await done.world.agenda.list(done.session);
+          const [kept] = done.world.closed(done.session);
 
-          should(item?.answerReceipt).match(/^[0-9a-f]{64}$/);
+          // Assert
+          should(kept?.answerReceipt).match(/^[0-9a-f]{64}$/);
+          should(await done.world.agenda.answerReceipt(done.session, kept?.id as AgendaId)).equal(kept?.answerReceipt);
+          should(JSON.stringify(listed)).not.match(/answerReceipt/);
         });
 
         it('refuses other words', async () => {

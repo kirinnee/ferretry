@@ -62,6 +62,7 @@ import type { CardWriteObserver } from './service.ts';
 /** The agenda operations the gates use. */
 interface GateAgenda {
   list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>>;
+  answerReceipt(sessionId: string, id: AgendaId): Promise<string | undefined>;
   raise(sessionId: string, request: RaiseAgendaRequest, actor: AgendaActor): Promise<AgendaMutation>;
   resolve(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation>;
   attachGate(sessionId: string, id: AgendaId, gate: AgendaGate | null, answered?: AgendaGate): Promise<AgendaMutation>;
@@ -464,10 +465,11 @@ export class GateItems implements CardWriteObserver {
     if ('code' in decision) return { handled: true, refused: decision };
     const unfit = this.filesRefusal(answer, decision);
     if (unfit !== undefined) return { handled: true, refused: unfit };
+    const kept = await this.ports.agenda.answerReceipt(answer.sessionId, answer.id);
     const same =
-      closed.answerReceipt === undefined
+      kept === undefined
         ? answer.attachments === undefined && closed.resolutionNote === decision.note
-        : closed.answerReceipt === receiptOf(answer, decision);
+        : kept === receiptOf(answer, decision);
     if (!same) return refused('moved-on', `${answer.id} was already answered, differently: nothing was sent`);
     const mutation = await this.ports.agenda.answer(answer.sessionId, answer.id, answer.response, answer.actor);
     return { handled: true, mutation };

@@ -215,6 +215,16 @@ export class AgendaService {
     };
   }
 
+  /**
+   * The digest a gate answer was closed with, kept on the ledger entry and never in a snapshot; `undefined` when the item
+   * is not closed, or was closed before the digest was kept. Daemon-internal: no route returns it.
+   */
+  async answerReceipt(sessionId: string, id: AgendaId): Promise<string | undefined> {
+    const current = await this.repository.read(sessionId);
+    const closed = current?.entries.find(entry => entry.lifecycle === 'addressed' && entry.item.id === id);
+    return closed?.lifecycle === 'addressed' ? closed.item.answerReceipt : undefined;
+  }
+
   async count(sessionId: string): Promise<AgendaQueryResult<number>> {
     const listed = await this.list(sessionId);
     return listed.ok ? { ok: true, value: listed.value.count } : listed;

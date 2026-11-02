@@ -51,7 +51,7 @@ import {
   ResolvedAgendaItemSchema,
   type TaskRef,
 } from '@ferretry/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -94,9 +94,29 @@ export function agentConfinedTo(actor: AgendaActor, sessionId: string): boolean 
   return actor.kind !== 'agent' || actor.sessionId === sessionId || actor.overSubFerret === true;
 }
 
+/**
+ * An answered item as the ledger keeps it: the item every client reads, plus the digest of the whole gate answer it was
+ * closed with (docs/agenda.md § Not good takes pictures and files). The digest is the daemon's own: the snapshot and
+ * the mutation's `addressed` leave it out ({@link publicResolved}); the gate's replay check reads it with `AgendaService.answerReceipt`.
+ */
+export type StoredResolvedAgendaItem = ResolvedAgendaItem & { readonly answerReceipt?: string };
+
+const StoredResolvedAgendaItemSchema = z.intersection(
+  ResolvedAgendaItemSchema,
+  z.object({
+    answerReceipt: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  }),
+);
+
+const publicResolved = ({ answerReceipt: _receipt, ...item }: StoredResolvedAgendaItem): ResolvedAgendaItem =>
+  item as ResolvedAgendaItem;
+
 export type AgendaEntry =
   | { readonly lifecycle: 'active'; readonly origin: AgendaActor; readonly item: AgendaItem }
-  | { readonly lifecycle: 'addressed'; readonly origin: AgendaActor; readonly item: ResolvedAgendaItem };
+  | { readonly lifecycle: 'addressed'; readonly origin: AgendaActor; readonly item: StoredResolvedAgendaItem };
 
 /** Internal durable state. Active state and count are both derived from the entry lifecycle. */
 export interface AgendaLedger {
@@ -477,7 +497,7 @@ export function agendaSnapshot(ledger: AgendaLedger): AgendaSnapshot {
     .sort(compareActive);
   const resolved = ledger.entries
     .filter((entry): entry is Extract<AgendaEntry, { lifecycle: 'addressed' }> => !isActiveAgenda(entry))
-    .map(entry => entry.item)
+    .map(entry => publicResolved(entry.item))
     .sort(compareAddressed);
 
   return {
@@ -724,7 +744,9 @@ function unreadableWrite(before: AgendaLedger, after: AgendaLedger): string | un
   const kept = new Set(before.entries);
   for (const entry of after.entries) {
     if (kept.has(entry)) continue;
-    const parsed = (entry.lifecycle === 'active' ? AgendaItemSchema : ResolvedAgendaItemSchema).safeParse(entry.item);
+    const parsed = (entry.lifecycle === 'active' ? AgendaItemSchema : StoredResolvedAgendaItemSchema).safeParse(
+      entry.item,
+    );
     if (parsed.success) continue;
     const issue = parsed.error.issues[0];
     const where = issue === undefined || issue.path.length === 0 ? '' : `${issue.path.join('.')}: `;
@@ -1172,7 +1194,7 @@ function parseAgendaEntry(value: unknown): AgendaEntry | null {
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'active', origin, item } : null;
   }
   if (raw.lifecycle === 'addressed') {
-    const item = parseEntryItem(ResolvedAgendaItemSchema, raw.item, origin);
+    const item = parseEntryItem(StoredResolvedAgendaItemSchema, raw.item, origin);
     return item !== null && sameItemOrigin(item, origin) ? { lifecycle: 'addressed', origin, item } : null;
   }
   return null;
@@ -1268,7 +1290,7 @@ function addressed(
     // Set-aside closed entries keep their places in the history, so it stays within its cap when they read again.
   ].slice(0, Math.max(0, MAX_AGENDA_RESOLUTIONS - setAsideOf(ledger.unreadable).addressed));
   const next: AgendaLedger = { ...ledger, entries: [...active, ...history], updatedAt: at };
-  return success(next, true, change, undefined, item);
+  return success(next, true, change, undefined, publicResolved(item));
 }
 
 function canAddressAgenda(actor: AgendaActor, entry: AgendaEntry): boolean {
