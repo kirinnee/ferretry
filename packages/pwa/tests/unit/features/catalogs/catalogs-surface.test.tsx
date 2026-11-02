@@ -3,7 +3,16 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import { CatalogsSurface } from '../../../../src/features/catalogs/catalogs-surface.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
-import { CATALOG, DIGEST, ITEM, itemPreview, ownedCatalog } from '../../../support/catalog-views.ts';
+import {
+  catalogChanges,
+  CATALOG,
+  DIGEST,
+  ITEM,
+  itemPreview,
+  ownedCatalog,
+  sharedItem,
+} from '../../../support/catalog-views.ts';
+import { healthOf } from '../../../support/health.ts';
 import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
@@ -337,6 +346,68 @@ describe('CatalogsSurface detail', () => {
     await tap('[data-catalog-publish="acme-mcp"]');
     await tap('[data-catalog-preview]');
     expect(fake.calls.at(-1)?.body).toEqual({ itemId: MCP_ITEM });
+    await view.unmount();
+  });
+});
+
+describe('CatalogsSurface versions', () => {
+  const ITEM_PATH = `/v1/catalog-items/${ITEM}`;
+  const versioned = (features: string[]) => ({
+    'GET /v1/catalogs': () => ({ catalogs: [rich()] }),
+    [`GET ${DETAIL}`]: () => ({ catalogs: [rich()] }),
+    'GET /v1/health': () => healthOf('1.0.0', features),
+    [`GET ${ITEM_PATH}`]: () => sharedItem(),
+    'GET /v1/catalog-members': () => ({ members: [] }),
+  });
+
+  it('opens the versions of a live item, and not of a withdrawn one', async () => {
+    const { view } = await open(versioned(['catalogs.items.1', 'catalogs.versions.1']));
+    await tap('[data-catalog-open]');
+    expect(q('[data-catalog-versions="old-one"]')).toBeNull();
+    await tap('[data-catalog-versions="pdf-tools"]');
+    expect(q('[data-catalog-sheet="versions"]')).not.toBeNull();
+    expect(q('[data-version="2"]')).not.toBeNull();
+    expect(q('[data-version-retire]')).toBeNull();
+    await click(q('[aria-label="Close Versions"]'));
+    expect(q('[data-catalog-sheet="versions"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('offers the writes with versions.2, and reads the list again after one', async () => {
+    let reads = 0;
+    const { view } = await open({
+      ...versioned(['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
+      [`GET ${DETAIL}`]: () => {
+        reads += 1;
+        return { catalogs: [rich()] };
+      },
+      [`PATCH ${ITEM_PATH}/versions/1`]: () => ({ itemId: ITEM, version: 1, changed: true, catalogs: [] }),
+    });
+    await tap('[data-catalog-open]');
+    const before = reads;
+    await tap('[data-catalog-versions="pdf-tools"]');
+    await tap('[data-version-retire="1"]');
+    await tap('[data-version-confirm-yes]');
+    expect(reads).toBeGreaterThan(before);
+    await view.unmount();
+  });
+
+  it('shows no Versions… button without the flag', async () => {
+    const { view } = await open(versioned(['catalogs.items.1']));
+    await tap('[data-catalog-open]');
+    expect(q('[data-catalog-versions]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows the changes before publishing an update', async () => {
+    const { view } = await open({
+      ...versioned(['catalogs.items.1', 'catalogs.versions.1']),
+      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview({ version: 2, changes: catalogChanges() }),
+    });
+    await tap('[data-catalog-open]');
+    await tap('[data-catalog-publish="pdf-tools"]');
+    await tap('[data-catalog-preview]');
+    expect(q('[data-changes-view]')).not.toBeNull();
     await view.unmount();
   });
 });

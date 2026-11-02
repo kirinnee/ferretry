@@ -18,6 +18,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
 import { AddCatalogFromLink } from './add-from-link.tsx';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
+import { VersionsSheet } from './versions-sheet.tsx';
 import { CatalogMoreMenu } from './catalog-more-menu.tsx';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
@@ -150,6 +151,7 @@ export function CatalogsSurface({
           catalog={read.catalogs.find(candidate => candidate.id === openId)}
           defaultCatalogId={read.defaultCatalogId}
           canMakeDefault={read.features.items}
+          features={read.features}
           saveFile={saveFile}
           onBack={() => setOpenId(null)}
           onChanged={reload}
@@ -223,6 +225,7 @@ function CatalogDetail({
   catalog,
   defaultCatalogId,
   canMakeDefault,
+  features,
   saveFile,
   onBack,
   onChanged,
@@ -233,6 +236,7 @@ function CatalogDetail({
   readonly catalog: OwnedCatalog | undefined;
   readonly defaultCatalogId: string | undefined;
   readonly canMakeDefault: boolean;
+  readonly features: CatalogFeatures;
   readonly saveFile: SaveText;
   readonly onBack: () => void;
   readonly onChanged: () => void;
@@ -244,6 +248,7 @@ function CatalogDetail({
   const [confirm, setConfirm] = useState<'delete' | { readonly withdraw: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [publishing, setPublishing] = useState<OwnedCatalogItem | null>(null);
+  const [versionsOf, setVersionsOf] = useState<OwnedCatalogItem | null>(null);
   const [sharing, setSharing] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
@@ -397,6 +402,7 @@ function CatalogDetail({
             busy={busy}
             confirming={typeof confirm === 'object' && confirm !== null && confirm.withdraw === item.itemId}
             onPublish={() => setPublishing(item)}
+            onVersions={features.versions ? () => setVersionsOf(item) : undefined}
             onAskWithdraw={() => setConfirm({ withdraw: item.itemId })}
             onCancel={() => setConfirm(null)}
             onWithdraw={() =>
@@ -484,8 +490,20 @@ function CatalogDetail({
           }
           label={publishing.name}
           publish={{ catalogId: catalog.id, itemId: publishing.itemId }}
+          versionTools={{ changes: features.versions, makeCurrent: features.versions2 }}
           onClose={() => setPublishing(null)}
           onDone={onChanged}
+        />
+      )}
+      {versionsOf === null ? null : (
+        <VersionsSheet
+          connection={connection}
+          createClient={createClient}
+          itemId={versionsOf.itemId}
+          label={versionsOf.name}
+          canWrite={features.versions2}
+          onClose={() => setVersionsOf(null)}
+          onChanged={onChanged}
         />
       )}
     </div>
@@ -564,6 +582,7 @@ function ItemRow({
   busy,
   confirming,
   onPublish,
+  onVersions,
   onAskWithdraw,
   onCancel,
   onWithdraw,
@@ -572,6 +591,8 @@ function ItemRow({
   readonly busy: boolean;
   readonly confirming: boolean;
   readonly onPublish: () => void;
+  /** Present only when the machine advertises versions. */
+  readonly onVersions: (() => void) | undefined;
   readonly onAskWithdraw: () => void;
   readonly onCancel: () => void;
   readonly onWithdraw: () => void;
@@ -631,6 +652,13 @@ function ItemRow({
           </Button>
         </div>
       ) : null}
+      {onVersions === undefined || withdrawn ? null : (
+        <div>
+          <Button type="button" size="sm" variant="ghost" onClick={onVersions} data-catalog-versions={item.name}>
+            Versions…
+          </Button>
+        </div>
+      )}
       {withdrawn ? null : confirming ? (
         <div
           className="flex min-w-0 flex-col items-start gap-xs"

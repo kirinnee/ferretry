@@ -142,3 +142,26 @@ describe('addState', () => {
     should(addState(itemPreview(), true).enabled).be.false();
   });
 });
+
+describe('ownerRefusal for versions', () => {
+  it('words each version refusal in one sentence', () => {
+    for (const code of ['same_as_version', 'version_current', 'version_retired', 'version_unknown'])
+      should(ownerRefusal(new FyHttpError('x', 409, code)).sentence).not.equal('x');
+    should(ownerRefusal(new FyHttpError('x', 409, 'version_current')).sentence).equal(
+      'Make another version current first.',
+    );
+  });
+  it('uses the daemon’s own sentence, which names the catalogs, for a version from before they joined', () => {
+    const sentence = 'Version 1 of pdf-tools is not one Friends may serve.';
+    should(ownerRefusal(new FyHttpError(sentence, 409, 'version_before_join')).sentence).equal(sentence);
+    should(ownerRefusal(new FyHttpError('  ', 409, 'version_before_join')).sentence.length).be.above(10);
+  });
+  it('asks to look again when the current version moved on', () => {
+    should(ownerRefusal(new FyHttpError('x', 409, 'current_changed')).previewAgain).be.true();
+  });
+  it('offers Make version N current when the preview equals an older kept version', () => {
+    const state = addState(itemPreview({ sameAsVersion: 2, version: 4 }), false, true);
+    should(state.enabled).be.false();
+    should(state.reason).equal('That is version 2. Make version 2 current instead.');
+  });
+});

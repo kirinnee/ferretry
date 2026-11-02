@@ -373,7 +373,7 @@ dials them only where the machine says it can.
 ### Making a version current, retiring one, and the signed version list (catalogs 3d-2)
 
 Publishing always makes the new version current. This slice adds the other two things an owner does with versions
-already kept, and a signed list of what a catalog offers. There is no installer or screen for it yet; those come later.
+already kept, and a signed list of what a catalog offers. The owner's screens for it are [catalogs 3d-4](#the-owners-versions-in-the-app-catalogs-3d-4); there is no installer for the list yet.
 
 - **`PUT /v1/catalog-items/:itemId/current` `{version, from}`** makes a kept version the one every live catalog
   serves. `from` must still be the current version (409 `current_changed` otherwise). It bumps **every live
@@ -553,7 +553,44 @@ catalog…**. A machine that cannot be asked (the read fails) offers neither, an
   `changed_since_preview`) the sheet reads the frozen version again, shows it, and says so, and the person adds
   again. Without `catalogs.items.1` the entry opens the ordinary sheet.
 
-Not here yet: versions, and a way to change the default other than **Make default**.
+Versions are in the next section.
+
+### The owner's versions in the app (catalogs 3d-4)
+
+The owner sees, compares, rolls back and retires versions from the app. It is built only where the machine
+advertises the flag: `catalogs.versions.1` for reading (the sheet, the changes, the changes in Publish update) and
+`catalogs.versions.2` for the three buttons that write. Without them today's screens stay as they were. Everything is
+the owner's: it appears only on the surfaces that already show owner actions (the row's ⋯ on the skill and MCP rows,
+and Sharing › My catalogs), never to a member.
+
+- **Versions…** opens a sheet from the row's ⋯ (when the item is shared) and from the item in Sharing › My catalogs
+  (not for a withdrawn one). It reads `GET /v1/catalog-items/:itemId`. Each line reads
+  `v3 · current · 2 days ago · 4 files · 12 KB`, newest first; a retired one says `retired`. Over the list: the
+  catalogs that serve the current version ("Used by Team skills and Friends.") and **"N people can see it."** That is
+  **reach, not installs**: the members who may read at least one catalog that lists the item live, counted in the app
+  from the members list. Nobody here says who installed what. If the members cannot be read, the line is left out
+  rather than guessed.
+- **What changed since vN** (on every line but the first) reads `GET .../changes?from=<neighbour>&to=<version>` and
+  draws it in the Apply-diff style (`ChangesView`). Entries that deserve a second look (a command or address, a script,
+  a file a tool runs on its own) and `newWarnings` come first. `tooLarge` and `truncated` are said in words; hidden
+  characters stay marked (`⟨U+200B⟩`) and a carriage return at a line end is shown as `⟨U+000D⟩`. Every string goes
+  through the same marked-text renderer as the full review, so raw hidden text is never drawn.
+- **Publish update** (Add to catalog's "Publish update" and the row's "Source changed — Publish update") shows
+  `changes` against the CURRENT version under the preview, before the button. When the daemon answers
+  `sameAsVersion`, the sheet says "That is version N. Make version N current instead." with a button that does it
+  (only when N is not already current: the daemon checks the current version first, so it can name it). When it
+  answers `sameAsRetiredVersion`, the sheet warns "This is the content of retired version N. Publishing makes a new
+  version number anyway." and still lets the owner publish.
+- **Make current** sends `{version, from}` with the current version the sheet read, after a one-line confirm ("Every
+  catalog that lists it will offer version N from now on. Copies people already have stay as they are."). Refusals
+  are one sentence each: `version_before_join` shows the daemon's own sentence, which names the catalogs that
+  joined later; `current_changed` reads the item again and says it moved on; `version_current` says "Make another
+  version current first." (also what a retire of the current one says).
+- **Retire…** and **Bring back…** (`PATCH .../versions/:version {retired}`) each confirm in one sentence. Only the
+  buttons the daemon would accept are drawn: the current version offers neither, a retired one only Bring back, an
+  ordinary one Make current and Retire.
+
+The frames are `harness/catalogs-versions-screenshot.tsx` (`harness/out/catalogs-versions-*.png`).
 
 ### Why a ferret may only list
 
@@ -985,7 +1022,7 @@ to catalog…") and the inline Open button.
 - **⋯** holds **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details**
   (so every MCP row has a ⋯), **Add to another catalog…** (items this machine could share) and
   **Remove** (catalog installs only, with the same confirm; with several installs, one per catalog named
-  "Remove (from ‹catalog›)"). **Versions…** and **Stop sharing** are not here yet.
+  "Remove (from ‹catalog›)"). **Versions…** (where the machine advertises `catalogs.versions.1`, [3d-4](#the-owners-versions-in-the-app-catalogs-3d-4)) opens the versions sheet; **Stop sharing** is not here yet.
 - **Show details** (MCP) opens a few plain lines under the row from the inventory the list already read: what it runs
   or its address, where it is declared, its project, the harness, and which runtimes see it with their approval. The
   address has no query and the program no arguments by construction, and hidden characters are marked.
@@ -1045,7 +1082,7 @@ What this does **not** protect against, said plainly (more in design §4.8):
   items (a deleted catalog's, or the old per-catalog blobs) are kept; nothing collects them yet.
 - **Retiring hides a version, it does not recall one.** A retired version stays in the store and in anything already
   installed from it, and a member who already holds its bytes keeps them. It stops being offered by the list and
-  the item route. Nothing reads the version list yet (no installer or app until 3d-3 and 3d-4).
+  the item route. The owner's app shows retired versions (3d-4); nothing installs from the version list yet (3d-3).
 - `public` and members are not available; a file is the only way a catalog leaves.
 
 ## What is built

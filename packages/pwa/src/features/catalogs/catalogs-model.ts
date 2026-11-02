@@ -20,6 +20,7 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import { deviceGrantCommand, grantRefusalNotice } from '../../lib/grants.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { plural } from './catalog-review-model.ts';
+import { sameAsVersionSentence } from './versions-model.ts';
 
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -86,13 +87,28 @@ const OWNER_REFUSALS: Readonly<Record<string, string>> = {
   source_ambiguous:
     'This machine shares that more than once, so it cannot tell which one you mean. Pick a catalog below.',
   grant_step_up_required: 'Nothing was changed: the passkey wasn’t confirmed. Try again and confirm it.',
+  same_as_version: 'That is a version you already keep. Make it current instead of publishing it again.',
+  version_current: 'Make another version current first.',
+  version_retired: 'That version is retired. Bring it back first, then make it current.',
+  version_unknown: 'That version is not there any more. The list is out of date; look again.',
 };
+
+/** The daemon names the catalogs that joined later; this stands in only if a message ever comes without them. */
+const BEFORE_JOIN_FALLBACK =
+  'A catalog that joined later cannot be offered that version. Pick a newer one, or publish a new version.';
 
 export function ownerRefusal(error: unknown): OwnerRefusal {
   if (grantRefusalNotice(error) !== null && !(error instanceof FyHttpError && error.code === 'grant_step_up_required'))
     return { sentence: SHARING_OFF_TITLE, previewAgain: false, sharingOff: true };
   const code = error instanceof FyHttpError ? error.code : undefined;
-  const known = code === undefined ? undefined : OWNER_REFUSALS[code];
+  const known =
+    code === 'version_before_join' && error instanceof FyHttpError
+      ? error.message.trim() === ''
+        ? BEFORE_JOIN_FALLBACK
+        : error.message
+      : code === undefined
+        ? undefined
+        : OWNER_REFUSALS[code];
   return {
     sentence: known ?? changeRefusalSentence(error),
     previewAgain: code === 'changed_since_preview' || code === 'current_changed',
@@ -187,12 +203,15 @@ export function previewButtonLabel(plan: PreviewPlan): string {
 export function addState(
   preview: SharedItemPreview | null,
   busy: boolean,
+  canMakeCurrent = false,
 ): { enabled: boolean; reason: string | null } {
   if (preview === null) return { enabled: false, reason: 'Preview it first, so you can read what will be shared.' };
   if (preview.sameAsVersion !== undefined)
     return {
       enabled: false,
-      reason: `This is the same as version ${preview.sameAsVersion}. There is nothing new to publish.`,
+      reason: canMakeCurrent
+        ? sameAsVersionSentence(preview.sameAsVersion)
+        : `This is the same as version ${preview.sameAsVersion}. There is nothing new to publish.`,
     };
   return { enabled: !busy, reason: null };
 }
