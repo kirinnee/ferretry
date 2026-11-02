@@ -6,6 +6,7 @@ import {
   handsOnItem,
   handsOnRaise,
   handsOnSource,
+  LATEST_INTERACTIVE_TTL_MS,
   type HomeSession,
   NO_MACHINE_AGENDA,
   SELF_AGENDA_HOME,
@@ -69,6 +70,69 @@ describe('AgendaHomes', () => {
       }),
     ]);
     should(await world.of('kid')).equal('new');
+  });
+
+  it('prefers a live interactive session to a more recently stopped one', async () => {
+    const world = homes([
+      session('warden', { origin: 'warden', projectId: 'P1' }),
+      session('kid', { parent: 'warden', origin: 'warden', projectId: 'P1' }),
+      session('running', { mode: 'interactive', projectId: 'P1', live: true }),
+      session('stopped', {
+        mode: 'interactive',
+        projectId: 'P1',
+        live: false,
+        updatedAt: '2026-10-02T10:00:00.000Z',
+      }),
+      session('unknown', { mode: 'interactive', projectId: 'P1', updatedAt: '2026-10-01T09:00:00.000Z' }),
+    ]);
+    should(await world.of('kid')).equal('running');
+  });
+
+  it('falls back to the latest stopped interactive session when none runs', async () => {
+    const world = homes([
+      session('warden', { origin: 'warden', projectId: 'P1' }),
+      session('kid', { parent: 'warden', origin: 'warden', projectId: 'P1' }),
+      session('old', { mode: 'interactive', projectId: 'P1', live: false }),
+      session('new', { mode: 'interactive', projectId: 'P1', live: false, updatedAt: '2026-10-02T10:00:00.000Z' }),
+    ]);
+    should(await world.of('kid')).equal('new');
+  });
+
+  it('reads every session once for a sweep of orphans, not once per orphan', async () => {
+    let reads = 0;
+    let clock = 0;
+    const sessions = [
+      session('warden', { origin: 'warden', projectId: 'P1' }),
+      session('kid1', { parent: 'warden', origin: 'warden', projectId: 'P1' }),
+      session('kid2', { parent: 'warden', origin: 'warden', projectId: 'P1' }),
+      session('kid3', { parent: 'warden', origin: 'warden', projectId: 'P1' }),
+      session('lead', { mode: 'interactive', projectId: 'P1' }),
+    ];
+    const world = new AgendaHomes(
+      {
+        get: async id => {
+          reads += 1;
+          return sessions.find(each => each.id === id);
+        },
+        all: async () => sessions.map(each => each.id),
+      },
+      undefined,
+      undefined,
+      () => clock,
+    );
+
+    await world.of('kid1');
+    const afterFirst = reads;
+    await world.of('kid2');
+    await world.of('kid3');
+    // Each further orphan walks its own lineage (kid -> warden), and nothing more: the project is not scanned again.
+    should(reads - afterFirst).equal(4);
+
+    clock += LATEST_INTERACTIVE_TTL_MS;
+    const before = reads;
+    await world.of('kid1');
+    should(reads - before).be.above(2 + 1);
+    should(await world.of('kid1')).equal('lead');
   });
 
   it('falls to the machine-wide agenda, and to the root while there is none', async () => {

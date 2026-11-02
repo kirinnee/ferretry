@@ -10183,6 +10183,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
+      let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -10826,7 +10827,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         diagnostics: boardDiagnostics,
       });
       // Open items already on a sub-ferret's agenda move to its home first, once; the gates then find them there.
-      void migrateToAgendaHomes({
+      const homesMigration = migrateToAgendaHomes({
         agenda,
         sessions: { all: agendaSessionIds },
         subFerrets: new StorageSubFerretDirectory(storage),
@@ -10841,7 +10842,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               `agenda: moved ${String(outcome.moved)} item(s) from sub-ferrets to their agenda homes\n`,
             );
         })
-        .catch(() => undefined)
+        .catch(() => undefined);
+      agendaHomesMigrated = homesMigration;
+      void homesMigration
         .then(() => gateItems?.backfill())
         .then(raised => {
           if ((raised ?? 0) > 0)
@@ -12619,6 +12622,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         notifications,
         attention: agenda,
         gateItems,
+        agendaHomesMigrated,
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         pins: new PinService(
@@ -14508,8 +14512,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => {
     releasing = true;
   });
-  void subsystems.warden
-    .arm()
+  // After the boot move of sub-ferret items to their homes: a sweep that ran first would clear or re-raise rows
+  // the move is still carrying.
+  void (subsystems.agendaHomesMigrated ?? Promise.resolve())
+    .then(async () => await subsystems.warden.arm())
     .then(disarm => {
       if (releasing) disarm();
       else cleanups.push(disarm);

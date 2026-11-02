@@ -6,7 +6,7 @@
  *    past the bound) found no owner: it is BROKEN, not rooted at the last session it reached.
  * 2. A root the owner started (origin `human`, or no stamp: never hide an item on a guess) is the home.
  * 3. Else (a Warden's or another session's orphan, or a broken lineage): the owner's most recently updated
- *    interactive session on the same project.
+ *    LIVE interactive session on the same project, else the most recently updated one that has stopped.
  * 4. Else the machine-wide agenda, when it exists.
  * 5. Else the root itself; a broken lineage keeps the item on the session it was raised for, and says so.
  */
@@ -25,6 +25,8 @@ export interface HomeSession {
   readonly projectId?: string;
   /** `config.updatedAt`: the recency the rule picks the owner's latest interactive session by. */
   readonly updatedAt: string;
+  /** Whether the session still runs; `config.updatedAt` moves on every stop too. Unknown reads as live. */
+  readonly live?: boolean;
 }
 
 export interface HomeSessions {
@@ -52,6 +54,9 @@ export const SELF_AGENDA_HOME: AgendaHomeResolver = { of: async sessionId => ses
 
 const ownerStarted = (session: HomeSession): boolean => session.origin === undefined || session.origin === 'human';
 
+/** How long one project's latest interactive session is remembered: a sweep asks once per orphan, not once per fleet read. */
+export const LATEST_INTERACTIVE_TTL_MS = 5000;
+
 /** Where a daemon diagnostic goes: the daemon's log. */
 export interface AgendaHomeDiagnostics {
   warn(message: string): void;
@@ -62,7 +67,13 @@ export class AgendaHomes implements AgendaHomeResolver {
     private readonly sessions: HomeSessions,
     private readonly machine: MachineAgendaHome = NO_MACHINE_AGENDA,
     private readonly diagnostics: AgendaHomeDiagnostics = { warn: () => undefined },
+    private readonly nowMs: () => number = Date.now,
   ) {}
+
+  private readonly latestByProject = new Map<
+    string | undefined,
+    { readonly at: number; readonly latest: Promise<HomeSession | undefined> }
+  >();
 
   async of(sessionId: string): Promise<string> {
     const { first, last, rooted } = await this.walk(sessionId);
@@ -102,7 +113,17 @@ export class AgendaHomes implements AgendaHomeResolver {
     return { ...(first === undefined ? {} : { first }), ...(last === undefined ? {} : { last }), rooted };
   }
 
+  /** Remembered briefly per project: every orphan of a sweep shares one read of every session configuration. */
   private async latestInteractive(projectId: string | undefined): Promise<HomeSession | undefined> {
+    const now = this.nowMs();
+    const known = this.latestByProject.get(projectId);
+    if (known !== undefined && now - known.at < LATEST_INTERACTIVE_TTL_MS) return await known.latest;
+    const latest = this.readLatestInteractive(projectId);
+    this.latestByProject.set(projectId, { at: now, latest });
+    return await latest;
+  }
+
+  private async readLatestInteractive(projectId: string | undefined): Promise<HomeSession | undefined> {
     let latest: HomeSession | undefined;
     for (const id of await this.sessions.all().catch(() => [] as readonly string[])) {
       const session: HomeSession | undefined = await this.sessions.get(id).catch(() => undefined);
@@ -114,11 +135,17 @@ export class AgendaHomes implements AgendaHomeResolver {
         session.projectId !== projectId
       )
         continue;
-      if (latest === undefined || Date.parse(session.updatedAt) > Date.parse(latest.updatedAt)) latest = session;
+      if (latest === undefined || newer(session, latest)) latest = session;
     }
     return latest;
   }
 }
+
+const isLive = (session: HomeSession): boolean => session.live !== false;
+
+/** Whether `session` beats `latest` as the owner's current ferret: a live one first, then the later update. */
+const newer = (session: HomeSession, latest: HomeSession): boolean =>
+  isLive(session) === isLive(latest) ? Date.parse(session.updatedAt) > Date.parse(latest.updatedAt) : isLive(session);
 
 /** Daemon causes whose card only the session it names can consume: the owner's answer goes into its pane or form. */
 const HANDS_ON_CAUSES: ReadonlySet<string> = new Set([

@@ -755,6 +755,8 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
   const standing: string[] = [];
   /** `[board, sourceRef]` pairs a notification stays open on this sweep. */
   const kept = new Set<string>();
+  /** References moved to a new home this sweep: their old row is cleared as moved, not as recovered. */
+  const carriedRefs = new Set<string>();
   if (remedyPermitsEscalation(input.remedy)) {
     for (const subject of subjects.values()) {
       const reason = reasonFor(subject, verdicts, routes);
@@ -768,13 +770,19 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
       if (node === undefined) continue;
       const board = boardOf(home);
       const isOpen = open.includes(board);
+      // CARRIED. A sub-ferret's notification (a scoped reference) stands on a board that is no longer where its
+      // asks go because its home changed: it moves with its ferret, still told, rather than being cleared for
+      // sitting elsewhere.
+      const carried = !isOpen && open.length > 0 && ref !== subject.sourceRef;
+      if (carried) carriedRefs.add(ref);
       // ALREADY TOLD. The owner was notified about this subject and it has not cleared since: reading the
       // notification closed it, and a new one every sweep would make the Inbox unusable.
-      if (!isOpen && notified.has(subject.key)) continue;
+      if (!isOpen && !carried && notified.has(subject.key)) continue;
       // A ferret waiting on a question its board already asks the owner: a second notification would ask
       // the same thing twice. An investigation that asked for a human is still its own.
       if (
         !isOpen &&
+        !carried &&
         reason.kind !== 'needs_human' &&
         subject.anomaly.kind === 'unattended_question' &&
         (boardsById.get(home)?.items ?? []).some(item => !isWardenEscalationItem(item))
@@ -834,14 +842,19 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
             subject.anomaly.kind === identity.kind &&
             subject.anomaly.sessionId === about,
       );
+      const movedTo = carriedRefs.has(item.sourceRef)
+        ? raise.find(each => each.sourceRef === item.sourceRef && boardOf(each.sessionId) !== board.sessionId)
+        : undefined;
       const note =
         node === undefined
           ? 'Cleared by the daemon: this node is no longer in the fleet.'
           : isTerminalStatus(node.state.status)
             ? `Cleared by the daemon: this node is ${node.state.status} and is no longer running.`
-            : !current
-              ? `Cleared by the daemon: the node recovered — ${identity.kind} is no longer detected.`
-              : 'Cleared by the Warden: this no longer waits on you — it was left alone, cleared, or is being looked at again.';
+            : movedTo !== undefined
+              ? `Moved by the daemon: this now waits on ${boardOf(movedTo.sessionId)}'s agenda, where its ferret's asks go.`
+              : !current
+                ? `Cleared by the daemon: the node recovered — ${identity.kind} is no longer detected.`
+                : 'Cleared by the Warden: this no longer waits on you — it was left alone, cleared, or is being looked at again.';
       resolve.push({
         sessionId: board.sessionId,
         anomalyKind: identity.kind,

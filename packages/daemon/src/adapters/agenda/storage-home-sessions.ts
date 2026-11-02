@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { HomeSession, HomeSessions } from '../../lib/agenda/home.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
+import { WARDEN_TERMINAL_STATUSES } from '../../lib/warden/types.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
 /** Only the fields the home rule reads: a document with others missing still has a lineage. */
@@ -18,7 +19,8 @@ export class StorageHomeSessions implements HomeSessions {
 
   async get(sessionId: string): Promise<HomeSession | undefined> {
     const id = tryParseSessionId(sessionId);
-    if (id === undefined || this.storage.findSession(id) === undefined) return undefined;
+    const indexed = id === undefined ? undefined : this.storage.findSession(id);
+    if (id === undefined || indexed === undefined) return undefined;
     const config = HomeConfigSchema.safeParse(await this.storage.readConfig(id));
     if (!config.success) return undefined;
     const { data } = config;
@@ -29,6 +31,9 @@ export class StorageHomeSessions implements HomeSessions {
       mode: data.mode,
       ...(data.projectId === undefined ? {} : { projectId: data.projectId }),
       updatedAt: data.updatedAt,
+      ...(indexed.status === undefined
+        ? {}
+        : { live: !(WARDEN_TERMINAL_STATUSES as readonly string[]).includes(indexed.status) }),
     };
   }
 

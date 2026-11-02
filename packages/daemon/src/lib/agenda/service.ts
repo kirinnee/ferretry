@@ -187,7 +187,8 @@ export class AgendaService {
             ),
           }
         : titled;
-    const carded = named.task === undefined ? await this.withFocusCard(home, named) : named;
+    // The home's focus card is the lead's own work, not the sub-ferret's: a redirected row names no card.
+    const carded = named.task === undefined && home === sessionId ? await this.withFocusCard(home, named) : named;
     const offered = await this.withOfferClose(carded);
     return this.apply(home, { action: 'raise', actor, request: offered, at: this.clock.now() });
   }
@@ -359,7 +360,9 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
   ): Promise<AgendaMutation> {
-    const home = await this.redirected(sessionId, handsOnSource(actor), actor);
+    // A row that stands on the board the daemon names is cleared there: only a row that is not there is looked for on the home.
+    const here = actor.kind === 'daemon' && (await this.holdsOpenSource(sessionId, source, sourceRef));
+    const home = here ? sessionId : await this.redirected(sessionId, handsOnSource(actor), actor);
     return this.apply(home, {
       action: 'resolve-source',
       actor,
@@ -368,6 +371,16 @@ export class AgendaService {
       note,
       at: this.clock.now(),
     });
+  }
+
+  private async holdsOpenSource(sessionId: string, source: AgendaSource, sourceRef: string): Promise<boolean> {
+    if (invalidSession(sessionId) !== null) return false;
+    const ledger = await this.repository.read(sessionId).catch(() => null);
+    return (
+      ledger?.entries.some(
+        entry => entry.lifecycle === 'active' && entry.item.source === source && entry.item.sourceRef === sourceRef,
+      ) ?? false
+    );
   }
 
   private async apply(

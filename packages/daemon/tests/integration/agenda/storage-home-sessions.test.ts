@@ -89,6 +89,21 @@ describe('StorageHomeSessions', () => {
     should([...(await sessions.all())].sort()).eql(['kid-1', 'lead-1']);
   });
 
+  it('should read a session that has stopped as not live, and one that runs, or has no state yet, as live', async () => {
+    // Arrange
+    const storage = await open();
+    for (const id of ['run-1', 'stop-1', 'new-1'])
+      await storage.writeConfig(parseSessionId(id), config(id, 'interactive'));
+    await storage.writeState(parseSessionId('run-1'), { id: 'run-1', status: 'running', turn: 1 });
+    await storage.writeState(parseSessionId('stop-1'), { id: 'stop-1', status: 'stopped', turn: 1 });
+    const sessions = new StorageHomeSessions(storage);
+
+    // Act + Assert
+    should((await sessions.get('run-1'))?.live).equal(true);
+    should((await sessions.get('stop-1'))?.live).equal(false);
+    should((await sessions.get('new-1'))?.live).be.undefined();
+  });
+
   it('should read an unknown session, a malformed id and an invalid document as unreadable', async () => {
     // Arrange
     const storage = await open();

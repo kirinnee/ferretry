@@ -905,6 +905,41 @@ describe('a sub-ferret’s escalation, kept on its agenda home', () => {
     should(result.resolve).be.empty();
   });
 
+  it('should carry a standing escalation to the new home when its ferret’s home changes, not clear it', () => {
+    // Arrange — sweep 1 told lead1; sweep 2 has the kid's home at lead2. The person was told: nothing may re-tell
+    // them, and the row must not simply vanish for sitting on a board the kid no longer belongs to.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes: [...nodes, node({ id: 'lead2' })],
+      homes: new Map([['kid1', 'lead2']]),
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('lead2'), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef])).eql([['kid1', scoped('kid1')]]);
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]).match({ sessionId: 'lead', sourceRef: scoped('kid1') });
+    should(result.resolve[0]?.note).match(/Moved by the daemon: this now waits on lead2's agenda/u);
+    should(result.resolve[0]?.note).not.match(/no longer waits on you/u);
+  });
+
+  it('should still clear a row on a board that is not the kid’s home once the kid has recovered', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes: [...nodes, node({ id: 'lead2' })],
+      homes: new Map([['kid1', 'lead2']]),
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('lead2'), board('kid1')],
+    });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]?.note).match(/recovered/u);
+  });
+
   it('should clear a row about a ferret whose board could be read', () => {
     // Arrange
     const result = plan({

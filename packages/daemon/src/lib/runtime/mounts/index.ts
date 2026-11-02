@@ -275,6 +275,8 @@ export interface MountedSubsystems {
   readonly agendaClearer: AgendaAgentClearer;
   /** A card's gate items (docs/board.md § Gates ask the owner): the owner's answer to one moves the card first. */
   readonly gateItems?: AgendaGatePort;
+  /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
+  readonly agendaHomesMigrated?: Promise<unknown>;
   readonly pins: PinService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;

@@ -30,7 +30,10 @@ class Ledgers implements AgendaLedgerRepository {
   }
 }
 
-const build = (homeOf: (sessionId: string) => Promise<string> = async () => 'lead') => {
+const build = (
+  homeOf: (sessionId: string) => Promise<string> = async () => 'lead',
+  focusOf: (sessionId: string) => Promise<{ id: string } | null> = async () => null,
+) => {
   const ledgers = new Ledgers();
   const service = new AgendaService(
     ledgers,
@@ -38,7 +41,7 @@ const build = (homeOf: (sessionId: string) => Promise<string> = async () => 'lea
     { has: async () => true },
     { raised: async () => undefined },
     undefined,
-    undefined,
+    { focusOf },
     { leadOf: async id => LEADS[id], addressOf: async id => CALLSIGNS[id] ?? id },
     undefined,
     { of: homeOf },
@@ -116,6 +119,78 @@ describe('AgendaService agenda homes', () => {
     should(inPlace).match({ ok: true, change: 'resolved' });
     should(ledgers.open('lead')).be.empty();
     should(ledgers.open('kid')).be.empty();
+  });
+
+  it('clears a row where the daemon names it when it stands there, and never the lead’s own row of the same reference', async () => {
+    const { ledgers, service } = build();
+    // The kid's own, unscoped row (a pre-upgrade one, or one the move left behind) and the lead's own row, one reference.
+    await service.raise(
+      'lead',
+      request({ source: 'agent-raised', sourceRef: 'warden:ask:K' }),
+      daemon('warden-escalation'),
+    );
+    const kidRow = await service.raise(
+      'grandkid',
+      request({ source: 'agent-raised', sourceRef: 'warden:ask:K' }),
+      daemon('input-request'),
+    );
+    should(kidRow).match({ ok: true });
+    should(ledgers.open('grandkid')).have.length(1);
+
+    const cleared = await service.resolveSource(
+      'grandkid',
+      'agent-raised',
+      'warden:ask:K',
+      daemon('warden-escalation'),
+      'recovered',
+    );
+
+    should(cleared).match({ ok: true, change: 'resolved' });
+    should(ledgers.open('grandkid')).be.empty();
+    should(ledgers.open('lead').map(each => each.sourceRef)).eql(['warden:ask:K']);
+  });
+
+  it('looks for the row on the home when the named board does not hold it', async () => {
+    const { ledgers, service } = build();
+    await service.raise(
+      'kid',
+      request({ source: 'agent-raised', sourceRef: 'warden:ask:K:kid' }),
+      daemon('warden-escalation'),
+    );
+    const cleared = await service.resolveSource(
+      'kid',
+      'agent-raised',
+      'warden:ask:K:kid',
+      daemon('warden-escalation'),
+      'recovered',
+    );
+    should(cleared).match({ ok: true, change: 'resolved' });
+    should(ledgers.open('lead')).be.empty();
+  });
+
+  it('does not look for a row on a session id that is not one', async () => {
+    const { service } = build();
+    const cleared = await service.resolveSource(
+      'not a session!',
+      'agent-raised',
+      'warden:ask:K',
+      daemon('warden-escalation'),
+    );
+    should(cleared).match({ ok: false, error: { code: 'invalid' } });
+  });
+
+  it('gives a redirected warden row no focus card, and a row raised in place its own', async () => {
+    const { ledgers, service } = build(
+      async () => 'lead',
+      async id => (id === 'lead' ? { id: 'F12' } : null),
+    );
+    await service.raise('kid', request({ source: 'agent-raised', sourceRef: 'w:kid' }), daemon('warden-escalation'));
+    await service.raise('lead', request({ source: 'agent-raised', sourceRef: 'w:lead' }), daemon('warden-escalation'));
+    const tasks = ledgers.open('lead').map(each => [each.sourceRef, each.task?.id ?? null]);
+    should(tasks).eql([
+      ['w:kid', null],
+      ['w:lead', 'F12'],
+    ]);
   });
 
   it('keeps two sub-ferrets and the lead itself, with one kind, on separate rows of the home', async () => {
