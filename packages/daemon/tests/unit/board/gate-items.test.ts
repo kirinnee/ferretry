@@ -98,6 +98,8 @@ interface Faults {
   readonly resolveThrows?: readonly string[];
   /** The duplicates sweep already ran. */
   readonly swept?: boolean;
+  /** The agenda home of these sessions; every other session is its own. */
+  readonly homes?: Readonly<Record<string, string>>;
 }
 
 /** The duplicates sweep's marker, in memory. */
@@ -127,6 +129,13 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const board = new BoardService(
     world({ store, reopen, done, gates: { written: async id => await gates?.written(id) } }),
   );
+  const homes = {
+    of: async (sessionId: string) => {
+      const home = faults.homes?.[sessionId];
+      if (home === '!') throw new Error('unreadable');
+      return home ?? sessionId;
+    },
+  };
   const agenda = new AgendaService(
     ledgers,
     { now: () => NOW },
@@ -135,6 +144,8 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     undefined,
     undefined,
     { leadOf: async sessionId => LEADS[sessionId], addressOf: async sessionId => sessionId },
+    undefined,
+    homes,
   );
   const cards_ = new BoardGateCards(board, { project: async () => ({ name: 'Ferretry' }) });
   gates = new GateItems({
@@ -163,6 +174,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       },
     },
     lanes: stageGateLanes,
+    homes,
     sessions: {
       all: async () => {
         if (listAllThrows > 0) {
@@ -1501,7 +1513,7 @@ describe('a card that changes hands keeps ONE gate item (&B138)', () => {
     should(moved.ok && moved.item?.subject).not.equal('forged');
   });
 
-  it('carries nothing over onto an item that is not a gate, and lets no ferret carry a gate', async () => {
+  it('lets the daemon carry any item over, but no ferret carry one', async () => {
     // Arrange
     const world = fixture([external({ laneId: 'tested' })]);
     await world.gates.backfill();
@@ -1529,9 +1541,9 @@ describe('a card that changes hands keeps ONE gate item (&B138)', () => {
     );
 
     // Assert
-    should(notAGate).match({ ok: false, error: { code: 'invalid' } });
+    should(notAGate).match({ ok: true });
     should(byAFerret).match({ ok: false, error: { code: 'forbidden' } });
-    should(world.open('peer')).be.empty();
+    should(world.open('peer').map(each => each.sourceRef)).eql(['b138:not-a-gate']);
   });
 
   it('finds a former ferret’s item raised before this daemon started', async () => {
@@ -1709,5 +1721,67 @@ describe('the one-time sweep of duplicate gate items (&B138)', () => {
     should(world.warnings[0]).equal('the sweep of duplicate gate items failed: the sessions cannot be listed');
     should(world.marker.records).be.empty();
     should(openGates(world).map(each => each.sessionId)).eql(['avary']);
+  });
+});
+
+describe('gates ask at the agenda home of the card’s ferrets', () => {
+  const HOMES = { grandchild: 'lead', child: 'lead', peer: 'lead' } as const;
+
+  it('raises the one gate item on the lead, not on the sub-ferrets', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })], { homes: HOMES });
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    should(world.open('lead').map(each => each.sourceRef)).eql(['gate:F1:tested:1']);
+    should(world.open('grandchild')).be.empty();
+    should(world.open('child')).be.empty();
+  });
+
+  it('opens the Not good conversation on the lead', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })], { homes: HOMES });
+    await world.gates.backfill();
+    const item = world.open('lead')[0] as AgendaItem;
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Not good'), {
+      sessionId: 'lead',
+      note: 'the badge counts it twice',
+    });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.open('lead').map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
+    should(world.open('grandchild')).be.empty();
+  });
+
+  it('reassigning between sub-ferrets of one lead moves and raises nothing', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })], { homes: HOMES });
+    await world.gates.backfill();
+    const before = world.open('lead');
+
+    // Act
+    world.store.cards.set('F1', { ...world.stored(), assignee: 'peer' });
+    await world.gates.written('F1');
+
+    // Assert
+    should(world.open('lead')).eql(before);
+    should(world.closed('lead')).be.empty();
+    should(world.open('peer')).be.empty();
+  });
+
+  it('falls back to the ferret itself when its home cannot be found', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })], { homes: { grandchild: '!' } });
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    should(world.open('grandchild')).have.length(1);
   });
 });

@@ -487,8 +487,8 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 /** What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. */
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
-    `Sub-ferret: you were started by a lead ferret. Report to it with \`${fy} send <lead-callsign> "<message>"\`; you cannot raise agenda items, notify the owner or move cards.`,
-    `If you have a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`), progress \`${fy} task note\`; it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Don't make one. Your final report says how the owner tests it.`,
+    `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; report to your lead: \`${fy} send <lead-callsign> "<message>"\`. Only a password, code or approval the daemon asks for reaches the owner from you.`,
+    `With a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`), progress \`${fy} task note\`; it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Make none. Your final report says how the owner tests it.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */
