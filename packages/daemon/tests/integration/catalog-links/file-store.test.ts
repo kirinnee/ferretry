@@ -108,3 +108,30 @@ describe('link-keys.json under a real state home', () => {
     should(await readFile(paths.catalogLinkKeys, 'utf8')).equal('nope');
   });
 });
+
+describe('what the two files refuse to hold', () => {
+  it('should refuse to write a document that breaks a rule of the file, and write nothing', async () => {
+    const { paths, boot } = await fixture();
+    await boot().documents.write({ schemaVersion: 1, links: [] });
+    const same = storedLink({ state: 'live' });
+    const out = await refusal(() => boot().documents.write({ schemaVersion: 1, links: [same, same] }));
+    should(out.refusal).equal('links_store_damaged');
+    should((await boot().documents.read()).links).deepEqual([]);
+    should(await readFile(paths.catalogLinks, 'utf8')).not.containEql(same.linkId);
+  });
+
+  it('should refuse a sealed key that does not authenticate, and say nothing of the key', async () => {
+    const { paths, boot } = await fixture();
+    await boot().vault.put('lnk_one', SECRET);
+    const sealed = JSON.parse(await readFile(paths.catalogLinkKeys, 'utf8')) as {
+      entries: Record<string, { iv: string; ciphertext: string }>;
+    };
+    const entry = sealed.entries.lnk_one;
+    if (entry === undefined) throw new Error('expected a sealed entry');
+    entry.ciphertext = `${entry.ciphertext.startsWith('A') ? 'B' : 'A'}${entry.ciphertext.slice(1)}`;
+    await writeFile(paths.catalogLinkKeys, JSON.stringify(sealed));
+    const out = await refusal(() => boot().vault.open('lnk_one'));
+    should(out.refusal).equal('links_store_damaged');
+    should(out.message).not.containEql(SECRET);
+  });
+});
