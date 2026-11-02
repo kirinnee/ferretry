@@ -55,8 +55,10 @@ import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { currentFlow, type StepperState, startStepper, stepForward, withSteps } from '../shell/stepper-model.ts';
 import {
   CLONE_FLOW_KIND,
+  CLONE_NO_DEFAULT,
   type CloneMode,
   type ClonePreview,
+  cloneDefaultView,
   clonePreview,
   cloneSharesSentence,
   cloneSlots,
@@ -64,17 +66,15 @@ import {
   cloneSteps,
   copiesRows,
   documentSize,
-  CLONE_NO_DEFAULT,
-  cloneDefaultView,
   existingSentence,
   runnableTitle,
 } from './clone-model.ts';
 import {
   CloneItemsChoices,
-  DefaultRuntimeChoice,
   CloneLoginsSection,
   CloneNeedsList,
   CloneOutcomes,
+  DefaultRuntimeChoice,
 } from './clone-settings.tsx';
 import {
   ALL_CLONE_ITEMS,
@@ -88,9 +88,10 @@ import {
   type CloneOutcomeItem,
   cloneLogins,
   cloneNeeds,
-  needsAfterCopy,
   controlsChange,
   keysToCopy,
+  needsAfterCopy,
+  reusedSignIns,
   type SourceSettingsFile,
   sourceItemSummary,
 } from './clone-settings-model.ts';
@@ -117,6 +118,8 @@ interface CloneResult {
   readonly summary: string | null;
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
+  /** The source sign-ins whose login this machine already had: reused as they are, with no slot. */
+  readonly reused: ReadonlySet<string>;
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
   /** The source as the person names it, for the Done sentences. */
   readonly sourceName: string;
@@ -371,6 +374,8 @@ export function CloneMachine(props: CloneMachineProps) {
         summary,
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
+        reused:
+          credentials?.kind === 'done' ? reusedSignIns(bundle.credentials, credentials.value.credentials) : new Set(),
         outcomes,
         sourceName,
       });
@@ -849,6 +854,7 @@ function DoneStep({
         needs={needsAfterCopy(
           needs,
           result.slots.map(slot => slot.id),
+          result.reused,
         )}
         machineName={machineName}
         onAdd={onAdd}

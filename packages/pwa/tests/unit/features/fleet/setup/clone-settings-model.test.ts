@@ -14,6 +14,7 @@ import {
   needsSentence,
   outcomeSentence,
   providersNeededBy,
+  reusedSignIns,
   type SourceSettingsFile,
   sourceItemSummary,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
@@ -539,13 +540,52 @@ describe('needsAfterCopy', () => {
   });
   const secret: CloneNeed = { key: 'secret:KEY', kind: 'secret', name: 'KEY', why: 'login glm', held: false };
 
-  it('drops a sign-in for a login this machine already had, since the copy left no slot for it', () => {
+  it('drops a sign-in for a reused login that has no slot, and keeps one with a slot', () => {
     const reused = signIn('claude-you');
     const slotted = signIn('codex-you');
-    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'])).toEqual([slotted, secret]);
+    expect(needsAfterCopy([reused, slotted, secret], ['codex-you'], new Set(['claude-you']))).toEqual([
+      slotted,
+      secret,
+    ]);
   });
 
-  it('keeps every secret and drops every sign-in when the copy left no slot at all', () => {
-    expect(needsAfterCopy([signIn('claude-you'), secret], [])).toEqual([secret]);
+  it('keeps a slotless sign-in that was not reused, and every secret', () => {
+    const ghost = signIn('ghost');
+    expect(needsAfterCopy([ghost, secret], [], new Set())).toEqual([ghost, secret]);
+  });
+});
+
+describe('reusedSignIns', () => {
+  const here = (
+    harness: string,
+    fields: { email?: string; label?: string; store?: string } = {},
+  ): { harness: string; store: string; email?: string; label?: string } => ({
+    harness,
+    store: fields.store ?? 'ferretry',
+    ...(fields.email === undefined ? {} : { email: fields.email }),
+    ...(fields.label === undefined ? {} : { label: fields.label }),
+  });
+  const bundleOf = (...credentials: FleetCloneBundle['credentials']): FleetCloneBundle['credentials'] => credentials;
+
+  it('matches the same CLI and email ignoring case, never another CLI or an API-key login', () => {
+    const credentials = bundleOf(
+      { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
+      { id: 'codex-you', harness: 'codex', email: 'me@work.example' },
+      { id: 'env', harness: 'claude', store: 'environment', env: {}, email: 'env@work.example' },
+    );
+    const logins = [
+      here('claude', { email: 'me@work.example' }),
+      here('claude', { email: 'env@work.example', store: 'environment' }),
+    ];
+    expect([...reusedSignIns(credentials, logins)]).toEqual(['claude-you']);
+  });
+
+  it('falls back to the label only when neither side has an email, and never lets an email meet none', () => {
+    const credentials = bundleOf(
+      { id: 'by-label', harness: 'codex', label: 'Work' },
+      { id: 'has-email', harness: 'claude', email: 'me@work.example' },
+    );
+    const logins = [here('codex', { label: 'Work' }), here('claude', { label: 'Work' })];
+    expect([...reusedSignIns(credentials, logins)]).toEqual(['by-label']);
   });
 });

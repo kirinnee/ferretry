@@ -1463,6 +1463,36 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
     }
   });
 
+  it('does not ask to sign in to a login this machine already had and reused', async () => {
+    const { createClient } = daemons({
+      work: sourceFiles({
+        '/v1/fleet/export': bundle({
+          credentials: [
+            { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
+            { id: 'codex-work', harness: 'codex', label: 'Work' },
+          ],
+        }),
+      }),
+      target: fullTarget({
+        '/v1/fleet/credentials': credentials([
+          credentialView('claude-mine', { email: 'me@work.example', usedBy: ['claude-default'] }),
+          credentialView('codex-work', { harness: 'codex', clonedFrom: 'work-linux', email: undefined, label: 'Work' }),
+        ]),
+      }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(screen.q('[data-clone-need="sign-in:claude-you"]')).toBeNull();
+      expect(screen.q('[data-clone-need="sign-in:codex-work"] [data-clone-need-sign-in="codex-work"]')).not.toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
   it('lets a secret still be added from Done, and then reads it as held', async () => {
     const secrets = secretsRoute();
     const { createClient } = daemons({
