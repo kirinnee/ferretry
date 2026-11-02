@@ -750,3 +750,22 @@ describe('DaemonBoardStore card ids', () => {
     expect(second.idsState(laptop.daemonId).error).toBeNull();
   });
 });
+
+describe('DaemonBoardStore start', () => {
+  it('hands the start of a card to the port, on the machine that holds it', async () => {
+    const started: string[] = [];
+    const { store } = open(
+      fakePort({
+        start: async (machine, id) => {
+          started.push(`${machine.daemonId}:${id}`);
+          return boardOk({ task: id, sessionId: 'worker' });
+        },
+      }),
+    );
+
+    const result = await store.start(laptop, 'F1' as never);
+
+    expect(started).toEqual([`${laptop.daemonId}:F1`]);
+    expect(result).toEqual(boardOk({ task: 'F1', sessionId: 'worker' }));
+  });
+});
