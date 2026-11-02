@@ -40,6 +40,7 @@ import {
   type ResolvedProfile,
   resolveDefaultRuntime,
   resolveProfile,
+  SECRET_TOKEN_SOURCE,
   runtimeDisable,
   type BudgetHolds,
   runtimeHarness,
@@ -316,6 +317,15 @@ const VALUE_RUN = /[^\s"'`,;)}\]]+/uy;
 
 /** One bare word of text, for a value whose own shape says it is a token. */
 const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
+/**
+ * A private-key block (its header, the base64 body and its footer when there is one) and any well-known token
+ * ({@link SECRET_TOKEN_SOURCE}), wherever either stands: no name, separator or word boundary is needed. Every
+ * part is a linear class, so a long run of one costs a single pass.
+ */
+const CONTEXT_FREE_SECRET = new RegExp(
+  `-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?|${SECRET_TOKEN_SOURCE}`,
+  'gu',
+);
 
 /** A line that ends in a name and its separator (`password =`), or opens a block value (`password: |`, `token: >-`). */
 const OPENS_VALUE = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=]([ \t]*[|>][-+0-9]*)?[ \t]*$/u;
@@ -335,7 +345,7 @@ const BLOCK_PROBE = 'x'.repeat(MIN_SECRET_VALUE_LENGTH);
 /** What ASSIGNMENT leaves out of a name too: `9TOKEN` is the name `TOKEN`. */
 const LEADING_DIGITS = /^[0-9.-]+/u;
 /** The separator that a value carries when a line break comes between it and its name (`ghp_x⏎=ghp_y`). */
-const LEADING_SEPARATORS = /^[=:]+/u;
+const LEADING_SEPARATORS = /^[=:&?|/$@]+/u;
 const indentOf = (line: string): number => line.length - line.trimStart().length;
 
 /** Whether the value found at `start` of `text` is the start of a pointer (`${secret:TOKEN}`), not a secret. */
@@ -403,11 +413,14 @@ function redactNextLines(
       const value = FIRST_VALUE.exec(rest);
       if (value?.[2] === HIDDEN_TEXT) continue;
       const start = opens.from + (value?.[1]?.length ?? 0);
+      // A token already hidden at the head of the run (`ghp_x{y`) leaves the rest of its run showing: hide that too.
+      const headHidden = value?.[2]?.startsWith(HIDDEN_TEXT) === true;
       if (
         value === null ||
-        (opens.from === 0 && KEY_LINE.test(rest)) ||
-        isPointer(line, start) ||
-        !isSecret(opens.name, value[2] ?? '')
+        (!headHidden &&
+          ((opens.from === 0 && KEY_LINE.test(rest)) ||
+            isPointer(line, start) ||
+            !isSecret(opens.name, value[2] ?? '')))
       ) {
         continue;
       }
@@ -470,7 +483,11 @@ export function redactText(
     return `${word.slice(0, word.length - held.length)}${HIDDEN_TEXT}`;
   });
   const lines = redactNextLines(text, bare, isSecret);
-  return { text: lines.text, redacted: redacted || lines.redacted };
+  const cut = lines.text.replace(CONTEXT_FREE_SECRET, () => {
+    redacted = true;
+    return HIDDEN_TEXT;
+  });
+  return { text: cut, redacted: redacted || lines.redacted };
 }
 
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>

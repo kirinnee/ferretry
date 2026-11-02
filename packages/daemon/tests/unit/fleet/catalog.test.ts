@@ -1892,6 +1892,99 @@ describe('redactText: where a name and its value are', () => {
   });
 });
 
+describe('redactText: a secret glued to the end of another value', () => {
+  it.each([
+    ['a glued token after a query value', 'x &Q=sk-abcdefghijklmnopqrst<&ghp_zyxwvutsrqponmlkjihg', 'x &Q=‹hidden›'],
+    ['a glued base64 value after a query value', '?Q=sk-abcdefghijklmnopqrst<&c2VjcmV0cGFzc3dvcmQ=', '?Q=‹hidden›'],
+    ['a glued short value after a query value', ';Q=ghp_zyxwvutsrqponmlkjihg>&tok3nvalue99', ';Q=‹hidden›'],
+    ['a short token and a value on the next line', 'Y=\nghp_aaaa{tok3nvalue99', 'Y=\n‹hidden›'],
+    ['a short token and a base64 value after a carriage return', 'Q=\rsk-qqqq{c2VjcmV0cGFzc3dvcmQ=', 'Q=\r‹hidden›'],
+    ['a short token and a value after a colon line', 'z:\nghp_aaaa>tok3nvalue99', 'z:\n‹hidden›'],
+  ])('should hide %s', (_label, text, expected) => {
+    should(redactText(text).text).equal(expected);
+  });
+
+  it.each(['=', ':', '&', '?', '|', '/', '$', '@', '=:', '&?'])(
+    'should hide a value that starts with %s whose prefix says it is a token, with or without a name',
+    lead => {
+      // These prefixes are not in the context-free list, so only the word with its leading separators taken off finds them.
+      should(redactText(`${lead}eyJhbGciOiJIUzI1NiJ9`).text).equal(`${lead}‹hidden›`);
+      should(redactText(`a ${lead}ya29.a0AfH6SMBxyz`).text).equal(`a ${lead}‹hidden›`);
+      should(redactText(`b ${lead}ghp_abcd`).text).equal(`b ${lead}‹hidden›`);
+    },
+  );
+});
+
+describe('redactText: a well-known token anywhere', () => {
+  const TOKENS = [
+    'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+    'gho_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghs_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghu_abcdefghijklmnopqrstuvwxyz0123456789',
+    'ghr_abcdefghijklmnopqrstuvwxyz0123456789',
+    'github_pat_11ABCDEFG0abcdefghijkl_abcdefghijklmnop',
+    'sk-abcdefghijklmnopqrst',
+    'sk-proj-abcdefghijklmnopqrst',
+    'sk-ant-api03-abcdefghijklmnopqrst',
+    'sk_live_abcdefghijklmnopqrst',
+    'xoxb-1234567890-abcdefghijkl',
+    'xoxp-1234567890-abcdefghijkl',
+    'xoxa-1234567890-abcdefghijkl',
+    'xoxr-1234567890-abcdefghijkl',
+    'xoxs-1234567890-abcdefghijkl',
+    'AKIAIOSFODNN7EXAMPLE',
+    'ASIAIOSFODNN7EXAMPLE',
+    'glpat-abcdefghijklmnopqrst',
+    'npm_abcdefghijklmnopqrstuvwxyz0123456789',
+    'hf_abcdefghijklmnopqrstuvwxyz',
+    'AIzaSyabcdefghijklmnopqrstuvwxyz012345',
+  ];
+  const BEFORE = ['<', '>', '{', '&', '?', '=', ':', '/', '|', '"', "'", '`', '(', '$', '@', '#', 'x', '9', '&amp;'];
+
+  it.each(TOKENS.flatMap(token => BEFORE.map(before => [token, before] as const)))(
+    'should hide %s after %s',
+    (token, before) => {
+      should(redactText(`a ${before}${token} z`)).deepEqual({ text: `a ${before}‹hidden› z`, redacted: true });
+    },
+  );
+
+  it('should hide every token of a text and stop at the end of each', () => {
+    should(redactText('x<&ghp_abcdefghijklmnop{ysk-qrstuvwxyz012345?plain!').text).equal(
+      'x<&‹hidden›{y‹hidden›?plain!',
+    );
+  });
+
+  it('should hide a private-key block, header to footer, and what follows it stays', () => {
+    const block = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEA+/ab==\n-----END OPENSSH PRIVATE KEY-----';
+    should(redactText(`before\n${block}\nafter`)).deepEqual({ text: 'before\n‹hidden›\nafter', redacted: true });
+    should(redactText(`k: ${block.replace('OPENSSH ', '')}`).text).equal('k: ‹hidden›');
+  });
+
+  it('should hide a private-key header that has no footer, with the body after it', () => {
+    should(redactText('-----BEGIN RSA PRIVATE KEY-----\nMIIEabc+/=\n. tail').text).equal('‹hidden›. tail');
+  });
+
+  it('should leave a token body that is too short, and a name that only shares a prefix', () => {
+    should(redactText('see sk-a and ghp_ and AKIA123 and npm_x')).deepEqual({
+      text: 'see sk-a and ghp_ and AKIA123 and npm_x',
+      redacted: false,
+    });
+  });
+
+  it('should finish on a very long run of one token, of token prefixes and of key headers', () => {
+    const started = performance.now();
+    const long = redactText(`ghp_${'a'.repeat(1_000_000)}`);
+    const prefixes = redactText('sk-'.repeat(200_000));
+    const unfinished = redactText('-----BEGIN PRIVATE KEY-----'.repeat(20_000));
+    const nearly = redactText('ghp_abc '.repeat(100_000));
+    should(long.text).equal('‹hidden›');
+    should(prefixes.text).equal('‹hidden›');
+    should(unfinished.redacted).equal(true);
+    should(nearly.redacted).equal(false);
+    should(performance.now() - started).be.below(5000);
+  });
+});
+
 describe('redactText: bounded work', () => {
   // Quadratic work on a run of name characters takes minutes at this size; linear work takes milliseconds. The
   // margin is a thousandfold, so this is a bound on the pattern and not a timing of the machine.

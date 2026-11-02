@@ -325,9 +325,33 @@ const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
 /** Name word pairs that say the same: `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `SECRET_KEY`. */
 const SECRET_NAME_PAIRS: ReadonlySet<string> = new Set(['API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY', 'SECRET_KEY']);
 
-/** Value prefixes of well-known token formats. */
-const SECRET_VALUE_PREFIX =
-  /^(?:sk-|sk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abposr]-|AKIA|ASIA|AIza|ya29\.|npm_|hf_|eyJ)/u;
+const TOKEN_BODY = '[A-Za-z0-9_-]{8,}';
+
+/**
+ * THE list of well-known token formats (one owner): each is a fixed prefix and the body that follows it. A
+ * value that starts with a prefix is a secret by value ({@link looksSecret}), and text that holds a whole token
+ * anywhere, glued to anything, is cut ({@link SECRET_TOKEN_SOURCE}). Every body is a linear class of a minimum
+ * length and no format looks behind it: `<&ghp_x` and `{sk-x` are cut as `ghp_x` and `sk-x` are. A new format
+ * is added here and nowhere else.
+ */
+const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
+  ['sk-', TOKEN_BODY],
+  ['sk_live_', TOKEN_BODY],
+  ['gh[pousr]_', TOKEN_BODY],
+  ['github_pat_', TOKEN_BODY],
+  ['glpat-', TOKEN_BODY],
+  ['xox[abposr]-', TOKEN_BODY],
+  ['(?:AKIA|ASIA)', '[A-Z0-9]{16}'],
+  ['AIza', TOKEN_BODY],
+  ['npm_', TOKEN_BODY],
+  ['hf_', TOKEN_BODY],
+];
+
+/** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
+const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
+
+/** The regular expression source of any whole token in a text; a caller builds it with the `g` and `u` flags. */
+export const SECRET_TOKEN_SOURCE: string = TOKEN_FORMATS.map(([prefix, body]) => `${prefix}${body}`).join('|');
 
 /** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
 const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;

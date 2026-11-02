@@ -815,11 +815,21 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   because base64 does), and `password: |` / `>-` as owning the more-indented lines after it (the block of a name that
   says nothing is not read, and a block inside a read one is not read again), for every caller of `redactText`, the
   fleet's component view included. A word that starts with a separator (`ghp_…⏎=ghp_…`) is tried without it, and a
-  pointer (`$VAR`, `${secret:NAME}`) is never cut. **The floor is tested**: `redact-differential.test.ts` keeps
-  main's own `redactText` (`tests/support/redact-reference.ts`, frozen) and generates 20 000 texts from a seeded
-  alphabet of secret names, `:` `=` `|` `>-`, tabs, CR, CRLF and LF, base64 padding, `ghp_` / `sk-` prefixes, quotes,
-  lead characters and nesting; every secret value that function hid must also be hidden by the current
-  `redactText` and by See changes, and a failure prints the smallest text that leaks. The rest of the answer
+  pointer (`$VAR`, `${secret:NAME}`) is never cut. **A well-known token is cut wherever it stands**, with no name,
+  separator or word boundary needed (`x<&ghp_…`, `{sk-…`): the fleet owns ONE list of formats (`TOKEN_FORMATS` in
+  `account/import.ts`: GitHub, OpenAI / Anthropic `sk-`, Slack, AWS key ids, GitLab, npm, Hugging Face, Google API),
+  each a fixed prefix and a linear body of a minimum length, and `redactText` (so every caller, See changes
+  included) cuts each match, and a private-key block from header to footer. The price is that a word that merely
+  contains a prefix and a long run after it (`risk-assessment-notes`) is cut too; a preview shows too little rather
+  than a secret. The glued value after a query value is read by `redactText` before the query pass, and a first
+  value on the next line that begins with a hidden token hides the rest of its run. **The floor is tested**:
+  `redact-differential.test.ts` keeps main's own `redactText` (`tests/support/redact-reference.ts`, frozen) and
+  generates 20 000 texts twice: structured ones from a seeded alphabet of secret names, `:` `=` `|` `>-`, tabs, CR,
+  CRLF and LF, base64 padding, `ghp_` / `sk-` prefixes, quotes, lead characters, nesting, a second secret glued by
+  `< > { & ? &amp;` and a value alone on a line before a separator line; and a soup of the whole alphabet with no
+  structure at all. Every secret value that function hid must also be hidden by the current
+  `redactText` and by See changes, and a failure prints the smallest text that leaks (`REDACT_FUZZ_SEED` and
+  `REDACT_FUZZ_CASES` re-run it with another seed and more cases). The rest of the answer
   (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
   is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are

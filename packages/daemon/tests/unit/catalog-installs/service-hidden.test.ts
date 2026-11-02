@@ -247,6 +247,14 @@ describe('see changes never carries a value typed in by hand', () => {
       'a token that starts with the separator of the line before',
       'ghp_abcdefghijklmnopqrstuvwxyz0123456789\n=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n',
     ],
+    ['a token glued after a query value', 'x &Q=sk-abcdefghijklmnopqrst<&ghp_zyxwvutsrqponmlkjihg\n'],
+    ['a base64 value glued after a query value', '?Q=sk-abcdefghijklmnopqrst<&c2VjcmV0cGFzc3dvcmQ=\n'],
+    ['a short value glued after a token', ';Q=ghp_abcdefghijklmnopqrst>&tok3nvalue99\n'],
+    ['a short token and a value on the next line', 'Y=\nghp_aaaa{tok3nvalue99\n'],
+    ['a short token and a base64 value after a carriage return', 'Q=\rsk-qqqq{c2VjcmV0cGFzc3dvcmQ=\r'],
+    ['a short token and a value after a colon line', 'z:\nghp_aaaa>tok3nvalue99\n'],
+    ['a token glued after a brace, with no name', 'a{sk-abcdefghijklmnopqrst and x<&ghp_zyxwvutsrqponmlkjihg\n'],
+    ['a key id glued after a bar', 'k|AKIAIOSFODNN7EXAMPLE|\n'],
   ])('should hide a secret in a skill file with %s, in the whole answer', async (_label, text) => {
     const r = rig();
     await install(r, skillV(1, '# one\n'), projectTarget());
@@ -256,7 +264,7 @@ describe('see changes never carries a value typed in by hand', () => {
       await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
     );
     should(wire(preview)).not.match(
-      /p_abcdefghijkl|abcdefghijklmnopqrstuvwxyz0123456789|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy/u,
+      /p_abcdefghijkl|abcdefghijklmnopqrst|hunter2|ghp_abcdefgh|c2VjcmV0|aHVudGVy|zyxwvutsrqpon|tok3nvalue99|ghp_aaaa|sk-qqqq|AKIAIOSF/u,
     );
   });
 
