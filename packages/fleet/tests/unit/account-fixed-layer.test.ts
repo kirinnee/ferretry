@@ -785,10 +785,10 @@ describe('AGENDA_INSTRUCTION', () => {
     );
     should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`).');
     // The owner's formatting rule: a short title-like ask, short points in every segment, no Markdown headings anywhere.
-    should(text).containEql('short Markdown points, no # headings, answer first;');
+    should(text).containEql('short Markdown points, no headings, answer first;');
     should(text).not.containEql('ask ≤120');
     // Several bugs or asks at once get ONE info item that says each was heard and where it is tracked.
-    should(text).containEql('Many bugs/asks: ONE `-k info` item, a line each, where tracked.');
+    should(text).containEql('Many bugs/asks: ONE `-k info`, line each + where tracked.');
     should(text).containEql('no "as above", ticket/PR ids, paths, acronyms');
     should(text).containEql('`--term "X=meaning"`');
     should(text).containEql('`--decided`=settled, `--still-open`=left');
