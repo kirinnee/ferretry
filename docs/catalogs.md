@@ -286,7 +286,7 @@ between them are byte-identical**. A reader that saw revision 7 refuses a signed
 
 Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them, whichever route published it), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
 
-A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
+A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. `sinceVersion` is a floor, not a ceiling: when an item is added or relisted while newer versions already exist (the current version was rolled back), the entry also stores `joinedAtMax`, the newest version that existed then, because the person who added it reviewed `sinceVersion` and was never shown the ones between. **A catalog may serve its `sinceVersion`, its current version, and any version after `joinedAtMax`; never one in between.** `joinedAtMax` is absent (no gap) unless a newer version existed, so entries from before 3d-2 carry none; see the declared gap below. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
 
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes
@@ -383,8 +383,10 @@ already kept, and a signed list of what a catalog offers. There is no installer 
 **The audience rule.** A catalog never serves a version below its entry's `sinceVersion`, and making a version
 current cannot widen who sees what:
 
-- Making a version current is refused, 409 `version_before_join`, when it is below the `sinceVersion` of **any**
-  live catalog. The sentence names those catalogs. `sinceVersion` is never lowered implicitly.
+- Making a version current is refused, 409 `version_before_join`, when **any** live catalog may not serve it: it is
+  below that catalog's `sinceVersion`, or it is one of the versions between `sinceVersion` and `joinedAtMax` (rolled
+  back from v5 to v3, then listed in catalog D at v3: D is never offered v4 or v5, and gets v6 when it is published).
+  The sentence names those catalogs. `sinceVersion` and `joinedAtMax` are never changed implicitly.
 - Retiring the current version is refused, 409 `version_current`. A retired version cannot be made current,
   409 `version_retired` (bring it back first).
 - Every write is checked again at the commit: a document where a live entry's `sinceVersion` is newer than its
@@ -396,28 +398,55 @@ signed manifest can ask "what else is there" without trusting the transport.
 - It is `{versions, spki, sig}`. `versions` is `format: "ferretry-catalog-versions"`, `version: 1`, then the
   `publisher`, `catalogId`, `itemId`, `revision`, `issuedAt`, `current` and `offered[]`
   (`version`, `digest`, `size`, `publishedAt`, `summary`), oldest first.
-- It **offers only versions from the catalog's `sinceVersion` on that are not retired, and the current version is
-  always offered.** A catalog that joined at version 3 is never offered 1 or 2.
+- It **offers only versions the catalog may serve (see the audience rule) that are not retired, and the current
+  version is always offered.** A catalog that joined at version 3 is never offered 1 or 2.
 - The signature covers the label `ferretry-catalog-versions-v1`, one `0x00` byte and the SHA-256 of the list's
   canonical JSON. The manifest's label is different, so **a manifest signature never verifies as a list and the
   reverse**.
 - A reader proves the list belongs to a manifest it holds: `publisher`, `catalogId`, `itemId`, `revision` and
   `issuedAt` equal the manifest's, `spki` is the same key, and `current` and the digest of the current entry equal the
-  manifest line (`verifyCatalogItemAgainstVersions` in `packages/relay`). Any difference is refused.
+  manifest line, including its size and summary (`verifyCatalogItemAgainstVersions` in `packages/relay`); an item
+  read from the list must also match the entry's digest, size and summary. Any difference is refused.
 - It is built from **the same document snapshot as the manifest**, so the two cannot disagree.
 
 **The member route** is `GET /v1/shared/catalogs/:catalogId/items/:itemId/versions` ([relay-protocol.md](relay-protocol.md)
 §14). An unlocked member only; their grants are re-read on every request. The `ETag` is the catalog's revision and a
-match answers 304. A withdrawn item, an unknown one and one the catalog's `sinceVersion` is above are all
-404 `item_unknown`, so the answer does not say which. The sibling route `…/items/:itemId/:version` now refuses a
-**retired** version the same way (404 `item_unknown`, "not offered").
+match answers 304. The daemon first does a plain read (no write queue, nothing signed): an item the catalog does not
+offer, because it is withdrawn or not listed, is 404 `item_unknown` whatever tag was sent; then the tag is checked, and
+only then is the list signed. A 304 never signs anything. The sibling route `…/items/:itemId/:version` refuses a
+**retired** version, one the catalog may not serve, and a withdrawn item the same way. **Both member routes say one fixed
+sentence for every `item_unknown`** ("this catalog does not offer that"): no item name, no version number, no reason, so
+retired, below-join, never-existed and withdrawn are indistinguishable to a member. A damaged store is
+500 `store_damaged`, not an export failure.
+
+**What an app does with the answer (the `/versions` contract).** The app learns that an item is withdrawn from the
+**signed manifest** (its `withdrawn[]` ids), never from `/versions`. A member app cannot see the feature flag
+(`SharedMeSchema` is strict and has no flags), so it tries the route and reads the answer:
+
+- Manifest lists the item live and `/versions` answers **404**: treat it as "this machine offers no version list" (an old
+  daemon, or a race with a withdrawal that the next manifest will show) and show **only the manifest line**.
+- Manifest lists the item in `withdrawn[]`: it is withdrawn, whatever `/versions` says.
+- 200: verify the list against the manifest it holds (above), then show it.
+
+The decision is a pure function of the manifest and the status; the member app that needs it is catalogs 3d-5, which
+owns its unit test. Nothing in this slice builds that app model.
 
 **Who may.** Both writes are the owner's (`sharing.use`, a person, not a ferret: 403 `forbidden`) and ask for no new
 passkey. The audit records ids only: a `catalog.changed` entry with action `make-current`, `retire` or `unretire`,
 the item id, the version and the catalogs and revisions it raised.
 
-The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes, so an app dials
-them only where the machine says it can.
+The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes, so an owner app
+dials the two owner routes only where the machine says it can. A member app has no flag to read and uses the 404 rule
+above.
+
+**For 3d-3 (recorded, not built).** An install chosen from the version list must keep the existing
+`catalog_revision_older` pin: an install chosen from a version list is checked against the manifest the list was
+verified with, and a manifest older than the revision of that catalog the app has already seen is refused, so a stale or
+replayed list cannot install an older version.
+
+**Declared gap.** An entry written before 3d-2 has a `sinceVersion` but no `joinedAtMax`, so if its item was rolled back
+before it was added, that catalog could still serve the versions between. The window needs a rollback, which did not exist
+before 3d-2, so no such entry can have been made by a released build.
 
 ### One item in many catalogs, and the default (catalogs 3c-2)
 

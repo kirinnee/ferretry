@@ -56,8 +56,8 @@ export const SHARED_CATALOG_VERSIONS_FORMAT = 'ferretry-catalog-versions' as con
 /** The domain label a version-list signature covers: new, so a manifest signature never verifies as a list or the reverse. */
 export const CATALOG_VERSIONS_SIGNATURE_LABEL = 'ferretry-catalog-versions-v1' as const;
 
-/** One item holds at most this many versions, so a list offers at most as many. */
-export const CATALOG_VERSIONS_MAX_OFFERED = 1000;
+/** Most versions one item keeps. A version past it is refused `items_full`. */
+export const CATALOG_ITEM_MAX_VERSIONS = 1_000;
 
 /** Clone's bounds where Clone has one (docs/cross-daemon.md §3a). */
 export const CATALOG_SKILL_FILE_MAX_BYTES = 256 * 1024;
@@ -587,7 +587,7 @@ export const SharedCatalogItemVersionsSchema = z
     revision: z.number().int().min(1),
     issuedAt: InstantSchema,
     current: z.number().int().min(1),
-    offered: z.array(SharedCatalogOfferedVersionSchema).min(1).max(CATALOG_VERSIONS_MAX_OFFERED),
+    offered: z.array(SharedCatalogOfferedVersionSchema).min(1).max(CATALOG_ITEM_MAX_VERSIONS),
   })
   .check(ctx => {
     const { offered, current } = ctx.value;

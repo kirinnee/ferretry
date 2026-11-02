@@ -251,6 +251,7 @@ export async function verifyCatalogItemAgainstVersions(
   if (!checked.ok) return checked;
   const list = checked.value;
   const line = manifest.items.find(candidate => candidate.itemId === list.itemId);
+  const currentOffered = list.offered.find(offered => offered.version === list.current);
   if (
     list.publisher !== manifest.publisher ||
     list.catalogId !== manifest.catalogId ||
@@ -258,7 +259,9 @@ export async function verifyCatalogItemAgainstVersions(
     list.revision !== manifest.revision ||
     list.issuedAt !== manifest.issuedAt ||
     list.current !== line.version ||
-    list.offered.find(offered => offered.version === list.current)?.digest !== line.digest
+    currentOffered?.digest !== line.digest ||
+    currentOffered.size !== line.size ||
+    currentOffered.summary !== line.summary
   )
     return refuse('item_mismatch', mismatch);
   const offered = list.offered.find(candidate => candidate.version === item.itemVersion);
@@ -269,7 +272,8 @@ export async function verifyCatalogItemAgainstVersions(
     item.catalogId !== manifest.catalogId ||
     item.kind !== line.kind ||
     item.name !== line.name ||
-    item.harness !== line.harness
+    item.harness !== line.harness ||
+    item.summary !== offered.summary
   )
     return refuse('item_mismatch', mismatch);
   const measured = await catalogItemDigest(crypto, item);

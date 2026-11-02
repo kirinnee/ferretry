@@ -44,9 +44,6 @@ export const CATALOGS_MAX_PER_PUBLISHER = 256;
 /** Most shared items one machine keeps. A new item past it is refused `items_full`. */
 export const SHARED_ITEMS_MAX = 4_096;
 
-/** Most versions one item keeps. A version past it is refused `items_full`. */
-export const CATALOG_ITEM_MAX_VERSIONS = 1_000;
-
 /** The sentence a request for a public catalog is refused with. */
 export const CATALOG_PUBLIC_UNAVAILABLE =
   'A public catalog is not available yet. Catalogs are shared with the people you add as members, and until members exist, as a file.';

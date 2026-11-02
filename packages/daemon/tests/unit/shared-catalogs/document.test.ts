@@ -13,6 +13,7 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  mayServe,
   offeredVersions,
   revisionsOf,
   sinceVersionOf,
@@ -20,6 +21,7 @@ import {
   type StoredVersion,
   withCatalog,
   withCatalogPatch,
+  withListedItem,
   withCurrentVersion,
   withRetired,
   withNewItem,
@@ -483,6 +485,76 @@ describe('making a version current and retiring one', () => {
     should(offeredVersions(retiredCurrent, { itemId: itemId(1), addedAt: T1 }).map(each => each.version)).deepEqual([
       3,
     ]);
+  });
+
+  it('should serve the version a catalog began at and those published after, never the ones that already existed', () => {
+    const entry = { itemId: itemId(1), addedAt: T1, sinceVersion: 3, joinedAtMax: 5 };
+    should([2, 3, 4, 5, 6, 7].map(each => mayServe(entry, each))).deepEqual([false, true, false, false, true, true]);
+    const open = { itemId: itemId(1), addedAt: T1, sinceVersion: 3 };
+    should([2, 3, 4].map(each => mayServe(open, each))).deepEqual([false, true, true]);
+    should(mayServe({ itemId: itemId(1), addedAt: T1 }, 1)).be.true();
+  });
+
+  it('should remember the newest version that existed when an item joined after a rollback, and offer around it', () => {
+    const five = (current: number): CatalogsDocument => {
+      const base = three([undefined, undefined]);
+      return {
+        ...base,
+        items: [
+          {
+            ...(base.items[0] as StoredSharedItem),
+            current,
+            versions: [1, 2, 3, 4, 5].map(each => version(each, 'a', [1, 2])),
+          },
+        ],
+      };
+    };
+    const rolledBack = withCurrentVersion(five(5), itemId(1), 3, 5, T2);
+    const everyVersion = Object.fromEntries([1, 2, 3, 4, 5].map(each => [each, { digest: hex('d'), size: 11 }]));
+    const withD = withCatalog(rolledBack, {
+      id: catalogId(3),
+      name: 'D',
+      description: '',
+      publisherName: 'host',
+      now: T1,
+    });
+    const listed = withListedItem(withD, catalogId(3), itemId(1), 3, everyVersion, T3);
+    const entry = findEntry(findCatalog(listed, catalogId(3)), itemId(1));
+    should(entry.sinceVersion).equal(3);
+    should(entry.joinedAtMax).equal(5);
+    should(problemOf(listed)).be.null();
+    const d = (document: CatalogsDocument) => findEntry(findCatalog(document, catalogId(3)), itemId(1));
+    should(refusalOf(() => withCurrentVersion(listed, itemId(1), 4, 3, T3))).equal('version_before_join');
+    const published = withPublishedVersion(listed, itemId(1), version(6, 'f', [1, 2, 3]), T3);
+    should(offeredVersions(itemOf(published, itemId(1)), d(published)).map(each => each.version)).deepEqual([3, 6]);
+    const relisted = withListedItem(
+      withWithdrawn(published, catalogId(3), itemId(1), T3),
+      catalogId(3),
+      itemId(1),
+      6,
+      {},
+      T3,
+    );
+    should(d(relisted).sinceVersion).equal(6);
+    should(d(relisted).joinedAtMax).be.undefined();
+  });
+
+  it('should refuse a joinedAtMax no version can explain, and a current version the catalog may not serve', () => {
+    const base = three([2, undefined]);
+    const withMax = (max: number, current = 3) => ({
+      ...base,
+      items: base.items.map(each => ({ ...each, current })),
+      catalogs: base.catalogs.map((catalog, index) => ({
+        ...catalog,
+        entries: catalog.entries.map(entry => (index === 0 ? { ...entry, joinedAtMax: max } : entry)),
+      })),
+    });
+    should(problemOf(withMax(2))).match(/is not a version after 2/u);
+    should(problemOf(withMax(4))).match(/is not a version after 2/u);
+    should(problemOf(withMax(3, 3))).match(/without the versions up to 3/u);
+    should(
+      problemOf({ ...withMax(3, 3), items: withMax(3, 3).items.map(each => ({ ...each, current: 2 })) }),
+    ).be.null();
   });
 
   it('should refuse a document in which a live line begins after the version the item serves', () => {

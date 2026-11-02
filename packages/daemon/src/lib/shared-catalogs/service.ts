@@ -87,6 +87,7 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  mayServe,
   offeredVersions,
   revisionsOf,
   roleOf,
@@ -908,6 +909,20 @@ export class SharedCatalogService {
   }
 
   /**
+   * The revision a member's version list would be signed at, from a plain read: no write queue, no signing, nothing
+   * noted. The item route asks first so a poll that has nothing new costs a read; `item_unknown` when the catalog does
+   * not offer the item (it never listed it, or withdrew it).
+   */
+  async versionsRevision(catalogId: string, itemId: string): Promise<number> {
+    const document = await this.#document();
+    const catalog = findCatalog(document, catalogId);
+    const entry = findEntry(catalog, itemId);
+    if (entry.withdrawnAt !== undefined)
+      throw new CatalogRefusal('item_unknown', `${catalog.name} does not offer ${itemId}.`);
+    return catalog.revision;
+  }
+
+  /**
    * The versions of one item this catalog offers, signed as of the manifest's revision. Made from the same document read
    * as the manifest, so the two always agree: the revision and instant are the catalog's, the current version is its line's.
    */
@@ -941,7 +956,7 @@ export class SharedCatalogService {
         }),
       };
       const signed = await signCatalogItemVersions(this.deps.crypto, identity, versions);
-      if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
+      if (!signed.ok) throw new CatalogRefusal('store_damaged', signed.reason);
       this.#ledger.noteSigned(catalog.id, catalog.revision);
       return signed.value;
     });
@@ -959,9 +974,9 @@ export class SharedCatalogService {
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
     if (stored.retiredAt !== undefined)
       throw new CatalogRefusal('item_unknown', `Version ${String(version)} of ${item.name} is not offered.`);
-    // A catalog serves the versions from the one it joined (or was relisted) at onward: the person who added the
-    // item reviewed that version, and nothing older.
-    if (version < (entry.sinceVersion ?? 1))
+    // A catalog serves the version it was added at and those published after it joined: the person who added the
+    // item reviewed that one, and never the older ones (or newer ones that already existed). The current is always allowed.
+    if (version !== item.current && !mayServe(entry, version))
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)} in this catalog.`);
     return await this.#frozen(catalogId, item, stored);
   }

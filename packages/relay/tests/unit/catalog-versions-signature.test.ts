@@ -263,7 +263,7 @@ describe('an item checked against the manifest and the version list together', (
     if (measured === null) throw new Error('no form');
     const signed = await resign({
       ...list,
-      offered: [{ version: 2, ...measured, publishedAt: AT, summary: 'older' }, ...list.offered.slice(1)],
+      offered: [{ version: 2, ...measured, publishedAt: AT, summary: older.summary }, ...list.offered.slice(1)],
     });
     const result = await verifyCatalogItemAgainstVersions(relayCrypto, manifest, signedManifest.spki, signed, older);
     should(result.ok && result.value.version).equal(2);
@@ -304,8 +304,18 @@ describe('an item checked against the manifest and the version list together', (
       { issuedAt: '2026-11-01T09:00:00.000Z' },
       { current: 2 },
       { offered: [wrongCurrent, { ...(list.offered[1] as typeof wrongCurrent), digest: hex('9') }] },
+      { offered: [wrongCurrent, { ...(list.offered[1] as typeof wrongCurrent), size: 1 }] },
+      { offered: [wrongCurrent, { ...(list.offered[1] as typeof wrongCurrent), summary: 'a different line' }] },
     ])
       should(await check(changed)).match({ ok: false, refusal: 'item_mismatch' });
+  });
+
+  it('should refuse an item whose summary is not the one the list offers for its version', async () => {
+    const { manifest, signedManifest, signedList, identity } = await world();
+    const reworded = SharedCatalogItemSchema.parse({ ...skill(identity.daemonId), summary: 'Something else entirely' });
+    should(
+      await verifyCatalogItemAgainstVersions(relayCrypto, manifest, signedManifest.spki, signedList, reworded),
+    ).match({ ok: false, refusal: 'item_mismatch' });
   });
 
   it('should refuse a list for another publisher than the manifest’s', async () => {

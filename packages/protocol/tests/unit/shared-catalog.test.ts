@@ -587,7 +587,7 @@ describe('the signed version list', () => {
   });
 
   it('should hold at most as many versions as one item keeps, and nothing it does not name', () => {
-    const many = Array.from({ length: catalog.CATALOG_VERSIONS_MAX_OFFERED }, (_, index) => offered(index + 1));
+    const many = Array.from({ length: catalog.CATALOG_ITEM_MAX_VERSIONS }, (_, index) => offered(index + 1));
     expect(parses(list({ offered: many, current: many.length }))).toBe(true);
     expect(parses(list({ offered: [...many, offered(many.length + 1)], current: many.length }))).toBe(false);
     expect(parses(list({ extra: 1 }))).toBe(false);

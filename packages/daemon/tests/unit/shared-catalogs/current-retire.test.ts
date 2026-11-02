@@ -122,6 +122,55 @@ describe('making a version current', () => {
   });
 });
 
+describe('a catalog added after a rollback', () => {
+  const V4 = { ...V3, 'four.txt': 'four' };
+  const V5 = { ...V4, 'five.txt': 'five' };
+
+  /** Versions 1..5 exist, 3 is current again, and "Late" has just been given the item. */
+  async function rolledBackThenAdded() {
+    const r = await rig();
+    const first = await r.service.create({ name: 'First' });
+    const late = await r.service.create({ name: 'Late' });
+    const preview = await r.service.previewItem(first.id, { source: SOURCE });
+    const { itemId } = await r.service.addItem(first.id, { source: SOURCE, digest: preview.digest });
+    for (const files of [V2, V3, V4, V5]) await publish(r, itemId, files);
+    await r.service.makeCurrent(itemId, { version: 3, from: 5 });
+    await r.service.addItem(late.id, { itemId, version: 3 });
+    return { r, first, late, itemId };
+  }
+
+  it('should never offer or serve the versions that existed when it joined, but its own and later ones', async () => {
+    const { r, first, late, itemId } = await rolledBackThenAdded();
+    const entry = r.documents.document.catalogs.find(catalog => catalog.id === late.id)?.entries[0];
+    should(entry?.sinceVersion).equal(3);
+    should(entry?.joinedAtMax).equal(5);
+    should((await r.service.signedVersions(late.id, itemId)).versions.offered.map(each => each.version)).deepEqual([3]);
+    should((await r.service.signedVersions(first.id, itemId)).versions.offered.map(each => each.version)).deepEqual([
+      1, 2, 3, 4, 5,
+    ]);
+    for (const version of [1, 2, 4, 5])
+      should((await refusal(async () => await r.service.frozenItem(late.id, itemId, version))).refusal).equal(
+        'item_unknown',
+      );
+    should((await r.service.frozenItem(late.id, itemId, 3)).itemVersion).equal(3);
+    const refused = await refusal(async () => await r.service.makeCurrent(itemId, { version: 5, from: 3 }));
+    should(refused.refusal).equal('version_before_join');
+    should(refused.message).match(/Late/u);
+  });
+
+  it('should get the next version published, and serve it along with the one it began at', async () => {
+    const { r, late, itemId } = await rolledBackThenAdded();
+    const next = await publish(r, itemId, { ...V5, 'six.txt': 'six' });
+    should(next.itemVersion).equal(6);
+    should((await r.service.signedVersions(late.id, itemId)).versions.offered.map(each => each.version)).deepEqual([
+      3, 6,
+    ]);
+    should((await r.service.frozenItem(late.id, itemId, 6)).itemVersion).equal(6);
+    should((await r.service.frozenItem(late.id, itemId, 3)).itemVersion).equal(3);
+    should((await refusal(async () => await r.service.frozenItem(late.id, itemId, 4))).refusal).equal('item_unknown');
+  });
+});
+
 describe('retiring a version', () => {
   it('should retire and unretire, stamping the time, and raise every live catalog once each time', async () => {
     const { r, first, itemId } = await joinedAtThree();
@@ -193,6 +242,18 @@ describe('the signed version list', () => {
     should((await verifySignedCatalogItemVersions(crypto, asList)).ok).be.false();
     const asManifest = { manifest: manifest.manifest, spki: list.spki, sig: list.sig };
     should((await verifySignedCatalogManifest(crypto, asManifest)).ok).be.false();
+  });
+
+  it('should read the revision without signing, and refuse an item the catalog does not offer', async () => {
+    const { r, first, itemId } = await joinedAtThree();
+    const kept = r.identity;
+    r.identity = undefined;
+    should(await r.service.versionsRevision(first.id, itemId)).equal(revisionOf(r, first.id));
+    r.identity = kept;
+    await r.service.withdraw(first.id, itemId);
+    should((await refusal(async () => await r.service.versionsRevision(first.id, itemId))).refusal).equal(
+      'item_unknown',
+    );
   });
 
   it('should refuse a withdrawn item, an unknown item, and a machine that cannot sign', async () => {

@@ -94,6 +94,12 @@ const CatalogEntrySchema = z.strictObject({
   addedAt: InstantSchema,
   /** The first version this catalog serves; absent means 1 (every version), as for catalogs made before 3c-2. */
   sinceVersion: z.number().int().min(1).optional(),
+  /**
+   * The newest version that existed when this catalog joined (or was relisted), set only when it is newer than
+   * `sinceVersion`. The person who added the item reviewed `sinceVersion` and nothing between it and this, so
+   * those versions are never served here; a version published after it is. Absent means there is no such gap.
+   */
+  joinedAtMax: z.number().int().min(1).optional(),
   withdrawnAt: InstantSchema.optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
@@ -166,8 +172,15 @@ function firstProblem(document: {
       const lists = listedBy.get(entry.itemId) ?? new Set<string>();
       lists.add(catalog.id);
       listedBy.set(entry.itemId, lists);
-      if (entry.withdrawnAt === undefined && entry.sinceVersion !== undefined && entry.sinceVersion > item.current)
-        return `${catalog.name} serves ${entry.itemId} from version ${String(entry.sinceVersion)}, which is newer than its current version ${String(item.current)}`;
+      if (
+        entry.joinedAtMax !== undefined &&
+        (entry.joinedAtMax <= sinceVersionOf(entry) || entry.joinedAtMax > item.versions.length)
+      )
+        return `${catalog.name} lists ${entry.itemId} as joined up to version ${String(entry.joinedAtMax)}, which is not a version after ${String(sinceVersionOf(entry))} that exists`;
+      if (entry.withdrawnAt === undefined && sinceVersionOf(entry) > item.current)
+        return `${catalog.name} serves ${entry.itemId} from version ${String(sinceVersionOf(entry))}, which is newer than its current version ${String(item.current)}`;
+      if (entry.withdrawnAt === undefined && !mayServe(entry, item.current))
+        return `${catalog.name} serves ${entry.itemId} without the versions up to ${String(entry.joinedAtMax)}, which includes its current version ${String(item.current)}`;
       if (entry.withdrawnAt !== undefined) {
         withdrawn += 1;
         continue;
@@ -424,16 +437,14 @@ export function withListedItem(
   assertRoom(document, catalog, item);
   if (entry !== undefined) {
     const { withdrawnAt: _forgotten, ...kept } = entry;
-    const listed = { ...kept, sinceVersion: item.current };
+    const { joinedAtMax: _oldMax, ...fresh } = kept;
+    const listed = { ...fresh, ...joinedAt(item) };
     return replaceCatalog(
       document,
       bumped({ ...catalog, entries: catalog.entries.map(other => (other === entry ? listed : other)) }, now),
     );
   }
-  const next = bumped(
-    { ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, sinceVersion: item.current }] },
-    now,
-  );
+  const next = bumped({ ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, ...joinedAt(item) }] }, now);
   return {
     ...replaceCatalog(document, next),
     items: document.items.map(other =>
@@ -498,13 +509,32 @@ const liveCatalogsOf = (document: CatalogsDocument, itemId: string): readonly St
 export const sinceVersionOf = (entry: CatalogEntry): number => entry.sinceVersion ?? 1;
 
 /**
- * The versions a catalog offers for one of its lines: from the line's `sinceVersion` on, not retired, and always the
- * current one. A catalog that joined at version 3 never offers 1 or 2, retired or not.
+ * What a catalog's line records when an item joins it at the item's current version: where it began and, if newer
+ * versions already exist (the current one was rolled back), the newest of them, which this catalog was never shown.
+ */
+const joinedAt = (item: StoredSharedItem): Pick<CatalogEntry, 'sinceVersion' | 'joinedAtMax'> => {
+  const newest = item.versions.reduce((most, stored) => Math.max(most, stored.version), 0);
+  return newest > item.current ? { sinceVersion: item.current, joinedAtMax: newest } : { sinceVersion: item.current };
+};
+
+/**
+ * Whether a catalog may serve a version of one of its lines: the version it began at, or one published after it
+ * joined. Never one before it began, and never one that already existed and sits after it (the person who added the
+ * item reviewed the first and was never shown those).
+ */
+export const mayServe = (entry: CatalogEntry, version: number): boolean => {
+  const since = sinceVersionOf(entry);
+  return version === since || (version > since && version > (entry.joinedAtMax ?? since));
+};
+
+/**
+ * The versions a catalog offers for one of its lines: those it may serve, not retired, and always the current one.
+ * A catalog that joined at version 3 never offers 1 or 2, retired or not.
  */
 export const offeredVersions = (item: StoredSharedItem, entry: CatalogEntry): readonly StoredVersion[] =>
   item.versions.filter(
     version =>
-      version.version >= sinceVersionOf(entry) && (version.version === item.current || version.retiredAt === undefined),
+      version.version === item.current || (mayServe(entry, version.version) && version.retiredAt === undefined),
   );
 
 /** Every live catalog's new revision after a change to an item's versions. */
@@ -557,13 +587,11 @@ export function withCurrentVersion(
       'nothing_to_publish',
       `Version ${String(version)} of ${item.name} is already the current version.`,
     );
-  const joinedLater = liveCatalogsOf(document, itemId).filter(
-    catalog => sinceVersionOf(findEntry(catalog, itemId)) > version,
-  );
-  if (joinedLater.length > 0)
+  const cannot = liveCatalogsOf(document, itemId).filter(catalog => !mayServe(findEntry(catalog, itemId), version));
+  if (cannot.length > 0)
     throw new CatalogRefusal(
       'version_before_join',
-      `Version ${String(version)} of ${item.name} is older than when ${joinedLater.map(catalog => catalog.name).join(', ')} began serving it, and a catalog never serves a version from before that.`,
+      `Version ${String(version)} of ${item.name} is not one ${cannot.map(catalog => catalog.name).join(', ')} may serve: a catalog serves an item from the version it was added at, and never the versions that already existed then.`,
     );
   return {
     ...document,

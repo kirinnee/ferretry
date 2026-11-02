@@ -84,6 +84,7 @@ interface Rig {
     catalogs: Error | undefined;
     release: boolean;
     signing: Error | undefined;
+    revision: Error | undefined;
     removal: Error | undefined;
   };
 }
@@ -104,6 +105,7 @@ function rig(): Rig {
     catalogs: undefined,
     release: false,
     signing: undefined,
+    revision: undefined,
     removal: undefined,
   };
   const catalogs: Rig['catalogs'] = [{ id: catalogId(1), name: 'Alpha', revision: 3 }];
@@ -134,6 +136,11 @@ function rig(): Rig {
       signed.push(id);
       if (failing.signing !== undefined) throw failing.signing;
       return manifest(7);
+    },
+    versionsRevision: async (id, itemId) => {
+      calls.push(`versionsRevision:${id}:${itemId}`);
+      if (failing.revision !== undefined) throw failing.revision;
+      return 7;
     },
     signedVersions: async (id, itemId) => {
       calls.push(`signedVersions:${id}:${itemId}`);
@@ -638,6 +645,19 @@ describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/versions', () => {
     should(response.status).equal(200);
   });
 
+  it('should answer 304 from a plain read WITHOUT asking for a signature', async () => {
+    // Arrange
+    const { dispatcher, calls } = rig();
+
+    // Act
+    const response = await call(dispatcher, 'GET', versionsPath(), { headers: { 'if-none-match': '"7"' } });
+
+    // Assert
+    should(response.status).equal(304);
+    should(calls).containEql(`versionsRevision:${catalogId(1)}:${ITEM}`);
+    should(calls.filter(entry => entry.startsWith('signedVersions'))).length(0);
+  });
+
   it('should answer 404 item_unknown for a malformed item id, before any read', async () => {
     // Arrange
     const { dispatcher, calls } = rig();
@@ -648,6 +668,7 @@ describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/versions', () => {
     // Assert
     should(response.status).equal(404);
     should(jsonBody(response).code).equal('item_unknown');
+    should(calls.filter(entry => entry.startsWith('versionsRevision'))).length(0);
     should(calls.filter(entry => entry.startsWith('signedVersions'))).length(0);
   });
 
@@ -668,7 +689,7 @@ describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/versions', () => {
   it('should answer a withdrawn or unlisted item 404 item_unknown, whatever tag was sent', async () => {
     // Arrange
     const { dispatcher, failing } = rig();
-    failing.signing = new CatalogRefusal('item_unknown', 'not offered');
+    failing.revision = new CatalogRefusal('item_unknown', 'not offered');
 
     // Act
     const response = await call(dispatcher, 'GET', versionsPath(), { headers: { 'if-none-match': '"7"' } });
@@ -741,7 +762,6 @@ describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/:version', () => {
   const REFUSALS: readonly (readonly [CatalogRefusal['refusal'], number])[] = [
     ['catalog_unknown', 404],
     ['item_unknown', 404],
-    ['item_withdrawn', 409],
     ['signing_unavailable', 503],
     ['store_damaged', 500],
   ];
@@ -760,6 +780,34 @@ describe('GET /v1/shared/catalogs/:catalogId/items/:itemId/:version', () => {
       should(jsonBody(response).code).equal(refusal);
     });
   }
+
+  it('should say the same fixed thing for every item a member may not read, on both routes', async () => {
+    // Arrange
+    const { dispatcher, failing } = rig();
+    const bodies: string[] = [];
+    const reasons = [
+      new CatalogRefusal('item_unknown', 'Secret Skill has no version 1 in this catalog.'),
+      new CatalogRefusal('item_unknown', 'Version 2 of Secret Skill is not offered.'),
+      new CatalogRefusal('item_withdrawn', 'Secret Skill was withdrawn, so it cannot be read.'),
+      new CatalogRefusal('item_unknown', 'Workshop does not offer itm_unknown.'),
+    ];
+
+    // Act
+    for (const reason of reasons) {
+      failing.signing = reason;
+      failing.revision = reason;
+      for (const path of [itemPath(), versionsPath()]) {
+        const response = await call(dispatcher, 'GET', path);
+        should(response.status).equal(404);
+        bodies.push(response.body);
+      }
+    }
+
+    // Assert
+    should(new Set(bodies).size).equal(1);
+    should(bodies[0]).not.match(/Secret|version|withdrawn/iu);
+    should(jsonBody({ body: bodies[0] } as never).code).equal('item_unknown');
+  });
 
   it('should answer 500 internal_error, saying nothing of the cause, for an unknown failure', async () => {
     // Arrange
