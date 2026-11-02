@@ -130,6 +130,12 @@ describe('CompactAtForm', () => {
     expect(h.saved).toEqual([300_000]);
   });
 
+  it('hints at the floor alone when the model’s window is not known', async () => {
+    const h = await open();
+    await choose(h.root, 'custom');
+    expect(h.root.textContent).toContain('Tokens, at least 100k — for example 300k.');
+  });
+
   it('shows the daemon’s refusal and stays open', async () => {
     const h = await open({}, async () => {
       throw new Error('400k is larger than this model’s 200k window, so it could never trigger.');

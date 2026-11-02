@@ -191,5 +191,6 @@ describe('launchedCompactAt', () => {
     // Act / Assert
     should(launchedCompactAt(buildLaunchArgv(claudeParts({ fast: true })))).equal('auto');
     should(launchedCompactAt([WRAPPER, '--settings', '/fleet/settings.json'])).equal('auto');
+    should(launchedCompactAt([WRAPPER, '--settings', '[250000]'])).equal('auto');
   });
 });

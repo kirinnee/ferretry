@@ -81,4 +81,39 @@ describe('adoptedLaunchArgv', () => {
     // Assert
     should(launch.kind).equal('unreadable');
   });
+
+  it('should refuse when the fixed settings are not a JSON object', async () => {
+    // Act
+    const launch = await adoptedLaunchArgv({
+      parts: parts(),
+      accountDefault: 250_000,
+      window: 1_000_000,
+      fixedSettings: async () => '[1]',
+    });
+
+    // Assert
+    should(launch.kind).equal('unreadable');
+  });
+
+  it('should let any other failure while building the argv through', async () => {
+    // Arrange
+    const broken = {
+      ...parts(),
+      remoteControl: {
+        [Symbol.iterator]: () => {
+          throw new Error('boom');
+        },
+      },
+    };
+
+    // Act / Assert
+    await should(
+      adoptedLaunchArgv({
+        parts: broken as never,
+        accountDefault: 250_000,
+        window: 1_000_000,
+        fixedSettings: async () => '',
+      }),
+    ).be.rejectedWith('boom');
+  });
 });
