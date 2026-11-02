@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
+import { SessionConfigSchema, SessionStateSchema, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   StorageTerminalOwnerDirectory,
@@ -138,5 +138,61 @@ describe('StorageTerminalOwnerDirectory', () => {
     // Assert
     should(throwsConfig).deepEqual({ standing: 'finished', status: 'completed', label: 'throws-config' });
     should(badConfig).deepEqual({ standing: 'live', status: 'running', label: 'bad-config' });
+  });
+});
+
+describe('StorageTerminalOwnerDirectory and a live ferret that is only idle', () => {
+  const ENDED = new Set(['completed', 'stopped']);
+
+  it('should call every status live except completed and stopped, so no idle or waiting ferret loses its shells', async () => {
+    // Arrange
+    const held: Record<string, Held> = {};
+    for (const status of SessionStatusSchema.options)
+      held[`s-${status.replaceAll('_', '-')}`] = {
+        config: config(`s-${status.replaceAll('_', '-')}`, { name: status }),
+        state: state(`s-${status.replaceAll('_', '-')}`, status),
+      };
+    const sut = new StorageTerminalOwnerDirectory(storage(held));
+
+    // Act
+    const standings = await Promise.all(
+      SessionStatusSchema.options.map(async status => ({
+        status,
+        standing: (await sut.standing(`s-${status.replaceAll('_', '-')}`)).standing,
+      })),
+    );
+
+    // Assert
+    should(standings.filter(entry => entry.standing === 'finished').map(entry => entry.status)).deepEqual([
+      'completed',
+      'stopped',
+    ]);
+    should(standings.filter(entry => entry.standing === 'live').map(entry => entry.status)).deepEqual(
+      SessionStatusSchema.options.filter(status => !ENDED.has(status)),
+    );
+  });
+
+  it('should keep a ferret live whatever else its state says: your turn, needs a human, rate limited, snoozed or idle', async () => {
+    // Arrange
+    const conditions: Record<string, Record<string, unknown>> = {
+      'your-turn': { status: 'waiting', promptReady: true, health: 'idle' },
+      'needs-input': { status: 'awaiting_user', needsHuman: 'a question is open', needsHumanKind: 'question' },
+      'rate-limited': { status: 'rate_limited', health: 'rate_limited', reason: 'usage limit reached' },
+      'warden-snoozed': { status: 'retrying', health: 'waiting', reason: 'snoozed by the warden' },
+      'stalled-idle': { status: 'stalled', health: 'stalled' },
+    };
+    const held: Record<string, Held> = {};
+    for (const [name, extra] of Object.entries(conditions))
+      held[name] = {
+        config: config(name, { name }),
+        state: SessionStateSchema.parse({ id: name, turn: 1, lastActivityAt: AT, ...extra }),
+      };
+    const sut = new StorageTerminalOwnerDirectory(storage(held));
+
+    // Act
+    const standings = await Promise.all(Object.keys(conditions).map(async name => (await sut.standing(name)).standing));
+
+    // Assert
+    should(standings).deepEqual(Object.keys(conditions).map(() => 'live'));
   });
 });

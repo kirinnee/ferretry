@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { TerminalHolder } from '@ferretry/protocol';
+import { SessionStatusSchema, type TerminalHolder } from '@ferretry/protocol';
 import should from 'should';
 import { ManagedTerminalService, TerminalServiceError } from '../../../src/adapters/index.ts';
+import { standingOfSessionStatus } from '../../../src/lib/terminal/holders.ts';
 import type {
   TerminalCapture,
   TerminalOwnerDirectory,
@@ -254,5 +255,32 @@ describe('ManagedTerminalService saying who holds the slots', () => {
       ['aime', 'live', 2],
       ['ghost', 'gone', 1],
     ]);
+  });
+});
+
+describe('ManagedTerminalService and a ferret that is live but idle', () => {
+  it('should close only the terminals of stopped, completed and removed ferrets, whatever status a live one is in', async () => {
+    // Arrange
+    const statuses = [...SessionStatusSchema.options, undefined];
+    const held = statuses.map((_status, index) => record(`owner-${String(index)}`, `t${String(index)}`));
+    const byOwner = new Map(statuses.map((status, index) => [`owner-${String(index)}`, status]));
+    const owners: TerminalOwnerDirectory = {
+      standing: async ownerId => ({ ...standingOfSessionStatus(byOwner.get(ownerId)), label: ownerId }),
+    };
+    const { tmux, service } = subject(held, { owners });
+
+    // Act
+    const result = await service.closeFinished('sweep');
+
+    // Assert
+    const survivors = [...tmux.sessions.values()].map(entry => byOwner.get(entry.ownerId));
+    should(result.closed).equal(3);
+    should(
+      survivors.filter(status => status === 'completed' || status === 'stopped' || status === undefined),
+    ).deepEqual([]);
+    should(survivors).have.length(SessionStatusSchema.options.length - 2);
+    should(survivors).containEql('awaiting_user');
+    should(survivors).containEql('rate_limited');
+    should(survivors).containEql('waiting');
   });
 });
