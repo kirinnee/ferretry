@@ -183,8 +183,8 @@ describe('useAgendaInboxModel', () => {
         },
       }) as AgendaItem;
 
-    const run = async (flag: boolean) => {
-      const { client } = fakeClient(new Map([[`${boardLaptop.daemonId}/g`, board('g', [gateItemFor('F1')])]]));
+    const run = async (flag: boolean, gate: AgendaItem = gateItemFor('F1'), snoozeF1 = false) => {
+      const { client } = fakeClient(new Map([[`${boardLaptop.daemonId}/g`, board('g', [gate])]]));
       client.wires.note(boardLaptop.daemonId, {
         kind: 'read',
         health: healthOf('4.110.0', flag ? [DAEMON_FEATURES.boardGateItems] : []),
@@ -192,7 +192,15 @@ describe('useAgendaInboxModel', () => {
       const { timers } = manualTimers();
       let inbox: AgendaInbox | null = null;
       const rows = toTestCards(
-        await boardModelOf([card('F1', { laneId: 'tested' }), card('F2', { laneId: 'tested' })]),
+        await boardModelOf([
+          card(
+            'F1',
+            snoozeF1
+              ? { laneId: 'tested', snoozed: { until: '2999-01-01T00:00:00.000Z', laneId: 'tested' } }
+              : { laneId: 'tested' },
+          ),
+          card('F2', { laneId: 'tested' }),
+        ]),
       );
       view = await mount(
         <Probe
@@ -215,6 +223,18 @@ describe('useAgendaInboxModel', () => {
       const read = await run(true);
       expect(read.cards.map(entry => entry.item.id)).toEqual(['A1']);
       expect(read.toTest.map(row => row.card.task.id)).toEqual(['F2']);
+    });
+
+    test('a gate item that is snoozed or replied still stands in for its card, awake or snoozed', async () => {
+      const parkedGate = (parked: AgendaItem['parked']): AgendaItem => ({ ...gateItemFor('F1'), parked }) as AgendaItem;
+      const snoozed = await run(true, parkedGate({ reason: 'snoozed', at: at(5), until: at(50) }), true);
+      expect(snoozed.toTestSnoozed).toEqual([]);
+      expect(snoozed.toTest.map(row => row.card.task.id)).toEqual(['F2']);
+      expect(snoozed.total).toBe(1);
+      await view?.unmount();
+      const replied = await run(true, parkedGate({ reason: 'replied', at: at(9) }));
+      expect(replied.toTest.map(row => row.card.task.id)).toEqual(['F2']);
+      expect(replied.parked.map(entry => entry.item.id)).toEqual(['A1']);
     });
 
     test('without the flag, every to-test row stays, as before', async () => {

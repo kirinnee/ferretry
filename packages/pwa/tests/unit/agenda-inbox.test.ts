@@ -12,6 +12,7 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
+  gateHolders,
   historyLine,
   type InboxCard,
   inboxCardKey,
@@ -650,6 +651,45 @@ describe('the session summary under either name', () => {
     const sourcesBoth = [{ daemonId: STUDIO, name: 'Studio', sessions: [agendaOnly, both] }];
     expect(unreadSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['both', 'new']);
     expect(withFerretSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['new', 'both']);
+  });
+});
+
+describe('gate holders', () => {
+  const gated = (id: string, cardId: string, parked?: AgendaItem['parked']): AgendaItem =>
+    ({
+      ...item(id, 1),
+      raisedBy: 'daemon',
+      gate: {
+        cardId,
+        laneId: 'tested',
+        laneName: 'Try it',
+        entry: 1,
+        projectId: 'p1',
+        options: [{ id: 'o0', label: 'Done', outcome: 'close' }],
+      },
+      ...(parked === undefined ? {} : { parked }),
+    }) as AgendaItem;
+  const sources = [{ daemonId: STUDIO, name: 'Studio', sessions: [waiting('s', summary(1, 1))] }];
+  const boards = new Map([
+    [
+      `${STUDIO}/s`,
+      board('s', [
+        gated('G1', 'F1'),
+        gated('G2', 'F2', { reason: 'snoozed', at: at(5), until: at(50) }),
+        gated('G3', 'F3', { reason: 'replied', at: at(9) }),
+        item('A4', 4),
+      ]),
+    ],
+  ]);
+  const boardFor = (daemonId: DaemonId, sessionId: string) => boards.get(`${daemonId}/${sessionId}`);
+
+  test('should hold every gate item that covers a card, open or parked, and no plain item', () => {
+    const holders = gateHolders(unreadSessions(sources), sources, boardFor);
+    expect(holders.map(card => card.item.gate?.cardId).sort()).toEqual(['F1', 'F2', 'F3']);
+  });
+
+  test('should hold nothing for conversations whose boards have not been read', () => {
+    expect(gateHolders(unreadSessions(sources), sources, () => undefined)).toEqual([]);
   });
 });
 

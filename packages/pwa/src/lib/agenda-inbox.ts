@@ -302,6 +302,18 @@ export const withFerretCards = (
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => agendaTurn(item) === 'ferret');
 
 /**
+ * The gate items that stand in for their card's to-test row: every open one, and every parked one (snoozed or replied)
+ * — a card shows once, however its gate item is held. Answers still in their undo window count, so a card does not
+ * flicker back for the few seconds before it moves.
+ */
+export const gateHolders = (
+  entries: readonly UnreadSession[],
+  sources: readonly AgendaInboxSource[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+): readonly InboxCard[] =>
+  [...inboxCards(entries, boardFor), ...inboxParked(sources, boardFor)].filter(card => card.item.gate !== undefined);
+
+/**
  * Every PARKED item (snoozed, or replied and waiting on its ferret) of every listed conversation whose board has
  * been read, newest parked first. The daemon's summary leaves parked items out, so a conversation with nothing
  * else open has no unread entry: these are read from the boards themselves, like the resolved records. `hidden`
