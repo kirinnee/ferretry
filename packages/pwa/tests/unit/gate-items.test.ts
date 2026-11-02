@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '@ferretry/protocol';
+import { gateAnswers, gateAskOptions, type AgendaItem } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
@@ -31,13 +31,10 @@ const gateItem = (g: ReturnType<typeof gate>, extra: Partial<AgendaItem> = {}): 
     subject: 'Pairing QR',
     kind: 'choice',
     raisedBy: 'daemon',
-    // The daemon lays the options out left · up · right: the forward option first (Done), Not good last.
-    ask: { kind: 'multiple-choice', options: g.options.map(option => ({ label: option.label })) },
+    // The daemon lays the options out as the protocol does: ← Not good, → Done.
+    ask: { kind: 'multiple-choice', options: gateAskOptions(g) },
     gate: g,
-    answers: [
-      { direction: 'left', does: 'choose', label: g.options[0]?.label ?? '' },
-      { direction: 'right', does: 'choose', label: g.options[1]?.label ?? '' },
-    ],
+    answers: gateAnswers(g),
     ...extra,
   } as Partial<AgendaItem>);
 
@@ -157,5 +154,64 @@ describe('the health switch: gate items replace to-test rows only where the mach
     const rows = await rowsOf('F1');
     const shown = toTestBesideGates(rows, [{ daemonId: OTHER, item: gateItem(twoOptions) }], () => true);
     expect(shown).toHaveLength(1);
+  });
+});
+
+describe('each swipe on a real gate item means what the protocol says', () => {
+  const labelsOf = (item: AgendaItem) =>
+    Object.fromEntries(Object.entries(swipeTargets(item)).map(([direction, target]) => [direction, target?.label]));
+
+  test('two options: ← Not good, → Done, whichever order the lane lists them in', () => {
+    const reversed = gate([
+      ['Not good', 'reopen-with-agenda'],
+      ['Done', 'close'],
+    ]);
+    expect(labelsOf(gateItem(twoOptions))).toEqual({ left: 'Not good', right: 'Done' });
+    expect(labelsOf(gateItem(reversed))).toEqual({ left: 'Not good', right: 'Done' });
+  });
+
+  test('→ sends Done and ← sends Not good with its words, never the other way round', () => {
+    const item = gateItem(twoOptions);
+    expect(swipeTargets(item, 'blank').right?.action).toEqual({
+      kind: 'respond',
+      label: 'Done',
+      response: { kind: 'multiple-choice', choice: 'Done' },
+      note: 'blank',
+    });
+    expect(swipeTargets(item, 'blank').left?.action).toEqual({
+      kind: 'respond',
+      label: 'Not good',
+      response: { kind: 'multiple-choice', choice: 'Not good' },
+      note: 'blank',
+    });
+  });
+
+  test('three options: ← Not good, ↑ the third, → Done', () => {
+    const three = gate([
+      ['Done', 'close'],
+      ['Ship later', 'lane'],
+      ['Not good', 'reopen-with-agenda'],
+    ]);
+    expect(labelsOf(gateItem(three))).toEqual({ left: 'Not good', up: 'Ship later', right: 'Done' });
+  });
+
+  test('one option: ← Not yet, → the option', () => {
+    expect(labelsOf(gateItem(gate([['OK to build', 'next']])))).toEqual({ left: 'Not yet', right: 'OK to build' });
+  });
+
+  test('every direction a gate item offers is the protocol layout, answer for answer', () => {
+    for (const g of [
+      twoOptions,
+      gate([
+        ['Done', 'close'],
+        ['Ship later', 'lane'],
+        ['Not good', 'reopen-with-agenda'],
+      ]),
+    ]) {
+      const item = gateItem(g);
+      expect(labelsOf(item)).toEqual(
+        Object.fromEntries(gateAnswers(g).map(answer => [answer.direction, answer.label])),
+      );
+    }
   });
 });
