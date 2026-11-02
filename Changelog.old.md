@@ -1,3 +1,9 @@
+## [4.226.1](https://github.com/kirinnee/ferretry/compare/v4.226.0...v4.226.1) (2026-11-02)
+
+### Fixes
+
+* **pwa:** rich text in task cards, label above a numbered list stays a label ([#1319](https://github.com/kirinnee/ferretry/issues/1319)) ([2713e99](https://github.com/kirinnee/ferretry/commit/2713e99ee5ee9b8e2cc958156138581fd05a4801))
+
 ## [4.226.0](https://github.com/kirinnee/ferretry/compare/v4.225.0...v4.226.0) (2026-11-02)
 
 ### Features
