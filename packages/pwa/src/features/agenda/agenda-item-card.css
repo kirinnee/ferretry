@@ -830,7 +830,7 @@
 .fy-form__needed {
   padding: 0 6px;
   border: var(--stroke, 1px) solid var(--warn, var(--accent));
-  border-radius: 999px;
+  border-radius: var(--radius-badge);
   color: var(--warn, var(--accent));
   font-size: var(--text-xs, 0.75rem);
   font-weight: normal;
@@ -870,28 +870,29 @@
   height: 18px;
   margin: 0;
   place-content: center;
-  border: 1.5px solid var(--fg-soft, var(--muted));
+  border: var(--stroke-control, var(--stroke, 1px)) solid var(--fg-soft, var(--muted));
   border-radius: 50%;
   background: var(--bg);
   appearance: none;
   cursor: pointer;
 }
 .fy-form__option input[type='checkbox'] {
-  border-radius: 4px;
+  border-radius: var(--radius-input, var(--radius-control));
 }
 .fy-form__option input:checked {
   border-color: var(--accent);
   background: var(--accent);
 }
+/* A picked radio is a dot inside a ring: the ground shows between them. */
 .fy-form__option input[type='radio']:checked {
-  box-shadow: inset 0 0 0 3px var(--bg);
+  background: radial-gradient(circle, var(--accent) 0 45%, var(--bg) 50%);
 }
 .fy-form__option input[type='checkbox']:checked::before {
   width: 10px;
   height: 6px;
   margin-top: -2px;
   border: solid var(--accent-fg, var(--bg));
-  border-width: 0 0 2px 2px;
+  border-width: 0 0 var(--stroke-heavy, var(--stroke)) var(--stroke-heavy, var(--stroke));
   content: '';
   transform: rotate(-45deg);
 }
@@ -913,7 +914,7 @@
   margin-left: 8px;
   padding: 0 6px;
   border: var(--stroke, 1px) dashed var(--accent-border, var(--accent));
-  border-radius: 999px;
+  border-radius: var(--radius-badge);
   color: var(--accent-strong, var(--accent));
   font-size: var(--text-xs, 0.75rem);
   font-weight: normal;
