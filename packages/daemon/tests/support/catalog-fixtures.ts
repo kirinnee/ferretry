@@ -1,12 +1,14 @@
 import {
   type SharedCatalogItem,
   SharedCatalogItemSchema,
+  SharedCatalogItemVersionsSchema,
+  type SignedCatalogItemVersions,
   type SharedCatalogManifest,
   SharedCatalogManifestSchema,
   type SignedCatalogManifest,
 } from '@ferretry/protocol';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
-import { catalogItemDigest, type DaemonIdentity, signCatalogManifest } from '@ferretry/relay';
+import { catalogItemDigest, type DaemonIdentity, signCatalogItemVersions, signCatalogManifest } from '@ferretry/relay';
 
 export const crypto = new WebCryptoRelayCrypto();
 
@@ -136,4 +138,56 @@ export async function publish(
   const signed = await signCatalogManifest(crypto, identity, manifest);
   if (!signed.ok) throw new Error(signed.reason);
   return { signedManifest: signed.value, items };
+}
+
+export interface VersionListOptions {
+  /** The version the list calls current; defaults to the highest of `items`. */
+  readonly current?: number;
+  readonly revision?: number;
+  readonly catalogId?: string;
+  readonly itemId?: string;
+}
+
+/**
+ * Sign the list of versions a catalog offers of ONE item, for the manifest in `published`, as `identity`.
+ * `items` are the versions on offer, oldest first.
+ */
+export async function signVersionList(
+  identity: DaemonIdentity,
+  published: Published,
+  items: readonly SharedCatalogItem[],
+  options: VersionListOptions = {},
+): Promise<SignedCatalogItemVersions> {
+  const offered = [];
+  for (const item of items) {
+    const measured = await catalogItemDigest(crypto, item);
+    if (measured === null) throw new Error('item has no canonical form');
+    offered.push({
+      version: item.itemVersion,
+      digest: measured.digest,
+      size: measured.size,
+      publishedAt: AT,
+      summary: item.summary,
+    });
+  }
+  const first = items[0];
+  if (first === undefined) throw new Error('no versions');
+  const manifest = published.signedManifest.manifest;
+  const signed = await signCatalogItemVersions(
+    crypto,
+    identity,
+    SharedCatalogItemVersionsSchema.parse({
+      format: 'ferretry-catalog-versions',
+      version: 1,
+      publisher: identity.daemonId,
+      catalogId: options.catalogId ?? manifest.catalogId,
+      itemId: options.itemId ?? first.itemId,
+      revision: options.revision ?? manifest.revision,
+      issuedAt: manifest.issuedAt,
+      current: options.current ?? Math.max(...items.map(item => item.itemVersion)),
+      offered,
+    }),
+  );
+  if (!signed.ok) throw new Error(signed.reason);
+  return signed.value;
 }

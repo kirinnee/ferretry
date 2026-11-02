@@ -95,6 +95,10 @@ class FakeInstalls implements CatalogInstallSubsystem {
     this.#record({ act: 'remove', scope, argument: installId, ...(governance === undefined ? {} : { governance }) });
     return REMOVED_ANSWER;
   }
+  async setPrefs(scope: CatalogInstallScope, installId: string, req: unknown) {
+    this.#record({ act: 'prefs', scope, argument: { installId, req } });
+    return PREFS_ANSWER;
+  }
   #record(call: Call): void {
     this.calls.push(call);
     if (this.failure !== undefined) throw this.failure;
@@ -104,6 +108,7 @@ class FakeInstalls implements CatalogInstallSubsystem {
 const PREVIEW_ANSWER = { previewId: PREVIEW } as never;
 const INSTALLED_ANSWER = { install: { installId: INSTALL }, notes: [] } as never;
 const REMOVED_ANSWER = { installId: INSTALL } as never;
+const PREFS_ANSWER = { installId: INSTALL, hold: true } as never;
 
 interface Answer {
   readonly status: number;
@@ -197,10 +202,12 @@ describe('the route table', () => {
     ['GET', '/v1/catalog-installs', 'fleet', 'use'],
     ['DELETE', '/v1/catalog-installs/project/:installId', 'filesystem', 'configure'],
     ['DELETE', '/v1/catalog-installs/runtime/:installId', 'fleet', 'configure'],
+    ['PATCH', '/v1/catalog-installs/project/:installId', 'filesystem', 'use'],
+    ['PATCH', '/v1/catalog-installs/runtime/:installId', 'fleet', 'use'],
   ] as const;
 
-  it('has exactly seven routes', () => {
-    should(routes.length).equal(7);
+  it('has exactly nine routes', () => {
+    should(routes.length).equal(9);
   });
 
   for (const [method, path, capability, axis] of table) {
@@ -363,6 +370,20 @@ describe('the passkey for this act', () => {
     should(installs.calls[0]?.governance?.governed).equal(true);
   });
 
+  it('asks for no passkey to preview a replace of edits, but still asks for it to apply the replace', async () => {
+    const installs = new FakeInstalls();
+    const body = { ...((await previewBody()) as object), replaceEdited: true };
+
+    const previewed = await drive(installs, 'POST', '/v1/catalog-installs/project/preview', body, DEVICE);
+    const applied = await drive(installs, 'POST', '/v1/catalog-installs/project', APPLY, DEVICE);
+
+    should(previewed.status).equal(200);
+    should(previewed.claimed).equal(0);
+    should((installs.calls[0]?.argument as { replaceEdited?: boolean } | undefined)?.replaceEdited).equal(true);
+    should(applied.status).equal(403);
+    should(applied.body.code).equal(STEP_UP_REQUIRED_CODE);
+  });
+
   it('lets one proof buy one install even when two applies race for it', async () => {
     const installs = new FakeInstalls();
     const proofs = { left: 1 };
@@ -452,6 +473,69 @@ describe('the passkey for this act', () => {
   });
 });
 
+describe('stay and skip: PATCH …/:installId', () => {
+  for (const scope of ['project', 'runtime'] as const) {
+    it(`passes the choice to the service on the ${scope} route and answers the install`, async () => {
+      const installs = new FakeInstalls();
+
+      const answer = await drive(installs, 'PATCH', `/v1/catalog-installs/${scope}/${INSTALL}`, {
+        hold: true,
+        skippedVersion: 3,
+      });
+
+      should(answer.status).equal(200);
+      should(answer.body).deepEqual({ installId: INSTALL, hold: true });
+      should(installs.calls[0]).match({
+        act: 'prefs',
+        scope,
+        argument: { installId: INSTALL, req: { hold: true, skippedVersion: 3 } },
+      });
+    });
+
+    it(`refuses a ferret on the ${scope} route with 403 forbidden, before a body is read`, async () => {
+      const installs = new FakeInstalls();
+
+      const answer = await drive(installs, 'PATCH', `/v1/catalog-installs/${scope}/${INSTALL}`, { hold: true }, FERRET);
+
+      should(answer.status).equal(403);
+      should(answer.code).equal('forbidden');
+      should(installs.calls).deepEqual([]);
+    });
+  }
+
+  it('asks for no passkey and spends none: it touches no file', async () => {
+    const installs = new FakeInstalls();
+
+    const answer = await drive(installs, 'PATCH', `/v1/catalog-installs/project/${INSTALL}`, { hold: false }, DEVICE);
+
+    should(answer.status).equal(200);
+    should(answer.claimed).equal(0);
+    should(answer.spent).equal(0);
+  });
+
+  it('refuses an empty choice and an install id that is not one, before the service is asked', async () => {
+    const installs = new FakeInstalls();
+
+    const empty = await drive(installs, 'PATCH', `/v1/catalog-installs/project/${INSTALL}`, {});
+    const badId = await drive(installs, 'PATCH', '/v1/catalog-installs/project/nope', { hold: true });
+    const unknownKey = await drive(installs, 'PATCH', `/v1/catalog-installs/project/${INSTALL}`, { hold: true, x: 1 });
+
+    should(empty.status).equal(400);
+    should([badId.status, badId.code]).deepEqual([400, 'invalid_install_id']);
+    should(unknownKey.status).equal(400);
+    should(installs.calls).deepEqual([]);
+  });
+
+  it('words a missing install as 404', async () => {
+    const installs = new FakeInstalls();
+    installs.failure = new CatalogInstallRefusalError('catalog_install_unknown', 'no such install');
+
+    const answer = await drive(installs, 'PATCH', `/v1/catalog-installs/runtime/${INSTALL}`, { skippedVersion: null });
+
+    should([answer.status, answer.code]).deepEqual([404, 'catalog_install_unknown']);
+  });
+});
+
 describe('who is asking, as a preview and its apply must agree', () => {
   const callerOfApply = async (caller: Caller) => {
     const installs = new FakeInstalls();
@@ -501,6 +585,7 @@ describe('how a refusal is worded in HTTP', () => {
     catalog_preview_expired: 410,
     catalog_bindings_invalid: 422,
     catalog_install_conflict: 409,
+    catalog_install_edited: 409,
     catalog_install_unknown: 404,
   };
 

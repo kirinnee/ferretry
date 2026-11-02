@@ -715,6 +715,8 @@ Installing is two steps and every route has exactly one capability. A project wr
 | `GET /v1/catalog-installs`                       | `fleet.use`            | what is installed, and where                                              |
 | `DELETE /v1/catalog-installs/project/:installId` | `filesystem.configure` | removes exactly what that install wrote                                   |
 | `DELETE /v1/catalog-installs/runtime/:installId` | `fleet.configure`      | the same, for a runtime install                                           |
+| `PATCH /v1/catalog-installs/project/:installId`  | `filesystem.use`       | stay on this version / skip one (no file is touched)                      |
+| `PATCH /v1/catalog-installs/runtime/:installId`  | `fleet.use`            | the same, for a runtime install                                           |
 
 - **The preview** runs the checks above in that order. Each refusal has its own code and a plain
   sentence (`CATALOG_INSTALL_REFUSALS`); the first one to fail is the one reported. The body is refused
@@ -742,10 +744,10 @@ Installing is two steps and every route has exactly one capability. A project wr
   refuses it; only the installer produces one, after its checks. The fleet executor also resolves every
   file path and refuses any write outside the skill's own folder in the assets directory. Anything already at the destination that B's install record did not write is
   `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
-  hash B recorded (files are compared by exact relative path); a file edited by hand is a conflict that
-  says so. A runtime component is compared by a hash of what it holds, recorded at install, so a hand
+  hash B recorded (files are compared by exact relative path); a file edited by hand is refused as
+  `catalog_install_edited` (see [Updating an install](#updating-an-install-catalogs-3d-3)). A runtime component is compared by a hash of what it holds, recorded at install, so a hand
   edit is found even when its provenance is kept. B records the resolved project folder and root, so a
-  removal needs no re-derivation from the spelling the install used. Keeping your edits is phase 3.
+  removal needs no re-derivation from the spelling the install used.
 - **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
   `catalog-install` (`403 grant_step_up_required` otherwise). **The unlock is not that proof**: it
   opens the machine, and only a passkey proved for this act counts. Each proof is stamped with the act it
@@ -764,6 +766,85 @@ Installing is two steps and every route has exactly one capability. A project wr
   with a `schemaVersion` and checked on read. It holds each install with the SHA-256 of every file it
   wrote, the publishers, the pin per catalog and the highest revision seen. A damaged file stops every
   install route with `500 catalog_installs_unreadable` instead of starting afresh.
+
+### Updating an install (catalogs 3d-3)
+
+Installing again over an install of the same item at the same target is an **update**. Everything
+below is on the installing machine and the daemon decides it from that machine's own bytes. Nothing here
+is automatic: an update is always a new preview and a new yes (and, from a governed device, a fresh
+`catalog-install` passkey).
+
+- **Move to any offered version.** The preview request may carry `signedVersions`, the publisher's signed
+  version list ([above](#making-a-version-current-retiring-one-and-the-signed-version-list-catalogs-3d-2)).
+  When `item.itemVersion` is **not** the version the manifest lists as current it is **required**, and the
+  installer checks it with `verifyCatalogItemAgainstVersions`: the list must be signed by the pinned
+  publisher, be for this catalog, this item and this manifest revision, and offer that version with the
+  digest of the bytes sent. A list lifted from another catalog, item or revision is refused
+  (`catalog_signature_invalid` / `catalog_item_mismatch`). A version the publisher retired is not on the
+  list and so is refused. The provenance records the version moved to and its digest. A move below the
+  installed version still needs `allowOlder` and shows the older-version warning. The
+  `catalog_revision_older` pin applies to an install chosen from the list exactly as to the current one.
+  Installs already on a retired version are untouched.
+- **See what changes.** When the preview `replaces` an install it also answers `changes`: the diff from
+  **the copy on this machine, as installed now, local edits included** to the offered version
+  (`catalogItemChanges`, the same 8M-step budget as the publisher's diff). Skill files are read through the
+  same no-link rules as every other skill read, bounded to what a catalog skill may be; a file too large or
+  not text is shown as too large. An MCP server is read from the project `.mcp.json` entry or the stored
+  component, with the values the install filled in mapped back to their placeholders. If the installed copy
+  cannot be rebuilt, `changes` is left out and the preview still stands.
+  **See changes is conservative: a part that MAY hold a secret is not drawn.** The preview is open to a ferret and
+  the installed copy is read from this machine's own bytes, which can hold a password pasted into a skill or a server's
+  environment. So nothing is cut out and nothing is guessed: the installed side and the offered side of each changed
+  entry are first checked by a broad detector (`mayHoldSecret`, `lib/catalog-installs/conservative-changes.ts`). If
+  EITHER side trips it, the entry is `{ change: 'changed', hidden: true }` with **no hunks, no before and no after**,
+  and the screen says "changed — hidden: this file may hold a secret. Open it yourself to compare." An entry that is
+  the same on both sides stays "unchanged", decided by comparing the two, never by showing either. **The detector
+  trips on** any text holding a name that announces a secret, in any case, with any separator or none (`pass`,
+  `pwd`, `secret`, `token`, `key`, `auth`, `cred`, `bearer`, `jwt`, `cookie`, `private`, `signature`, `dsn`,
+  `webhook`: `api_key`, `apikey`, `X-Auth`, `passphrase`); a well-known token prefix (`ghp_` `gho_` `ghu_` `ghs_`
+  `ghr_`, `github_pat_`, `sk-`, `xox`, `AKIA`, `ASIA`, `glpat-`, `npm_`, `hf_`, `AIza`, `eyJ`, `-----BEGIN`); a
+  `${…}` expansion (`${X:-default}` included); any run of 24 or more base64, base64url or hex-like characters; and
+  credentials in an address (`scheme://user:pw@host`, `user:pw@host`); and a short flag that takes a credential (`-u`,
+  `-p`, `-a` followed by a word, or `-p` with its value attached: `curl -u bob:pw`, `mysql -phunter2`,
+  `redis-cli -a hunter2`). The long-word rule is tried again with invisible format characters and the
+  `⟨U+00AD⟩` marks the review writes for them taken out, and the names, prefixes and `${` with line breaks (a lone
+  carriage return too) taken out as well, so a name or token split by one is still seen, in the text a person reads as
+  well as in raw text. A server's arguments are also read one by one as they were written, because the `Starts` line
+  quotes an argument with a line break in it. **A server's environment
+  values are never shown**: a changed one is only "changed" (hidden), whatever it holds. A new or old warning that
+  carries a value (an address, a registry, a package) and trips the detector reads "Hidden: this may hold a secret".
+  **Over-hiding is the accepted cost**: a file that merely says "token" or "key" is hidden whole, and a plain file
+  with none of these still gets a normal line-by-line diff. **The detector is linear and bounded**: plain scans, no
+  backtracking pattern, and a text over 2 MiB is hidden without being read. It never runs the fleet's `redactText`
+  (or any pattern that can backtrack) on a publisher's bytes. The same function (`conservativeChanges(onDisk,
+offered, budget?)`, with `mayHoldSecret`) is what any other install path that shows an on-disk comparison uses.
+  The rest of the answer (`edited`, warnings, the refusal text) names paths and servers only, never text from disk;
+  the full `review` is the offered item, the publisher's own text.
+- **Keep my edits, or replace them.** If the place is held by this install and the only differences are
+  files it wrote whose hash changed (a stored component, or the server's `.mcp.json` entry), the preview is
+  refused with **`catalog_install_edited`** (409), naming the paths. Nothing is changed. **Keep** is
+  doing nothing. **Replace** is the same preview with `replaceEdited: true`: it lists `edited` with an
+  `edited-locally` warning and **saves the hashes it saw**. The apply re-reads the place and compares it with those
+  hashes (`sameEdits`), so a file edited again after the review is refused `catalog_install_edited` again; an
+  edit **undone** after the review is no edit, and the write is guarded by what is on disk at the apply, not by the
+  hash once reviewed. A project server's `.mcp.json` entry is checked again at the write, against the entry the
+  check saw, so a file that moves between the two is `catalog_install_conflict`. A file the
+  install has no hash for, or anything another install holds, is never overwritten or deleted: that stays
+  `catalog_install_conflict`, and it wins over `edited`.
+- **Stay or skip.** `PATCH …/:installId` with `{hold?: boolean, skippedVersion?: int | null}` records the
+  person's choice about future versions and answers the install (with `hold` / `skippedVersion` when set).
+  `hold: false` and `skippedVersion: null` clear. It touches no file and asks for no passkey, but it is the
+  person's act, so a ferret is refused. The choice lives in `<FY_HOME>/state/catalog-install-prefs.json`
+  (`schemaVersion` 1, `0600`, written by temp file and rename; a damaged file refuses every NEW choice, never
+  "no choices", but it does not hide the installs: the list shows all of them without any choice and a `note` that
+  says the file is damaged), apart from `catalog-installs.json`, which stays at version 1. A choice is dropped when its
+  install is removed or replaced. Neither choice ever updates, or stops, anything on its own.
+- **Declared gap: the revision a machine has seen rises only on an apply.** A machine that never installed from
+  revision r+1 accepts a cached (manifest r, version list r) pair, exactly as the current-version path does:
+  `catalog_revision_older` is judged against what this machine has installed from, not against what it has
+  merely been shown.
+- **Feature flag.** `GET /v1/health` lists `catalog-installs.updates.1` once the daemon does all of this, so
+  an app can tell a daemon that answers `changes` from one that does not.
 
 ### The command line
 

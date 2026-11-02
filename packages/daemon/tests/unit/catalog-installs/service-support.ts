@@ -1,6 +1,8 @@
 import type {
   CatalogInstalled,
   CatalogInstallPreview,
+  CatalogInstall,
+  CatalogInstallPrefsRequest,
   CatalogInstallPreviewRequest,
   CatalogInstallRequest,
   CatalogInstallScope,
@@ -10,6 +12,7 @@ import type {
   FleetCatalogInstallChange,
   FleetLayeredProfileCatalog,
   FleetRuntimeCatalog,
+  SignedCatalogItemVersions,
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
@@ -29,8 +32,14 @@ import {
   SkillFolderChanged,
   SkillFolderRefused,
   type SkillFolderChange,
+  type SkillFilesReading,
   type SkillFolderReading,
 } from '../../../src/lib/catalog-installs/ports.ts';
+import {
+  type CatalogInstallPrefsState,
+  type CatalogInstallPrefsStore,
+  EMPTY_CATALOG_INSTALL_PREFS,
+} from '../../../src/lib/catalog-installs/prefs.ts';
 import { CatalogPreviews } from '../../../src/lib/catalog-installs/previews.ts';
 import type { FreshStepUpContext } from '../../../src/lib/fleet/catalog-service.ts';
 import {
@@ -65,6 +74,14 @@ export class AsCaller {
     return this.inner.apply(scope, request, this.caller, governance);
   }
 
+  setPrefs(
+    scope: CatalogInstallScope,
+    installId: string,
+    request: CatalogInstallPrefsRequest,
+  ): Promise<CatalogInstall> {
+    return this.inner.setPrefs(scope, installId, request);
+  }
+
   list: CatalogInstallService['list'] = () => this.inner.list();
   remove: CatalogInstallService['remove'] = (scope, installId, governance, stepUp) =>
     this.inner.remove(scope, installId, governance, stepUp);
@@ -86,12 +103,32 @@ class MemoryStore implements CatalogInstallStore {
   }
 }
 
+class MemoryPrefs implements CatalogInstallPrefsStore {
+  state: CatalogInstallPrefsState = EMPTY_CATALOG_INSTALL_PREFS;
+  failWrite: Error | undefined;
+  failRead: Error | undefined;
+  async read(): Promise<CatalogInstallPrefsState> {
+    if (this.failRead !== undefined) throw this.failRead;
+    return structuredClone(this.state);
+  }
+
+  async write(state: CatalogInstallPrefsState): Promise<void> {
+    if (this.failWrite !== undefined) throw this.failWrite;
+    this.state = structuredClone(state);
+  }
+}
+
 class FakeMcpFiles implements McpProjectFiles {
   text: string | null = null;
   version = 0;
   failRead: Error | undefined;
   racing = false;
+  reads = 0;
+  /** Runs at the start of each read, with how many there have been: a file that moves between two reads. */
+  onRead: ((reads: number) => void) | undefined;
   async read(): Promise<McpProjectFileReading> {
+    this.reads += 1;
+    this.onRead?.(this.reads);
     if (this.failRead !== undefined) throw this.failRead;
     return { text: this.text, etag: this.text === null ? null : `e${this.version}` };
   }
@@ -111,6 +148,22 @@ export class FakeFolders {
   refuse: string | undefined;
   fail: Error | undefined;
   racing = false;
+  /** Paths whose bytes are "too large" for the bounded read. */
+  readonly tooLarge = new Set<string>();
+  failReadFiles: Error | undefined;
+
+  async readFiles(key: string, paths: readonly string[]): Promise<SkillFilesReading> {
+    if (this.failReadFiles !== undefined) throw this.failReadFiles;
+    const files = new Map<string, string>();
+    const tooLarge: string[] = [];
+    for (const path of paths) {
+      const text = this.folders.get(key)?.get(path);
+      if (text === undefined) continue;
+      if (this.tooLarge.has(path)) tooLarge.push(path);
+      else files.set(path, text);
+    }
+    return { files, tooLarge };
+  }
 
   async read(key: string): Promise<SkillFolderReading> {
     if (this.fail !== undefined) throw this.fail;
@@ -144,12 +197,20 @@ class FakeProjectSkills implements ProjectSkillFiles {
   apply(root: string, folder: string, change: SkillFolderChange): Promise<void> {
     return this.folders.change(`${root}/${folder}`, change);
   }
+
+  read(root: string, folder: string, paths: readonly string[]): Promise<SkillFilesReading> {
+    return this.folders.readFiles(`${root}/${folder}`, paths);
+  }
 }
 
 class FakeRuntimeSkills implements RuntimeSkillAssets {
   constructor(readonly folders: FakeFolders) {}
   inspect(name: string): Promise<SkillFolderReading> {
     return this.folders.read(`runtime/${name}`);
+  }
+
+  read(name: string, paths: readonly string[]): Promise<SkillFilesReading> {
+    return this.folders.readFiles(`runtime/${name}`, paths);
   }
 
   async remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void> {
@@ -162,6 +223,15 @@ interface FakeComponent {
   detail?: unknown;
   installedFrom?: { digest: string };
 }
+
+/** A component as the fleet hands it back: the record itself, with where it came from. */
+const asStored = (component: FakeComponent | undefined): unknown =>
+  component === undefined
+    ? undefined
+    : {
+        ...(component.detail as object),
+        ...(component.installedFrom === undefined ? {} : { installedFrom: component.installedFrom }),
+      };
 
 export class FakeFleet {
   readonly proposed: (FleetAccountChange | FleetCatalogInstallChange)[] = [];
@@ -189,7 +259,8 @@ export class FakeFleet {
         format: 'version-2',
         profiles: [{ name: 'work' }, { name: 'play' }],
       }) as unknown as FleetLayeredProfileCatalog,
-    storedComponent: async (kind, name) => this.components.get(kind)?.find(component => component.name === name),
+    storedComponent: async (kind, name) =>
+      asStored(this.components.get(kind)?.find(component => component.name === name)),
     propose: async change => {
       this.proposed.push(change);
       return { id: `change-${this.proposed.length}` } as FleetAccountChangeView;
@@ -212,7 +283,7 @@ export class FakeFleet {
         folder.set(file.path, file.content);
         this.assets.folders.set(`runtime/${change.name}`, folder);
       }
-      return { outcome: { outcome: 'executed', executor: 'setup', summary: 'done' }, component: stored };
+      return { outcome: { outcome: 'executed', executor: 'setup', summary: 'done' }, component: asStored(stored) };
     },
     apply: async id => {
       this.applied.push(id);
@@ -236,6 +307,7 @@ export interface Rig {
   readonly inner: CatalogInstallService;
   as(caller: CatalogCaller): AsCaller;
   readonly store: MemoryStore;
+  readonly prefs: MemoryPrefs;
   readonly mcp: FakeMcpFiles;
   readonly folders: FakeFolders;
   readonly fleet: FakeFleet;
@@ -247,6 +319,7 @@ export interface Rig {
 
 export function rig(options: { maxKept?: number } = {}): Rig {
   const store = new MemoryStore();
+  const prefs = new MemoryPrefs();
   const mcp = new FakeMcpFiles();
   const folders = new FakeFolders();
   const fleet = new FakeFleet(folders);
@@ -255,6 +328,7 @@ export function rig(options: { maxKept?: number } = {}): Rig {
   let minted = 0;
   const state: Rig = {
     store,
+    prefs,
     mcp,
     folders,
     fleet,
@@ -270,6 +344,7 @@ export function rig(options: { maxKept?: number } = {}): Rig {
     {
       crypto,
       store,
+      prefs,
       projectRoots: async () => state.roots,
       mcpFiles: mcp,
       skillFiles: new FakeProjectSkills(folders),
@@ -306,7 +381,13 @@ export async function request(
   identity: DaemonIdentity,
   item: Published['items'][number],
   target: CatalogInstallTarget,
-  options: { revision?: number; catalogId?: string; allowOlder?: true } = {},
+  options: {
+    revision?: number;
+    catalogId?: string;
+    allowOlder?: true;
+    replaceEdited?: true;
+    signedVersions?: SignedCatalogItemVersions;
+  } = {},
 ): Promise<CatalogInstallPreviewRequest> {
   const published = await publish(identity, [item], options);
   return {
@@ -314,5 +395,7 @@ export async function request(
     item,
     target,
     ...(options.allowOlder === true ? { allowOlder: true as const } : {}),
+    ...(options.replaceEdited === true ? { replaceEdited: true as const } : {}),
+    ...(options.signedVersions === undefined ? {} : { signedVersions: options.signedVersions }),
   };
 }

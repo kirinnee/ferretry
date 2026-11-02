@@ -332,7 +332,7 @@ const KEY_WORDS = new Set([
   'bearer',
   'basic',
 ]);
-const announcesKey = (name: string): boolean =>
+export const announcesKey = (name: string): boolean =>
   name
     .toLowerCase()
     .split(/[-_.]+/u)

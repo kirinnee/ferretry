@@ -186,6 +186,7 @@ describe('rendering what changed', () => {
         { label: 'Skill file b.txt', change: 'removed', document: true, before: 'gone' },
         { label: 'Skill file c.txt', change: 'changed', document: true, tooLarge: true },
         { label: 'Skill file d.txt', change: 'changed', document: true },
+        { label: 'Skill file e.txt', change: 'changed', document: true, hidden: true },
       ],
       newWarnings: [{ code: 'carries-scripts', text: 'This skill carries scripts.' }],
       goneWarnings: [{ code: 'carries-scripts', text: 'Old one.' }],
@@ -196,6 +197,9 @@ describe('rendering what changed', () => {
     should(text).containEql('  - Skill file b.txt\n    gone');
     should(text).containEql('too large to show line by line');
     should(text).containEql('  ~ Skill file d.txt');
+    should(text).containEql(
+      '  ~ Skill file e.txt\n    changed — hidden: this may hold a secret. Open it yourself to compare.',
+    );
     should(text).containEql('  1 part the same');
     should(text).containEql('new warning: This skill carries scripts.');
     should(text).containEql('no longer warned: Old one.');

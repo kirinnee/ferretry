@@ -8,6 +8,7 @@
  */
 
 import type { CatalogChange, CatalogChanges } from '@ferretry/protocol';
+import { FileWarning, Lock } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
 import { MarkedText, WarningList } from './catalog-review-view.tsx';
 import {
@@ -17,6 +18,7 @@ import {
   hunkHeader,
   LINE_SIGN,
   TOO_LARGE_SENTENCE,
+  HIDDEN_SENTENCE,
   TRUNCATED_SENTENCE,
 } from './versions-model.ts';
 
@@ -54,13 +56,25 @@ function WholeText({ kind, text }: { readonly kind: 'add' | 'remove'; readonly t
   );
 }
 
+/** A sentence about the entry, not its contents: body font and theme text colour, never the code style. */
+function EntryNote({
+  attribute,
+  icon: Icon,
+  children,
+}: {
+  readonly attribute: string;
+  readonly icon: typeof Lock;
+  readonly children: string;
+}) {
+  return (
+    <p className="m-0 flex items-start gap-2 px-3 py-2 text-cell text-fg" {...{ [attribute]: '' }}>
+      <Icon size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-muted" />
+      <span className="min-w-0">{children}</span>
+    </p>
+  );
+}
+
 function EntryBody({ entry }: { readonly entry: CatalogChange }) {
-  if (entry.tooLarge === true)
-    return (
-      <p className="m-0 px-3 py-2 text-cell text-muted" data-change-too-large="">
-        {TOO_LARGE_SENTENCE}
-      </p>
-    );
   if (entry.hunks !== undefined)
     return (
       <>
@@ -108,9 +122,19 @@ function Entry({ entry }: { readonly entry: CatalogChange }) {
         )}
       </figcaption>
       {/* A review never hides the end of a line: every line wraps, so every character and marker shows. */}
-      <pre className="mono m-0 min-w-0 max-w-full whitespace-pre-wrap py-1 text-meta leading-base [overflow-wrap:anywhere]">
-        <EntryBody entry={entry} />
-      </pre>
+      {entry.hidden === true ? (
+        <EntryNote attribute="data-change-hidden" icon={Lock}>
+          {HIDDEN_SENTENCE}
+        </EntryNote>
+      ) : entry.tooLarge === true ? (
+        <EntryNote attribute="data-change-too-large" icon={FileWarning}>
+          {TOO_LARGE_SENTENCE}
+        </EntryNote>
+      ) : (
+        <pre className="mono m-0 min-w-0 max-w-full whitespace-pre-wrap py-1 text-meta leading-base [overflow-wrap:anywhere]">
+          <EntryBody entry={entry} />
+        </pre>
+      )}
     </figure>
   );
 }
