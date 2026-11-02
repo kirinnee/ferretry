@@ -74,7 +74,7 @@ describe('who is offered "Pair a phone"', () => {
 
   it('words the act apart from "Add a machine"', () => {
     expect(pairPhoneLabel('studio')).toBe('Pair a phone with studio');
-    expect(PAIR_PHONE_DESCRIPTION).toContain('Settings › Add a device');
+    expect(PAIR_PHONE_DESCRIPTION).toContain('Settings › Devices');
   });
 });
 
@@ -218,7 +218,7 @@ describe('PairPhoneSheet', () => {
     const title = must(document.getElementById(must(dialog.getAttribute('aria-labelledby'), 'a label')), 'the title');
     expect(title.textContent).toBe('Pair a phone with studio');
     expect(document.activeElement).toBe(dialog);
-    // The surface itself, unchanged: the same panel Settings › Add a device shows.
+    // The surface itself, unchanged: the same panel Settings › Devices shows.
     expect(dialog.querySelector('[data-pair-phone-body]')?.textContent).toContain('No paired device can reach');
     await interact(() => pressKey(dialog, 'Escape'));
     expect(document.querySelector('[data-pair-phone]')).toBeNull();

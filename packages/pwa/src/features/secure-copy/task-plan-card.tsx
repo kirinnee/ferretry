@@ -357,7 +357,7 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
           />
           <span className="flex min-w-0 flex-col gap-1">
             <span className="text-fg">
-              Also fill the 6-digit code
+              Also fill the 2FA code
               {code === 'impossible' ? ` · ${TOTP_IMPOSSIBLE_WORDS}` : ''}
             </span>
             {code === 'available' ? <span data-task-plan-one-factor="">{TOTP_TICK_WARNING}</span> : null}
@@ -391,7 +391,7 @@ export function ApprovedFacts({ line }: { readonly line: TaskPlanLine }) {
       <RootFlag line={line} picked={picked} />
       {approvedCode(line) ? (
         <span className="text-meta text-err" data-task-plan-one-factor="">
-          Includes the 6-digit code. {TOTP_TICK_WARNING}
+          Includes the 2FA code. {TOTP_TICK_WARNING}
         </span>
       ) : null}
     </>
@@ -466,7 +466,7 @@ function StagedLine({
       ) : null}
       {stagedCodeOn(codes, line) ? (
         <span className="text-meta text-err" data-task-plan-one-factor="">
-          Includes the 6-digit code. {TOTP_TICK_WARNING}
+          Includes the 2FA code. {TOTP_TICK_WARNING}
         </span>
       ) : null}
       <span className="text-meta text-faint" data-task-plan-why="">

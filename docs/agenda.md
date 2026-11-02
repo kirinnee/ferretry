@@ -502,8 +502,10 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
   `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
-- **The open items are a deck**, on a phone and a wide screen alike. Swipe — from the item's head or its
-  who-and-what line; the body scrolls — or press the arrow keys:
+- **The open items are a deck**, on a phone and a wide screen alike. Swipe with a finger — from the item's head or its
+  who-and-what line; the body scrolls — or press the arrow keys. **Only touch swipes, on every screen size** (decided by
+  the gesture's `pointerType`, never by width): a mouse or trackpad drag never swipes or pulls down anywhere — Inbox
+  cards, Answer quickly, the side-panel cards — and stays the reader selecting text; a mouse uses the buttons and keys:
   - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
     CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
     (two options: ← and →) — wherever the recommendation sits;

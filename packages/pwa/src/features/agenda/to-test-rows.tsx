@@ -40,7 +40,7 @@ import {
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
-  swipesWith,
+  isTouch,
 } from './agenda-swipe-gesture.ts';
 import { CardHead, type CardHeadPager } from './card-head.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
@@ -158,7 +158,7 @@ interface RowSwipeAnswers {
  * A swipe on one row, the deck's own: left is `onLeft`, right is `onRight`, and a pull down — from the head, or from a body
  * at the top of its scroll — is the compass (↓ and ↓← Skip, ↓↓ the shared snooze list). The whole card is the surface.
  */
-const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, disabled: boolean, mouse: boolean) => {
+const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, disabled: boolean) => {
   const gesture = useRef<{
     readonly pointerId: number;
     readonly startX: number;
@@ -177,7 +177,7 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
     swallowClick.current = false;
     if (
       disabled ||
-      !swipesWith(event, mouse) ||
+      !isTouch(event) ||
       (startsOnInteractive(event.target) && !startsOnTitle(event.target)) ||
       startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
@@ -190,9 +190,7 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
       width: event.currentTarget.getBoundingClientRect().width,
       down:
         startsInRowHead(event.target) ||
-        (event.pointerType !== 'mouse' &&
-          boxAtTop(event.currentTarget) &&
-          startsAtScrollTop(event.target, event.currentTarget)),
+        (boxAtTop(event.currentTarget) && startsAtScrollTop(event.target, event.currentTarget)),
       startedAt: event.timeStamp,
       axis: null,
       dx: 0,
@@ -217,8 +215,6 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
         return;
       }
       current.axis = lock;
-      // A mouse drag that became a swipe is not a selection: whatever the press started to select is let go.
-      if (event.pointerType === 'mouse') window.getSelection()?.removeAllRanges();
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
@@ -306,7 +302,6 @@ function ToTestRow({
   skipButton,
   pager,
   onClose,
-  mouseSwipe,
 }: {
   readonly row: ToTestCard;
   readonly answers: ToTestAnswers;
@@ -316,7 +311,6 @@ function ToTestRow({
   readonly skipButton: boolean;
   readonly pager?: CardHeadPager | undefined;
   readonly onClose?: (() => void) | undefined;
-  readonly mouseSwipe: boolean;
 }) {
   const state = answers.answerFor(row.card);
   const busy = state.pressed !== null;
@@ -338,7 +332,6 @@ function ToTestRow({
       },
     },
     busy,
-    mouseSwipe,
   );
   const direction = swipe.intent?.direction ?? null;
   const release = releaseWords(row.card.task.shippedIn);
@@ -543,7 +536,6 @@ export function ToTestList({
   onSkip,
   pager,
   onClose,
-  mouseSwipe = false,
 }: {
   readonly rows: readonly ToTestCard[];
   readonly answers: ToTestAnswers;
@@ -553,8 +545,6 @@ export function ToTestList({
   /** The place in the stack the card steps through, drawn in each row's head. */
   readonly pager?: CardHeadPager;
   readonly onClose?: () => void;
-  /** A mouse drag swipes a row too (the desktop run). */
-  readonly mouseSwipe?: boolean;
 }) {
   const list = useRef<HTMLUListElement>(null);
   const scrollToNext = (row: ToTestCard): void => {
@@ -567,7 +557,6 @@ export function ToTestList({
         <ToTestRow
           answers={answers}
           key={row.key}
-          mouseSwipe={mouseSwipe}
           now={now}
           onClose={onClose}
           onNavigate={onNavigate}

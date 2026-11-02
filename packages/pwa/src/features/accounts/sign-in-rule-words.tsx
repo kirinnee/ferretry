@@ -71,7 +71,13 @@ export function SignInRuleWords({ does, rows, flags, note }: SignInRuleWordsProp
         <summary className="min-h-[44px] cursor-pointer py-3 text-meta font-medium text-muted">
           How it&rsquo;s checked
         </summary>
-        <p className="m-0 break-words">{checkedWords(root)}</p>
+        <div className="flex flex-col gap-1">
+          {checkedWords(root).map(line => (
+            <p className="m-0 break-words" key={line}>
+              {line}
+            </p>
+          ))}
+        </div>
       </details>
     </div>
   );

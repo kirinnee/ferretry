@@ -92,8 +92,8 @@ export function RuleStillAsked() {
       </summary>
       <ul className="m-0 flex list-none flex-col gap-2 p-0 text-meta text-muted">
         {RULE_STILL_ASKED.map(each => (
-          <li className="min-w-0 break-words" key={each}>
-            {each}
+          <li className="min-w-0 break-words" key={each.what}>
+            {each.what}: {each.instead}
           </li>
         ))}
       </ul>
@@ -161,10 +161,23 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
       ? undefined
       : `You signed in here yourself ${String(times)} ${times === 1 ? 'time' : 'times'}.`;
   const set = (change: Partial<RuleTicks>): void => setTicks(current => ({ ...current, ...change }));
-  const scopes = props.scopes.some(scope => scope.kind === 'any') ? props.scopes : [ANY_SCOPE, ...props.scopes];
+  const offered = props.scopes.some(scope => scope.kind === 'any') ? props.scopes : [ANY_SCOPE, ...props.scopes];
+  // The scope the rule has now is always a choice, so the picker never shows one scope while another is sent.
+  const held = [props.before?.scope, props.replacing?.scope].filter(
+    (scope): scope is SignInRuleScope => scope !== undefined,
+  );
+  const scopes = [...offered, ...held].filter(
+    (scope, index, all) => all.findIndex(each => scopeKey(each) === scopeKey(scope)) === index,
+  );
 
   const heading =
-    origin === 'resume' ? 'Resume the standing rule' : origin === 'renew' ? 'Approve it again' : 'Don’t ask again';
+    origin === 'resume'
+      ? 'Resume the standing rule'
+      : origin === 'renew'
+        ? 'Approve it again'
+        : origin === 'widen'
+          ? 'Change the standing rule'
+          : 'Don’t ask again';
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-rule-sheet={surface} data-rule-origin={origin}>
@@ -247,7 +260,7 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
                 tickName="totp"
                 tone="err"
               >
-                <span className="text-fg">Also fill the 6-digit code</span>
+                <span className="text-fg">Also fill the 2FA code</span>
               </Tick>
             ) : null}
             {ticks.totp ? (

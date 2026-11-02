@@ -3,8 +3,8 @@
  * without a layout engine. The whole card swipes — not only its head — so these are the rules that keep a swipe from
  * taking anything else's gesture:
  *
- * - TOUCH ONLY ({@link isTouch}): a mouse drag selects text, a pen is left to the page. The desktop run opts a mouse in
- *   ({@link swipesWith}), where it never pulls down from the body: that drag stays text selection.
+ * - TOUCH ONLY ({@link isTouch}), decided by the pointer of the gesture and never by screen width: a mouse or trackpad
+ *   drag selects text, a pen is left to the page, and a touchscreen laptop still swipes with a finger.
  * - NEVER ON SOMETHING THE READER PRESSES OR TYPES IN ({@link startsOnInteractive}).
  * - NEVER ON TEXT BEING SELECTED: a touch that goes down inside a selection ({@link startsInSelection}), or is held
  *   {@link LONG_PRESS_MS} before it moves ({@link isLongPress}), is the reader highlighting, so it is not a swipe.
@@ -23,10 +23,6 @@ export const LOCK_PX = SWIPE_SLOP_PX;
 
 /** Only a finger swipes. */
 export const isTouch = (event: { readonly pointerType: string }): boolean => event.pointerType === 'touch';
-
-/** A finger swipes; where the host opts in (the desktop run), a mouse drag does too. */
-export const swipesWith = (event: { readonly pointerType: string }, mouse: boolean): boolean =>
-  isTouch(event) || (mouse && event.pointerType === 'mouse');
 
 /** Whether a key pressed at `target` belongs to the field, menu or dialog it is in — not the card itself, which is a dialog too. */
 export const ownsKeys = (target: EventTarget | null): boolean => {

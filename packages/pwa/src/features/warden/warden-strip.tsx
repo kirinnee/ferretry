@@ -90,7 +90,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
       {accounts.length > 0 && (
         <>
           <Dot />
-          <ul className="inline-flex flex-wrap items-center gap-1" aria-label="Warden accounts">
+          <ul className="inline-flex flex-wrap items-center gap-1" aria-label="Warden AI logins">
             {accounts.map(account => (
               <li
                 key={account.agent}

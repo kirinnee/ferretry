@@ -5,7 +5,8 @@
  *   bun harness/sign-in-rules-screenshot.tsx [out-dir] [states]   # writes sign-in-rules-<state>-<viewport>-<scheme>.png
  *
  * `states` is a comma list of: create-page, create-totp, create-terminal, ineligible, suggestion, passkey, machine,
- * settings, suspended, narrow, site-panel, edit-warning, fallback, history, device-revoke, replaces, filled.
+ * settings, suspended, narrow, site-panel, edit-warning, fallback, history, device-revoke, replaces, filled, widen, rule-card, narrow-hours, revoke-all, passkey-flags, needs-update,
+ * deep-link-elsewhere.
  * "create-*" are the owner's sheet (a page rule, a page rule with the code ticked and its red acknowledgement, a sudo
  * rule with the root flag); "ineligible" is the sheet for a sign-in that cannot have a rule; "suggestion" is a
  * ferret's card, nothing ticked; "passkey" is the passkey sheet with the daemon's own words for a root stage;
@@ -14,7 +15,10 @@
  * "fallback" is the input card for a rule that did not apply; "history" is the closed card of a fill that did;
  * "device-revoke" is Settings › Devices with the rules a device's passkey approved; "replaces" is a ferret's suggestion
  * opened for a sign-in that already has a rule (it renews it, never a second rule); "filled" is the owner's input card
- * a rule filled, with the place.
+ * a rule filled, with the place. "widen" clicks Change (passkey) on the real Accounts Rule tab, so it is the real sheet with the real host props; "rule-card" is the card
+ * with its Change button; "narrow-hours" is the narrow form ending in hours; "revoke-all" is an account's revoke-all
+ * confirm; "passkey-flags" is the passkey sheet with the red root block and the amber cautions apart; "needs-update"
+ * is the one line a machine too old for a feature shows; "deep-link-elsewhere" is the toast for a link to another machine.
  *
  * Fake fixtures only: no real account, no daemon, no value. Every width asserts no sideways scroll and the touch floor
  * on every button and checkbox of the phone.
@@ -43,6 +47,7 @@ const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import { Markdown } from '../../src/components/markdown.tsx';
+import { AccountRulesRevoke } from '../../src/features/accounts/account-rules.tsx';
 import { SignInRuleCard } from '../../src/features/accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheet } from '../../src/features/accounts/sign-in-rule-sheet.tsx';
 import { SiteDetail } from '../../src/features/accounts/site-detail.tsx';
@@ -52,17 +57,21 @@ import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { DeviceRuleNote } from '../../src/features/secure-copy/device-rule-note.tsx';
 import { SignInRuleSuggestionHost } from '../../src/features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { MachineRuleStage, SignInRulesSurface } from '../../src/features/secure-copy/sign-in-rules-surface.tsx';
+import { DaemonSettingsFrame } from '../../src/features/settings/daemon-settings-frame.tsx';
+import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { AddDeviceCard } from '../../src/features/settings/add-device-settings.tsx';
 import { StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { fieldsOf } from '../../src/lib/input-card.ts';
-import { passkeyWords } from '../../src/lib/sign-in-rules.ts';
+import { passkeyWords, RULE_LINKED_ELSEWHERE_WORDS } from '../../src/lib/sign-in-rules.ts';
+import { DaemonClientProvider } from '../../src/lib/store.tsx';
+import { healthOf } from '../../tests/support/health.ts';
 import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 import { list as accountList } from '../../tests/support/accounts-fixtures.ts';
 import { NOW, request as fakeRequest } from '../../tests/support/input-fixtures.ts';
 import {
   RULE_ID, SITE_SIGN_IN, STAGE_ID, codeRule, machineStage, pageRule, ruleList, sitePlace, sudoPlace,
-  suggestion, suspendedRule, terminalRule,
+  stagedRule, suggestion, suspendedRule, terminalRule,
 } from '../../tests/support/sign-in-rule-fixtures.ts';
 
 const view = new URLSearchParams(location.search).get('view');
@@ -73,6 +82,8 @@ const accounts = accountList();
 const rulesFor = () => {
   switch (view) {
     case 'settings': return { rules: [pageRule(), codeRule(), terminalRule(), suspendedRule2()], stages: [machineStage()] };
+    case 'rule-card': case 'revoke-all': return { rules: [pageRule(), pageRule({ id: 'sr_' + 'e'.repeat(24), signIn: 'si_0000000000000009' })], stages: [] };
+    case 'widen': return { rules: [pageRule({ uses: 5, remaining: 2, usage: { count: 3, lastUsedAt: '2026-10-31T09:00:00.000Z' } })], stages: [] };
     case 'site-panel': case 'edit-warning': case 'device-revoke': return { rules: [pageRule(), terminalRule()], stages: [] };
     default: return { rules: [], stages: [] };
   }
@@ -87,6 +98,7 @@ function suspendedRule2() {
 const answerFor = (path, method) => {
   if (path === '/v1/accounts') return accounts;
   if (path === '/v1/sign-in-rules') return ruleList(rulesFor());
+  if (path.startsWith('/v1/sign-in-rules/eligibility')) return eligible;
   if (path === '/v1/sign-in-rules/suggestions') return { suggestions: [suggestion()] };
   throw new Error('the harness has no answer for ' + method + ' ' + path);
 };
@@ -138,10 +150,10 @@ const itemView = (extra, shown = item) => (
   </div>
 );
 
-if (view === 'passkey') {
+if (view === 'passkey' || view === 'passkey-flags') {
   const gate = new StepUpGate({ ceremony: () => new Promise(() => undefined), describe: () => 'unknown' });
   globalThis.__openGate = () => {
-    const words = passkeyWords(machineStage());
+    const words = passkeyWords(view === 'passkey' ? machineStage() : stagedRule({ totp: true, autoRecipe: true, fields: ['password', 'totp'] }));
     void gate.require(connection, words.does, 'explicit', 'approve-sign-in-rule', STAGE_ID, words);
   };
   globalThis.__gate = gate;
@@ -159,7 +171,23 @@ const body = () => {
           createClient={async () => client} item={{ signInRuleSuggestion: { suggestion: suggestion().id } }} offered />
       </div>
     );
-    case 'passkey': case 'machine': return (
+    case 'widen': return site('rule');
+    case 'rule-card': return ruleCard(pageRule());
+    case 'narrow-hours': return ruleCard(codeRule());
+    case 'revoke-all': return (
+      <div className="fy-card" data-harness-card="">
+        <AccountRulesRevoke account={{ ...accounts.accounts[0], id: 'GITHUB_WORK', label: 'github work' }} rules={{ client, askPasskey: async () => true }} />
+      </div>
+    );
+    case 'needs-update': return (
+      <DaemonClientProvider client={async () => ({ request: async (_path, schema) => schema.parse(healthOf('1.0.0', [])) })}>
+        <DaemonSettingsFrame additionalTabs={[]} connection={connection} createSecretClient={async () => client}
+          createWardenClient={async () => client} name="Studio" onOpenPanel={quiet} panel="secure-copy"
+          readWardenStatus={async () => { throw new Error('quiet'); }} />
+      </DaemonClientProvider>
+    );
+    case 'deep-link-elsewhere': return <ActionToast notice={RULE_LINKED_ELSEWHERE_WORDS} onDismiss={quiet} />;
+    case 'passkey': case 'passkey-flags': case 'machine': return (
       <div className="fy-card" data-harness-card="">
         <MachineRuleStage canUsePasskey onConfirm={quiet} onDeny={quiet} phase={{ kind: 'idle' }} staged={machineStage()} />
       </div>
@@ -203,7 +231,7 @@ const body = () => {
 createRoot(root).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]">{body()}</div>
-    {view === 'passkey' ? <StepUpDialog gate={globalThis.__gate} machineName={() => 'Studio'} /> : null}
+    {view === 'passkey' || view === 'passkey-flags' ? <StepUpDialog gate={globalThis.__gate} machineName={() => 'Studio'} /> : null}
   </div>,
 );
 `;
@@ -250,6 +278,13 @@ const ALL_STATES = [
   'device-revoke',
   'replaces',
   'filled',
+  'widen',
+  'rule-card',
+  'narrow-hours',
+  'revoke-all',
+  'passkey-flags',
+  'needs-update',
+  'deep-link-elsewhere',
 ] as const;
 const wanted = process.argv[3]?.split(',');
 const STATES = ALL_STATES.filter(state => wanted === undefined || wanted.includes(state));
@@ -272,6 +307,13 @@ const SURFACE: Readonly<Record<(typeof ALL_STATES)[number], string>> = {
   'device-revoke': '[data-device-rules]',
   replaces: '[data-rule-replaces]',
   filled: '[data-input-plan-filled]',
+  widen: '[data-rule-replaces]',
+  'rule-card': '[data-rule-widen]',
+  'narrow-hours': '[data-rule-narrow-form]',
+  'revoke-all': '[data-account-rules-confirm]',
+  'passkey-flags': '[data-step-up-confirm]',
+  'needs-update': '[data-machine-needs-update]',
+  'deep-link-elsewhere': '[data-action-toast]',
 };
 
 const server = Bun.serve({
@@ -319,7 +361,7 @@ try {
         for (const state of STATES) {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           const surface = page.locator(SURFACE[state]);
-          if (state === 'passkey') {
+          if (state === 'passkey' || state === 'passkey-flags') {
             await page.locator('[data-rule-stage]').first().waitFor({ state: 'visible' });
             await page.evaluate(() => (globalThis as { __openGate?: () => void }).__openGate?.());
           }
@@ -339,6 +381,17 @@ try {
             await page.locator('[data-rule-tick="password"]').waitFor({ state: 'visible' });
             await page.locator('[data-rule-tick="password"]').check();
           }
+          if (state === 'widen') {
+            await page.locator('[data-rule-widen]').first().click();
+          }
+          if (state === 'narrow-hours') {
+            await page.locator('[data-rule-narrow]').first().click();
+            await page.locator('[data-rule-end-unit]').selectOption('hours');
+            await page.locator('[data-rule-end-days]').fill('3');
+          }
+          if (state === 'revoke-all') {
+            await page.locator('[data-account-rules-revoke]').first().click();
+          }
           if (state === 'narrow') {
             await page.locator('[data-rule-narrow]').first().click();
           }
@@ -350,7 +403,10 @@ try {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${where} scrolls sideways by ${overflow}px`);
           if (viewport.touch) {
-            const scope = state === 'passkey' ? page.locator('[data-step-up-dialog]') : page.locator('#root');
+            const scope =
+              state === 'passkey' || state === 'passkey-flags'
+                ? page.locator('[data-step-up-dialog]')
+                : page.locator('#root');
             for (const height of await scope
               .locator('button')
               .evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height)))

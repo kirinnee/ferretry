@@ -147,7 +147,7 @@ describe('the pre-approval rules card', () => {
     const box = must(q('[data-copy-profile-targets]') as HTMLInputElement | null, 'the setting');
 
     expect(box.checked).toBe(false);
-    expect(text()).toContain('Copy rules may target programs in my own profile');
+    expect(text()).toContain('Paste rules may target programs in my own profile');
     expect(text()).toContain('could swap that program for its own');
     await click(box);
     expect(changed).toEqual([{ allowProfileTargets: true }]);

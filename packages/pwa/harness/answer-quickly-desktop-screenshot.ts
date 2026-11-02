@@ -6,10 +6,9 @@
  *   bun harness/answer-quickly-desktop-screenshot.ts [outDir] [series]   # <outDir>/<series>-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage`, invented data), serves it on an ephemeral loopback port and
- * drives it with a REAL mouse and keyboard (a wide screen) or REAL touch (the phone). It FAILS, after writing every
+ * drives it with a REAL mouse and keyboard (a wide screen; a mouse drag selects text and never swipes) or REAL touch (the phone). It FAILS, after writing every
  * picture, when: a page scrolls sideways; the button's count is not the run's length; the run is wider than 720px or
- * off-centre; the keys line is missing (desktop) or present (phone); a key, a mouse drag or Esc does not do what the
- * line says; or a finished run does not say "All done".
+ * off-centre; the keys line is missing (desktop) or present (phone); a key or Esc does not do what the line says, or a mouse drag swipes or selects nothing; or a finished run does not say "All done".
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -182,23 +181,27 @@ for (const theme of THEMES) {
     );
     check((await committed(page)) === 0, `desktop ${theme}: moving answered a card`);
 
-    // A real mouse drag to the right answers the card with its right-hand answer.
+    // A real mouse drag never swipes: it selects the text under it, on the head and on the body alike.
     const top = page.locator('.fy-attn-deck__top');
     const grip = await top.locator('[data-inbox-who]').boundingBox();
     if (grip === null) fail('the decision card has no who-and-what line to hold');
     else {
-      await page.mouse.move(grip.x + 40, grip.y + grip.height / 2);
+      await page.mouse.move(grip.x + 4, grip.y + grip.height / 2);
       await page.mouse.down();
       await page.mouse.move(grip.x + 120, grip.y + grip.height / 2, { steps: 4 });
-      await page.mouse.move(grip.x + 420, grip.y + grip.height / 2, { steps: 8 });
+      await page.mouse.move(grip.x + 420, grip.y + grip.height / 2 + 60, { steps: 8 });
       check(
-        ((await top.getAttribute('data-swipe-answer')) ?? '') !== '',
-        `desktop ${theme}: the mouse drag does not read as an answer`,
+        ((await top.getAttribute('data-swipe-answer')) ?? '') === '' &&
+          (await top.getAttribute('data-dragging')) === null,
+        `desktop ${theme}: a mouse drag moved the card`,
       );
-      await shot(page, 'mouse-drag', 'desktop', theme);
+      const selected = await page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
+      check(selected.length > 0, `desktop ${theme}: a mouse drag over the card selected no text`);
+      await shot(page, 'mouse-selection', 'desktop', theme);
       await page.mouse.up();
       await page.waitForTimeout(350);
-      check((await committed(page)) === 0, `desktop ${theme}: the answer was sent before the undo window ended`);
+      check((await committed(page)) === 0, `desktop ${theme}: a mouse drag answered the card`);
+      await page.mouse.click(grip.x + 600, grip.y - 4);
     }
 
     // Down (↓) skips; the arrows answer the next one.

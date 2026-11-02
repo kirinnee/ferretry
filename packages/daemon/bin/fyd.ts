@@ -624,6 +624,7 @@ import {
   walkLadder,
 } from '../src/lib/board/index.ts';
 import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
+import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
@@ -10492,6 +10493,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // Every session directory that may hold an agenda, whatever the session index still says about it.
+      const agendaSessionIds = async (): Promise<readonly string[]> =>
+        (await stateFiles.listDirectory(paths.sessions))
+          .filter(entry => entry.directory && isAgendaSessionId(entry.name))
+          .map(entry => entry.name);
       // ONE search over every card and agenda item (docs/work-search.md): the finder, `fy search` and the related
       // check. It reads the board store's in-memory cards and the agenda ledgers through their own caches, indexes
       // only scrubbed text, and rebuilds whenever the secret or login vault file changes (its epoch).
@@ -10501,10 +10507,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           laneSet: async projectId => await laneSets.laneSet(projectId),
         },
         agenda: {
-          sessions: async () =>
-            (await stateFiles.listDirectory(paths.sessions))
-              .filter(entry => entry.directory && isAgendaSessionId(entry.name))
-              .map(entry => entry.name),
+          sessions: agendaSessionIds,
           ledger: async sessionId => await agendaBoards.read(sessionId),
         },
         redaction: {
@@ -10755,6 +10758,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agenda,
         board: new BoardGateCards(boardWorld.board, laneSets),
         lanes: stageGateLanes,
+        // A card changes hands and its items stay where they were raised: its gate items are looked for on every
+        // agenda on this machine, so a gate is asked once whoever has the card.
+        sessions: { all: agendaSessionIds },
+        marker: new FileGateItemsMigrationMarker(join(paths.home, 'gate-items-duplicates-migration.json')),
+        now: () => clock.now(),
         words: {
           told: async (task, message, key) => {
             await walkLadder(gateWordsMessenger, boardDiagnostics, rungsOf(task), message, key);

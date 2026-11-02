@@ -7,7 +7,15 @@
 
 import type { SignInRuleNarrow, SignInRuleView } from '@ferretry/protocol';
 import { useId, useState } from 'react';
-import { canRenew, canResume, ruleWordsOf, statusWords, viewFlags } from '../../lib/sign-in-rules.ts';
+import {
+  canRenew,
+  canResume,
+  type EndUnit,
+  narrowEnd,
+  ruleWordsOf,
+  statusWords,
+  viewFlags,
+} from '../../lib/sign-in-rules.ts';
 import { SignInRuleWords } from './sign-in-rule-words.tsx';
 
 export interface SignInRuleCardProps {
@@ -18,10 +26,8 @@ export interface SignInRuleCardProps {
   readonly canUsePasskey: boolean;
   readonly onNarrow: (narrow: SignInRuleNarrow) => void;
   readonly onRevoke: () => void;
-  readonly onReapprove: (origin: 'resume' | 'renew') => void;
+  readonly onReapprove: (origin: 'resume' | 'renew' | 'widen') => void;
 }
-
-const DAY_MS = 86_400_000;
 
 export function SignInRuleCard({
   rule,
@@ -35,23 +41,26 @@ export function SignInRuleCard({
   const id = useId();
   const [narrowing, setNarrowing] = useState(false);
   const [dropTotp, setDropTotp] = useState(false);
-  const [endDays, setEndDays] = useState('');
+  const [endIn, setEndIn] = useState('');
+  const [endUnit, setEndUnit] = useState<EndUnit>('days');
   const [cap, setCap] = useState('');
+  const [asOf, setAsOf] = useState(() => Date.now());
   const live = rule.status === 'active' || rule.status === 'suspended';
-  const leftDays = Math.max(1, Math.floor((Date.parse(rule.expiresAt) - Date.now()) / DAY_MS));
+  const endAt = () => (endIn === '' ? undefined : narrowEnd(endIn, endUnit, rule.expiresAt, asOf));
+  const end = endAt();
 
-  const narrowed = (): SignInRuleNarrow => ({
+  const narrowed = (at: string | undefined): SignInRuleNarrow => ({
     ...(dropTotp ? { dropTotp: true as const } : {}),
-    ...(endDays === '' ? {} : { expiresAt: new Date(Date.now() + Number(endDays) * DAY_MS).toISOString() }),
+    ...(at === undefined ? {} : { expiresAt: at }),
     ...(cap === '' ? {} : { uses: Number(cap) }),
   });
   const narrowProblem =
-    endDays !== '' && !(Number(endDays) >= 1 && Number(endDays) < leftDays)
-      ? 'End earlier than it does now, in whole days.'
+    end?.ok === false
+      ? end.problem
       : cap !== '' && !(Number(cap) >= 1 && (rule.remaining === undefined || Number(cap) < rule.remaining))
         ? 'Lower the cap below what is left.'
         : undefined;
-  const empty = !dropTotp && endDays === '' && cap === '';
+  const empty = !dropTotp && endIn === '' && cap === '';
 
   return (
     <article
@@ -95,21 +104,36 @@ export function SignInRuleCard({
                 onChange={event => setDropTotp(event.currentTarget.checked)}
                 type="checkbox"
               />
-              <span>Stop typing the 6-digit code</span>
+              <span>Stop typing the 2FA code</span>
             </label>
           ) : null}
-          <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-end`}>
-            End in (days, fewer than {leftDays})
-            <input
-              className="kt-input min-h-[44px] min-w-0"
-              data-rule-end-days=""
-              id={`${id}-end`}
-              inputMode="numeric"
-              onChange={event => setEndDays(event.currentTarget.value.trim())}
-              type="number"
-              value={endDays}
-            />
-          </label>
+          <div className="flex min-w-0 items-end gap-2">
+            <label className="flex min-w-0 flex-1 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-end`}>
+              End in
+              <input
+                className="kt-input min-h-[44px] min-w-0"
+                data-rule-end-days=""
+                id={`${id}-end`}
+                inputMode="numeric"
+                onChange={event => setEndIn(event.currentTarget.value.trim())}
+                type="number"
+                value={endIn}
+              />
+            </label>
+            <label className="sr-only" htmlFor={`${id}-unit`}>
+              Days or hours
+            </label>
+            <select
+              className="kt-input min-h-[44px]"
+              data-rule-end-unit=""
+              id={`${id}-unit`}
+              onChange={event => setEndUnit(event.currentTarget.value === 'hours' ? 'hours' : 'days')}
+              value={endUnit}
+            >
+              <option value="days">days</option>
+              <option value="hours">hours</option>
+            </select>
+          </div>
           <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-cap`}>
             Most uses{rule.remaining === undefined ? '' : ` (fewer than ${String(rule.remaining)})`}
             <input
@@ -137,10 +161,16 @@ export function SignInRuleCard({
               data-variant="primary"
               disabled={busy || empty || narrowProblem !== undefined}
               onClick={() => {
-                onNarrow(narrowed());
+                // The form may have been open a while: the end is read against the clock now, and refused rather than dropped.
+                const fresh = endIn === '' ? undefined : narrowEnd(endIn, endUnit, rule.expiresAt, Date.now());
+                if (fresh?.ok === false) {
+                  setAsOf(Date.now());
+                  return;
+                }
+                onNarrow(narrowed(fresh?.at));
                 setNarrowing(false);
                 setDropTotp(false);
-                setEndDays('');
+                setEndIn('');
                 setCap('');
               }}
               type="button"
@@ -156,10 +186,24 @@ export function SignInRuleCard({
               className="kt-btn min-h-[44px]"
               data-rule-narrow=""
               disabled={busy}
-              onClick={() => setNarrowing(true)}
+              onClick={() => {
+                setAsOf(Date.now());
+                setNarrowing(true);
+              }}
               type="button"
             >
               Narrow
+            </button>
+          ) : null}
+          {rule.status === 'active' ? (
+            <button
+              className="kt-btn min-h-[44px]"
+              data-rule-widen=""
+              disabled={busy || !canUsePasskey}
+              onClick={() => onReapprove('widen')}
+              type="button"
+            >
+              Change (passkey)…
             </button>
           ) : null}
           {canResume(rule) ? (

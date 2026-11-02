@@ -177,11 +177,27 @@ describe('shared settings catalog', () => {
   test('finds Machines by the account model’s words and the old ones, on the daemon being searched', () => {
     const machines = SETTINGS_LINKS.find(link => link.id === 'machines');
     expect(machines?.href(beta)).toBe('/d/daemon-beta/settings#machines');
-    for (const query of ['runtime', 'credential', 'profile', 'component', 'login', 'accounts']) {
+    for (const query of ['runtime', 'profile', 'component', 'ai login', 'fleet']) {
       expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-machines')?.href).toBe(
         '/d/daemon-alpha/settings#machines',
       );
     }
+  });
+
+  test('finds Accounts, Secure copy and Secrets by their own words, not Machines', () => {
+    const reach = (query: string, id: string) =>
+      settingsPaletteEntries(alpha, query).find(item => item.id === `setting-link-${id}`)?.href;
+    for (const query of ['accounts', 'sign in', '2fa', 'password']) {
+      expect(reach(query, 'accounts')).toBe('/d/daemon-alpha/settings#accounts');
+    }
+    for (const query of ['secure copy', 'standing rule', 'paste rules', 'task plan']) {
+      expect(reach(query, 'secure-copy')).toBe('/d/daemon-alpha/settings#secure-copy');
+    }
+    for (const query of ['secrets', 'env', 'api key']) {
+      expect(reach(query, 'secrets')).toBe('/d/daemon-alpha/settings#secrets');
+    }
+    expect(reach('accounts', 'machines')).toBeUndefined();
+    expect(reach('accounts', 'warden')).toBeUndefined();
   });
 
   test('finds the passkey panel by what a person types after a confirm prompt, on the daemon searched', () => {

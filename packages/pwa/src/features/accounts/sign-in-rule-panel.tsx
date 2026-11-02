@@ -114,10 +114,11 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
         </div>
       </div>
     );
-  const replacing = pending && existing !== 'unreadable' ? existing : undefined;
-  // The rule it replaces decides how the sheet opens: a suspended one is resumed, an ended one renewed.
+  // A named rule (Change, Resume, Approve again from its card) is shown as the terms in force now, beside the new ones.
+  const replacing = named ? props.before : pending && existing !== 'unreadable' ? existing : undefined;
+  // A rule found by the daemon decides how the sheet opens: a suspended one is resumed, an ended one renewed.
   const origin: RuleOrigin =
-    replacing === undefined || replacing.status === 'active'
+    named || replacing === undefined || replacing.status === 'active'
       ? props.origin
       : replacing.status === 'suspended'
         ? 'resume'

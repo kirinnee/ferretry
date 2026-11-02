@@ -121,22 +121,15 @@ describe('destinationPaletteEntries', () => {
   });
 
   /**
-   * ONE DESTINATION ANSWERS TO "accounts" NOW, and it is Warden — which is the honest answer.
-   *
-   * This test used to pin the OPPOSITE: two destinations claimed the word and the Accounts page had to
-   * come first, because it WAS the accounts. Accounts is no longer a destination at all — it is Fleet's
-   * child panel inside one daemon's settings, and a panel has no pathname for `destinationExists` to
-   * resolve — so the entry and its keywords were deleted rather than left pointing at a dead route.
-   *
-   * The assertion is kept rather than dropped because what it guards is unchanged: Warden keeps its own
-   * claim on the word (its verdicts are about accounts), and this module still ranks nothing, so a row
-   * appearing here can only ever come from `APP_BAR_DESTINATIONS`. If a future change re-adds an
-   * accounts row to the bar, this fails and says so.
+   * NO DESTINATION ANSWERS TO "accounts": Accounts is a settings panel (the settings links find it), and Warden is
+   * about the AI login a ferret works under, so it answers to "ai login" and no longer to "accounts". If a future
+   * change re-adds an accounts row to the bar, or Warden claims the word again, this fails and says so.
    */
-  it('answers “accounts” with Warden alone, now that Accounts is a settings panel and not a destination', () => {
-    const entries = destinationPaletteEntries('accounts', APP_BAR_DESTINATIONS, alpha);
-
-    expect(entries.map(entry => entry.id)).toEqual(['destination-warden']);
+  it('answers “accounts” with no destination, and “ai login” with Warden', () => {
+    expect(destinationPaletteEntries('accounts', APP_BAR_DESTINATIONS, alpha)).toEqual([]);
+    expect(destinationPaletteEntries('ai login', APP_BAR_DESTINATIONS, alpha).map(entry => entry.id)).toEqual([
+      'destination-warden',
+    ]);
   });
 
   it('returns nothing when the query matches no destination', () => {

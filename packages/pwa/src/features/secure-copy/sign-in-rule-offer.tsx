@@ -1,6 +1,6 @@
 /**
  * The quiet offer after the owner hand-tapped a saved sign-in on an input card: "Don’t ask again for this sign-in…".
- * It only opens the owner's own sheet with nothing ticked; no rule exists until the owner approves it with a passkey.
+ * It only opens the owner's own sheet with the usual ticks (the password, and the username when it is saved), which the owner can change; no rule exists until the owner approves it with a passkey.
  * The names come from the secrets-gated accounts route, read when the owner opens the sheet. It is offered ONLY once the
  * daemon says this sign-in is eligible: while that is read, when it is not eligible, and when the machine cannot answer,
  * nothing is drawn, so the offer never leads to a sheet that says no.

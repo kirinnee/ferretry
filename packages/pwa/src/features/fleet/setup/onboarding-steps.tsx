@@ -3,7 +3,7 @@
  * its subject in Settings, so a step and its "Set up later" panel can never disagree:
  *
  * - **Pair** — this device is already paired (the screen is only reachable through a pairing); a
- *   phone can be paired too, with Settings › Add a device's own surface.
+ *   phone can be paired too, with Settings › Devices's own surface.
  * - **Start from** — fresh, or Copy settings from another machine (`clone.tsx`), embedded in the step with no
  *   stepper of its own.
  * - **Claude Code**, **Codex** — one screen each that detects, imports, signs in and names the runtime
@@ -76,7 +76,7 @@ export function OnboardingPairStep({
       </SetupNote>
       <SetupSection title="Another device" name="pair-another">
         <p className="m-0 text-cell leading-base text-muted">
-          Pair a phone now, or later from Settings › Add a device. A pairing code is single-use and lasts two minutes.
+          Pair a phone now, or later from Settings › Devices. A pairing code is single-use and lasts two minutes.
         </p>
         <div>
           <Button type="button" data-onboarding-pair-phone="" onClick={() => setOpen(true)}>

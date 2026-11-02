@@ -29,6 +29,7 @@ import {
   signInRuleChallenge,
   signInRuleEffective,
   signInRuleNarrowed,
+  signInRuleScopeWords,
   signInRuleSubject,
   signInRuleSuspensionOf,
   signInRuleSuspensionWords,
@@ -941,6 +942,11 @@ describe('standing sign-in rules: what is in force', () => {
     ])
       should(signInRuleNarrowed(capped, narrow, NOW).ok).be.false();
     should(signInRuleNarrowed(record(), { dropTotp: true }, NOW).ok).be.false();
+    should(signInRuleNarrowed(capped, { expiresAt: new Date(NOW + HOUR - 1).toISOString() }, NOW)).deepEqual({
+      ok: false,
+      reason: 'a rule lasts at least 1 hour',
+    });
+    should(signInRuleNarrowed(capped, { expiresAt: new Date(NOW + HOUR).toISOString() }, NOW).ok).be.true();
     should(
       signInRuleNarrowed(record({ body: totpBody(), narrowed: { dropTotp: true } }), { dropTotp: true }, NOW).ok,
     ).be.false();
@@ -1470,5 +1476,13 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
   it('should accept a rule with its code key and up to two notes', () => {
     const noted = [...staged.rows, { label: 'Note', value: 'a' }, { label: 'Note', value: 'b' }];
     should(SignInRuleStagedSchema.safeParse({ ...staged, rows: noted }).success).be.true();
+  });
+});
+
+describe('standing sign-in rules: who a rule is for', () => {
+  it('should say each scope the one way every surface reads it', () => {
+    should(signInRuleScopeWords({ kind: 'any' })).equal('Any ferret on this machine');
+    should(signInRuleScopeWords({ kind: 'project', project: 'P1' as never })).equal('Ferrets in board project P1');
+    should(signInRuleScopeWords({ kind: 'session', session: 'S1' as never })).equal('Session S1');
   });
 });

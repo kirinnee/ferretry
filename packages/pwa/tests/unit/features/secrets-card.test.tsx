@@ -328,7 +328,7 @@ describe('SecretsSurface', () => {
     expect(paths).toEqual(['/v1/secrets']);
     const rendered = text(renderer.toJSON());
     expect(rendered).not.toContain('Accounts');
-    expect(rendered).not.toContain('Pastes approved in advance');
+    expect(rendered).not.toContain('Paste rules');
   });
 
   it('reports a failed read as a refusal, NEVER as an empty store', async () => {

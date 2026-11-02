@@ -7,6 +7,7 @@ import {
   CompactionRecordSchema,
   expectedCompaction,
   MAX_COMPACTION_MS,
+  PANE_GRACE_MS,
   paneCompaction,
   paneShowsCompaction,
   resolveCompaction,
@@ -340,15 +341,79 @@ describe('resolveCompaction', () => {
     should(verdict.finished).be.undefined();
   });
 
-  it('should drop a tracked compaction whose line vanished with no boundary after it', () => {
+  it('should drop a tracked compaction whose line stayed gone past the grace with no boundary after it', () => {
     // Arrange — interrupted: the only boundary on record is from before this one began.
+    const tracker = { startedAt: at(20), missedAt: ms(30) };
     const verdict = resolveCompaction(
-      evidence({ paneCompacting: false, tracker: { startedAt: at(20) }, events: [boundary(3)], nowMs: ms(30) }),
+      evidence({ paneCompacting: false, tracker, events: [boundary(3)], nowMs: ms(30) + PANE_GRACE_MS }),
     );
 
     // Assert — back to reading the old boundary from the tail alone.
     should(verdict.tracker).be.undefined();
     should(verdict.compaction).deepEqual({ phase: 'done', endedAt: at(3) });
+  });
+
+  it('should hold a running compaction, on its own start, through a frame that lacks its line', () => {
+    // Arrange — one capture landed mid-repaint: no Compacting line, no boundary.
+    const tracker = { startedAt: at(2), tokensBefore: 5, percent: 34 };
+
+    // Act
+    const gap = resolveCompaction(evidence({ paneCompacting: false, tracker, nowMs: ms(30) }));
+    const still = resolveCompaction(evidence({ paneCompacting: false, tracker: gap.tracker, nowMs: ms(33) }));
+
+    // Assert — the card stays, its clock and percent unmoved, and the gap is remembered from its first frame.
+    should(gap.tracker).deepEqual({ ...tracker, missedAt: ms(30) });
+    should(gap.compaction).containDeep({ phase: 'running', startedAt: at(2), tokensBefore: 5, percent: 34 });
+    should(still.tracker).equal(gap.tracker);
+    should(still.compaction).containDeep({ phase: 'running', startedAt: at(2), percent: 34 });
+  });
+
+  it('should keep the SAME start when the line returns after a gap, so the clock never restarts', () => {
+    // Arrange
+    const gap = resolveCompaction(evidence({ paneCompacting: false, tracker: { startedAt: at(2) }, nowMs: ms(30) }));
+
+    // Act
+    const back = resolveCompaction(evidence({ paneCompacting: true, tracker: gap.tracker, nowMs: ms(31) }));
+
+    // Assert — no second tracker was begun, and the gap is forgotten.
+    should(back.tracker).deepEqual({ startedAt: at(2) });
+    should(back.compaction).containDeep({ phase: 'running', startedAt: at(2) });
+  });
+
+  it('should carry the last percent and tokens through a frame that paints none, and take a newer one', () => {
+    // Arrange
+    const first = resolveCompaction(
+      evidence({
+        paneCompacting: true,
+        progress: { percent: 34, tokensWritten: 9_000 },
+        tracker: { startedAt: at(2) },
+      }),
+    );
+
+    // Act
+    const bare = resolveCompaction(evidence({ paneCompacting: true, tracker: first.tracker }));
+    const newer = resolveCompaction(
+      evidence({ paneCompacting: true, progress: { percent: 40 }, tracker: bare.tracker }),
+    );
+
+    // Assert
+    should(bare.compaction).containDeep({ phase: 'running', percent: 34, tokensWritten: 9_000 });
+    should(bare.tracker).equal(first.tracker);
+    should(newer.compaction).containDeep({ phase: 'running', percent: 40, tokensWritten: 9_000 });
+  });
+
+  it('should end a held compaction at its boundary even mid-gap', () => {
+    // Arrange
+    const tracker = { startedAt: at(0), missedAt: ms(40) };
+
+    // Act
+    const verdict = resolveCompaction(
+      evidence({ paneCompacting: false, tracker, events: [boundary(41)], nowMs: ms(42) }),
+    );
+
+    // Assert
+    should(verdict.compaction).containDeep({ phase: 'done', startedAt: at(0), endedAt: at(41) });
+    should(verdict.finished).deepEqual({ durationMs: 41_000 });
   });
 
   it('should read a finished compaction from the tail alone, with the sizes either side of the boundary', () => {
@@ -380,7 +445,12 @@ describe('resolveCompaction', () => {
 
   it('should not carry a start from a tracker that began after the boundary it is shown with', () => {
     const verdict = resolveCompaction(
-      evidence({ paneCompacting: false, tracker: { startedAt: at(20) }, events: [boundary(5)], nowMs: ms(30) }),
+      evidence({
+        paneCompacting: false,
+        tracker: { startedAt: at(20), missedAt: ms(20) },
+        events: [boundary(5)],
+        nowMs: ms(30),
+      }),
     );
 
     should(verdict.compaction).not.have.property('startedAt');

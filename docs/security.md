@@ -168,7 +168,7 @@ keys or add a device.
 ### Lost or stolen phone
 
 1. **Revoke the device.** At the machine: `fy device ls`, then `fy device revoke <device>`. Or from
-   another device: Settings, open the machine and its **Machine** tab, then **Add a device**, find the device and tap **Revoke**. This
+   another device: Settings, open the machine and its **Machine** tab, then **Devices**, find the device and tap **Revoke**. This
    closes its connections, ends its unlock and forgets its passkeys, at once.
 2. Do this on **every** machine that phone was paired with.
 3. Check the audit log for what it did: Settings › ‹machine› › Machine › Security log, or `fy daemon audit` at the machine.

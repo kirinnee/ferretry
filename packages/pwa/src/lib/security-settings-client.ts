@@ -51,6 +51,16 @@ export function unlockStaysSentence(hours: number): string {
   return `It stays unlocked on this device for ${describeSettingValue('unlockValidityHours', hours)}.`;
 }
 
+/**
+ * The line under a step-up prompt: how long one confirmation covers changes, in the machine's own
+ * `stepUpWindowMinutes` (0: every change asks, so this one covers only itself).
+ */
+export function stepUpStaysSentence(minutes: number): string {
+  return minutes === 0
+    ? 'This covers this change only. This machine asks again for the next one.'
+    : `This covers changes on this machine for ${describeSettingValue('stepUpWindowMinutes', minutes)}, in this open copy of the app. Closing the page ends it.`;
+}
+
 /** The same line when the machine's number could not be read. */
 export const UNLOCK_STAYS_FALLBACK = 'It stays unlocked on this device for a few hours, as this machine is set.';
 

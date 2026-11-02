@@ -34,6 +34,33 @@ describe('Transcript compaction', () => {
     expect(mounted.container.querySelector('.fy-live-activity')).toBeNull();
   });
 
+  test('keeps the same bar, and its clock from the daemon’s start, across samples and a stream gap', async () => {
+    const startedAt = new Date(Date.now() - 125_000).toISOString();
+    const running = (percent?: number): SessionLiveActivity =>
+      frame({
+        phase: 'running',
+        startedAt,
+        expectedMs: 60_000,
+        basis: 'typical',
+        ...(percent === undefined ? {} : { percent }),
+      });
+    mounted = await mount(<Transcript busy daemonId="d" entries={entries} live={running(34)} sessionId="s" />);
+    const card = mounted.container.querySelector('[data-compaction="running"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toMatch(/2m \d+s/);
+
+    // A sample with no bar, a quiet gap (no sample at all), then the stream's next sample.
+    await mounted.render(<Transcript busy daemonId="d" entries={entries} live={running()} sessionId="s" />);
+    await mounted.render(<Transcript busy daemonId="d" entries={entries} live={running()} sessionId="s" />);
+    await mounted.render(<Transcript busy daemonId="d" entries={entries} live={running(40)} sessionId="s" />);
+
+    const after = mounted.container.querySelector('[data-compaction="running"]');
+    expect(after).toBe(card);
+    expect(after?.isConnected).toBe(true);
+    expect(after?.textContent).toMatch(/2m \d+s/);
+    expect(after?.textContent).toContain('40%');
+  });
+
   test('puts the finished divider where the compaction happened', async () => {
     const live = frame({
       phase: 'done',

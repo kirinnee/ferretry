@@ -343,7 +343,7 @@ const ACT_VERB: Readonly<Record<JevAct, string>> = {
   resume: 'resume it',
   restart: 'restart it',
   stop: 'stop it',
-  failover: 'move it to another account',
+  failover: 'move it to another AI login',
 };
 
 const ACT_ALONE: Readonly<Record<JevAct, string>> = {
@@ -374,7 +374,7 @@ const checkCause = (check: WardenJevCheck): string => {
         ? `Jev was ${sure} sure, but may not act alone`
         : `Jev would ${ACT_VERB[check.act]} (${sure} sure), but ${ACT_ALONE[check.act]} alone is off`;
     case 'cannot_choose_login':
-      return `Jev would move it to another account (${sure} sure), but cannot choose which`;
+      return `Jev would move it to another AI login (${sure} sure), but cannot choose which`;
     case 'not_sure_enough':
       return `Jev was only ${sure} sure${act === undefined ? '' : ` it should ${act}`}, below your bar`;
     case 'no_message':

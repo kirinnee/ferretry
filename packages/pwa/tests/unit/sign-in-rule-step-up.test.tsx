@@ -1,7 +1,11 @@
 /** The passkey prompt for a standing rule: the approved rows and the red block are separate lists, from structure. */
 
 import { describe, expect, it } from 'bun:test';
-import { SIGN_IN_RULE_ROOT_WARNING, SIGN_IN_RULE_TERMINAL_RESIDUAL } from '@ferretry/protocol';
+import {
+  SIGN_IN_RULE_AUTO_RECIPE_WARNING,
+  SIGN_IN_RULE_ROOT_WARNING,
+  SIGN_IN_RULE_TERMINAL_RESIDUAL,
+} from '@ferretry/protocol';
 import { StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { passkeyWords } from '../../src/lib/sign-in-rules.ts';
@@ -66,5 +70,52 @@ describe('the passkey prompt for a terminal rule', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('the passkey prompt for a page rule (C1320-3)', () => {
+  it('names the site and the account, so the owner sees whose sign-in the passkey approves', async () => {
+    const staged = stagedRule();
+    const mounted = await asked(passkeyWords(staged));
+    try {
+      const rows = texts(mounted.container, '[data-step-up-row]');
+      expect(rows.some(row => row.includes('Site') && row.includes('github.com'))).toBe(true);
+      expect(
+        rows.some(row => row.includes('Account') && row.includes('github work') && row.includes('kirin@atomi.cloud')),
+      ).toBe(true);
+      expect(texts(mounted.container, '[data-step-up-row] dt')).toEqual(staged.rows.map(row => row.label));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('the passkey prompt splits what is red from what is amber', () => {
+  it('draws a caution apart from the red block, and no red block for a caution alone', async () => {
+    const mounted = await asked({ does: 'Do it', rows: [], warnings: [], cautions: ['This rule types a code.'] });
+    try {
+      expect(texts(mounted.container, '[data-step-up-caution]')).toEqual(['This rule types a code.']);
+      expect(mounted.container.querySelector('[data-step-up-warnings]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+    const both = await asked({ does: 'Do it', rows: [], warnings: ['Root.'], cautions: ['Careful.'] });
+    try {
+      const warnings = must(both.container.querySelector('[data-step-up-warnings]'), 'the warnings');
+      expect(texts(warnings, 'p')).toEqual(['Root.']);
+      expect(warnings.querySelector('[data-step-up-caution]')).toBeNull();
+      expect(texts(both.container, '[data-step-up-caution]')).toEqual(['Careful.']);
+    } finally {
+      await both.unmount();
+    }
+  });
+
+  it('puts a root or typed-code flag in the red list and an automatic-recipe flag in the amber one', () => {
+    const recipe = passkeyWords(stagedRule({ autoRecipe: true }));
+    expect(recipe.cautions).toEqual([SIGN_IN_RULE_AUTO_RECIPE_WARNING]);
+    expect(recipe.warnings).toEqual([]);
+    const root = passkeyWords(machineStage());
+    expect(root.warnings).toContain(SIGN_IN_RULE_ROOT_WARNING);
+    expect(root.cautions).toEqual([]);
   });
 });

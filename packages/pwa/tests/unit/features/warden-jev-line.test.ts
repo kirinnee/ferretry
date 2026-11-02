@@ -34,7 +34,7 @@ describe('jevBeforeLine', () => {
     [
       'a failover',
       handed({ why: 'cannot_choose_login', act: 'failover', confidence: 0.9 }),
-      'Jev: would move it to another account (90%), cannot pick which · $0.0041 → investigated',
+      'Jev: would move it to another AI login (90%), cannot pick which · $0.0041 → investigated',
     ],
     [
       'a nudge with no message',
@@ -94,7 +94,7 @@ describe('jevBeforeLine', () => {
     [
       'an earlier act with no confidence',
       { verdict: 'not_asked', why: 'already_acted', act: 'failover' },
-      'Jev: already moved it to another account (0%) — still flagged',
+      'Jev: already moved it to another AI login (0%) — still flagged',
     ],
     ['an earlier act unnamed', { verdict: 'not_asked', why: 'already_acted' }, 'Jev: already acted — still flagged'],
     ['no record', { verdict: 'not_asked', why: 'no_record' }, 'Jev: no record — queued before Jev’s checks were kept'],

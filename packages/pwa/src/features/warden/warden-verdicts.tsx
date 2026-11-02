@@ -69,7 +69,7 @@ export const verdictProvenanceLine = (spawn?: WardenVerdictSpawnInfo): string =>
 };
 
 export const switchedAccountCopy = (spawn?: WardenVerdictSpawnInfo): string | null =>
-  spawn?.failedOver ? 'switched account' : null;
+  spawn?.failedOver ? 'switched AI login' : null;
 
 /** State why the Warden used a different account, without inventing a reason. */
 export const failoverReasonCopy = (spawn?: WardenVerdictSpawnInfo): string => {

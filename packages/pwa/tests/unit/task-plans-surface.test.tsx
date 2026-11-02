@@ -59,7 +59,7 @@ describe('the card', () => {
       expect(text).toContain('Waiting for you until');
       expect(text).toContain('Allowed until');
       expect(text).toContain('Account: github work · kirin@atomi.cloud');
-      expect(text).toContain('Includes the 6-digit code');
+      expect(text).toContain('Includes the 2FA code');
       expect(text).toContain('1 of 2 uses left');
       expect(q(mounted.container, '[data-task-plans-revoke-all]').textContent).toBe('End this plan');
     } finally {

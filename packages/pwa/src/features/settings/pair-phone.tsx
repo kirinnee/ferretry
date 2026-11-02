@@ -1,7 +1,7 @@
 /**
  * PAIRING A PHONE FROM THE MACHINE MENU — a second door into the one Add-a-device surface.
  *
- * Minting a code for another device used to live only at Settings › ‹machine› › Add a device. The act
+ * Minting a code for another device used to live only at Settings › ‹machine› › Devices. The act
  * belongs to one machine, and the machine switcher at the top of the sessions bar is already "the
  * machine" menu, so it carries the entry too (and the finder offers the same act). Both open THIS
  * wrapper, which renders the existing `AddDeviceSurface` unchanged: the QR, the passkey prompt the
@@ -38,7 +38,7 @@ export const pairPhoneLabel = (machineName: string): string => `Pair a phone wit
 
 /** What the act does, for the finder row and the frame's own subtitle. */
 export const PAIR_PHONE_DESCRIPTION =
-  'Show a QR code another phone or browser scans to reach this machine. Revoke devices in Settings › Add a device.';
+  'Show a QR code another phone or browser scans to reach this machine. Revoke devices in Settings › Devices.';
 
 /**
  * Whether this caller may be offered the act at all.
@@ -61,7 +61,7 @@ export type PairingGrantsClientFactory = (connection: DaemonConnection) => Promi
  *
  * KEYED BY THE MACHINE. An answer read for one daemon is never returned for another: switching machines
  * reads false until the new one has answered. A read that fails reads false too — the entry is a
- * shortcut, Settings › Add a device is still there and explains whatever went wrong in full.
+ * shortcut, Settings › Devices is still there and explains whatever went wrong in full.
  */
 export function usePairPhoneAllowed(
   connection: DaemonConnection | undefined,

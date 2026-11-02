@@ -848,7 +848,7 @@ describe('AddDeviceSurface', () => {
     try {
       const row = must(
         list.container.querySelector<HTMLButtonElement>('[data-daemon-panel="devices"]'),
-        'the Add a device row',
+        'the Devices row',
       );
       // Act
       await interact(() => row.click());

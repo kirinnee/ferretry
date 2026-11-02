@@ -737,6 +737,17 @@ const rowLine = (text: string): string => {
     : `${flat.slice(0, TASK_PLAN_SUMMARY_LINE_MAX_CHARS - 1)}…`;
 };
 
+/**
+ * THE "WHO" OF A RULE, one wording on every surface (the rows' Who line, the app's cards and the CLI): any ferret on the
+ * machine, the ferrets of one board project, or one session. The ids are the ones the rule pins.
+ */
+export const signInRuleScopeWords = (scope: SignInRuleScope): string =>
+  scope.kind === 'any'
+    ? 'Any ferret on this machine'
+    : scope.kind === 'project'
+      ? `Ferrets in board project ${scope.project}`
+      : `Session ${scope.session}`;
+
 /** The facts {@link signInRuleWords} turns into words: all resolved by the daemon, none a value. */
 export interface SignInRuleWordsFacts {
   readonly fields: readonly SignInField[];
@@ -773,12 +784,7 @@ export function signInRuleWords(facts: SignInRuleWordsFacts): {
   readonly rows: SignInRuleRow[];
 } {
   const { place, scope } = facts;
-  const who =
-    scope.kind === 'any'
-      ? 'Any ferret on this machine'
-      : scope.kind === 'project'
-        ? `Ferrets in board project ${scope.project}`
-        : `Session ${scope.session}`;
+  const who = signInRuleScopeWords(scope);
   const forWhom =
     scope.kind === 'any'
       ? 'any ferret'
@@ -1006,6 +1012,8 @@ export function signInRuleNarrowed(
   if (narrow.expiresAt !== undefined) {
     const at = Date.parse(narrow.expiresAt);
     if (!(at < Date.parse(effective.expiresAt))) return { ok: false, reason: 'a narrowed rule ends earlier' };
+    if (at < now + SIGN_IN_RULE_MIN_SECONDS * 1_000)
+      return { ok: false, reason: `a rule lasts at least ${String(SIGN_IN_RULE_MIN_SECONDS / 3_600)} hour` };
     if (at < Date.parse(record.body.createdAt)) return { ok: false, reason: 'a rule cannot end before it began' };
   }
   if (narrow.uses !== undefined && effective.uses !== undefined && !(narrow.uses < effective.uses))

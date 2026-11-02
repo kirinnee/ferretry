@@ -54,9 +54,12 @@ class Ledgers implements AgendaLedgerRepository {
   }
 }
 
+/** The ferrets &F291 passed through, in order, each change of hands raising its gate again before B138. */
+const F291_FERRETS = ['coleson', 'khristina', 'dyani', 'rayce', 'avary'] as const;
+
 /** `lead` started `child`, which started `grandchild`; the card is `child`'s, worked by `grandchild`. */
 const LEADS: Readonly<Record<string, string>> = { child: 'lead', grandchild: 'child' };
-const SESSIONS = new Set(['lead', 'child', 'grandchild', 'stranger']);
+const SESSIONS = new Set(['lead', 'child', 'grandchild', 'stranger', 'peer', 'other', ...F291_FERRETS]);
 
 const HUMAN: AgendaActor = { kind: 'human' };
 const OWNER: BoardCaller = { kind: 'owner' };
@@ -87,12 +90,36 @@ interface Faults {
   readonly refuses?: readonly BoardTaskActionRequest['action'][];
   /** Telling the ferret throws. */
   readonly tellThrows?: boolean;
+  /** Listing every session throws this many times, then answers. */
+  readonly listAllThrows?: number;
+  /** These sessions' agendas cannot be read. */
+  readonly unreadable?: readonly string[];
+  /** Resolving an item on these sessions' agendas throws. */
+  readonly resolveThrows?: readonly string[];
+  /** The duplicates sweep already ran. */
+  readonly swept?: boolean;
+}
+
+/** The duplicates sweep's marker, in memory. */
+class Marker {
+  readonly records: { readonly at: string; readonly closed: readonly string[] }[] = [];
+  constructor(private readonly already: boolean) {}
+
+  async ran(): Promise<boolean> {
+    return this.already || this.records.length > 0;
+  }
+
+  async record(at: string, closed: readonly string[]): Promise<void> {
+    this.records.push({ at, closed });
+  }
 }
 
 const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const ledgers = new Ledgers();
   const warnings: string[] = [];
   const told: { readonly task: string; readonly message: string; readonly key: string }[] = [];
+  const marker = new Marker(faults.swept ?? true);
+  let listAllThrows = faults.listAllThrows ?? 0;
   const store = new MemoryBoardStore(cards);
   const reopen = new FakeReopen();
   const done = new FakeDone();
@@ -112,12 +139,18 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const cards_ = new BoardGateCards(board, { project: async () => ({ name: 'Ferretry' }) });
   gates = new GateItems({
     agenda: {
-      list: async sessionId => await agenda.list(sessionId),
+      list: async sessionId => {
+        if (faults.unreadable?.includes(sessionId) === true) throw new Error('the agenda is unreadable');
+        return await agenda.list(sessionId);
+      },
       raise: async (sessionId, request, actor) => {
         if (faults.raiseThrows === true) throw new Error('the agenda is unwritable');
         return await agenda.raise(sessionId, request, actor);
       },
-      resolve: async (sessionId, id, actor, note) => await agenda.resolve(sessionId, id, actor, note),
+      resolve: async (sessionId, id, actor, note) => {
+        if (faults.resolveThrows?.includes(sessionId) === true) throw new Error('the agenda is unwritable');
+        return await agenda.resolve(sessionId, id, actor, note);
+      },
       answer: async (sessionId, id, response, actor, note) => await agenda.answer(sessionId, id, response, actor, note),
     },
     board: {
@@ -130,6 +163,17 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
       },
     },
     lanes: stageGateLanes,
+    sessions: {
+      all: async () => {
+        if (listAllThrows > 0) {
+          listAllThrows -= 1;
+          throw new Error('the sessions cannot be listed');
+        }
+        return [...new Set([...SESSIONS, ...ledgers.ledgers.keys()])];
+      },
+    },
+    marker,
+    now: () => NOW,
     words: {
       told: async (task, message, key) => {
         if (faults.tellThrows === true) throw new Error('nobody to tell');
@@ -173,6 +217,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     agenda,
     ledgers,
     board,
+    marker,
     gates: gates as GateItems,
     store,
     reopen,
@@ -1206,5 +1251,429 @@ describe('an external card at a gate always has its item', () => {
     // Assert
     should(raised).equal(0);
     should(await world.board.audienceOf(world.stored())).equal('internal');
+  });
+});
+
+describe('a card that changes hands keeps ONE gate item (&B138)', () => {
+  const DAEMON_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const LATER = '2026-10-30T12:00:00.000Z';
+  const UNTIL = '2026-11-30T10:00:00.000Z';
+
+  type World = ReturnType<typeof fixture>;
+
+  const assign = async (world: World, to: string, id = 'F1') =>
+    await world.board.act(id, BoardTaskActionRequestSchema.parse({ action: 'assign', assignee: to }), OWNER);
+
+  /** Every open gate item on every agenda, with the agenda that holds it. */
+  const gatesEverywhere = (world: World) =>
+    [...world.ledgers.ledgers.keys()].flatMap(sessionId =>
+      world.open(sessionId).flatMap(item => (item.gate === undefined ? [] : [{ sessionId, id: item.id, item }])),
+    );
+
+  /** Raises the card's gate as the daemon did before B138, straight onto `sessionId`'s agenda. */
+  const raiseOn = async (world: World, sessionId: string, waitingSince = NOW, id = 'F1') => {
+    const task = world.stored(id);
+    const gate = gateOf(
+      { task, laneSet: lanes(PROJECT), audience: 'external', projectName: 'Ferretry' },
+      stageGateLanes,
+    );
+    if (gate === undefined) throw new Error('the card is at no gate');
+    const raised = await world.agenda.raise(sessionId, { ...gateRaise(gate, task), waitingSince }, DAEMON_ACTOR);
+    if (!raised.ok || raised.item === undefined) throw new Error('no gate item raised');
+    return raised.item;
+  };
+
+  /** Rewrites one open item in place, as a later turn of its conversation would have left it. */
+  const rewrite = (world: World, sessionId: string, id: string, change: (item: AgendaItem) => AgendaItem) => {
+    const ledger = world.ledgers.ledgers.get(sessionId) as AgendaLedger;
+    world.ledgers.ledgers.set(sessionId, {
+      ...ledger,
+      entries: ledger.entries.map(entry =>
+        entry.lifecycle === 'active' && entry.item.id === id ? { ...entry, item: change(entry.item) } : entry,
+      ),
+    });
+  };
+
+  it('reassigned twice, the card has ONE open gate item: moved to its ferret with the owner’s snooze', async () => {
+    // Arrange — asked on the assignee's agenda, and snoozed by the owner there
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    const snoozed = await world.agenda.snooze('grandchild', (first as AgendaItem).id, UNTIL, HUMAN);
+
+    // Act — the owner hands the card to one ferret, then another
+    await assign(world, 'peer');
+    await assign(world, 'other');
+
+    // Assert — one open item, on the last ferret's agenda, still asleep until the owner's time
+    should(snoozed.ok).be.true();
+    const open = gatesEverywhere(world);
+    should(open.map(each => each.sessionId)).eql(['other']);
+    should(open[0]?.item).match({
+      sourceRef: 'gate:F1:tested:1',
+      waitingSince: NOW,
+      parked: { reason: 'snoozed', until: UNTIL },
+    });
+    // … and each one it replaced is closed, saying where the card's item went
+    should(world.closed('grandchild')[0]?.resolutionNote).equal(
+      "the card changed hands; its gate item is now !A1 on peer's agenda",
+    );
+    should(world.closed('peer')[0]?.resolutionNote).equal(
+      "the card changed hands; its gate item is now !A1 on other's agenda",
+    );
+  });
+
+  it('carries the item’s history and turn over, and keeps them on the one it closes', async () => {
+    // Arrange — the item has a history and is on the ferret's turn
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    rewrite(world, 'grandchild', (first as AgendaItem).id, item => ({
+      ...item,
+      waitingOn: 'ferret',
+      askedAt: LATER,
+      infoRequests: 1,
+      history: [{ at: LATER, kind: 'needs-info', note: 'which build?' }],
+    }));
+
+    // Act
+    await assign(world, 'peer');
+
+    // Assert
+    const history = [{ kind: 'needs-info', note: 'which build?' }];
+    should(world.open('peer')[0]).match({ waitingOn: 'ferret', askedAt: LATER, infoRequests: 1, history });
+    should(world.closed('grandchild')[0]).match({ history });
+  });
+
+  it('hands down through fy new --card and still has ONE gate item', async () => {
+    // Arrange — the lead works its own card, waiting at a gate
+    const world = fixture([external({ laneId: 'tested', owner: 'child', assignee: 'child' })]);
+    await world.gates.backfill();
+
+    // Act — `fy new --card F1` hands it to the lead's sub-ferret, which writes the card again
+    await world.board.handOver('F1', 'child', 'grandchild');
+    await world.gates.written('F1');
+    await world.gates.backfill();
+
+    // Assert
+    should(world.stored().assignee).equal('grandchild');
+    should(gatesEverywhere(world)).have.length(1);
+  });
+
+  it('never asks again a gate the owner already answered on the former ferret’s agenda', async () => {
+    // Arrange — the owner said Not needed while the card was the assignee's
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    await world.agenda.dismiss('grandchild', (first as AgendaItem).id, HUMAN);
+
+    // Act
+    await assign(world, 'peer');
+    await world.gates.backfill();
+
+    // Assert
+    should(gatesEverywhere(world)).be.empty();
+  });
+
+  it('keeps the item on the card’s ferret’s agenda and closes a duplicate left elsewhere', async () => {
+    // Arrange — one on the assignee's agenda, and a newer stray on a former ferret's
+    const world = fixture([external({ laneId: 'tested' })]);
+    await raiseOn(world, 'grandchild');
+    await raiseOn(world, 'peer', LATER);
+
+    // Act
+    await world.gates.written('F1');
+
+    // Assert
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['grandchild']);
+    should(world.closed('peer')[0]?.resolutionNote).equal(
+      "the card changed hands; its gate item is now !A1 on grandchild's agenda",
+    );
+  });
+
+  it('closes the item on a former ferret’s agenda when the card moves on', async () => {
+    // Arrange — the card's item is on a former ferret's agenda
+    const world = fixture([external({ laneId: 'tested', assignee: 'gone', owner: 'ghost' })]);
+    await raiseOn(world, 'peer');
+
+    // Act
+    await world.move('closed');
+
+    // Assert
+    should(gatesEverywhere(world)).be.empty();
+    should(world.closed('peer')[0]?.resolutionNote).equal(GATE_MOVED_ON);
+  });
+
+  it('leaves the item where it is, and says why, when no agenda of the card’s takes it', async () => {
+    // Arrange — the assignee's agenda already closed this gate once, and the owner ferret has none
+    const world = fixture([external({ laneId: 'tested', owner: 'ghost' })]);
+    const first = await raiseOn(world, 'grandchild');
+    await world.agenda.resolve('grandchild', first.id, DAEMON_ACTOR);
+    await raiseOn(world, 'peer');
+
+    // Act
+    await world.gates.written('F1');
+
+    // Assert
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['peer']);
+    should(world.warnings.at(-1)).match(
+      /^the gate item of &F1 in To test stays on peer's agenda: grandchild: already asked there; ghost: /u,
+    );
+  });
+
+  it('closes the Not good conversation of an earlier round on a former ferret’s agenda', async () => {
+    // Arrange — Not good on the first ferret's agenda; the rework goes to another ferret
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    await world.answer((first as AgendaItem).id, choose('Not good'), { note: 'still broken' });
+    await assign(world, 'peer');
+
+    // Act — the rework is done and the card is back at the gate
+    await world.board.trigger('F1', 'release.running');
+
+    // Assert
+    should(world.open('grandchild')).be.empty();
+    should(world.closed('grandchild').find(each => each.sourceRef === 'gate-followup:F1:1')).match({
+      resolutionNote: 'the card is back in To test',
+    });
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['peer']);
+  });
+
+  it('never closes a Not good conversation still going with the owner', async () => {
+    // Arrange — two earlier rounds' conversations: one on the owner's turn, one talked over since the card came back
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    await world.answer((first as AgendaItem).id, choose('Not good'), { note: 'still broken' });
+    const [followup] = world.open();
+    const id = (followup as AgendaItem).id;
+    rewrite(world, 'grandchild', id, ({ waitingOn: _on, askedAt: _at, waitingFor: _for, ...item }) => item);
+    await world.board.trigger('F1', 'release.running');
+    const [second] = world.open().filter(item => item.gate !== undefined);
+    await world.answer((second as AgendaItem).id, choose('Not good'), { note: 'broken again' });
+    const later = world
+      .open()
+      .find(item => item.gate === undefined && item.id !== id && item.sourceRef?.startsWith('gate-followup:'));
+    if (later === undefined) throw new Error('expected a second follow-up');
+    rewrite(world, 'grandchild', later.id, item => ({ ...item, history: [{ at: LATER, kind: 'replied' }] }));
+
+    // Act — back at the gate a third time
+    await world.board.trigger('F1', 'release.running');
+
+    // Assert — both conversations stay open beside the new gate item
+    const open = world.open();
+    should(open.filter(item => item.gate !== undefined)).have.length(1);
+    should(open.filter(item => item.gate === undefined).map(item => item.id)).eql([id, later.id]);
+  });
+
+  it('carries nothing over onto an item that is not a gate, and lets no ferret carry a gate', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [first] = world.open();
+    const carried = { waitingSince: NOW, parked: { reason: 'snoozed' as const, at: NOW, until: UNTIL } };
+
+    // Act
+    const notAGate = await world.agenda.raise(
+      'peer',
+      {
+        source: 'task',
+        sourceRef: 'b138:not-a-gate',
+        subject: 'Anything',
+        why: 'Because.',
+        howToResolve: 'Answer it.',
+        kind: 'info',
+        carried,
+      },
+      DAEMON_ACTOR,
+    );
+    const byAFerret = await world.agenda.raise(
+      'peer',
+      { ...gateRaise((first as AgendaItem).gate as NonNullable<AgendaItem['gate']>, world.stored()), carried },
+      { kind: 'agent', sessionId: 'peer', name: null },
+    );
+
+    // Assert
+    should(notAGate).match({ ok: false, error: { code: 'invalid' } });
+    should(byAFerret).match({ ok: false, error: { code: 'forbidden' } });
+    should(world.open('peer')).be.empty();
+  });
+
+  it('finds a former ferret’s item raised before this daemon started', async () => {
+    // Arrange — a stray item on a ferret's agenda this daemon never raised
+    const world = fixture([external({ laneId: 'tested' })]);
+    await raiseOn(world, 'peer');
+
+    // Act
+    await world.gates.written('F1');
+
+    // Assert — moved to the assignee rather than asked a second time
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['grandchild']);
+  });
+
+  it('looks again for every agenda when listing them failed, and skips one it cannot read', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })], { listAllThrows: 1, unreadable: ['stranger'] });
+    await raiseOn(world, 'peer');
+
+    // Act — the first pass cannot list the agendas, the second can
+    await world.gates.written('F1');
+    const afterFirst = gatesEverywhere(world).map(each => each.sessionId);
+    await world.gates.written('F1');
+
+    // Assert — the first only knew the card's own ferrets and asked there; the second found the stray and closed it
+    should(afterFirst.sort()).eql(['grandchild', 'peer']);
+    should(world.warnings[0]).equal(
+      'the agendas holding gate items could not be listed: the sessions cannot be listed',
+    );
+    should(gatesEverywhere(world).map(each => each.sessionId)).eql(['grandchild']);
+  });
+});
+
+describe('the one-time sweep of duplicate gate items (&B138)', () => {
+  const DAEMON_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+
+  /** When each of &F291's ferrets was asked: in the order it changed hands. */
+  const ASKED: Readonly<Record<(typeof F291_FERRETS)[number], string>> = {
+    coleson: '2026-10-20T10:00:00.000Z',
+    khristina: '2026-10-22T10:00:00.000Z',
+    dyani: '2026-10-24T10:00:00.000Z',
+    rayce: '2026-10-26T10:00:00.000Z',
+    avary: '2026-10-28T10:00:00.000Z',
+  };
+
+  /**
+   * &F291 as the owner found it: one card waiting in To test, its gate asked on every ferret it passed through — the
+   * first three closed, dyani's and avary's open and snoozed — and two Not good conversations from earlier rounds,
+   * still in discussion, on rayce's and coleson's agendas.
+   */
+  const f291 = async (faults: Faults = {}) => {
+    const task = external({
+      id: 'F291',
+      laneId: 'tested',
+      owner: 'lead',
+      assignee: 'avary',
+      title: 'Credentials redesign',
+      history: [
+        { seq: 1, at: ASKED.coleson, actor: { kind: 'owner' }, type: 'created', laneId: 'implement' },
+        {
+          seq: 2,
+          at: NOW,
+          actor: { kind: 'daemon' },
+          type: 'moved',
+          from: 'implement',
+          to: 'tested',
+          backward: false,
+          reason: null,
+          auto: true,
+          trigger: 'release.running',
+        },
+      ],
+    });
+    const world = fixture([task], { swept: false, ...faults });
+    const gate = gateOf(
+      { task, laneSet: lanes(PROJECT), audience: 'external', projectName: 'Ferretry' },
+      stageGateLanes,
+    );
+    if (gate === undefined) throw new Error('F291 is at no gate');
+    for (const sessionId of F291_FERRETS) {
+      const raised = await world.agenda.raise(
+        sessionId,
+        { ...gateRaise(gate, task), waitingSince: ASKED[sessionId] },
+        DAEMON_ACTOR,
+      );
+      const id = (raised.ok ? raised.item?.id : undefined) as AgendaItem['id'];
+      if (sessionId === 'dyani' || sessionId === 'avary') {
+        await world.agenda.snooze(sessionId, id, '2026-12-01T10:00:00.000Z', HUMAN);
+      } else await world.agenda.resolve(sessionId, id, DAEMON_ACTOR, GATE_MOVED_ON);
+    }
+    for (const sessionId of ['rayce', 'coleson']) {
+      await world.agenda.raise(
+        sessionId,
+        {
+          source: 'task',
+          sourceRef: 'gate-followup:F291:1',
+          title: 'Not good: Credentials redesign',
+          kind: 'reply',
+          ask: { kind: 'open-question' },
+          subject: 'What should change in &F291?',
+          why: 'You said &F291 is not good yet.',
+          howToResolve: 'Talk it over with the ferret here.',
+          task: { id: 'F291' },
+          discussion: true,
+          waitingSince: ASKED.coleson,
+        },
+        DAEMON_ACTOR,
+      );
+    }
+    return world;
+  };
+
+  const openGates = (world: Awaited<ReturnType<typeof f291>>) =>
+    F291_FERRETS.flatMap(sessionId =>
+      world.open(sessionId).flatMap(item => (item.gate === undefined ? [] : [{ sessionId, item }])),
+    );
+
+  it('keeps the newest of &F291’s gate items, closes the other with a note, and records that it ran', async () => {
+    // Arrange
+    const world = await f291();
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert — one open gate item, avary's, still snoozed
+    should(openGates(world).map(each => each.sessionId)).eql(['avary']);
+    should(openGates(world)[0]?.item.parked).match({ reason: 'snoozed' });
+    should(world.closed('dyani').at(-1)?.resolutionNote).equal(
+      "closed as a duplicate: the card changed hands; its gate item is now !A1 on avary's agenda",
+    );
+    should(world.marker.records).eql([{ at: NOW, closed: ['dyani !A1'] }]);
+    // … and the earlier round's Not good conversations, untouched since, are closed too
+    should(world.open('rayce')).be.empty();
+    should(world.open('coleson')).be.empty();
+  });
+
+  it('runs once: a second start finds the marker and leaves the agendas to the card’s own pass', async () => {
+    // Arrange
+    const world = await f291();
+    await world.gates.backfill();
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    should(world.marker.records).have.length(1);
+    should(openGates(world)).have.length(1);
+  });
+
+  it('records nothing while an agenda cannot be read or a duplicate cannot be closed, so the next start tries again', async () => {
+    // Arrange
+    const unreadable = await f291({ unreadable: ['stranger'] });
+    const unwritable = await f291({ resolveThrows: ['dyani'] });
+
+    // Act
+    await unreadable.gates.backfill();
+    await unwritable.gates.backfill();
+
+    // Assert
+    should(unreadable.marker.records).be.empty();
+    should(unwritable.marker.records).be.empty();
+    should(unwritable.warnings).containEql(
+      'the sweep of duplicate gate items is unfinished; the next start tries again',
+    );
+  });
+
+  it('warns and goes on with the card’s own pass when the sessions cannot be listed', async () => {
+    // Arrange
+    const world = await f291({ listAllThrows: 1 });
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    should(world.warnings[0]).equal('the sweep of duplicate gate items failed: the sessions cannot be listed');
+    should(world.marker.records).be.empty();
+    should(openGates(world).map(each => each.sessionId)).eql(['avary']);
   });
 });

@@ -102,7 +102,12 @@ import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession }
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
-import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
+import {
+  fetchSecuritySettings,
+  stepUpStaysSentence,
+  UNLOCK_STAYS_FALLBACK,
+  unlockStaysSentence,
+} from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
 import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { MemoryOutboxBackend, type OutboxBackend, SendOutbox } from './send-outbox.ts';
@@ -648,6 +653,11 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       origin: appOrigin,
     }),
     describe: describeStepUpFailure(appOrigin),
+    // The machine's own window, read once as the prompt opens; a failed read leaves the prompt's neutral words.
+    scope: async daemon => {
+      const view = await fetchSecuritySettings(await clients.client(daemon));
+      return stepUpStaysSentence(view.settings.stepUpWindowMinutes);
+    },
   });
   const unlockGate = new StepUpGate({
     ceremony: unlockCeremony({
@@ -1329,15 +1339,15 @@ export function useAddKeyStepUp():
  * there is no prompt and the answer is `undefined`.
  */
 export function useApproveTaskPlanStepUp():
-  | ((daemon: DaemonConnection, stage: TaskPlanStageId, words: string) => Promise<boolean>)
+  | ((daemon: DaemonConnection, stage: TaskPlanStageId, words: StepUpWords) => Promise<boolean>)
   | undefined {
   const store = useContext(StoreContext);
   return useMemo(
     () =>
       store === null
         ? undefined
-        : async (daemon: DaemonConnection, stage: TaskPlanStageId, words: string) =>
-            await store.stepUp.require(daemon, words, 'explicit', 'approve-task-plan', stage),
+        : async (daemon: DaemonConnection, stage: TaskPlanStageId, words: StepUpWords) =>
+            await store.stepUp.require(daemon, words.does, 'explicit', 'approve-task-plan', stage, words),
     [store],
   );
 }
