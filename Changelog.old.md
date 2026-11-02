@@ -1,3 +1,9 @@
+## [4.237.0](https://github.com/kirinnee/ferretry/compare/v4.236.0...v4.237.0) (2026-11-02)
+
+### Features
+
+* **daemon:** move an install to any offered version, with changes, keep or replace, stay or skip (catalogs 3d-3) ([#1328](https://github.com/kirinnee/ferretry/issues/1328)) ([b0ccbb1](https://github.com/kirinnee/ferretry/commit/b0ccbb14f88e4b07d4f09eac3658126d1cacb043))
+
 ## [4.236.0](https://github.com/kirinnee/ferretry/compare/v4.235.1...v4.236.0) (2026-11-02)
 
 ### Features
