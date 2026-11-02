@@ -44,18 +44,16 @@ export function SignInRuleCard({
   const [endIn, setEndIn] = useState('');
   const [endUnit, setEndUnit] = useState<EndUnit>('days');
   const [cap, setCap] = useState('');
+  const [asOf, setAsOf] = useState(() => Date.now());
   const live = rule.status === 'active' || rule.status === 'suspended';
-  const endAt = () => (endIn === '' ? undefined : narrowEnd(endIn, endUnit, rule.expiresAt, Date.now()));
+  const endAt = () => (endIn === '' ? undefined : narrowEnd(endIn, endUnit, rule.expiresAt, asOf));
   const end = endAt();
 
-  const narrowed = (): SignInRuleNarrow => {
-    const fresh = endAt();
-    return {
-      ...(dropTotp ? { dropTotp: true as const } : {}),
-      ...(fresh?.ok === true ? { expiresAt: fresh.at } : {}),
-      ...(cap === '' ? {} : { uses: Number(cap) }),
-    };
-  };
+  const narrowed = (at: string | undefined): SignInRuleNarrow => ({
+    ...(dropTotp ? { dropTotp: true as const } : {}),
+    ...(at === undefined ? {} : { expiresAt: at }),
+    ...(cap === '' ? {} : { uses: Number(cap) }),
+  });
   const narrowProblem =
     end?.ok === false
       ? end.problem
@@ -163,7 +161,13 @@ export function SignInRuleCard({
               data-variant="primary"
               disabled={busy || empty || narrowProblem !== undefined}
               onClick={() => {
-                onNarrow(narrowed());
+                // The form may have been open a while: the end is read against the clock now, and refused rather than dropped.
+                const fresh = endIn === '' ? undefined : narrowEnd(endIn, endUnit, rule.expiresAt, Date.now());
+                if (fresh?.ok === false) {
+                  setAsOf(Date.now());
+                  return;
+                }
+                onNarrow(narrowed(fresh?.at));
                 setNarrowing(false);
                 setDropTotp(false);
                 setEndIn('');
@@ -182,7 +186,10 @@ export function SignInRuleCard({
               className="kt-btn min-h-[44px]"
               data-rule-narrow=""
               disabled={busy}
-              onClick={() => setNarrowing(true)}
+              onClick={() => {
+                setAsOf(Date.now());
+                setNarrowing(true);
+              }}
               type="button"
             >
               Narrow

@@ -17,11 +17,22 @@ describe('reading the open input requests of a session', () => {
       wanted.sessionId,
       wanted.id,
     );
-    expect(found?.id).toBe(wanted.id);
+    expect(found).toMatchObject({ id: wanted.id });
   });
 
   it('says nothing is there when the card is no longer listed', async () => {
     const found = await readInputRequest(clientAnswering([{ odd: true }]), 'sess-1', 'gone');
     expect(found).toBeUndefined();
+  });
+});
+
+describe('a card this build cannot read', () => {
+  it('is reported as unreadable, not as gone, so the owner is told to update', async () => {
+    const found = await readInputRequest(
+      clientAnswering([{ id: 'ab'.repeat(16), from: 'a newer daemon' }]),
+      'sess-1',
+      'ab'.repeat(16),
+    );
+    expect(found).toBe('unreadable');
   });
 });

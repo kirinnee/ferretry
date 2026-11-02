@@ -92,6 +92,7 @@ interface HostProps {
   readonly live?: ReactElement;
   readonly entries?: readonly TranscriptEntry[];
   readonly onAnswered?: () => void;
+  readonly projectId?: string;
 }
 
 let current: Agenda | undefined;
@@ -115,6 +116,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     ...(rest.live === undefined ? {} : { live: rest.live }),
     ...(rest.entries === undefined ? {} : { entries: rest.entries }),
     ...(rest.onAnswered === undefined ? {} : { onAnswered: rest.onAnswered }),
+    ...(rest.projectId === undefined ? {} : { projectId: rest.projectId }),
   });
   current = agenda;
   return (
@@ -1053,5 +1055,22 @@ describe('a sign-in rule suggestion card', () => {
       offered({ signInRuleSuggestion: { suggestion: 'srg_aaaaaaaaaaaaaaaa' } } as Partial<AgendaItem>),
     ).toBeDefined();
     expect(offered({})).toBeUndefined();
+  });
+
+  test('is given the session’s project, so a rule can be limited to it', () => {
+    const view = mount({
+      snapshot: board([
+        item('A1', {
+          kind: 'info',
+          signInRuleSuggestion: { suggestion: 'srg_aaaaaaaaaaaaaaaa' },
+        } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+      projectId: '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b',
+    });
+    expect(view.root.findByType(AgendaItemView).props.planForm.props.projectId).toBe(
+      '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b',
+    );
+    run(() => view.unmount());
   });
 });

@@ -36,7 +36,7 @@ describe('revoking all of an account’s rules', () => {
     try {
       expect(none.mounted.container.querySelector('[data-account-rules]')).toBeNull();
       expect(q(some.mounted.container, '[data-account-rules-count]').textContent).toContain(
-        'github work has 1 standing rule.',
+        'github work has 1 standing rule listed here.',
       );
     } finally {
       await none.mounted.unmount();

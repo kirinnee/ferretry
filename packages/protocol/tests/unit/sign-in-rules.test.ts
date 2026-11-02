@@ -942,6 +942,11 @@ describe('standing sign-in rules: what is in force', () => {
     ])
       should(signInRuleNarrowed(capped, narrow, NOW).ok).be.false();
     should(signInRuleNarrowed(record(), { dropTotp: true }, NOW).ok).be.false();
+    should(signInRuleNarrowed(capped, { expiresAt: new Date(NOW + HOUR - 1).toISOString() }, NOW)).deepEqual({
+      ok: false,
+      reason: 'a rule lasts at least 1 hour',
+    });
+    should(signInRuleNarrowed(capped, { expiresAt: new Date(NOW + HOUR).toISOString() }, NOW).ok).be.true();
     should(
       signInRuleNarrowed(record({ body: totpBody(), narrowed: { dropTotp: true } }), { dropTotp: true }, NOW).ok,
     ).be.false();

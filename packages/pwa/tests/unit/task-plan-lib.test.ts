@@ -314,6 +314,29 @@ describe('the words on the passkey for a task plan', () => {
     expect(words.warnings[1]).toBe(AUTOMATED_CODE_WARNING);
   });
 
+  it('names the row, not this machine, when a machine-made stage could type at more than one host', () => {
+    const base = sudoLine(0);
+    const two = planOf({
+      lines: [
+        {
+          ...base,
+          candidates: [
+            ...base.candidates,
+            ...base.candidates.map(each => ({
+              ...each,
+              signIn: 'si_00000000000000ab',
+              place: { ...each.place, host: 'other-box' },
+            })),
+          ],
+          preselect: undefined,
+        },
+      ],
+    });
+    const [warning] = planPasskeyWords(two, staged([0], [])).warnings;
+    expect(warning).toContain('root on the host named in the row');
+    expect(warning).not.toContain('this machine');
+  });
+
   it('adds no warning for a plain line and uses the singular for one line', () => {
     const words = planPasskeyWords(plan, staged([0], []));
     expect(words.does).toBe('Let the ferret use this line without asking');

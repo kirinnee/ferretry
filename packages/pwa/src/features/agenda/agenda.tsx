@@ -116,6 +116,8 @@ const failure = (reason: unknown): string =>
 export interface UseAgendaInput {
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope;
+  /** The board project this session works in, so a standing rule can be limited to it. */
+  readonly projectId?: string;
   /** Absent when this host has no Attention subscription: nothing can be answered from here. */
   readonly client: AgendaActionClient | undefined;
   readonly snapshot: AgendaSnapshot | null;
@@ -175,6 +177,7 @@ export interface Agenda {
 export const useAgenda = ({
   connection,
   scope,
+  projectId,
   client,
   snapshot,
   status,
@@ -418,6 +421,7 @@ export const useAgenda = ({
                     agentName={ferret}
                     connection={connection}
                     item={cardItem}
+                    {...(projectId === undefined ? {} : { projectId })}
                     sessionId={scope.sessionId}
                   />
                 ),

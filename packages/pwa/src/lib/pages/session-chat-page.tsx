@@ -1211,6 +1211,7 @@ export function SessionChatPage({
   const agendaMode = agendaModel !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
   const agenda = useAgenda({
     agendaMode,
+    ...(session.config.projectId === undefined ? {} : { projectId: session.config.projectId }),
     client: agendaModel?.client,
     connection,
     ferret: sessionDisplayName(session),

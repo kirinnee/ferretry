@@ -24,6 +24,12 @@ import {
 
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 
+/** A sent narrowing whose new end is about `ms` from now (a few seconds of slack, so no test reads the clock to the millisecond). */
+const endsWithin = (sent: unknown, ms: number): boolean => {
+  const at = Date.parse((sent as { expiresAt?: string }).expiresAt ?? '');
+  return Math.abs(at - (Date.now() + ms)) < 10_000;
+};
+
 const card = (rule: SignInRuleCardProps['rule'], extra: Partial<SignInRuleCardProps> = {}) => (
   <SignInRuleCard
     busy={false}
@@ -84,7 +90,9 @@ describe('narrowing a rule', () => {
       await typeInto(q(mounted.container, '[data-rule-cap]'), '3');
       expect(mounted.container.querySelector('[role="status"]')).toBeNull();
       await click(q(mounted.container, '[data-rule-narrow-apply]'));
-      expect(narrowed).toEqual([{ expiresAt: new Date(Date.now() + 2 * 86_400_000).toISOString(), uses: 3 }]);
+      expect(narrowed).toHaveLength(1);
+      expect(narrowed[0]).toMatchObject({ uses: 3 });
+      expect(endsWithin(narrowed[0], 2 * 86_400_000)).toBe(true);
       expect(mounted.container.querySelector('[data-rule-narrow-form]')).toBeNull();
     } finally {
       await mounted.unmount();
@@ -278,7 +286,8 @@ describe('narrowing a rule in hours', () => {
       await typeInto(q(mounted.container, '[data-rule-end-days]'), '5');
       expect(mounted.container.querySelector('[role="status"]')).toBeNull();
       await click(q(mounted.container, '[data-rule-narrow-apply]'));
-      expect(narrowed).toEqual([{ expiresAt: new Date(Date.now() + 5 * 3_600_000).toISOString() }]);
+      expect(narrowed).toHaveLength(1);
+      expect(endsWithin(narrowed[0], 5 * 3_600_000)).toBe(true);
     } finally {
       await mounted.unmount();
     }
@@ -296,6 +305,34 @@ describe('narrowing a rule in hours', () => {
       await typeInto(q(mounted.container, '[data-rule-end-days]'), '9999');
       expect(q<HTMLButtonElement>(mounted.container, '[data-rule-narrow-apply]').disabled).toBe(true);
     } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('a narrowing whose end stops being earlier while the form is open', () => {
+  it('is refused and says so, instead of being sent without its new end', async () => {
+    const realNow = Date.now;
+    const start = realNow();
+    const narrowed: unknown[] = [];
+    const mounted = await mount(
+      card(pageRule({ expiresAt: new Date(start + 3_600_000 + 1_000).toISOString(), uses: 5, remaining: 5 }), {
+        onNarrow: narrow => narrowed.push(narrow),
+      }),
+    );
+    try {
+      await click(q(mounted.container, '[data-rule-narrow]'));
+      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await typeInto(q(mounted.container, '[data-rule-end-days]'), '1');
+      await typeInto(q(mounted.container, '[data-rule-cap]'), '2');
+      Date.now = () => start + 30_000;
+      await click(q(mounted.container, '[data-rule-narrow-apply]'));
+      expect(narrowed).toEqual([]);
+      expect(q(mounted.container, '[role="status"]').textContent).toBe(
+        'End earlier than it does now, in whole hours (at least 1).',
+      );
+    } finally {
+      Date.now = realNow;
       await mounted.unmount();
     }
   });

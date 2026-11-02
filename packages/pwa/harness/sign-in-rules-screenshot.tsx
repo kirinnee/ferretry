@@ -15,7 +15,7 @@
  * "fallback" is the input card for a rule that did not apply; "history" is the closed card of a fill that did;
  * "device-revoke" is Settings › Devices with the rules a device's passkey approved; "replaces" is a ferret's suggestion
  * opened for a sign-in that already has a rule (it renews it, never a second rule); "filled" is the owner's input card
- * a rule filled, with the place. "widen" is the sheet a Change (passkey) opens on a live rule; "rule-card" is the card
+ * a rule filled, with the place. "widen" clicks Change (passkey) on the real Accounts Rule tab, so it is the real sheet with the real host props; "rule-card" is the card
  * with its Change button; "narrow-hours" is the narrow form ending in hours; "revoke-all" is an account's revoke-all
  * confirm; "passkey-flags" is the passkey sheet with the red root block and the amber cautions apart; "needs-update"
  * is the one line a machine too old for a feature shows; "deep-link-elsewhere" is the toast for a link to another machine.
@@ -83,6 +83,7 @@ const rulesFor = () => {
   switch (view) {
     case 'settings': return { rules: [pageRule(), codeRule(), terminalRule(), suspendedRule2()], stages: [machineStage()] };
     case 'rule-card': case 'revoke-all': return { rules: [pageRule(), pageRule({ id: 'sr_' + 'e'.repeat(24), signIn: 'si_0000000000000009' })], stages: [] };
+    case 'widen': return { rules: [pageRule({ uses: 5, remaining: 2 })], stages: [] };
     case 'site-panel': case 'edit-warning': case 'device-revoke': return { rules: [pageRule(), terminalRule()], stages: [] };
     default: return { rules: [], stages: [] };
   }
@@ -97,6 +98,7 @@ function suspendedRule2() {
 const answerFor = (path, method) => {
   if (path === '/v1/accounts') return accounts;
   if (path === '/v1/sign-in-rules') return ruleList(rulesFor());
+  if (path.startsWith('/v1/sign-in-rules/eligibility')) return eligible;
   if (path === '/v1/sign-in-rules/suggestions') return { suggestions: [suggestion()] };
   throw new Error('the harness has no answer for ' + method + ' ' + path);
 };
@@ -169,8 +171,7 @@ const body = () => {
           createClient={async () => client} item={{ signInRuleSuggestion: { suggestion: suggestion().id } }} offered />
       </div>
     );
-    case 'widen': return sheet({ origin: 'widen', replacesExisting: true, replacing: pageRule(), before: pageRule(),
-      scopes: [{ kind: 'any' }, { kind: 'project', project: '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b' }, { kind: 'session', session: 'sess-1' }] });
+    case 'widen': return site('rule');
     case 'rule-card': return ruleCard(pageRule());
     case 'narrow-hours': return ruleCard(codeRule());
     case 'revoke-all': return (
@@ -379,6 +380,9 @@ try {
           if (state === 'create-terminal') {
             await page.locator('[data-rule-tick="password"]').waitFor({ state: 'visible' });
             await page.locator('[data-rule-tick="password"]').check();
+          }
+          if (state === 'widen') {
+            await page.locator('[data-rule-widen]').first().click();
           }
           if (state === 'narrow-hours') {
             await page.locator('[data-rule-narrow]').first().click();

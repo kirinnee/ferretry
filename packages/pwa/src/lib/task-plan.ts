@@ -545,8 +545,9 @@ export function planPasskeyWords(
     if (line === undefined || line.kind !== 'terminal-sign-in') return [];
     const picked = approval?.lines.find(each => each.line === number)?.signIn;
     const candidate = line.candidates.find(each => each.signIn === picked);
+    const host = rootHost(candidate, line);
     return [
-      `Line ${String(number + 1)}: ${rootWords(rootHost(candidate, line), undefined, rootTool(candidate, line))}`,
+      `Line ${String(number + 1)}: ${rootWords(host ?? 'the host named in the row', undefined, rootTool(candidate, line))}`,
     ];
   });
   return {

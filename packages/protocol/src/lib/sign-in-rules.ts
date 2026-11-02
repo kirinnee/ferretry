@@ -1012,6 +1012,8 @@ export function signInRuleNarrowed(
   if (narrow.expiresAt !== undefined) {
     const at = Date.parse(narrow.expiresAt);
     if (!(at < Date.parse(effective.expiresAt))) return { ok: false, reason: 'a narrowed rule ends earlier' };
+    if (at < now + SIGN_IN_RULE_MIN_SECONDS * 1_000)
+      return { ok: false, reason: `a rule lasts at least ${String(SIGN_IN_RULE_MIN_SECONDS / 3_600)} hour` };
     if (at < Date.parse(record.body.createdAt)) return { ok: false, reason: 'a rule cannot end before it began' };
   }
   if (narrow.uses !== undefined && effective.uses !== undefined && !(narrow.uses < effective.uses))

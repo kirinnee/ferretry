@@ -46,7 +46,8 @@ export function AccountRulesRevoke({
       {count === 0 ? null : (
         <>
           <p className="m-0 text-cell text-muted" data-account-rules-count="">
-            {account.label} has {rulesWords(count)}. Revoking them needs no passkey: ferrets ask you each time again.
+            {account.label} has {rulesWords(count)} listed here. Revoking takes every standing rule of this account,
+            listed or not, and needs no passkey: ferrets ask you each time again.
           </p>
           <div className="flex flex-wrap gap-2">
             {confirming ? (

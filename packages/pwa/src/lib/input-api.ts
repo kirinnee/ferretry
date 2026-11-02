@@ -45,23 +45,22 @@ const sessionPath = (sessionId: string): string => `/v1/sessions/${encodeURIComp
 
 const OpenRequestsSchema = z.object({ requests: z.array(z.unknown()) });
 
-/** Each request is read on its own: one card this build cannot parse is dropped, it does not fail the whole list. */
-async function listSessionInputRequests(client: InputClient, sessionId: string): Promise<readonly InputRequest[]> {
-  const { requests } = await client.request(sessionPath(sessionId), OpenRequestsSchema);
-  return requests.flatMap(each => {
-    const parsed = InputRequestSchema.safeParse(each);
-    return parsed.success ? [parsed.data] : [];
-  });
-}
+// Each request is read on its own: one card this build cannot parse never fails the others.
 
-/** The request an `input` agenda item points at, or `undefined` once the daemon no longer lists it. */
+/**
+ * The request an `input` agenda item points at, `undefined` once the daemon no longer lists it, or `'unreadable'`
+ * while it is listed but this build cannot read it (so the owner is told to update, not that it is closed).
+ */
 export async function readInputRequest(
   client: InputClient,
   sessionId: string,
   requestId: string,
-): Promise<InputRequest | undefined> {
-  const requests = await listSessionInputRequests(client, sessionId);
-  return requests.find(request => request.id === requestId);
+): Promise<InputRequest | 'unreadable' | undefined> {
+  const { requests } = await client.request(sessionPath(sessionId), OpenRequestsSchema);
+  const listed = requests.find(each => z.object({ id: z.literal(requestId) }).safeParse(each).success);
+  if (listed === undefined) return undefined;
+  const parsed = InputRequestSchema.safeParse(listed);
+  return parsed.success ? parsed.data : 'unreadable';
 }
 
 export async function deliverInput(
