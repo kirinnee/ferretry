@@ -6,6 +6,7 @@ import {
   type AuditDetail,
   type Place,
   SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   SIGN_IN_RULE_INELIGIBLE_CODES,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_MAX,
@@ -40,6 +41,7 @@ import {
   signInRuleSuspensionWords,
   signInRuleWords,
 } from '@ferretry/protocol';
+import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
 import type { AuditSink } from '../audit/types.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { PasskeysChange } from '../step-up/passkeys-changed.ts';
@@ -80,7 +82,8 @@ import { auditText } from './words.ts';
  * ## IT DECIDES WHAT A RULE IS, NOT WHETHER ONE FILLS
  *
  * The shared matcher decides that (`sign-in-grants/rules.ts` reads {@link fillable}, {@link verified} and
- * {@link fillCheck}). `sign-in-rules.1` stays unadvertised until the app ships, and until then no rule fills.
+ * {@link fillCheck}). A rule fills only while the daemon reports `sign-in-rules.1` (reported since R3c-6), and a
+ * terminal one only beside `sign-in-rules-terminal.1` too.
  */
 
 /** The rules file. `read` rejects when the file cannot be read or does not parse: that is damage, never "no rules". */
@@ -120,8 +123,9 @@ export interface SignInRulePorts {
   /** Said to the operator (stderr): a damaged file, a write that failed. Never a value or a name. */
   readonly warn: (message: string) => void;
   /**
-   * Whether the daemon reports `sign-in-rules-terminal.1`: until it does, a sudo, su or doas sign-in can't have a rule
-   * (`tool_not_covered`, at the stage and in the eligibility). Absent: it can't.
+   * Whether terminal rules are offered (`terminalRulesOffered`: `sign-in-rules-terminal.1` beside `sign-in-rules.1`):
+   * until they are, a sudo, su or doas sign-in can't have a rule (`terminal_off`, at the stage and in the eligibility).
+   * Absent: it can't.
    */
   readonly terminalRules?: () => boolean;
 }
@@ -137,6 +141,10 @@ export class SignInRuleError extends Error {
     this.name = 'SignInRuleError';
   }
 }
+
+/** A `409` whose code has a sentence of its own in protocol: the message every client shows for it. */
+const refusal = (code: keyof typeof SIGN_IN_RULE_REFUSAL_WORDS): SignInRuleError =>
+  new SignInRuleError(409, code, SIGN_IN_RULE_REFUSAL_WORDS[code]);
 
 /** The commit was asked without the kept `approve-sign-in-rule` proof for its bytes: the route answers the step-up. */
 export class SignInRuleProofMissing extends Error {
@@ -197,11 +205,7 @@ const auditActor = (owner: Owner): AuditActor =>
 
 function requireOwner(caller: PasteRuleCaller): Owner {
   if (caller.kind !== 'owner')
-    throw new SignInRuleError(
-      403,
-      'forbidden',
-      'only the owner makes, changes or reads standing rules; a ferret cannot',
-    );
+    throw new SignInRuleError(403, OWNER_ONLY_CODE, ownerOnlyWords('makes, changes or reads standing rules'));
   return caller;
 }
 
@@ -392,7 +396,7 @@ export class SignInRuleService {
     if (found === undefined) throw new SignInRuleError(404, 'not_found', `there is no sign-in ${signIn}`);
     const rule = this.#records.find(record => record.body.signIn === signIn)?.body.id;
     const because =
-      (ruleSurfaceOf(found) === 'terminal' && !this.#terminalRules() ? 'tool-not-covered' : undefined) ??
+      (ruleSurfaceOf(found) === 'terminal' && !this.#terminalRules() ? 'terminal-off' : undefined) ??
       ineligibleBecause(found) ??
       ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
     return because === undefined
@@ -421,12 +425,12 @@ export class SignInRuleService {
     const listing = await this.#listing();
     const target = listing.signIns.find(each => each.id === ask.signIn);
     const surface = target === undefined ? 'page' : ruleSurfaceOf(target);
-    // Terminal rules are their own feature (`sign-in-rules-terminal.1`): until it is reported, none can be made.
+    // Terminal rules are their own feature (`terminalRulesOffered`): until it is reported, none can be made.
     if (surface === 'terminal' && !this.#terminalRules())
       throw new SignInRuleError(
         409,
-        SIGN_IN_RULE_INELIGIBLE_CODES['tool-not-covered'],
-        SIGN_IN_RULE_INELIGIBLE_WORDS['tool-not-covered'],
+        SIGN_IN_RULE_INELIGIBLE_CODES['terminal-off'],
+        SIGN_IN_RULE_INELIGIBLE_WORDS['terminal-off'],
       );
     // sudo, su and doas ask for the password alone: a username or a code ticked for one is refused before anything else.
     if (surface === 'terminal' && (totp || ask.fields.length !== 1 || ask.fields[0] !== 'password'))
@@ -449,17 +453,8 @@ export class SignInRuleService {
     }
     const existing = this.#records.find(record => record.body.signIn === ask.signIn);
     if (ask.replaces !== undefined && existing?.body.id !== ask.replaces)
-      throw new SignInRuleError(
-        409,
-        SIGN_IN_RULE_ERROR_CODES.conflict,
-        'that rule is not this sign-in’s standing rule',
-      );
-    if (ask.replaces === undefined && existing !== undefined)
-      throw new SignInRuleError(
-        409,
-        SIGN_IN_RULE_ERROR_CODES.conflict,
-        'this sign-in already has a standing rule: renew or resume that one',
-      );
+      throw refusal(SIGN_IN_RULE_ERROR_CODES.notThisRule);
+    if (ask.replaces === undefined && existing !== undefined) throw refusal(SIGN_IN_RULE_ERROR_CODES.ruleExists);
     if (existing === undefined && this.#records.length >= SIGN_IN_RULE_MAX)
       throw new SignInRuleError(429, 'capacity', `this machine already has ${String(SIGN_IN_RULE_MAX)} standing rules`);
     if (!(await this.#passkeyFor(owner)))
@@ -521,7 +516,7 @@ export class SignInRuleService {
     return this.#staged(stage);
   }
 
-  /** Whether terminal rules are on (`sign-in-rules-terminal.1` reported). Off unless the composition root says so. */
+  /** Whether terminal rules are offered (`terminalRulesOffered`). Off unless the composition root says so. */
   #terminalRules(): boolean {
     return this.ports.terminalRules?.() === true;
   }
@@ -629,7 +624,7 @@ export class SignInRuleService {
     if (bound === undefined) throw new SignInRuleProofMissing();
     if (signInRuleClockProblems(bound.body, this.ports.clock.now()).length > 0) {
       this.#finish(held, 'expired');
-      throw new SignInRuleError(409, SIGN_IN_RULE_ERROR_CODES.conflict, 'the clock moved back: stage the rule again');
+      throw refusal(SIGN_IN_RULE_ERROR_CODES.clockMovedBack);
     }
     const challenge = ruleChallenge(bound.body, held.id, held.nonce);
     if (challenge === undefined) throw this.#stageGone();
@@ -683,24 +678,24 @@ export class SignInRuleService {
         held.replaces === undefined
           ? existing === undefined
           : existing?.body.id === held.replaces.id && existing.body.revision === held.replaces.revision;
+      // A rule made for the sign-in since a create was staged is one this approval did not name; a named rule that is
+      // gone or was approved again since is no longer the one it replaces.
       if (!replaced)
-        throw new SignInRuleError(
-          409,
-          SIGN_IN_RULE_ERROR_CODES.conflict,
-          'the sign-in’s standing rule changed since this one was staged; nothing was approved',
+        throw refusal(
+          held.replaces === undefined ? SIGN_IN_RULE_ERROR_CODES.ruleExists : SIGN_IN_RULE_ERROR_CODES.notThisRule,
         );
       // A suspension is sticky and keeps its first reason, so the only way this differs is one that landed since.
       const suspendedNow = existing?.suspended?.because;
       if (held.replaces !== undefined && suspendedNow !== held.replaces.suspended)
         throw new SignInRuleError(
           409,
-          SIGN_IN_RULE_ERROR_CODES.conflict,
+          SIGN_IN_RULE_ERROR_CODES.notThisRule,
           `the standing rule was suspended after this approval was staged (${signInRuleSuspensionWords(suspendedNow ?? 'proof-invalid')}); nothing was approved: look at it again`,
         );
       if (held.replaces !== undefined && existing !== undefined && narrowingOf(existing) !== held.replaces.narrowed)
         throw new SignInRuleError(
           409,
-          SIGN_IN_RULE_ERROR_CODES.conflict,
+          SIGN_IN_RULE_ERROR_CODES.notThisRule,
           'the standing rule was narrowed after this approval was staged; nothing was approved: look at it again',
         );
       if (existing === undefined && this.#records.length >= SIGN_IN_RULE_MAX)
@@ -1218,11 +1213,7 @@ export class SignInRuleService {
   }
 
   #stageGone(): SignInRuleError {
-    return new SignInRuleError(
-      404,
-      SIGN_IN_RULE_ERROR_CODES.stageNotFound,
-      'that standing rule is not waiting for a passkey: stage it again',
-    );
+    return new SignInRuleError(404, SIGN_IN_RULE_ERROR_CODES.stageNotFound, SIGN_IN_RULE_REFUSAL_WORDS.stage_not_found);
   }
 
   #staged(stage: Stage): SignInRuleStaged {

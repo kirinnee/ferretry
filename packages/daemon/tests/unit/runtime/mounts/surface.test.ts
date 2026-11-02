@@ -778,7 +778,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     agenda: {
       raise: async () => ({ ok: false, message: 'not exercised' }),
       close: async () => undefined,
-      isOpen: async () => true,
     },
     redact: async text => text,
     audit: { record: async () => undefined },

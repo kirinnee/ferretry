@@ -333,4 +333,11 @@ describe('a code card’s title', () => {
   ])('should name %s', (_name, keys, expected) => {
     expect(factorAskWords(keys, { label: 'GitHub', username: 'kirinnee' })).toBe(expected);
   });
+
+  it('should name the place alone, never the account, where the title reaches the agenda', () => {
+    // Agenda text is readable by every ferret (secrev-1261 L4): the daemon passes the place, the app the account.
+    expect(factorAskWords([push], { place: 'github.com' })).toBe('One-time code for github.com');
+    expect(factorAskWords([], { place: 'sudo@kirin-box' })).toBe('One-time code for sudo@kirin-box');
+    expect(factorAskWords([sms], { place: 'github.com' })).toBe('Code sent to ••42 (SMS)');
+  });
 });

@@ -29,6 +29,8 @@ import {
   MAX_LIVE_TWO_FACTOR_STAGES,
   MAX_SEEDS_PER_ACCOUNT,
   parseTotpInput,
+  type Place,
+  placeWords,
   type StageTwoFactorSeedRequest,
   type TotpParameters,
   TWO_FACTOR_ERROR_CODES,
@@ -60,7 +62,7 @@ export class TwoFactorSeedError extends Error {
 /** The commit was asked without a passkey proof bound to this stage: the route answers the step-up demand. */
 export class TwoFactorSeedProofMissing extends Error {
   constructor() {
-    super('saving a 2FA seed needs a passkey confirmation for this one save, from a paired device');
+    super('saving a 2FA key needs a passkey confirmation for this one save, from a paired device');
     this.name = 'TwoFactorSeedProofMissing';
   }
 }
@@ -194,9 +196,17 @@ const randomStageId = (): TwoFactorStageId => `st_${randomBytes(12).toString('he
 /** The sealed names a staged seed rests under in memory: never a name the sealed document can hold. */
 const sealName = (stage: TwoFactorStageId, part: 'seed' | 'input'): string => `stage:${stage}:${part}`;
 
-/** "GitHub · kirinnee". */
-const accountWords = (target: { readonly label: string; readonly username?: string }): string =>
-  target.username === undefined ? target.label : `${target.label} · ${target.username}`;
+/**
+ * WHERE THE ACCOUNT SIGNS IN, for the agenda card: "your account on github.com", "… and 2 more places", or "your
+ * account" when it signs in nowhere yet. Agenda text is readable by every ferret, so it names a place, never an account
+ * label or a username: the app names the account from the accounts it reads.
+ */
+const accountPlaceWords = (places: readonly Place[]): string => {
+  const [first] = places;
+  if (first === undefined) return 'your account';
+  const more = places.length - 1;
+  return `your account ${placeWords(first)}${more === 0 ? '' : ` and ${String(more)} more ${more === 1 ? 'place' : 'places'}`}`;
+};
 
 const NOTES: Readonly<Record<Exclude<StageState, 'waiting'>, string>> = {
   saved: 'Saved: Ferretry makes this account’s codes now.',
@@ -233,7 +243,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       throw new TwoFactorSeedError(
         409,
         'full',
-        `${target.label} already keeps ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA seeds; remove one first`,
+        `${target.label} already keeps ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA keys Ferretry makes codes for; remove one first`,
       );
     if (
       request.label !== undefined &&
@@ -248,7 +258,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       throw new TwoFactorSeedError(
         409,
         TWO_FACTOR_ERROR_CODES.passkeyRequired,
-        'saving a 2FA seed needs a passkey: add a passkey in Settings › Security first',
+        'saving a 2FA key needs a passkey: add a passkey in Settings › Security first',
       );
     const key = parsed.value;
     const mismatch = factorMismatch(target, target.places, key);
@@ -318,6 +328,8 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       ...(held.factor === undefined ? {} : { factor: held.factor }),
       ...(held.card === undefined ? {} : { agendaItemId: held.card.id }),
       mismatch: held.mismatch,
+      ...(held.issuer === undefined ? {} : { issuer: held.issuer }),
+      ...(held.accountName === undefined ? {} : { accountName: held.accountName }),
     };
   }
 
@@ -406,16 +418,15 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     if (held.card !== undefined) return { agendaItemId: held.card.id };
     const target = await this.deps.accounts.seedTarget(accountId);
     const at = new Date(this.deps.clock.nowMs()).toISOString().slice(11, 16);
-    const says = [held.issuer, held.accountName].filter(part => part !== undefined).join(' · ');
+    // What the key says it is for (often the username) is not on the card: the app reads it from the stage.
     const context = [
-      ...(says === '' ? [] : [`The key says it is for ${says}.`]),
       ...(held.mismatch ? [TWO_FACTOR_SEED_CARD_MISMATCH_LINE] : []),
       'Password and code both come from this machine then: together they are one factor.',
     ];
     const id = await agenda.raise(sessionId, {
       stage: held.id,
       account: accountId,
-      subject: `Save automatic codes to ${accountWords(target)}?`,
+      subject: `Save automatic codes to ${accountPlaceWords(target.places)}?`,
       why: `Asked by ${askedBy} on ${this.deps.hostName} at ${at} UTC. If you didn't just ask for this, Deny.`,
       context: context.map(line => `- ${line}`).join('\n'),
       expiresAt: new Date(held.expiresAtMs).toISOString(),
@@ -486,13 +497,13 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     const full = (why: string) => new TwoFactorSeedError(429, TWO_FACTOR_ERROR_CODES.tooManyStages, why);
     if (waiting.filter(stage => stage.owner === caller.key).length >= MAX_STAGES_PER_CALLER)
       throw full(
-        `you already have ${String(MAX_STAGES_PER_CALLER)} 2FA seeds waiting for a passkey; save or drop one, or wait two minutes`,
+        `you already have ${String(MAX_STAGES_PER_CALLER)} 2FA keys waiting for a passkey; save or drop one, or wait two minutes`,
       );
     const limit = caller.device ? MAX_LIVE_TWO_FACTOR_STAGES : MAX_LIVE_TWO_FACTOR_STAGES - 1;
     const counted = caller.device ? waiting : waiting.filter(stage => !stage.owner.startsWith(DEVICE_OWNER));
     if (waiting.length >= MAX_LIVE_TWO_FACTOR_STAGES || counted.length >= limit)
       throw full(
-        `${String(waiting.length)} 2FA seeds are already waiting for a passkey; save or drop one, or wait two minutes`,
+        `${String(waiting.length)} 2FA keys are already waiting for a passkey; save or drop one, or wait two minutes`,
       );
   }
 

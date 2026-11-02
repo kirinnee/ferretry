@@ -405,7 +405,7 @@ describe('a staged seed', () => {
 
   it('should put a daemon-worded card on the agenda, and close it when the seed is saved', async () => {
     // Arrange
-    const raised: unknown[] = [];
+    const raised: Record<string, unknown>[] = [];
     const closed: unknown[] = [];
     const r = await rig({
       agenda: {
@@ -435,11 +435,19 @@ describe('a staged seed', () => {
         sessionId: 'owner-board',
         stage: staged.stage,
         account: 'GITHUB',
-        subject: 'Save automatic codes to GitHub · kirinnee?',
+        subject: 'Save automatic codes to your account on github.com?',
         why: /^Asked by fy on kirin-box at \d\d:\d\d UTC\./u,
       },
     ]);
     should(JSON.stringify(raised)).not.containEql(SEED);
+    // Agenda text is every ferret's to read: the account's label and username, and what the key says, stay off it.
+    const { subject, why, context } = raised[0] ?? {};
+    for (const text of [subject, why, context]) {
+      should(String(text ?? '')).not.containEql('GitHub');
+      should(String(text ?? '')).not.containEql('kirinnee');
+    }
+    const view = await r.call('GET', `/v1/accounts/GITHUB/factors/seed/${staged.stage}`);
+    should(view.body).match({ issuer: 'GitHub', accountName: 'kirinnee' });
     should(closed).match([{ sessionId: 'owner-board', id: 'A7', note: /^Saved/u }]);
   });
 });

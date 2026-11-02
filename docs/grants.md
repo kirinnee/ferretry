@@ -387,7 +387,7 @@ in memory and end with the process: they are minutes long, and an update is the 
 Writing that file needs this machine's disk, which already holds the admin token — it widens nothing.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
-with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,
+with the unlock turned off always asks per act. **Narrowing never asks again** (below). **Adding access always asks:** minting a pairing code,
 widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
 want a passkey proved for that one act, from any device, unlocked or not
 ([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. So does
@@ -567,10 +567,24 @@ cannot switch it back on from that phone. It is what makes the rule safe, and it
 yourself out of your own machine — so the refusal names the remedy exactly, and `mayGrant` on every
 capability view lets a UI say so _before_ somebody walks through, rather than after.
 
-Revoking must never be harder than granting. A governed narrowing costs one touch on the device already in
-hand — a step-up and nothing else — and never a trip to the host, which is the property that matters in an
-incident. It is not free, and the cost is stated: a phone whose passkey the thief cannot use cannot narrow
+Revoking must never be harder than granting. A governed narrowing of the grants costs one touch on the device
+already in hand — a step-up and nothing else — and never a trip to the host, which is the property that matters
+in an incident. It is not free, and the cost is stated: a phone whose passkey the thief cannot use cannot narrow
 either, so the remedy for that case is the host.
+
+### Narrowing never asks again
+
+A route that only **takes away** declares it (`narrowing: true` on its capability demand, `api/capability.ts`):
+the boundary still asks its grant, and an unlock still stands in front of it, but it never asks a per-act passkey
+— whatever "ask again for each act" (`stepUpOnActions`) says, and on a machine with the unlock off too. Those
+routes are: revoking a task plan (`POST …/task-plans/:planId/revoke`); narrowing or revoking a standing sign-in
+rule, one or an account's; deleting a 2FA key, a sign-in or an account (`DELETE /v1/accounts/:id/factors/:factor`,
+`DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`);
+revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a device's grants
+(`PATCH /v1/pair/devices/:deviceId/grants`), where a widen in the same patch is judged inside and still wants a
+passkey proved for it. **Not** on the list, deliberately: removing an account default (it changes which account a
+card offers first, so it asks `loosen-config` like every change to that file) and paste rules — both are open
+owner calls.
 
 ## A grant only ever narrows
 
@@ -638,12 +652,12 @@ its toggles follow the remote column below — a toggle it may not turn on says 
 | change                        | the owner (`fy`) | any device (a browser on the host too)                                                 |
 | ----------------------------- | ---------------- | -------------------------------------------------------------------------------------- |
 | turn an axis **on** (widen)   | allowed          | only an axis it holds itself, effective, **and** it holds `pairing.configure`; step-up |
-| turn an axis **off** (narrow) | allowed          | allowed with a step-up — any device, its own included                                  |
+| turn an axis **off** (narrow) | allowed          | allowed, with no per-act step-up — any device, its own included                        |
 
 - **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
   is a copy of what it has. A widen of anything else by a device is `403 grant_forbidden`, naming the host command.
-- **Narrowing is never harder than widening.** The route demands `pairing.use`, so any device holding that
-  — and a step-up — can narrow. A device with no `pairing.use` (the default) cannot reach the route at all;
+- **Narrowing is never harder than widening.** The route demands `pairing.use` as a narrowing, so any device
+  holding that can narrow, with no per-act step-up ([Narrowing never asks again](#narrowing-never-asks-again)). A device with no `pairing.use` (the default) cannot reach the route at all;
   its own grants are narrowed at the machine or by a device that may manage devices.
 - **`configure` implies `use` on the result**: turning `configure` on turns `use` on with it, turning `use`
   off turns `configure` off, and a field naming both reads as the narrowing.

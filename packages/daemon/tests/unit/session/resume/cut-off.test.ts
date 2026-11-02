@@ -8,6 +8,10 @@ describe('resuming a session a person cut off', () => {
     should([cutOffResume(true, 'admin-cli'), cutOffResume(true, 'admin-ui')]).deepEqual(['restore', 'restore']);
   });
 
+  it('should restore it for the owner in the app on a paired device (C4): "Resume session" is a person asking', () => {
+    should(cutOffResume(true, 'device')).equal('restore');
+  });
+
   it('should refuse every other reviver: a peer, the Warden, the daemon itself, or anyone it cannot name', () => {
     for (const actor of ['peer', 'warden', 'daemon', 'unknown'] as const)
       should({ actor, answer: cutOffResume(true, actor) }).deepEqual({ actor, answer: 'refuse' });

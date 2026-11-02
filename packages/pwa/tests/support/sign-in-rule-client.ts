@@ -20,8 +20,8 @@ export interface RuleWorld {
   readonly suggestions?: readonly SignInRuleSuggestionView[];
   readonly staged?: SignInRuleStaged;
   readonly committed?: SignInRuleView;
-  /** Returns an error to throw for a call, or nothing to answer it. */
-  readonly fail?: (key: string) => Error | undefined;
+  /** Returns an error to throw for a call (with its body), or nothing to answer it. */
+  readonly fail?: (key: string, body?: Record<string, unknown>) => Error | undefined;
 }
 
 export interface RuleCall {
@@ -35,8 +35,8 @@ export const refused = (message: string, extra: { status?: number; code?: string
 
 const answerFor =
   (world: RuleWorld) =>
-  ({ key }: RuleCall): unknown => {
-    const failure = world.fail?.(key);
+  ({ key, body }: RuleCall): unknown => {
+    const failure = world.fail?.(key, body);
     if (failure !== undefined) throw failure;
     if (key === 'GET /v1/sign-in-rules')
       return typeof world.list === 'function' ? world.list() : (world.list ?? ruleList());

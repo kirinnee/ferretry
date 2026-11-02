@@ -169,7 +169,8 @@ describe('the words of an approve-on-phone card', () => {
       where: 'ClickUp via Okta on company.okta.com',
       numberLine: 'Tap 42 on your phone',
       warning: PHONE_APPROVAL_WARNING,
-      subject: 'Approve on your phone: ClickUp · a@gmail.com',
+      subject: 'Approve on your phone: your account on company.okta.com',
+      agendaWhy: 'Your account on company.okta.com.',
       // Owner decision !A171: the push carries the daemon-read number.
       push: 'Tap 42 on your phone: ClickUp · a@gmail.com',
     });
@@ -177,6 +178,15 @@ describe('the words of an approve-on-phone card', () => {
 
   it('should keep the number out of the agenda subject, which an older app shows as it is', () => {
     expect(phoneApprovalWords(APPROVAL).subject).not.toContain('42');
+  });
+
+  it('should name the place alone in the agenda words, never the account label, its provider or the username', () => {
+    // Agenda text is readable by every ferret (secrev-1261 L4): the card names the account, the agenda does not.
+    const terminal = phoneApprovalWords({ surface: 'terminal', account: { id: 'AWS', label: 'AWS (okta-aws-cli)' } });
+    for (const words of [phoneApprovalWords(APPROVAL), terminal])
+      for (const text of [words.subject, words.agendaWhy])
+        for (const name of ['ClickUp', 'a@gmail.com', 'Okta ', 'AWS']) expect(text).not.toContain(name);
+    expect(terminal.subject).toBe('Approve on your phone: your account in a terminal');
   });
 
   it('should say "enter" for a Duo code', () => {
@@ -286,7 +296,7 @@ describe('the agenda card that presents an approval', () => {
     const parsed = AgendaItemSchema.parse({ ...older, someRefFromTheFuture: { id: ID } });
     expect(Object.keys(parsed)).not.toContain('someRefFromTheFuture');
     expect(parsed.kind).toBe('info');
-    expect(parsed.subject).toBe('Approve on your phone: ClickUp · a@gmail.com');
+    expect(parsed.subject).toBe('Approve on your phone: your account on company.okta.com');
   });
 });
 

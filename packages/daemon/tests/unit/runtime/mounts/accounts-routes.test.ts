@@ -12,6 +12,7 @@ import {
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { demandNeedsStepUp } from '../../../../src/lib/grants/policy.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
@@ -282,6 +283,31 @@ describe('the account routes, the rest of their answers', () => {
     should(
       secretRoutes(bare).some(route => route.path === '/v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId'),
     ).be.false();
+  });
+
+  it('should ask no per-act passkey to delete a 2FA key, a sign-in or an account, and one to add or change any (C31)', async () => {
+    const w = await world();
+    const routes = secretRoutes(w.subsystem);
+    const askedAgain = (method: string, path: string): boolean | undefined => {
+      const demand = routes.find(route => route.method === method && route.path === path)?.capability;
+      return demand === undefined ? undefined : demandNeedsStepUp(demand);
+    };
+
+    should({
+      removeKey: askedAgain('DELETE', '/v1/accounts/:id/factors/:factor'),
+      removeSignIn: askedAgain('DELETE', '/v1/accounts/sign-ins/:signIn'),
+      removeAccount: askedAgain('DELETE', '/v1/accounts/:id'),
+      removeLogin: askedAgain('DELETE', '/v1/secrets/logins/:id'),
+      changeSignIn: askedAgain('PUT', '/v1/accounts/sign-ins/:signIn'),
+      addSignIn: askedAgain('POST', '/v1/accounts/:id/sign-ins'),
+    }).eql({
+      removeKey: false,
+      removeSignIn: false,
+      removeAccount: false,
+      removeLogin: false,
+      changeSignIn: true,
+      addSignIn: true,
+    });
   });
 
   it('should say a damaged store is damaged, on the list, the hint and look-alike — never an empty answer', async () => {

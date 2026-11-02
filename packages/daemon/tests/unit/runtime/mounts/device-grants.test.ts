@@ -208,17 +208,20 @@ describe('changing one device’s grants', () => {
     should(spentFresh()).equal(0);
   });
 
-  it('should ask a remote manager for a step-up first', async () => {
-    // Arrange
+  it('should let a remote manager NARROW with no per-act step-up, but ask a passkey proved for a widen (C31)', async () => {
+    // Arrange — "ask again for each act" on: the manager holds no step-up and no fresh proof.
     const { dispatcher, devices } = await mount({ caller: MANAGER, steppedUp: false });
 
     // Act
-    const response = await dispatcher.dispatch(patch({ fleet: { use: false } }));
+    const narrowed = await dispatcher.dispatch(patch({ fleet: { use: false } }));
+    const widened = await dispatcher.dispatch(patch({ terminal: { use: true } }));
 
-    // Assert — refused at the boundary (pairing.use needs a step-up) before the subsystem is asked.
-    should(response.status).equal(403);
-    should(jsonBody(response).code).equal(STEP_UP_REQUIRED_CODE);
-    should(devices.get(targetId)).deepEqual(LIMITED_DEVICE_GRANTS);
+    // Assert — taking away is never harder than having it; giving more still asks for this act.
+    should(narrowed.status).equal(200);
+    should(devices.get(targetId)?.fleet).deepEqual({ use: false, configure: false });
+    should(widened.status).equal(403);
+    should(jsonBody(widened).code).equal(STEP_UP_REQUIRED_CODE);
+    should(devices.get(targetId)?.terminal).deepEqual(LIMITED_DEVICE_GRANTS.terminal);
   });
 
   it('should refuse a remote widen of an axis the caller does not hold, naming the host command', async () => {
@@ -402,17 +405,18 @@ describe('the device-grant service on its own', () => {
     });
   });
 
-  it('should refuse a remote narrowing without a live step-up, and write nothing', async () => {
+  it('should let a remote narrowing through without a live step-up (C31: narrowing never asks again)', async () => {
     // Arrange
     const grants = grantSubsystem();
     await grants.refresh();
-    const service = deviceGrantsOver(grants, new Map([[targetId, LIMITED_DEVICE_GRANTS]]));
+    const devices = new Map([[targetId, LIMITED_DEVICE_GRANTS]]);
+    const service = deviceGrantsOver(grants, devices);
 
-    // Act + Assert
-    await should(service.change(targetId, { fleet: { use: false } }, presentation({ stepUp: false }))).be.rejectedWith({
-      failure: 'step-up-required',
-      message: /passkey confirmation from this device/u,
-    });
+    // Act
+    await service.change(targetId, { fleet: { use: false } }, presentation({ stepUp: false }));
+
+    // Assert
+    should(devices.get(targetId)?.fleet).deepEqual({ use: false, configure: false });
   });
 
   it('should report a device removed between the read and the write as not found', async () => {

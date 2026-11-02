@@ -115,7 +115,7 @@ describe('a suspension that lands after the stage is never cleared unseen (secre
     const refused = await refusal(w.service.commit(deviceOwner(), widen.stage, () => evidenceFor(challenge)));
 
     // Assert
-    should([refused.status, refused.code]).eql([409, 'conflict']);
+    should([refused.status, refused.code]).eql([409, 'not_this_rule']);
     should(refused.message).containEql('suspended after this approval was staged');
     should((await w.service.list(HOST_OWNER)).rules[0]).containDeep({
       revision: 1,
@@ -336,7 +336,7 @@ describe('a narrowing made after the stage is never undone unseen (secrev-1274-d
     const refused = await refusal(w.service.commit(deviceOwner(), widen.stage, () => evidenceFor(challenge)));
 
     // Assert
-    should([refused.status, refused.code]).eql([409, 'conflict']);
+    should([refused.status, refused.code]).eql([409, 'not_this_rule']);
     should(refused.message).containEql('narrowed after this approval was staged');
     should((await w.service.list(HOST_OWNER)).rules[0]).containDeep({ revision: 1, uses: 2 });
   });

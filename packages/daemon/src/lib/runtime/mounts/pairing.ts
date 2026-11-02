@@ -124,6 +124,11 @@ export interface DeviceGrantSubsystem {
  * `docs/grants.md`.
  */
 const PAIRING_DEMAND: CapabilityDemand = { capability: 'pairing', axis: 'use' };
+/**
+ * Revoking a device, or changing its grants: `pairing.use` and never a per-act passkey at the boundary, because a
+ * narrowing only takes away. A widen in the same route is judged inside, and wants a passkey proved for it.
+ */
+const PAIRING_NARROWING: CapabilityDemand = { ...PAIRING_DEMAND, narrowing: true };
 
 /**
  * The caller's OWN device grant, when the caller is a paired device.
@@ -286,7 +291,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       path: '/v1/pair/devices/:deviceId',
       minimum: 'operator',
       caller: 'person',
-      capability: PAIRING_DEMAND,
+      capability: PAIRING_NARROWING,
       noStore: true,
       handle: async context => {
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));
@@ -302,15 +307,15 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
        * One device's own grants, changed (`docs/design/zero-trust.md` B5).
        *
        * `pairing.use` at the boundary, so every paired device can NARROW — its own grant included —
-       * with a step-up and nothing else. Widening is judged inside, field by field: at the machine
-       * anything; remotely only what the caller holds itself, with `pairing.configure` and a step-up.
+       * with nothing else: no per-act step-up. Widening is judged inside, field by field: at the machine
+       * anything; remotely only what the caller holds itself, with `pairing.configure` and a passkey proved for it.
        * A patch with any illegal widen is refused whole. Answers the whole list, as the revoke does.
        */
       method: 'PATCH',
       path: '/v1/pair/devices/:deviceId/grants',
       minimum: 'operator',
       caller: 'person',
-      capability: PAIRING_DEMAND,
+      capability: PAIRING_NARROWING,
       noStore: true,
       handle: async context => {
         const deviceId = PairedDeviceIdSchema.safeParse(decodeParameter(context.params.get('deviceId') ?? ''));

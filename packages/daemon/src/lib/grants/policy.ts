@@ -80,13 +80,14 @@ export function isGovernedCaller(arrival: CallerArrival): boolean {
  * The demands that need a passkey step-up from a governed caller even when the axis is granted.
  *
  * Every `configure`, and the `use` of the capabilities whose ordinary use already reaches past the
- * daemon: `terminal` is arbitrary code on the host, `browser` drives a browser the operator is signed
+ * daemon — except a {@link CapabilityDemand.narrowing} route's, which only takes away and asks the grant alone: `terminal` is arbitrary code on the host, `browser` drives a browser the operator is signed
  * into, `pairing` hands out credentials for the machine, and `sharing` publishes its material to people
  * who are not its devices. Every other `use` — watching
  * sessions, reading the fleet, the filesystem view, the warden — is ordinary operation and needs
  * nothing beyond the grant.
  */
 export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
+  if (demand.narrowing === true) return false;
   if (demand.axis === 'configure') return true;
   return STEP_UP_USE_CAPABILITIES.has(demand.capability);
 }
@@ -324,8 +325,8 @@ const ALL_OFF_GRANTS: CapabilityGrants = Object.fromEntries(
  * The one decision about a change to ONE device's grants, field by field, refused WHOLE.
  *
  * - A caller on the host may make any change: it already has the machine (B4).
- * - A governed caller needs a live step-up for ANY change — narrowing included, on any device, its own
- *   included — and nothing else for a narrowing. Revoking is never harder than granting.
+ * - A governed narrowing — on any device, its own included — needs nothing beyond the grant and the unlock: no
+ *   per-act step-up, whatever "ask again for each act" says. Revoking is never harder than granting.
  * - A governed widen is allowed only for axes {@link widenableBy} lists. One illegal widen refuses the
  *   whole patch, so a mixed patch never half-applies.
  * - A legal governed widen needs a passkey proved FOR IT (owner decision 2026-10-14): an unlock, or a
@@ -344,7 +345,6 @@ export function judgeDeviceGrantChange(judgement: DeviceGrantJudgement): DeviceG
   if (illegal.length > 0) return { kind: 'forbidden', widened: illegal };
   if (!judgement.freshStepUp && widenedBy(judgement.current, judgement.next).length > 0)
     return { kind: 'widen-step-up-required' };
-  if (!judgement.stepUp) return { kind: 'step-up-required' };
   return { kind: 'allowed' };
 }
 

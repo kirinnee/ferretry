@@ -11,6 +11,9 @@ import {
   type TaskPlanCandidate,
   type TaskPlanLine,
   type TaskPlanSelectedLine,
+  taskPlanRootBadge,
+  taskPlanRootHost,
+  taskPlanRootWords,
 } from '@ferretry/protocol';
 
 export { TASK_PLAN_HONEST_LIMIT };
@@ -68,7 +71,7 @@ function lineAsk(line: TaskPlanLine): string {
         : `one of ${String(line.candidates.length)} saved accounts`;
   const what =
     line.kind === 'terminal-sign-in'
-      ? `Type the password of ${who} (root there)`
+      ? `Type the password of ${who} (${taskPlanRootBadge(taskPlanRootHost(line.candidates.map(each => each.place)))})`
       : `Sign in as ${who} with its ${fieldWords(line.fields)}`;
   const because = line.because === undefined ? undefined : grantMissWords(line.because);
   return `${what} (${uses(line.uses)})${line.state === 'unavailable' && because !== undefined ? `: can't be pre-approved, ${because}` : ''}`;
@@ -118,7 +121,7 @@ export function selectedWords(line: TaskPlanSelectedLine, plan: TaskPlan): strin
   const who = candidate === undefined ? line.signIn : candidateWords(candidate);
   const words =
     line.kind === 'terminal-sign-in'
-      ? `${number}: type the password of ${who}; this gives the ferret root there, ${uses(line.uses)}`
+      ? `${number}: type the password of ${who}; ${taskPlanRootWords(taskPlanRootHost(candidate === undefined ? [] : [candidate.place]))}, ${uses(line.uses)}`
       : `${number}: sign in as ${who} with its ${fieldWords(line.fields)}, ${uses(line.uses)}`;
   return clip(words, TASK_PLAN_SUMMARY_LINE_MAX_CHARS);
 }

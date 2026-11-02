@@ -79,6 +79,7 @@ import {
 } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
 import {
+  TASK_PLAN_MIN_LIFETIME_SECONDS,
   type TaskPlanCall,
   TaskPlanAgentViewSchema,
   TaskPlanCallSchema,
@@ -714,7 +715,12 @@ const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
     tool: z.literal('secure.preapprove'),
     /** The pastes the agent plans, before it starts: one card, the owner ticks what it allows. */
     items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
-    expiresInSeconds: z.number().int().min(300).max(COPY_PLAN_MAX_LIFETIME_SECONDS).optional(),
+    expiresInSeconds: z
+      .number()
+      .int()
+      .min(TASK_PLAN_MIN_LIFETIME_SECONDS)
+      .max(COPY_PLAN_MAX_LIFETIME_SECONDS)
+      .optional(),
   }),
   /** The widened plan (docs/agent-tools.md, `task_plan`): sign-ins, terminal sign-ins and pastes on one card. */
   TaskPlanCallSchema,

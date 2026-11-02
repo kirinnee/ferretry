@@ -68,6 +68,7 @@ import {
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
   daemonFeatureList,
+  terminalRulesOffered,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -10832,7 +10833,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // THE OWNER'S STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): on disk, each carrying the
       // owner's passkey assertion over its own bytes, checked again offline at load and whenever a passkey or device
       // goes. Every account change is followed: a pinned fact that drifted suspends its rule. A rule fills only through
-      // the shared grant matcher below, and only once `sign-in-rules.1` is advertised (the app ships first).
+      // the shared grant matcher below, and only while `sign-in-rules.1` is reported (since R3c-6).
       const signInRules = new SignInRuleService({
         store: new FileSignInRuleStore(join(paths.state, 'accounts'), stateFiles),
         accounts: { listing: async () => await accountDirectory.keyedList() },
@@ -10850,7 +10851,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         audit: auditLog,
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
-        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminalRules: () => terminalRulesOffered(daemonFeatureList()),
       });
       // A ferret's suggestion of a rule (account_propose preapprove): RAM only, one card on the agenda, no stage or proof.
       const signInRuleSuggestions = new SignInRuleSuggestions({
@@ -10859,7 +10860,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         redact: async text => await secretRedactor.redact(text),
         audit: auditLog,
         clock: { now: () => Date.now() },
-        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminalRules: () => terminalRulesOffered(daemonFeatureList()),
       });
       setInterval(() => signInRuleSuggestions.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       connectSignInRules(signInRules, {
@@ -10881,7 +10882,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return key.success ? key.data : undefined;
         },
         advertised: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRules),
-        terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+        terminal: () => terminalRulesOffered(daemonFeatureList()),
         stampedProject: async sessionId => await stampedProjectOf(signInRuleSessions, sessionId),
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),

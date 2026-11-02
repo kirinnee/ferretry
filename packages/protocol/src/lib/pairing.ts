@@ -2,11 +2,13 @@ import { z } from 'zod';
 import { isLoopbackHost, isWildcardHost } from './address.ts';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
 import { PublishedCarriersSchema, SocketEndpointSchema } from './carriers.ts';
-import { InstantSchema } from './common.ts';
+import { durationWords, InstantSchema } from './common.ts';
 import { DAEMON_CAPABILITIES, type DaemonCapability, ReadCapabilityGrantsSchema } from './grants.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
 export const PAIRING_CODE_TTL_SECONDS = 120 as const;
+/** How long a pairing code lives, in words ("two minutes"): every screen and help text that says it. */
+export const PAIRING_CODE_LIFETIME_WORDS = durationWords(PAIRING_CODE_TTL_SECONDS);
 export const PAIRING_CODE_MAX_ATTEMPTS = 5 as const;
 export const PAIRING_DEVICE_NAME_MAX_LENGTH = 100 as const;
 

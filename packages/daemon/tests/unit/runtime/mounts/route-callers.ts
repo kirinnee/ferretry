@@ -76,7 +76,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'PATCH /v1/cgroups/config operator person',
   'GET /v1/config/status operator any',
   'GET /v1/config/file operator any',
-  'PUT /v1/config/file operator any',
+  'PUT /v1/config/file operator person',
   'POST /v1/config/confirm operator person',
   'POST /v1/agent/config none any',
   'GET /v1/imports/history operator any',

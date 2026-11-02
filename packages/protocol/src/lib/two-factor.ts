@@ -313,13 +313,18 @@ function shortKeyWords(key: TwoFactorKeySummary): string {
 /**
  * THE TITLE OF A CODE CARD, from the account's keys: the one a ferret named (`factor`) when the caller passes only
  * that one, else every key that ends in a code. One: where its code went ("Code sent to ••42 (SMS)"). Several: each
- * ("One-time code: SMS ••42 or Authenticator app"). None known: "One-time code for GitHub · kirinnee". Every word is
- * the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
+ * ("One-time code: SMS ••42 or Authenticator app"). None known: the account ("One-time code for GitHub · kirinnee") where
+ * the caller may name it (the app, from the accounts it reads), and the PLACE alone ("One-time code for github.com")
+ * where the words reach the agenda: agenda text is readable by every ferret, so it never names an account label or a
+ * username. Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
  */
-export function factorAskWords(keys: readonly TwoFactorKeySummary[], account: FactorMismatchAccount): string {
+export function factorAskWords(
+  keys: readonly TwoFactorKeySummary[],
+  named: FactorMismatchAccount | { readonly place: string },
+): string {
   const codes = keys.filter(key => isCodeFactor(key.kind));
   const [only] = codes;
-  if (only === undefined) return `One-time code for ${accountWords(account)}`;
+  if (only === undefined) return `One-time code for ${'place' in named ? named.place : accountWords(named)}`;
   if (codes.length === 1) return oneKeyWords(only);
   return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
 }

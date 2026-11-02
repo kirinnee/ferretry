@@ -325,6 +325,18 @@ const cases: SchemaCase[] = [
     schema: rules.SignInRuleEligibilitySchema,
     value: { signIn: SIGN_IN, eligible: false, because: 'tool-not-covered', rule: RULE },
   },
+  { name: 'stage dropped', schema: rules.SignInRuleStageDroppedSchema, value: { stage: STAGE, dropped: true } },
+  { name: 'rule revoked', schema: rules.SignInRuleRevokedSchema, value: { id: RULE, revoked: true } },
+  {
+    name: 'account rules revoked',
+    schema: rules.SignInRuleAccountRevokedSchema,
+    value: { account: 'GITHUB_KIRINNEE', revoked: 2 },
+  },
+  {
+    name: 'suggestion dismissed',
+    schema: rules.SignInRuleSuggestionDismissedSchema,
+    value: { id: `srg_${'3'.repeat(16)}`, dismissed: false },
+  },
 ];
 
 describe('standing sign-in rules: the wire', () => {
@@ -424,11 +436,13 @@ describe('standing sign-in rules: the wire', () => {
     should(rules.signInRuleLifetime('page')).deepEqual({
       defaultSeconds: 30 * 86_400,
       maxSeconds: 90 * 86_400,
+      defaultDays: 30,
       maxDays: 90,
     });
     should(rules.signInRuleLifetime('terminal')).deepEqual({
       defaultSeconds: 86_400,
       maxSeconds: 7 * 86_400,
+      defaultDays: 1,
       maxDays: 7,
     });
     should(SignInRuleBodySchema.safeParse(body({ expiresAt: ending(SIGN_IN_RULE_MIN_SECONDS) })).success).be.true();
@@ -1279,7 +1293,8 @@ describe('standing sign-in rules: the words of a rule', () => {
     should(plain.rows.find(row => row.label === 'Uses')?.value).equal('At most 3 times');
     should(code.rows.find(row => row.label === 'Types')?.value).equal('username, password and 2FA code');
     should(code.rows.find(row => row.label === 'Code key')?.value).equal('Authenticator');
-    should(labels(noKey)).not.containEql('Code key');
+    // A code rule never drops its Code key row: without a label it says so (C1320-1).
+    should(noKey.rows.find(row => row.label === 'Code key')?.value).equal(rules.SIGN_IN_RULE_CODE_KEY_UNNAMED);
     should(labels(plain)).not.containEql('Note');
     should(again.rows.filter(row => row.label === 'Note')).deepEqual([
       { label: 'Note', value: 'Approves this rule again (revision 3)' },
@@ -1446,7 +1461,10 @@ describe('standing sign-in rules: the rows the passkey binds are strict', () => 
   it('should hold a page rule to exactly one Account row and a code rule to exactly one Code key row', () => {
     const plain = { ...staged, fields: ['username', 'password'], totp: false, rows: without('Code key') };
     should(SignInRuleStagedSchema.safeParse(plain).success).be.true();
-    should(SignInRuleStagedSchema.safeParse({ ...plain, rows: without('Account') }).success).be.false();
+    // The negative is built from the plain rule's own rows, so only the missing Account row can fail it.
+    const noAccount = { ...plain, rows: plain.rows.filter(row => row.label !== 'Account') };
+    should(SignInRuleStagedSchema.safeParse(noAccount).success).be.false();
+    should(SignInRuleStagedSchema.safeParse({ ...noAccount, rows: plain.rows }).success).be.true();
   });
 
   it('should accept a rule with its code key and up to two notes', () => {

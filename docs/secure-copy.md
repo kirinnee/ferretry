@@ -297,9 +297,10 @@ a ferret's words: a plain item with the same text is a plain item.
   amber. Ticking the automatic 2FA code is red with the login-code warning; the tick is hidden when the ferret didn't
   ask for a code, hidden until an account is picked on a picker line, and disabled ("No automatic codes for this
   account") when the picked account can't make them. A disabled Allow says why ("Tick at least one line…").
-- **"You'll still be asked."** Every plan card lists what a plan never covers: push approvals, security keys and
-  passkeys, captchas, sign-ins not in Accounts or through another account, ssh, npm, docker, gh and any program but
-  `sudo`, `su` and `doas`, SMS and email codes, and anything after a line stopped.
+- **"You'll still be asked."** Every plan card lists what a plan never covers, from the one protocol list a rule sheet
+  shares (`stillAskedFor('plan')`): push approvals, security keys and passkeys, captchas, sign-ins not in Accounts or
+  through another account, a paste that would replace a secret the store already holds, ssh, scp, npm or docker login,
+  gh and any program but `sudo`, `su` and `doas`, SMS and email codes, and anything after a line stopped.
 - **The honest-client line**, on every plan card: "This stops misuse through a ferret's tools and page text; it can't
   stop a ferret that reads Ferretry's own files."
 - **The passkey.** A sign-in tick asks the daemon to stage the selection, then runs the `approve-task-plan` passkey bound
@@ -379,8 +380,10 @@ A rule is one owner-signed permission to fill one sign-in for any ferret until i
 are described in [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules). On this screen: the sheet
 starts with nothing ticked when a ferret suggested it, the code needs its own red acknowledgement and is never carried
 over on resume or renew, a terminal rule is password-only with the root warning, and approving always asks for the
-passkey. The card a rule filled closes with "Filled under your standing sign-in rule on <site>."; a rule that did not
-apply shows one plain line on the owner's card and none on the ferret's.
+passkey. The owner's input card a rule filled says "Filled under your standing sign-in rule on <site>." (the same
+`grantFilledLineFor` sentence a plan fill's history uses); its agenda card closes in a tap fill's words, because every
+ferret can read every agenda. A rule that did not apply shows one plain line on the owner's card and none on the
+ferret's.
 
 ## Programs in your own profile
 

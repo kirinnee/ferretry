@@ -9,7 +9,7 @@ import {
   PhoneApprovalIdSchema,
   type PhoneApprovalList,
 } from '@ferretry/protocol';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -54,11 +54,16 @@ export function answered(error: unknown): never {
   throw error;
 }
 
-/** The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is read. */
-export function ownerActorOf(context: RouteContext): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
+/**
+ * The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is
+ * read, in the one owner-only sentence and code, naming the route's own act (`act`: "answers an input request").
+ */
+export function ownerActorOf(
+  context: RouteContext,
+  act = 'answers an input request',
+): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
   const credential = context.credential;
-  if (isAgentCaller(context))
-    throw new ApiError(403, 'only the owner answers an input request; an agent cannot', 'forbidden');
+  if (isAgentCaller(context)) throw new ApiError(403, ownerOnlyWords(act), OWNER_ONLY_CODE);
   return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
 }
 

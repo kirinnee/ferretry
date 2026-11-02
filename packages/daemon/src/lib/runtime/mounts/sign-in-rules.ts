@@ -2,18 +2,23 @@ import {
   type AccountId,
   AccountIdSchema,
   SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_REFUSAL_WORDS,
   type SignInId,
   SignInIdSchema,
+  SignInRuleAccountRevokedSchema,
   SignInRuleDraftSchema,
   SignInRuleEligibilitySchema,
   type SignInRuleId,
   SignInRuleIdSchema,
   SignInRuleListSchema,
   SignInRuleNarrowSchema,
+  SignInRuleRevokedSchema,
+  SignInRuleStageDroppedSchema,
   SignInRuleStagedSchema,
   type SignInRuleStageId,
   SignInRuleStageIdSchema,
   SignInRuleStageViewSchema,
+  SignInRuleSuggestionDismissedSchema,
   SignInRuleSuggestionIdSchema,
   SignInRuleSuggestionListSchema,
   SignInRuleViewSchema,
@@ -29,7 +34,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { SignInRuleError, SignInRuleProofMissing, type SignInRuleService } from '../../sign-in-rules/service.ts';
-import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
+import { SignInRuleSuggestionError, type SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedAccountNames, refusedPageInput } from './secret-write-grant.ts';
 
@@ -57,10 +62,22 @@ const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
 const USE = { minimum: 'operator', caller: 'person', capability: SECRETS_USE, noStore: true } as const;
 const CONFIGURE = { minimum: 'operator', caller: 'person', capability: SECRETS_CONFIGURE, noStore: true } as const;
+/** Narrowing and revoking: `secrets.use`, and never a per-act passkey, whatever "ask again for each act" says. */
+const TAKE_AWAY = { ...USE, capability: { ...SECRETS_USE, narrowing: true } } as const;
+
+/** Each suggestion refusal's status: a suggestion error is a refusal the person can act on, never a 500. */
+const SUGGESTION_STATUS = {
+  bad_request: 400,
+  not_found: 404,
+  capacity: 429,
+  unavailable: 503,
+} as const satisfies Record<SignInRuleSuggestionError['code'], number>;
 
 /** A refusal of the service, in the person's words and a code to branch on. */
 function answered(error: unknown): never {
   if (error instanceof SignInRuleError) throw new ApiError(error.status, error.message, error.code);
+  if (error instanceof SignInRuleSuggestionError)
+    throw new ApiError(SUGGESTION_STATUS[error.code], error.message, error.code);
   throw error;
 }
 
@@ -73,17 +90,16 @@ function owned<T>(work: () => T): T {
   }
 }
 
-const owner = (context: RouteContext): PasteRuleCaller => ({ kind: 'owner', actor: ownerActorOf(context) });
+const owner = (context: RouteContext): PasteRuleCaller => ({
+  kind: 'owner',
+  actor: ownerActorOf(context, 'makes, changes or reads standing rules'),
+});
 
 /** The stage in the path. One this daemon could never have minted is simply not waiting. */
 function stageOf(context: RouteContext): SignInRuleStageId {
   const parsed = SignInRuleStageIdSchema.safeParse(context.params.get('stage') ?? '');
   if (!parsed.success)
-    throw new ApiError(
-      404,
-      'that standing rule is not waiting for a passkey: stage it again',
-      SIGN_IN_RULE_ERROR_CODES.stageNotFound,
-    );
+    throw new ApiError(404, SIGN_IN_RULE_REFUSAL_WORDS.stage_not_found, SIGN_IN_RULE_ERROR_CODES.stageNotFound);
   return parsed.data;
 }
 
@@ -224,6 +240,8 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
           const made = await rules.commit(caller, stage, challenge =>
             context.claimStoredProof?.(STEP_UP_ACTS.approveSignInRule, stage, challenge),
           );
+          // Answered on the owner's side only: a ferret's suggestion of it leaves the owner's list, its card unchanged.
+          suggestions.approved(made.signIn);
           return jsonResponse(SignInRuleViewSchema.parse(made), 201);
         } catch (error) {
           if (error instanceof SignInRuleProofMissing) return proofDemand();
@@ -239,14 +257,14 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
         const caller = owner(context);
         const stage = stageOf(context);
         owned(() => rules.drop(caller, stage));
-        return jsonResponse({ stage, dropped: true });
+        return jsonResponse(SignInRuleStageDroppedSchema.parse({ stage, dropped: true }));
       },
     },
     {
       // NARROW: drop the code, end earlier, lower the cap. No passkey: it only takes away.
       method: 'POST',
       path: '/v1/sign-in-rules/:id/narrow',
-      ...USE,
+      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const id = ruleOf(context);
@@ -260,24 +278,24 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
       // REVOKE: one tap, no passkey.
       method: 'DELETE',
       path: '/v1/sign-in-rules/:id',
-      ...USE,
+      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const id = ruleOf(context);
         await rules.revoke(caller, id).catch(answered);
-        return jsonResponse({ id, revoked: true });
+        return jsonResponse(SignInRuleRevokedSchema.parse({ id, revoked: true }));
       },
     },
     {
       // REVOKE every rule of one account, one tap, no passkey.
       method: 'POST',
       path: '/v1/accounts/:id/sign-in-rules/revoke',
-      ...USE,
+      ...TAKE_AWAY,
       handle: async context => {
         const caller = owner(context);
         const account = accountOf(context);
         const { revoked } = await rules.revokeAccount(caller, account).catch(answered);
-        return jsonResponse({ account, revoked });
+        return jsonResponse(SignInRuleAccountRevokedSchema.parse({ account, revoked }));
       },
     },
   ];
@@ -294,7 +312,6 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute
         const names = refusedAccountNames(context, 'read the standing rules ferrets suggested');
         if (names !== undefined) return names;
         const caller = owner(context);
-        await suggestions.reconcile();
         return jsonResponse(SignInRuleSuggestionListSchema.parse(owned(() => suggestions.list(caller))));
       },
     },
@@ -306,8 +323,8 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute
         const caller = owner(context);
         const parsed = SignInRuleSuggestionIdSchema.safeParse(context.params.get('sid') ?? '');
         if (!parsed.success) throw new ApiError(400, 'the suggestion in the path is not usable', 'bad_request');
-        const dismissed = await suggestions.dismiss(caller, parsed.data);
-        return jsonResponse({ id: parsed.data, dismissed });
+        const dismissed = owned(() => suggestions.dismiss(caller, parsed.data));
+        return jsonResponse(SignInRuleSuggestionDismissedSchema.parse({ id: parsed.data, dismissed }));
       },
     },
   ];

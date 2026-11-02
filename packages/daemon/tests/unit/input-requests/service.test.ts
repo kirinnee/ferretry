@@ -661,7 +661,7 @@ describe('InputRequestService.deliver', () => {
     should(view.state).equal('pending');
     should(card?.risk?.level).equal('amber');
     should(card?.risk?.reason).containEql('show on screen');
-    should(card?.risk?.reason).containEql('2 minutes');
+    should(card?.risk?.reason).containEql('two minutes');
     should(done.state).equal('delivered');
     should(w.writes).eql([{ text: VALUE, submit: true }]);
     should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
@@ -2287,7 +2287,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(request.lock).be.undefined();
     should(view.lockSeconds).be.undefined();
     should(w.cards[0]?.title).equal('Needs a code');
-    should(w.cards[0]?.ask).equal('Type it into the terminal. One-time code: the ferret can see this value.');
+    should(w.cards[0]?.ask).equal('Type it into the terminal. One-time code: the ferret can see it.');
     should(w.cards[0]?.blocking).be.false();
   });
 

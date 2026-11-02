@@ -32,7 +32,7 @@ describe('a staged 2FA seed card on the real agenda', () => {
     const id = await adapter.raise('s1', {
       stage: STAGE,
       account: 'GITHUB',
-      subject: 'Save automatic codes to GitHub · kirinnee?',
+      subject: 'Save automatic codes to your account on github.com?',
       why: 'Asked by `fy` on kirin-box at 14:02 UTC.',
       context: '- Password and code both come from this machine then.',
       expiresAt: '2026-10-31T12:02:00.000Z',

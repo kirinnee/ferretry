@@ -365,7 +365,8 @@ export class PhoneApprovalService {
       approvalId: id,
       title: words.title,
       subject: words.subject,
-      why: `${words.who}: ${words.where}.`,
+      // Agenda text is every ferret's to read: the place only, never the account (the card reads it on a person route).
+      why: words.agendaWhy,
       context: [`Asked by ${held.approval.agentName}.`, words.warning].join('\n'),
       howToResolve:
         'Approve the sign-in on your phone if you expected it; Ferretry sees it go through. If you did not, tap Not me on the card and deny it on your phone.',

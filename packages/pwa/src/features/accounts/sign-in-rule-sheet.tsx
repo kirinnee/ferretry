@@ -30,6 +30,7 @@ import {
   ruleFlags,
   scopeWords,
   sheetWords,
+  statusWords,
   surfaceOf,
   ticksProblem,
 } from '../../lib/sign-in-rules.ts';
@@ -49,6 +50,12 @@ export interface SignInRuleSheetProps {
   readonly origin: RuleOrigin;
   /** The rule being resumed or renewed. */
   readonly before?: SignInRuleView;
+  /**
+   * The sign-in's rule an approval opened from elsewhere (a ferret's suggestion, the post-tap offer) replaces: the
+   * sign-in has one already, so approving here renews, resumes or changes it. `replacesExisting` alone while it is read.
+   */
+  readonly replacing?: SignInRuleView;
+  readonly replacesExisting?: boolean;
   /** `undefined` while the daemon is asked. */
   readonly eligibility: SignInRuleEligibility | undefined;
   /** Whether the account has a 2FA key Ferretry makes codes for. */
@@ -130,6 +137,12 @@ function Tick({
   );
 }
 
+/** What approving here does to the sign-in's rule: never a second one. */
+const replacingWords = (rule: SignInRuleView | undefined): string =>
+  rule === undefined
+    ? 'This sign-in already has a standing rule. Approving here replaces it.'
+    : `This sign-in already has a standing rule (${statusWords(rule)}). Approving here replaces it.`;
+
 export function SignInRuleSheet(props: SignInRuleSheetProps) {
   const { accountName, username, place, origin, before, eligibility, phase, canUsePasskey } = props;
   const surface: SignInRuleSurface = surfaceOf(place);
@@ -167,6 +180,11 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
         note={history}
       />
 
+      {props.replacesExisting === true ? (
+        <p className="m-0 text-ui text-muted" data-rule-replaces={props.replacing?.status ?? ''} role="status">
+          {replacingWords(props.replacing)}
+        </p>
+      ) : null}
       {eligibility === undefined ? (
         <p className="m-0 text-ui text-muted" data-rule-eligibility="reading" role="status">
           Checking whether this sign-in can have a rule…

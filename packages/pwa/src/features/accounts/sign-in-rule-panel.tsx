@@ -18,6 +18,7 @@ import {
   codeKeyLabel,
   draftOf,
   failureWords,
+  listRules,
   readEligibility,
   RULE_DAMAGED_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
@@ -50,17 +51,34 @@ export interface SignInRuleSheetHostProps {
   readonly onCancel: () => void;
 }
 
-/** The sheet, wired: asks the daemon whether the sign-in is eligible, then stages, asks the passkey and commits. */
+/**
+ * The sheet, wired: asks the daemon whether the sign-in is eligible, then stages, asks the passkey and commits.
+ *
+ * A SIGN-IN HAS ONE RULE (C1). When the daemon says this sign-in already has one (`eligibility.rule`) and the opener did
+ * not name it (a ferret's suggestion, the post-tap offer), the approval is that rule's renewal, resume or change: it
+ * names it (`replaces`) and the sheet says so, so it can never fail as a second rule.
+ */
 export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode {
   const { rules, signIn } = props;
   const [eligibility, setEligibility] = useState<SignInRuleEligibility | undefined>(undefined);
+  const [existing, setExisting] = useState<SignInRuleView | undefined>(undefined);
   const [phase, setPhase] = useState<RuleSheetPhase>({ kind: 'idle' });
+  const named = props.replaces !== undefined;
 
   useEffect(() => {
     let current = true;
     void readEligibility(rules.client, signIn).then(
       found => {
-        if (current) setEligibility(found);
+        if (!current) return;
+        setEligibility(found);
+        // The rule it replaces, for the sheet to show: the approval names it either way.
+        if (found.rule !== undefined && !named)
+          void listRules(rules.client).then(
+            list => {
+              if (current) setExisting(list.rules.find(each => each.id === found.rule));
+            },
+            () => undefined,
+          );
       },
       cause => {
         if (current) setPhase({ kind: 'failed', words: failureWords(cause) });
@@ -69,7 +87,10 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
     return () => {
       current = false;
     };
-  }, [rules.client, signIn]);
+  }, [rules.client, signIn, named]);
+
+  const replaces = props.replaces ?? eligibility?.rule;
+  const replacing = named ? undefined : existing;
 
   return (
     <SignInRuleSheet
@@ -86,7 +107,7 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
             askPasskey: rules.askPasskey,
             report: progress => setPhase({ kind: 'working', progress }),
           },
-          draftOf(signIn, ticks, props.replaces),
+          draftOf(signIn, ticks, replaces),
         ).then(outcome => {
           if (outcome.kind === 'settled') props.onSettled(outcome.rule);
           else if (outcome.kind === 'dismissed') setPhase({ kind: 'dismissed' });
@@ -99,6 +120,8 @@ export function SignInRuleSheetHost(props: SignInRuleSheetHostProps): ReactNode 
       place={props.place}
       scopes={props.scopes ?? [{ kind: 'any' }]}
       {...(props.before === undefined ? {} : { before: props.before })}
+      {...(replacing === undefined ? {} : { replacing })}
+      {...(!named && eligibility?.rule !== undefined ? { replacesExisting: true } : {})}
       {...(props.username === undefined ? {} : { username: props.username })}
     />
   );

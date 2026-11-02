@@ -118,6 +118,7 @@ import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
+import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
 import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
@@ -382,7 +383,7 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
-          tools={<CardTools act={act} skip={skip} />}
+          tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
           item={card.item}
           onAct={act}
           onClose={place.onClose}
@@ -443,21 +444,32 @@ function GateMeta({
 }
 
 /** The compass's quiet moves as plain buttons, so nothing depends on a gesture: Skip and Not needed. Snooze is the head's clock. */
-function CardTools({ act, skip }: { readonly act: (action: InboxAction) => void; readonly skip: () => void }) {
+function CardTools({
+  act,
+  skip,
+  dismissable = true,
+}: {
+  readonly act: (action: InboxAction) => void;
+  readonly skip: () => void;
+  /** A ferret's rule suggestion has no Not needed: its card's own Dismiss says no (the agenda refuses a close). */
+  readonly dismissable?: boolean;
+}) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
     <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
       <button className="kt-btn kt-btn--sm" data-inbox-tool="skip" onClick={skip} type="button">
         Skip
       </button>
-      <button
-        className="kt-btn kt-btn--sm"
-        data-inbox-tool="not-needed"
-        onClick={() => act(DISMISS_ACTION)}
-        type="button"
-      >
-        Not needed
-      </button>
+      {dismissable ? (
+        <button
+          className="kt-btn kt-btn--sm"
+          data-inbox-tool="not-needed"
+          onClick={() => act(DISMISS_ACTION)}
+          type="button"
+        >
+          Not needed
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1259,6 +1271,7 @@ export function AgendaInboxPage({
   toTestHost,
 }: AgendaInboxPageProps) {
   const headingId = useId();
+  useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
   const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);

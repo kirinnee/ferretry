@@ -22,11 +22,11 @@ import {
   type TwoFactorKeySummary,
 } from './accounts.ts';
 import { canonicalJson } from './canonical-json.ts';
-import { InstantSchema } from './common.ts';
-import { LOGIN_MATCH_MAX, LOGIN_USERNAME_MAX_LENGTH, oneLine } from './login-entries.ts';
+import { InstantSchema, timesWords } from './common.ts';
+import { AUTOMATED_CODE_WARNING, LOGIN_MATCH_MAX, LOGIN_USERNAME_MAX_LENGTH, oneLine } from './login-entries.ts';
 import { LOGIN_OBSERVED_MAX } from './login-recipes.ts';
 import { sha256Hex } from './mcp-oauth.ts';
-import { PairedDeviceIdSchema } from './pairing.ts';
+import { type DaemonId, DaemonIdSchema, PairedDeviceIdSchema } from './pairing.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS, StoredStepUpProofSchema } from './step-up.ts';
 import {
   type GrantMissReason,
@@ -87,7 +87,8 @@ export const SIGN_IN_RULE_MAX = 64;
 /** How long a rule lasts when the owner names no time, and the most it may: in days, and the bounds in seconds. */
 export const SIGN_IN_RULE_DEFAULT_DAYS = 30;
 export const SIGN_IN_RULE_MAX_DAYS = 90;
-const DAY_SECONDS = 86_400;
+/** One day, in seconds: every rule lifetime is a whole number of these. */
+export const DAY_SECONDS = 86_400;
 export const SIGN_IN_RULE_DEFAULT_SECONDS = SIGN_IN_RULE_DEFAULT_DAYS * DAY_SECONDS;
 export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
 /** The same for a terminal rule (sudo, su, doas): root on demand, so a day by default and a week at most. */
@@ -108,7 +109,8 @@ export const SIGN_IN_RULE_MAX_USES = 1_000;
 export const SIGN_IN_RULE_STAGE_TTL_SECONDS = PASSKEY_CHALLENGE_TTL_SECONDS;
 /** A ferret's suggestions: per session an hour, at most one pending per sign-in, each gone after a day. */
 export const SIGN_IN_RULE_SUGGESTIONS_PER_HOUR = 3;
-export const SIGN_IN_RULE_SUGGESTION_TTL_SECONDS = DAY_SECONDS;
+const SIGN_IN_RULE_SUGGESTION_TTL_DAYS = 1;
+export const SIGN_IN_RULE_SUGGESTION_TTL_SECONDS = SIGN_IN_RULE_SUGGESTION_TTL_DAYS * DAY_SECONDS;
 /** How many of the owner's own device taps that went through a sign-in needs before a rule can be made for it. */
 export const SIGN_IN_RULE_HISTORY_TAPS = 2;
 /** The most own-hand sign-ins an eligibility answer counts (it is a tally for the owner to read, not a limit). */
@@ -128,11 +130,17 @@ export const SIGN_IN_RULE_ROOT_WARNING = 'Any ferret on this machine gets root w
 
 /**
  * The one red line on a rule that also types the 2FA code, verbatim: with it the password and the code both come from
- * this machine. A rule's own words, since the saved-login card's {@link LOGIN_TOTP_WARNING} is about a vault and is
- * longer than a rule's single red block holds.
+ * this machine. The same sentence a task-plan line's code tick says ({@link AUTOMATED_CODE_WARNING}), never the
+ * key-saving {@link LOGIN_TOTP_WARNING}, which is about a vault and is longer than a rule's single red block holds.
  */
-export const SIGN_IN_RULE_TOTP_WARNING =
-  'Ferretry types the password and the 2FA code, so a ferret that uses this rule has both factors.';
+export const SIGN_IN_RULE_TOTP_WARNING = AUTOMATED_CODE_WARNING;
+
+/**
+ * The amber line on a rule whose sign-in applies its recipe by itself (`autoRecipe`), verbatim, on every surface that
+ * draws the flag: the form it fills is then one a ferret may have written, with no review by the owner.
+ */
+export const SIGN_IN_RULE_AUTO_RECIPE_WARNING =
+  'This sign-in applies its recipe by itself, so the form it fills is one a ferret may have written.';
 
 /**
  * What a terminal rule's program proof is worth, beside {@link SIGN_IN_RULE_ROOT_WARNING}, verbatim: the kernel proves a
@@ -163,21 +171,55 @@ export const SIGN_IN_RULE_TERMINAL_RESIDUAL =
 export const SignInRuleSurfaceSchema = z.enum(['page', 'terminal']);
 export type SignInRuleSurface = z.infer<typeof SignInRuleSurfaceSchema>;
 
-/** How long a rule of each surface lasts when the owner names no time, and the most it may, in seconds. */
+/** How long a rule of each surface lasts when the owner names no time, and the most it may: in seconds and in days. */
 export const signInRuleLifetime = (
   surface: SignInRuleSurface,
-): { readonly defaultSeconds: number; readonly maxSeconds: number; readonly maxDays: number } =>
+): {
+  readonly defaultSeconds: number;
+  readonly maxSeconds: number;
+  readonly defaultDays: number;
+  readonly maxDays: number;
+} =>
   surface === 'terminal'
     ? {
         defaultSeconds: SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
         maxSeconds: SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
+        defaultDays: SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS,
         maxDays: SIGN_IN_RULE_TERMINAL_MAX_DAYS,
       }
     : {
         defaultSeconds: SIGN_IN_RULE_DEFAULT_SECONDS,
         maxSeconds: SIGN_IN_RULE_MAX_SECONDS,
+        defaultDays: SIGN_IN_RULE_DEFAULT_DAYS,
         maxDays: SIGN_IN_RULE_MAX_DAYS,
       };
+
+/** A week: the shorter choice a page rule's sheet offers beside its default and its most. */
+const WEEK_DAYS = 7;
+
+/**
+ * THE LIFETIMES A SHEET OFFERS, in days, shortest first, built from {@link signInRuleLifetime} so a sheet never offers
+ * one the daemon refuses: a terminal rule its default and its most (1 and 7), a page rule a week, its default and its
+ * most (7, 30 and 90).
+ */
+export const signInRuleDayChoices = (surface: SignInRuleSurface): readonly number[] => {
+  const { defaultDays, maxDays } = signInRuleLifetime(surface);
+  const choices = surface === 'terminal' ? [defaultDays, maxDays] : [WEEK_DAYS, defaultDays, maxDays];
+  return [...new Set(choices.filter(days => days <= maxDays))].sort((a, b) => a - b);
+};
+
+/**
+ * THE SURFACE A RULE FOR A PLACE IS FOR, decided once for every program: a site is a page rule, a terminal place a
+ * terminal one. Exhaustive over the place kinds, so a new kind is a compile error here, never a rule of a guessed surface.
+ */
+export const signInRuleSurfaceOf = (place: Pick<Place, 'kind'>): SignInRuleSurface => {
+  switch (place.kind) {
+    case 'site':
+      return 'page';
+    case 'terminal':
+      return 'terminal';
+  }
+};
 
 /**
  * Whether match keys are ones a rule of this surface may fill at: a page rule only at web hosts (never a `tool@host`),
@@ -704,12 +746,19 @@ export interface SignInRuleWordsFacts {
   readonly scope: SignInRuleScope;
   readonly expiresAt: string;
   readonly uses?: number | undefined;
-  /** The label of the pinned 2FA key, when the rule types the code. */
+  /**
+   * The label of the pinned 2FA key, when the rule types the code. A code rule ALWAYS has a Code key row: without a
+   * label it says {@link SIGN_IN_RULE_CODE_KEY_UNNAMED}, never nothing (a field list is not a type the checker can
+   * discriminate on, so the row is the one owner of this rule).
+   */
   readonly codeKey?: string | undefined;
   readonly revision: number;
   /** Why the rule this approves again is suspended, when it is: a resume says what it resumes. */
   readonly suspended?: SignInRuleSuspension | undefined;
 }
+
+/** The Code key row of a rule that types the code when no key label was given: said, never dropped. */
+export const SIGN_IN_RULE_CODE_KEY_UNNAMED = 'A 2FA key not named here';
 
 /**
  * THE WORDS OF A STANDING RULE, ONE SHAPE EVERYWHERE (the create sheet, the machine view, Settings, the passkey dialog
@@ -761,8 +810,8 @@ export function signInRuleWords(facts: SignInRuleWordsFacts): {
     { label: 'Who', value: rowLine(who) },
     { label: 'Until', value: `${facts.expiresAt.slice(0, 16).replace('T', ' ')} UTC` },
     { label: 'Uses', value: facts.uses === undefined ? 'No limit' : `At most ${String(facts.uses)} times` },
-    ...(facts.fields.includes('totp') && facts.codeKey !== undefined
-      ? [{ label: 'Code key' as const, value: rowLine(facts.codeKey) }]
+    ...(facts.fields.includes('totp')
+      ? [{ label: 'Code key' as const, value: rowLine(facts.codeKey ?? SIGN_IN_RULE_CODE_KEY_UNNAMED) }]
       : []),
     ...(facts.revision > 1
       ? [{ label: 'Note' as const, value: `Approves this rule again (revision ${String(facts.revision)})` }]
@@ -832,6 +881,68 @@ export const SignInRuleListSchema = z.strictObject({
   stages: z.array(SignInRuleStagedSchema).max(SIGN_IN_RULE_MAX),
 });
 export type SignInRuleList = z.infer<typeof SignInRuleListSchema>;
+
+// ── The small answers (one schema each, for the daemon, the app and the CLI) ────────────────────────
+
+/** `DELETE /v1/sign-in-rules/stages/:stage`: the waiting stage was dropped. */
+export const SignInRuleStageDroppedSchema = z.strictObject({
+  stage: SignInRuleStageIdSchema,
+  dropped: z.literal(true),
+});
+export type SignInRuleStageDropped = z.infer<typeof SignInRuleStageDroppedSchema>;
+/** `DELETE /v1/sign-in-rules/:id`: the rule was revoked. */
+export const SignInRuleRevokedSchema = z.strictObject({ id: SignInRuleIdSchema, revoked: z.literal(true) });
+export type SignInRuleRevoked = z.infer<typeof SignInRuleRevokedSchema>;
+/** `POST /v1/accounts/:id/sign-in-rules/revoke`: how many of the account's rules were revoked (zero or more). */
+export const SignInRuleAccountRevokedSchema = z.strictObject({
+  account: AccountIdSchema,
+  revoked: z.number().int().min(0).max(SIGN_IN_RULE_MAX),
+});
+export type SignInRuleAccountRevoked = z.infer<typeof SignInRuleAccountRevokedSchema>;
+/** `DELETE /v1/sign-in-rules/suggestions/:sid`: whether a waiting suggestion was there to dismiss. */
+export const SignInRuleSuggestionDismissedSchema = z.strictObject({
+  id: SignInRuleSuggestionIdSchema,
+  dismissed: z.boolean(),
+});
+export type SignInRuleSuggestionDismissed = z.infer<typeof SignInRuleSuggestionDismissedSchema>;
+
+// ── The link that opens a waiting rule (`fy rules add`) ──────────────────────────────────────────────
+
+const RULE_LINK_MACHINE_PARAMETER = 'machine';
+
+/**
+ * THE FRAGMENT THAT OPENS ONE WAITING RULE in the app: `#rules/<stage>`, and `?machine=<daemon id>` when the printer
+ * knows which machine holds it. It carries no secret and never reaches the daemon: it only picks which row to show.
+ */
+export const ruleDeepLinkFragment = (stage: SignInRuleStageId, machine?: DaemonId): string =>
+  `#rules/${encodeURIComponent(stage)}${machine === undefined ? '' : `?${RULE_LINK_MACHINE_PARAMETER}=${encodeURIComponent(machine)}`}`;
+
+/** The whole link on an app address (trailing slashes dropped): what `fy rules add` prints and opens. */
+export const ruleDeepLink = (origin: string, stage: SignInRuleStageId, machine?: DaemonId): string =>
+  `${origin.replace(/\/+$/u, '')}/${ruleDeepLinkFragment(stage, machine)}`;
+
+/**
+ * The stage (and machine) a `#rules/<stage>` fragment names, the one reader of {@link ruleDeepLinkFragment}: `null` for
+ * any other fragment, a stage id that is not one, or a machine that is not a daemon id.
+ */
+export const ruleDeepLinkFromFragment = (
+  fragment: string,
+): { readonly stage: SignInRuleStageId; readonly machine?: DaemonId } | null => {
+  const match = /^#?rules\/([^/?]+)(?:\?(.*))?$/u.exec(fragment);
+  if (match === null) return null;
+  let raw: string;
+  try {
+    raw = decodeURIComponent(match[1] ?? '');
+  } catch {
+    return null;
+  }
+  const stage = SignInRuleStageIdSchema.safeParse(raw);
+  if (!stage.success) return null;
+  const named = new URLSearchParams(match[2] ?? '').get(RULE_LINK_MACHINE_PARAMETER);
+  if (named === null) return { stage: stage.data };
+  const machine = DaemonIdSchema.safeParse(named);
+  return machine.success ? { stage: stage.data, machine: machine.data } : null;
+};
 
 /** The longest reason of a ferret's suggestion the owner's sheet shows (redacted, one line). */
 export const SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS = 300;
@@ -994,26 +1105,58 @@ export const SIGN_IN_RULE_ERROR_CODES = {
   notPassword: 'not_password',
   /** A terminal sign-in for another program than sudo, su or doas (ssh, npm…): no standing rule ever covers it. */
   toolNotCovered: 'tool_not_covered',
+  /** sudo, su or doas, on a machine that does not offer terminal rules ({@link terminalRulesOffered}). */
+  terminalOff: 'terminal_off',
   /** The code was ticked, but the account has no 2FA key Ferretry makes codes for. */
   noCodeKey: 'no_code_key',
+  /**
+   * The sign-in already has a standing rule (active, suspended, expired or scoped elsewhere), and the approval did not
+   * name it: approve it again as that rule's renewal, resume or change (`replaces`), never as a second rule.
+   */
+  ruleExists: 'rule_exists',
+  /**
+   * The approval named a rule (`replaces`) that is not, or is no longer, the sign-in's standing rule as it was when the
+   * approval was staged: look at the rule again.
+   */
+  notThisRule: 'not_this_rule',
+  /** This machine's clock moved back between the stage and the commit: nothing was approved; stage it again. */
+  clockMovedBack: 'clock_moved_back',
   /** The sign-in, its account or a pinned fact changed between the stage and the commit: nothing was approved. */
   conflict: 'conflict',
   /** The passkey assertion did not verify against the staged bytes: nothing was approved. */
   proofInvalid: 'proof_invalid',
 } as const;
 
+/**
+ * THE SENTENCE FOR EACH REFUSAL THAT IS NOT AN INELIGIBILITY, one owner for the daemon's message and the app's and the
+ * CLI's words: each says what happened and the next step, so no two refusals read alike ({@link
+ * SIGN_IN_RULE_INELIGIBLE_WORDS} owns the rest).
+ */
+export const SIGN_IN_RULE_REFUSAL_WORDS = {
+  stage_not_found: 'That approval timed out or was already answered. Start it again.',
+  no_code_key: 'This account has no 2FA key Ferretry makes codes for, so the code can’t be ticked.',
+  rule_exists:
+    'This sign-in already has a standing rule, so nothing was approved. Renew, resume or change that rule instead.',
+  not_this_rule:
+    'This sign-in’s standing rule changed while you were approving it, so nothing was approved. Look at it again.',
+  clock_moved_back: 'This machine’s clock moved back, so nothing was approved. Start again.',
+  conflict: 'The sign-in changed while you were approving it, so nothing was approved. Start again.',
+  proof_invalid: 'The passkey did not match this rule, so nothing was approved.',
+} as const satisfies Partial<Record<(typeof SIGN_IN_RULE_ERROR_CODES)[keyof typeof SIGN_IN_RULE_ERROR_CODES], string>>;
+
 // ── Eligibility ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Why a sign-in cannot have a standing rule yet: the owner has no tapped history with it, it is a provider sign-in or
- * not a password one, it is a terminal sign-in for a program other than sudo, su or doas, or no paired device holds a
- * passkey.
+ * not a password one, it is a terminal sign-in for a program other than sudo, su or doas, it is sudo, su or doas on a
+ * machine that does not offer terminal rules, or no paired device holds a passkey.
  */
 export const SIGN_IN_RULE_INELIGIBLE = [
   'no-history',
   'via-provider',
   'not-password',
   'tool-not-covered',
+  'terminal-off',
   'no-passkey',
 ] as const;
 export const SignInRuleIneligibleSchema = z.enum(SIGN_IN_RULE_INELIGIBLE);
@@ -1025,15 +1168,17 @@ export const SIGN_IN_RULE_INELIGIBLE_CODES = {
   'via-provider': SIGN_IN_RULE_ERROR_CODES.viaProvider,
   'not-password': SIGN_IN_RULE_ERROR_CODES.notPassword,
   'tool-not-covered': SIGN_IN_RULE_ERROR_CODES.toolNotCovered,
+  'terminal-off': SIGN_IN_RULE_ERROR_CODES.terminalOff,
   'no-passkey': SIGN_IN_RULE_ERROR_CODES.passkeyRequired,
 } as const satisfies Record<SignInRuleIneligible, string>;
 
 /** The owner's sentence for each. */
 export const SIGN_IN_RULE_INELIGIBLE_WORDS = {
-  'no-history': 'Sign in yourself twice from the app first',
+  'no-history': `Sign in yourself ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} from the app first`,
   'via-provider': "This sign-in goes through another account, so it can't be pre-approved",
   'not-password': 'Only a password sign-in can be pre-approved',
   'tool-not-covered': 'A standing rule covers a page sign-in, or sudo, su or doas in a terminal; not this program',
+  'terminal-off': 'This machine does not offer standing rules for sudo, su or doas',
   'no-passkey': 'Add a passkey in Settings › Security first',
 } as const satisfies Record<SignInRuleIneligible, string>;
 

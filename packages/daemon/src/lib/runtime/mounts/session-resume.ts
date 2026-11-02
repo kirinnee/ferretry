@@ -114,7 +114,7 @@ function pathSessionId(context: RouteContext): string {
 /**
  * Who asked, in the resume domain's own vocabulary.
  *
- * `resolveApiActor` produces `admin-cli`, `admin-ui`, `peer:<id>` or `warden:<id>`, and the domain
+ * `resolveApiActor` produces `admin-cli`, `admin-ui`, `device:<id>`, `peer:<id>` or `warden:<id>`, and the domain
  * names the KIND only — a policy does not depend on which peer asked. Anything the domain does not
  * recognise, including the absent actor a `public` route would carry, becomes `unknown`.
  */

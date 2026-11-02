@@ -477,8 +477,12 @@ describe('the handlers’ own second line', () => {
       {},
     );
 
-    // Assert
-    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    // Assert: the one owner-only code and sentence (C28), naming this route's act
+    should([answer.status, answer.code, answer.message]).deepEqual([
+      403,
+      'owner_only',
+      'only a person answers an input request; a ferret asks the owner instead',
+    ]);
   });
 });
 

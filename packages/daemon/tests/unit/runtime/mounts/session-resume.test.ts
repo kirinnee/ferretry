@@ -185,6 +185,8 @@ describe('the session resume mount', () => {
     // Arrange / Act / Assert
     should(resumeActorOf('admin-cli')).equal('admin-cli');
     should(resumeActorOf('admin-ui')).equal('admin-ui');
+    // The owner in the app on a paired device is a person, not an unknown reviver (C4).
+    should(resumeActorOf('device:d_1')).equal('device');
     should(resumeActorOf('peer:s9')).equal('peer');
     should(resumeActorOf('warden:s4')).equal('warden');
     should(resumeActorOf('cron:nightly')).equal('unknown');

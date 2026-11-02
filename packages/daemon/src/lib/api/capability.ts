@@ -62,6 +62,13 @@ export interface CapabilityDemand {
   readonly capability: DaemonCapability;
   /** `use` is exercising the capability; `configure` is changing how it behaves on the host. */
   readonly axis: CapabilityAxis;
+  /**
+   * The route only TAKES AWAY — revokes a plan line, deletes a 2FA key, a sign-in or an account, revokes or narrows a
+   * device. The grant is still asked, and the unlock still stands, but never a per-act passkey step-up, whatever
+   * "ask again for each act" says: taking access away is never harder than having it (docs/grants.md § Narrowing
+   * never asks again). A route that can ALSO widen judges the widen inside, where a passkey proved for it is asked.
+   */
+  readonly narrowing?: true;
 }
 
 /**

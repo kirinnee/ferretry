@@ -66,7 +66,8 @@ or a standing sign-in rule ([input requests](input-requests.md#standing-rule-fil
 is raised and closed at once: it was never the owner's to answer, so it must not buzz. While the daemon fills it, the
 card is QUIET (`InputRequestService.quietCard`): `AgendaBuzz` leaves it out of the owner's items, so it makes neither
 its deadline push nor a stop. The card on the wire is unchanged; the agenda history shows it closed ("Filled under
-your task plan (line 2) on github.com.", "Filled under your standing rule on github.com.").
+your task plan (line 2) on github.com." for a plan; a rule fill closes in a tap fill's words, and the owner's input
+card says "Filled under your standing sign-in rule on github.com.").
 
 When the fill does not happen after all (a check missed, the write typed nothing), the card stops being quiet and the
 daemon adds one line to its context ("A task plan line didn't apply here, so you're asked as usual."). That edit is a

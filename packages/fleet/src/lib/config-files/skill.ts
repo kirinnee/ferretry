@@ -55,7 +55,7 @@ JSON Schema of a kind (\`${bin} config schema\` lists the kinds).
    value; a ferret cannot write the secret store), then write \`\${secret:NAME}\` where the value would go. A file holding anything that looks like a
    key is refused.
 2. **Run \`${bin} config check\` after every edit.** It names each problem by file, line and column, with the
-   fix. (\`${bin} config write <file>\` writes from stdin through the daemon and refuses a file that does not check.) A broken file is never half-applied: its last good version stays in effect until it checks.
+   fix. (The owner's \`${bin} config write <file>\` writes from stdin through the daemon; yours is \`config_write\`.) A broken file is never half-applied: its last good version stays in effect until it checks.
 3. **A change that loosens what the machine may spend or what agents may do waits for the owner** —
    switching on a Warden layer that spends (\`jev\` or \`llm\`), raising a cap, letting the Warden act alone, letting the Warden move ferrets to another login (\`autoMigrate\`: switching it on, \`forceStopBackground\`, a new trigger or target, more moves an hour, a lower \`minHeadroomPercent\`), letting agents control more, opening the public usage feed (\`publicUsageFeed\`), sending dictated text to a provider.
    It is written, but the tighter version stays in effect until the owner runs \`${bin} config confirm\` at

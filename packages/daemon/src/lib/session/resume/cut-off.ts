@@ -4,11 +4,12 @@ import type { ResumeActor } from './types.ts';
 export type CutOffResume = 'proceed' | 'restore' | 'refuse';
 
 /**
- * A cut-off session comes back only when a PERSON resumes it: that resume clears the mark (`restore`), so its
+ * A cut-off session comes back only when a PERSON resumes it (at the CLI, in the app on this host, or in the app on a
+ * paired device): that resume clears the mark (`restore`), so its
  * relaunch rotates a credential. A peer, the Warden or the daemon's own revive is refused (`refuse`) before anything
  * is touched. A session nobody cut off resumes as it always did (`proceed`).
  */
 export function cutOffResume(cutOff: boolean, actor: ResumeActor): CutOffResume {
   if (!cutOff) return 'proceed';
-  return actor === 'admin-cli' || actor === 'admin-ui' ? 'restore' : 'refuse';
+  return actor === 'admin-cli' || actor === 'admin-ui' || actor === 'device' ? 'restore' : 'refuse';
 }

@@ -879,7 +879,7 @@ describe('TaskPlanService: the edges of each step', () => {
 
     should(stage.codes).eql([]);
     should(stage.summary).eql([
-      'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root there, 1 use',
+      'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root on kirin-box, 1 use',
     ]);
   });
 

@@ -773,7 +773,7 @@ describe('the refusals around saved logins, each with nothing typed', () => {
         HOST,
       ),
     );
-    should(refused.message).containEql('no saved logins');
+    should(refused.message).containEql('keeps no accounts');
     should(h.writes).deepEqual([]);
   });
 

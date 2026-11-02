@@ -122,13 +122,16 @@ describe('the composition root makes every connection', () => {
 
 // secrev-1301 / lizzette (a), on since !A226: the terminal gate is the protocol's compile-time list, read nowhere else.
 describe('terminal standing rules are switched by the build alone', () => {
-  it('should read sign-in-rules-terminal.1 only through daemonFeatureList, for the rule service, the suggestions and the fills', async () => {
+  it('should read sign-in-rules-terminal.1 only through terminalRulesOffered(daemonFeatureList()), for the rule service, the suggestions and the fills', async () => {
     const fyd = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
-    const reads = fyd.split('\n').filter(line => line.includes('signInRulesTerminal'));
+    const reads = fyd
+      .split('\n')
+      .filter(line => line.includes('signInRulesTerminal') || line.includes('terminalRulesOffered('));
+    // One decision (C29): both names, page and terminal, the same way in every program.
     should(reads.map(line => line.trim())).eql([
-      'terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
-      'terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
-      'terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
+      'terminalRules: () => terminalRulesOffered(daemonFeatureList()),',
+      'terminalRules: () => terminalRulesOffered(daemonFeatureList()),',
+      'terminal: () => terminalRulesOffered(daemonFeatureList()),',
     ]);
     // No daemon code (comments aside) holds the feature's name, which a config, env or file value could match.
     const glob = new Bun.Glob('**/*.ts');

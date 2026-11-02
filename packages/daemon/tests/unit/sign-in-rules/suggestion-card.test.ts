@@ -1,15 +1,17 @@
 import { describe, it } from 'bun:test';
-import type { SignInRuleSuggestionId } from '@ferretry/protocol';
+import { SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, type SignInRuleSuggestionId } from '@ferretry/protocol';
 import should from 'should';
 import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '../../../src/lib/agenda/index.ts';
 import { parseAgendaLedger } from '../../../src/lib/agenda/state-machine.ts';
 import { SignInRuleSuggestionAgendaAdapter, SignInRuleSuggestions } from '../../../src/lib/sign-in-rules/index.ts';
 import { GITHUB, listing, NOW } from './support.ts';
 
+const OWNER = { kind: 'owner', actor: { kind: 'host' } } as const;
+
 /**
  * A ferret's rule suggestion on the REAL agenda (invariant 30): the card is the daemon's, a plain answer to it is refused
  * so it can never read as an approval, it survives the ledger round-trip, and the ferret has no agenda route that could
- * make one.
+ * make one. Whatever the owner does, the ferret's agenda reads the same until the card expires (R1).
  */
 
 function agendaWorld() {
@@ -28,15 +30,16 @@ function agendaWorld() {
     { has: async sessionId => sessionId === 's1' },
     { raised: async () => undefined },
   );
+  const clock = { now: NOW };
   const suggestions = new SignInRuleSuggestions({
     accounts: { listing: async () => listing() },
     agenda: new SignInRuleSuggestionAgendaAdapter(agenda),
     redact: async text => text,
     audit: { record: async () => undefined },
-    clock: { now: () => NOW },
+    clock: { now: () => clock.now },
     ids: { suggestionId: () => `srg_${'1'.repeat(16)}` as SignInRuleSuggestionId },
   });
-  return { agenda, suggestions, ledgers };
+  return { agenda, suggestions, ledgers, clock };
 }
 
 describe('a rule suggestion card on the real agenda', () => {
@@ -81,53 +84,75 @@ describe('a rule suggestion card on the real agenda', () => {
     should(text).not.containEql('GitHub work');
   });
 
-  it('should close the card when the owner turns the suggestion down', async () => {
-    // Arrange
-    const w = agendaWorld();
-    const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+  it('should keep the ferret’s agenda byte-identical whether the owner dismisses, approves, closes or stays silent', async () => {
+    // Arrange — one world per door, each with the same card
+    const doors = ['silent', 'dismiss', 'approve', 'close', 'not-needed'] as const;
+    const worlds = await Promise.all(
+      doors.map(async door => {
+        const w = agendaWorld();
+        const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+        return { door, w, made };
+      }),
+    );
 
-    // Act
-    await w.suggestions.dismiss({ kind: 'owner', actor: { kind: 'host' } }, made.suggestion);
-    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(w.ledgers.get('s1'))), 's1');
+    // Act — each door, then the agenda as the ferret reads it; then the day runs out
+    const before = await Promise.all(
+      worlds.map(async ({ door, w, made }) => {
+        if (door === 'dismiss') w.suggestions.dismiss(OWNER, made.suggestion);
+        if (door === 'approve') w.suggestions.approved(GITHUB);
+        if (door === 'close') await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'no');
+        if (door === 'not-needed') await w.agenda.dismiss('s1', made.agenda as never, { kind: 'human' } as never, 'no');
+        return JSON.stringify(await w.agenda.list('s1'));
+      }),
+    );
+    const after = await Promise.all(
+      worlds.map(async ({ w }) => {
+        w.clock.now = NOW + SIGN_IN_RULE_SUGGESTION_TTL_SECONDS * 1000 + 1;
+        w.suggestions.sweep();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return JSON.stringify(await w.agenda.list('s1'));
+      }),
+    );
 
-    // Assert
-    should(parsed?.entries.map(entry => (entry.item as { resolutionNote?: string }).resolutionNote)).eql([
-      'The owner closed this card.',
-    ]);
+    // Assert — the same bytes for every door, open until the expiry, then closed by the daemon in one note
+    should(new Set(before).size).equal(1);
+    should(new Set(after).size).equal(1);
+    should(before[0]).containEql('A ferret suggests a standing rule');
+    should(after[0]).containEql('This suggestion expired.');
+    should(after[0]).not.containEql('The owner closed this card.');
+    should(worlds.map(({ w }) => w.suggestions.waiting('s1', GITHUB))).eql(doors.map(() => false));
   });
 
-  it('should see a card the owner resolved on the agenda as closed, and an open one as open', async () => {
+  it('should refuse the owner’s close and Not needed on the agenda, pointing at Dismiss on the card', async () => {
     // Arrange
     const w = agendaWorld();
     const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
-    const adapter = new SignInRuleSuggestionAgendaAdapter(w.agenda);
-    const id = made.agenda as string;
 
     // Act
-    const before = await adapter.isOpen('s1', id);
-    await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'done');
-    const after = await adapter.isOpen('s1', id);
-    const missing = await adapter.isOpen('no-such-session', id);
+    const closed = await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'no');
+    const dismissed = await w.agenda.dismiss('s1', made.agenda as never, { kind: 'human' } as never, 'no');
 
-    // Assert — an unreadable agenda must never end a suggestion
-    should(before).be.true();
-    should(after).be.false();
-    should(missing).be.true();
+    // Assert — refused both ways, the card still open
+    for (const refused of [closed, dismissed])
+      should(refused).match({
+        ok: false,
+        error: { code: 'use_input_form', message: /Dismiss it on its card in the app/u },
+      });
+    should(JSON.stringify(await w.agenda.list('s1'))).not.containEql('resolvedAt');
   });
 
-  it('should end the suggestion when the owner closes its card on the agenda, and keep the ferret blocked', async () => {
+  it('should take an answered suggestion off the owner’s list only, by a Dismiss or an approved rule', async () => {
     // Arrange
     const w = agendaWorld();
-    const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
-    await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'done');
+    await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+    const listed = w.suggestions.list(OWNER).suggestions.length;
 
     // Act
-    await w.suggestions.reconcile();
-    const retry = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'again' }).catch(error => error);
+    w.suggestions.approved(GITHUB);
 
-    // Assert
-    should(w.suggestions.list({ kind: 'owner', actor: { kind: 'host' } }).suggestions).eql([]);
-    should(retry).match({ code: 'capacity' });
+    // Assert — gone from the owner's list, still waiting as far as the ferret is told
+    should(listed).equal(1);
+    should(w.suggestions.list(OWNER).suggestions).eql([]);
     should(w.suggestions.waiting('s1', GITHUB)).be.true();
   });
 
@@ -137,7 +162,6 @@ describe('a rule suggestion card on the real agenda', () => {
     const inner = new SignInRuleSuggestionAgendaAdapter({
       raise: async () => ({ ok: true, item: undefined }),
       resolve: async () => ({ ok: true }),
-      list: async () => ({ ok: true, value: { items: [] } }),
     } as never);
     const suggestions = new SignInRuleSuggestions({
       accounts: { listing: async () => listing() },

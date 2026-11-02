@@ -46,10 +46,10 @@ const accountList = () =>
 
 const item = (mismatch = false): ComponentProps<typeof TwoFactorSeedHost>['item'] => ({
   twoFactorSeed: { stage: STAGE, account: 'GITHUB' },
-  subject: 'Save automatic codes to GitHub · kirinnee?',
+  // The daemon's words name the place only: agenda text is every ferret's to read.
+  subject: 'Save automatic codes to your account on github.com?',
   why: 'Asked by fy on kirin-box at 10:00 UTC. If you didn’t just ask for this, Deny.',
   context: [
-    '- The key says it is for GitHub · kirinnee.',
     ...(mismatch ? [`- ${TWO_FACTOR_SEED_CARD_MISMATCH_LINE}`] : []),
     '- Password and code both come from this machine then: together they are one factor.',
   ].join('\n'),
@@ -111,6 +111,8 @@ const served = ({
       state,
       expiresAt: AT,
       ...(omitFlag ? {} : { mismatch: flag }),
+      issuer: 'GitHub',
+      accountName: 'kirinnee',
     };
   });
   return machine;
@@ -152,8 +154,10 @@ describe('the owner card for a staged 2FA seed', () => {
   it('should read the daemon’s words, name the account, and offer Allow only after the warning is ticked', async () => {
     const card = await draw({});
 
+    // The account and what the key says come from the reads, never from the agenda item's text.
     expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to GitHub · kirinnee?');
     expect(card.q('[data-seed-why]')).toBeNull();
+    expect(card.q('[data-seed-lines]')?.textContent).toContain('The key says it is for GitHub · kirinnee.');
     expect(card.q('[data-seed-lines]')?.textContent).toContain('together they are one factor');
     expect(card.q('[data-seed-warning]')?.textContent).toBe(LOGIN_TOTP_WARNING);
     expect(card.q('[data-seed-mismatch]')).toBeNull();

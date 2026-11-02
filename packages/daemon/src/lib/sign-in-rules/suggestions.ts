@@ -7,16 +7,20 @@ import {
   SIGN_IN_RULE_SUGGESTION_TTL_SECONDS,
   SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS,
   SIGN_IN_RULE_SUGGESTIONS_PER_HOUR,
+  signInRuleKeysFit,
   type SignInId,
   type SignInRuleSuggestionId,
   type SignInRuleSuggestionList,
   type SignInRuleSuggestionView,
   type SignInSummary,
 } from '@ferretry/protocol';
+import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
 import type { AuditSink } from '../audit/types.ts';
+import { proposalTarget } from '../secrets/proposal-target.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { RuleListing } from './drift.ts';
 import { ruleSurfaceOf } from './eligibility.ts';
+import { SignInRuleError } from './service.ts';
 import { auditText } from './words.ts';
 
 /**
@@ -38,6 +42,14 @@ import { auditText } from './words.ts';
  * session. Both are reserved in the same synchronous run that checks them, so calls sent together cannot all pass.
  * A refused suggestion gives its place and its count back. A suggestion is RAM only and ends after a day.
  *
+ * ## THE CARD IS THE SAME WHATEVER THE OWNER DOES (R1)
+ *
+ * The card sits on the ferret's own agenda, which the ferret reads. So it stays open, byte for byte as raised, until its
+ * day is up, and then the DAEMON closes it with one fixed note: a Dismiss, an approved rule and silence all read the
+ * same. Neither the owner nor the ferret can close it on the agenda (the agenda refuses: `use_input_form`). What the owner
+ * did is kept here only, as "answered": it takes the suggestion off the owner's list (`GET /v1/sign-in-rules/suggestions`,
+ * a person route), which is how the app takes the card out of the owner's Inbox.
+ *
  * ## THE FERRET LEARNS NOTHING ABOUT RULES
  *
  * A refusal is only ever about the sign-in itself, which the ferret can already read (not a password sign-in, signed
@@ -45,15 +57,13 @@ import { auditText } from './words.ts';
  * rule, tapped this sign-in by hand, or holds a passkey is never said: the answer is the same whatever it is.
  */
 
-/** The agenda, as a suggestion's card needs it: raise one, and close it when the suggestion ends. */
+/** The agenda, as a suggestion's card needs it: raise one, and close it when the suggestion expires. */
 export interface SignInRuleSuggestionAgendaPort {
   raise(
     sessionId: string,
     card: SignInRuleSuggestionCard,
   ): Promise<{ readonly ok: true; readonly id: string } | { readonly ok: false; readonly message: string }>;
   close(sessionId: string, id: string, note: string): Promise<void>;
-  /** Whether the card is still open on the agenda: the owner may close it there instead of in the sheet. */
-  isOpen(sessionId: string, id: string): Promise<boolean>;
 }
 
 /** The daemon's words for the card. Nothing here is the ferret's. */
@@ -73,7 +83,7 @@ export interface SignInRuleSuggestionPorts {
   readonly audit: AuditSink;
   readonly clock: { now(): number };
   readonly ids?: { suggestionId?(): SignInRuleSuggestionId };
-  /** Whether the daemon reports `sign-in-rules-terminal.1`: until it does, no terminal sign-in can have a rule. */
+  /** Whether terminal rules are offered (`terminalRulesOffered`): until they are, no terminal sign-in can have a rule. */
   readonly terminalRules?: () => boolean;
 }
 
@@ -116,7 +126,10 @@ interface Pending {
 }
 
 const HOUR_MS = 3_600_000;
-const CLOSED_NOTE = 'The owner closed this card.';
+/** The one refusal for a sign-in no rule could cover, whatever the reason, so the ferret learns only what it can read. */
+const UNCOVERABLE_WORDS = 'No standing rule can cover this sign-in.';
+/** The one note every suggestion card closes with, at its expiry, whatever the owner did. */
+export const SUGGESTION_EXPIRED_NOTE = 'This suggestion expired.';
 const randomSuggestionId = (): SignInRuleSuggestionId => `srg_${randomBytes(8).toString('hex')}`;
 
 const oneLine = (text: string, max: number): string => {
@@ -136,10 +149,11 @@ export function suggestionHost(place: Place): string {
 export class SignInRuleSuggestions {
   readonly #pending = new Map<SignInRuleSuggestionId, Pending>();
   /**
-   * Suggestions the owner turned down, by either door. They stay in `#pending` until their own expiry so `waiting()`
-   * keeps answering as if the owner had not answered: the ferret can never tell a "no" from silence.
+   * Suggestions the owner answered: dismissed, or approved a rule for the sign-in. They stay in `#pending`, and their
+   * card stays open, until their own expiry, so `waiting()` and the agenda answer as if the owner had not answered: the
+   * ferret can never tell a "no", or a rule, from silence. Only the owner's list leaves them out.
    */
-  readonly #turnedDown = new Set<SignInRuleSuggestionId>();
+  readonly #answered = new Set<SignInRuleSuggestionId>();
   /** Session → the sign-ins whose suggestion is being raised right now, so two calls together can't both pass. */
   readonly #raising = new Map<string, Set<SignInId>>();
   readonly #raised = new Map<string, number[]>();
@@ -161,10 +175,7 @@ export class SignInRuleSuggestions {
     let release = (): void => {};
     try {
       const listing = await this.ports.accounts.listing().catch(() => {
-        throw new SignInRuleSuggestionError(
-          'unavailable',
-          'The saved logins cannot be read right now; try again later.',
-        );
+        throw new SignInRuleSuggestionError('unavailable', 'The accounts cannot be read right now; try again later.');
       });
       const found = this.#resolve(listing, ask);
       release = this.#reserveSignIn(sessionId, found.id);
@@ -214,27 +225,27 @@ export class SignInRuleSuggestions {
     this.#requireOwner(caller);
     this.sweep();
     return {
-      suggestions: [...this.#pending.values()].filter(pending => !this.#turnedDown.has(pending.id)).map(viewOf),
+      suggestions: [...this.#pending.values()].filter(pending => !this.#answered.has(pending.id)).map(viewOf),
     };
   }
 
-  /** The owner turns one down: it leaves the sheet and its card closes, but the ferret is still told it is waiting. */
-  async dismiss(caller: PasteRuleCaller, id: SignInRuleSuggestionId): Promise<boolean> {
+  /**
+   * The owner turns one down: it leaves the owner's list, and nothing else changes. Its card stays open on the ferret's
+   * agenda until it expires, and the ferret is still told it is waiting.
+   */
+  dismiss(caller: PasteRuleCaller, id: SignInRuleSuggestionId): boolean {
     this.#requireOwner(caller);
-    const pending = this.#pending.get(id);
-    if (pending === undefined || this.#turnedDown.has(id)) return false;
-    this.#turnedDown.add(id);
-    await this.ports.agenda.close(pending.sessionId, pending.agenda, CLOSED_NOTE).catch(() => undefined);
+    if (!this.#pending.has(id) || this.#answered.has(id)) return false;
+    this.#answered.add(id);
     return true;
   }
 
-  /** A card the owner closed on the agenda is a "no" like a dismissal: it leaves the sheet and keeps the ferret blocked. */
-  async reconcile(): Promise<void> {
-    for (const pending of [...this.#pending.values()]) {
-      if (this.#turnedDown.has(pending.id)) continue;
-      const open = await this.ports.agenda.isOpen(pending.sessionId, pending.agenda).catch(() => true);
-      if (!open) this.#turnedDown.add(pending.id);
-    }
+  /**
+   * The owner approved a standing rule for this sign-in: every suggestion of it, from any session, is answered and leaves
+   * the owner's list. Their cards stay as they are until they expire, exactly as after a Dismiss.
+   */
+  approved(signIn: SignInId): void {
+    for (const pending of this.#pending.values()) if (pending.signIn === signIn) this.#answered.add(pending.id);
   }
 
   /** Ends every suggestion past its day, with its card. */
@@ -253,39 +264,37 @@ export class SignInRuleSuggestions {
 
   async #expire(pending: Pending): Promise<void> {
     this.#pending.delete(pending.id);
-    if (this.#turnedDown.delete(pending.id)) return;
-    await this.ports.agenda.close(pending.sessionId, pending.agenda, 'This suggestion expired.').catch(() => undefined);
+    this.#answered.delete(pending.id);
+    await this.ports.agenda.close(pending.sessionId, pending.agenda, SUGGESTION_EXPIRED_NOTE).catch(() => undefined);
   }
 
   #requireOwner(caller: PasteRuleCaller): void {
     if (caller.kind !== 'owner')
-      throw new SignInRuleSuggestionError('bad_request', 'only the owner reads or dismisses a rule suggestion');
+      throw new SignInRuleError(403, OWNER_ONLY_CODE, ownerOnlyWords('reads or dismisses a rule suggestion'));
   }
 
+  /** The same decision, codes and words as a recipe's (`proposalTarget`): one `account.propose`, one answer. */
   #resolve(listing: RuleListing, ask: SignInRuleSuggestionAsk): SignInSummary {
-    if (ask.signIn !== undefined) {
-      const found = listing.signIns.find(each => each.id === ask.signIn);
-      if (found === undefined) throw new SignInRuleSuggestionError('not_found', `There is no sign-in ${ask.signIn}.`);
-      return found;
-    }
-    const own = listing.signIns.filter(each => each.account === ask.login);
-    if (own.length === 0)
-      throw new SignInRuleSuggestionError(
-        'not_found',
-        'There is no such saved login; name the sign-in (account_hint).',
-      );
-    const [only] = own;
-    if (own.length > 1 || only === undefined)
-      throw new SignInRuleSuggestionError('bad_request', 'That account has several sign-ins; name one (signIn).');
-    return only;
+    const found = proposalTarget(listing, ask);
+    if (!found.ok) throw new SignInRuleSuggestionError(found.code, found.words);
+    return found.signIn;
   }
 
-  /** Only what the ferret can read for itself. Never the owner's taps, rules or passkeys. */
+  /**
+   * Only what the ferret can read for itself: a terminal sign-in while terminal rules are off, a program no rule covers
+   * (ssh, npm…: the place says so, as the eligibility does), a provider sign-in or a non-password one. Never the owner's
+   * taps, rules or passkeys.
+   */
   #refuseUncoverable(signIn: SignInSummary): void {
-    if (ruleSurfaceOf(signIn) === 'terminal' && this.ports.terminalRules?.() !== true)
-      throw new SignInRuleSuggestionError('bad_request', 'No standing rule can cover this sign-in.');
-    if (signIn.via !== undefined || signIn.method.via !== undefined || signIn.method.kind !== 'password')
-      throw new SignInRuleSuggestionError('bad_request', 'No standing rule can cover this sign-in.');
+    const surface = ruleSurfaceOf(signIn);
+    if (
+      (surface === 'terminal' && this.ports.terminalRules?.() !== true) ||
+      !signInRuleKeysFit(surface, placeKeys(signIn.place)) ||
+      signIn.via !== undefined ||
+      signIn.method.via !== undefined ||
+      signIn.method.kind !== 'password'
+    )
+      throw new SignInRuleSuggestionError('bad_request', UNCOVERABLE_WORDS);
   }
 
   async #whyOf(text: string): Promise<string> {

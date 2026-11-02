@@ -241,7 +241,7 @@ describe('drop and commit refusals', () => {
     const refused = await refusal(w.service.commit(deviceOwner(), renewal.stage, () => evidenceFor(challenge)));
 
     // Assert
-    should([refused.status, refused.code]).eql([409, 'conflict']);
+    should([refused.status, refused.code]).eql([409, 'not_this_rule']);
     should(w.store.document?.rules).eql([]);
   });
 

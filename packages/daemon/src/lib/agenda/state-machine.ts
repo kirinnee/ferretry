@@ -936,6 +936,18 @@ function addressById(
   } else if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
+  // A ferret's standing-rule suggestion stays on its board unchanged until it expires, whatever the owner does, so the
+  // ferret can never tell a "no" from silence: only the daemon closes it. The owner says no with Dismiss on its card.
+  if (
+    command.action !== 'answer' &&
+    command.actor.kind !== 'daemon' &&
+    target.item.signInRuleSuggestion !== undefined
+  ) {
+    return failure(
+      'use_input_form',
+      `${command.id} is a ferret's rule suggestion: Dismiss it on its card in the app. The ferret is not told; the card leaves its list when it expires`,
+    );
+  }
   // The owner closes a gate by answering it (or Not needed): a bare "done" would close it with the card unmoved.
   if (command.action === 'resolve' && command.actor.kind === 'human' && isGateAgenda(target)) {
     return failure(

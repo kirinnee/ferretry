@@ -60,6 +60,7 @@ import {
 } from './login-recipes.ts';
 import { sha256Hex } from './mcp-oauth.ts';
 import { SecretStoreHealthSchema } from './secrets.ts';
+import { PASSKEY_CHALLENGE_TTL_SECONDS } from './step-up.ts';
 
 /**
  * ACCOUNTS AND SIGN-INS: the saved login split in two (docs/input-requests.md, "Accounts and sign-ins").
@@ -509,7 +510,7 @@ export function accountIndexProblems(document: {
     if (seeds > MAX_SEEDS_PER_ACCOUNT)
       problems.push({
         path: ['accounts', handle, 'factors'],
-        message: `an account keeps at most ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA seeds`,
+        message: `an account keeps at most ${String(MAX_SEEDS_PER_ACCOUNT)} 2FA keys that make codes`,
       });
   }
 
@@ -779,8 +780,8 @@ export const RemovedTwoFactorKeySchema = z.strictObject({
 });
 export type RemovedTwoFactorKey = z.infer<typeof RemovedTwoFactorKeySchema>;
 
-/** How long a staged seed waits for its passkey: one passkey challenge's life (`PASSKEY_CHALLENGE_TTL_SECONDS`). */
-export const TWO_FACTOR_STAGE_TTL_SECONDS = 120;
+/** How long a staged seed waits for its passkey: one passkey challenge's life. */
+export const TWO_FACTOR_STAGE_TTL_SECONDS = PASSKEY_CHALLENGE_TTL_SECONDS;
 /** Most seeds one daemon holds staged at once, so nobody can fill its memory by staging. */
 export const MAX_LIVE_TWO_FACTOR_STAGES = 4;
 
@@ -856,6 +857,13 @@ export const TwoFactorSeedStageViewSchema = z.strictObject({
    * a daemon from before it existed omits it, and the card then goes by the sentence the card's context carries.
    */
   mismatch: z.boolean().optional(),
+  /**
+   * What the pasted key says it is for (its `otpauth://` issuer and account name). Only here, on a route that reads
+   * the accounts: the agenda card never carries it, because the account name is often the username and every ferret
+   * reads agenda text. A daemon from before it existed puts it in the card's context instead.
+   */
+  issuer: totpShape.issuer,
+  accountName: totpShape.accountName,
 });
 export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema>;
 
@@ -913,9 +921,9 @@ export const TWO_FACTOR_ERROR_CODES = {
   unknownFactor: 'unknown_2fa_key',
 } as const;
 
-/** Where to add a 2FA seed now that the old path is closed: the sentence the 403 says. */
+/** Where to add a 2FA key now that the old path is closed: the sentence the 403 says. */
 export const ADD_TWO_FACTOR_KEY_WHERE =
-  'saving a 2FA seed needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
+  'saving a 2FA key needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
 
 // ── `config/account-defaults.yaml`───────────────────────────────────────────────────────────────
 

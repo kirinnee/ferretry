@@ -997,7 +997,7 @@ describe('a staged 2FA seed card', () => {
         item('A1', {
           kind: 'permission',
           raisedBy: 'daemon',
-          subject: 'Save automatic codes to GitHub · kirinnee?',
+          subject: 'Save automatic codes to your account on github.com?',
           twoFactorSeed: REF,
         } as Partial<AgendaItem>),
       ]),
@@ -1011,7 +1011,7 @@ describe('a staged 2FA seed card', () => {
         item('A1', {
           kind: 'permission',
           raisedBy: 'agent',
-          subject: 'Save automatic codes to GitHub · kirinnee?',
+          subject: 'Save automatic codes to your account on github.com?',
         } as Partial<AgendaItem>),
       ]),
       focus: { target: 'A1' as AgendaId, seq: 1 },

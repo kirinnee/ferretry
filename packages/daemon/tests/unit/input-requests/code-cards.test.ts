@@ -294,6 +294,16 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
     should(own.cards[0]).deepEqual(held.cards[0]);
   });
 
+  it('should title a card with no code key by the place, never the account’s label or username', async () => {
+    // The title is agenda text, which every ferret reads (secrev-1261 L4): the app names the account itself.
+    const h = harness();
+    await github(h);
+    await h.directory.accounts.addFactor('GITHUB', { kind: 'push', label: 'GitHub Mobile' });
+    await raised(h);
+    should(h.cards[0]?.title).equal('One-time code for github.com');
+    should(JSON.stringify(h.cards[0])).not.containEql('kirinnee');
+  });
+
   it('should keep the plain title where no sign-in matches, and cut a long one to what a card holds', async () => {
     const h = harness({ facts: page('https://example.org') });
     await raised(h);

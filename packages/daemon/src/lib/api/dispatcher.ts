@@ -11,7 +11,7 @@ import {
   type StoredProofStepUpAct,
 } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
-import { callerIsAgent, OWNER_ONLY_CODE } from './agent-caller.ts';
+import { callerIsAgent, OWNER_ONLY_CODE, ownerOnlyWords } from './agent-caller.ts';
 import {
   type ApiCredentials,
   type Authentication,
@@ -261,11 +261,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   if (lookup.route.caller !== 'any' && callerIsAgent(authentication, actor))
     return {
       kind: 'refused',
-      response: errorResponse(
-        403,
-        `only a person may use ${request.method} ${request.path}; a ferret asks the owner instead`,
-        OWNER_ONLY_CODE,
-      ),
+      response: errorResponse(403, ownerOnlyWords(`may use ${request.method} ${request.path}`), OWNER_ONLY_CODE),
     };
 
   // The OWNER is the host's admin token over loopback, never a loopback peer on its own: a tunnel or

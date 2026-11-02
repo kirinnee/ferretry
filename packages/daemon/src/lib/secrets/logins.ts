@@ -137,7 +137,7 @@ export function savedLoginOf(account: AccountSummary, signIns: readonly SignInSu
 /** The saved login an account in a draft reads as. */
 function savedLoginIn(draft: Pick<AccountDraft, 'accounts' | 'signIns'>, id: AccountId): LoginEntrySummary {
   const account = draft.accounts[id];
-  if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+  if (account === undefined) throw new LoginEntryError('unknown_login', `there is no account ${id}`);
   const own = signInsOf(draft.signIns, account.key).map(([signInId, signIn]) =>
     signInSummary(signInId, signIn, draft.accounts, draft.signIns),
   );

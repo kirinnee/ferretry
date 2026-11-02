@@ -70,6 +70,31 @@ function expected(
   return 'granted';
 }
 
+describe('a route that only takes away (C31: narrowing never asks again)', () => {
+  it('should need no per-act step-up for a narrowing demand on any capability or axis, and still ask the grant', () => {
+    // Act + Assert
+    for (const capability of DAEMON_CAPABILITIES) {
+      for (const axis of AXES) {
+        const demand = { capability, axis, narrowing: true } as const;
+        should({ capability, axis, needs: demandNeedsStepUp(demand) }).deepEqual({ capability, axis, needs: false });
+        should(decideCapability(demand, governed({ stepUp: false }))).deepEqual({ allowed: true, refusal: 'granted' });
+        should(decideCapability(demand, governed({ device: ALL_OFF, stepUp: false })).refusal).equal(
+          'device-not-granted',
+        );
+        should(decideCapability(demand, governed({ grants: ALL_OFF, stepUp: false })).refusal).equal('not-granted');
+      }
+    }
+  });
+
+  it('should still ask the step-up of the same demand when it is not marked narrowing', () => {
+    // Act
+    const plain = decideCapability({ capability: 'secrets', axis: 'configure' }, governed({ stepUp: false }));
+
+    // Assert
+    should(plain.refusal).equal('step-up-required');
+  });
+});
+
 describe('effective = daemon-wide AND device, for a governed caller', () => {
   it('should answer every axis × device grant × daemon-wide grant × step-up exactly as the contract says', () => {
     // Act + Assert
@@ -327,7 +352,7 @@ describe('judging one device-grant change', () => {
     should(verdict).deepEqual({ kind: 'forbidden', widened: ['terminal.use'] });
   });
 
-  it('should let a remote narrowing through with a step-up and nothing else — even by a device with no grants', () => {
+  it('should let a remote narrowing through with nothing else — no per-act step-up, even by a device with no grants (C31)', () => {
     // Arrange — the caller holds NOTHING beyond the default; narrowing must still never be harder.
     const current = withGrant(LIMITED_DEVICE_GRANTS, 'terminal', { use: true, configure: true });
     const next = LIMITED_DEVICE_GRANTS;
@@ -350,9 +375,9 @@ describe('judging one device-grant change', () => {
       holder: undefined,
     });
 
-    // Assert
+    // Assert — with "ask again for each act" on, the step-up is not held; a narrowing still goes through.
     should(confirmed).deepEqual({ kind: 'allowed' });
-    should(unconfirmed).deepEqual({ kind: 'step-up-required' });
+    should(unconfirmed).deepEqual({ kind: 'allowed' });
   });
 
   it('should refuse a mixed patch WHOLE when any field widens illegally, before asking for a step-up', () => {

@@ -89,8 +89,10 @@ describe('a ferret proposes', () => {
       agendaItemId: 'A1',
     });
     should(w.cards).have.length(1);
-    should(w.cards[0]?.subject).equal("Recipe change for 'Vercel' on vercel.com");
-    should(w.cards[0]?.howToResolve).containEql('Settings › Accounts › Vercel › vercel.com › Recipe');
+    // Agenda text is every ferret's to read: it names the place, never the account's label.
+    should(w.cards[0]?.subject).equal('Recipe change on vercel.com');
+    should(w.cards[0]?.howToResolve).containEql("Settings › Accounts, on the account's vercel.com › Recipe");
+    should(JSON.stringify(w.cards)).not.containEql('Vercel');
     should(w.cards[0]?.context).equal('- Click Log in\n+ Continue with Google\n\nThe ferret says: the button moved');
     should(w.cards[0]?.howToResolve).match(/fy account site recipe approve si_[0-9a-f]{16} rp_0000000000000000/u);
     const [entry] = await w.directory.list();
@@ -312,8 +314,9 @@ describe('a proposal is keyed by the SIGN-IN it is for', () => {
     should(proposed).containDeep({ login: 'GITHUB', signIn: w.ssh, state: 'pending' });
     should((await proposalsOf(w, w.ssh)).map(each => each.id)).deepEqual([proposed.id]);
     should(await proposalsOf(w, w.site)).deepEqual([]);
-    should(w.cards[0]?.subject).equal("Recipe change for 'GitHub' on ssh@build.example.com");
-    should(w.cards[0]?.howToResolve).containEql('GitHub › ssh@build.example.com › Recipe');
+    should(w.cards[0]?.subject).equal('Recipe change on ssh@build.example.com');
+    should(w.cards[0]?.howToResolve).containEql('ssh@build.example.com › Recipe');
+    should(JSON.stringify(w.cards)).not.containEql('GitHub');
   });
 
   it('should refuse the older { login } for an account that signs in at several places, filing nothing', async () => {

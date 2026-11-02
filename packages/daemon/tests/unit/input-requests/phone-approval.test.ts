@@ -60,8 +60,13 @@ describe('PhoneApprovalService raise', () => {
     should(cards[0]?.card).containDeep({
       approvalId: view.id,
       title: 'Approve on your phone',
-      subject: 'Approve on your phone: ClickUp · a@gmail.com',
+      subject: 'Approve on your phone: your account on company.okta.com',
+      why: 'Your account on company.okta.com.',
     });
+    // Agenda text is every ferret's to read (secrev-1261 L4): no account label, provider label or username on it.
+    const { subject, why, context, howToResolve } = cards[0]?.card ?? {};
+    for (const text of [subject, why, context, howToResolve])
+      for (const name of ['ClickUp', 'a@gmail.com', 'Okta ', 'Okta.']) should(String(text ?? '')).not.containEql(name);
     should(pushes).eql([{ body: 'Tap 42 on your phone: ClickUp · a@gmail.com', sequence: 0, secondsLeft: 120 }]);
   });
 

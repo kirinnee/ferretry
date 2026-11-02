@@ -1,18 +1,35 @@
 /** A ferret's suggestion and the quiet offer after a hand-tapped sign-in: both only open the owner's own sheet. */
 
 import { describe, expect, it } from 'bun:test';
+import { SIGN_IN_RULE_REFUSAL_WORDS } from '@ferretry/protocol';
 import { SignInRuleOffer } from '../../../src/features/secure-copy/sign-in-rule-offer.tsx';
 import { SignInRuleSuggestionHost } from '../../../src/features/secure-copy/sign-in-rule-suggestion-host.tsx';
+import { cardModel } from '../../../src/lib/agenda-card-model.ts';
+import { AnsweredSuggestions } from '../../../src/lib/answered-suggestions.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { RULE_NO_ACCOUNTS_DEVICE_WORDS } from '../../../src/lib/sign-in-rules.ts';
+import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { mount, must } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
 import { type RuleWorld, refused, ruleClient } from '../../support/sign-in-rule-client.ts';
-import { SITE_SIGN_IN, suggestion } from '../../support/sign-in-rule-fixtures.ts';
+import { pageRule, RULE_ID, ruleList, SITE_SIGN_IN, suggestion } from '../../support/sign-in-rule-fixtures.ts';
 
 const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' });
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 const ref = { signInRuleSuggestion: { suggestion: suggestion().id } };
+
+/**
+ * A sign-in that already has a standing rule (here one that ran out), and a daemon that refuses a second rule for it
+ * exactly as the real stage does (C1): only an approval that names the rule it replaces is staged.
+ */
+const withRule: RuleWorld = {
+  eligibility: { signIn: SITE_SIGN_IN, eligible: true, history: 2, rule: RULE_ID },
+  list: ruleList({ rules: [pageRule({ status: 'expired' })] }),
+  fail: (key, body) =>
+    key === 'POST /v1/sign-in-rules/stages' && body?.['replaces'] !== RULE_ID
+      ? refused(SIGN_IN_RULE_REFUSAL_WORDS.rule_exists, { status: 409, code: 'rule_exists' })
+      : undefined,
+};
 
 const host = (
   world: RuleWorld,
@@ -187,6 +204,33 @@ describe('a ferret’s suggestion', () => {
     }
   });
 
+  it('approves a rule for a sign-in that already has one, as that rule’s renewal, never as a second rule (C1)', async () => {
+    let done = 0;
+    const { fake, element } = host(withRule, { onDone: () => (done += 1) });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      expect(q(mounted.container, '[data-rule-replaces]').textContent).toBe(
+        'This sign-in already has a standing rule (Expired). Approving here replaces it.',
+      );
+      await click(q(mounted.container, '[data-rule-tick="password"]'));
+      await click(q(mounted.container, '[data-rule-approve]'));
+      await settle();
+      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body).toMatchObject({
+        signIn: SITE_SIGN_IN,
+        fields: ['password'],
+        replaces: RULE_ID,
+      });
+      expect(fake.keys().some(key => key.endsWith('/commit'))).toBe(true);
+      expect(mounted.container.textContent).not.toContain('The sign-in changed');
+      expect(done).toBe(1);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
   it('cannot be approved on a device with no passkey', async () => {
     const { element } = host({}, {}, null);
     const mounted = await mount(element);
@@ -198,6 +242,63 @@ describe('a ferret’s suggestion', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('a suggestion the owner answered leaves the Inbox, never the ferret’s agenda (C2)', () => {
+  const answeredOf = () => {
+    const answered = new AnsweredSuggestions();
+    return { answered, has: () => answered.has(answered.getSnapshot(), connection.daemonId, suggestion().id) };
+  };
+
+  it('marks it answered on a Dismiss, and closes no agenda card', async () => {
+    const { answered, has } = answeredOf();
+    const { fake, element } = host({}, { answered });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      expect(has()).toBe(false);
+      await click(q(mounted.container, '[data-rule-suggestion-dismiss]'));
+      await settle();
+      expect(has()).toBe(true);
+      expect(fake.keys().some(key => key.includes('/agenda'))).toBe(false);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('marks it answered once a rule is approved from it', async () => {
+    const { answered, has } = answeredOf();
+    const { element } = host({}, { answered });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      await click(q(mounted.container, '[data-rule-tick="password"]'));
+      await click(q(mounted.container, '[data-rule-approve]'));
+      await settle();
+      expect(has()).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('marks one the owner’s list no longer holds (answered elsewhere, or expired)', async () => {
+    const { answered, has } = answeredOf();
+    const mounted = await mount(host({ suggestions: [] }, { answered }).element);
+    try {
+      await settle();
+      expect(has()).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('offers no Not needed on its card: the agenda refuses a close, and Dismiss says no', () => {
+    const item = agendaItem('A9', { kind: 'permission', signInRuleSuggestion: { suggestion: suggestion().id } });
+    expect(cardModel(item).dismissInMenu).toBe(false);
+    expect(cardModel({ ...item, signInRuleSuggestion: undefined }).dismissInMenu).toBe(true);
   });
 });
 
@@ -252,6 +353,22 @@ describe('the offer after a hand-tapped sign-in', () => {
       await settle();
       expect(q(mounted.container, '[data-rule-offer-saved]').textContent).toContain('Standing rule saved');
       expect(fake.keys().some(key => key.endsWith('/commit'))).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('approves for a sign-in that already has a rule, naming the rule it replaces (C1)', async () => {
+    const { fake, element } = offer(withRule);
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-offer-button]'));
+      await settle();
+      await click(q(mounted.container, '[data-rule-approve]'));
+      await settle();
+      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body?.['replaces']).toBe(RULE_ID);
+      expect(q(mounted.container, '[data-rule-offer-saved]').textContent).toContain('Standing rule saved');
     } finally {
       await mounted.unmount();
     }

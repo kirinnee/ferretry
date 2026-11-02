@@ -57,7 +57,7 @@ import {
   TwoFactorStageIdSchema,
 } from '@ferretry/protocol';
 import { parseActor } from '../../api/actor.ts';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -94,6 +94,12 @@ import {
   UnknownSecretError,
 } from '../../secrets/index.ts';
 import { heldEditRefusal, spendHeldEditProof } from './config-files.ts';
+
+/**
+ * What a ferret is told when it tries to set a place's default account: only the owner does, and how a ferret asks.
+ * `config_write` is off unless the owner turned on "Ferretry settings", so the agenda card is named first.
+ */
+export const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default account for a place')}: say which account and why on an agenda card, or, where "Ferretry settings" is on, write the line with config_write to account-defaults.yaml, where it waits for them`;
 
 /**
  * The secret store's HTTP surface.
@@ -202,7 +208,7 @@ function ownerOnly(context: RouteContext, act: string): void {
 /** The saved login's handle in the path. */
 function pathLoginId(context: RouteContext): LoginEntryId {
   const parsed = LoginEntryIdSchema.safeParse(decodeParameter(context.params.get('id') ?? '') ?? '');
-  if (!parsed.success) throw new ApiError(400, 'the saved login name in the path is not usable', 'invalid_login_id');
+  if (!parsed.success) throw new ApiError(400, 'the account name in the path is not usable', 'invalid_login_id');
   return parsed.data;
 }
 
@@ -232,7 +238,7 @@ async function listLogins(logins: LoginDirectory, recipes: LoginRecipeService | 
     return jsonResponse({
       v: 1,
       health: 'damaged',
-      diagnosis: `the saved logins cannot be read: ${error.message}`,
+      diagnosis: `the accounts cannot be read: ${error.message}`,
       entries: [],
     } satisfies LoginEntryList);
   }
@@ -263,7 +269,7 @@ async function putLogin(
   recipes: LoginRecipeService | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  ownerOnly(context, 'change a saved login');
+  ownerOnly(context, 'change an account');
   const id = pathLoginId(context);
   const change = await parseBody(context.request, PutLoginEntryRequestSchema);
   try {
@@ -297,7 +303,7 @@ async function decideRecipe(recipes: LoginRecipeService, context: RouteContext):
 }
 
 async function renameLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
-  ownerOnly(context, 'rename a saved login');
+  ownerOnly(context, 'rename an account');
   const id = pathLoginId(context);
   const { to } = await parseBody(context.request, RenameLoginEntryRequestSchema);
   try {
@@ -308,10 +314,10 @@ async function renameLogin(logins: LoginDirectory, context: RouteContext): Promi
 }
 
 async function removeLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
-  ownerOnly(context, 'delete a saved login');
+  ownerOnly(context, 'delete an account');
   const id = pathLoginId(context);
   try {
-    if (!(await logins.remove(id))) throw new ApiError(404, `there is no saved login ${id}`, 'unknown_login');
+    if (!(await logins.remove(id))) throw new ApiError(404, `there is no account ${id}`, 'unknown_login');
     return jsonResponse({ id, removed: true });
   } catch (error) {
     return reraise(error);
@@ -376,7 +382,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       path: '/v1/secrets/logins/:id',
       minimum: 'operator',
       caller: 'person',
-      capability: SECRETS_CONFIGURE,
+      capability: SECRETS_REMOVE,
       noStore: true,
       handle: async context => await removeLogin(logins, context),
     },
@@ -553,6 +559,7 @@ function accountRoutes(
       method: 'DELETE',
       path: '/v1/accounts/sign-ins/:signIn',
       ...configure,
+      capability: SECRETS_REMOVE,
       handle: owned('remove a sign-in', async context => {
         const signIn = pathSignInId(context);
         if (!(await accounts.removeSignIn(signIn)))
@@ -592,12 +599,7 @@ function accountRoutes(
             path: '/v1/accounts/defaults',
             ...configure,
             handle: async (context: RouteContext) => {
-              if (isAgentCaller(context))
-                throw new ApiError(
-                  403,
-                  'a ferret cannot choose the default account for a place; the owner does. A suggestion goes in config/account-defaults.yaml, where it waits for the owner to confirm it',
-                  'forbidden',
-                );
+              if (isAgentCaller(context)) throw new ApiError(403, ACCOUNT_DEFAULT_OWNER_ONLY, OWNER_ONLY_CODE);
               const refused = heldEditRefusal(context, 'account-defaults.yaml', 'confirm');
               if (refused !== undefined) return refused;
               const change = await parseBody(context.request, PutAccountDefaultRequestSchema);
@@ -637,6 +639,7 @@ function accountRoutes(
       method: 'DELETE',
       path: '/v1/accounts/:id',
       ...configure,
+      capability: SECRETS_REMOVE,
       handle: owned('delete an account', async context => {
         const id = pathAccountId(context);
         if (!(await accounts.removeAccount(id))) throw new ApiError(404, `there is no account ${id}`, 'unknown_login');
@@ -733,7 +736,7 @@ function askedByWords(context: RouteContext): string {
 const seedProofDemand = (): ApiResponse =>
   jsonResponse(
     {
-      error: 'saving a 2FA seed needs a passkey confirmation for this one save, from a paired device',
+      error: 'saving a 2FA key needs a passkey confirmation for this one save, from a paired device',
       code: STEP_UP_REQUIRED_CODE,
       demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.addTwoFactorKey },
     } satisfies StepUpRequiredBody,
@@ -774,7 +777,7 @@ function factorRoutes(
             path: '/v1/accounts/:id/factors/seed',
             ...configure,
             handle: owned(
-              'stage a 2FA seed',
+              'stage a 2FA key',
               async context => {
                 const id = pathAccountId(context);
                 return TwoFactorSeedStagedSchema.parse(
@@ -792,7 +795,7 @@ function factorRoutes(
             method: 'GET',
             path: '/v1/accounts/:id/factors/seed/:stage',
             ...configure,
-            handle: owned('read a staged 2FA seed', async context =>
+            handle: owned('read a staged 2FA key', async context =>
               TwoFactorSeedStageViewSchema.parse(
                 await seeds.view(pathAccountId(context), pathStageId(context), stageCaller(context)),
               ),
@@ -803,7 +806,7 @@ function factorRoutes(
             path: '/v1/accounts/:id/factors/seed/:stage/commit',
             ...configure,
             handle: async context => {
-              ownerOnly(context, 'save a 2FA seed');
+              ownerOnly(context, 'save a 2FA key');
               const id = pathAccountId(context);
               const stage = pathStageId(context);
               try {
@@ -827,7 +830,7 @@ function factorRoutes(
             path: '/v1/accounts/:id/factors/seed/:stage/confirm-in-app',
             ...configure,
             handle: owned(
-              'ask the owner to save a 2FA seed',
+              'ask the owner to save a 2FA key',
               async context => {
                 const id = pathAccountId(context);
                 const stage = pathStageId(context);
@@ -848,7 +851,7 @@ function factorRoutes(
             method: 'DELETE',
             path: '/v1/accounts/:id/factors/seed/:stage',
             ...configure,
-            handle: owned('drop a staged 2FA seed', async context => {
+            handle: owned('drop a staged 2FA key', async context => {
               const stage = pathStageId(context);
               await seeds.drop(pathAccountId(context), stage, stageCaller(context));
               return { stage, dropped: true };
@@ -885,6 +888,7 @@ function factorRoutes(
       method: 'DELETE',
       path: '/v1/accounts/:id/factors/:factor',
       ...configure,
+      capability: SECRETS_REMOVE,
       handle: owned('remove a 2FA key', async context => {
         const id = pathAccountId(context);
         const factor = pathFactorId(context);
@@ -1003,6 +1007,11 @@ async function exportSecrets(exports: SecretExportService, context: RouteContext
 
 const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
+/**
+ * Deleting a 2FA key, a sign-in or an account: `secrets.configure`, but never a per-act passkey, because removing one
+ * only takes away (docs/grants.md § Narrowing never asks again).
+ */
+const SECRETS_REMOVE: CapabilityDemand = { ...SECRETS_CONFIGURE, narrowing: true };
 
 /** Everything this mount needs, already built. */
 export interface SecretSubsystem {

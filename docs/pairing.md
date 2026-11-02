@@ -387,7 +387,9 @@ Two different things are revocable and they are not the same act:
 **At the machine: `fy device revoke <device>`.** This is THE way to remove a stolen phone without a
 browser. `<device>` is a paired device's id, or its name when exactly one device has that name (the same
 resolver as `fy passkey window`); it calls `DELETE /v1/pair/devices/:deviceId` with the host's admin token
-over loopback, which is ungoverned, so no step-up is asked. Revoking is the one change here that cannot be
+over loopback, which is ungoverned, so no step-up is asked. From a paired device the same route asks only its
+`pairing.use` grant and the unlock — never a per-act passkey, because revoking only takes away
+([grants.md](grants.md#narrowing-never-asks-again)). Revoking is the one change here that cannot be
 undone — the device must pair again — so it asks you to type `revoke` unless `--yes` waived it, and off a
 terminal it refuses without `--yes` rather than skip the question. It ends in one sentence: the device can
 no longer reach this machine, its open sessions were closed and its passkeys forgotten. An unknown name, two
