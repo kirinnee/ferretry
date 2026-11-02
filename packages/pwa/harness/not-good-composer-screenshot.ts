@@ -1,20 +1,20 @@
 /**
  * Screenshots and checks for the "Not good" box, which is the chat's own composer detached from any chat: open under
- * a card waiting for the owner's try (the quick-answer run and the list: a modal sheet over the card), and under the
- * Inbox deck's gate card (inline, exactly as wide as the card), empty and with words. Phone 390 and desktop 1440, Studio light and dark.
+ * a card waiting for the owner's try (the quick-answer run and the list) and under the Inbox deck's gate card: in
+ * every place inline directly under the card, exactly as wide as it, empty and with words. Phone 390 and desktop 1440, Studio light and dark.
  *
  *   bun harness/not-good-composer-screenshot.ts [outDir]   # writes <outDir>/<state>-<390|1440>-<light|dark>.png
  *
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage`, invented data), serves it on an ephemeral loopback port, and
  * FAILS (after writing every picture) when: a page scrolls sideways; the box is not the composer (no attach, no mic
- * slot, no send); the box is not exactly as wide as the card it answers; words typed do not reach the field; or Cancel
+ * slot, no send); the box is not directly under, and exactly as wide as, the card it answers; a dead band is left under the field; the placeholder is cut off; words typed do not reach the field; or Cancel
  * does not close it.
  */
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { chromium, type Page } from 'playwright-core';
+import { chromium } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
@@ -96,27 +96,22 @@ const check = (ok: boolean, message: string): void => {
   process.stderr.write(`❌ ${message}\n`);
 };
 
-/** What each place draws: its view, the button that asks for words, the card the box answers, and whether it sits under it (a modal sheet does not). */
+/** What each place draws: its view, the button that asks for words, and the card the box answers. */
 const PLACES = [
   {
     state: 'to-test-quick',
     view: 'quick-to-test',
     ask: '[data-to-test-not-good]',
     card: '[data-to-test]',
-    inline: false,
   },
-  { state: 'to-test-list', view: 'to-test', ask: '[data-to-test-not-good]', card: '[data-to-test]', inline: false },
+  { state: 'to-test-list', view: 'to-test', ask: '[data-to-test-not-good]', card: '[data-to-test]' },
   {
     state: 'gate-deck',
     view: 'gate',
     ask: '[data-agenda-option="Not good"]',
     card: '.fy-attn-deck__top',
-    inline: true,
   },
 ] as const;
-
-const widthOf = (page: Page, selector: string): Promise<number> =>
-  page.evaluate(selector => document.querySelector(selector)?.getBoundingClientRect().width ?? Number.NaN, selector);
 
 for (const width of [390, 1440] as const) {
   for (const theme of THEMES) {
@@ -149,15 +144,56 @@ for (const width of [390, 1440] as const) {
       check((await box.getByRole('button', { name: 'Cancel' }).count()) === 1, `${label}: the box has no Cancel`);
       const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       check(wide <= 0, `${label}: scrolls sideways by ${wide}px`);
-      const boxWidth = await widthOf(page, '[data-board-send-back]');
-      const cardWidth = await widthOf(page, place.card);
-      process.stdout.write(`ℹ️  ${label}: box ${boxWidth}px, card ${cardWidth}px\n`);
-      if (place.inline) {
-        check(
-          Math.abs(boxWidth - cardWidth) <= 1,
-          `${label}: box ${boxWidth}px is not as wide as its card ${cardWidth}px`,
+      const geometry = await page.evaluate(card => {
+        const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+        const cardRect = rect(card);
+        const boxRect = rect('[data-board-send-back]');
+        const formRect = rect('[data-board-send-back] form');
+        const field = document.querySelector<HTMLElement>(
+          '[data-board-send-back] textarea, [data-board-send-back] .fy-live-editor',
         );
-      }
+        const words = field instanceof HTMLTextAreaElement ? field.placeholder : (field?.dataset.placeholder ?? '');
+        const style = field === null ? null : getComputedStyle(field);
+        const canvas = document.createElement('canvas').getContext('2d');
+        if (canvas !== null && style !== null)
+          canvas.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const text = canvas?.measureText(words).width ?? Number.NaN;
+        const room =
+          field === null || style === null
+            ? Number.NaN
+            : field.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+        return {
+          cardLeft: cardRect?.left ?? Number.NaN,
+          cardBottom: cardRect?.bottom ?? Number.NaN,
+          cardWidth: cardRect?.width ?? Number.NaN,
+          boxLeft: boxRect?.left ?? Number.NaN,
+          boxTop: boxRect?.top ?? Number.NaN,
+          boxBottom: boxRect?.bottom ?? Number.NaN,
+          boxWidth: boxRect?.width ?? Number.NaN,
+          formBottom: formRect?.bottom ?? Number.NaN,
+          placeholder: words,
+          placeholderOver: text - room,
+        };
+      }, place.card);
+      process.stdout.write(
+        `ℹ️  ${label}: box ${geometry.boxWidth}px at ${geometry.boxLeft}, card ${geometry.cardWidth}px at ${geometry.cardLeft}; band ${geometry.boxBottom - geometry.formBottom}px\n`,
+      );
+      check(
+        Math.abs(geometry.boxWidth - geometry.cardWidth) <= 1 && Math.abs(geometry.boxLeft - geometry.cardLeft) <= 1,
+        `${label}: box ${geometry.boxWidth}px at ${geometry.boxLeft} is not the card's ${geometry.cardWidth}px at ${geometry.cardLeft}`,
+      );
+      check(
+        geometry.boxTop >= geometry.cardBottom - 1 && geometry.boxTop - geometry.cardBottom <= 24,
+        `${label}: box is not directly under its card (card ends ${geometry.cardBottom}, box starts ${geometry.boxTop})`,
+      );
+      check(
+        geometry.boxBottom - geometry.formBottom <= 20,
+        `${label}: ${geometry.boxBottom - geometry.formBottom}px dead band under the field`,
+      );
+      check(
+        geometry.placeholderOver <= 0,
+        `${label}: placeholder "${geometry.placeholder}" is cut off by ${geometry.placeholderOver}px`,
+      );
       await box.scrollIntoViewIfNeeded();
       await page.screenshot({
         path: join(outDir, `${name.replace(place.state, `${place.state}-not-good-empty`)}.png`),

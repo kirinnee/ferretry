@@ -604,7 +604,7 @@ function GateWhy({
         }
         submitLabel={optional ? 'Not yet' : 'Send back'}
         wordsOptional={optional}
-        placeholder={optional ? 'Optional: what should the ferret know?' : 'What is not good? The ferret reads this.'}
+        placeholder={optional ? 'Optional: add a note' : 'What went wrong?'}
         onCancel={onCancel}
         onSubmit={sent => {
           onSend(sent.reason);
@@ -1922,7 +1922,6 @@ export function AgendaInboxPage({
             </div>
           </div>
         )}
-        {toTestAnswers.composer}
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );
@@ -1976,7 +1975,6 @@ export function AgendaInboxPage({
       ) : (
         openBody
       )}
-      {toTestAnswers.composer}
       <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );

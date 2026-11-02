@@ -1348,6 +1348,10 @@ export function Composer({
     : `Send (${sendKeyLabel} or ${modifierLabel}↵)`;
   const interruptTitle = `Interrupt & send — stops the agent's turn and sends now (${modifierLabel}⇧↵)`;
   const fieldDisabled = disabled || sending;
+  const newLineChip = inputModality.touchAffected && bareEnterAction === 'send';
+  // A detached composer has no session readouts: its status row is drawn only when it holds a control, so the box
+  // ends at the field instead of keeping an empty band under it.
+  const hasStatusRow = !isDetached || vimMode || newLineChip;
 
   // ONE attach control, placed by layout: before the field on a desktop, at the top of the phone's
   // left-hand column.
@@ -1643,54 +1647,56 @@ export function Composer({
           </button>
         </div>
       </div>
-      <div className="fy-composer-actions" data-composer-status="">
-        {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an
+      {hasStatusRow ? (
+        <div className="fy-composer-actions" data-composer-status="">
+          {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an
             unmount, so an open chip keeps its state), leaving the transcript the room. */}
-        <span className="fy-composer-status-chrome" data-composer-status-chrome="">
-          {statusSlot}
-          {context === undefined ? null : (
-            <ContextRing
-              context={context}
-              {...(compacting === undefined ? {} : { compacting })}
-              {...(onOpenContext === undefined ? {} : { onOpen: onOpenContext })}
-            />
-          )}
-          {isDetached ? null : <ComposerQuota quota={quota} />}
-        </span>
-        <span className="fy-composer-spacer" />
-        {vimMode ? (
-          <>
-            {/* One transition, one polite announcement. The word itself is the
+          <span className="fy-composer-status-chrome" data-composer-status-chrome="">
+            {statusSlot}
+            {context === undefined ? null : (
+              <ContextRing
+                context={context}
+                {...(compacting === undefined ? {} : { compacting })}
+                {...(onOpenContext === undefined ? {} : { onOpen: onOpenContext })}
+              />
+            )}
+            {isDetached ? null : <ComposerQuota quota={quota} />}
+          </span>
+          <span className="fy-composer-spacer" />
+          {vimMode ? (
+            <>
+              {/* One transition, one polite announcement. The word itself is the
                 state — a colour alone would say nothing to half the readers who
                 need this most, and Escape is not reachable on a phone at all,
                 which is why the indicator is also the toggle. */}
-            <span aria-atomic="true" aria-live="polite" className="sr-only">
-              {`${VIM_MODE_LABEL[vim.mode]} mode`}
-            </span>
-            <button
-              aria-label={`Vim ${VIM_MODE_LABEL[vim.mode]} mode. Switch to ${
-                vim.mode === 'insert' ? VIM_MODE_LABEL.normal : VIM_MODE_LABEL.insert
-              } mode`}
-              className="fy-composer-vim"
-              data-composer-vim-mode={vim.mode}
-              disabled={fieldDisabled}
-              onClick={() => {
-                setVim(vim.mode === 'insert' ? normalVimState(vim) : { ...vim, mode: 'insert', operator: null });
-                inputRef.current?.focus();
-              }}
-              title={vim.mode === 'insert' ? 'Insert mode — Esc for normal mode' : 'Normal mode — i, a or o to type'}
-              type="button"
-            >
-              {`-- ${VIM_MODE_LABEL[vim.mode].toUpperCase()} --`}
+              <span aria-atomic="true" aria-live="polite" className="sr-only">
+                {`${VIM_MODE_LABEL[vim.mode]} mode`}
+              </span>
+              <button
+                aria-label={`Vim ${VIM_MODE_LABEL[vim.mode]} mode. Switch to ${
+                  vim.mode === 'insert' ? VIM_MODE_LABEL.normal : VIM_MODE_LABEL.insert
+                } mode`}
+                className="fy-composer-vim"
+                data-composer-vim-mode={vim.mode}
+                disabled={fieldDisabled}
+                onClick={() => {
+                  setVim(vim.mode === 'insert' ? normalVimState(vim) : { ...vim, mode: 'insert', operator: null });
+                  inputRef.current?.focus();
+                }}
+                title={vim.mode === 'insert' ? 'Insert mode — Esc for normal mode' : 'Normal mode — i, a or o to type'}
+                type="button"
+              >
+                {`-- ${VIM_MODE_LABEL[vim.mode].toUpperCase()} --`}
+              </button>
+            </>
+          ) : null}
+          {newLineChip ? (
+            <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={fieldDisabled}>
+              New line
             </button>
-          </>
-        ) : null}
-        {inputModality.touchAffected && bareEnterAction === 'send' ? (
-          <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={fieldDisabled}>
-            New line
-          </button>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
       {recalled && draft !== '' ? (
         <p className="fy-composer-recalled" data-composer-recalled="" role="status">
           Editing a copy of your queued message. The original is still in the agent’s queue and will arrive too unless

@@ -383,12 +383,12 @@ function DetailBody({
           ? { placeholder: 'Why does it no longer wait?', submitLabel: 'Stop waiting', busyLabel: 'Saving…' }
           : dialog.kind === 'rework'
             ? {
-                placeholder: 'What is not good? The ferret reads this.',
+                placeholder: 'What went wrong?',
                 submitLabel: 'Send back',
                 busyLabel: 'Sending…',
               }
             : {
-                placeholder: 'Why is it going back? The ferret reads this.',
+                placeholder: 'Why is it going back?',
                 submitLabel: 'Move back',
                 busyLabel: 'Moving…',
               };

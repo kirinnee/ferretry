@@ -1252,6 +1252,13 @@ a.fy-inbox-row:focus-visible {
   padding: 0;
   list-style: none;
 }
+/* The Not good box a row opens sits directly under its card, in the list's own column: the card's width, no sheet. */
+.fy-totest-compose {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 /* The row's own ground shows as the surface slides: green for Done (right), red for Not good (left), quiet for Skip (down). */
 .fy-totest {
   position: relative;

@@ -132,7 +132,7 @@ export function BoardSendBack({
   onSubmit,
   onCancel,
   files,
-  placeholder = 'What is not good? The ferret reads this.',
+  placeholder = 'What went wrong?',
   submitLabel = 'Send back',
   wordsOptional = false,
 }: BoardSendBackProps) {

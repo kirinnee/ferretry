@@ -866,7 +866,7 @@ describe('BoardPage — an answer in flight', () => {
     expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe(
       'Reopen Old closed thing: back to Implement',
     );
-    expect(sendBackField(root).getAttribute('placeholder')).toBe('Why is it going back? The ferret reads this.');
+    expect(sendBackField(root).getAttribute('placeholder')).toBe('Why is it going back?');
   });
 });
 

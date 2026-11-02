@@ -235,6 +235,23 @@ describe('Inbox — answering a card waiting for a try', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it('draws the Not good box inline, directly under its own card and as wide as the list, not as a sheet', async () => {
+    const { root } = await open();
+    await interact(() =>
+      must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click(),
+    );
+    const box = sendBackBox(root);
+    const slot = must(box.parentElement, 'the box slot');
+    const row = rowOf(root, 'F22');
+    expect(slot.getAttribute('data-to-test-compose')).toBe(row.getAttribute('data-to-test'));
+    expect(row.nextElementSibling).toBe(slot);
+    expect(slot.parentElement).toBe(row.parentElement);
+    expect(box.classList.contains('fy-board-sendback')).toBe(true);
+    expect(document.body.querySelector('.fy-board__scrim')).toBeNull();
+    expect(root.querySelectorAll('[data-to-test-compose]').length).toBe(1);
+    expect(box.querySelector('textarea')?.getAttribute('placeholder')).toBe('What went wrong?');
+  });
+
   it('says so, and opens no box, when Not good is pressed for a machine that is not connected here', async () => {
     const { root, actions } = await open({ disconnected: true });
     await interact(() =>

@@ -124,7 +124,7 @@ describe('BoardSendBack — the chat composer', () => {
     // The chat's own composer: its form, its field, its send, its attach — not a box of the Board's.
     expect(dialog.querySelector('form[data-composer-style]')).not.toBeNull();
     expect(document.activeElement).toBe(fieldOf(root));
-    expect(fieldOf(root).getAttribute('placeholder')).toBe('What is not good? The ferret reads this.');
+    expect(fieldOf(root).getAttribute('placeholder')).toBe('What went wrong?');
     expect(attachButton(root)).not.toBeNull();
     expect(root.querySelector('.fy-composer-quota')).toBeNull();
     expect(submit.getAttribute('aria-label')).toContain('Send back');
@@ -215,10 +215,10 @@ describe('BoardSendBack — the chat composer', () => {
   it('takes its words from the move it is for', async () => {
     const { root, submit } = await composer({
       heading: 'Move Card back to Todo',
-      placeholder: 'Why is it going back? The ferret reads this.',
+      placeholder: 'Why is it going back?',
       submitLabel: 'Move back',
     });
-    expect(fieldOf(root).getAttribute('placeholder')).toBe('Why is it going back? The ferret reads this.');
+    expect(fieldOf(root).getAttribute('placeholder')).toBe('Why is it going back?');
     expect(submit.getAttribute('aria-label')).toContain('Move back');
   });
 

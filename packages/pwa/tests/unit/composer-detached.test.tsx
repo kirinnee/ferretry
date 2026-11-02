@@ -43,6 +43,8 @@ it('publishes no quote target, offers no attach, and sends the words as typed', 
 
   expect(composerQuoteTarget(daemonSessionScope(laptop, 'child-1'))).toBeNull();
   expect(view.container.querySelector('[data-composer-attach]')).toBeNull();
+  // No session readouts to hold: the box ends at the field, with no empty band under it.
+  expect(view.container.querySelector('[data-composer-status]')).toBeNull();
 
   const field = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the composer field');
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, 'not good');

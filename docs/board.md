@@ -715,6 +715,11 @@ The owner's two answers about a card, on every surface that shows one (Kanban, T
   ferret is sent them through its queue as the owner. The `reopened` history event names the files, so the
   card reads "reopened Released → Implement … with 2 images".
 
+Where the box opens is one rule too: **inline, directly under the card it answers, at the card's exact width** — under the
+Inbox deck's card, under a to-test row in the Inbox list and in the Answer-quickly run (no sheet, no popup over the page).
+Only the Board's own card and detail pages, which have no row to sit under, keep it as a modal. It ends at the field: a
+detached composer draws no empty status row under it, and its placeholder is short enough for a phone (`What went wrong?`).
+
 The files travel as ordinary chat attachments. The app uploads them to the card's ferret (its assignee, else
 its owner ferret) through the session attachment route, then names them on the move (`attachments: { from,
 ids }`). The daemon refuses files from anyone but the owner, files in any other session, and files on a move

@@ -452,7 +452,7 @@ describe('BoardDetail — the verdict', () => {
     const { root, actions } = await open({ task: card('F1', tested) });
     await click(root, '[data-verdict="not-good"]');
     expect(text(reasonBox(root), '.fy-board-reason__heading')).toBe('Not good: send Try it back to Implement');
-    expect(sendBackField(reasonBox(root)).getAttribute('placeholder')).toBe('What is not good? The ferret reads this.');
+    expect(sendBackField(reasonBox(root)).getAttribute('placeholder')).toBe('What went wrong?');
     await reasonSubmit(root, 'it crashes on phones');
     expect(actions.calls).toEqual(['moveTask:["implement","it crashes on phones"]']);
   });
