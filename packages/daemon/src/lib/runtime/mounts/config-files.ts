@@ -105,9 +105,15 @@ function stepUpRefusal(
 
 /**
  * Whether this caller may act on the file on `axis`, as the operator's grants decide for the file's
- * own capability. Answers a refusal response, or `undefined` when allowed.
+ * own capability. Answers a refusal response, or `undefined` when allowed. A `narrowing` act asks the grant and a
+ * proven device alone, never a passkey (`CapabilityDemand.narrowing`).
  */
-function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configure'): ApiResponse | undefined {
+function refusedFor(
+  context: RouteContext,
+  path: string,
+  axis: 'use' | 'configure',
+  narrowing = false,
+): ApiResponse | undefined {
   const capability = configFileCapability(addressOf(path));
   const governance = context.governance;
   if (governance === undefined) {
@@ -124,7 +130,7 @@ function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configur
       403,
     );
   }
-  const decision = governance.decide({ capability, axis });
+  const decision = governance.decide({ capability, axis, ...(narrowing ? { narrowing: true as const } : {}) });
   if (decision.allowed) return undefined;
   if (decision.refusal === 'step-up-required') {
     return stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, capability);
@@ -229,6 +235,21 @@ export function heldEditRefusal(
       configFileCapability(addressOf(path)),
       STEP_UP_ACTS.loosenConfig,
     );
+  }
+  return undefined;
+}
+
+/**
+ * Whether this caller may make the owner's own write to `path` that only TAKES AWAY, such as removing one account
+ * default (owner decision !A243): the fleet on `use`, the file's capability on `configure` as a narrowing (the grant
+ * and a proven device, no passkey for the act, whatever "ask again for each act" says), and never an agent. Adding or
+ * changing a line still goes through {@link heldEditRefusal}'s `confirm`.
+ */
+export function takeAwayRefusal(context: RouteContext, path: string): ApiResponse | undefined {
+  const refused = refusedFor(context, path, 'configure', true) ?? refusedFleetUse(context, path);
+  if (refused !== undefined) return refused;
+  if (isAgentCaller(context)) {
+    throw new ApiError(403, 'an agent cannot confirm a configuration change; the owner confirms it', 'forbidden');
   }
   return undefined;
 }

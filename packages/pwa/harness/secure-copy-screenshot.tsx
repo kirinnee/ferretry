@@ -2,9 +2,9 @@
  * Screenshots of secure copy's three owner screens (docs/secure-copy.md), at a 390px phone and a 1440px desktop,
  * in the light and dark studio themes. Review evidence; nothing compares the PNGs.
  *
- *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-{paste,page,store,plan,rules}-*.png
+ *   bun harness/secure-copy-screenshot.tsx [out-dir] [states]   # writes secure-copy-<state>-<viewport>-<scheme>.png
  *
- * `states` is a comma list (paste,page,store,plan,rules) when only some are wanted.
+ * `states` is a comma list (paste,page,store,plan,rules,rules-waiting,rules-passkey,profile-passkey) when only some are wanted.
  *
  * Fake fixtures only: no real account, no real daemon, no value (a paste card never holds one). "paste" is the
  * input card a paste raises: a token sealed from `vercel tokens create`, going into the `vercel` program reading
@@ -13,7 +13,11 @@
  * ~/.bun/bin going into a password field on vercel.com. "plan" is the card a ferret raises before it starts, two planned
  * pastes with one ticked off. "rules" is Settings › Secure copy › Pastes approved in advance, with programs in the
  * owner's own profile allowed, the gh → vercel rule marked as one into the profile, and the add form open on a rule
- * into bash, which it warns runs whatever it reads.
+ * into bash, which it warns runs whatever it reads. "rules-waiting" is the same card with a rule `fy copy rules add`
+ * staged at the machine, waiting for the passkey with the daemon's rows; "rules-passkey" is the passkey prompt for
+ * that one rule (`approve-paste-rule`, owner decision !A244), listing what it allows and who staged it;
+ * "profile-passkey" is the passkey prompt for turning on programs in your own profile (`allow-profile-targets`,
+ * secrev-1334 M2), listing every paste rule it widens.
  * Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
@@ -43,7 +47,10 @@ import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { InputCard } from '../../src/features/input-request/input-card.tsx';
 import { CopyPlanCard } from '../../src/features/secure-copy/copy-plan-card.tsx';
 import { CopyRulesCard } from '../../src/features/secure-copy/copy-rules-card.tsx';
+import { StepUpDialog } from '../../src/features/step-up/step-up-dialog.tsx';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { fieldsOf } from '../../src/lib/input-card.ts';
+import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 import { NOW, browserField, field, request as fakeRequest } from '../../tests/support/input-fixtures.ts';
 
 const view = new URLSearchParams(location.search).get('view');
@@ -126,6 +133,51 @@ const rules = [
   { id: '3'.repeat(32), from: { kind: 'command', program: 'vercel' }, to: { kind: 'terminal', program: 'vercel' }, sessionId: 'sess-1', remaining: 1, used: 0, createdAt: '2026-08-05T09:58:30.000Z', createdBy: { kind: 'host' }, expiresAt: '2026-08-05T11:58:00.000Z', plan: 'b'.repeat(32) },
 ] as never;
 
+// A paste rule staged at the machine, in the daemon's own words (protocol pasteRuleWords): what the passkey approves.
+const staged = {
+  stage: 'prs_' + '4'.repeat(24),
+  kind: 'rule',
+  does: 'Ferretry pastes what gh prints into bash in a terminal, for any ferret on this machine, without asking.',
+  rows: [
+    { label: 'From', value: 'what gh prints' },
+    { label: 'To', value: 'bash in a terminal' },
+    { label: 'Who', value: 'Any ferret on this machine' },
+    { label: 'Pastes', value: 'At most 3' },
+    { label: 'Until', value: 'For 2 hours from approval' },
+    { label: 'Staged', value: 'At this machine, 2026-08-05 10:00 UTC' },
+  ],
+  runsAnything: true,
+  expiresAt: '2026-08-05T10:02:00.000Z',
+} as never;
+
+if (view === 'profile-passkey') {
+  const gate = new StepUpGate({ ceremony: () => new Promise(() => undefined), describe: () => 'unknown' });
+  const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'phone-1' });
+  const words = {
+    does: 'Paste rules may then paste into programs from your own profile (~/.nix-profile), which any ferret can swap; it widens 2 paste rules now.',
+    rows: [
+      { label: 'Widens', value: 'what gh prints → vercel in a terminal' },
+      { label: 'Widens', value: 'what vercel prints → vercel in a terminal' },
+      { label: 'Staged', value: 'On Kirin’s phone, 2026-08-05 10:00 UTC' },
+    ],
+    warnings: [],
+  };
+  void gate.require(connection, words.does, 'explicit', 'allow-profile-targets', 'prs_' + '5'.repeat(24), words);
+  globalThis.__gate = gate;
+}
+
+if (view === 'rules-passkey') {
+  const gate = new StepUpGate({ ceremony: () => new Promise(() => undefined), describe: () => 'unknown' });
+  const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'phone-1' });
+  const words = {
+    does: (staged as { does: string }).does,
+    rows: (staged as { rows: { label: string; value: string }[] }).rows,
+    warnings: ['This program runs whatever it reads: a paste into it can run as a command.'],
+  };
+  void gate.require(connection, words.does, 'explicit', 'approve-paste-rule', (staged as { stage: never }).stage, words);
+  globalThis.__gate = gate;
+}
+
 const pasteItem = {
   id: 'A7', source: 'question', sourceRef: paste.id, sourceSeq: 1, kind: 'input',
   title: 'Wants to paste a secure copy',
@@ -176,7 +228,21 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]">
-      {view === 'rules' ? (
+      {view === 'rules-waiting' || view === 'rules-passkey' || view === 'profile-passkey' ? (
+        <>
+          <CopyRulesCard
+            rules={rules}
+            waiting={[staged]}
+            onApproveWaiting={quiet}
+            onDenyWaiting={quiet}
+            onAdd={quiet}
+            onRemove={quiet}
+          />
+          {view === 'rules-passkey' || view === 'profile-passkey' ? (
+            <StepUpDialog gate={globalThis.__gate} machineName={() => 'Studio'} />
+          ) : null}
+        </>
+      ) : view === 'rules' ? (
         <CopyRulesCard
           rules={rules}
           settings={{ allowProfileTargets: true }}
@@ -230,9 +296,9 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['paste', 'page', 'store', 'plan', 'rules'] as const).filter(
-  state => wanted === undefined || wanted.includes(state),
-);
+const STATES = (
+  ['paste', 'page', 'store', 'plan', 'rules', 'rules-waiting', 'rules-passkey', 'profile-passkey'] as const
+).filter(state => wanted === undefined || wanted.includes(state));
 
 const server = Bun.serve({
   hostname: '127.0.0.1',
@@ -279,11 +345,13 @@ try {
         for (const state of STATES) {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           const surface =
-            state === 'rules'
+            state === 'rules' || state === 'rules-waiting'
               ? page.locator('[data-testid="copy-rules-card"]')
-              : state === 'plan'
-                ? page.locator('[data-copy-plan]')
-                : page.locator('[data-input-paste]');
+              : state === 'rules-passkey' || state === 'profile-passkey'
+                ? page.locator('[data-step-up-dialog]')
+                : state === 'plan'
+                  ? page.locator('[data-copy-plan]')
+                  : page.locator('[data-input-paste]');
           await surface.waitFor({ state: 'visible' });
           if (state === 'plan') await page.locator('[data-copy-plan-tick="1"]').uncheck();
           if (state === 'rules') {
@@ -302,7 +370,7 @@ try {
               if (height < 44) fail(`${where}: a button is ${height}px tall, under the 44px floor`);
           }
           const target = join(outDir, `secure-copy-${state}-${viewport.name}-${scheme}.png`);
-          await page.screenshot({ path: target, fullPage: state === 'rules' });
+          await page.screenshot({ path: target, fullPage: state === 'rules' || state === 'rules-waiting' });
           process.stdout.write(`📸 ${target}\n`);
         }
       } finally {

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import { DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import {
   agentItem,
   CapturingOutput,
@@ -805,6 +806,54 @@ describe('attention needs-info command', () => {
     should(out.diagnostics).deepEqual([
       'this daemon is older than the Done button on agenda items, so the item is raised without it; update the daemon to offer it',
     ]);
+  });
+
+  it('should take a health read that fails as no optional features, and still raise the item', async () => {
+    // Arrange
+    const gateway = new RecordingAgendaGateway(board, afterAdd);
+    gateway.features = async () => {
+      throw new DaemonFeaturesUnreadable(new Error('down'));
+    };
+    const out = new CapturingOutput();
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, out, SESSION), async () => {});
+
+    // Act
+    await program.parseAsync([
+      'node',
+      'fy',
+      ...withBrief(['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12', '--offer-close']),
+    ]);
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(gateway.applied[0]?.request).not.have.property('offerClose');
+    should(gateway.applied[0]?.request).not.have.property('task');
+  });
+
+  it('should surface a feature read that failed for any other reason, and raise nothing', async () => {
+    // Arrange — not "could not ask the daemon": a fault of its own, which must not pass for an older daemon
+    const gateway = new RecordingAgendaGateway(board, afterAdd);
+    gateway.features = async () => {
+      throw new TypeError('a bug in the reply handling');
+    };
+    const out = new CapturingOutput();
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, out, SESSION), async () => {});
+
+    // Act
+    const failed = await program
+      .parseAsync(['node', 'fy', ...withBrief(['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'])])
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should(failed).be.instanceOf(TypeError);
+    should(gateway.applied).have.length(0);
   });
 
   it('should leave the card to the focus card when --offer-close comes with a bare --task', async () => {

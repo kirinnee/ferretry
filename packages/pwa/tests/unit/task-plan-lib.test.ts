@@ -18,6 +18,7 @@ import {
   machineStageWords,
   NO_PASSKEY_TICK_WORDS,
   planPasskeyWords,
+  ticksNeedPasskey,
   revokeLines,
   rootBadge,
   rootHost,
@@ -213,6 +214,30 @@ describe('the ticks', () => {
     const ticked = withTicked(plan, initialTicks(plan), 0, true);
     expect(allowBlockedWords(plan, ticked, true)).toBeUndefined();
     expect(allowBlockedWords(plan, ticked, false)).toBe(NO_PASSKEY_TICK_WORDS);
+  });
+});
+
+describe('the passkey a selection needs (!A244)', () => {
+  it('asks it for a ticked paste line too, never for nothing ticked, and blocks a device that cannot ask', () => {
+    const plan = planOf({
+      lines: [
+        {
+          kind: 'paste',
+          line: 0,
+          uses: 1,
+          why: 'x',
+          state: 'waiting',
+          from: { kind: 'command', program: 'gh' },
+          to: { kind: 'terminal', program: 'vercel' },
+        },
+      ],
+    });
+    const none = initialTicks(plan);
+    const paste = withTicked(plan, none, 0, true);
+
+    expect([ticksNeedPasskey(plan, none), ticksNeedPasskey(plan, paste)]).toEqual([false, true]);
+    expect(allowBlockedWords(plan, paste, false)).toBe(NO_PASSKEY_TICK_WORDS);
+    expect(NO_PASSKEY_TICK_WORDS).toContain('Declining needs no passkey');
   });
 });
 

@@ -59,7 +59,7 @@ import {
 import { parseActor } from '../../api/actor.ts';
 import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
-import type { CapabilityDemand } from '../../api/capability.ts';
+import { type CapabilityDemand, grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -93,7 +93,7 @@ import {
   type TwoFactorSeedStages,
   UnknownSecretError,
 } from '../../secrets/index.ts';
-import { heldEditRefusal, spendHeldEditProof } from './config-files.ts';
+import { heldEditRefusal, spendHeldEditProof, takeAwayRefusal } from './config-files.ts';
 
 /**
  * What a ferret is told when it tries to set a place's default account: only the owner does, and how a ferret asks.
@@ -587,9 +587,12 @@ function accountRoutes(
         ]),
     // THE DEFAULT ACCOUNT FOR A PLACE (docs/config-files.md, account-defaults.yaml). Registered BEFORE `/:id`, which
     // would otherwise read "defaults" as a handle. Every change to that file is HELD when anyone else makes it, so
-    // this is the owner's own act: a ferret is refused before the body is read, a paired device needs the passkey
-    // step-up for loosening a configuration file, and at the machine it is direct. The line is written and in effect
-    // in the same act. It is `caller: 'person'` (from `configure`), so the boundary refuses a ferret first.
+    // this is the owner's own act: a ferret is refused before the body is read, and at the machine it is direct. From
+    // a paired device, ADDING OR CHANGING a line needs the passkey step-up for loosening a configuration file;
+    // REMOVING one (`account: null`) only takes away and asks the grant alone, never a passkey (owner decision !A243).
+    // So the boundary admits the route as a narrowing and the handler judges a widen inside, as
+    // `CapabilityDemand.narrowing` says. The line is written and in effect in the same act. It is `caller: 'person'`,
+    // so the boundary refuses a ferret first.
     ...(defaults === undefined
       ? []
       : [
@@ -597,14 +600,18 @@ function accountRoutes(
             method: 'PUT',
             path: '/v1/accounts/defaults',
             ...configure,
+            capability: { ...SECRETS_CONFIGURE, narrowing: true },
             handle: async (context: RouteContext) => {
               if (isAgentCaller(context)) throw new ApiError(403, ACCOUNT_DEFAULT_OWNER_ONLY, OWNER_ONLY_CODE);
-              const refused = heldEditRefusal(context, 'account-defaults.yaml', 'confirm');
-              if (refused !== undefined) return refused;
               const change = await parseBody(context.request, PutAccountDefaultRequestSchema);
+              const removes = change.account === null;
+              const refused = removes
+                ? takeAwayRefusal(context, ACCOUNT_DEFAULTS_FILE)
+                : (widenRefusal(context) ?? heldEditRefusal(context, ACCOUNT_DEFAULTS_FILE, 'confirm'));
+              if (refused !== undefined) return refused;
               try {
                 const written = await defaults.set(change, change.account);
-                spendHeldEditProof(context);
+                if (!removes) spendHeldEditProof(context);
                 return jsonResponse({ defaults: written } satisfies PutAccountDefaultResult);
               } catch (error) {
                 if (error instanceof AccountDefaultsFileBroken)
@@ -1013,6 +1020,30 @@ async function exportSecrets(exports: SecretExportService, context: RouteContext
 
 const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
+
+const ACCOUNT_DEFAULTS_FILE = 'account-defaults.yaml';
+
+/**
+ * The widen a narrowing route judges inside (`CapabilityDemand.narrowing`): `secrets.configure` as the boundary would
+ * have asked it, step-up and all. Answers the refusal, or `undefined` when allowed or ungoverned.
+ */
+function widenRefusal(context: RouteContext): ApiResponse | undefined {
+  const decision = context.governance?.decide(SECRETS_CONFIGURE);
+  if (decision === undefined || decision.allowed) return undefined;
+  return decision.refusal === 'step-up-required'
+    ? jsonResponse(
+        {
+          error: 'choosing a default account from this device needs a passkey confirmation',
+          code: STEP_UP_REQUIRED_CODE,
+          demand: { capability: 'secrets', axis: 'configure' },
+        } satisfies StepUpRequiredBody,
+        403,
+      )
+    : jsonResponse(
+        { error: 'this device may not choose default accounts', code: grantRefusalCode(decision.refusal) },
+        403,
+      );
+}
 
 /** Everything this mount needs, already built. */
 export interface SecretSubsystem {

@@ -4,12 +4,12 @@ import type { z } from 'zod';
 import {
   agendaBoardPath,
   agendaRepliesPath,
-  DAEMON_HEALTH_PATH,
   legacyAttentionBoardPath,
   ProtocolAgendaGateway,
   repliesPath,
 } from '../../../src/lib/agenda/gateway';
 import type { AgendaApiClient } from '../../../src/lib/agenda/ports';
+import { DAEMON_HEALTH_PATH, DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import { humanItem, SESSION, snapshot } from './fixtures';
 
 interface Call {
@@ -131,7 +131,7 @@ describe('protocol attention gateway send-now', () => {
 });
 
 describe('the features the daemon offers', () => {
-  it('should read them from its health report, and none when it reports none or cannot be asked', async () => {
+  it('should read them from its health report, none when it reports none, and say so when it cannot be asked', async () => {
     // Arrange
     // The health view's other fields are not this test's: the client hands back what the route said.
     const paths: string[] = [];
@@ -149,7 +149,10 @@ describe('the features the daemon offers', () => {
     should(await offering.features()).deepEqual(['agenda.task.1']);
     should(paths[0]).equal(DAEMON_HEALTH_PATH);
     should(await silent.features()).deepEqual([]);
-    should(await down.features()).deepEqual([]);
+    await down.features().then(
+      () => should.fail('', '', 'an unreadable health was taken as no features'),
+      (error: unknown) => should(error).be.instanceOf(DaemonFeaturesUnreadable),
+    );
   });
 });
 

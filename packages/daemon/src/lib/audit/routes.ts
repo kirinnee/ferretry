@@ -134,10 +134,11 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseSettings: [],
   },
   // A secure-copy rule lets a ferret paste a value it holds without asking each time (docs/secure-copy.md): adding
-  // one, or approving a ferret's plan of them, loosens what agents may do; removing one narrows it. All are kept.
+  // one (the commit of its staged rule, with a passkey bound to it, owner decision !A244), or approving a ferret's plan
+  // of them, loosens what agents may do; removing one narrows it. All are kept.
   {
     method: 'POST',
-    path: '/v1/copy-rules',
+    path: '/v1/copy-rules/stages/:stage/commit',
     event: 'security.changed',
     fixedSubject: 'copy-rule',
     detail: { action: 'added' },
@@ -147,6 +148,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   {
     method: 'PUT',
     path: '/v1/copy-rules/settings',
+    event: 'security.changed',
+    fixedSubject: 'copy-rule-settings',
+    responseSettings: [],
+  },
+  // Turning profile targets on is staged now, and its commit (with a passkey bound to what it widens) is the change.
+  {
+    method: 'POST',
+    path: '/v1/copy-rules/settings/stages/:stage/commit',
     event: 'security.changed',
     fixedSubject: 'copy-rule-settings',
     responseSettings: [],

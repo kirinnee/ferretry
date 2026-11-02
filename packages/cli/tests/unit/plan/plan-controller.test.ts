@@ -1,10 +1,13 @@
 import { describe, it } from 'bun:test';
-import type {
-  TaskPlan,
-  TaskPlanApproval,
-  TaskPlanApprovalAnswer,
-  TaskPlanLine,
-  TaskPlanStageState,
+import {
+  AUTOMATED_CODE_WARNING,
+  TASK_PLAN_FIRST_FILL_WORDS,
+  TASK_PLAN_HONEST_LIMIT,
+  type TaskPlan,
+  type TaskPlanApproval,
+  type TaskPlanApprovalAnswer,
+  type TaskPlanLine,
+  type TaskPlanStageState,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
@@ -195,16 +198,22 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     should(gateway.calls).eql(['plans', 'features', 'stage', 'confirmInApp', 'view', 'view']);
     should(slept).eql([1_000]);
     should(said[0]).equal('  Sign in as GITHUB_WORK on github.com');
-    should(said[1]).containEql('card !A9');
-    should(said[1]).containEql('Nothing is approved until you do');
-    should(said[2]).startWith('Approved.');
+    should(said[1]).equal(TASK_PLAN_HONEST_LIMIT);
+    should(said[2]).containEql("card !A9 in the app's Inbox (session s1)");
+    should(said[2]).not.containEql('Agenda');
+    should(said[2]).containEql('Nothing is approved until you do');
+    should(said[3]).startWith('Approved.');
   });
 
   it('should never call anything that commits: the gateway the CLI holds has no such method', async () => {
     const { controller, gateway } = rig();
     gateway.views = ['approved'];
 
-    await controller.approve('feed', ['1', '2', '3'], { pick: ['2=GITHUB_WORK'], totp: ['2'] });
+    await controller.approve('feed', ['1', '2', '3'], {
+      pick: ['2=GITHUB_WORK'],
+      totp: ['2'],
+      iUnderstandOneFactor: true,
+    });
 
     should(gateway.calls.filter(call => /commit|approve/iu.test(call))).eql([]);
     should(Object.getOwnPropertyNames(SpyGateway.prototype).filter(name => /commit/iu.test(name))).eql([]);
@@ -300,7 +309,11 @@ describe('fy plan approve: what is checked before anything is staged', () => {
   it('should take a pick by account handle or by si_… id, and a code tick only where it can work', async () => {
     const byHandle = rig();
     byHandle.gateway.views = ['approved'];
-    await byHandle.controller.approve('feed', ['2'], { pick: ['2=GITHUB_WORK'], totp: ['2'] });
+    await byHandle.controller.approve('feed', ['2'], {
+      pick: ['2=GITHUB_WORK'],
+      totp: ['2'],
+      iUnderstandOneFactor: true,
+    });
     const byId = rig();
     byId.gateway.views = ['approved'];
     await byId.controller.approve('feed', ['2'], { pick: [`2=${HOME}`] });
@@ -308,9 +321,15 @@ describe('fy plan approve: what is checked before anything is staged', () => {
     should(byHandle.gateway.staged).eql([{ lines: [{ line: 1, signIn: WORK, totp: true }] }]);
     should(byId.gateway.staged).eql([{ lines: [{ line: 1, signIn: HOME }] }]);
     const noCodes = rig();
-    should(await failure(noCodes.controller.approve('feed', ['2'], { pick: [`2=${HOME}`], totp: ['2'] }))).containEql(
-      'GITHUB_HOME has no automatic codes',
-    );
+    should(
+      await failure(
+        noCodes.controller.approve('feed', ['2'], {
+          pick: [`2=${HOME}`],
+          totp: ['2'],
+          iUnderstandOneFactor: true,
+        }),
+      ),
+    ).containEql('GITHUB_HOME has no automatic codes');
     should(noCodes.gateway.staged).eql([]);
   });
 
@@ -319,7 +338,7 @@ describe('fy plan approve: what is checked before anything is staged', () => {
 
     const several = await failure(controller.approve('feed', ['2'], {}));
     const onPaste = await failure(controller.approve('feed', ['1'], { pick: ['1=GITHUB_WORK'] }));
-    const codeOnPaste = await failure(controller.approve('feed', ['1'], { totp: ['1'] }));
+    const codeOnPaste = await failure(controller.approve('feed', ['1'], { totp: ['1'], iUnderstandOneFactor: true }));
 
     should(several).containEql('more than one account');
     should(several).containEql('--pick 2=<account or si_…>');
@@ -367,6 +386,88 @@ describe('fy plan approve: what is checked before anything is staged', () => {
   });
 });
 
+describe('fy plan approve: a code tick needs its acknowledgement, as in fy rules', () => {
+  it('should refuse --totp without --i-understand-one-factor, and the ack without --totp, before any daemon call', async () => {
+    const { controller, gateway } = rig();
+
+    const bare = await failure(controller.approve('feed', ['2'], { pick: ['2=GITHUB_WORK'], totp: ['2'] }));
+    const alone = await failure(controller.approve('feed', ['3'], { iUnderstandOneFactor: true }));
+
+    should(bare).equal(
+      `--totp makes the sign-in one factor. ${AUTOMATED_CODE_WARNING} Add --i-understand-one-factor to go on.`,
+    );
+    should(alone).equal('--i-understand-one-factor goes with --totp only');
+    should(gateway.calls).eql([]);
+  });
+
+  it('should stage the code tick once it is acknowledged', async () => {
+    const { controller, gateway } = rig();
+    gateway.views = ['approved'];
+
+    await controller.approve('feed', ['2'], { pick: ['2=GITHUB_WORK'], totp: ['2'], iUnderstandOneFactor: true });
+
+    should(gateway.staged).eql([{ lines: [{ line: 1, signIn: WORK, totp: true }] }]);
+  });
+});
+
+describe('fy plan ls: the flags of each line, in the protocol words', () => {
+  const SUDO = {
+    signIn: `si_${'4'.repeat(16)}`,
+    account: { id: 'SUDO_BOX', label: 'sudo_box' },
+    place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+    can: { username: false, password: true, totp: false },
+    history: false,
+  };
+  const TERMINAL = {
+    kind: 'terminal-sign-in',
+    line: 0,
+    uses: 1,
+    why: 'install the package',
+    state: 'waiting',
+    fields: ['password'],
+    candidates: [SUDO],
+    flags: ['root', 'no-history'],
+  } as unknown as TaskPlanLine;
+  const CODES = { ...PICKER, line: 1, flags: ['one-factor'] } as TaskPlanLine;
+
+  it('should mark root, a code that would be ticked and a first fill under the line they are on', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.plan = { ...PLAN, lines: [TERMINAL, CODES] };
+
+    await controller.list({});
+
+    const text = said[0] as string;
+    should(text).containEql(
+      '1. [waiting] sign in at a terminal: password — SUDO_BOX (sudo_box) at sudo@kirin-box  the ferret says: install the package\n      ! this gives the ferret root on kirin-box\n      ! ' +
+        TASK_PLAN_FIRST_FILL_WORDS,
+    );
+    should(text).containEql(`\n      ! with --totp 2: ${AUTOMATED_CODE_WARNING}`);
+    should(text.split('\n').filter(line => line.includes(TASK_PLAN_FIRST_FILL_WORDS))).have.length(1);
+  });
+
+  it('should say the code warning plainly on a line approved with its code, and nothing on an ended or paste line', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.plan = {
+      ...PLAN,
+      state: 'approved',
+      lines: [
+        PASTE,
+        {
+          ...CODES,
+          state: 'approved',
+          approved: { signIn: WORK, totp: true, remaining: 1 },
+        } as TaskPlanLine,
+        { ...TERMINAL, line: 2, state: 'ended' } as TaskPlanLine,
+      ],
+    };
+
+    await controller.list({});
+
+    const lines = (said[0] as string).split('\n');
+    should(lines.filter(line => line.startsWith('      ! '))).eql([`      ! ${AUTOMATED_CODE_WARNING}`]);
+  });
+});
+
 describe('fy plan ls and revoke', () => {
   it('should list each line in the owner’s words, with the ferret’s reason shown as text', async () => {
     const { controller, gateway, said } = rig();
@@ -375,7 +476,9 @@ describe('fy plan ls and revoke', () => {
     await controller.list({});
 
     should(said[0]).startWith('feedbeef  !A9  pending  session s1  until 2026-11-01T14:00:00.000Z');
-    should(said[0]).containEql('1. [waiting] paste command:gh → terminal:vercel  the agent says: a\\u{202e}b');
+    should(said[0]).containEql('1. [waiting] paste command:gh → terminal:vercel  the ferret says: a\\u{202e}b');
+    should(said[0]).not.containEql('the agent says');
+    should(said[0]).endWith(`\n\n${TASK_PLAN_HONEST_LIMIT}`);
     should(said[0]).containEql(
       '2. [waiting] sign in on a page: username, password, totp — GITHUB_WORK (github_work) at github.com, can make codes; GITHUB_HOME (github_home) at github.com',
     );
@@ -450,7 +553,8 @@ describe('fy plan: the less common lines and answers', () => {
     should(said).have.length(1);
     should(JSON.parse(said[0] as string)).eql({ state: 'approved' });
     should(warned[0]).equal('  Sign in as GITHUB_WORK on github.com');
-    should(warned[1]).containEql('card !A9');
+    should(warned[1]).equal(TASK_PLAN_HONEST_LIMIT);
+    should(warned[2]).containEql('card !A9');
   });
 
   it('should report the plan in force when the owner re-ticked the lines in the app and the stage was replaced', async () => {
@@ -505,14 +609,18 @@ describe('fy plan: the less common lines and answers', () => {
 
   it('should stage nothing for a --totp on a line that was not listed, or that the ferret never asked codes for', async () => {
     const asked = rig();
-    const unlisted = await failure(asked.controller.approve('feed', ['1'], { totp: ['2'] }));
+    const unlisted = await failure(
+      asked.controller.approve('feed', ['1'], { totp: ['2'], iUnderstandOneFactor: true }),
+    );
     const noCodes = rig();
     noCodes.gateway.plan = planWith([
       PASTE,
       PICKER,
       { ...SINGLE, candidates: [candidate(ONLY, 'STRIPE', true)] } as TaskPlanLine,
     ]);
-    const unasked = await failure(noCodes.controller.approve('feed', ['3'], { totp: ['3'] }));
+    const unasked = await failure(
+      noCodes.controller.approve('feed', ['3'], { totp: ['3'], iUnderstandOneFactor: true }),
+    );
 
     should(unlisted).containEql('--totp names line 2, which you did not list to allow');
     should(unasked).containEql('the ferret did not ask for codes');

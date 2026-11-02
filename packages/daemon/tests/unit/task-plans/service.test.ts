@@ -209,6 +209,12 @@ async function staged(w: ReturnType<typeof world>, plan: TaskPlan, approval: Tas
   return answer.staged;
 }
 
+/** Stages a selection and commits it with the passkey bound to it: how any ticked line is approved (!A244). */
+async function allowed(w: ReturnType<typeof world>, plan: TaskPlan, approval: TaskPlanApproval, caller = PHONE) {
+  const held = await staged(w, plan, approval, caller);
+  return await w.service.commit(caller, SESSION, plan.id, held.stage, proofFor(w.service.boundSubjectOf(held.stage)));
+}
+
 describe('TaskPlanService: the ferret asks', () => {
   it('should put no account label, username or handle anywhere on the plan card (L8)', async () => {
     const w = world();
@@ -261,6 +267,16 @@ describe('TaskPlanService: the ferret asks', () => {
     should(w.cards[0]?.context).containEql('The ferret says: check Actions');
     should(w.cards[0]?.context).containEql(TASK_PLAN_HONEST_LIMIT);
     should(w.cards[0]?.how).containEql('passkey');
+  });
+
+  it('should point a paste-only card at `fy plan approve`, never the alias `fy copy plan approve`', async () => {
+    const w = world();
+    await w.rules.load();
+
+    const plan = await w.service.propose(SESSION, { lines: [PASTE] });
+
+    should(w.cards[0]?.how).containEql(`\`fy plan approve ${plan.id} <numbers>\``);
+    should(w.cards[0]?.how).not.containEql('fy copy plan');
   });
 
   it("should preselect only the owner's own default on a picker, never the ferret's hint", async () => {
@@ -424,21 +440,34 @@ describe('TaskPlanService: only the owner answers', () => {
 });
 
 describe('TaskPlanService: approving', () => {
-  it('should approve paste lines at once with no passkey, as a paste plan was, and write nothing', async () => {
+  it('should stage paste lines too, and approve them only with a passkey bound to that stage (!A244)', async () => {
     const w = world();
     await w.rules.load();
     const plan = await w.service.propose(SESSION, { lines: [{ ...PASTE, uses: 3 }, PAGE_PASTE] });
+    const other = await w.service.propose(SESSION, { lines: [PASTE] });
 
-    const answer = await w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }] });
+    const held = await staged(w, plan, { lines: [{ line: 0 }] }, HOST);
+    const elsewhere = await staged(w, other, { lines: [{ line: 0 }] });
+    // No proof (a held window, the machine's token), and a proof bound to another stage, each make nothing.
+    const missing = await w.service.commit(HOST, SESSION, plan.id, held.stage, () => false).catch(error => error);
+    const borrowed = await w.service
+      .commit(HOST, SESSION, plan.id, held.stage, proofFor(w.service.boundSubjectOf(elsewhere.stage)))
+      .catch(error => error);
+    should(missing).be.instanceOf(TaskPlanProofMissing);
+    should(borrowed).be.instanceOf(TaskPlanProofMissing);
+    should(w.rules.list(HOST)).eql([]);
+    should(w.service.get(HOST, SESSION, plan.id).state).equal('pending');
 
-    should(answer).match({
-      outcome: 'answered',
-      plan: { state: 'approved', answered: { by: { kind: 'host' }, proof: 'none' } },
-    });
-    should(answer.outcome === 'answered' ? answer.plan.lines.map(line => line.state) : []).eql([
-      'approved',
-      'declined',
-    ]);
+    const settled = await w.service.commit(
+      PHONE,
+      SESSION,
+      plan.id,
+      held.stage,
+      proofFor(w.service.boundSubjectOf(held.stage)),
+    );
+
+    should(settled).match({ state: 'approved', answered: { by: { kind: 'device' }, proof: 'passkey' } });
+    should(settled.lines.map(line => line.state)).eql(['approved', 'declined']);
     should(w.rules.list(HOST)).match([{ sessionId: SESSION, remaining: 3, plan: plan.id }]);
     should(w.writes).eql([]);
     should(w.closed).eql([`A1: You allowed line 1 until 2026-11-01 14:00 UTC.`]);
@@ -566,17 +595,19 @@ describe('TaskPlanService: approving', () => {
     ]);
   });
 
-  it('should ask for a passkey to be added first when no device holds one; paste lines still pass', async () => {
+  it('should ask for a passkey to be added first when no device holds one, for a paste line too; a decline still passes', async () => {
     const w = world();
     await w.rules.load();
     w.state.passkey = false;
     const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
 
-    const error = await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 0 }] }));
-    const answer = await w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 1 }] });
+    const signIn = await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 0 }] }));
+    const paste = await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 1 }] }));
+    const declined = await w.service.stage(PHONE, SESSION, plan.id, { lines: [] });
 
-    should(error).match({ status: 409, code: 'passkey_required' });
-    should(answer).match({ outcome: 'answered', plan: { state: 'approved' } });
+    should(signIn).match({ status: 409, code: 'passkey_required' });
+    should(paste).match({ status: 409, code: 'passkey_required', message: /declining needs none/u });
+    should(declined).match({ outcome: 'answered', plan: { state: 'declined' } });
   });
 
   it('should refuse to stage a sign-in that changed since the card was drawn', async () => {
@@ -799,10 +830,17 @@ describe('TaskPlanService: the paste-plan routes, kept', () => {
     const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
 
     should((await refused(w.service.approveCopyItems(HOST, SESSION, plan.id, [1]))).code).equal('bad_request');
-    const settled = await w.service.approveCopyItems(HOST, SESSION, plan.id, [0]);
+    // Allowing a paste needs the bound passkey now (!A244): the one-step route only declines.
+    should(await refused(w.service.approveCopyItems(HOST, SESSION, plan.id, [0]))).match({
+      status: 409,
+      code: 'needs_passkey',
+    });
+    should(w.service.get(HOST, SESSION, plan.id).state).equal('pending');
+    const settled = await w.service.approveCopyItems(HOST, SESSION, plan.id, []);
 
-    should(CopyPlanSchema.parse(settled)).match({ state: 'approved', approved: [0] });
-    should(w.service.get(HOST, SESSION, plan.id).lines.map(line => line.state)).eql(['declined', 'approved']);
+    should(CopyPlanSchema.parse(settled)).match({ state: 'declined' });
+    should(w.service.get(HOST, SESSION, plan.id).lines.map(line => line.state)).eql(['declined', 'declined']);
+    should(w.rules.list(HOST)).eql([]);
     should(w.service.approvedSignIns(SESSION)).eql([]);
   });
 
@@ -935,7 +973,7 @@ describe('TaskPlanService: the edges of each step', () => {
     await w.rules.load();
     const waiting = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
     const answered = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
-    await w.service.stage(HOST, SESSION, answered.id, { lines: [{ line: 0 }] });
+    await allowed(w, answered, { lines: [{ line: 0 }] });
 
     const early = await refused(w.service.revoke(HOST, SESSION, waiting.id, [0]));
     const declined = await refused(w.service.revoke(HOST, SESSION, answered.id, [1]));
@@ -955,6 +993,19 @@ describe('TaskPlanService: the edges of each step', () => {
     should(w.service.sessions()).eql([SESSION, 's2']);
   });
 
+  it('should refuse a new plan while three are in force for the session, raising no card', async () => {
+    const w = world();
+    await w.rules.load();
+    for (let index = 0; index < 3; index += 1)
+      await allowed(w, await w.service.propose(SESSION, { lines: [PASTE] }), { lines: [{ line: 0 }] });
+    const cards = w.cards.length;
+
+    const error = await refused(w.service.propose(SESSION, { lines: [PASTE] }));
+
+    should(error).match({ code: 'capacity', message: /already in force/u });
+    should(w.cards).have.length(cards);
+  });
+
   it('should refuse an answer that would put a fourth plan in force, making nothing', async () => {
     const w = world();
     await w.rules.load();
@@ -963,11 +1014,14 @@ describe('TaskPlanService: the edges of each step', () => {
       await w.service.propose(SESSION, { lines: [PASTE] }),
       await w.service.propose(SESSION, { lines: [PASTE] }),
     ];
-    for (const plan of [first, second]) await w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }] });
+    for (const plan of [first, second]) await allowed(w, plan, { lines: [{ line: 0 }] });
     const fourth = await w.service.propose(SESSION, { lines: [PASTE] });
-    await w.service.stage(HOST, SESSION, third.id, { lines: [{ line: 0 }] });
+    await allowed(w, third, { lines: [{ line: 0 }] });
+    const held = await staged(w, fourth, { lines: [{ line: 0 }] });
 
-    const error = await refused(w.service.stage(HOST, SESSION, fourth.id, { lines: [{ line: 0 }] }));
+    const error = await refused(
+      w.service.commit(PHONE, SESSION, fourth.id, held.stage, proofFor(w.service.boundSubjectOf(held.stage))),
+    );
 
     should(error.code).equal('capacity');
     should(w.service.get(HOST, SESSION, fourth.id).state).equal('pending');
@@ -982,7 +1036,8 @@ describe('TaskPlanService: the edges of each step', () => {
     const first = await staged(w, answered, { lines: [{ line: 0 }] });
     const second = await staged(w, revoked, { lines: [{ line: 0 }] });
 
-    await w.service.stage(PHONE, SESSION, answered.id, { lines: [{ line: 1 }] });
+    // Declined while its stage waits: the decline answers the plan, and the stage goes with it.
+    await w.service.stage(PHONE, SESSION, answered.id, { lines: [] });
     await w.service.revoke(PHONE, SESSION, revoked.id);
 
     should(w.service.viewStage(PHONE, SESSION, answered.id, first.stage).state).equal('denied');
@@ -1066,18 +1121,20 @@ describe('TaskPlanService: secrev-1261', () => {
     should(w.service.viewStage(PHONE, SESSION, plan.id, fromPhone.stage).state).equal('waiting');
   });
 
-  it('should answer a paste-only plan once when two answers arrive together', async () => {
+  it('should answer a paste-only plan once when two commits of its stage arrive together', async () => {
     const w = world();
     await w.rules.load();
     const plan = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
+    const held = await staged(w, plan, { lines: [{ line: 0 }] });
+    const proof = proofFor(w.service.boundSubjectOf(held.stage));
 
     const [first, second] = await Promise.allSettled([
-      w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }] }),
-      w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }, { line: 1 }] }),
+      w.service.commit(PHONE, SESSION, plan.id, held.stage, proof),
+      w.service.commit(PHONE, SESSION, plan.id, held.stage, proof),
     ]);
 
     should(first.status).equal('fulfilled');
-    should(second).match({ status: 'rejected', reason: { code: 'conflict' } });
+    should(second.status).equal('rejected');
     should(w.rules.list(HOST)).have.length(1);
   });
 

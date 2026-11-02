@@ -1,13 +1,19 @@
 import {
+  AUTOMATED_CODE_WARNING,
   agendaDeepLinkFragment,
   DAEMON_FEATURES,
   namesSignIn,
   placeKeys,
+  TASK_PLAN_FIRST_FILL_WORDS,
+  TASK_PLAN_HONEST_LIMIT,
   TASK_PLAN_MAX_LINES,
   TASK_PLAN_STAGE_TTL_SECONDS,
   type TaskPlan,
   type TaskPlanApproval,
   type TaskPlanLine,
+  taskPlanLineFirstFill,
+  taskPlanRootHost,
+  taskPlanRootWords,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { showUntrusted } from '../input/render.ts';
@@ -24,6 +30,8 @@ export interface PlanCommandOptions {
 export interface PlanApproveOptions extends PlanCommandOptions {
   readonly pick?: readonly string[] | undefined;
   readonly totp?: readonly string[] | undefined;
+  /** `--i-understand-one-factor`: the owner read {@link AUTOMATED_CODE_WARNING}; `--totp` is refused without it. */
+  readonly iUnderstandOneFactor?: boolean | undefined;
   /** Opens the plan's card in this host's browser once the selection is staged. */
   readonly open?: boolean | undefined;
 }
@@ -54,11 +62,37 @@ const lineStatus = (line: TaskPlanLine): string => {
   return line.state;
 };
 
+/** Lines whose flags still matter: one the owner may tick, or one in force. */
+const FLAGGED_STATES: ReadonlySet<TaskPlanLine['state']> = new Set(['waiting', 'approved']);
+
+/**
+ * The daemon's flags on a sign-in line, in the protocol's words, one a line under it: root (red), the one-factor code
+ * (red) and the first fill (amber), as the plan's card draws them. The account the line is approved for decides the
+ * root host and the first fill once there is one; the line's own candidates decide while there is none.
+ */
+function lineFlags(line: TaskPlanLine): readonly string[] {
+  if (line.kind === 'paste' || !FLAGGED_STATES.has(line.state)) return [];
+  const picked = line.approved?.signIn;
+  const places = line.candidates.filter(each => picked === undefined || each.signIn === picked).map(each => each.place);
+  const number = String(line.line + 1);
+  return [
+    ...(line.kind === 'terminal-sign-in' || line.flags.includes('root')
+      ? [taskPlanRootWords(taskPlanRootHost(places))]
+      : []),
+    ...(line.approved?.totp === true
+      ? [AUTOMATED_CODE_WARNING]
+      : line.state === 'waiting' && line.flags.includes('one-factor')
+        ? [`with --totp ${number}: ${AUTOMATED_CODE_WARNING}`]
+        : []),
+    ...(taskPlanLineFirstFill(line, picked) ? [TASK_PLAN_FIRST_FILL_WORDS] : []),
+  ].map(words => `      ! ${words}`);
+}
+
 function renderPlan(plan: TaskPlan): string {
-  const lines = plan.lines.map(
-    line =>
-      `   ${String(line.line + 1)}. [${lineStatus(line)}] ${lineWords(line)}  the agent says: ${showUntrusted(line.why)}`,
-  );
+  const lines = plan.lines.flatMap(line => [
+    `   ${String(line.line + 1)}. [${lineStatus(line)}] ${lineWords(line)}  the ferret says: ${showUntrusted(line.why)}`,
+    ...lineFlags(line),
+  ]);
   return [
     `${plan.id.slice(0, 8)}  !${plan.agendaItemId}  ${plan.state}  session ${plan.sessionId}  until ${plan.expiresAt}`,
     ...lines,
@@ -66,6 +100,20 @@ function renderPlan(plan: TaskPlan): string {
 }
 
 const lineList = (lines: readonly number[]): string => lines.map(line => String(line + 1)).join(', ');
+
+/**
+ * `--totp` needs `--i-understand-one-factor`, the same rule and words as `fy rules`: a ticked code makes the sign-in
+ * one factor, so it is never ticked by a flag alone. One without the other is refused before anything is read.
+ */
+function acknowledged(options: PlanApproveOptions): void {
+  const codes = (options.totp ?? []).length > 0;
+  if (codes && options.iUnderstandOneFactor !== true)
+    throw new Error(
+      `--totp makes the sign-in one factor. ${AUTOMATED_CODE_WARNING} Add --i-understand-one-factor to go on.`,
+    );
+  if (!codes && options.iUnderstandOneFactor === true)
+    throw new Error('--i-understand-one-factor goes with --totp only');
+}
 
 /** `3` as the owner reads it, line 2 as the daemon numbers it. */
 function lineNumber(text: string, plan: TaskPlan, flag: string): number {
@@ -92,7 +140,7 @@ export class PlanController {
         ? JSON.stringify({ plans }, null, 2)
         : plans.length === 0
           ? 'no plans are waiting'
-          : plans.map(renderPlan).join('\n'),
+          : [...plans.map(renderPlan), '', TASK_PLAN_HONEST_LIMIT].join('\n'),
     );
   }
 
@@ -102,6 +150,7 @@ export class PlanController {
    */
   async approve(reference: string, numbers: readonly string[], options: PlanApproveOptions): Promise<void> {
     refuseFerret(this.ports);
+    acknowledged(options);
     const plan = await this.#plan(reference);
     if (plan.state !== 'pending') throw new Error(`the plan ${plan.id.slice(0, 8)} is ${plan.state}, not waiting`);
     const approval = this.#approval(plan, numbers, options);
@@ -110,9 +159,10 @@ export class PlanController {
       !(await this.ports.gateway.features()).includes(DAEMON_FEATURES.taskPlan)
     )
       throw new Error(
-        'a sign-in line can only be confirmed on the plan card in the app, and this daemon does not report that card yet: nothing was staged. Allow the paste lines now, or the sign-in lines once the app shows plan cards',
+        'a sign-in line can only be confirmed on the plan card in the app, and this daemon does not report that card yet: nothing was staged',
       );
     const answer = await this.ports.gateway.stage(plan.sessionId, plan.id, approval);
+    // Answered at once only for a decline, or by a daemon from before every tick needed the passkey (!A244).
     if (answer.outcome === 'answered') {
       this.ports.out.success(
         options.json === true ? JSON.stringify(answer.plan, null, 2) : this.#answered(answer.plan, approval),
@@ -123,9 +173,10 @@ export class PlanController {
     const say = (message: string): void =>
       options.json === true ? this.ports.out.diagnostic(message) : this.ports.out.success(message);
     for (const words of staged.summary) say(`  ${showUntrusted(words)}`);
+    say(TASK_PLAN_HONEST_LIMIT);
     const card = await this.ports.gateway.confirmInApp(plan.sessionId, plan.id, staged.stage);
     say(
-      `Confirm it with your passkey on the plan's card !${card.agendaItemId} in the Ferretry app (Agenda).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the plan's card !${card.agendaItemId} in the app's Inbox (session ${plan.sessionId}).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     await this.#showCard(plan, card.agendaItemId, options, say);
     const state = await this.#wait(plan, staged.stage);

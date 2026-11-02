@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { InputController } from '../../../src/lib/input/controller';
-import { renderInputList, showUntrusted } from '../../../src/lib/input/render';
+import { describeInputReason, renderInputList, showUntrusted } from '../../../src/lib/input/render';
 import { FakeInputGateway, request, rig, SESSION } from './fixtures';
 
 const RAW_CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
@@ -19,7 +19,7 @@ describe('untrusted text on the owner’s screen', () => {
     const lines = await shown({ prompt: 'Enter password\u001b[8m' });
 
     for (const line of lines) should(line).not.match(RAW_CONTROL);
-    should(lines).containEql('the agent says: Enter password\\x1b[8m');
+    should(lines).containEql('the ferret says: Enter password\\x1b[8m');
     should(lines).containEql('risk red: Not secret: the ferret can see this value.');
   });
 
@@ -27,7 +27,7 @@ describe('untrusted text on the owner’s screen', () => {
     const lines = await shown({ prompt: 'pay\u202eevil\u200b\u2066x\u2069' });
 
     for (const line of lines) should(line).not.match(RAW_CONTROL);
-    should(lines).containEql('the agent says: pay\\u{202e}evil\\u{200b}\\u{2066}x\\u{2069}');
+    should(lines).containEql('the ferret says: pay\\u{202e}evil\\u{200b}\\u{2066}x\\u{2069}');
   });
 
   it('should spell out the daemon-observed program and prompt line, and never print argv', async () => {
@@ -70,7 +70,7 @@ describe('untrusted text on the owner’s screen', () => {
     const text = renderInputList({ requests: [request({ prompt: 'again\u001b]0;pwned\u0007‮' })] }, NOW);
 
     for (const line of text.split('\n')) should(line).not.match(RAW_CONTROL);
-    should(text).containEql('the agent says: again\\x1b]0;pwned\\x07\\u{202e}');
+    should(text).containEql('the ferret says: again\\x1b]0;pwned\\x07\\u{202e}');
     should(text.split('\n')).have.length(2);
   });
 
@@ -80,5 +80,11 @@ describe('untrusted text on the owner’s screen', () => {
 
   it('should leave ordinary and non-latin text alone', () => {
     should(showUntrusted('sudo パスワード — ok')).equal('sudo パスワード — ok');
+  });
+});
+
+describe('the ferret, in the owner’s words', () => {
+  it('should say "the ferret" for a request the ferret cancelled, as the app and the daemon do', () => {
+    should(describeInputReason('agent_cancelled')).equal('the ferret cancelled it');
   });
 });

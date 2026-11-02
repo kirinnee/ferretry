@@ -170,6 +170,21 @@ describe('ProtocolAccountGateway', () => {
     should(sent).have.length(1);
   });
 
+  it('should refuse a ferret’s read in the same neutral words, never as "changing accounts"', async () => {
+    // Arrange
+    const { client: api } = client([new FyHttpError('only a person may use GET /v1/accounts', 403, 'owner_only')]);
+
+    // Act
+    const message = await refusal(() => new ProtocolAccountGateway(api).list());
+
+    // Assert
+    should(message).startWith(
+      "the daemon refused this: this is the owner's command, and it ran with a ferret's credential.",
+    );
+    should(message).not.containEql('changing accounts');
+    should(message).not.containEql('--as-owner');
+  });
+
   it('should pass any other refusal through untouched, a different 403 and a code-less 404 included', async () => {
     // Arrange
     const conflict = new FyHttpError('already there', 409, 'conflict');

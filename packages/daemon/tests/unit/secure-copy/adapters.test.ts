@@ -83,7 +83,7 @@ describe('TaskPlanAgendaAdapter', () => {
       pastes: true,
       ask: 'Allow?',
       context: '1. x',
-      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy copy plan approve`.',
+      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy plan approve`.',
       expiresAt: '2026-10-31T14:00:00.000Z',
     });
     await adapter.close('s1', 'A4', 'done');
@@ -104,9 +104,7 @@ describe('TaskPlanAgendaAdapter', () => {
         },
       },
     ]);
-    should((raised[0] as { request: { howToResolve: string } }).request.howToResolve).containEql(
-      'fy copy plan approve',
-    );
+    should((raised[0] as { request: { howToResolve: string } }).request.howToResolve).containEql('fy plan approve');
     should(resolved).eql([
       { sessionId: 's1', id: 'A4', actor: { kind: 'daemon', cause: 'secure-copy' }, note: 'done' },
     ]);
@@ -187,7 +185,7 @@ describe('a paste plan card on the real agenda', () => {
       pastes: true,
       ask: 'Allow?',
       context: '1. x',
-      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy copy plan approve`.',
+      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy plan approve`.',
       expiresAt: '2026-10-31T14:00:00.000Z',
     });
     const id = card.ok ? card.id : 'A0';
@@ -241,6 +239,9 @@ describe('a paste plan card kept from an older daemon', () => {
       kind: 'human',
     });
 
-    should(answered).match({ ok: false, error: { code: 'use_input_form', message: /is a paste plan/u } });
+    should(answered).match({
+      ok: false,
+      error: { code: 'use_input_form', message: /is a paste plan: answer it on its card, or with fy plan approve$/u },
+    });
   });
 });

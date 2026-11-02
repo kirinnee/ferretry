@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import * as secureCopy from '../../src/lib/secure-copy.ts';
 import { z } from 'zod';
 import {
   AGENT_TOOL_NAMES,
@@ -323,5 +324,70 @@ describe('the secure copy settings and the rule warnings', () => {
     ])
       should(runsWhatItReads(program)).be.true();
     for (const program of ['psql', 'gh', 'vercel', 'pythonista', 'sudo']) should(runsWhatItReads(program)).be.false();
+  });
+});
+
+describe('a staged paste rule (!A244)', () => {
+  const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
+
+  it("should word the daemon's rows from the request, in their fixed order", () => {
+    const words = secureCopy.pasteRuleWords({ ...RULE, count: 2, expiresInSeconds: 7_200, sessionId: 's1' });
+
+    should(words.does).equal(
+      'Ferretry pastes what gh prints into vercel in a terminal, for session s1, without asking.',
+    );
+    should(words.rows).deepEqual([
+      { label: 'From', value: 'what gh prints' },
+      { label: 'To', value: 'vercel in a terminal' },
+      { label: 'Who', value: 'Session s1' },
+      { label: 'Pastes', value: 'At most 2' },
+      { label: 'Until', value: 'For 2 hours from approval' },
+    ]);
+    should(
+      secureCopy
+        .pasteRuleWords(RULE)
+        .rows.map(row => row.value)
+        .slice(2),
+    ).deepEqual(['Any ferret on this machine', 'Any number', 'No end: until you remove it']);
+  });
+
+  it('should word every source, destination and life the way the passkey prompt shows it', () => {
+    const until = (expiresInSeconds: number) =>
+      secureCopy.pasteRuleWords({ ...RULE, expiresInSeconds }).rows.find(row => row.label === 'Until')?.value;
+
+    should(secureCopy.pasteFromWords({ kind: 'browser', origin: 'https://github.com' })).equal(
+      'text on https://github.com',
+    );
+    should(secureCopy.pasteFromWords({ kind: 'clipboard', origin: 'https://github.com' })).equal(
+      'the clipboard of https://github.com',
+    );
+    should(secureCopy.pasteToWords({ kind: 'browser', origin: 'https://vercel.com' })).equal(
+      'a field on https://vercel.com',
+    );
+    should(secureCopy.pasteToWords({ kind: 'secret', name: 'VERCEL_TOKEN' })).equal('the secret VERCEL_TOKEN');
+    should([until(86_400), until(3 * 86_400), until(3_600), until(2_700), until(61), until(60)]).deepEqual([
+      'For 1 day from approval',
+      'For 3 days from approval',
+      'For 1 hour from approval',
+      'For 45 minutes from approval',
+      'For 61 seconds from approval',
+      'For 1 minute from approval',
+    ]);
+  });
+
+  it('should bind its subject to the stage and the exact request, nothing else', () => {
+    const stage = `prs_${'a'.repeat(24)}` as const;
+    const other = `prs_${'b'.repeat(24)}` as const;
+    const subject = secureCopy.pasteRuleApprovalSubject(stage, secureCopy.canonicalPasteRule(RULE));
+
+    should(subject).match(/^[0-9a-f]{64}$/u);
+    should(secureCopy.pasteRuleApprovalSubject(other, secureCopy.canonicalPasteRule(RULE))).not.equal(subject);
+    should(secureCopy.pasteRuleApprovalSubject(stage, secureCopy.canonicalPasteRule({ ...RULE, count: 1 }))).not.equal(
+      subject,
+    );
+    // Key order does not change the bytes a proof is bound to.
+    should(secureCopy.canonicalPasteRule({ to: RULE.to, from: RULE.from })).equal(secureCopy.canonicalPasteRule(RULE));
+    should(secureCopy.pasteRuleRunsAnything({ kind: 'terminal', program: 'bash' })).be.true();
+    should(secureCopy.pasteRuleRunsAnything(RULE.to)).be.false();
   });
 });

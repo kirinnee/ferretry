@@ -762,8 +762,9 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         lines: {
           type: 'array',
           description:
-            '[{kind:"sign-in",signIn|site,fields:[username,password,totp],uses,why}|{kind:"terminal-sign-in",signIn|place,uses,why}|{kind:"paste",from,to,uses,why}]',
+            '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
         },
+        expiresInSeconds: { type: 'integer' },
       },
       ['lines'],
     ),

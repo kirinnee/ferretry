@@ -86,24 +86,6 @@ function requestOf(context: RouteContext): string {
   return id;
 }
 
-/** Mirrors the notice `InputRequestService` masks a quarantined terminal's facts with. */
-const QUARANTINE_NOTICE = '[hidden: a secret was just typed in this terminal]';
-
-/** A request as it may be spelled right now: a terminal quarantined since the service answered reads as masked. */
-function sealed(service: InputRequestService, request: InputRequest): InputRequest {
-  const facts = request.observed;
-  if (facts?.kind !== 'terminal' || service.quarantinedUntil(request.sessionId, [request.target.key]) === undefined)
-    return request;
-  return {
-    ...request,
-    observed: {
-      ...facts,
-      promptLine: QUARANTINE_NOTICE,
-      foreground: { ...facts.foreground, comm: QUARANTINE_NOTICE, argv: '' },
-    },
-  };
-}
-
 /**
  * A request as a caller that may not read ACCOUNT NAMES sees it (no `secrets.use`, the demand `GET /v1/accounts`
  * makes): no `saved` at all. Every part of it names an account or a person — offers' labels and usernames, the account
@@ -119,10 +101,11 @@ async function list(service: InputRequestService, context: RouteContext, all: bo
   const caller = ownerOf(context);
   const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
   const names = refusedAccountNames(context, 'read the accounts a card names') === undefined;
-  // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
+  // A hold taken since the service answered still wins, now and again as the dispatcher sends it, under any of the
+  // terminal's names (its key, the pane's name and its id), as the agent-tools path checks them.
   const spell = (): ApiResponse => {
     const body: InputRequestList = {
-      requests: requests.map(request => sealed(service, names ? request : nameless(request))),
+      requests: requests.map(request => service.resealed(names ? request : nameless(request))),
     };
     return jsonResponse(body);
   };
