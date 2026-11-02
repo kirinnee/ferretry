@@ -271,14 +271,18 @@ describe('AgendaInboxPage counts what it lists', () => {
     await view.unmount();
   });
 
-  it('counts only the rows Find keeps, so the badge never claims more than the list shows', async () => {
-    const { view, menu, choose, openMenu, option, rowIds } = await mountPage({
+  it('counts only the rows Find keeps, so the badge never claims more than Find shows under that tab', async () => {
+    const { view, menu, choose, openMenu, option } = await mountPage({
       parked: [...many.slice(0, 40), replied('A90')],
       parkedWhole: true,
     });
     await choose('snoozed');
     await typeInto(await openFind(view.container), '!A7');
-    expect(rowIds()).toEqual(['A7']);
+    const found = [...view.container.querySelectorAll('[data-find-row]')];
+    expect(found.map(row => row.textContent?.match(/!(A\d+)/u)?.[1])).toEqual(['A7']);
+    expect(found.map(row => row.querySelector('[data-find-chip]')?.getAttribute('data-find-chip'))).toEqual([
+      'snoozed',
+    ]);
     expect(menu().textContent).toBe('Snoozed (1)');
     await openMenu();
     expect(option('snoozed').textContent).toBe('Snoozed (1)');
