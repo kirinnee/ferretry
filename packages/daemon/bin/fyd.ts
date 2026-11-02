@@ -867,7 +867,9 @@ import {
   createSessionDirectory,
   createSessionPaths,
   createWardenPaths,
+  adoptedLaunchArgv,
   currentLaunchCompactAt,
+  launchedCompactAt,
   currentLaunchEffort,
   currentLaunchModel,
   type DaemonConfig,
@@ -2861,7 +2863,11 @@ function createSessionControlSubsystem(
         await releaseCallsign();
         throw new SessionControlError('invalid', compactRefusal);
       }
-      const launchCompactAt = currentLaunchCompactAt({ compactAt: request.compactAt }, account.compactAt);
+      const launchCompactAt = currentLaunchCompactAt(
+        { compactAt: request.compactAt },
+        account.compactAt,
+        plan.contextWindow,
+      );
       // Claude carries fast mode and the compaction trigger in a replacement `--settings`, so the overlay it
       // replaces is read now.
       const fixedSettings =
@@ -3233,6 +3239,7 @@ function createConversationAdopter(
   adoptLearning: (id: SessionId) => Promise<void>,
   readableHandoffs: (id: SessionId) => readonly string[],
   linker: ConversationLinker,
+  fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>,
 ): ConversationAdopter {
   return {
     adopt: async ({ harness, runtime, conversation, start }) => {
@@ -3283,15 +3290,25 @@ function createConversationAdopter(
         return { kind: 'refused', code: 'unavailable', reason: planned.reason };
       }
       const plan = planned.plan;
-      const command = buildLaunchArgv({
-        harness: account.kind,
-        executable,
-        remoteControl: [],
-        transcript: conversationResumeArguments(harness, conversation.id),
-        readableFolders: readableHandoffs(id),
-        model: plan.model,
-        harnessFlags: [],
+      const launch = await adoptedLaunchArgv({
+        parts: {
+          harness: account.kind,
+          executable,
+          remoteControl: [],
+          transcript: conversationResumeArguments(harness, conversation.id),
+          readableFolders: readableHandoffs(id),
+          model: plan.model,
+          harnessFlags: [],
+        },
+        accountDefault: account.compactAt,
+        window: plan.contextWindow,
+        fixedSettings,
       });
+      if (launch.kind === 'unreadable') {
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+        return { kind: 'refused', code: 'unavailable', reason: `${account.agent}: ${launch.reason}.` };
+      }
+      const command = launch.argv;
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
@@ -5678,7 +5695,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     });
     // The compaction trigger travels with the session (its own choice stays on the document), else the TARGET
     // login's default. Claude carries it in the replacement `--settings`, so that overlay is read now.
-    const compactAt = currentLaunchCompactAt(config, account.compactAt);
+    const compactAt = currentLaunchCompactAt(config, account.compactAt, plan.contextWindow);
     const fixedSettings =
       account.kind === 'claude' && compactAt !== undefined ? await parts.fixedSettings(executable, account.kind) : '';
     if (fixedSettings === undefined)
@@ -10584,6 +10601,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
+          async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
         ),
         new AccountModelConversationListPolicy(declaredAccountModel),
       );
@@ -11434,15 +11452,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const compactAtService = new SessionCompactAtService({
         facts: async reference => {
           const id = tryParseSessionId(reference);
-          const view = id === undefined ? undefined : await sessions.get(id);
+          if (id === undefined) return undefined;
+          const view = await sessions.get(id);
           if (view === undefined) return undefined;
           const account = findAccountByAgent(await accounts.accounts(), view.config.agent);
           const declared = account === undefined ? undefined : declaredModel(account, view.config.model ?? '')?.context;
+          // What the running process was launched with is in the command its lifecycle recorded.
+          const lifecycle = SessionLifecycleConfigSchema.safeParse(
+            lifecycleConfigDocument(await storage.readConfig(id)),
+          );
           return {
             own: view.config.compactAt,
             accountDefault: account?.compactAt,
             window: currentContextWindow(view.config, view.state, declared),
             running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status),
+            ...(lifecycle.success ? { launched: launchedCompactAt(lifecycle.data.command) } : {}),
           };
         },
         write: writeCompactAt,

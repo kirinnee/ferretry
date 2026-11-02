@@ -27,6 +27,11 @@ overrides a login default, and `inherit` drops the ferret's own value so the def
   trigger would compact over and over without leaving room for work.
 - At most the **model's context window**, when the daemon can tell it. A larger value could never trigger.
 
+The value that would be **in force** is checked, not only one a person typed. A login default larger than a
+ferret's model window is not used: the launch falls back to Auto rather than refuse to start, and the ferret's
+compact-at answer says so. A request that would leave a ferret on such a value — a number above the window, or
+`inherit` onto a default the model cannot honour — is refused.
+
 A refused value says which rule it broke and what is allowed. The config check (`fy config check`) applies the
 floor to YAML; the window is checked when a ferret is started or changed, because it depends on the model.
 
@@ -34,7 +39,9 @@ floor to YAML; the window is checked when a ferret is started or changed, becaus
 
 It is a **launch setting** ([launch-settings.md](launch-settings.md)): it reaches a ferret when its CLI is next
 launched — **Restart CLI**, a revive, a restart after `fy daemon restart` or a migration all build it again from
-the ferret's saved config. A change on a running ferret says so ("takes effect when the ferret restarts"). A
+the ferret's saved config. A change on a running ferret says so ("takes effect when the ferret restarts"), and keeps saying so — on a read
+and on a repeat of the same change — for as long as the process still runs on the value it launched with (read
+from the launch arguments the daemon recorded). A
 ferret that is not running takes it at its next launch.
 
 It is **not** sent to a running harness. Claude Code's `/autocompact` would do that, but it writes the login's

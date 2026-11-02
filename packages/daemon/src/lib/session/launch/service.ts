@@ -151,7 +151,7 @@ export class SessionLaunchService {
     if (outcome.kind !== 'planned') return undefined;
     const effort = currentLaunchEffort(config, state);
     const fast = currentLaunchFast(config, state);
-    const compactAt = currentLaunchCompactAt(config, account.compactAt);
+    const compactAt = currentLaunchCompactAt(config, account.compactAt, outcome.plan.contextWindow);
     // Claude carries fast mode and the compaction trigger in a replacement overlay, so the one it replaces has to be in hand. A
     // login whose overlay cannot be read cannot be rebuilt: the record is replayed as it was.
     const fixedSettings =

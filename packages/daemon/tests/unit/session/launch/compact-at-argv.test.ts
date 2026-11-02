@@ -4,6 +4,7 @@ import {
   buildLaunchArgv,
   currentLaunchCompactAt,
   fastLaunchArguments,
+  launchedCompactAt,
   settingsArguments,
 } from '../../../../src/lib/session/launch/index.ts';
 
@@ -106,22 +107,89 @@ describe('settingsArguments with a compaction trigger', () => {
 describe('currentLaunchCompactAt', () => {
   it('should prefer the ferret’s own number over its login’s default', () => {
     // Act / Assert
-    should(currentLaunchCompactAt({ compactAt: 250_000 }, 400_000)).equal(250_000);
+    should(currentLaunchCompactAt({ compactAt: 250_000 }, 400_000, 1_000_000)).equal(250_000);
   });
 
   it('should fall back to the login’s default when the ferret says nothing', () => {
     // Act / Assert
-    should(currentLaunchCompactAt({}, 400_000)).equal(400_000);
+    should(currentLaunchCompactAt({}, 400_000, 1_000_000)).equal(400_000);
   });
 
   it('should let an explicit auto on the ferret beat a login default', () => {
     // Act / Assert
-    should(currentLaunchCompactAt({ compactAt: 'auto' }, 400_000)).be.undefined();
+    should(currentLaunchCompactAt({ compactAt: 'auto' }, 400_000, 1_000_000)).be.undefined();
   });
 
   it('should be nothing when neither says anything or the default is auto', () => {
     // Act / Assert
-    should(currentLaunchCompactAt({}, undefined)).be.undefined();
-    should(currentLaunchCompactAt({}, 'auto')).be.undefined();
+    should(currentLaunchCompactAt({}, undefined, 1_000_000)).be.undefined();
+    should(currentLaunchCompactAt({}, 'auto', 1_000_000)).be.undefined();
+  });
+});
+
+describe('currentLaunchCompactAt against the window', () => {
+  it('should drop a login default larger than the window to auto instead of failing the launch', () => {
+    // Act / Assert
+    should(currentLaunchCompactAt({}, 400_000, 200_000)).be.undefined();
+  });
+
+  it('should drop the ferret’s own value when a model change left it larger than the window', () => {
+    // Act / Assert
+    should(currentLaunchCompactAt({ compactAt: 400_000 }, undefined, 200_000)).be.undefined();
+  });
+
+  it('should keep a value that fits, and a value when the window is unknown', () => {
+    // Act / Assert
+    should(currentLaunchCompactAt({}, 150_000, 200_000)).equal(150_000);
+    should(currentLaunchCompactAt({}, 400_000, undefined)).equal(400_000);
+  });
+});
+
+describe('settingsArguments with unrelated inline settings', () => {
+  const overlay = (settings: Record<string, unknown>): readonly string[] => [
+    WRAPPER,
+    '--settings',
+    JSON.stringify(settings),
+  ];
+
+  it('should see a change to a setting that rides beside the trigger', () => {
+    // Act
+    const before = settingsArguments(overlay({ autoCompactWindow: 250_000, disableAllHooks: false }));
+    const after = settingsArguments(overlay({ autoCompactWindow: 250_000, disableAllHooks: true }));
+
+    // Assert
+    should(before).not.eql(after);
+    should(before).containEql('--compact-at=250000');
+  });
+
+  it('should still ignore fast mode beside the trigger and the other settings', () => {
+    // Act
+    const fast = settingsArguments(overlay({ disableAllHooks: false, fastMode: true, autoCompactWindow: 250_000 }));
+    const standard = settingsArguments(
+      overlay({ disableAllHooks: false, fastMode: false, autoCompactWindow: 250_000 }),
+    );
+
+    // Assert
+    should(fast).eql(standard);
+  });
+});
+
+describe('launchedCompactAt', () => {
+  it('should read Claude’s autoCompactWindow from the inline overlay', () => {
+    // Act / Assert
+    should(launchedCompactAt(buildLaunchArgv(claudeParts({ compactAt: 250_000, fast: true })))).equal(250_000);
+  });
+
+  it('should read Codex’s -c pair', () => {
+    // Act / Assert
+    should(
+      launchedCompactAt(buildLaunchArgv({ ...claudeParts({ compactAt: 300_000 }), harness: 'codex' as const })),
+    ).equal(300_000);
+  });
+
+  it('should be auto when the launch carries no trigger', () => {
+    // Act / Assert
+    should(launchedCompactAt(buildLaunchArgv(claudeParts({ fast: true })))).equal('auto');
+    should(launchedCompactAt([WRAPPER, '--settings', '/fleet/settings.json'])).equal('auto');
   });
 });

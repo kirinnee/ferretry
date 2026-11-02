@@ -16,6 +16,7 @@
  */
 
 import type { CompactAt, SessionConfig, SessionState } from '@ferretry/protocol';
+import { resolveCompactAt } from '../compact-at/resolve.ts';
 
 /** A `[1m]`-style selector suffix, which a harness drops from the model it reports. */
 const SELECTOR = /\[[^\]]*\]$/u;
@@ -64,14 +65,16 @@ export function currentLaunchFast(config: SessionConfig, state: SessionState): b
 /**
  * Where a relaunch compacts the conversation, as a token count: the ferret's own choice, else its login's
  * default. `auto` (either said so, or neither said anything) is nothing, which leaves the harness's own
- * trigger in charge. A ferret's explicit `auto` beats a login default.
+ * trigger in charge. A ferret's explicit `auto` beats a login default. A value the launch model's `window` cannot
+ * honour is dropped to `auto` (`resolveCompactAt`): refusing a launch over a default would be worse.
  */
 export function currentLaunchCompactAt(
   config: Pick<SessionConfig, 'compactAt'>,
   accountDefault: CompactAt | undefined,
+  window: number | undefined,
 ): number | undefined {
-  const wanted = config.compactAt ?? accountDefault;
-  return typeof wanted === 'number' ? wanted : undefined;
+  const { effective } = resolveCompactAt({ own: config.compactAt, accountDefault }, window);
+  return typeof effective === 'number' ? effective : undefined;
 }
 
 /**

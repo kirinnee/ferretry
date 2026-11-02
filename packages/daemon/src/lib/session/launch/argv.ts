@@ -26,7 +26,7 @@
  */
 
 import type { HarnessKind } from '@ferretry/fleet';
-import type { TranscriptProvenance } from '@ferretry/protocol';
+import type { CompactAt, TranscriptProvenance } from '@ferretry/protocol';
 import { handoffReadArguments } from '../send/handoff.ts';
 import { claudeSessionArguments } from '../transcript/claude-path.ts';
 import { codexCorrelationArguments, isCodexCorrelationPair } from '../transcript/codex-rollout.ts';
@@ -237,18 +237,56 @@ const RUN_OVERRIDE = /^(?:model|model_reasoning_effort|service_tier)=/u;
  */
 const INLINE_SETTINGS = /^\{.*"(?:fastMode":(?:true|false)|autoCompactWindow":\d+).*\}$/su;
 
-/** The compaction trigger an inline overlay carries, which unlike fast mode IS a setting. */
-function inlineCompactAt(overlay: string): number | undefined {
+/** An inline overlay as an object, or nothing when it is not one. */
+function inlineOverlay(overlay: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(overlay);
-    const value =
-      typeof parsed === 'object' && parsed !== null
-        ? (parsed as Record<string, unknown>)[CLAUDE_COMPACT_KEY]
-        : undefined;
-    return typeof value === 'number' ? value : undefined;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * What an inline overlay says that a Restart would change: the compaction trigger as a `--compact-at=<n>` marker,
+ * then every OTHER setting in it as an overlay of its own. Only fast mode, a run fact, is left out. An overlay
+ * with no trigger is fast mode's alone and is dropped whole, as it always was.
+ */
+function overlaySettings(overlay: string): readonly string[] {
+  const parsed = inlineOverlay(overlay);
+  const { fastMode: _fast, [CLAUDE_COMPACT_KEY]: compactAt, ...others } = parsed ?? {};
+  if (typeof compactAt !== 'number') return [];
+  return [
+    `--compact-at=${compactAt}`,
+    ...(Object.keys(others).length === 0
+      ? []
+      : [
+          '--settings',
+          JSON.stringify(Object.fromEntries(Object.entries(others).sort(([a], [b]) => a.localeCompare(b)))),
+        ]),
+  ];
+}
+
+/**
+ * The compaction trigger a recorded launch command carries, in tokens, or `auto` when it carries none — what the
+ * RUNNING process was started with (Claude's inline `--settings` `autoCompactWindow`; Codex's `-c` pair).
+ */
+export function launchedCompactAt(command: readonly string[]): CompactAt {
+  for (let index = 0; index < command.length; index += 1) {
+    const next = command[index + 1];
+    if (next === undefined) break;
+    if (command[index] === '--settings') {
+      const value = inlineOverlay(next)?.[CLAUDE_COMPACT_KEY];
+      if (typeof value === 'number') return value;
+    }
+    if (command[index] === '-c' && next.startsWith(`${CODEX_COMPACT_KEY}=`)) {
+      const value = Number(next.slice(CODEX_COMPACT_KEY.length + 1));
+      if (Number.isSafeInteger(value)) return value;
+    }
+  }
+  return 'auto';
 }
 
 /**
@@ -268,8 +306,7 @@ export function settingsArguments(argv: readonly string[]): readonly string[] {
     const token = argv[index] as string;
     const next = argv[index + 1];
     if (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) {
-      const compactAt = inlineCompactAt(next);
-      if (compactAt !== undefined) kept.push(`--compact-at=${compactAt}`);
+      kept.push(...overlaySettings(next));
       index += 1;
       continue;
     }
