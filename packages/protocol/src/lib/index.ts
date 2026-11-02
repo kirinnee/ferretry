@@ -127,6 +127,7 @@ export * from './task-title.ts';
 export * from './tasks.ts';
 export * from './tcp-listeners.ts';
 export * from './terminal.ts';
+export * from './tidy.ts';
 export * from './transcript-images.ts';
 export * from './tunnel.ts';
 export * from './turn-handoff.ts';

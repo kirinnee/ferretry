@@ -55,6 +55,7 @@ import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
+import { type TidySubsystem, tidyRoutes } from './tidy.ts';
 import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
@@ -383,6 +384,8 @@ export interface MountedSubsystems {
   readonly board: BoardSubsystem;
   /** One search over every card and agenda item (docs/work-search.md): the finder, `fy search` and the related check. */
   readonly workSearch: WorkSearchSubsystem;
+  /** One ferret's clean-up of its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy"). */
+  readonly tidy: TidySubsystem;
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
    *  for the reason `handoverReconcile` is — a loop nothing arms is a watcher that never looks. */
   readonly boardGitHub: { arm(): () => void };
@@ -718,6 +721,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...boardRoutes(subsystems.board),
         // `/v1/search` is a fixed literal no other subsystem uses.
         ...workSearchRoutes(subsystems.workSearch),
+        // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
+        ...tidyRoutes(subsystems.tidy),
         ...analyticsRoutes(subsystems.analytics),
         ...analyticsPricingRoutes(subsystems.analyticsPricing),
         // The agent's route is a fixed literal under `/v1/agent`, and a person's are under

@@ -40,6 +40,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'switches whether a project uses the board; owner-only, it changes nobody’s access, and the switch records that the owner set it and when',
   'POST /v1/search/related':
     'a read: a POST only because a title and an ask do not fit a URL; it weighs them against the board and changes nothing',
+  'POST /v1/tidy/plan':
+    'a read: a POST only so a plan is never cached by a proxy; it decides what one ferret could tidy and changes nothing',
   'POST /v1/worktrees':
     'creates a worktree inside a registered project; removal is the destructive half and is audited',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',

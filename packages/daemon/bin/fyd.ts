@@ -659,6 +659,7 @@ import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts'
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
+import { TidyService } from '../src/lib/tidy/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
@@ -12794,6 +12795,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           search: async query => await workSearch.search(query),
           related: async request => await workSearch.related(request),
         },
+        tidy: new TidyService({
+          board: boardWorld.board,
+          switches: boardWorld.switches,
+          sessions: boardSessions,
+          agenda,
+          subFerrets: boardSubFerrets,
+          machineId: () => attachmentDaemonId,
+        }),
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,

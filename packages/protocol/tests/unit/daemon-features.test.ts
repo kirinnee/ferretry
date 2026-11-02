@@ -48,6 +48,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('work.search.1');
   });
 
+  it('should name the tidy plan, so fy tidy is offered only on a machine that serves it', () => {
+    should(DAEMON_FEATURES.tidy).equal('tidy.1');
+    should(daemonFeatureList()).containEql('tidy.1');
+  });
+
   it('should report 2FA keys now that the app draws them', () => {
     should(DAEMON_FEATURES.twoFactorKeys).equal('accounts.2fa-keys.1');
     should(daemonFeatureList()).containEql('accounts.2fa-keys.1');
