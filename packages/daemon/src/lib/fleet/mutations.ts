@@ -258,8 +258,32 @@ function assertDocument(text: string, format: SettingsFormat, what: string): voi
   }
 }
 
+/** Where an item came from: set by a copy, never by an edit, so an edit carries it over as it was. */
+const CLONE_LINK_FIELDS = ['clonedFrom', 'clonedFromDaemon', 'clonedFromKey'] as const;
+
+/** The copy provenance of an item that already exists, for the item an edit rebuilds in its place. */
+function cloneLinkOf(existing: Readonly<Record<string, unknown>> | undefined): Record<string, string> {
+  const carried: Record<string, string> = {};
+  for (const field of CLONE_LINK_FIELDS) {
+    const value = existing?.[field];
+    if (typeof value === 'string') carried[field] = value;
+  }
+  return carried;
+}
+
 /** The component as the configuration stores it, and the file it writes. */
 function componentOf(
+  name: string,
+  input: FleetComponentInput,
+  given: string | undefined,
+  existing: Record<string, unknown> | undefined,
+  existingSettings: SettingsObject | undefined,
+): { readonly component: Record<string, unknown>; readonly file?: AccountComponentFile } {
+  const built = componentBody(name, input, given, existing, existingSettings);
+  return { ...built, component: { ...built.component, ...cloneLinkOf(existing) } };
+}
+
+function componentBody(
   name: string,
   input: FleetComponentInput,
   given: string | undefined,
@@ -903,6 +927,7 @@ function putRuntime(
     agent: change.agent,
     ...(change.harness === undefined ? {} : { harness: change.harness }),
     ...(model.runtimes[change.name]?.disabled === undefined ? {} : { disabled: model.runtimes[change.name]?.disabled }),
+    ...cloneLinkOf(model.runtimes[change.name]),
   };
   // The first agent runtime on a machine becomes its default for new agents (and the Warden's login).
   if (change.create && change.agent && resolveDefaultRuntime(model) === undefined) {
@@ -929,7 +954,7 @@ function putProfile(
   if (!change.create && !exists) refuse(`no profile ${change.name} exists on this machine`);
   const layers = layersRefusal(model, change.name, change.layers);
   if (layers !== undefined) refuse(layers);
-  draft.profiles[change.name] = { layers: [...change.layers] };
+  draft.profiles[change.name] = { layers: [...change.layers], ...cloneLinkOf(model.profiles[change.name]) };
   if (exists) {
     const consequence = editConsequence(profileUsage(model, change.name));
     if (consequence !== undefined) consequences.push(consequence);

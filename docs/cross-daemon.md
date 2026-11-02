@@ -75,9 +75,11 @@ summary is [security.md](security.md).
   it, and the target keeps a **last-copied record** (`setup/clone-base.json`, mode 0600) of what the source
   looked like at each copy: digests, sizes and paths, never content or a secret. It is written in the same
   all-or-nothing batch as the copy, filed under the daemon id the browser verified (else the one the bundle
-  reports of itself — and a bundle that names another machine than the one picked is refused), and
-  garbage-collected on every copy from that source; a Replace rewrites it. A copy never touches a login's
-  sign-in or any secret (account-model.md K10–K18).
+  reports of itself, kept apart as `self:<id>` so it can never rewrite a verified entry — and a bundle that
+  names another machine than the one picked is refused), and garbage-collected on every copy from that
+  source; a Replace rewrites it. A record file that cannot be read never blocks a copy: the copy is made
+  without it, the review says so, and the file is left alone. Editing a copied item keeps its link. A copy
+  never touches a login's sign-in or any secret (account-model.md K10–K18).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the

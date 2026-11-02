@@ -3,6 +3,7 @@ import { type FleetCloneBundle, FleetCloneBundleSchema, sha256Hex } from '@ferre
 import should from 'should';
 import {
   applyCloneToBase,
+  CLONE_BASE_FILES_LIMIT,
   CLONE_BASE_ITEMS_LIMIT,
   CLONE_BASE_SOURCES_LIMIT,
   type CloneBase,
@@ -13,6 +14,7 @@ import {
   CloneSourceMismatch,
   EMPTY_CLONE_BASE,
   forgetCloneSource,
+  SELF_REPORTED_PREFIX,
   linkedKeys,
   parseCloneBase,
   serializeCloneBase,
@@ -188,9 +190,9 @@ describe('cloneSourceIdentity', () => {
     });
   });
 
-  it('should file a version 2 bundle under what it said of itself, as unverified', () => {
+  it('should file a version 2 bundle under what it said of itself, as unverified, in a namespace of its own', () => {
     should(cloneSourceIdentity(V2(), undefined, undefined)).deepEqual({
-      id: 'daemon-source',
+      id: `${SELF_REPORTED_PREFIX}daemon-source`,
       name: 'studio-mac',
       verified: 'self',
     });
@@ -210,6 +212,36 @@ describe('cloneSourceIdentity', () => {
     const huge = { ...V2(), daemon: 'd'.repeat(201) } as ReturnType<typeof V2>;
     should(cloneSourceIdentity(huge, undefined, undefined)).be.undefined();
     should(() => cloneSourceIdentity(huge, 'daemon-source', undefined)).throw(CloneSourceMismatch);
+  });
+
+  it('should never file what a bundle says of itself under an id the browser could have verified', () => {
+    // Act
+    const reported = cloneSourceIdentity(V2(), undefined, undefined);
+    const verified = cloneSourceIdentity(V2(), 'daemon-source', undefined);
+
+    // Assert
+    should(reported?.id).not.equal(verified?.id);
+    should(verified?.id).equal('daemon-source');
+  });
+
+  it('should say an over-long id is too long, not that the export is from another machine', () => {
+    // Arrange
+    const huge = 'd'.repeat(201);
+    const bundle = { ...V2(), daemon: huge } as ReturnType<typeof V2>;
+
+    // Act + Assert
+    should(() => cloneSourceIdentity(bundle, huge, undefined)).throw(CloneSourceMismatch);
+    should(() => cloneSourceIdentity(bundle, huge, undefined)).throw(
+      'That export names its machine with an id too long to remember. Export it again from the other machine.',
+    );
+  });
+
+  it('should read a self-reported id with no room for its namespace as no identity', () => {
+    // Arrange
+    const bundle = { ...V2(), daemon: 'd'.repeat(200) } as ReturnType<typeof V2>;
+
+    // Act + Assert
+    should(cloneSourceIdentity(bundle, undefined, undefined)).be.undefined();
   });
 
   it('should cut a display name to 120 characters', () => {
@@ -515,5 +547,212 @@ describe('linkedKeys', () => {
     const plan = planClone(emptyTarget(), V2(), options());
     should(linkedKeys(plan.model)).deepEqual(new Set([KEY_A, KEY_B, KEY_C, KEY_D]));
     should(linkedKeys(emptyTarget()).size).equal(0);
+  });
+});
+
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+
+/** An item whose document list is longer than one item may list. */
+const oversizeItem = (): CloneBaseItem =>
+  item({
+    files: Object.fromEntries(
+      Array.from({ length: CLONE_BASE_FILES_LIMIT + 1 }, (_, index) => [
+        `components/skills/big/f${String(index)}.md`,
+        { digest: DIGEST, bytes: 1 },
+      ]),
+    ),
+  });
+
+describe('serializeCloneBase: a record that always reads back', () => {
+  it('should leave out the documents of an item that lists too many, and keep every source', () => {
+    // Arrange
+    const honest = source({ [KEY_A]: item() });
+    const base: CloneBase = {
+      version: 1,
+      sources: {
+        honest,
+        big: source({
+          [KEY_B]: oversizeItem(),
+          [KEY_C]: item({ files: { 'components/x.md': { digest: DIGEST, bytes: 1 } } }),
+        }),
+      },
+    };
+
+    // Act
+    const read = parseCloneBase(serializeCloneBase(base));
+
+    // Assert
+    should(Object.keys(read.sources).toSorted()).deepEqual(['big', 'honest']);
+    should(read.sources.honest).deepEqual(honest);
+    should(read.sources.big?.items[KEY_B]).deepEqual(item());
+    should(read.sources.big?.items[KEY_C]?.files).deepEqual({ 'components/x.md': { digest: DIGEST, bytes: 1 } });
+  });
+
+  it('should drop a source with more items than one source may hold, and keep the others', () => {
+    // Arrange
+    const items = Object.fromEntries(
+      Array.from({ length: CLONE_BASE_ITEMS_LIMIT + 1 }, (_, index) => [
+        `${'a'.repeat(22)}${[...index.toString(32).padStart(4, '0')].map(digit => BASE32[Number.parseInt(digit, 32)]).join('')}`,
+        item(),
+      ]),
+    );
+    const base: CloneBase = { version: 1, sources: { huge: source(items), small: source({ [KEY_A]: item() }) } };
+
+    // Act
+    const read = parseCloneBase(serializeCloneBase(base));
+
+    // Assert
+    should(Object.keys(read.sources)).deepEqual(['small']);
+  });
+
+  it('should keep the newest 32 sources of a record with more, rather than none', () => {
+    // Arrange
+    const sources = Object.fromEntries(
+      Array.from({ length: CLONE_BASE_SOURCES_LIMIT + 3 }, (_, index) => [
+        `s${String(index).padStart(2, '0')}`,
+        source({}, `2026-10-01T00:${String(index).padStart(2, '0')}:00.000Z`),
+      ]),
+    );
+
+    // Act
+    const read = parseCloneBase(serializeCloneBase({ version: 1, sources }));
+
+    // Assert
+    should(Object.keys(read.sources)).have.length(CLONE_BASE_SOURCES_LIMIT);
+    should(read.sources.s00).be.undefined();
+    should(read.sources.s34).not.be.undefined();
+  });
+
+  it('should leave a source filed under __proto__ out, with every other source still reading back', () => {
+    // Arrange
+    const base = applyCloneToBase(
+      { version: 1, sources: { fine: source({ [KEY_B]: item() }) } },
+      update({
+        source: { id: '__proto__', name: 'odd', verified: 'browser' },
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A, KEY_B),
+      }),
+    );
+
+    // Act
+    const read = parseCloneBase(serializeCloneBase(base));
+
+    // Assert
+    should(Object.keys(read.sources)).deepEqual(['fine']);
+  });
+
+  it('should give a source whose verified id is __proto__ no identity at all', () => {
+    // Act + Assert
+    should(cloneSourceIdentity(V1(), '__proto__', undefined)).be.undefined();
+    should(
+      cloneSourceIdentity({ ...V2(), daemon: '__proto__' } as ReturnType<typeof V2>, undefined, undefined)?.id,
+    ).equal(`${SELF_REPORTED_PREFIX}__proto__`);
+  });
+});
+
+describe('applyCloneToBase: a source is only ever its own entry', () => {
+  const copiedFrom = (id: string, verified: 'browser' | 'self', digest: string, replace = false) =>
+    update({
+      source: { id, name: id, verified },
+      replace,
+      copied: [entry(KEY_A, { digest })],
+      sourceKeys: new Set([KEY_A]),
+      model: linkedModel(KEY_A),
+    });
+
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'should not find an inherited property when %p is a new source',
+    id => {
+      // Act
+      const next = applyCloneToBase(EMPTY_CLONE_BASE, copiedFrom(id, 'browser', 'a'.repeat(64)));
+
+      // Assert
+      should(Object.keys(next.sources)).deepEqual([id]);
+      should(Object.hasOwn(next.sources, id)).be.true();
+      should(Object.keys(next.sources[id]?.items ?? {})).deepEqual([KEY_A]);
+    },
+  );
+
+  it('should leave the record exactly as it was when a self-reported id equals a browser-verified one', () => {
+    // Arrange
+    const verified = applyCloneToBase(EMPTY_CLONE_BASE, copiedFrom('daemon-a', 'browser', 'a'.repeat(64)));
+    const before = serializeCloneBase(verified);
+
+    // Act
+    const merged = applyCloneToBase(verified, copiedFrom('daemon-a', 'self', 'b'.repeat(64)));
+    const rewritten = applyCloneToBase(verified, copiedFrom('daemon-a', 'self', 'b'.repeat(64), true));
+
+    // Assert
+    should(serializeCloneBase(merged)).equal(before);
+    should(serializeCloneBase(rewritten)).equal(before);
+    should(merged.sources['daemon-a']?.verified).equal('browser');
+    should(merged.sources['daemon-a']?.items[KEY_A]?.digest).equal('a'.repeat(64));
+  });
+
+  it('should start a verified copy afresh over an entry that was only self-reported', () => {
+    // Arrange
+    const planted = applyCloneToBase(
+      EMPTY_CLONE_BASE,
+      update({
+        source: { id: 'daemon-a', name: 'daemon-a', verified: 'self' },
+        copied: [entry(KEY_A), entry(KEY_B)],
+        sourceKeys: new Set([KEY_A, KEY_B]),
+        model: linkedModel(KEY_A, KEY_B),
+      }),
+    );
+
+    // Act
+    const next = applyCloneToBase(
+      planted,
+      update({
+        source: { id: 'daemon-a', name: 'daemon-a', verified: 'browser' },
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A, KEY_B),
+      }),
+    );
+
+    // Assert
+    should(next.sources['daemon-a']?.verified).equal('browser');
+    should(Object.keys(next.sources['daemon-a']?.items ?? {})).deepEqual([KEY_A]);
+  });
+
+  it('should not keep one source alive because another source stamped the same key on its items', () => {
+    // Arrange: source A recorded KEY_A, and nothing but a copy from B (which claims KEY_A) now carries it
+    const previous: CloneBase = { version: 1, sources: { a: source({ [KEY_A]: item() }) } };
+
+    // Act
+    const next = applyCloneToBase(
+      previous,
+      update({
+        source: { id: 'b', name: 'b', verified: 'browser' },
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A),
+      }),
+    );
+
+    // Assert
+    should(Object.keys(next.sources)).deepEqual(['b']);
+  });
+
+  it('should keep another source whose own items are still linked here', () => {
+    // Arrange
+    const previous: CloneBase = { version: 1, sources: { a: source({ [KEY_B]: item() }) } };
+
+    // Act
+    const next = applyCloneToBase(
+      previous,
+      update({
+        source: { id: 'b', name: 'b', verified: 'browser' },
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A, KEY_B),
+      }),
+    );
+
+    // Assert
+    should(Object.keys(next.sources).toSorted()).deepEqual(['a', 'b']);
   });
 });

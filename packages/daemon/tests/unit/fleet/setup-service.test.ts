@@ -1266,7 +1266,7 @@ describe('the clone-base record', () => {
     should(record?.mode).equal(0o600);
     should(record?.expect).equal('absent');
     const parsed = parseCloneBase(record?.content);
-    const source = parsed.sources['daemon-source'];
+    const source = parsed.sources['self:daemon-source'];
     should(source?.verified).equal('self');
     should(source?.name).equal('work-mac');
     should(source?.lastCopiedAt).equal('2026-10-13T08:00:00.000Z');
@@ -1378,7 +1378,34 @@ describe('the clone-base record', () => {
     const change = clone(await sourceBundle());
     await w.service.executors.clone.describe(change);
     await w.service.executors.clone.execute(change);
-    should(Object.keys(parseCloneBase(batchRecord(w)?.content).sources)).deepEqual(['daemon-source']);
+    should(Object.keys(parseCloneBase(batchRecord(w)?.content).sources)).deepEqual(['self:daemon-source']);
+  });
+
+  it('should copy without a record, and say so, when the record file exists but cannot be read', async () => {
+    // Arrange
+    const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    const w = target({
+      overrides: {
+        cloneBase: {
+          read: async () => {
+            throw denied;
+          },
+          write: async () => {
+            throw new Error('must not write over a record that could not be read');
+          },
+        },
+      },
+    });
+    const change = clone(await sourceBundle());
+
+    // Act
+    const review = await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    should(JSON.stringify(review)).containEql('cannot be read');
+    should(w.applied).have.length(1);
+    should(batchRecord(w)).be.undefined();
   });
 
   it('should forget one source, writing only the record, and say whether it knew it', async () => {
@@ -1390,7 +1417,7 @@ describe('the clone-base record', () => {
 
     should(await w.service.forgetCloneSource('daemon-nobody')).equal(false);
     should(w.state.baseWrites).deepEqual([]);
-    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(await w.service.forgetCloneSource('self:daemon-source')).equal(true);
     should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
     should(w.applied).have.length(1);
   });

@@ -2926,3 +2926,106 @@ describe('deriveAccountChange: catalog.install', () => {
 function refusalWord(kind: 'mcp' | 'skills'): string {
   return KIND_WORDS[kind];
 }
+
+describe('deriveAccountChange: a copied item edited in the app keeps its link to the source', () => {
+  const KEY = 'abcdefghijklmnopqrstuvwxyz'.slice(0, 26);
+  const LINK = { clonedFromKey: KEY, clonedFrom: 'studio', clonedFromDaemon: 'daemon-studio' };
+  const copiedModel = (): AccountModel =>
+    modelOf({
+      credentials: {
+        work: { harness: 'claude', store: 'ferretry', label: 'Work', ...LINK },
+        envy: { harness: 'claude', store: 'environment', env: { REGION: 'eu' }, ...LINK },
+        spare: { harness: 'claude', store: 'ferretry' },
+      },
+      components: {
+        instructions: { main: { file: 'components/instructions/main.md', ...LINK } },
+        mcp: { search: { command: 'search-server', args: ['--fast'], ...LINK } },
+        skills: { review: { items: ['review'], ...LINK } },
+        settings: { tuned: { harness: 'claude', file: 'components/settings/tuned.json', ...LINK } },
+        hooks: { guard: { harness: 'claude', file: 'components/hooks/guard.json', ...LINK } },
+        modelSets: { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5', ...LINK } },
+      },
+      profiles: { base: { layers: ['instructions/main'], clonedFromKey: KEY } },
+      runtimes: { alpha: { credential: 'work', profile: 'base', agent: false, clonedFromKey: KEY } },
+      advanced: { commands: [] },
+    });
+
+  it('should keep the key of a runtime whose login, profile and CLI are edited', () => {
+    // Act
+    const edit = derive(
+      runtimePut({ name: 'alpha', credential: 'spare', profile: 'base', agent: true, create: false }),
+      copiedModel(),
+    );
+
+    // Assert
+    should(edit.model.runtimes.alpha).deepEqual({
+      credential: 'spare',
+      profile: 'base',
+      agent: true,
+      clonedFromKey: KEY,
+    });
+  });
+
+  it('should keep the key of a profile whose layers are edited', () => {
+    // Act
+    const edit = derive(
+      profilePut({ name: 'base', layers: ['skills/review', 'instructions/main'], create: false }),
+      copiedModel(),
+    );
+
+    // Assert
+    should(edit.model.profiles.base).deepEqual({ layers: ['skills/review', 'instructions/main'], clonedFromKey: KEY });
+  });
+
+  it.each([
+    { kind: 'instructions' as const, name: 'main', input: { kind: 'instructions' }, content: '# New rules' },
+    { kind: 'mcp' as const, name: 'search', input: { kind: 'mcp', command: 'other-server' }, content: undefined },
+    { kind: 'skills' as const, name: 'review', input: { kind: 'skills', items: ['review', 'extra'] } },
+    {
+      kind: 'settings' as const,
+      name: 'tuned',
+      input: { kind: 'settings', harness: 'claude', flags: ['--x'] },
+      content: undefined,
+    },
+    { kind: 'hooks' as const, name: 'guard', input: { kind: 'hooks', harness: 'claude' }, content: '{"hooks":{}}' },
+    {
+      kind: 'modelSets' as const,
+      name: 'heavy',
+      input: { kind: 'modelSets', models: ['claude-opus-5-5', 'gpt-6'], default: 'gpt-6' },
+    },
+  ])('should keep where a $kind component came from when it is edited', ({ kind, name, input, ...rest }) => {
+    // Act
+    const edit = derive(
+      componentPut(input, {
+        name,
+        create: false,
+        ...('content' in rest && rest.content ? { content: rest.content } : {}),
+      }),
+      copiedModel(),
+    );
+
+    // Assert
+    const kept = edit.model.components[kind][name] as unknown as Record<string, unknown>;
+    should(kept.clonedFromKey).equal(KEY);
+    should(kept.clonedFrom).equal('studio');
+    should(kept.clonedFromDaemon).equal('daemon-studio');
+  });
+
+  it("should not give a component it creates anyone else's key", () => {
+    // Act
+    const edit = derive(componentPut({ kind: 'skills', items: ['review'] }, { name: 'review-2' }), copiedModel());
+
+    // Assert
+    should(edit.model.components.skills['review-2']).deepEqual({ items: ['review'] });
+  });
+
+  it('should keep where a login came from when its label and variables are edited', () => {
+    // Act
+    const labelled = derive({ kind: 'credential.label', id: 'work', label: 'Day job' }, copiedModel());
+    const changed = derive({ kind: 'credential.env', id: 'envy', env: { REGION: 'us' } }, copiedModel());
+
+    // Assert
+    should(labelled.model.credentials.work).containDeep({ label: 'Day job', ...LINK });
+    should(changed.model.credentials.envy).containDeep({ env: { REGION: 'us' }, ...LINK });
+  });
+});
