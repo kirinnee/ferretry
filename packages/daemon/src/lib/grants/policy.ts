@@ -159,6 +159,14 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
     if (!own.use || (demand.axis === 'configure' && !own.configure))
       return { allowed: false, refusal: 'device-not-granted' };
   }
+  // A narrowing skips the per-act step-up, never the proven device it stood for (secrev-1329b L3): a governed caller
+  // with no device (the admin token off loopback, a remote warden) is refused as it was when it had to step up.
+  if (
+    demand.narrowing === true &&
+    evaluation.device === undefined &&
+    demandNeedsStepUp({ capability: demand.capability, axis: demand.axis })
+  )
+    return { allowed: false, refusal: 'step-up-required' };
   if (!demandNeedsStepUp(demand)) return { allowed: true, refusal: 'granted' };
   if (!evaluation.stepUp) return { allowed: false, refusal: 'step-up-required' };
   return { allowed: true, refusal: 'granted', steppedUp: true };
@@ -238,9 +246,9 @@ export function patchedCapabilities(patch: GrantsPatch): readonly DaemonCapabili
 /**
  * Which axes a change turns ON.
  *
- * THE ASYMMETRY IS THE POINT. Widening is the one change that hands a remote browser more than it
- * had, so only a caller on the host may make it — no step-up buys it. A governed caller may only
- * narrow, and since narrowing is a `configure` act it needs the same step-up as any other.
+ * THE ASYMMETRY IS THE POINT.  * Widening is the one change that hands a remote browser more than it
+ * had, so a governed caller may make it only for what it holds itself, with a live step-up and a passkey proved for
+ * it. A pure narrowing only takes away, so it needs neither (docs/grants.md § Narrowing never asks again).
  */
 export function widenedBy(current: CapabilityGrants, next: CapabilityGrants): readonly string[] {
   const widened: string[] = [];
@@ -290,6 +298,8 @@ export interface DeviceGrantJudgement {
 /** Why a device-grant change was refused, in a vocabulary the service turns into a status. */
 export type DeviceGrantVerdict =
   | { readonly kind: 'allowed' }
+  /** A change that is not a pure narrowing, from a governed caller with no live step-up. */
+  | { readonly kind: 'step-up-required' }
   /** A legal widen, without a passkey proved for it alone. */
   | { readonly kind: 'widen-step-up-required' }
   | { readonly kind: 'forbidden'; readonly widened: readonly string[] };
@@ -324,8 +334,9 @@ const ALL_OFF_GRANTS: CapabilityGrants = Object.fromEntries(
  * The one decision about a change to ONE device's grants, field by field, refused WHOLE.
  *
  * - A caller on the host may make any change: it already has the machine (B4).
- * - A governed narrowing — on any device, its own included — needs nothing beyond the grant and the unlock: no
- *   per-act step-up, whatever "ask again for each act" says. Revoking is never harder than granting.
+ * - A governed PURE narrowing — on any device, its own included — needs nothing beyond the grant and the unlock: no
+ *   per-act step-up, whatever "ask again for each act" says. Revoking is never harder than granting. Anything that is
+ *   not a pure narrowing needs the live step-up, as every change did before.
  * - A governed widen is allowed only for axes {@link widenableBy} lists. One illegal widen refuses the
  *   whole patch, so a mixed patch never half-applies.
  * - A legal governed widen needs a passkey proved FOR IT (owner decision 2026-10-14): an unlock, or a
@@ -342,8 +353,9 @@ export function judgeDeviceGrantChange(judgement: DeviceGrantJudgement): DeviceG
     return !allowed[capability][which];
   });
   if (illegal.length > 0) return { kind: 'forbidden', widened: illegal };
-  if (!judgement.freshStepUp && widenedBy(judgement.current, judgement.next).length > 0)
-    return { kind: 'widen-step-up-required' };
+  if (widenedBy(judgement.current, judgement.next).length === 0) return { kind: 'allowed' };
+  if (!judgement.stepUp) return { kind: 'step-up-required' };
+  if (!judgement.freshStepUp) return { kind: 'widen-step-up-required' };
   return { kind: 'allowed' };
 }
 

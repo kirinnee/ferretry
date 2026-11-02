@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type PutLoginEntry, PutLoginEntryRequestSchema } from '@ferretry/protocol';
 import should from 'should';
+import { namesOnCard } from '../../support/names-on-card.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
   cardContext,
@@ -120,6 +121,21 @@ describe('a ferret proposes', () => {
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     for (const n of [1, 2, 3, 4]) await w.service.propose('s1', { login: 'VERCEL' }, `steps ${String(n)}`, 'again');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Replaced by a newer recipe proposal.' }]);
+  });
+});
+
+describe('a recipe card names a place, never the account (L8)', () => {
+  it('should put no label, username or handle anywhere on the card', async () => {
+    const w = world();
+    await w.directory.put(
+      'ZEBRA_QUOKKA',
+      change({ label: 'Zebra Label', username: 'quokka-user', match: ['zebra.example'] }),
+    );
+
+    await w.service.propose('s1', { login: 'ZEBRA_QUOKKA' }, 'Open zebra.example\nClick Log in', 'it works');
+
+    should(w.cards).have.length(1);
+    should(namesOnCard(w.cards, ['Zebra Label', 'quokka-user', 'ZEBRA_QUOKKA'])).eql([]);
   });
 });
 

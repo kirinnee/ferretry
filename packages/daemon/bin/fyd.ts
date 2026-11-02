@@ -3271,7 +3271,7 @@ function createSessionResumeSubsystem(
   held: Pick<SessionSendService, 'releaseHeld'>,
 ): SessionResumeSubsystem {
   return {
-    resume: async (reference, actor, message, policy) => {
+    resume: async (reference, actor, message, policy, confirmRestore) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
@@ -3284,6 +3284,12 @@ function createSessionResumeSubsystem(
           'refused',
           `a person revoked ${reference}'s credential; only a person can resume it (${CLIENT_NAME} resume ${reference})`,
         );
+      // From a paired device it is a widen: the route's grant and passkey check, asked now (secrev-1329b M2).
+      if (cutOff === 'restore' && actor === 'device') {
+        if (confirmRestore === undefined)
+          throw new SessionResumeError('refused', `a paired device cannot bring back ${reference} here`);
+        confirmRestore();
+      }
       if (cutOff === 'restore') await restoreCredential(storage, id);
       await service
         .resume({

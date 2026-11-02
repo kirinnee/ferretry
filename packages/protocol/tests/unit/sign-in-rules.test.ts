@@ -1297,7 +1297,7 @@ describe('standing sign-in rules: the words of a rule', () => {
     should(noKey.rows.find(row => row.label === 'Code key')?.value).equal(rules.SIGN_IN_RULE_CODE_KEY_UNNAMED);
     should(labels(plain)).not.containEql('Note');
     should(again.rows.filter(row => row.label === 'Note')).deepEqual([
-      { label: 'Note', value: 'Approves this rule again (revision 3)' },
+      { label: 'Note', value: 'Replaces this sign-in’s rule (revision 3)' },
       { label: 'Note', value: `Suspended: ${signInRuleSuspensionWords('place-changed')}` },
     ]);
   });

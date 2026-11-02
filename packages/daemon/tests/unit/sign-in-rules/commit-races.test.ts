@@ -138,7 +138,7 @@ describe('a suspension that lands after the stage is never cleared unseen (secre
     // Assert
     should(resume.rows.some(row => row.label === 'Note' && row.value.startsWith('Suspended: '))).be.true();
     should(
-      resume.rows.some(row => row.label === 'Note' && row.value === 'Approves this rule again (revision 2)'),
+      resume.rows.some(row => row.label === 'Note' && row.value === 'Replaces this sign-in’s rule (revision 2)'),
     ).be.true();
     should(resumed).containDeep({ revision: 2, status: 'active' });
     should(actions(w).at(-1)).equal('sign-in-rule-resumed');

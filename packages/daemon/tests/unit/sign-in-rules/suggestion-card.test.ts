@@ -4,7 +4,8 @@ import should from 'should';
 import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '../../../src/lib/agenda/index.ts';
 import { parseAgendaLedger } from '../../../src/lib/agenda/state-machine.ts';
 import { SignInRuleSuggestionAgendaAdapter, SignInRuleSuggestions } from '../../../src/lib/sign-in-rules/index.ts';
-import { GITHUB, listing, NOW } from './support.ts';
+import { namesOnCard } from '../../support/names-on-card.ts';
+import { GITHUB, listing, NOW, USERNAME } from './support.ts';
 
 const OWNER = { kind: 'owner', actor: { kind: 'host' } } as const;
 
@@ -81,12 +82,22 @@ describe('a rule suggestion card on the real agenda', () => {
     // Assert
     should(text).containEql('A ferret suggests a standing rule for a sign-in on github.com.');
     should(text).not.containEql('Approve everything');
-    should(text).not.containEql('GitHub work');
+    should(namesOnCard(w.ledgers.get('s1'), ['GitHub work', 'GITHUB_WORK', USERNAME])).eql([]);
   });
 
   it('should keep the ferret’s agenda byte-identical whether the owner dismisses, approves, closes or stays silent', async () => {
     // Arrange — one world per door, each with the same card
-    const doors = ['silent', 'dismiss', 'approve', 'close', 'not-needed'] as const;
+    const doors = [
+      'silent',
+      'dismiss',
+      'approve',
+      'close',
+      'not-needed',
+      'snooze',
+      'reply',
+      'needs-info',
+      'discuss',
+    ] as const;
     const worlds = await Promise.all(
       doors.map(async door => {
         const w = agendaWorld();
@@ -102,6 +113,12 @@ describe('a rule suggestion card on the real agenda', () => {
         if (door === 'approve') w.suggestions.approved(GITHUB);
         if (door === 'close') await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'no');
         if (door === 'not-needed') await w.agenda.dismiss('s1', made.agenda as never, { kind: 'human' } as never, 'no');
+        if (door === 'snooze')
+          await w.agenda.snooze('s1', made.agenda as never, '2026-11-01T18:00:00Z', { kind: 'human' } as never);
+        if (door === 'reply') await w.agenda.reply('s1', made.agenda as never, { kind: 'human' } as never, 'no thanks');
+        if (door === 'needs-info')
+          await w.agenda.needsInfo('s1', made.agenda as never, { kind: 'human' } as never, 'why?');
+        if (door === 'discuss') await w.agenda.discuss('s1', made.agenda as never, { kind: 'human' } as never, 'hmm');
         return JSON.stringify(await w.agenda.list('s1'));
       }),
     );
@@ -123,17 +140,26 @@ describe('a rule suggestion card on the real agenda', () => {
     should(worlds.map(({ w }) => w.suggestions.waiting('s1', GITHUB))).eql(doors.map(() => false));
   });
 
-  it('should refuse the owner’s close and Not needed on the agenda, pointing at Dismiss on the card', async () => {
+  it('should refuse every owner move on the agenda, pointing at Dismiss on the card', async () => {
     // Arrange
     const w = agendaWorld();
     const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+    const id = made.agenda as never;
+    const human = { kind: 'human' } as never;
 
     // Act
-    const closed = await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'no');
-    const dismissed = await w.agenda.dismiss('s1', made.agenda as never, { kind: 'human' } as never, 'no');
+    const moves = [
+      await w.agenda.resolve('s1', id, human, 'no'),
+      await w.agenda.dismiss('s1', id, human, 'no'),
+      await w.agenda.snooze('s1', id, '2026-11-01T18:00:00Z', human),
+      await w.agenda.unsnooze('s1', id, human),
+      await w.agenda.reply('s1', id, human, 'no'),
+      await w.agenda.needsInfo('s1', id, human, 'why?'),
+      await w.agenda.discuss('s1', id, human, 'hmm'),
+    ];
 
-    // Assert — refused both ways, the card still open
-    for (const refused of [closed, dismissed])
+    // Assert — refused every way, the card still open and unchanged
+    for (const refused of moves)
       should(refused).match({
         ok: false,
         error: { code: 'use_input_form', message: /Dismiss it on its card in the app/u },

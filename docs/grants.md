@@ -567,15 +567,19 @@ cannot switch it back on from that phone. It is what makes the rule safe, and it
 yourself out of your own machine — so the refusal names the remedy exactly, and `mayGrant` on every
 capability view lets a UI say so _before_ somebody walks through, rather than after.
 
-Revoking must never be harder than granting. A governed narrowing of the grants costs one touch on the device
-already in hand — a step-up and nothing else — and never a trip to the host, which is the property that matters
-in an incident. It is not free, and the cost is stated: a phone whose passkey the thief cannot use cannot narrow
-either, so the remedy for that case is the host.
+Revoking must never be harder than granting. A governed PURE narrowing of the grants costs one touch on the device
+already in hand — no per-act step-up — and never a trip to the host, which is the property that matters in an
+incident ([Narrowing never asks again](#narrowing-never-asks-again)). It still needs a proven device: a governed
+caller with none (the admin token off loopback, a remote warden) is refused. The cost is stated: an unlocked phone
+holding `pairing.use` can narrow or revoke the owner's other devices without a passkey, and the remedy for that is
+the host. Anything that is not a pure narrowing asks the live step-up, and a widen a passkey proved for it, taken in
+one step as it is written, so one confirmation buys one widen.
 
 ### Narrowing never asks again
 
 A route that only **takes away** declares it (`narrowing: true` on its capability demand, `api/capability.ts`):
-the boundary still asks its grant, and an unlock still stands in front of it, but it never asks a per-act passkey
+the boundary still asks its grant and a proven device, and an unlock still stands in front of it, but it never asks a
+per-act passkey
 — whatever "ask again for each act" (`stepUpOnActions`) says, and on a machine with the unlock off too. Those
 routes are: revoking a task plan (`POST …/task-plans/:planId/revoke`); narrowing or revoking a standing sign-in
 rule, one or an account's; revoking a device (`DELETE /v1/pair/devices/:deviceId`) and changing a device's grants
@@ -658,7 +662,8 @@ its toggles follow the remote column below — a toggle it may not turn on says 
 - **No device can grant what it does not hold**, so nothing escalates: the most a device can give another
   is a copy of what it has. A widen of anything else by a device is `403 grant_forbidden`, naming the host command.
 - **Narrowing is never harder than widening.** The route demands `pairing.use` as a narrowing, so any device
-  holding that can narrow, with no per-act step-up ([Narrowing never asks again](#narrowing-never-asks-again)). A device with no `pairing.use` (the default) cannot reach the route at all;
+  holding that can narrow, with no per-act step-up ([Narrowing never asks again](#narrowing-never-asks-again)). A default `full` pairing holds
+  `pairing.use`; a device narrowed without it cannot reach the route at all;
   its own grants are narrowed at the machine or by a device that may manage devices.
 - **`configure` implies `use` on the result**: turning `configure` on turns `use` on with it, turning `use`
   off turns `configure` off, and a field naming both reads as the narrowing.

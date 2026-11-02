@@ -310,13 +310,18 @@ function shortKeyWords(key: TwoFactorKeySummary): string {
   }
 }
 
+/** A code key by its kind alone, for agenda text: no label, address or digits the owner wrote. */
+const KEY_KIND_WORDS = { totp: 'authenticator app', sms: 'SMS', email: 'email' } as const;
+
 /**
  * THE TITLE OF A CODE CARD, from the account's keys: the one a ferret named (`factor`) when the caller passes only
  * that one, else every key that ends in a code. One: where its code went ("Code sent to ••42 (SMS)"). Several: each
  * ("One-time code: SMS ••42 or Authenticator app"). None known: the account ("One-time code for GitHub · kirinnee") where
  * the caller may name it (the app, from the accounts it reads), and the PLACE alone ("One-time code for github.com")
  * where the words reach the agenda: agenda text is readable by every ferret, so it never names an account label or a
- * username. Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
+ * username. On that path the keys are said by KIND only ("One-time code for github.com, by email"): a key's label and
+ * the address an email key goes to are the owner's words, and an address is often the username (secrev-1329a L6).
+ * Every word is the OWNER's (the key's label and plain facts) or Ferretry's, never a ferret's.
  */
 export function factorAskWords(
   keys: readonly TwoFactorKeySummary[],
@@ -324,7 +329,11 @@ export function factorAskWords(
 ): string {
   const codes = keys.filter(key => isCodeFactor(key.kind));
   const [only] = codes;
-  if (only === undefined) return `One-time code for ${'place' in named ? named.place : accountWords(named)}`;
+  if ('place' in named) {
+    const kinds = [...new Set(codes.map(key => KEY_KIND_WORDS[key.kind as keyof typeof KEY_KIND_WORDS]))];
+    return `One-time code for ${named.place}${kinds.length === 0 ? '' : `, by ${kinds.join(' or ')}`}`;
+  }
+  if (only === undefined) return `One-time code for ${accountWords(named)}`;
   if (codes.length === 1) return oneKeyWords(only);
   return `One-time code: ${codes.map(shortKeyWords).join(' or ')}`;
 }

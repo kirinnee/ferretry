@@ -474,19 +474,24 @@ The card is answered by its Allow (the passkey ceremony, then the commit) or Den
 saves nothing, so an app from before these cards shows the daemon's words and cannot save.
 
 **The app draws this card itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
-daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). Every sentence is the
+daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). The reference names the
+stage alone: an account's handle is often its label and username, and every ferret and any device reads the agenda, so
+the app reads the stage, and the account it is for, by the stage id (`GET /v1/accounts/seed-stages/:stage`). An older
+daemon's reference also names the account, and the app then reads the stage there. Every sentence is the
 daemon's (subject, why, context); the app adds the one-factor warning with its tick, an amber box and a second tick when
 the stage was staged with "save it here anyway" (the daemon marks that with `TWO_FACTOR_SEED_CARD_MISMATCH_LINE`, one
 shared constant), **Allow** and **Deny**. Allow is the same shared flow as the "Set up automatic codes" panel: the
 `add-2fa-key` passkey bound to THAT stage (`useAddKeyStepUp`), then the commit with no body. A dismissed passkey leaves
 the stage waiting (it expires in two minutes), so the owner can try again or Deny; Deny drops the stage with no passkey. The
-card reads only where the stage stands (`GET …/seed/:stage`) and the account's name; it never holds the key.
+card reads only where the stage stands (`GET /v1/accounts/seed-stages/:stage`) and the account's name; it never holds
+the key.
 
 | Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- |
 | `POST /v1/accounts/:id/factors`                            | add a key with no value (`sms`, `email`, `push`, `security-key`, a `totp` you hold) | no                         |
 | `PATCH` / `DELETE /v1/accounts/:id/factors/:tf`            | relabel; remove (its seed swept)                                                    | never                      |
 | `POST /v1/accounts/:id/factors/seed`                       | stage a seed (memory, two minutes); answers what was read                           | no (it saves nothing)      |
+| `GET /v1/accounts/seed-stages/:stage`                      | where a stage stands, and its account, by the stage id alone (the card's read)      | no                         |
 | `GET` / `DELETE /v1/accounts/:id/factors/seed/:stage`      | where a stage stands; drop it                                                       | no                         |
 | `POST /v1/accounts/:id/factors/seed/:stage/commit`         | save it                                                                             | **yes, bound to `:stage`** |
 | `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app` | put it on the agenda `{ session }` so the owner confirms it                         | no (it saves nothing)      |

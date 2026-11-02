@@ -22,7 +22,8 @@ export class TwoFactorSeedAgendaAdapter implements TwoFactorSeedAgendaPort {
         sourceRef: card.stage,
         kind: 'permission',
         title: 'Save automatic codes?',
-        twoFactorSeed: { stage: card.stage, account: card.account },
+        // The stage alone: the account's handle is often its label and username, and every ferret reads the agenda.
+        twoFactorSeed: { stage: card.stage },
         subject: card.subject,
         why: card.why,
         context: card.context,

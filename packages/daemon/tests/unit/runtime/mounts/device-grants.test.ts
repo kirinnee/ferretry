@@ -103,6 +103,12 @@ async function mount(world: World = {}) {
       spendFresh: () => {
         spentFresh += 1;
       },
+      // A widen TAKES its proof in one step as it is written (L4): a claim spends it.
+      claimFresh: (() => {
+        if (!(world.freshProof ?? world.steppedUp ?? true)) return false;
+        spentFresh += 1;
+        return true;
+      }) as never,
     },
   );
   return { dispatcher, devices, audit, service, rechecks: () => rechecks, spentFresh: () => spentFresh };
@@ -417,6 +423,56 @@ describe('the device-grant service on its own', () => {
 
     // Assert
     should(devices.get(targetId)?.fleet).deepEqual({ use: false, configure: false });
+  });
+
+  it('should let one passkey pay for one widen: of two racing on one proof, exactly one is written (L4)', async () => {
+    // Arrange — one fresh proof, claimed in one step as each widen is about to be written
+    const grants = grantSubsystem();
+    await grants.refresh();
+    const otherId = `fy_device_id_${'c'.repeat(22)}`;
+    const devices = new Map([
+      [targetId, LIMITED_DEVICE_GRANTS],
+      [otherId, LIMITED_DEVICE_GRANTS],
+    ]);
+    const service = deviceGrantsOver(grants, devices);
+    let proofs = 1;
+    const claim = (): boolean => {
+      if (proofs <= 0) return false;
+      proofs -= 1;
+      return true;
+    };
+    const fresh = presentation({ freshStepUp: true });
+
+    // Act — two widens, of two devices, race on the one proof
+    const outcomes = await Promise.allSettled([
+      service.change(targetId, { terminal: { use: true } }, fresh, claim),
+      service.change(otherId, { terminal: { use: true } }, fresh, claim),
+    ]);
+
+    // Assert
+    should(outcomes.map(outcome => outcome.status).toSorted()).eql(['fulfilled', 'rejected']);
+    should(outcomes.find(outcome => outcome.status === 'rejected')).match({
+      reason: { failure: 'widen-step-up-required' },
+    });
+    should(proofs).equal(0);
+    should([devices.get(targetId)?.terminal.use, devices.get(otherId)?.terminal.use].filter(Boolean)).have.length(1);
+  });
+
+  it('should ask a governed widen with no live step-up for one, and claim no proof for it (review A M3)', async () => {
+    // Arrange
+    const grants = grantSubsystem();
+    await grants.refresh();
+    const service = deviceGrantsOver(grants, new Map([[targetId, LIMITED_DEVICE_GRANTS]]));
+    let claimed = 0;
+
+    // Act + Assert
+    await should(
+      service.change(targetId, { terminal: { use: true } }, presentation({ stepUp: false }), () => {
+        claimed += 1;
+        return true;
+      }),
+    ).be.rejectedWith({ failure: 'step-up-required' });
+    should(claimed).equal(0);
   });
 
   it('should report a device removed between the read and the write as not found', async () => {

@@ -86,7 +86,6 @@ export const DEVICE_OWNER = 'device:';
 /** The card that asks the owner to confirm a staged save in the app, as the agenda needs it. */
 export interface TwoFactorSeedCard {
   readonly stage: TwoFactorStageId;
-  readonly account: AccountId;
   readonly subject: string;
   readonly why: string;
   readonly context: string;
@@ -315,6 +314,16 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     return held?.state === 'waiting' ? addTwoFactorKeySubject(held.accountKey, held.id) : undefined;
   }
 
+  /**
+   * Where a stage stands, read by its id alone: the agenda card names no account (not even its handle, which is often
+   * the label and username), so the app reads the stage, and the account it is for, from here (secrev-1329a M2).
+   */
+  async viewStage(stage: TwoFactorStageId, caller: StageCaller): Promise<TwoFactorSeedStageView> {
+    const held = this.#stages.get(stage);
+    if (held === undefined) throw this.#gone();
+    return await this.view(held.account, stage, caller);
+  }
+
   /** Where a stage stands, for `fy` waiting on the owner. Refused as unknown for another account's stage. */
   async view(accountId: AccountId, stage: TwoFactorStageId, caller: StageCaller): Promise<TwoFactorSeedStageView> {
     this.#sweep(this.deps.clock.nowMs());
@@ -425,7 +434,6 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     ];
     const id = await agenda.raise(sessionId, {
       stage: held.id,
-      account: accountId,
       subject: `Save automatic codes to ${accountPlaceWords(target.places)}?`,
       why: `Asked by ${askedBy} on ${this.deps.hostName} at ${at} UTC. If you didn't just ask for this, Deny.`,
       context: context.map(line => `- ${line}`).join('\n'),

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { PhoneApprovalRaiseSchema } from '@ferretry/protocol';
 import should from 'should';
+import { namesOnCard } from '../../support/names-on-card.ts';
 import { PhoneApprovalAuditAdapter } from '../../../src/lib/input-requests/audit-adapter.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
 import { gatedNumber } from '../../../src/lib/input-requests/phone-approval.ts';
@@ -67,7 +68,18 @@ describe('PhoneApprovalService raise', () => {
     const { subject, why, context, howToResolve } = cards[0]?.card ?? {};
     for (const text of [subject, why, context, howToResolve])
       for (const name of ['ClickUp', 'a@gmail.com', 'Okta ', 'Okta.']) should(String(text ?? '')).not.containEql(name);
-    should(pushes).eql([{ body: 'Tap 42 on your phone: ClickUp · a@gmail.com', sequence: 0, secondsLeft: 120 }]);
+    should(pushes).eql([
+      { body: 'Tap 42 on your phone: your account on company.okta.com', sequence: 0, secondsLeft: 120 },
+    ]);
+  });
+
+  it('should put no account, username, handle or key label on the card or in the push (L7, L8)', async () => {
+    const { raise, cards, pushes } = world();
+
+    await raise();
+
+    should(cards).have.length(1);
+    should(namesOnCard([cards, pushes], ['ClickUp', 'a@gmail.com', 'CLICKUP', 'Okta Verify on Pixel'])).eql([]);
   });
 
   it('should never tell the ferret the number, nor put it in the agenda card (invariant 8)', async () => {
@@ -121,7 +133,7 @@ describe('PhoneApprovalService raise', () => {
 
     // Assert
     should(run.service.get(OWNER, SESSION, view.id)).containDeep({ numberMissing: 'scripted' });
-    should(run.pushes[0]?.body).equal('Approve on your phone: ClickUp · a@gmail.com — open for the number');
+    should(run.pushes[0]?.body).equal('Approve on your phone: your account on company.okta.com — open for the number');
   });
 
   it('should read no number from a page that changed while it was read, a frame of another origin or the wrong provider', () => {
@@ -200,7 +212,7 @@ describe('PhoneApprovalService raise', () => {
     should(run.looks).eql(['app']);
     should(approval.number).be.undefined();
     should(approval.numberMissing).equal('none-found');
-    should(run.pushes[0]?.body).equal('Approve on your phone: ClickUp · a@gmail.com — open for the number');
+    should(run.pushes[0]?.body).equal('Approve on your phone: your account on company.okta.com — open for the number');
     should(JSON.stringify([approval, run.cards, run.pushes])).not.match(/\b42\b/u);
   });
 
@@ -251,7 +263,7 @@ describe('PhoneApprovalService raise', () => {
     should(approval).containDeep({ surface: 'terminal', numberMissing: 'terminal', signIn: SI_AWS });
     should(approval.number).be.undefined();
     should(JSON.stringify([approval, run.cards, run.pushes])).not.match(/42/u);
-    should(run.pushes[0]?.body).equal('Approve on your phone: AWS — check the terminal');
+    should(run.pushes[0]?.body).equal('Approve on your phone: your account in a terminal — check the terminal');
   });
 
   it('should say whether a session has an approval waiting on the phone, and no for another session', async () => {
@@ -442,8 +454,8 @@ describe('PhoneApprovalService settling (invariant 10)', () => {
     // Assert
     should(after).containDeep({ state: 'waiting', number: { value: '17' } });
     should(run.pushes.map(push => [push.sequence, push.body])).eql([
-      [0, 'Tap 42 on your phone: ClickUp · a@gmail.com'],
-      [1, 'Tap 17 on your phone: ClickUp · a@gmail.com'],
+      [0, 'Tap 42 on your phone: your account on company.okta.com'],
+      [1, 'Tap 17 on your phone: your account on company.okta.com'],
     ]);
     should(cleared.number).be.undefined();
     should(cleared.numberMissing).equal('none-found');

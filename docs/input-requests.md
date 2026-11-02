@@ -841,8 +841,9 @@ accounts that may be picked by hand.
 A code card is titled by the owner's 2FA key and offers **"Use code from Ferretry"** once per key whose seed this
 machine holds. The tap is the permission, as for a password; what follows is where the daemon may type the code.
 
-- **The title** is `factorAskWords` over the keys of the account the daemon matched ("Code sent to ••42 (SMS)", "Code
-  from Authenticator app", "One-time code: SMS ••42 or Authenticator app"), cut to 60 characters. The account is the
+- **The title** is `factorAskWords` over the keys of the account the daemon matched, by the place and each code key's
+  kind ("One-time code for github.com, by SMS", "One-time code for github.com, by SMS or authenticator app"), cut to
+  60 characters: never a key's label, digits or address, which are the owner's words and often the username. The account is the
   one `chosenSignIn` picks among the sign-ins matched here, whatever fields they hold, so the title is the same
   whether a seed is held. A raise's `factor` names one of that account's keys; one of any other account, or no key
   at all, is ignored and the title is as if none was named. Two matched accounts and nothing to choose: "Needs a
@@ -1070,11 +1071,12 @@ into a guessed key. This is folded into the `v: 2` index directly; there is no `
   A ferret can still tell which accounts have a `totp` key, and right after the migration every such key holds a
   seed. The design allows that (a ferret may know which 2FA kinds an account has); it never learns more.
 
-**A code card's title** comes from the keys (`factorAskWords`), in the owner's words: "Code sent to ••42 (SMS)",
-"Code from Authenticator app", "One-time code: SMS ••42 or Authenticator app", or, with no key known, the place:
-"One-time code for github.com". The title is agenda text, which every ferret reads, so the daemon's never names the
-account's label or username; the app's card names the account ("One-time code for GitHub · kirinnee") from the
-accounts it reads. A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
+**A code card's title** comes from the keys (`factorAskWords`). The daemon's is agenda text, which every ferret and a
+device without `secrets.use` reads, so it names the place and the keys' kinds alone ("One-time code for github.com, by
+SMS or authenticator app"; with no code key, "One-time code for github.com"): never the account's label, its username,
+a key's label, its digits or the address an email key goes to, which is often the username (secrev-1329a L6). The
+app's card names the keys in the owner's words ("Code sent to ••42 (SMS)", "Code from Authenticator app") and the
+account ("One-time code for GitHub · kirinnee") from the accounts it reads. A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
 only if it is a key of the matched account, and otherwise ignored ([Codes Ferretry makes](#codes-ferretry-makes)).
 
 **Saving a seed** takes one field: a base32 key (spaces fine) or an `otpauth://totp/…` link. `parseTotpInput` is
@@ -1138,8 +1140,9 @@ the agenda subject and the push from the approval's own fields, and from nothing
 
 - **Card:** "Approve on your phone" · "ClickUp · a@gmail.com" · "ClickUp via Okta on company.okta.com" · "Tap 42
   on your phone" (Duo: "Enter 123456 in Duo Mobile").
-- **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: ClickUp ·
-  a@gmail.com". With no number, it ends "— open for the number".
+- **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: your account on
+  company.okta.com". It names the place, never the account: a push reaches every subscribed device, one without
+  `secrets.use` included (secrev-1329a L7). With no number, it ends "— open for the number".
 - **Agenda subject and why:** never the number, and never the account's label, its provider or the username: the
   place alone ("Approve on your phone: your account on company.okta.com"), because agenda text is every ferret's to
   read. The card names the account from the approval, read on a person's route. It is a plain `info` item with a

@@ -261,7 +261,11 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   if (lookup.route.caller !== 'any' && callerIsAgent(authentication, actor))
     return {
       kind: 'refused',
-      response: errorResponse(403, ownerOnlyWords(`may use ${request.method} ${request.path}`), OWNER_ONLY_CODE),
+      response: errorResponse(
+        403,
+        `${ownerOnlyWords(`may use ${request.method} ${request.path}`)}${lookup.route.ferretDoor === undefined ? '' : `; ${lookup.route.ferretDoor}`}`,
+        OWNER_ONLY_CODE,
+      ),
     };
 
   // The OWNER is the host's admin token over loopback, never a loopback peer on its own: a tunnel or

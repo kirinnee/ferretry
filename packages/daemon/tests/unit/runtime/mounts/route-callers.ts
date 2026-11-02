@@ -114,6 +114,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/accounts/:id/merge operator person',
   'POST /v1/accounts/:id/apart operator person',
   'POST /v1/accounts/:id/factors/seed operator person',
+  'GET /v1/accounts/seed-stages/:stage operator person',
   'GET /v1/accounts/:id/factors/seed/:stage operator person',
   'POST /v1/accounts/:id/factors/seed/:stage/commit operator person',
   'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app operator person',

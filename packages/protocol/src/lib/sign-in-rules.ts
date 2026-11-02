@@ -814,7 +814,7 @@ export function signInRuleWords(facts: SignInRuleWordsFacts): {
       ? [{ label: 'Code key' as const, value: rowLine(facts.codeKey ?? SIGN_IN_RULE_CODE_KEY_UNNAMED) }]
       : []),
     ...(facts.revision > 1
-      ? [{ label: 'Note' as const, value: `Approves this rule again (revision ${String(facts.revision)})` }]
+      ? [{ label: 'Note' as const, value: `Replaces this sign-in’s rule (revision ${String(facts.revision)})` }]
       : []),
     ...(facts.suspended === undefined
       ? []

@@ -53,6 +53,10 @@ import {
 import { controlRefusal } from '../../agent-tools/policy.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
+
+/** Where a ferret writes a config file instead of the owner's `PUT /v1/config/file` (C30). */
+const PUT_FERRET_DOOR =
+  'a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -172,7 +176,8 @@ function pathOf(context: RouteContext): string {
 async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseBody(context.request, ConfigFilePutRequestSchema, { maxBytes: MAX_PUT_BODY_BYTES });
   // The second wall: a person's route, so an agent the boundary let through is still refused (its door is config.write).
-  if (isAgentCaller(context)) throw new ApiError(403, ownerOnlyWords('may use PUT /v1/config/file'), OWNER_ONLY_CODE);
+  if (isAgentCaller(context))
+    throw new ApiError(403, `${ownerOnlyWords('may use PUT /v1/config/file')}; ${PUT_FERRET_DOOR}`, OWNER_ONLY_CODE);
   const refused = refusedFor(context, request.path, 'configure');
   if (refused !== undefined) return refused;
   const fresh = context.presentation?.freshStepUp === true;
@@ -347,6 +352,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       path: '/v1/config/file',
       minimum: 'operator',
       caller: 'person',
+      ferretDoor: PUT_FERRET_DOOR,
       capability: USE,
       noStore: true,
       handle: async context => await put(subsystem, context),

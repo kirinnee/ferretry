@@ -86,6 +86,23 @@ describe('a route that only takes away (C31: narrowing never asks again)', () =>
     }
   });
 
+  it('should refuse a governed caller with no proven device, as it was when the narrowing asked a step-up (L3)', () => {
+    // Arrange — the admin token arriving off loopback, or a remote warden: governed, and no device record
+    const noDevice: GrantEvaluation = { grants: ALL_ON, governed: true, hostLocal: false, stepUp: false };
+
+    // Act + Assert — every demand that used to ask a step-up is refused; one that never did is still served
+    for (const capability of DAEMON_CAPABILITIES)
+      for (const axis of AXES) {
+        const demand = { capability, axis, narrowing: true } as const;
+        const asked = demandNeedsStepUp({ capability, axis });
+        should({ capability, axis, refusal: decideCapability(demand, noDevice).refusal }).deepEqual({
+          capability,
+          axis,
+          refusal: asked ? 'step-up-required' : 'granted',
+        });
+      }
+  });
+
   it('should still ask the step-up of the same demand when it is not marked narrowing', () => {
     // Act
     const plain = decideCapability({ capability: 'secrets', axis: 'configure' }, governed({ stepUp: false }));
@@ -292,9 +309,9 @@ describe('judging one device-grant change', () => {
       holder: manager,
     });
 
-    // Assert — a widen without a passkey proved for it names the act it is waiting on.
+    // Assert — a widen is not a pure narrowing: with no live step-up at all it asks one first (review A M3).
     should(confirmed).deepEqual({ kind: 'allowed' });
-    should(unconfirmed).deepEqual({ kind: 'widen-step-up-required' });
+    should(unconfirmed).deepEqual({ kind: 'step-up-required' });
   });
 
   it('should refuse a remote widen on the unlock alone: it needs a passkey proved for it', () => {

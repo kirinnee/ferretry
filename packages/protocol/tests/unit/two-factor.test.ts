@@ -338,6 +338,11 @@ describe('a code card’s title', () => {
     // Agenda text is readable by every ferret (secrev-1261 L4): the daemon passes the place, the app the account.
     expect(factorAskWords([push], { place: 'github.com' })).toBe('One-time code for github.com');
     expect(factorAskWords([], { place: 'sudo@kirin-box' })).toBe('One-time code for sudo@kirin-box');
-    expect(factorAskWords([sms], { place: 'github.com' })).toBe('Code sent to ••42 (SMS)');
+    // The keys by kind alone (secrev-1329a L6): no label, no digits, no address, which is often the username.
+    expect(factorAskWords([sms], { place: 'github.com' })).toBe('One-time code for github.com, by SMS');
+    const toUsername = key({ kind: 'email', label: 'kirinnee mail', to: 'kirinnee@example.com' });
+    const words = factorAskWords([sms, totp, toUsername, email], { place: 'github.com' });
+    expect(words).toBe('One-time code for github.com, by SMS or authenticator app or email');
+    expect(words).not.toContain('kirinnee');
   });
 });

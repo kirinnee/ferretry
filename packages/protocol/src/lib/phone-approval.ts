@@ -288,8 +288,9 @@ const NO_NUMBER_WORDS: Readonly<Record<PhoneApprovalNumberMissing, string>> = {
 /**
  * THE WORDS OF AN APPROVE-ON-PHONE CARD, from the approval's own fields: the daemon-matched account and username,
  * the observed host, the provider it goes via, and the number the daemon read. It takes nothing else, so nothing a
- * ferret wrote can reach the card, the agenda subject or the push. The agenda's words (`subject`, `agendaWhy`) name
- * the place alone.
+ * ferret wrote can reach the card, the agenda subject or the push. The agenda's words (`subject`, `agendaWhy`) and the
+ * push name the place alone: a push reaches every subscribed device, a device without `secrets.use` included
+ * (secrev-1329a L7); the card draws the account from the owner's routes.
  */
 export function phoneApprovalWords(
   approval: Pick<PhoneApproval, 'surface' | 'origin' | 'account' | 'username' | 'via' | 'number' | 'numberMissing'>,
@@ -324,8 +325,9 @@ export function phoneApprovalWords(
   const pointed = number?.from === 'pointed';
   const placed = known === undefined ? who : `your account ${place}`;
   const subject = cut(`Approve on your phone: ${placed}`, MAX_AGENDA_SUBJECT_LENGTH);
-  // The push names a sign-in it doesn't know without its host (see `push`), and says when the ferret chose the element.
-  const pushWho = known ?? "a sign-in Ferretry doesn't know";
+  // The push names the place, never the account; a sign-in it doesn't know without its host. It says when the ferret
+  // chose the element.
+  const pushWho = known === undefined ? "a sign-in Ferretry doesn't know" : placed;
   const push =
     numberLine !== undefined
       ? `${numberLine}${pointed ? ' (read where the ferret pointed)' : ''}: ${pushWho}`

@@ -44,8 +44,9 @@ const accountList = () =>
     signIns: [],
   });
 
-const item = (mismatch = false): ComponentProps<typeof TwoFactorSeedHost>['item'] => ({
-  twoFactorSeed: { stage: STAGE, account: 'GITHUB' },
+const item = (mismatch = false, legacy = false): ComponentProps<typeof TwoFactorSeedHost>['item'] => ({
+  // This daemon's card names the stage alone (its handle is often the label and username); an older one named it.
+  twoFactorSeed: legacy ? { stage: STAGE, account: 'GITHUB' } : { stage: STAGE },
   // The daemon's words name the place only: agenda text is every ferret's to read.
   subject: 'Save automatic codes to your account on github.com?',
   why: 'Asked by fy on kirin-box at 10:00 UTC. If you didn’t just ask for this, Deny.',
@@ -126,6 +127,7 @@ const draw = async (
     readonly mismatch?: boolean;
     readonly allowKey?: boolean;
     readonly withoutKey?: boolean;
+    readonly legacy?: boolean;
   },
 ) => {
   const machine = served(over);
@@ -142,7 +144,7 @@ const draw = async (
           })}
       connection={connection}
       createClient={async () => machine.client}
-      item={item(over.mismatch)}
+      item={item(over.mismatch, over.legacy)}
     />,
   );
   mounted.push(view);
@@ -177,6 +179,18 @@ describe('the owner card for a staged 2FA seed', () => {
 
     expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to your account on github.com?');
     expect(card.q('[data-seed-subject]')?.textContent).not.toContain('kirinnee');
+  });
+
+  it('should read the stage by its id alone, and an older daemon’s card by the account it names (M2)', async () => {
+    const card = await draw({});
+    const legacy = await draw({ legacy: true });
+
+    const reads = (calls: readonly Call[]) =>
+      calls.filter(call => call.method === 'GET' && call.path !== '/v1/accounts');
+    expect(reads(card.calls).map(call => call.path)).toEqual([`/v1/accounts/seed-stages/${STAGE}`]);
+    expect(reads(legacy.calls).map(call => call.path)).toEqual([`/v1/accounts/GITHUB/factors/seed/${STAGE}`]);
+    // The account the stage is for still names the card, from the reads.
+    expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to GitHub · kirinnee?');
   });
 
   it('should ask for the passkey bound to THIS stage, then commit with no body', async () => {

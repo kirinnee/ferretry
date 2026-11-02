@@ -444,7 +444,10 @@ export const useAgenda = ({
             : {})}
           swipeable={swipeable}
           {...(standing === undefined || questionKept
-            ? { onSnooze: (until: string) => act(cardItem, snoozeAction(until), '') }
+            ? // A ferret's rule suggestion is never snoozed: the ferret reads its own board (C2).
+              cardItem.signInRuleSuggestion === undefined
+              ? { onSnooze: (until: string) => act(cardItem, snoozeAction(until), '') }
+              : {}
             : { settled: standing })}
           {...(standing !== undefined && questionKept ? { parkedNote: standing } : {})}
           {...(now === undefined ? {} : { now })}

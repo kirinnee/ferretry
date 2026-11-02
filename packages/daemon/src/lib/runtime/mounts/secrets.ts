@@ -790,6 +790,15 @@ function factorRoutes(
             ),
           },
           {
+            // The card names no account: the app reads its stage, and the account it is for, by the stage id alone.
+            method: 'GET',
+            path: '/v1/accounts/seed-stages/:stage',
+            ...configure,
+            handle: owned('read a staged 2FA key', async context =>
+              TwoFactorSeedStageViewSchema.parse(await seeds.viewStage(pathStageId(context), stageCaller(context))),
+            ),
+          },
+          {
             method: 'GET',
             path: '/v1/accounts/:id/factors/seed/:stage',
             ...configure,

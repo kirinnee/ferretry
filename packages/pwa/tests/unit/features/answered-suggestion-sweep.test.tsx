@@ -70,6 +70,22 @@ function Sweep(props: {
 const answeredOf = (answered: AnsweredSuggestions, machine: string, id: string): boolean =>
   answered.has(answered.getSnapshot(), daemonId(machine), id);
 
+describe('the app’s answered set', () => {
+  it('tells its listeners once per new answer, and stops telling one that left', () => {
+    const answered = new AnsweredSuggestions();
+    let told = 0;
+    const leave = answered.subscribe(() => {
+      told += 1;
+    });
+    answered.mark(STUDIO, [ANSWERED]);
+    answered.mark(STUDIO, [ANSWERED]);
+    leave();
+    answered.mark(STUDIO, [OPEN]);
+    expect(told).toBe(1);
+    expect(answeredOf(answered, 'studio', OPEN)).toBe(true);
+  });
+});
+
 describe('the Inbox’s sweep of answered rule suggestions (C2)', () => {
   it('marks only what the owner’s list no longer holds, per machine', async () => {
     const answered = new AnsweredSuggestions();

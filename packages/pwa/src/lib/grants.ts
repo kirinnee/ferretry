@@ -118,6 +118,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'allow-profile-targets': 'let copy rules paste into programs in your own profile',
   'approve-task-plan': "let Ferretry sign in for a ferret with an account's password",
   'approve-sign-in-rule': "let Ferretry sign in for any ferret with an account's password, until the rule ends",
+  'resume-cut-off': 'bring back a ferret you cut off',
 };
 
 /**

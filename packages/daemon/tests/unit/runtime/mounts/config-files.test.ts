@@ -498,15 +498,17 @@ describe('the configuration files mount', () => {
       // Act
       const route = routeFor(world().subsystem, 'PUT', '/v1/config/file');
 
-      // Assert
+      // Assert — and the boundary's refusal names the ferret's own door
       should(route.caller).equal('person');
+      should(route.ferretDoor).containEql('config_write');
     });
 
     it('should refuse every agent in the handler too, whatever its switch, credential or proof, writing nothing', async () => {
       // Arrange — "Ferretry settings" on: the switch opens config.write, never this route.
       const subject = world({ 'warden.yaml': WARDEN_OFF });
       subject.off.delete('settings');
-      const owner = 'only a person may use PUT /v1/config/file; a ferret asks the owner instead';
+      const owner =
+        'only a person may use PUT /v1/config/file; a ferret asks the owner instead; a ferret writes a config file with config_write, where the owner turned "Ferretry settings" on';
 
       // Act
       const answers = [

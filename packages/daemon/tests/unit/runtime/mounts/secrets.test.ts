@@ -72,6 +72,7 @@ describe('the secret routes', () => {
       'POST /v1/accounts/:id/apart',
       // 2FA keys: a seed is staged, then saved only with a passkey bound to its stage; nothing answers one.
       'POST /v1/accounts/:id/factors/seed',
+      'GET /v1/accounts/seed-stages/:stage',
       'GET /v1/accounts/:id/factors/seed/:stage',
       'POST /v1/accounts/:id/factors/seed/:stage/commit',
       'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',

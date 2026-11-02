@@ -188,8 +188,8 @@ export class SignInRuleSuggestions {
         suggestionId: id,
         ask: `A ferret suggests a standing rule for a sign-in on ${host}.`,
         context:
-          'Nothing is allowed yet. Open it in the app: nothing is ticked, and you choose what to allow and confirm with your passkey. You can also just close this card.',
-        howToResolve: 'Open it in the app to start a rule, or close the card to say no.',
+          'Nothing is allowed yet. Open it in the app: nothing is ticked, and you choose what to allow and confirm with your passkey.',
+        howToResolve: 'Open it in the app to start a rule, or Dismiss it there to say no; the ferret is not told.',
         expiresAt: new Date(expiresAt).toISOString(),
       });
       if (!card.ok) throw new SignInRuleSuggestionError('unavailable', card.message);

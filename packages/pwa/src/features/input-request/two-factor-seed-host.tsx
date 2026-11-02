@@ -8,6 +8,7 @@
  */
 
 import {
+  type AccountId,
   type AccountList,
   type AgendaItem,
   TWO_FACTOR_ERROR_CODES,
@@ -90,6 +91,8 @@ export function TwoFactorSeedHost({
   const [phase, setPhase] = useState<SeedCardPhase>({ kind: 'waiting' });
   const [flagged, setFlagged] = useState(false);
   const [says, setSays] = useState<string | undefined>(undefined);
+  /** The account the stage is for, as the stage read says: the card itself names none. */
+  const [staged, setStaged] = useState<AccountId | undefined>(undefined);
   const [check, setCheck] = useState<SeedCheck>('checking');
   const [reads, setReads] = useState(0);
 
@@ -117,6 +120,7 @@ export function TwoFactorSeedHost({
           return;
         }
         setCheck('ok');
+        setStaged(stage.account);
         setFlagged(stage.mismatch === true);
         setSays(keySaysLine(stage));
         if (stage.state !== 'waiting') setPhase(FINISHED[stage.state]);
@@ -129,11 +133,12 @@ export function TwoFactorSeedHost({
     };
   }, [connection, createClient, ref, reads]);
 
-  const account = accounts?.accounts.find(each => each.id === ref?.account);
+  const target = ref?.account ?? staged;
+  const account = accounts?.accounts.find(each => each.id === target);
   const named = account === undefined ? 'this account' : accountWords(account);
 
   const allow = useCallback(async (): Promise<void> => {
-    if (ref === undefined || client === null) return;
+    if (ref === undefined || client === null || target === undefined) return;
     if (askKey === undefined) {
       setPhase({ kind: 'failed', words: 'This device cannot confirm with a passkey, so it cannot save this key.' });
       return;
@@ -145,24 +150,24 @@ export function TwoFactorSeedHost({
         return;
       }
       setPhase({ kind: 'saving' });
-      const saved = await commitSeed(client, ref.account, ref.stage);
+      const saved = await commitSeed(client, target, ref.stage);
       setPhase({ kind: 'done', ok: true, words: savedSeedWords(saved, account?.label ?? named) });
       onDone?.();
     } catch (cause) {
       setPhase({ kind: 'failed', words: seedFailureWords(cause) });
     }
-  }, [account, askKey, client, named, onDone, ref]);
+  }, [account, askKey, client, named, onDone, ref, target]);
 
   const deny = useCallback(async (): Promise<void> => {
-    if (ref === undefined || client === null) return;
+    if (ref === undefined || client === null || target === undefined) return;
     try {
-      await dropSeed(client, ref.account, ref.stage);
+      await dropSeed(client, target, ref.stage);
       setPhase(FINISHED.dropped);
       onDone?.();
     } catch (cause) {
       setPhase({ kind: 'failed', words: seedFailureWords(cause) });
     }
-  }, [client, onDone, ref]);
+  }, [client, onDone, ref, target]);
 
   if (ref === undefined || client === null) return null;
   return (

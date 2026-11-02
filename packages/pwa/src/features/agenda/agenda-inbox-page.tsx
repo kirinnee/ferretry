@@ -184,6 +184,13 @@ const answerCard = (
   if (editor !== undefined) onNavigate(editor);
 };
 
+/**
+ * Whether the owner may snooze this card: the machine must take snoozes, and a ferret's rule suggestion never does (the
+ * ferret reads its own board, so a snooze would tell it the owner looked: C2).
+ */
+const snoozable = (inbox: AgendaInbox, card: InboxCard): boolean =>
+  card.item.signInRuleSuggestion === undefined && (inbox.canSnooze?.(card.daemonId) ?? true);
+
 /** One compact card (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
 const renderInboxCard = (
   { inbox, onNavigate, now }: CardHostProps,
@@ -196,7 +203,9 @@ const renderInboxCard = (
       item={card.item}
       key={card.key}
       onAct={act}
-      onSnooze={until => act(snoozeAction(until))}
+      {...(card.item.signInRuleSuggestion === undefined
+        ? { onSnooze: (until: string) => act(snoozeAction(until)) }
+        : {})}
       origin={inboxCardOrigin(card, onNavigate)}
       swipeHints={false}
       {...inputFormFor(inbox, card)}
@@ -1680,7 +1689,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
-              canSnooze={card => inbox.canSnooze?.(card.daemonId) ?? true}
+              canSnooze={card => snoozable(inbox, card)}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
               onHold={(card, action) => {
@@ -1700,7 +1709,7 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
-                    canSnooze={inbox.canSnooze?.(card.daemonId) ?? true}
+                    canSnooze={snoozable(inbox, card)}
                     card={card}
                     host={host}
                     key={card.key}
@@ -1730,7 +1739,11 @@ export function AgendaInboxPage({
                     setGateWhy(null);
                   }}
                 />
-              ) : deck[0] === undefined || renderComposer === undefined || isGateItem(deck[0].item) ? null : (
+              ) : deck[0] === undefined ||
+                renderComposer === undefined ||
+                isGateItem(deck[0].item) ||
+                // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
+                deck[0].item.signInRuleSuggestion !== undefined ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div
                   className="fy-inbox-composer"

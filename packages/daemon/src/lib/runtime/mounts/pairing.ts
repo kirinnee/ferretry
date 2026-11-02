@@ -107,7 +107,13 @@ export interface PairingSubsystem {
  */
 export interface DeviceGrantSubsystem {
   mayWiden(presentation: CapabilityPresentation): CapabilityGrants;
-  change(deviceId: string, patch: DeviceGrantsPatch, presentation: CapabilityPresentation): Promise<DeviceGrantOutcome>;
+  /** `claimFresh` takes the caller's passkey proved for a widen, in one step, right before it is written. */
+  change(
+    deviceId: string,
+    patch: DeviceGrantsPatch,
+    presentation: CapabilityPresentation,
+    claimFresh?: () => boolean,
+  ): Promise<DeviceGrantOutcome>;
 }
 
 /**
@@ -323,14 +329,18 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
         const patch = await parseBody(context.request, DeviceGrantsPatchSchema);
         let outcome: DeviceGrantOutcome;
         try {
-          outcome = await grants.change(deviceId.data, patch, presentationIn(context));
+          outcome = await grants.change(
+            deviceId.data,
+            patch,
+            presentationIn(context),
+            () => context.claimFreshStepUp?.(STEP_UP_ACTS.widenDevice) === true,
+          );
         } catch (error) {
           // A WIDEN wants a passkey proved for it alone; say which act, so the prompt can name it.
           if (error instanceof GrantError && error.failure === 'widen-step-up-required')
             return addsAccessRefusal(error.message, STEP_UP_ACTS.widenDevice);
           return deviceGrantRefusal(error);
         }
-        if (outcome === 'widened') context.spendFreshStepUp?.();
         return outcome !== 'not-found'
           ? jsonResponse(await devicesView(subsystem, grants, context))
           : errorResponse(404, 'device not found', 'pairing_device_not_found');

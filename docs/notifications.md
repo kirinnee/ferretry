@@ -124,7 +124,8 @@ Read at start; a change needs a restart.
 
 - **An approve-on-phone card:** the daemon's own title, "Approve on your phone", and a body built by
   `phoneApprovalWords` from what the daemon observed. By owner decision !A171 the body leads with the number
-  the daemon read off the page: "Tap 42 on your phone: ClickUp · a@gmail.com", or "Enter 123 in Duo Mobile: …".
+  the daemon read off the page: "Tap 42 on your phone: your account on company.okta.com", or "Enter 123 in Duo Mobile:
+  …". It names the place, never the account, because every subscribed device shows it.
   With no number it ends "— open for the number" ("— check the terminal" for a terminal). The number only ever comes
   from the provider's own challenge view, never from an element a ferret points at. A sign-in
   Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating.

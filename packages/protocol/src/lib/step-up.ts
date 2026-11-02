@@ -78,6 +78,7 @@ export const StepUpActSchema = z.enum([
   'allow-profile-targets',
   'approve-task-plan',
   'approve-sign-in-rule',
+  'resume-cut-off',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
@@ -416,6 +417,12 @@ export const STEP_UP_ACTS = {
    * ({@link STEP_UP_ACTS_STORED_PROOF}) so the daemon checks it again before every fill. Narrowing and revoking never ask.
    */
   approveSignInRule: 'approve-sign-in-rule',
+  /**
+   * Bringing back a ferret the owner CUT OFF (`fy session revoke-credential`) from a paired device: the resume rotates in
+   * a new credential, so it is a widen, and wants `fleet.configure` on the device and a passkey proved for it alone.
+   * A session nobody cut off resumes without it; the CLI and the app on the host never ask.
+   */
+  resumeCutOff: 'resume-cut-off',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
