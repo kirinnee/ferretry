@@ -19,17 +19,18 @@ import {
 } from '@ferretry/fleet';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
-import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { fleetSetupRoutes } from '../../../src/lib/runtime/mounts/fleet-setup.ts';
+import { CREDENTIALS, GRANTED, human, NARROWED } from '../../unit/runtime/mounts/support.ts';
+import { request } from '../../unit/api/support.ts';
+import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
+import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
-import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
 import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
-import { request } from '../../unit/api/support.ts';
-import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -901,4 +902,205 @@ describe('Clone reuses a login the target already has, and never touches it (des
       }
     });
   }
+});
+
+describe('a repeat copy (update) over real files', () => {
+  const apply = async (on: Machine, change: unknown, governed = false) => {
+    const staged = await on.catalog.propose(change as never);
+    return await on.catalog.apply(staged.id, { governed } as never);
+  };
+
+  const instructionsName = async (on: Machine): Promise<string> => {
+    const [name] = Object.keys((await declared(on)).components.instructions);
+    if (name === undefined) throw new Error('expected an instructions component');
+    return name;
+  };
+
+  const editInstructions = async (on: Machine, content: string): Promise<void> => {
+    const name = await instructionsName(on);
+    await apply(on, { kind: 'component.put', name, component: { kind: 'instructions' }, content, create: false });
+  };
+
+  const instructionsFile = async (on: Machine): Promise<string> =>
+    await readFile(
+      path.join(on.fleet, 'assets', 'components', 'instructions', `${await instructionsName(on)}.md`),
+      'utf8',
+    );
+
+  /** The source after its own import, and a target that took its first copy. */
+  async function copiedPair(): Promise<{ source: Machine; target: Machine }> {
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const target = await machine('work-linux', { claude: false });
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    await apply(target, { kind: 'clone.import', mode: 'alongside', bundle });
+    return { source, target };
+  }
+
+  const exported = async (source: Machine) => FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+
+  const update = async (
+    target: Machine,
+    source: Machine,
+    decisions: Record<string, 'take' | 'keep'> = {},
+    governed = false,
+  ) => {
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    return {
+      review,
+      outcome: await apply(
+        target,
+        { kind: 'clone.import', mode: 'update', bundle, reviewed: review.fingerprint, decisions },
+        governed,
+      ),
+    };
+  };
+
+  /** Every file under the target's assets, with its bytes. */
+  const assetBytes = async (on: Machine): Promise<Record<string, string>> => {
+    const root = path.join(on.fleet, 'assets');
+    const bytes: Record<string, string> = {};
+    for (const file of await filesUnder(root)) bytes[file] = await readFile(path.join(root, file), 'utf8');
+    return bytes;
+  };
+
+  it('should copy twice with nothing changed and list every item as already the same, writing no asset', async () => {
+    const { source, target } = await copiedPair();
+    const before = await assetBytes(target);
+
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    should(review.items).deepEqual([]);
+    should(review.same.count).be.above(0);
+    await update(target, source);
+
+    should(await assetBytes(target)).deepEqual(before);
+  });
+
+  it('should say "changed here" for an item edited here, and leave its bytes alone', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(target, 'Edited here.\n');
+
+    const review = await target.setup.reviewClone({ bundle: await exported(source) });
+    const item = review.items.find(row => row.kind === 'instructions');
+    should(item?.outcome).equal('mine');
+    await update(target, source);
+
+    should(await instructionsFile(target)).equal('Edited here.\n');
+  });
+
+  it('should apply an item edited on the source', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+
+    const { review } = await update(target, source);
+
+    should(review.items.find(row => row.kind === 'instructions')?.outcome).equal('theirs');
+    should(await instructionsFile(target)).equal('Edited on the source.\n');
+  });
+
+  it('should honour the choice for an item edited on both sides, in both directions', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+    await editInstructions(target, 'Edited here.\n');
+    const ref = `instructions/${await instructionsName(target)}`;
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === ref)?.choice).be.undefined();
+
+    const unchosen = await target.catalog.propose({
+      kind: 'clone.import',
+      mode: 'update',
+      bundle,
+      reviewed: review.fingerprint,
+      decisions: {},
+    } as never);
+    await target.catalog.apply(unchosen.id, { governed: false } as never).then(
+      () => should.fail(undefined, undefined, 'expected the unchosen item to be refused'),
+      (error: Error) => should(error.message).containEql(ref),
+    );
+    should(await instructionsFile(target)).equal('Edited here.\n');
+
+    await apply(target, {
+      kind: 'clone.import',
+      mode: 'update',
+      bundle,
+      reviewed: review.fingerprint,
+      decisions: { [ref]: 'keep' },
+    });
+    should(await instructionsFile(target)).equal('Edited here.\n');
+
+    const reviewAgain = await target.setup.reviewClone({ bundle });
+    await apply(target, {
+      kind: 'clone.import',
+      mode: 'update',
+      bundle,
+      reviewed: reviewAgain.fingerprint,
+      decisions: { [ref]: 'take' },
+    });
+    should(await instructionsFile(target)).equal('Edited on the source.\n');
+  });
+
+  it('should still link an item renamed by hand on both machines', async () => {
+    const { source, target } = await copiedPair();
+    await apply(source, { kind: 'runtime.rename', name: 'claude-default', to: 'claude-studio' });
+    await apply(target, { kind: 'runtime.rename', name: 'claude-default', to: 'claude-mine' });
+
+    const review = await target.setup.reviewClone({ bundle: await exported(source) });
+
+    should(review.items.filter(row => row.kind === 'runtime' && row.outcome === 'new')).deepEqual([]);
+    should((await declared(target)).runtimes['claude-mine']).not.be.undefined();
+  });
+
+  it('should refuse an apply whose review is stale', async () => {
+    const { source, target } = await copiedPair();
+    await editInstructions(source, 'Edited on the source.\n');
+    const bundle = await exported(source);
+    const review = await target.setup.reviewClone({ bundle });
+    await editInstructions(target, 'Edited here after the review.\n');
+
+    const staged = await target.catalog.propose({
+      kind: 'clone.import',
+      mode: 'update',
+      bundle,
+      reviewed: review.fingerprint,
+      decisions: {},
+    } as never);
+    await target.catalog.apply(staged.id, { governed: false } as never).then(
+      () => should.fail(undefined, undefined, 'expected a stale review to be refused'),
+      (error: Error) => should(error.message).equal('Something changed since you reviewed. Review again.'),
+    );
+    should(await instructionsFile(target)).equal('Edited here after the review.\n');
+  });
+
+  it('should refuse a governed device without fleet.configure, on the review route', async () => {
+    const { source, target } = await copiedPair();
+    const dispatcher = new ApiDispatcher(new ApiRouter(fleetSetupRoutes(target.setup)), CREDENTIALS, NARROWED);
+
+    const answered = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/clone/review',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: JSON.stringify({ bundle: await exported(source) }),
+      }),
+    );
+
+    should(answered.status).equal(403);
+  });
+
+  it('should leave a signed-in login and its secrets byte-identical across an update', async () => {
+    const { source, target } = await copiedPair();
+    const store = path.join(target.fleet, 'credentials', 'claude-you');
+    await mkdir(store, { recursive: true });
+    await writeFile(path.join(store, '.credentials.json'), FAKE_LOGIN, { mode: 0o600 });
+    target.secrets.set('GITHUB_TOKEN', FAKE_SECRET);
+    const before = await signedInState(target);
+    await editInstructions(source, 'Edited on the source.\n');
+
+    await update(target, source);
+
+    should(await signedInState(target)).deepEqual(before);
+  });
 });

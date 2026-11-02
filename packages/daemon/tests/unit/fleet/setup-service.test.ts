@@ -1282,6 +1282,147 @@ describe('the clone.import executor', () => {
   });
 });
 
+// ── The update copy ──────────────────────────────────────────────────────────────────────────────
+
+describe('the clone.import executor in update mode', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+
+  const sourceAt = async (content: string): Promise<Record<string, unknown>> => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+  const request = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+  /** A target that already took its first copy from the source, as it stands afterwards. */
+  const copied = async (): Promise<World> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const alongside = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle: await sourceAt('Main.\n'),
+    } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+    await first.service.executors.clone.describe(alongside);
+    await first.service.executors.clone.execute(alongside);
+    const documents = first.applied[0]?.documents ?? [];
+    const target = world({ overrides: { daemonId: () => 'daemon-target' } });
+    target.state.reading = configReading(modelOfWrites(documents), 'r');
+    for (const document of documents) target.state.assets[document.path] = document.content;
+    target.state.emails = async () => [];
+    return target;
+  };
+
+  const batchRecord = (w: World) => (w.applied[0]?.documents ?? []).find(document => document.path === BASE_PATH);
+
+  it('should list nothing and write nothing for a copy that has not changed', async () => {
+    const w = await copied();
+    const review = await w.service.reviewClone({ bundle: await sourceAt('Main.\n') });
+    should(review.mode).equal('update');
+    should(review.items).deepEqual([]);
+    should(review.same.count).be.above(0);
+  });
+
+  it('should take a change made on the source, and record it as the new last-copied in the same batch', async () => {
+    // Arrange
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('theirs');
+    should(item?.choice).equal('take');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    const written = (w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY);
+    should(written?.content).equal('Main, changed on the source.\n');
+    should(batchRecord(w)?.path).equal(BASE_PATH);
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    const after = await w.service.reviewClone({ bundle });
+    should(after.items.map(row => row.ref)).not.containEql('instructions/main');
+  });
+
+  it('should refuse an apply whose review has moved since the person saw it', async () => {
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(request(bundle, { reviewed: 'stale', decisions: {} })),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should leave an item changed here alone when the source did not change it', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main.\n');
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'instructions/main')?.outcome).equal('mine');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should refuse an item changed on both sides until the person chooses, then honour either choice', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('both');
+    should(item?.choice).be.undefined();
+
+    const unchosen = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    const refusal = await catalogRefusal(w.service.executors.clone.describe(unchosen), 'fleet_change_refused');
+    should(refusal.message).containEql('instructions/main');
+
+    const take = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(take);
+    await w.service.executors.clone.execute(take);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)?.content).equal(
+      'Main, edited there.\n',
+    );
+
+    const keep = await copied();
+    keep.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const keeping = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'keep' } });
+    await keep.service.executors.clone.describe(keeping);
+    await keep.service.executors.clone.execute(keeping);
+    should((keep.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should never write a login or a secret, whatever the person chose (account-model §14.4)', async () => {
+    // Arrange: a target holding a signed-in login and a stored secret.
+    const w = await copied();
+    w.secrets.set('NOTES_TOKEN', 'ghp_do_not_touch');
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    should(configTextOf(w.applied[0]?.documents ?? [])).not.containEql('claude-you');
+    should([...w.secrets]).deepEqual([['NOTES_TOKEN', 'ghp_do_not_touch']]);
+  });
+});
+
 // ── The "last copied" record ─────────────────────────────────────────────────────────────────────
 
 describe('the clone-base record', () => {

@@ -80,6 +80,15 @@ summary is [security.md](security.md).
   source; a Replace rewrites it. A record file that cannot be read never blocks a copy: the copy is made
   without it, the review says so, and the file is left alone. Editing a copied item keeps its link. A copy
   never touches a login's sign-in or any secret (account-model.md K10–K18).
+- **3c′. A repeat copy lists only what differs — and why that is safe.** The review
+  (`POST /v1/fleet/clone/review`, `fleet.configure`) compares every item with its copy here and hides the
+  ones that are **byte-identical** (every runnable field and every carried file, by `cloneItemDigest`
+  computed on the target from the bundle's own documents, never a digest the bundle claims). An item shown as
+  "the same" is never written, so what the review lists is everything an apply could write. Items are paired
+  by **origin key**, falling back to a probable match by name and content; a key two items claim is unlinked,
+  and a part the bundle did not carry is compared by its literal path so it can never hide a change. The apply
+  names the review's fingerprint and the target re-plans, so a person cannot apply a review other than the
+  one they saw. Governed devices need `fleet.configure`; no login or secret is written (account-model.md L13).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the
