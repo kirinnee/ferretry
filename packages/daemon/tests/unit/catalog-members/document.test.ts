@@ -281,6 +281,16 @@ describe('a member name is a user ID', () => {
     should(LegacyMembersDocumentSchema.safeParse(document).success).be.false();
   });
 
+  it('should still read a stored name that mixes scripts or holds a private-use character', () => {
+    const labels = ['Team Москва', 'Ana (Анна)', `Old${String.fromCodePoint(0xe000)}name`];
+    const members = membersDoc(...labels.map((label, index) => storedMember(index + 1, { label })));
+    const shares = sharesDoc(...labels.map((memberLabel, index) => storedShare(index + 1, { memberLabel })));
+
+    should(MembersDocumentSchema.safeParse(members).success).be.true();
+    should(LegacyMembersDocumentSchema.safeParse(members).success).be.true();
+    should(SharesDocumentSchema.safeParse(shares).success).be.true();
+  });
+
   it('should accept names that differ', () => {
     const document = membersDoc(storedMember(1, { label: 'Sam' }), storedMember(2, { label: 'Sam (2)' }));
 

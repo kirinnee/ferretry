@@ -15,7 +15,7 @@
  */
 import {
   CatalogMemberIdSchema,
-  CatalogMemberLabelSchema,
+  CatalogMemberNameSchema,
   CatalogMemberKeyIdSchema,
   CatalogMemberRenameRequestSchema,
   CatalogShareIdSchema,
@@ -122,7 +122,7 @@ function lookupName(context: RouteContext): string | undefined {
   }
   const raw = context.request.query.get('name')?.[0];
   if (raw === undefined) return undefined;
-  const parsed = CatalogMemberLabelSchema.safeParse(raw);
+  const parsed = CatalogMemberNameSchema.safeParse(raw);
   if (!parsed.success) throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a user ID', 'invalid_name');
   return parsed.data;
 }

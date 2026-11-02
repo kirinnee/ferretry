@@ -307,20 +307,28 @@ function scriptsOf(text: string): ReadonlySet<string> {
   return found;
 }
 
-/** True when `text` mixes scripts beyond what UTS #39 "highly restrictive" allows. */
+/** True when `text` (compared in NFKC, so a math or full-width look-alike counts as its plain letter) mixes scripts beyond what UTS #39 "highly restrictive" allows. */
 function mixesScripts(text: string): boolean {
-  const found = scriptsOf(text);
+  const found = scriptsOf(text.normalize('NFKC'));
   return found.size > 1 && !ALLOWED_MIXES.some(allowed => [...found].every(script => allowed.has(script)));
 }
 
 /**
- * A member's name, as the owner wrote it ("Alice", "Workshop Oct 31"): their user ID on this machine. The catalog
+ * A member's name as it is STORED and SHOWN ("Alice", "Workshop Oct 31"): the catalog label's rules, exactly what
+ * every name was held to before the stricter rules below. Stored documents, the legacy path and every view read
+ * with this, so a name that was valid when it was written is never made unreadable by a later rule.
+ */
+export const CatalogMemberLabelSchema = CatalogLabelSchema;
+
+/**
+ * A name the owner is CHOOSING now (a new person, a rename, a lookup): their user ID on this machine. The catalog
  * label's rules, which refuse every hidden, format and control character, because an invisible character would
  * make two look-alike IDs; no private-use or unassigned code point, which a font may draw as nothing; and no
  * name that mixes look-alike scripts. What stays possible is a name wholly in one script that looks like another
- * (an all-Cyrillic "аlісе" beside a Latin "alice"); no rule over letters alone can see that.
+ * (an all-Cyrillic "аlісе" beside a Latin "alice"); no rule over letters alone can see that. Only input is held
+ * to this: an older name that breaks it stays readable and the owner can rename it.
  */
-export const CatalogMemberLabelSchema = z
+export const CatalogMemberNameSchema = z
   .string()
   .min(1)
   .max(80)
@@ -352,8 +360,8 @@ export const MemberClientNameSchema = CatalogLabelSchema;
  * `member_exists` when the name is taken, so it can never make a second person of the same name.
  */
 export const CatalogShareMemberSchema = z.union([
-  z.strictObject({ name: CatalogMemberLabelSchema }),
-  z.strictObject({ kind: z.literal('new'), label: CatalogMemberLabelSchema }),
+  z.strictObject({ name: CatalogMemberNameSchema }),
+  z.strictObject({ kind: z.literal('new'), label: CatalogMemberNameSchema }),
   z.strictObject({ kind: z.literal('existing'), memberId: CatalogMemberIdSchema }),
 ]);
 export type CatalogShareMember = z.infer<typeof CatalogShareMemberSchema>;
@@ -467,7 +475,7 @@ export const CatalogMemberListSchema = z.strictObject({
 export type CatalogMemberList = z.infer<typeof CatalogMemberListSchema>;
 
 /** `PATCH /v1/catalog-members/:memberId`: the owner's name for a person. */
-export const CatalogMemberRenameRequestSchema = z.strictObject({ label: CatalogMemberLabelSchema });
+export const CatalogMemberRenameRequestSchema = z.strictObject({ label: CatalogMemberNameSchema });
 export type CatalogMemberRenameRequest = z.infer<typeof CatalogMemberRenameRequestSchema>;
 
 /** `DELETE /v1/catalog-members/:memberId`: a person removed, with their browsers, and the shares that named them ended. */

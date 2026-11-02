@@ -326,6 +326,50 @@ describe('the members store: names that were not yet IDs', () => {
   });
 });
 
+describe('the stores: names that were valid before the stricter rules', () => {
+  const OLD_NAMES = ['Team Москва', 'Ana (Анна)', 'Σigma team', `Old${String.fromCodePoint(0xe000)}name`];
+
+  it('reads a members file whose names mix scripts or hold a private-use character, unchanged and not damaged', async () => {
+    const { files, members } = build();
+    const document = {
+      ...MEMBERS,
+      members: OLD_NAMES.map((label, index) => ({
+        ...MEMBERS.members[0],
+        memberId: `mbr_${String(index)}${'m'.repeat(21)}`,
+        keys: [],
+        label,
+      })),
+    };
+    const text = JSON.stringify(document);
+    files.files.set(PATHS.catalogMembers, text);
+
+    const read = await members.read();
+
+    should(read.members.map(member => member.label)).deepEqual(OLD_NAMES);
+    should(files.calls).deepEqual([]);
+    should(files.files.get(PATHS.catalogMembers)).equal(text);
+  });
+
+  it('reads a shares file whose member name mixes scripts', async () => {
+    const { files, shares } = build();
+    const document = { ...SHARES, shares: [{ ...SHARES.shares[0], memberLabel: 'Team Москва' }] };
+    files.files.set(PATHS.catalogShares, JSON.stringify(document));
+
+    const read = await shares.read();
+
+    should(read.shares[0]?.memberLabel).equal('Team Москва');
+  });
+
+  it('writes such a name back, so a rename of someone else never fails on it', async () => {
+    const { files, members } = build();
+    const document = { ...MEMBERS, members: MEMBERS.members.map(member => ({ ...member, label: 'Team Москва' })) };
+
+    await members.write(document);
+
+    should(JSON.parse(files.files.get(PATHS.catalogMembers) ?? '{}').members[0].label).equal('Team Москва');
+  });
+});
+
 describe('the shares store', () => {
   it('reads as no shares on a machine that has never shared', async () => {
     const { shares } = build();

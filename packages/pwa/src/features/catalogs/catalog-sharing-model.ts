@@ -15,8 +15,10 @@ import {
   CATALOG_SHARE_MULTI_CAP_DEFAULT,
   CATALOG_SHARE_MULTI_CAP_MAX,
   type CatalogMemberKeyView,
-  CatalogMemberLabelSchema,
+  CatalogMemberNameSchema,
   type CatalogMemberView,
+  MEMBER_NAME_MIXED_SCRIPT_MESSAGE,
+  MEMBER_NAME_UNDRAWABLE_MESSAGE,
   type CatalogShareExpiry,
   type CatalogShareMintRequest,
   type CatalogShareState,
@@ -138,8 +140,13 @@ export function shareProblem(draft: ShareDraft, members: readonly CatalogMemberV
   if (draft.who.kind === 'new') {
     const name = draft.who.name.trim();
     if (name === '') return 'Type the name of the person this is for.';
-    if (!CatalogMemberLabelSchema.safeParse(name).success)
-      return 'Use a shorter name with no line breaks or hidden characters.';
+    const chosen = CatalogMemberNameSchema.safeParse(name);
+    if (!chosen.success) {
+      const said = chosen.error.issues.find(
+        issue => issue.message === MEMBER_NAME_UNDRAWABLE_MESSAGE || issue.message === MEMBER_NAME_MIXED_SCRIPT_MESSAGE,
+      );
+      return said?.message ?? 'Use a shorter name with no line breaks or hidden characters.';
+    }
     if (members.some(member => member.label.toLowerCase() === name.toLowerCase()))
       return `You already have someone called ${name}. Pick them under “${SHARE_EXISTING_PERSON_LABEL}”, or use another name.`;
   } else if (memberById(members, draft.who.memberId) === undefined) {

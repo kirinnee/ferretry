@@ -379,6 +379,7 @@ describe('a person’s user ID', () => {
   const {
     memberNameKey,
     CatalogMemberLabelSchema,
+    CatalogMemberNameSchema,
     CatalogMemberListSchema,
     MEMBER_NAME_HIDDEN_MESSAGE,
     MEMBER_NAME_MIXED_SCRIPT_MESSAGE,
@@ -404,12 +405,12 @@ describe('a person’s user ID', () => {
 
   it('refuses hidden characters in the words a person reads', () => {
     for (const hidden of ['Al​ice', 'Al‮ice', 'Al\u0000ice']) {
-      const parsed = CatalogMemberLabelSchema.safeParse(hidden);
+      const parsed = CatalogMemberNameSchema.safeParse(hidden);
       expect(parsed.success).toBe(false);
       expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_HIDDEN_MESSAGE);
     }
     expect(MEMBER_NAME_HIDDEN_MESSAGE).toBe("A user ID can't contain hidden characters. Type it again.");
-    expect(CatalogMemberLabelSchema.safeParse('Alice (2)').success).toBe(true);
+    expect(CatalogMemberNameSchema.safeParse('Alice (2)').success).toBe(true);
   });
 
   it('refuses private-use and unassigned code points', () => {
@@ -418,7 +419,7 @@ describe('a person’s user ID', () => {
       String.fromCodePoint(0x378),
       `Al${String.fromCodePoint(0xf0000)}`,
     ]) {
-      const parsed = CatalogMemberLabelSchema.safeParse(bad);
+      const parsed = CatalogMemberNameSchema.safeParse(bad);
       expect(parsed.success).toBe(false);
       expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_UNDRAWABLE_MESSAGE);
     }
@@ -436,7 +437,7 @@ describe('a person’s user ID', () => {
       'αβγ abc',
       'Alice שלום',
     ]) {
-      const parsed = CatalogMemberLabelSchema.safeParse(mixed);
+      const parsed = CatalogMemberNameSchema.safeParse(mixed);
       expect(parsed.success).toBe(false);
       expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_MIXED_SCRIPT_MESSAGE);
     }
@@ -464,7 +465,7 @@ describe('a person’s user ID', () => {
       'Zoe\u0308 – 7',
       '李雷 2.0',
     ]) {
-      expect(CatalogMemberLabelSchema.safeParse(fine).success).toBe(true);
+      expect(CatalogMemberNameSchema.safeParse(fine).success).toBe(true);
     }
   });
 
@@ -477,14 +478,34 @@ describe('a person’s user ID', () => {
       'Alice 한국어 ひらがな', // Latin + Hangul + Hiragana
       'Алиса 李雷', // Cyrillic + Han
     ]) {
-      expect(CatalogMemberLabelSchema.safeParse(mixed).success).toBe(false);
+      expect(CatalogMemberNameSchema.safeParse(mixed).success).toBe(false);
+    }
+  });
+
+  it('reads a letter the way it is compared, so a math or full-width look-alike cannot slip a second script in', () => {
+    const mathA = String.fromCodePoint(0x1d5a0); // MATHEMATICAL SANS-SERIF CAPITAL A, plain Latin once NFKC'd
+    for (const mixed of [`${mathA}лісе`, 'Ａлісе', `${mathA}lice Алиса`]) {
+      const parsed = CatalogMemberNameSchema.safeParse(mixed);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_MIXED_SCRIPT_MESSAGE);
+    }
+    expect(CatalogMemberNameSchema.safeParse(`${mathA}lice`).success).toBe(true);
+  });
+
+  it('holds only a chosen name to those rules: a stored or shown name keeps the older ones', () => {
+    for (const old of ['Team Москва', 'Ana (Анна)', 'Σigma team', `Old${String.fromCodePoint(0xe000)}name`]) {
+      expect(CatalogMemberLabelSchema.safeParse(old).success).toBe(true);
+      expect(CatalogMemberNameSchema.safeParse(old).success).toBe(false);
+    }
+    for (const hidden of ['Al\u200Bice', 'Al\u0000ice', ' Alice', 'x'.repeat(81)]) {
+      expect(CatalogMemberLabelSchema.safeParse(hidden).success).toBe(false);
     }
   });
 
   it('counts a letter of a script newer than the table as a script of its own', () => {
     const vithkuqi = String.fromCodePoint(0x10570);
-    expect(CatalogMemberLabelSchema.safeParse(`Alice${vithkuqi}`).success).toBe(false);
-    expect(CatalogMemberLabelSchema.safeParse(vithkuqi).success).toBe(true);
+    expect(CatalogMemberNameSchema.safeParse(`Alice${vithkuqi}`).success).toBe(false);
+    expect(CatalogMemberNameSchema.safeParse(vithkuqi).success).toBe(true);
   });
 
   it('can be looked up, and the list answers who holds it by ID alone', () => {

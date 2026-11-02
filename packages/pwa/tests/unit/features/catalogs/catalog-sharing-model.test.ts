@@ -95,6 +95,9 @@ describe('the share draft', () => {
   it('refuses a name with hidden characters', () => {
     should(shareProblem(named('Ca\u0000rol'), [])).match(/shorter name/);
   });
+  it('says why a name that mixes look-alike scripts cannot be used', () => {
+    should(shareProblem(named('Team Москва'), [])).match(/mix scripts/);
+  });
   it('refuses a name someone already has, ignoring case, and says where to find them', () => {
     should(shareProblem(named('alice'), [alice])).match(/already have someone called alice/);
   });

@@ -250,6 +250,18 @@ describe('minting a share', () => {
     should(members.calls).deepEqual([{ act: 'mint', args: [MINT] }]);
   });
 
+  it('refuses a NEW name that mixes look-alike scripts, in both arms, and the service is not reached', async () => {
+    const members = new FakeMembers();
+
+    for (const member of [{ name: 'Team Москва' }, { kind: 'new', label: 'Team Москва' }]) {
+      const answer = await drive(members, 'POST', '/v1/catalog-shares', { ...MINT, member });
+
+      should(answer.status).equal(400);
+      should(answer.message).containEql("can't mix scripts that look alike");
+    }
+    should(members.calls).deepEqual([]);
+  });
+
   it('asks nothing of the machine itself, which is ungoverned', async () => {
     const answer = await drive(new FakeMembers(), 'POST', '/v1/catalog-shares', MINT, { ...HOST, proofs: 1 });
 
@@ -504,6 +516,16 @@ describe('renaming a person', () => {
     should(members.calls).deepEqual([{ act: 'renameMember', args: [MEMBER, 'Bob'] }]);
   });
 
+  it('refuses a new name that mixes look-alike scripts, and the service is not reached', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'PATCH', `/v1/catalog-members/${MEMBER}`, { label: 'Team Москва' });
+
+    should(answer.status).equal(400);
+    should(answer.message).containEql("can't mix scripts that look alike");
+    should(members.calls).deepEqual([]);
+  });
+
   it('refuses a ferret', async () => {
     const members = new FakeMembers();
 
@@ -662,6 +684,21 @@ describe('a person’s user ID on the wire', () => {
     should(answer.status).equal(400);
     should(answer.code).equal('invalid_name');
     should(answer.message).equal("A user ID can't contain hidden characters. Type it again.");
+    should(members.calls).deepEqual([]);
+  });
+
+  it('refuses a name that mixes look-alike scripts, in the words a person reads', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'GET', '/v1/catalog-members', undefined, HOST, undefined, [
+      ['name', 'Team Москва'],
+    ]);
+
+    should(answer.status).equal(400);
+    should(answer.code).equal('invalid_name');
+    should(answer.message).equal(
+      "A user ID can't mix scripts that look alike (for example Latin and Cyrillic letters). Type it again.",
+    );
     should(members.calls).deepEqual([]);
   });
 
