@@ -1,3 +1,10 @@
+## [4.227.0](https://github.com/kirinnee/ferretry/compare/v4.226.1...v4.227.0) (2026-11-02)
+
+### Features
+
+* **daemon:** what changed between versions, and publishing an item update (catalogs 3d-1) ([#1316](https://github.com/kirinnee/ferretry/issues/1316)) ([888044b](https://github.com/kirinnee/ferretry/commit/888044bebd68d2b8a9640ef43c2faa36ed0d05d6))
+* **pwa:** one card UI, compact phone Inbox filters, swipe from the middle ([#1318](https://github.com/kirinnee/ferretry/issues/1318)) ([17f7a88](https://github.com/kirinnee/ferretry/commit/17f7a88f4101a139a4785fdaf3c5583ceefa9e3d))
+
 ## [4.226.1](https://github.com/kirinnee/ferretry/compare/v4.226.0...v4.226.1) (2026-11-02)
 
 ### Fixes
