@@ -150,6 +150,7 @@ function fixture(
   const added: string[] = [];
   const config = { days: options.days ?? 30 };
   const view = { gone: false };
+  const keyIds = new Map<string, readonly string[]>();
   const service = new MemberPasskeyService({
     store,
     verifier: passkeyVerifier(webCrypto),
@@ -163,6 +164,7 @@ function fixture(
         return added.length;
       },
       access: async id => (view.gone ? undefined : KNOWN.get(id)),
+      keyIdsOf: async memberId => keyIds.get(memberId) ?? [],
     },
     catalogNames: async () => options.names ?? new Map([[catalogId(1), 'Spring Pack']]),
     allowedOrigins: () => options.origins ?? [ORIGIN, OTHER_ORIGIN],
@@ -177,7 +179,7 @@ function fixture(
     },
     ...(options.passkeysChanged === undefined ? {} : { passkeysChanged: options.passkeysChanged }),
   });
-  return { clock, store, ledger, challenges, service, audited, added, config, view };
+  return { clock, store, ledger, challenges, service, audited, added, config, view, keyIds };
 }
 
 type Fixture = ReturnType<typeof fixture>;
@@ -1063,6 +1065,28 @@ describe('MemberPasskeyService', () => {
       // Assert
       should(f.ledger.writes).eql([]);
       should(f.store.forgotten).eql([keyId(3)]);
+    });
+  });
+
+  describe('one person’s passkeys', () => {
+    it('should list the passkeys of every browser the person holds, and no one else’s', async () => {
+      // Arrange
+      const f = fixture();
+      f.keyIds.set(memberId(1), [keyId(1), keyId(2)]);
+      f.keyIds.set(memberId(2), [keyId(3)]);
+      const row = (deviceId: string, credentialId: string): StoredPasskey =>
+        ({ ...f.store.rows[0], deviceId, credentialId }) as StoredPasskey;
+      await enrol(f, await es256Authenticator());
+      const first = f.store.rows[0] as StoredPasskey;
+      f.store.rows = [first, row(keyId(2), 'second'), row(keyId(3), 'someone-else')];
+
+      // Act
+      const mine = await f.service.passkeysOf(memberId(1));
+
+      // Assert
+      should(mine.map(passkey => passkey.credentialId)).eql([first.credentialId, 'second']);
+      should(await f.service.passkeysOf(memberId(2))).have.length(1);
+      should(await f.service.passkeysOf(memberId(9))).eql([]);
     });
   });
 

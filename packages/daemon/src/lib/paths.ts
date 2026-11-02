@@ -88,6 +88,8 @@ export interface FoundationPaths {
    * never a code.
    */
   readonly catalogMembers: string;
+  /** The members file as it was before duplicate names were made unique: kept once, never read. */
+  readonly catalogMembersBeforeUniqueNames: string;
   readonly catalogShares: string;
   /** The passkeys and unlocks of members' browsers, by member KEY id: public keys and instants, never a secret. */
   readonly catalogMemberPasskeys: string;
@@ -147,6 +149,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     catalogsBackupV2: join(state, 'catalogs', 'catalogs.v2.json'),
     catalogBlobs: join(state, 'catalogs', 'blobs'),
     catalogMembers: join(state, 'catalogs', 'members.json'),
+    catalogMembersBeforeUniqueNames: join(state, 'catalogs', 'members.before-unique-names.json'),
     catalogShares: join(state, 'catalogs', 'shares.json'),
     catalogMemberPasskeys: join(state, 'catalogs', 'member-passkeys.json'),
     catalogMemberUnlocks: join(state, 'catalogs', 'member-unlocks.json'),

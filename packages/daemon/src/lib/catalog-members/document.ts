@@ -29,6 +29,7 @@ import {
   CatalogShareUsesSchema,
   InstantSchema,
   MemberClientNameSchema,
+  memberNameKey,
   SharedCatalogIdSchema,
 } from '@ferretry/protocol';
 import { MemberBoxKeySchema, MemberKeySchema as WireMemberKeySchema } from '@ferretry/relay';
@@ -72,30 +73,50 @@ const StoredMemberSchema = z.strictObject({
 });
 export type StoredMember = z.infer<typeof StoredMemberSchema>;
 
-export const MembersDocumentSchema = z
-  .strictObject({
-    schemaVersion: z.literal(CATALOG_MEMBERS_SCHEMA_VERSION),
-    members: z.array(StoredMemberSchema).max(CATALOG_MAX_MEMBERS),
-  })
-  .check(ctx => {
-    const issue = (message: string): void => {
-      ctx.issues.push({ code: 'custom', message, input: ctx.value, path: ['members'] });
-    };
-    const memberIds = new Set<string>();
-    const keyIds = new Set<string>();
-    let keys = 0;
-    for (const member of ctx.value.members) {
-      if (memberIds.has(member.memberId)) return issue(`${member.memberId} is listed twice`);
-      memberIds.add(member.memberId);
-      for (const key of member.keys) {
-        if (keyIds.has(key.keyId)) return issue(`${key.keyId} is listed twice`);
-        keyIds.add(key.keyId);
-        keys += 1;
-      }
+const MembersShapeSchema = z.strictObject({
+  schemaVersion: z.literal(CATALOG_MEMBERS_SCHEMA_VERSION),
+  members: z.array(StoredMemberSchema).max(CATALOG_MAX_MEMBERS),
+});
+
+/**
+ * Every rule of the members file but one: two people may still share a name. ONLY the one-time upgrade reads a
+ * file with this (docs/catalogs.md § Members): files written before a name was an ID can hold duplicates, and the
+ * upgrade renames them before anything else sees the document.
+ */
+export const LegacyMembersDocumentSchema = MembersShapeSchema.check(ctx =>
+  report(ctx, membersProblem(ctx.value, false)),
+);
+
+/** A member's name is their ID on this machine: no two are the same by {@link memberNameKey}. */
+export const MembersDocumentSchema = MembersShapeSchema.check(ctx => report(ctx, membersProblem(ctx.value, true)));
+
+function report(ctx: z.core.ParsePayload<z.infer<typeof MembersShapeSchema>>, message: string | undefined): void {
+  if (message !== undefined) ctx.issues.push({ code: 'custom', message, input: ctx.value, path: ['members'] });
+}
+
+function membersProblem(document: z.infer<typeof MembersShapeSchema>, uniqueNames: boolean): string | undefined {
+  const memberIds = new Set<string>();
+  const keyIds = new Set<string>();
+  const names = new Set<string>();
+  let keys = 0;
+  for (const member of document.members) {
+    if (memberIds.has(member.memberId)) return `${member.memberId} is listed twice`;
+    memberIds.add(member.memberId);
+    if (uniqueNames) {
+      const name = memberNameKey(member.label);
+      if (names.has(name)) return `${member.memberId} has the same name as another member`;
+      names.add(name);
     }
-    if (keys > CATALOG_MAX_MEMBER_KEYS)
-      issue(`it holds ${String(keys)} member keys; the most is ${String(CATALOG_MAX_MEMBER_KEYS)}`);
-  });
+    for (const key of member.keys) {
+      if (keyIds.has(key.keyId)) return `${key.keyId} is listed twice`;
+      keyIds.add(key.keyId);
+      keys += 1;
+    }
+  }
+  if (keys > CATALOG_MAX_MEMBER_KEYS)
+    return `it holds ${String(keys)} member keys; the most is ${String(CATALOG_MAX_MEMBER_KEYS)}`;
+  return undefined;
+}
 export type MembersDocument = z.infer<typeof MembersDocumentSchema>;
 
 export const EMPTY_MEMBERS_DOCUMENT: MembersDocument = { schemaVersion: CATALOG_MEMBERS_SCHEMA_VERSION, members: [] };

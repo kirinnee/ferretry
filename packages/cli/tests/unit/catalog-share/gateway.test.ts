@@ -77,12 +77,8 @@ describe('ProtocolSharingGateway', () => {
     const calls: Call[] = [];
     const gateway = new ProtocolSharingGateway(fakeClient(mintResponse(), calls));
     await should(gateway.mint({ ...request, catalogIds: [] })).be.rejected();
-    const many = {
-      ...request,
-      member: { kind: 'existing', memberId: MEMBER_ID },
-      uses: { kind: 'multi', cap: 5 },
-    } as const;
-    await should(gateway.mint(many)).be.rejected();
+    const hidden = { ...request, member: { name: 'Al\u200Bice' } } as const;
+    await should(gateway.mint(hidden)).be.rejected();
     should(calls).have.length(0);
   });
 

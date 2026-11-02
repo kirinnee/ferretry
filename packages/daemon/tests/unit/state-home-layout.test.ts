@@ -115,6 +115,7 @@ describe('foundation paths', () => {
       // The people it shares with and the codes that let them in: fingerprints of codes, never a code.
       catalogMembers: '/tmp/fy-home/state/catalogs/members.json',
       catalogShares: '/tmp/fy-home/state/catalogs/shares.json',
+      catalogMembersBeforeUniqueNames: '/tmp/fy-home/state/catalogs/members.before-unique-names.json',
       // Members' browsers: passkeys and unlocks by member KEY id, public keys and instants only.
       catalogMemberPasskeys: '/tmp/fy-home/state/catalogs/member-passkeys.json',
       catalogMemberUnlocks: '/tmp/fy-home/state/catalogs/member-unlocks.json',

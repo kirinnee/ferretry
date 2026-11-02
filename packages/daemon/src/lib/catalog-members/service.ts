@@ -20,6 +20,13 @@
  * VOIDS the reservations it touches in the same queue, and a commit refuses a reservation that is no longer
  * held, so nothing the owner removed comes back through a join that was already in flight.
  *
+ * ## A name is an ID
+ *
+ * Two members never share a name (compared by `memberNameKey`). A name is held by a member, or RESERVED by a
+ * live share that names a person who has not joined yet (or by a join in flight), and a reservation lapses by
+ * itself: it is read from the shares, so an ended, expired or used-up share no longer holds it and a person
+ * removed before anyone joined frees the name again.
+ *
  * ## The order of a revoke
  *
  * `members.json` is written FIRST, then `shares.json`, then live sessions are closed (`LiveMemberSessions`): what the person can reach must stop before anything else is tidied.
@@ -37,6 +44,7 @@ import {
   type CatalogShareMintResponse,
   type CatalogShareView,
   MEMBER_PASSKEY_WINDOW_SECONDS,
+  memberNameKey,
   shareLinkUrl,
 } from '@ferretry/protocol';
 import { DaemonIdSchema } from '@ferretry/protocol';
@@ -65,11 +73,13 @@ import {
   type StoredMemberKey,
   type StoredShare,
 } from './document.ts';
+import { freeMemberName, type MemberRename } from './names.ts';
 import type {
   CatalogDirectory,
   CatalogMembersStore,
   CatalogSharesStore,
   MemberAuditSink,
+  MembersUpgrade,
   MemberSessionCloser,
   ShareCodeHasher,
   ShareLinkSource,
@@ -88,6 +98,8 @@ export interface CatalogMemberDeps {
   readonly links: ShareLinkSource;
   readonly sessions: MemberSessionCloser;
   readonly audit: MemberAuditSink;
+  /** Told once, when people were renamed so that every name is unique: the owner reads it at boot. */
+  readonly onRenamed?: (renames: readonly MemberRename[]) => void;
   /** Milliseconds since the epoch. */
   readonly now: () => number;
   /** Compares two digests. Defaults to the constant-time compare; a test passes its own to watch the path. */
@@ -206,6 +218,48 @@ export class CatalogMemberService {
   async #load(): Promise<void> {
     const [members, shares] = await Promise.all([this.deps.members.read(), this.deps.shares.read()]);
     this.#state ??= { members, shares };
+    const upgrade = this.deps.members.takeUpgrade();
+    if (upgrade !== undefined) await this.#upgraded(upgrade);
+  }
+
+  /**
+   * The file was written before a name was an ID and people shared one: the later ones were renamed in memory.
+   * Audited by ID (the names are the owner's own text, so they stay out of the log), written once with the
+   * original put aside, and told to the owner once. A disk that will not take the write leaves the old file,
+   * and the next boot does it again.
+   */
+  async #upgraded(upgrade: MembersUpgrade): Promise<void> {
+    for (const rename of upgrade.renames) await this.#renamed(rename);
+    const { shares } = this.#loaded();
+    const renamed = new Map(upgrade.renames.map(rename => [rename.memberId, rename.to] as const));
+    const followed: SharesDocument = {
+      ...shares,
+      shares: shares.shares.map(share => {
+        const label = renamed.get(share.memberId);
+        return label === undefined ? share : { ...share, memberLabel: label };
+      }),
+    };
+    this.#state = { ...this.#loaded(), shares: followed };
+    try {
+      await upgrade.commit();
+      if (upgrade.renames.length > 0) await this.deps.shares.write(followed);
+    } catch {
+      // The old file is still there, untouched or backed up; the next boot repeats this.
+    }
+    this.deps.onRenamed?.(upgrade.renames);
+  }
+
+  async #renamed(rename: MemberRename): Promise<void> {
+    await this.deps.audit
+      .record({
+        event: 'catalog.member.renamed',
+        actor: { kind: 'host' },
+        cause: 'daemon',
+        subject: rename.memberId,
+        outcome: 'succeeded',
+        detail: { memberId: rename.memberId, reason: 'duplicate-name' },
+      })
+      .catch(() => undefined);
   }
 
   // ── The admission step (2b-2 calls these) ───────────────────────────────────────────────────────
@@ -321,11 +375,17 @@ export class CatalogMemberService {
         passkeyCount: 0,
         passkeyWindowEndsAt: windowEnds,
       };
+      // A name is free by construction: it was reserved at mint. Only a share minted before names were IDs can
+      // find it taken now, and that person is then given a free name rather than a second copy of someone's ID.
+      const label =
+        existing === undefined
+          ? freeMemberName(reservation.memberLabel, this.#nameKeys(state.members))
+          : reservation.memberLabel;
       const member: StoredMember =
         existing === undefined
           ? {
               memberId: reservation.memberId,
-              label: reservation.memberLabel,
+              label,
               catalogIds,
               createdAt: instant(now),
               keys: [stored],
@@ -354,6 +414,11 @@ export class CatalogMemberService {
       } catch (error) {
         this.#revert(members, shares, state);
         throw error;
+      }
+      if (existing === undefined && label !== reservation.memberLabel) {
+        const rename = { memberId: member.memberId, from: reservation.memberLabel, to: label };
+        await this.#renamed(rename);
+        this.deps.onRenamed?.([rename]);
       }
       return {
         memberId: member.memberId,
@@ -439,12 +504,8 @@ export class CatalogMemberService {
           'shares_full',
           `${String(CATALOG_SHARES_LISTED_MAX)} shares are stored. Old ones are forgotten after 30 days; end some, or try again later.`,
         );
-      const existing =
-        request.member.kind === 'existing'
-          ? state.members.members.find(member => member.memberId === (request.member as { memberId: string }).memberId)
-          : undefined;
-      if (request.member.kind === 'existing' && existing === undefined)
-        throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
+      const who = this.#whoFor(request.member, now);
+      const existing = who.existing;
       if (new Set([...(existing?.catalogIds ?? []), ...request.catalogIds]).size > CATALOG_SHARE_MAX_CATALOGS)
         throw new CatalogMemberRefusal(
           'catalogs_full',
@@ -454,9 +515,9 @@ export class CatalogMemberService {
       const share: StoredShare = {
         shareId: `shr_${randomText(this.deps.crypto)}`,
         codeSha256: this.deps.hasher.hex(code),
-        memberId: existing?.memberId ?? `mbr_${randomText(this.deps.crypto)}`,
-        memberLabel: existing?.label ?? (request.member.kind === 'new' ? request.member.label : ''),
-        memberKind: request.member.kind,
+        memberId: who.memberId,
+        memberLabel: who.label,
+        memberKind: who.kind,
         catalogIds: [...request.catalogIds],
         createdAt: instant(now),
         expiresAt: instant(now + CATALOG_SHARE_EXPIRY_SECONDS[request.expiresIn] * 1_000),
@@ -504,9 +565,12 @@ export class CatalogMemberService {
 
   // ── The owner: members ───────────────────────────────────────────────────────────────────────────
 
-  async listMembers(): Promise<CatalogMemberList> {
+  /** The people. Given a `name`, also which of them holds that user ID (or has it reserved), for "already in". */
+  async listMembers(name?: string): Promise<CatalogMemberList> {
     await this.ready();
-    return { members: this.#loaded().members.members.map(memberView) };
+    const members = this.#loaded().members.members.map(memberView);
+    const holder = name === undefined ? undefined : this.#nameHolder(memberNameKey(name), this.deps.now());
+    return holder === undefined ? { members } : { members, match: holder.memberId };
   }
 
   async renameMember(memberId: string, label: string): Promise<CatalogMemberView> {
@@ -514,6 +578,8 @@ export class CatalogMemberService {
     return await this.#serially(async () => {
       const state = this.#loaded();
       const member = this.#member(state, memberId);
+      const holder = this.#nameHolder(memberNameKey(label), this.deps.now(), memberId);
+      if (holder !== undefined) throw this.#taken(label, holder.memberId);
       const next: StoredMember = { ...member, label };
       await this.#applyMembers(this.#membersWith(state.members, next), state.members);
       // The label a not-yet-used share carries is the name the owner gave when minting; it follows the rename.
@@ -659,6 +725,13 @@ export class CatalogMemberService {
     return undefined;
   }
 
+  /** The ids of every browser one person holds; none when the person is not here. */
+  async keyIdsOf(memberId: string): Promise<readonly string[]> {
+    await this.ready();
+    const member = this.#loaded().members.members.find(entry => entry.memberId === memberId);
+    return member?.keys.map(key => key.keyId) ?? [];
+  }
+
   /** Files that a browser was just seen, at most once a {@link LAST_SEEN_GRANULARITY_MS}; idle expiry counts in days. */
   async touchKey(keyId: string): Promise<void> {
     await this.ready();
@@ -716,6 +789,78 @@ export class CatalogMemberService {
   #loaded(): State {
     if (this.#state === undefined) throw new CatalogMemberRefusal('store_damaged', 'the member store was not read');
     return this.#state;
+  }
+
+  #nameKeys(document: MembersDocument): ReadonlySet<string> {
+    return new Set(document.members.map(member => memberNameKey(member.label)));
+  }
+
+  /**
+   * Who holds a user ID: the member who has it, else the person a live share is waiting for, else a join in
+   * flight. `except` is somebody renaming themselves, who cannot collide with their own name. A name nobody
+   * holds is free.
+   */
+  #nameHolder(key: string, now: number, except?: string): { memberId: string; label: string } | undefined {
+    const state = this.#loaded();
+    const member = state.members.members.find(entry => entry.memberId !== except && memberNameKey(entry.label) === key);
+    if (member !== undefined) return member;
+    const joined = new Set(state.members.members.map(entry => entry.memberId));
+    const waiting = state.shares.shares.find(
+      share =>
+        share.memberId !== except &&
+        !joined.has(share.memberId) &&
+        shareState(share, now) === 'live' &&
+        memberNameKey(share.memberLabel) === key,
+    );
+    if (waiting !== undefined) return { memberId: waiting.memberId, label: waiting.memberLabel };
+    for (const held of this.#held.values()) {
+      const reservation = held.reservation;
+      if (
+        reservation.kind === 'join' &&
+        reservation.memberId !== except &&
+        !joined.has(reservation.memberId) &&
+        memberNameKey(reservation.memberLabel) === key
+      )
+        return { memberId: reservation.memberId, label: reservation.memberLabel };
+    }
+    return undefined;
+  }
+
+  #taken(name: string, memberId: string): CatalogMemberRefusal {
+    return new CatalogMemberRefusal(
+      'member_exists',
+      `Someone here already has the user ID ${name}. Pick another.`,
+      memberId,
+    );
+  }
+
+  /**
+   * Who a share is for. A `{ name }` reaches whoever holds that user ID, member or reserved, and otherwise makes
+   * and reserves a new person; the older `new` arm is refused when the name is taken, so no mint ever makes a
+   * second person of the same name.
+   */
+  #whoFor(
+    member: CatalogShareMintRequest['member'],
+    now: number,
+  ): {
+    readonly kind: 'new' | 'existing';
+    readonly memberId: string;
+    readonly label: string;
+    readonly existing: StoredMember | undefined;
+  } {
+    const state = this.#loaded();
+    if ('kind' in member && member.kind === 'existing') {
+      const found = state.members.members.find(entry => entry.memberId === member.memberId);
+      if (found === undefined) throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
+      return { kind: 'existing', memberId: found.memberId, label: found.label, existing: found };
+    }
+    const name = 'kind' in member ? member.label : member.name;
+    const holder = this.#nameHolder(memberNameKey(name), now);
+    if (holder === undefined)
+      return { kind: 'new', memberId: `mbr_${randomText(this.deps.crypto)}`, label: name, existing: undefined };
+    if ('kind' in member) throw this.#taken(name, holder.memberId);
+    const found = state.members.members.find(entry => entry.memberId === holder.memberId);
+    return { kind: found === undefined ? 'new' : 'existing', ...holder, existing: found };
   }
 
   #member(state: State, memberId: string): StoredMember {

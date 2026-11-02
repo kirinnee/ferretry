@@ -20,6 +20,8 @@ export class CatalogMemberRefusal extends Error {
   constructor(
     readonly refusal: CatalogMemberRefusalCode,
     message: string,
+    /** The person a `member_exists` refusal found holding the name. */
+    readonly memberId?: string,
   ) {
     super(message);
     this.name = 'CatalogMemberRefusal';
@@ -38,6 +40,7 @@ export const CATALOG_MEMBER_STATUS: Readonly<Record<CatalogMemberRefusalCode, nu
   share_refused: 409,
   share_other_member: 409,
   share_new_member: 409,
+  member_exists: 409,
   members_full: 409,
   member_unknown: 404,
   member_key_unknown: 404,
