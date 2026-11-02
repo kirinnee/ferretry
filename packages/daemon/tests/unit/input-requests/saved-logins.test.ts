@@ -14,6 +14,7 @@ import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-reques
 import type { InputCaller, InputChoicePort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { TypedIdentities } from '../../../src/lib/input-requests/typed-identities.ts';
 import { LoginDirectory, LoginEntryError, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 
@@ -68,6 +69,8 @@ function harness(
     observer?: (directory: LoginDirectory) => Pick<LoginObserver, 'delivered' | 'tainted'>;
     /** The session's project, folder and the owner's defaults, as the daemon reads them. */
     choice?: InputChoicePort;
+    /** Who a page is signing in, as the ferret typed it (typed-identities.ts). */
+    identities?: TypedIdentities;
   } = {},
 ) {
   const writes: string[] = [];
@@ -133,6 +136,7 @@ function harness(
     redact: async text => values.scrubAll(text),
     ...(options.none === true ? {} : { logins: options.logins?.(spied) ?? spied }),
     ...(options.choice === undefined ? {} : { choice: options.choice }),
+    ...(options.identities === undefined ? {} : { identities: options.identities }),
     ...(options.observer === undefined ? {} : { observer: options.observer(directory) }),
     hostName: 'Kirin-Box.local',
   });
@@ -205,6 +209,7 @@ describe('the first time: the owner types the value and saves it', () => {
     should(request.saved).deepEqual({
       match: 'sudo@kirin-box',
       suggest: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
+      newAccount: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },
       saves: 'password',
       offers: [],
     });
@@ -1002,6 +1007,226 @@ describe('what the daemon saw is kept on the saved login', () => {
     await Bun.sleep(5);
     should(await factsOf('SUDO_ADMIN')).have.length(1);
     should((await factsOf('SUDO_KIRIN_BOX'))?.[0]?.masked?.count).equal(1);
+  });
+});
+
+/**
+ * &B137, THE OWNER'S SCENARIO: kirinnee97@gmail.com's Google password is saved; a ferret signs ernest@atomi.tech in
+ * on accounts.google.com, typing that email itself. The card must not one-tap kirinnee97's password, Save as must start
+ * a second account and overwrite nothing, and the agenda (which ferrets and other devices read) names no account.
+ */
+describe('a second person on one site', () => {
+  const GOOGLE = 'https://accounts.google.com';
+  const KIRIN_PASSWORD = 'kirin-UNIQUE-pw-1';
+  const ERNEST_PASSWORD = 'ernest-UNIQUE-pw-2';
+  const page = (): InputTargetFacts => ({
+    kind: 'browser',
+    pageId: 'page-gper2',
+    origin: GOOGLE,
+    secure: true,
+    navigationId: 'loader-1',
+    fields: [
+      {
+        fieldId: 'value',
+        frameOrigin: GOOGLE,
+        frameId: 'main',
+        backendNodeId: 12,
+        field: { tag: 'input', type: 'password', name: 'Passwd' },
+        box: { x: 10, y: 10, w: 200, h: 40 },
+        visible: true,
+      },
+    ],
+  });
+  const PAGE_RAISE: InputRaise = {
+    target: { kind: 'browser', key: 'gper2' },
+    prompt: 'Google wants a password',
+    sensitivity: 'secret',
+    fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e2' } }],
+    submit: 'offer-owner',
+  };
+  /** The ferret typed `username` into this page's email box, as the agent tools tell the store. */
+  const world = async (username: string) => {
+    const identities = new TypedIdentities(() => NOW);
+    identities.typed(SESSION, 'page-gper2', 'accounts.google.com', username);
+    const h = harness({ facts: page(), identities });
+    await h.directory.put(
+      'ACCOUNTS_GOOGLE_COM',
+      PutLoginEntryRequestSchema.parse({
+        label: 'accounts.google.com',
+        match: ['accounts.google.com'],
+        username: 'kirinnee97@gmail.com',
+        password: KIRIN_PASSWORD,
+      }),
+    );
+    return h;
+  };
+
+  it('should offer no one-tap of kirinnee97 on a page signing in ernest@atomi, and name who it is only on the card', async () => {
+    const h = await world('ernest@atomi.tech');
+    const { request } = await raised(h, PAGE_RAISE);
+
+    should(request.saved?.offers.some(offer => offer.primary === true)).be.false();
+    should(request.saved).match({
+      typedUsername: 'ernest@atomi.tech',
+      differentFrom: { id: 'ACCOUNTS_GOOGLE_COM', username: 'kirinnee97@gmail.com' },
+      newAccount: { id: 'GOOGLE_ERNEST', label: 'Google · ernest@atomi.tech' },
+      suggest: { id: 'GOOGLE_ERNEST' },
+    });
+    // kirinnee97's account is not even offered for Update: the page is signing in someone else.
+    should(request.saved?.update).be.undefined();
+    // Nothing is typed by a typed username: only the owner's Send does.
+    should(h.writes).deepEqual([]);
+    // The agenda card (title, ask, prompt) is what ferrets and other devices read: the place only, no account, no person.
+    const agenda = h.sinks.filter(line => line.includes('"requestId"') && line.includes('"ask"')).join('\n');
+    should(agenda).not.equal('');
+    for (const name of ['kirinnee97', 'ernest', 'ACCOUNTS_GOOGLE_COM', 'GOOGLE_ERNEST'])
+      should(agenda).not.containEql(name);
+  });
+
+  it('should keep a one-tap of the saved account when the page signs that same person in', async () => {
+    const h = await world('kirinnee97@gmail.com');
+    const { request } = await raised(h, PAGE_RAISE);
+
+    should(request.saved?.offers.find(offer => offer.primary === true)).match({
+      id: 'ACCOUNTS_GOOGLE_COM',
+      why: 'only',
+    });
+    should(request.saved?.differentFrom).be.undefined();
+  });
+
+  it('should save ernest as a SECOND account with its username, overwriting nothing of kirinnee97', async () => {
+    const h = await world('ernest@atomi.tech');
+    const { request } = await raised(h, PAGE_RAISE);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      typed(request.observedDigest as string, ERNEST_PASSWORD, {
+        save: {
+          entry: 'GOOGLE_ERNEST',
+          label: 'Google · ernest@atomi.tech',
+          mode: 'new',
+          username: 'ernest@atomi.tech',
+        },
+      }),
+      HOST,
+    );
+
+    should(result.saved).deepEqual({ entry: 'GOOGLE_ERNEST', ok: true });
+    const accounts = (await h.directory.accounts.list()).accounts;
+    should(accounts.map(each => [each.id, each.username])).deepEqual([
+      ['ACCOUNTS_GOOGLE_COM', 'kirinnee97@gmail.com'],
+      ['GOOGLE_ERNEST', 'ernest@atomi.tech'],
+    ]);
+    should(await h.directory.list()).match([
+      { id: 'ACCOUNTS_GOOGLE_COM', fields: { password: true } },
+      { id: 'GOOGLE_ERNEST', match: ['accounts.google.com'], fields: { password: true } },
+    ]);
+    // kirinnee97's own password is still the one it types.
+    const tap = await h.service.raise(SESSION, PAGE_RAISE);
+    const next = (await h.service.list(HOST)).find(each => each.agendaItemId === tap.id);
+    await h.service.deliver(
+      SESSION,
+      next?.id as string,
+      saved(next?.observedDigest as string, 'ACCOUNTS_GOOGLE_COM'),
+      HOST,
+    );
+    should(h.writes).deepEqual([ERNEST_PASSWORD, KIRIN_PASSWORD]);
+  });
+
+  it('should refuse, with nothing typed, a NEW account under a CLI name another account has', async () => {
+    const h = await world('ernest@atomi.tech');
+    const { request } = await raised(h, PAGE_RAISE);
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, ERNEST_PASSWORD, {
+          save: { entry: 'ACCOUNTS_GOOGLE_COM', label: 'x', mode: 'new' },
+        }),
+        HOST,
+      ),
+    );
+
+    should(refused.code).equal('conflict');
+    should(refused.message).containEql('Nothing was typed');
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should refuse, with nothing typed, an UPDATE that carries another person’s username', async () => {
+    const h = await world('ernest@atomi.tech');
+    const { request } = await raised(h, PAGE_RAISE);
+    const refused = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, ERNEST_PASSWORD, {
+          save: { entry: 'ACCOUNTS_GOOGLE_COM', label: 'x', mode: 'update', username: 'ernest@atomi.tech' },
+        }),
+        HOST,
+      ),
+    );
+
+    should(refused.code).equal('conflict');
+    // Nor with no username sent at all: the page itself is signing in ernest.
+    const bare = await refusal(
+      h.service.deliver(
+        SESSION,
+        request.id,
+        typed(request.observedDigest as string, ERNEST_PASSWORD, {
+          save: { entry: 'ACCOUNTS_GOOGLE_COM', label: 'x', mode: 'update' },
+        }),
+        HOST,
+      ),
+    );
+    should(bare.code).equal('conflict');
+    should(h.writes).deepEqual([]);
+    should((await h.directory.accounts.list()).accounts.map(each => each.username)).deepEqual(['kirinnee97@gmail.com']);
+  });
+
+  it('should refuse an UPDATE of an account that is not there, and fill in a username an account lacks', async () => {
+    const missing = await world('ernest@atomi.tech');
+    const first = await raised(missing, PAGE_RAISE);
+    should(
+      (
+        await refusal(
+          missing.service.deliver(
+            SESSION,
+            first.request.id,
+            typed(first.request.observedDigest as string, ERNEST_PASSWORD, {
+              save: { entry: 'NOBODY', label: 'x', mode: 'update' },
+            }),
+            HOST,
+          ),
+        )
+      ).code,
+    ).equal('not_found');
+    should(missing.writes).deepEqual([]);
+
+    const h = harness({ facts: page() });
+    await h.directory.put('G', PutLoginEntryRequestSchema.parse({ label: 'google', match: ['accounts.google.com'] }));
+    const { request } = await raised(h, PAGE_RAISE);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      typed(request.observedDigest as string, ERNEST_PASSWORD, {
+        save: { entry: 'G', label: 'google', mode: 'update', username: 'ernest@atomi.tech' },
+      }),
+      HOST,
+    );
+    should(result.saved).deepEqual({ entry: 'G', ok: true });
+    should((await h.directory.accounts.list()).accounts.map(each => [each.id, each.username])).deepEqual([
+      ['G', 'ernest@atomi.tech'],
+    ]);
+  });
+
+  it('should never save into another account when a card raised earlier finds the CLI name taken at save time', async () => {
+    const h = await world('ernest@atomi.tech');
+    // Between the check and the save, another card saved GOOGLE_ERNEST: the store's own lock refuses the second.
+    await h.directory.saveFields('GOOGLE_ERNEST', 'first', 'accounts.google.com', { password: KIRIN_PASSWORD });
+    await should(
+      h.directory.saveFields('GOOGLE_ERNEST', 'second', 'accounts.google.com', { password: ERNEST_PASSWORD }, 'new'),
+    ).be.rejectedWith(LoginEntryError);
+    should((await h.directory.list()).find(each => each.id === 'GOOGLE_ERNEST')?.label).equal('first');
   });
 });
 

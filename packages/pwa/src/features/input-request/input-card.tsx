@@ -45,7 +45,9 @@ import { codesAccounts, startingAccount } from '../../lib/automatic-codes.ts';
 import { cancelInput, deliverInput, type InputClient, putAccountDefault, readInputShot } from '../../lib/input-api.ts';
 import {
   type AlwaysUse,
+  accountTitleWords,
   alwaysUseFor,
+  cardAccountWords,
   cardOffersSave,
   cardSaveBlock,
   chainWords,
@@ -54,6 +56,7 @@ import {
   codeCheckedWords,
   codeTitleWords,
   defaultSubmit,
+  differentAccountWords,
   expiryWords,
   fieldAttributes,
   fieldProblem,
@@ -71,6 +74,11 @@ import {
   plainFlagWords,
   revealable,
   saveDraftProblem,
+  savesUsername,
+  editSaveLabel,
+  editSaveUsername,
+  updateChoiceWords,
+  usernameLocked,
   savedBody,
   savedButtonWords,
   savedOutcomeWords,
@@ -80,12 +88,14 @@ import {
   showsHeaderRisk,
   signInWords,
   splitOffers,
+  switchSaveMode,
   targetRef,
   titleWords,
   typedBody,
   typedFieldsBody,
   typedReady,
   updatedEntry,
+  updateWords,
 } from '../../lib/input-card.ts';
 import { pasteRoute } from '../../lib/secure-copy.ts';
 import { AutomaticCodesPanel } from './automatic-codes.tsx';
@@ -176,8 +186,15 @@ export function InputCard({
   const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
   const startAt = startingAccount(request.saved, codeAccounts);
   const codeFor = accounts?.accounts.find(each => each.id === startAt?.id);
+  // Whose sign-in this is, named ONLY from the secrets-gated accounts listing (`accounts`): a device that may not read
+  // accounts, and the agenda text every reader sees, say the place only (secrev-1261 L4).
+  const forAccount = asksCode ? undefined : cardAccountWords(request.saved, accounts);
   const title =
-    asksCode && codeFor !== undefined ? codeTitleWords(request, agentName, codeFor) : titleWords(request, agentName);
+    asksCode && codeFor !== undefined
+      ? codeTitleWords(request, agentName, codeFor)
+      : forAccount !== undefined
+        ? accountTitleWords(request, agentName, forAccount)
+        : titleWords(request, agentName);
   const setup =
     addKey !== undefined && codeAccounts.length > 0 && request.state === 'pending' ? (
       <AutomaticCodesPanel
@@ -812,7 +829,20 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   // "Too short to save" is said only once something is typed AND Save as is ticked: never before the owner acts.
   const typedSomething = fields.some(field => (values[field.key] ?? '') !== '');
   const saveSaid = save.enabled && typedSomething ? saveReason : undefined;
-  const draftProblem = saveDraftProblem(save);
+  const draftProblem = saveDraftProblem(save, request.saved);
+  const update = request.saved?.update;
+  const differentLine = differentAccountWords(request.saved);
+  const askUsername = savesUsername(fields, save);
+  const saveFieldId = useId();
+  // "Type a different one" over a saved account: what is typed is someone else's until the owner says otherwise.
+  const typeInstead = (): void => {
+    setTyping(true);
+    setSave(current =>
+      current.mode === undefined
+        ? current
+        : { ...initialSaveDraft(request.saved, { typedInstead: true }), enabled: current.enabled },
+    );
+  };
   const ready = typedReady(fields, values);
 
   const mintId = (): string => {
@@ -938,6 +968,12 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         </p>
       )}
 
+      {differentLine === undefined ? null : (
+        <p className="m-0 text-cell font-medium text-warn" data-input-different-account="" role="status">
+          {differentLine}
+        </p>
+      )}
+
       {typing ? (
         <div className="flex min-w-0 flex-col gap-3">
           {fields.map(field => (
@@ -967,12 +1003,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-stretch gap-2">
             {primary.codes === undefined ? offerButton(primary, true) : codeButtons(primary, true)}
-            <button
-              className="kt-btn min-h-[44px]"
-              data-input-type-instead=""
-              onClick={() => setTyping(true)}
-              type="button"
-            >
+            <button className="kt-btn min-h-[44px]" data-input-type-instead="" onClick={typeInstead} type="button">
               Type a different one
             </button>
           </div>
@@ -995,7 +1026,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           <button
             className="kt-btn min-h-[44px] self-start"
             data-input-type-instead=""
-            onClick={() => setTyping(true)}
+            onClick={typeInstead}
             type="button"
           >
             Type a different one
@@ -1011,7 +1042,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
 
       {typing && saving ? (
         <div className="flex min-w-0 flex-col gap-2" data-input-save="">
-          <label className="flex items-center gap-2 text-cell text-fg">
+          <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
             <input
               checked={save.enabled}
               data-input-save-tick=""
@@ -1019,40 +1050,105 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               onChange={event => setSave(current => ({ ...current, enabled: event.target.checked }))}
               type="checkbox"
             />
-            Save as
+            Save to Accounts
           </label>
           {saveSaid === undefined ? null : (
-            <p className="m-0 text-meta text-muted" data-input-save-reason="">
+            <p className="m-0 text-meta text-warn" data-input-save-reason="" role="status">
               {saveSaid}
             </p>
           )}
-          {save.enabled ? (
-            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-              <label className="flex min-w-0 flex-1 flex-col gap-1 text-meta text-muted">
-                Label
+          {save.enabled && askUsername ? (
+            <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
+              Username
+              <input
+                aria-describedby={request.saved?.typedUsername === undefined ? undefined : `${saveFieldId}-who`}
+                autoCapitalize="none"
+                autoComplete="off"
+                className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg read-only:opacity-70"
+                data-input-save-username=""
+                disabled={off}
+                onChange={event => setSave(current => editSaveUsername(request.saved, current, event.target.value))}
+                readOnly={usernameLocked(request.saved, save)}
+                spellCheck={false}
+                value={save.username}
+              />
+              {request.saved?.typedUsername === undefined || usernameLocked(request.saved, save) ? null : (
+                <span className="text-meta text-muted" data-input-save-username-note="" id={`${saveFieldId}-who`}>
+                  What the ferret typed on the page. Check it is right.
+                </span>
+              )}
+            </label>
+          ) : null}
+          {save.enabled && save.mode !== undefined && update !== undefined ? (
+            <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0" data-input-save-mode={save.mode}>
+              <legend className="sr-only">Where to save it</legend>
+              <label className="flex min-h-[44px] items-center gap-2 text-cell text-fg">
                 <input
-                  autoComplete="off"
-                  className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-                  data-input-save-label=""
-                  onChange={event => setSave(current => ({ ...current, label: event.target.value }))}
-                  value={save.label}
+                  checked={save.mode === 'new'}
+                  data-input-save-new=""
+                  disabled={off}
+                  name={`${saveFieldId}-mode`}
+                  onChange={() => setSave(current => switchSaveMode(request.saved, current, 'new'))}
+                  type="radio"
                 />
+                Save as a new account
               </label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1 text-meta text-muted">
-                Handle
+              <label className="flex min-h-[44px] min-w-0 items-center gap-2 text-cell text-fg">
                 <input
+                  checked={save.mode === 'update'}
+                  data-input-save-update=""
+                  disabled={off}
+                  name={`${saveFieldId}-mode`}
+                  onChange={() => setSave(current => switchSaveMode(request.saved, current, 'update'))}
+                  type="radio"
+                />
+                <span className="min-w-0 break-words">{updateChoiceWords(update)}</span>
+              </label>
+            </fieldset>
+          ) : null}
+          {save.enabled && save.mode !== 'update' ? (
+            <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
+              Name
+              <input
+                autoComplete="off"
+                className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                data-input-save-label=""
+                disabled={off}
+                onChange={event => setSave(current => editSaveLabel(request.saved, current, event.target.value))}
+                value={save.label}
+              />
+            </label>
+          ) : null}
+          {save.enabled && save.mode !== 'update' ? (
+            <details className="min-w-0" data-input-save-more="">
+              <summary className="cursor-pointer text-meta text-muted">More</summary>
+              <label className="mt-2 flex min-w-0 flex-col gap-1 text-meta text-muted">
+                Name in the terminal
+                <input
+                  aria-describedby={`${saveFieldId}-cli`}
                   autoCapitalize="characters"
                   autoComplete="off"
                   className="kt-input mono min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
                   data-input-save-id=""
-                  onChange={event => setSave(current => ({ ...current, id: normalizeHandle(event.target.value) }))}
+                  disabled={off}
+                  onChange={event =>
+                    setSave(current => ({ ...current, id: normalizeHandle(event.target.value), idEdited: true }))
+                  }
                   spellCheck={false}
                   value={save.id}
                 />
               </label>
-            </div>
+              <p className="m-0 mt-1 text-meta text-muted" data-input-save-cli-note="" id={`${saveFieldId}-cli`}>
+                How <span className="mono">fy account</span> names this account. It is not an environment variable.
+              </p>
+            </details>
           ) : null}
-          {save.enabled && saveReason === undefined && existing !== undefined ? (
+          {save.enabled && saveReason === undefined && save.mode === 'update' && update !== undefined ? (
+            <p className="m-0 text-meta text-warn" data-input-save-updates="">
+              {updateWords(update)}
+            </p>
+          ) : null}
+          {save.enabled && saveReason === undefined && save.mode === undefined && existing !== undefined ? (
             <p className="m-0 text-meta text-warn" data-input-save-updates="">
               updates {existing.label}
             </p>
@@ -1116,7 +1212,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
             onClick={sendTyped}
             type="button"
           >
-            {sending ? 'Sending…' : 'Send'}
+            {sending ? 'Sending…' : save.enabled && saveReason !== undefined ? 'Send without saving' : 'Send'}
           </button>
         ) : null}
       </div>

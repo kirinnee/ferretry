@@ -286,15 +286,32 @@ export class LoginDirectory {
    * existing one (its label kept). The place it was typed at is added when the account does not sign in there yet: to
    * its website for a web host (as a saved login's `match` grew), else as a sign-in of its own. The username and the
    * password of one login card are kept together or not at all.
+   *
+   * `mode` is the owner's choice, checked UNDER THE STORE LOCK so a card raised before another saved cannot write over
+   * it: `new` refuses a handle an account already has, `update` refuses one no account has, and refuses a username
+   * that is not the account's own (it is someone else: a new account). Absent: either, as before.
    */
   async saveFields(
     id: LoginEntryId,
     label: string,
     match: string | undefined,
     fields: LoginFieldValues,
+    mode?: 'new' | 'update',
   ): Promise<LoginEntrySummary> {
     return await this.accounts.transact(async draft => {
       const existing = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      if (mode === 'new' && existing !== undefined)
+        throw new LoginEntryError('login_exists', `${id} is already an account's CLI name`);
+      if (mode === 'update' && existing === undefined)
+        throw new LoginEntryError('unknown_login', `there is no account ${id} to update`);
+      const had = existing?.username?.trim().toLowerCase();
+      if (
+        mode === 'update' &&
+        fields.username !== undefined &&
+        had !== undefined &&
+        had !== fields.username.trim().toLowerCase()
+      )
+        throw new LoginEntryError('invalid_change', `${id} has another username; save it as a new account`);
       const account = await this.accounts.applyAccount(draft, id, {
         ...(existing === undefined ? { label } : {}),
         ...(fields.username === undefined ? {} : { username: fields.username }),

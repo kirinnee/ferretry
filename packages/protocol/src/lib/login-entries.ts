@@ -441,7 +441,34 @@ export type InputSignIn = z.infer<typeof InputSignInSchema>;
  */
 export const InputSavedSchema = z.strictObject({
   match: LoginMatchSchema.optional(),
-  suggest: z.strictObject({ id: LoginEntryIdSchema, label: oneLine(LOGIN_LABEL_MAX_LENGTH) }).optional(),
+  /**
+   * What an older app pre-fills under "Save as": `update` when that is the account the card is about, else
+   * `newAccount`. A newer app reads those two and asks the owner which one.
+   */
+  suggest: LoginEntryRefSchema.optional(),
+  /**
+   * The account "Update" would write the typed value into: the one this card is about among those that sign in here.
+   * Absent when none does, or when two or more do and nothing chose one. Saving into it takes the owner's explicit
+   * "Update" (`save.mode: 'update'`); its username is shown so the owner can tell it is the same person.
+   */
+  update: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
+  /**
+   * What "New account" would be called: a label and a CLI name from the site's provider and the username when it is
+   * known ("Google · a@gmail.com", `GOOGLE_A`), never a CLI name an account already has.
+   */
+  newAccount: LoginEntryRefSchema.optional(),
+  /**
+   * The username the FERRET typed into this page's identifier field (an email or username box) before the card was
+   * raised, as the daemon saw its own type act: plain, and only the ferret's word. It pre-fills the editable "Username"
+   * under "Save as" and can REMOVE a one-tap (`differentFrom`); it never chooses, promotes or fills an account.
+   */
+  typedUsername: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
+  /**
+   * The account that would have been the one-tap, demoted because the page is signing in someone else: the typed
+   * username is not that account's, or it has none saved. The card says "This looks like a different account" and the
+   * owner picks or types.
+   */
+  differentFrom: LoginEntryRefSchema.safeExtend({ username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional() }).optional(),
   /** Which field a typed value would be saved as; absent when this kind of value is never saved (a code). */
   saves: LoginFieldRoleSchema.optional(),
   offers: z
@@ -623,4 +650,55 @@ export function suggestedLoginId(match: string): LoginEntryId {
 export function suggestedLoginLabel(match: string): string {
   const at = match.indexOf('@');
   return (at === -1 ? match : `${match.slice(0, at)} on ${match.slice(at + 1)}`).slice(0, LOGIN_LABEL_MAX_LENGTH);
+}
+
+const PROVIDER_HOSTS: ReadonlyMap<string, string> = new Map([
+  ['accounts.google.com', 'Google'],
+  ['login.microsoftonline.com', 'Microsoft'],
+  ['login.live.com', 'Microsoft'],
+]);
+const OKTA_DOMAINS = ['okta.com', 'oktapreview.com', 'okta-emea.com'] as const;
+
+/**
+ * The identity provider a sign-in host belongs to, by the name people call it ("Google"), from a FIXED list: Google's
+ * and Microsoft's sign-in hosts exactly, and an organisation's own subdomain of Okta's (never the bare apex). Names a
+ * new account only; it decides nothing.
+ */
+export function providerNameOf(match: string): string | undefined {
+  const host = match.toLowerCase();
+  const exact = PROVIDER_HOSTS.get(host);
+  if (exact !== undefined) return exact;
+  return OKTA_DOMAINS.some(domain => host.endsWith(`.${domain}`)) ? 'Okta' : undefined;
+}
+
+/** A username's part a CLI name is made from: an email's local part, else the whole name. */
+const handleWordOf = (username: string): string => {
+  const at = username.indexOf('@');
+  return at > 0 ? username.slice(0, at) : username;
+};
+
+/**
+ * What "New account" is called on a card ({@link InputSavedSchema} `newAccount`): the provider's name, or the place as
+ * {@link suggestedLoginLabel} says it, then ` · <username>` when the username is known ("Google · a@gmail.com"); the
+ * CLI name from the same words (`GOOGLE_A`, `GITHUB_COM_KIRINNEE`). A CLI name in `taken` gets `_2`, `_3`, … so two
+ * accounts on one site never share one. Always a valid {@link LoginEntryIdSchema}; the owner can edit both.
+ */
+export function suggestedNewAccount(
+  match: string,
+  username: string | undefined,
+  taken: ReadonlySet<string>,
+): LoginEntryRef {
+  const provider = providerNameOf(match);
+  const place = provider ?? suggestedLoginLabel(match);
+  const who = username?.trim();
+  const label = (who === undefined || who === '' ? place : `${place} · ${who}`).slice(0, LOGIN_LABEL_MAX_LENGTH).trim();
+  const base = suggestedLoginId(
+    who === undefined || who === '' ? (provider ?? match) : `${provider ?? match}_${handleWordOf(who)}`,
+  );
+  let id = base;
+  for (let count = 2; taken.has(id); count += 1) {
+    const suffix = `_${String(count)}`;
+    id = `${base.slice(0, 64 - suffix.length).replace(/_+$/u, '')}${suffix}`;
+  }
+  return { id, label };
 }

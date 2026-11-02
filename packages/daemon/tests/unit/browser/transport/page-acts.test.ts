@@ -38,6 +38,10 @@ class FakePage implements ActablePage {
   failMouse = false;
   /** The `type` attribute each selector's element carries; none for an unlisted one. */
   readonly types = new Map<string, string>();
+  /** Every other attribute, per selector. */
+  readonly attributes = new Map<string, Readonly<Record<string, string>>>();
+  /** The host of the document a text field is in; absent: the element is a button or a file field. */
+  host: string | undefined;
   text = 'Welcome back';
   snapshot = SNAPSHOT;
   /** Whether the element is a file input. */
@@ -68,7 +72,8 @@ class FakePage implements ActablePage {
       press: async key => {
         page.calls.push(`press ${selector} ${key}`);
       },
-      getAttribute: async name => (name === 'type' ? (page.types.get(selector) ?? null) : null),
+      getAttribute: async name =>
+        name === 'type' ? (page.types.get(selector) ?? null) : (page.attributes.get(selector)?.[name] ?? null),
       innerText: async () => {
         page.calls.push(`innerText ${selector}`);
         return page.text;
@@ -87,7 +92,11 @@ class FakePage implements ActablePage {
       // The real page function runs, on an element that is a file field or a button.
       evaluate: async (pageFunction, arg) =>
         (pageFunction as (element: unknown, arg: string) => unknown)(
-          page.fileInput ? { tagName: 'INPUT', type: 'file' } : { tagName: 'BUTTON', type: 'submit' },
+          page.host !== undefined
+            ? { tagName: 'INPUT', ownerDocument: { location: { host: page.host } } }
+            : page.fileInput
+              ? { tagName: 'INPUT', type: 'file' }
+              : { tagName: 'BUTTON', type: 'submit' },
           arg,
         ),
       scrollIntoViewIfNeeded: async () => {
@@ -247,6 +256,36 @@ describe('browser page acts — type', () => {
     // Assert
     should(secret).deepEqual({ passwordField: true });
     should(plain).deepEqual({ passwordField: false });
+  });
+
+  it('should name the host of an email or username box it typed into, and of nothing else (&B137)', async () => {
+    // Arrange: Google's email box, GitHub's login box, Microsoft's, a search box and a password box.
+    const page = new FakePage();
+    page.host = 'Accounts.Google.com';
+    page.types.set('#google', 'email');
+    page.attributes.set('#google', { autocomplete: 'username webauthn', name: 'identifier', id: 'identifierId' });
+    page.types.set('#github', 'text');
+    page.attributes.set('#github', { autocomplete: 'username', name: 'login' });
+    page.types.set('#microsoft', 'email');
+    page.attributes.set('#microsoft', { name: 'loginfmt' });
+    page.types.set('#named', 'text');
+    page.attributes.set('#named', { name: 'user_name' });
+    page.types.set('#search', 'text');
+    page.attributes.set('#search', { name: 'q' });
+    page.types.set('#pw', 'password');
+    page.attributes.set('#pw', { autocomplete: 'username' });
+    page.types.set('#check', 'checkbox');
+    page.attributes.set('#check', { name: 'username' });
+
+    // Act
+    const typed = async (selector: string) => await typeInto(page, { kind: 'selector', selector }, 'x');
+
+    // Assert
+    for (const selector of ['#google', '#github', '#microsoft', '#named'])
+      should(await typed(selector)).deepEqual({ passwordField: false, identifierHost: 'accounts.google.com' });
+    should(await typed('#search')).deepEqual({ passwordField: false });
+    should(await typed('#pw')).deepEqual({ passwordField: true });
+    should(await typed('#check')).deepEqual({ passwordField: false });
   });
 });
 

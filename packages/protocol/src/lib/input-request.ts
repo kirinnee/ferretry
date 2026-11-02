@@ -3,7 +3,13 @@ import { SignInIdSchema, SignInRuleIdSchema, SignInRuleRevisionSchema, TwoFactor
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { durationWords, InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
-import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
+import {
+  InputSavedSchema,
+  LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_USERNAME_MAX_LENGTH,
+  LoginEntryIdSchema,
+  oneLine,
+} from './login-entries.ts';
 import { SecretNameSchema } from './secrets.ts';
 import { CopyNameSchema, CopyOriginSchema, CopyPlanIdSchema } from './secure-copy.ts';
 import { SurfaceKeySchema } from './surface-names.ts';
@@ -715,6 +721,11 @@ export const InputDeliverBodySchema = z
     /**
      * Keep the typed value in a saved login: a new entry with this label, or the existing one with this
      * handle (its label then stays). Saved only once it has been typed; a one-time code is never saved.
+     *
+     * `mode` is the owner's choice on the card: `new` keeps it ONLY in a new account (a CLI name that is already an
+     * account's is refused, nothing typed), `update` ONLY in the existing account `entry` names, replacing what it
+     * holds. Absent (an older app): either, as `entry` says. `username` is the owner-confirmed username kept with it
+     * (the "Username" box, pre-filled from what the ferret typed); never on a card that types a username itself.
      */
     save: z
       .strictObject({
@@ -725,6 +736,8 @@ export const InputDeliverBodySchema = z
           .min(1)
           .max(LOGIN_LABEL_MAX_LENGTH)
           .regex(/^[^\p{Cc}\p{Cf}]*$/u),
+        mode: z.enum(['new', 'update']).optional(),
+        username: oneLine(LOGIN_USERNAME_MAX_LENGTH).optional(),
       })
       .optional(),
   })

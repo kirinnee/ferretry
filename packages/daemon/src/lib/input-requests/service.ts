@@ -110,6 +110,7 @@ import {
   savedForFields,
   signInOfAt,
   signInsAt,
+  someoneElse,
   targetMatchKey,
 } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
@@ -209,6 +210,12 @@ interface Held {
    * (`chosenSignIn`): one it names is the primary, "Ferret chose this"; one matched nowhere here is only tagged.
    */
   readonly hint?: string;
+  /**
+   * The username the ferret typed into this page's identifier field before the card was raised (typed-identities.ts),
+   * taken AT RAISE so the card never changes under the owner. The ferret's word only: it removes a one-tap and pre-fills
+   * the owner's editable username under "Save as"; it never chooses or fills an account.
+   */
+  readonly typedUsername?: string;
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
@@ -263,6 +270,8 @@ export interface InputRequestServiceDependencies {
   readonly choice?: InputChoicePort;
   /** This machine's host name, for a terminal target's key (`sudo@<host>`). */
   readonly hostName?: string;
+  /** Who a page is signing in, as the ferret typed it (typed-identities.ts). Absent: never known. */
+  readonly identities?: { at(sessionId: string, pageId: string, host: string | undefined): string | undefined };
   /** Secure copies a paste types from (docs/secure-copy.md). Absent: a paste is refused. */
   readonly sealed?: InputSealedPort;
   /** The owner's pre-approval rules. Absent: every paste waits for the owner. */
@@ -542,6 +551,7 @@ export class InputRequestService {
         ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
         ...(matchKey === undefined ? {} : { matchKey }),
         ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
+        ...typedUsernameAt(this.deps.identities, sessionId, seen.facts, matchKey),
         deliveries: new Map(),
         waiters: new Set(),
         ...(shot === undefined ? {} : { shot }),
@@ -1089,6 +1099,7 @@ export class InputRequestService {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, held.request.fields),
+      ...(held.typedUsername === undefined ? {} : { typedUsername: held.typedUsername }),
     });
   }
 
@@ -1760,7 +1771,7 @@ export class InputRequestService {
       const typed = pasted === undefined ? typedValues(request, body) : new Map<string, string>();
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no accounts; type the value instead');
-      const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
+      const kept = body.save === undefined ? undefined : await this.guardSave(held, typed, body.save);
       // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
       // nothing is counted; the card reads the request again and the owner checks it before sending.
       if (body.observedDigest !== request.observedDigest) throw targetRebound(request.target.kind);
@@ -2003,7 +2014,12 @@ export class InputRequestService {
    * "Save as" is checked before anything is typed, so a save that could never happen refuses the whole
    * Send with nothing typed rather than typing and then failing to keep it.
    */
-  private guardSave(request: InputRequest, typed: ReadonlyMap<string, string>): LoginFieldValues {
+  private async guardSave(
+    held: Held,
+    typed: ReadonlyMap<string, string>,
+    save: NonNullable<InputDeliverBody['save']>,
+  ): Promise<LoginFieldValues> {
+    const { request } = held;
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no accounts; send without saving');
     const roles = savedRolesOf(request.fields);
@@ -2034,7 +2050,54 @@ export class InputRequestService {
         throw new InputRequestError('bad_request', 'that value cannot be kept as a username; send it without saving');
       kept[role] = value;
     }
+    if (save.username !== undefined) {
+      if ([...roles.values()].includes('username'))
+        throw new InputRequestError(
+          'bad_request',
+          'this card types the username itself, so Save as keeps that one; nothing was typed',
+        );
+      kept.username = save.username;
+    }
+    await this.guardSaveMode(save, kept, held.typedUsername);
     return kept;
+  }
+
+  /**
+   * The owner's "New account" or "Update", checked on the store as it is NOW and again under its lock when it is kept
+   * (`LoginDirectory.saveFields`): a new account never lands on a CLI name another account has, and an update never on
+   * an account that is not there or is someone else (another username). Nothing is typed when it would not hold.
+   */
+  private async guardSaveMode(
+    save: NonNullable<InputDeliverBody['save']>,
+    kept: LoginFieldValues,
+    typedUsername: string | undefined,
+  ): Promise<void> {
+    if (save.mode === undefined) return;
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    if (listing === undefined)
+      throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
+    const account = listing.accounts.find(each => each.id === save.entry);
+    if (save.mode === 'new' && account !== undefined)
+      throw new InputRequestError(
+        'conflict',
+        `${save.entry} is already the CLI name of ${account.label}: choose Update, or give the new account another CLI name. Nothing was typed`,
+      );
+    if (save.mode === 'update' && account === undefined)
+      throw new InputRequestError(
+        'not_found',
+        `there is no account ${save.entry} to update: save it as a new account. Nothing was typed`,
+      );
+    // An account with no username saved takes the one confirmed here; one with another username is another person,
+    // whether the owner's box or the page (what the ferret typed there) names them.
+    if (
+      save.mode === 'update' &&
+      account?.username !== undefined &&
+      [kept.username, typedUsername].some(name => name !== undefined && someoneElse(name, account))
+    )
+      throw new InputRequestError(
+        'conflict',
+        `${account.label} is saved with another username: save it as a new account. Nothing was typed`,
+      );
   }
 
   /**
@@ -2137,6 +2200,7 @@ export class InputRequestService {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, filled),
+      ...(held.typedUsername === undefined ? {} : { typedUsername: held.typedUsername }),
     }).offers.find(each => each.id === entry);
     if (offer === undefined)
       throw new InputRequestError('bad_request', `${entry} is not offered for this target; nothing was typed`);
@@ -2236,12 +2300,21 @@ export class InputRequestService {
     const logins = this.deps.logins;
     if (logins === undefined) return { entry: save.entry, ok: false, problem: 'not saved' };
     try {
-      await logins.save(save.entry, save.label, held.matchKey, kept);
-    } catch {
+      await logins.save(save.entry, save.label, held.matchKey, kept, save.mode);
+    } catch (error) {
+      // The store changed between the check and the save (another card saved first): said plainly, never written over.
+      const raced =
+        error instanceof LoginEntryError &&
+        (error.refusal === 'login_exists' || error.refusal === 'unknown_login' || error.refusal === 'invalid_change');
       return {
         entry: save.entry,
         ok: false,
-        problem: 'The value was typed, but Ferretry could not keep it; save it from Settings › Secrets.',
+        problem: raced
+          ? `The value was typed, but not saved: ${error.message}. Nothing saved was changed; save it from Settings › Accounts.`.slice(
+              0,
+              240,
+            )
+          : 'The value was typed, but Ferretry could not keep it; save it from Settings › Accounts.',
       };
     }
     for (const field of ['username', 'password'] as const) {
@@ -2948,6 +3021,21 @@ function clipped(title: string): string {
 function codesHere(facts: InputTargetFacts | undefined, fields: readonly InputRequestField[]): boolean {
   const ids = fields.filter(field => fillRoleFor(field.sensitivity) === 'totp').map(field => field.id);
   return ids.length > 0 && codeTargetProblem(facts, ids) === undefined;
+}
+
+/**
+ * Who the page a card is raised on is signing in: what the ferret typed into an identifier field of THAT page (by the
+ * browser's page id) in a document on the card's own host. Nothing for a terminal, another page, or another host.
+ */
+function typedUsernameAt(
+  identities: InputRequestServiceDependencies['identities'],
+  sessionId: string,
+  facts: InputTargetFacts,
+  matchKey: string | undefined,
+): Pick<Held, 'typedUsername'> {
+  if (identities === undefined || facts.kind !== 'browser' || matchKey === undefined) return {};
+  const typed = identities.at(sessionId, facts.pageId, matchKey);
+  return typed === undefined ? {} : { typedUsername: typed };
 }
 
 function titleOf(fields: readonly InputRequestField[]): string {

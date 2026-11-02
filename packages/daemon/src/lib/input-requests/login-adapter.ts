@@ -26,7 +26,13 @@ export class InputLoginAdapter implements InputLoginPort {
     return await this.vault.fill(id, role, nowMs, options);
   }
 
-  async save(id: LoginEntryId, label: string, match: string | undefined, fields: LoginFieldValues): Promise<void> {
-    await this.directory.saveFields(id, label, match, fields);
+  async save(
+    id: LoginEntryId,
+    label: string,
+    match: string | undefined,
+    fields: LoginFieldValues,
+    mode?: 'new' | 'update',
+  ): Promise<void> {
+    await this.directory.saveFields(id, label, match, fields, mode);
   }
 }

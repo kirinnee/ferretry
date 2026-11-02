@@ -202,6 +202,27 @@ describe('browser worker snapshots', () => {
     should(absent.ok && 'passwordField' in absent.value).be.false();
   });
 
+  it('should carry an identifier field’s host only when it is a host, and never beside a password field', () => {
+    // Act
+    const typed = (identifierHost: unknown, passwordField?: true) =>
+      normalizeWorkerActionSnapshot({
+        ...snapshotReply(),
+        actedPageId: 'p1',
+        identifierHost,
+        ...(passwordField ? { passwordField } : {}),
+      });
+
+    // Assert
+    const kept = typed('accounts.google.com');
+    should(kept.ok && kept.value.identifierHost).equal('accounts.google.com');
+    for (const bad of ['ACCOUNTS.google.com', 'a b', 'x/y', 42, '']) {
+      const dropped = typed(bad);
+      should(dropped.ok && 'identifierHost' in dropped.value).be.false();
+    }
+    const both = typed('accounts.google.com', true);
+    should(both.ok && 'identifierHost' in both.value).be.false();
+  });
+
   it('should refuse a snapshot with no usable or no matching active page', () => {
     // Act & Assert
     should(normalizeWorkerSnapshot(undefined)).deepEqual({

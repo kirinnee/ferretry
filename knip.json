@@ -53,6 +53,7 @@
         "harness/sharing-screenshot.tsx",
         "harness/screenshot.ts",
         "harness/cred-cards-screenshot.tsx",
+        "harness/save-as-screenshot.tsx",
         "harness/sign-in-rules-screenshot.tsx",
         "harness/accounts-screenshot.tsx",
         "harness/agenda-question-answer-screenshot.tsx",

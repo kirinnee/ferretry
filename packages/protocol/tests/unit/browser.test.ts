@@ -162,6 +162,7 @@ const browserCases: SchemaCase[] = [
     schema: browser.BrowserDownloadNoticeSchema,
     value: { id: 'dl-3', name: 'report.csv', size: 2048, state: 'ready' },
   },
+  { name: 'identifier field host', schema: browser.BrowserFieldHostSchema, value: 'accounts.google.com' },
   { name: 'agent page', schema: browser.BrowserAgentPageSchema, value: agentPage },
   { name: 'capacity', schema: browser.BrowserCapacitySchema, value: capacity },
   { name: 'proxy setting', schema: browser.BrowserProxySettingSchema, value: proxySetting },

@@ -11,6 +11,7 @@
  */
 
 import {
+  type AccountList,
   type AccountSummary,
   factorAskWords,
   INPUT_ERROR_CODES,
@@ -28,6 +29,7 @@ import {
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_ONE_FACTOR_WARNING,
   LOGIN_PASSWORD_MIN_LENGTH,
+  LOGIN_USERNAME_MAX_LENGTH,
   LoginEntryIdSchema,
   loginMethodSentence,
   PlaceKeySchema,
@@ -382,16 +384,194 @@ export const normalizeHandle = (text: string): string =>
 
 export interface SaveDraft {
   readonly enabled: boolean;
+  /**
+   * The owner's choice: keep it in a NEW account (`label`, `id`), or UPDATE the account the card is about
+   * (`saved.update`), replacing its password. `undefined`: an older daemon that sends neither choice, so the name in
+   * the terminal decides, as it always did.
+   */
+  readonly mode: 'new' | 'update' | undefined;
+  /** The account's name, as the owner reads it ("Google · a@gmail.com"). The protocol calls it the label. */
   readonly label: string;
+  /** The name in the terminal (`fy account …`): derived from the name until the owner edits it under "More". */
   readonly id: string;
+  /** The account's username: pre-filled from who the page is signing in, editable. An account IS username + password. */
+  readonly username: string;
+  readonly labelEdited: boolean;
+  readonly idEdited: boolean;
 }
 
-/** Where "Save as" starts: off, with the daemon's suggestion. */
-export const initialSaveDraft = (saved: InputSaved | undefined): SaveDraft => ({
-  enabled: false,
-  label: saved?.suggest?.label ?? '',
-  id: saved?.suggest?.id ?? '',
-});
+/** Two usernames name the same person: equal ignoring case and surrounding space, or both absent. */
+const sameUsername = (left: string | undefined, right: string | undefined): boolean =>
+  (left?.trim().toLowerCase() ?? '') === (right?.trim().toLowerCase() ?? '');
+
+/** Where the new account's name starts: the place ("Google"), from the daemon's suggestion minus who it named. */
+const placeOf = (saved: InputSaved): string => {
+  const label = saved.newAccount?.label ?? '';
+  const typed = saved.typedUsername;
+  return typed !== undefined && label.endsWith(` · ${typed}`) ? label.slice(0, -` · ${typed}`.length) : label;
+};
+
+/** A name in the terminal from a name: capitals, digits and underscores, starting with a letter; `_2`… when taken. */
+const terminalNameOf = (label: string, taken: ReadonlySet<string>): string => {
+  const words = label
+    .toUpperCase()
+    .replaceAll(/[^A-Z0-9]+/gu, '_')
+    .replaceAll(/^_+|_+$/gu, '');
+  const base = (/^[A-Z]/u.test(words) ? words : `LOGIN_${words}`).slice(0, 64).replace(/_+$/u, '');
+  let id = base;
+  for (let count = 2; taken.has(id); count += 1) id = `${base.slice(0, 60).replace(/_+$/u, '')}_${String(count)}`;
+  return id;
+};
+
+/** The names a new account's terminal name must not take: every account the card knows of. */
+const takenIds = (saved: InputSaved | undefined): ReadonlySet<string> =>
+  new Set([...(saved?.offers ?? []).map(offer => offer.id), ...(saved?.update === undefined ? [] : [saved.update.id])]);
+
+/** A new account's name and terminal name for `username`, unless the owner has edited them. */
+const freshNames = (saved: InputSaved, draft: SaveDraft, username: string): Pick<SaveDraft, 'label' | 'id'> => {
+  const suggested = saved.newAccount;
+  const who = username.trim();
+  const label = draft.labelEdited
+    ? draft.label
+    : sameUsername(who, saved.typedUsername) && suggested !== undefined
+      ? suggested.label
+      : (who === '' ? placeOf(saved) : `${placeOf(saved)} · ${who}`).slice(0, LOGIN_LABEL_MAX_LENGTH);
+  const id = draft.idEdited
+    ? draft.id
+    : !draft.labelEdited && sameUsername(who, saved.typedUsername) && suggested !== undefined
+      ? suggested.id
+      : terminalNameOf(label, takenIds(saved));
+  return { label, id };
+};
+
+/**
+ * Where "Save as" starts: off. The Username is who the page is signing in (what the ferret typed in its identifier box)
+ * or, failing that, the account the card is about. It starts on UPDATE only when that username IS the account's own
+ * (two absent usernames, a sudo password, count as the same); on NEW otherwise, and always after the owner pressed
+ * "Type a different one" over a one-tap (`typedInstead`) or when the page is signing in someone else (`differentFrom`).
+ * An account with another username is never the start, and never written by a card.
+ */
+export const initialSaveDraft = (
+  saved: InputSaved | undefined,
+  options: { readonly typedInstead?: boolean } = {},
+): SaveDraft => {
+  const blank = { enabled: false, labelEdited: false, idEdited: false } as const;
+  if (saved?.newAccount === undefined)
+    return {
+      ...blank,
+      mode: undefined,
+      label: saved?.suggest?.label ?? '',
+      id: saved?.suggest?.id ?? '',
+      username: saved?.typedUsername ?? '',
+    };
+  const update = saved.update;
+  const typedInstead = options.typedInstead === true;
+  const username =
+    saved.typedUsername ?? (typedInstead || saved.differentFrom !== undefined ? '' : (update?.username ?? ''));
+  const updates =
+    update !== undefined &&
+    !typedInstead &&
+    saved.differentFrom === undefined &&
+    sameUsername(username, update.username);
+  if (updates) return { ...blank, mode: 'update', label: update.label, id: update.id, username };
+  const draft: SaveDraft = { ...blank, mode: 'new', label: '', id: '', username };
+  return { ...draft, ...freshNames(saved, draft, username) };
+};
+
+/**
+ * The owner switched between "Save as a new account" and "Update <account>". Update takes the account's own username
+ * when it has one, so an update can never carry another person's; New names the account from the username.
+ */
+export const switchSaveMode = (saved: InputSaved | undefined, draft: SaveDraft, mode: 'new' | 'update'): SaveDraft => {
+  const update = saved?.update;
+  if (mode === 'update' && update !== undefined)
+    return { ...draft, mode, label: update.label, id: update.id, username: update.username ?? draft.username };
+  if (mode === 'new' && saved?.newAccount !== undefined) {
+    // Back from an update that took the account's own username: the new account is who the page is signing in again.
+    const username = usernameLocked(saved, draft) ? (saved.typedUsername ?? '') : draft.username;
+    const next: SaveDraft = { ...draft, mode, username, labelEdited: false, idEdited: false };
+    return { ...next, ...freshNames(saved, next, username) };
+  }
+  return draft;
+};
+
+/** The owner typed a username: a new account's name follows it until the owner names the account themselves. */
+export const editSaveUsername = (saved: InputSaved | undefined, draft: SaveDraft, username: string): SaveDraft =>
+  draft.mode === 'new' && saved !== undefined
+    ? { ...draft, username, ...freshNames(saved, draft, username) }
+    : { ...draft, username };
+
+/** The owner named the account: its name in the terminal follows until they edit that under "More". */
+export const editSaveLabel = (saved: InputSaved | undefined, draft: SaveDraft, label: string): SaveDraft => {
+  const next: SaveDraft = { ...draft, label, labelEdited: true };
+  return draft.idEdited || draft.mode === undefined ? next : { ...next, id: terminalNameOf(label, takenIds(saved)) };
+};
+
+/**
+ * Whether Save as shows the Username box: every card that does not type a username itself. On "Update" it is read-only
+ * when the account already has one (a card never changes it); `false` for an older daemon's draft.
+ */
+export const savesUsername = (fields: readonly InputCardField[], draft: SaveDraft): boolean =>
+  draft.mode !== undefined && !fields.some(field => field.sensitivity === 'plain');
+
+/** Whether the Username box may be edited: not on "Update" of an account that has its own. */
+export const usernameLocked = (saved: InputSaved | undefined, draft: SaveDraft): boolean =>
+  draft.mode === 'update' && saved?.update?.username !== undefined;
+
+/** The plain line under "Update <account>": what saving there does, said before the owner sends. */
+export const updateWords = (update: NonNullable<InputSaved['update']>): string =>
+  `Replaces the saved password of ${named(update)}.`;
+
+/** The "Update" choice's words: the account, and that it is the same person. */
+export const updateChoiceWords = (update: NonNullable<InputSaved['update']>): string =>
+  update.username === undefined
+    ? `Update ${update.label}`
+    : update.label.includes(update.username)
+      ? `Update ${update.label} (same username)`
+      : `Update ${update.label} (same username, ${update.username})`;
+
+/** An account as a sentence names it: its name, and its username when the name does not already say it. */
+const named = (account: { readonly label: string; readonly username?: string | undefined }): string =>
+  account.username === undefined || account.label.includes(account.username)
+    ? account.label
+    : `${account.label} (${account.username})`;
+
+/**
+ * The line a card shows when the one-tap was taken away because the page is signing in someone else, or `undefined`.
+ * The typed username is the ferret's word: it is said as what the page shows, never as who the owner is.
+ */
+export const differentAccountWords = (saved: InputSaved | undefined): string | undefined => {
+  const other = saved?.differentFrom;
+  if (other === undefined) return undefined;
+  const typed = saved?.typedUsername;
+  const page = typed === undefined ? '' : ` The page is signing in ${typed}`;
+  return other.username === undefined
+    ? `This looks like a different account.${page}${page === '' ? '' : ','} and ${other.label} has no username saved, so pick it only if it is the same one.`
+    : `This looks like a different account.${page}${page === '' ? '' : ','} not ${named(other)}.`;
+};
+
+/**
+ * The account a card is for, named from the SECRETS-GATED accounts listing (`accounts`, read only by a device with
+ * `secrets.use`), never from the card route: the one-tap account, or the one "Update" would write, else who the page
+ * is signing in. `undefined` without the listing, so a device that may not read accounts sees the place-only title.
+ */
+export const cardAccountWords = (
+  saved: InputSaved | undefined,
+  accounts: AccountList | undefined,
+): string | undefined => {
+  if (accounts === undefined || saved === undefined) return undefined;
+  const id =
+    saved.differentFrom === undefined
+      ? (saved.offers.find(offer => offer.primary === true)?.id ?? saved.update?.id)
+      : undefined;
+  const account = id === undefined ? undefined : accounts.accounts.find(each => each.id === id);
+  if (account !== undefined) return named(account);
+  return saved.typedUsername;
+};
+
+/** `!A7 · Hadi needs a password for Google · a@gmail.com`: the title naming the account, when the device may know it. */
+export const accountTitleWords = (request: InputRequest, agentName: string, account: string): string =>
+  `${titleWords(request, agentName)} for ${account}`;
 
 /** Save is drawn only when a typed value of this kind is ever kept (a one-time code is not). */
 const offersSave = (field: InputCardField): boolean => field.saved?.saves !== undefined;
@@ -400,7 +580,7 @@ const offersSave = (field: InputCardField): boolean => field.saved?.saves !== un
 export const updatedEntry = (saved: InputSaved | undefined, id: string): InputSavedOffer | undefined =>
   saved?.offers.find(offer => offer.id === id);
 
-export const SAVE_TOO_SHORT = `Too short to save: at least ${LOGIN_PASSWORD_MIN_LENGTH} characters. You can still send it.`;
+export const SAVE_TOO_SHORT = `Not saved: a saved password is at least ${LOGIN_PASSWORD_MIN_LENGTH} characters. Send types it without saving it.`;
 
 /**
  * Why the typed value cannot be saved, or `undefined`. It can always be SENT: a short value is only refused a
@@ -438,19 +618,43 @@ export const cardSaveBlock = (
 };
 
 /** The sentence under the Save fields when what is typed in them will not do, or `undefined`. */
-export const saveDraftProblem = (draft: SaveDraft): string | undefined => {
+export const saveDraftProblem = (draft: SaveDraft, saved?: InputSaved): string | undefined => {
   if (!draft.enabled) return undefined;
-  if (draft.label.trim() === '') return 'Give it a label.';
+  if (draft.label.trim() === '') return 'Give the account a name.';
   if (draft.label.trim().length > LOGIN_LABEL_MAX_LENGTH)
-    return `A label is at most ${LOGIN_LABEL_MAX_LENGTH} characters.`;
+    return `A name is at most ${LOGIN_LABEL_MAX_LENGTH} characters.`;
   if (!LoginEntryIdSchema.safeParse(draft.id).success)
-    return 'A handle is uppercase letters, digits and underscores, starting with a letter.';
+    return 'The name in the terminal (under More) is capital letters, digits and underscores, starting with a letter.';
+  const username = draft.username.trim();
+  if (username.length > LOGIN_USERNAME_MAX_LENGTH || /[\p{Cc}\p{Cf}]/u.test(username))
+    return 'That username cannot be kept: one line, at most 256 characters.';
+  if (draft.mode === 'new' && saved?.offers.some(offer => offer.id === draft.id) === true)
+    return `Another account is already called ${draft.id} in the terminal: change it under More.`;
   return undefined;
 };
 
-/** Whether the typed value will be kept: ticked, long enough, and the label and handle are fine. */
-const savesTypedValue = (field: InputCardField, value: string, draft: SaveDraft): boolean =>
-  offersSave(field) && draft.enabled && saveBlock(field, value) === undefined && saveDraftProblem(draft) === undefined;
+/** What `save` a Send carries for a draft that is kept: the owner's choice, and the username only where it is asked. */
+const saveOf = (
+  draft: SaveDraft,
+  saved: InputSaved | undefined,
+  fields: readonly InputCardField[],
+): NonNullable<InputDeliverBody['save']> => {
+  const username = draft.username.trim();
+  return {
+    entry: draft.id,
+    label: draft.label.trim(),
+    ...(draft.mode === undefined ? {} : { mode: draft.mode }),
+    // An update never carries another username: one the account has stays, and the daemon refuses any other.
+    ...(username !== '' && savesUsername(fields, draft) && !usernameLocked(saved, draft) ? { username } : {}),
+  };
+};
+
+/** Whether the typed value will be kept: ticked, long enough, and its names are fine. */
+const savesTypedValue = (field: InputCardField, value: string, draft: SaveDraft, saved?: InputSaved): boolean =>
+  offersSave(field) &&
+  draft.enabled &&
+  saveBlock(field, value) === undefined &&
+  saveDraftProblem(draft, saved) === undefined;
 
 export interface TypedSend {
   readonly request: InputRequest;
@@ -475,7 +679,7 @@ export const typedBody = ({ request, field, value, submit, save, deliveryId }: T
   const problem = inputValueProblem(value, field.sensitivity);
   if (problem !== undefined) return { ok: false, problem };
   if (request.observedDigest === undefined) return { ok: false, problem: REOBSERVING };
-  const keeps = savesTypedValue(field, value, save);
+  const keeps = savesTypedValue(field, value, save, request.saved);
   return {
     ok: true,
     body: {
@@ -483,7 +687,7 @@ export const typedBody = ({ request, field, value, submit, save, deliveryId }: T
       observedDigest: request.observedDigest,
       padded: padInputValue(value),
       submit: enterFor(request, submit),
-      ...(keeps ? { save: { entry: save.id, label: save.label.trim() } } : {}),
+      ...(keeps ? { save: saveOf(save, request.saved, [field]) } : {}),
     },
   };
 };
@@ -517,7 +721,7 @@ export const typedFieldsBody = ({ request, fields, values, submit, deliveryId, s
     save.enabled &&
     cardOffersSave(request, fields) &&
     cardSaveBlock(request, fields, values) === undefined &&
-    saveDraftProblem(save) === undefined;
+    saveDraftProblem(save, request.saved) === undefined;
   return {
     ok: true,
     body: {
@@ -525,7 +729,7 @@ export const typedFieldsBody = ({ request, fields, values, submit, deliveryId, s
       observedDigest: request.observedDigest,
       fields: typed,
       submit: enterFor(request, submit),
-      ...(keeps ? { save: { entry: save.id, label: save.label.trim() } } : {}),
+      ...(keeps ? { save: saveOf(save, request.saved, fields) } : {}),
     },
   };
 };

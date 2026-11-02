@@ -1301,6 +1301,7 @@ import {
   type TwoFactorSeedAgendaPort,
   type TwoFactorSeedCardPort,
   TwoFactorSeedStages,
+  TypedIdentities,
   tailPage,
   tailTranscriptEvents,
   temporaryFilePath,
@@ -6431,6 +6432,8 @@ function createAgentToolsSubsystem(input: {
   /** A ferret's suggestion of a standing rule: a card for the owner and nothing else. */
   readonly ruleSuggestions: Pick<SignInRuleSuggestions, 'suggest'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
+  /** Who a page is signing in: what the agent typed into an identifier field, for the owner's card only. */
+  readonly typedIdentities: Pick<TypedIdentities, 'typed' | 'seen'>;
   /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
   readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
 }): MountedSubsystems['agentTools'] {
@@ -6475,6 +6478,7 @@ function createAgentToolsSubsystem(input: {
       recipes: input.recipes,
       ruleSuggestions: input.ruleSuggestions,
       loginActs: input.loginActs,
+      typedIdentities: input.typedIdentities,
       ...(input.scriptedOrigins === undefined ? {} : { scriptedOrigins: input.scriptedOrigins }),
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
@@ -6539,6 +6543,7 @@ function createInputRequestService(input: {
   readonly service: InputRequestService;
   readonly observer: LoginObserver;
   readonly approvals: PhoneApprovalService;
+  readonly identities: TypedIdentities;
 } {
   const clock = { now: () => Date.now() };
   const terminalTarget = new TmuxInputTarget(
@@ -6566,8 +6571,11 @@ function createInputRequestService(input: {
     now: () => Date.now(),
     sleep: async milliseconds => await Bun.sleep(milliseconds),
   });
+  // Who a page is signing in, as the ferret typed it: plain text it held already, for the owner's card only.
+  const identities = new TypedIdentities(() => Date.now());
   const service = new InputRequestService({
     observer,
+    identities,
     target: new InputTargetRouter(
       terminalTarget,
       pageTarget,
@@ -6666,7 +6674,7 @@ function createInputRequestService(input: {
     // Offered only while the daemon reports it: the app draws the card, so DAEMON_FEATURES.phoneApproval is reported.
     enabled: () => daemonFeatureList().includes(DAEMON_FEATURES.phoneApproval),
   });
-  return { service, observer, approvals };
+  return { service, observer, approvals, identities };
 }
 
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
@@ -10931,6 +10939,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         service: inputRequestService,
         observer: loginObserver,
         approvals: phoneApprovals,
+        identities: typedIdentities,
       } = createInputRequestService({
         storage,
         terminals,
@@ -11013,6 +11022,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ...secureCopies.sessions(),
             ...copyPageRecords.sessions(),
             ...loginObserver.sessions(),
+            ...typedIdentities.sessions(),
             ...phoneApprovals.sessions(),
             ...copyPlans.sessions(),
           ])) {
@@ -11024,6 +11034,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status))) {
               secureCopies.drop(sessionId);
               loginObserver.forget(sessionId);
+              typedIdentities.forget(sessionId);
               await phoneApprovals.sessionEnded(sessionId);
               // A plan ends with its session: its card closes, and its pastes and grants go at once.
               await copyPlans.sessionEnded(sessionId);
@@ -12305,6 +12316,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         recipes: loginRecipes,
         ruleSuggestions: signInRuleSuggestions,
         loginActs: loginObserver,
+        typedIdentities,
         // Every page script, in any session, taints its page's host for the owner's standing rules (R3c §7.3).
         scriptedOrigins: signInRuleGrants,
         files: (() => {

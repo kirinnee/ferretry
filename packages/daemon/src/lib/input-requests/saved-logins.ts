@@ -21,8 +21,7 @@ import {
   savedRolesOf,
   signInMatches,
   strongestSensitivity,
-  suggestedLoginId,
-  suggestedLoginLabel,
+  suggestedNewAccount,
   type TwoFactorId,
   type TwoFactorKeySummary,
 } from '@ferretry/protocol';
@@ -192,15 +191,25 @@ function offered(
   matchKey: string | undefined,
   listing: SavedListing,
   context: SavedChoiceContext,
-): { readonly offers: readonly InputSavedOffer[]; readonly signIn: InputSignIn | undefined } {
+): {
+  readonly offers: readonly InputSavedOffer[];
+  readonly signIn: InputSignIn | undefined;
+  readonly differentFrom: InputSaved['differentFrom'];
+} {
   // A code the daemon makes is offered only where it may type one ({@link codeTargetProblem}): nowhere else, not even
   // as a button that would then be refused.
   const makesCode = roles.includes('totp');
-  if (makesCode && context.codesHere !== true) return { offers: [], signIn: signInFor(matchKey, listing) };
+  if (makesCode && context.codesHere !== true)
+    return { offers: [], signIn: signInFor(matchKey, listing), differentFrom: undefined };
   const holders = listing.accounts.filter(account => roles.every(role => holds(account, role)));
   const byId = new Map(holders.map(account => [account.id, account]));
   const matched = signInsAt(matchKey, listing).filter(signIn => byId.has(signIn.account));
-  const choice = chosenSignIn(matchKey, matched, context);
+  const chosen = chosenSignIn(matchKey, matched, context);
+  // The page is signing in someone else (the ferret typed another username there): the one-tap is REMOVED, never moved
+  // to another account. A typed username only ever takes a choice away.
+  const chosenAccount = chosen === undefined ? undefined : accountOfSignIn(chosen.signIn, matched, byId);
+  const differs = chosenAccount !== undefined && someoneElse(context.typedUsername, chosenAccount);
+  const choice = differs ? undefined : chosen;
   const hinted = hintedAccount(context.hint, listing);
   const signIn = signInFor(matchKey, listing);
   const providers = new Set(listing.signIns.flatMap(each => (each.via === undefined ? [] : [each.via.account.id])));
@@ -242,26 +251,91 @@ function offered(
       (left, right) =>
         Number(right.hinted === true) - Number(left.hinted === true) || left.label.localeCompare(right.label),
     );
-  return { offers: [...atKey, ...byHand], signIn };
+  return {
+    offers: [...atKey, ...byHand],
+    signIn,
+    differentFrom: differs && chosenAccount !== undefined ? refOf(chosenAccount) : undefined,
+  };
+}
+
+/** The account of a sign-in among those matched here. */
+function accountOfSignIn(
+  signInId: string,
+  matched: readonly SignInSummary[],
+  byId: ReadonlyMap<AccountId, AccountSummary>,
+): AccountSummary | undefined {
+  const signIn = matched.find(each => each.id === signInId);
+  return signIn === undefined ? undefined : byId.get(signIn.account);
+}
+
+/** An account as a card names it: handle, label, and its username when it has one. */
+const refOf = (account: AccountSummary): NonNullable<InputSaved['update']> => ({
+  id: account.id,
+  label: account.label,
+  ...(account.username === undefined ? {} : { username: account.username }),
+});
+
+/**
+ * Whether the username typed on the page is NOT this account's: it differs (ignoring case and surrounding space), or
+ * the account has none saved, so nothing says it is the same person. No typed username: nothing is known, so no.
+ */
+export function someoneElse(typed: string | undefined, account: Pick<AccountSummary, 'username'>): boolean {
+  if (typed === undefined) return false;
+  const saved = account.username?.trim().toLowerCase();
+  return saved === undefined || saved !== typed.trim().toLowerCase();
 }
 
 /**
- * The account "Save as" would update: the one {@link chosenSignIn} picks among EVERY sign-in matched here (whatever
- * fields it holds; the ferret's hint is not asked), or a new one named from the key when none signs in here. Two or
- * more sign in here and nothing chose one: none is suggested, so a typed password never lands on "the first" of them.
+ * WHERE "SAVE AS" COULD KEEP A TYPED VALUE:
+ *
+ * - `update`: the account that signs in here whose saved username IS the one typed on the page (exactly one), else the
+ *   one {@link chosenSignIn} picks among EVERY sign-in matched here (whatever fields it holds; the ferret's hint is not
+ *   asked). Two or more sign in here and nothing chose one: no `update`, so a password never lands on "the first".
+ * - `newAccount`: a new one named from the place and the typed username ({@link suggestedNewAccount}), whose CLI name
+ *   no account has.
+ *
+ * Neither saves anything: the owner picks "Save as a new account" or "Update" on the card. An account whose saved
+ * username is not the one typed on the page is never `update`, and the daemon refuses an update into it. `suggest` is what an older app pre-fills: `update` unless the page is
+ * signing in someone else ({@link someoneElse}), or there is none; then `newAccount`.
  */
 function suggestFor(
   matchKey: string | undefined,
   listing: SavedListing,
-  context: SignInChoiceContext,
-): InputSaved['suggest'] {
-  if (matchKey === undefined) return undefined;
+  context: SavedChoiceContext,
+): Pick<InputSaved, 'suggest' | 'update' | 'newAccount'> {
+  if (matchKey === undefined) return {};
   const atKey = signInsAt(matchKey, listing);
-  if (atKey.length === 0) return { id: suggestedLoginId(matchKey), label: suggestedLoginLabel(matchKey) };
-  const choice = chosenSignIn(matchKey, atKey, { ...context, hint: undefined });
-  const signIn = choice === undefined ? undefined : atKey.find(each => each.id === choice.signIn);
-  const account = signIn === undefined ? undefined : listing.accounts.find(each => each.id === signIn.account);
-  return account === undefined ? undefined : { id: account.id, label: account.label };
+  const accountsHere = listing.accounts.filter(each => atKey.some(signIn => signIn.account === each.id));
+  const typed = context.typedUsername;
+  const sameName =
+    typed === undefined ? [] : accountsHere.filter(each => each.username !== undefined && !someoneElse(typed, each));
+  const choice = atKey.length === 0 ? undefined : chosenSignIn(matchKey, atKey, { ...context, hint: undefined });
+  const chosen =
+    choice === undefined
+      ? undefined
+      : accountsHere.find(each => atKey.some(signIn => signIn.id === choice.signIn && signIn.account === each.id));
+  // Never another person's: an account whose saved username is not the one typed on the page is not offered for update.
+  const candidate = sameName.length === 1 ? sameName[0] : chosen;
+  const account =
+    candidate !== undefined && candidate.username !== undefined && someoneElse(typed, candidate)
+      ? undefined
+      : candidate;
+  const newAccount = suggestedNewAccount(matchKey, typed, new Set(listing.accounts.map(each => each.id)));
+  const update = account === undefined ? undefined : refOf(account);
+  // Two or more sign in here and nothing chose one: an older app is suggested nothing, as before, unless the page is
+  // signing in a person none of them is (then a new account is plainly what is typed).
+  const nobodyHere = typed !== undefined && sameName.length === 0;
+  const suggest =
+    account !== undefined && !someoneElse(typed, account)
+      ? { id: account.id, label: account.label }
+      : atKey.length > 0 && account === undefined && !nobodyHere
+        ? undefined
+        : newAccount;
+  return {
+    ...(suggest === undefined ? {} : { suggest }),
+    ...(update === undefined ? {} : { update }),
+    newAccount,
+  };
 }
 
 /**
@@ -269,7 +343,14 @@ function suggestFor(
  * that the target may take a one-time code it makes ({@link codeTargetProblem} found nothing). Absent: no offer that
  * makes a code, so a caller that has not looked never offers one.
  */
-export type SavedChoiceContext = SignInChoiceContext & { readonly codesHere?: boolean };
+export type SavedChoiceContext = SignInChoiceContext & {
+  readonly codesHere?: boolean;
+  /**
+   * The username the ferret typed into this page's identifier field (typed-identities.ts): the DAEMON's record of the
+   * ferret's own act, so only ever the ferret's word. It removes a one-tap and names a new account; nothing more.
+   */
+  readonly typedUsername?: string;
+};
 
 /** The "Use code from Ferretry" buttons of an account: each key whose seed Ferretry holds, in offer order. */
 function codeKeysOf(account: AccountSummary): readonly InputCodeKey[] {
@@ -346,18 +427,27 @@ export function savedFor(
   context: SavedChoiceContext = {},
 ): InputSaved {
   const role = fillRoleFor(sensitivity);
-  const { offers, signIn } = offered([role], role, matchKey, listing, context);
+  const { offers, signIn, differentFrom } = offered([role], role, matchKey, listing, context);
   const saves = savedFieldFor(sensitivity);
-  const suggest = saves === undefined ? undefined : suggestFor(matchKey, listing, context);
   return {
     ...(matchKey === undefined ? {} : { match: matchKey }),
-    ...(suggest === undefined ? {} : { suggest }),
+    ...(saves === undefined ? {} : suggestFor(matchKey, listing, context)),
     ...(saves === undefined ? {} : { saves }),
     offers,
     ...(signIn === undefined ? {} : { signIn }),
+    ...identityOf(context, differentFrom),
     ...projectOf(context),
   };
 }
+
+/** Who the page is signing in, as the ferret typed it, and the one-tap that took away: the owner's view only. */
+const identityOf = (
+  context: SavedChoiceContext,
+  differentFrom: InputSaved['differentFrom'],
+): Pick<InputSaved, 'typedUsername' | 'differentFrom'> => ({
+  ...(context.typedUsername === undefined ? {} : { typedUsername: context.typedUsername }),
+  ...(differentFrom === undefined ? {} : { differentFrom }),
+});
 
 /** The project the session works on, for the card's "Always use for <project>": the daemon's reading, never the ferret's. */
 const projectOf = (context: SavedChoiceContext): Pick<InputSaved, 'project'> => {
@@ -384,15 +474,15 @@ export function savedForFields(
   if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, listing, context);
   const roles = fields.map(field => fillRoleFor(field.sensitivity));
   const fills = fillRoleFor(strongestSensitivity(fields));
-  const { offers, signIn } = offered(roles, fills, matchKey, listing, context);
+  const { offers, signIn, differentFrom } = offered(roles, fills, matchKey, listing, context);
   const kept = savedRolesOf(fields);
-  const suggest = kept === undefined ? undefined : suggestFor(matchKey, listing, context);
   return {
     ...(matchKey === undefined ? {} : { match: matchKey }),
-    ...(suggest === undefined ? {} : { suggest }),
+    ...(kept === undefined ? {} : suggestFor(matchKey, listing, context)),
     ...(kept === undefined ? {} : { saves: [...kept.values()].includes('password') ? 'password' : 'username' }),
     offers,
     ...(signIn === undefined ? {} : { signIn }),
+    ...identityOf(context, differentFrom),
     ...projectOf(context),
   };
 }

@@ -1064,6 +1064,47 @@ describe('AgentToolService — pointer and keys', () => {
     ]);
   });
 
+  it('should keep what the agent typed into an email box as who the page signs in, and never a password (&B137)', async () => {
+    // Arrange
+    const typed: string[] = [];
+    const seen: string[] = [];
+    const world = agentToolWorld({
+      typedIdentities: {
+        typed: (sessionId, pageId, host, text) => void typed.push(`${sessionId}|${pageId}|${host}|${text}`),
+        seen: (sessionId, pageId, host) => void seen.push(`${sessionId}|${pageId}|${host ?? '-'}`),
+      },
+    });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    world.browser.identifierHost = 'accounts.google.com';
+
+    // Act
+    await world.service.call(agent, {
+      tool: 'browser.type',
+      name: 'app',
+      selector: '#identifierId',
+      text: 'ernest@atomi.tech',
+    });
+    world.browser.passwordField = true;
+    await world.service.call(agent, { tool: 'browser.type', name: 'app', selector: '#pw', text: 'not-a-username' });
+    world.browser.passwordField = false;
+    await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: '#next' });
+    // A person typing on the page is not the ferret: nothing is kept for it.
+    await world.service.call(person, {
+      tool: 'browser.type',
+      name: 'app',
+      selector: '#identifierId',
+      text: 'owner@x.com',
+    });
+
+    // Assert
+    should(typed).have.length(1);
+    should(typed[0]).match(/\|accounts\.google\.com\|ernest@atomi\.tech$/u);
+    should(typed.join()).not.containEql('not-a-username');
+    should(typed.join()).not.containEql('owner@x.com');
+    // Every other agent act tells where the page now is, so a page that left the site forgets who it was signing in.
+    should(seen).have.length(2);
+  });
+
   it('should say a password field was filled, tell the agent to hand secrets to the owner, and audit the flag', async () => {
     // Arrange
     const world = agentToolWorld();

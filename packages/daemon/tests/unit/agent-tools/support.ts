@@ -174,6 +174,8 @@ class FakeBrowserPages implements Pick<
   scriptOrigin: string | undefined = 'https://github.com';
   /** Whether every act reports that it put text in a password field. */
   passwordField = false;
+  /** The host every act reports for an identifier field it typed into (an email or username box). */
+  identifierHost: string | undefined;
   /** The document every page shows, as an act's in-queue guard reads it: a navigation changes it. */
   document: string | undefined = 'loader-1';
   /** Runs, oldest first, just before each act reaches its in-queue guard: something landing while the act waited. */
@@ -254,6 +256,7 @@ class FakeBrowserPages implements Pick<
       actedPageId: page.id,
       ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
       ...(this.passwordField ? { passwordField: true as const } : {}),
+      ...(this.identifierHost === undefined ? {} : { identifierHost: this.identifierHost }),
     };
     if (action.action === 'read') {
       const text =
@@ -474,6 +477,7 @@ export function agentToolWorld(
     | 'accounts'
     | 'recipes'
     | 'loginActs'
+    | 'typedIdentities'
     | 'scriptedOrigins'
     | 'ruleSuggestions'
   > &

@@ -183,6 +183,15 @@ export interface AgentToolPorts {
    */
   readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
   /**
+   * Told what an agent's `browser.type` put into an identifier field (an email or username box), and the host each
+   * act left a page on: who a page is signing in, for the owner's card (input-requests/typed-identities.ts). Plain
+   * text the agent typed itself; it only ever removes a one-tap or pre-fills a username. Absent: nothing is kept.
+   */
+  readonly typedIdentities?: {
+    typed(sessionId: string, pageId: string, host: string, text: string): void;
+    seen(sessionId: string, pageId: string, host: string | undefined): void;
+  };
+  /**
    * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
    * and again where it ended: a standing rule fills for every ferret in one shared browser profile, so a script on its
    * login domain suspends it (docs/input-requests.md, "Standing rule fills"). `undefined`: the host couldn't be read, so
@@ -1012,6 +1021,7 @@ export class AgentToolService {
       humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
     const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
     if (secret !== '') facts.detail = { ...facts.detail, passwordField: true };
+    if (caller.kind === 'agent' && 'result' in answer) this.noteIdentity(caller.sessionId, call, answer.result);
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -1031,6 +1041,29 @@ export class AgentToolService {
         ...(page.screenshotFormat === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
       };
     return { summary: `Done on ${reference}${at}.${secret}${check}` };
+  }
+
+  /**
+   * WHO THE PAGE IS SIGNING IN: the agent's own type into an identifier field is kept for that page and the host of
+   * the field's document; any act that leaves the page on another host forgets it. Never into a password field.
+   */
+  private noteIdentity(
+    sessionId: string,
+    call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
+    result: {
+      readonly actedPageId?: string | undefined;
+      readonly url?: string | undefined;
+      readonly identifierHost?: string | undefined;
+      readonly passwordField?: true | undefined;
+    },
+  ): void {
+    const identities = this.ports.typedIdentities;
+    const pageId = result.actedPageId;
+    if (identities === undefined || pageId === undefined) return;
+    const identifier = result.identifierHost;
+    if (call.tool === 'browser.type' && identifier !== undefined && result.passwordField !== true)
+      identities.typed(sessionId, pageId, identifier, call.text);
+    else identities.seen(sessionId, pageId, pageHostOf(result.url));
   }
 
   /**
@@ -2338,6 +2371,16 @@ function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: reado
       return ` A download started: ${name}, ${sizeWords(notice.size ?? 0)} — save it with browser_download (id ${notice.id}).`;
     })
     .join('');
+}
+
+/** A page URL's host, lowercase, or `undefined` when there is none to read. */
+function pageHostOf(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).host.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The element fields of a page tool's call, if it carries any. */

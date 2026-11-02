@@ -972,7 +972,14 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         ...(params.submit === true ? { submit: true } : {}),
         ...(params.slowly === true ? { slowly: true } : {}),
       });
-      return await acted(page, typed.passwordField ? { passwordField: true } : {});
+      return await acted(
+        page,
+        typed.passwordField
+          ? { passwordField: true }
+          : typed.identifierHost === undefined
+            ? {}
+            : { identifierHost: typed.identifierHost },
+      );
     }
     case 'copyRead': {
       const page = targetPage(params.pageId);

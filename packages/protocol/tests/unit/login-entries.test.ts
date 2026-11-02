@@ -21,8 +21,10 @@ import {
   LoginMatchSchema,
   PutLoginEntryRequestSchema,
   RenameLoginEntryRequestSchema,
+  providerNameOf,
   suggestedLoginId,
   suggestedLoginLabel,
+  suggestedNewAccount,
   TotpSeedSchema,
 } from '../../src/lib/login-entries.ts';
 
@@ -146,6 +148,42 @@ describe('what an input card offers', () => {
     expect(suggestedLoginId('1password.com')).toBe('LOGIN_1PASSWORD_COM');
     expect(suggestedLoginLabel('sudo@kirin-box')).toBe('sudo on kirin-box');
     expect(suggestedLoginLabel('github.com')).toBe('github.com');
+  });
+
+  it('should name a new account for its provider and its person, never as a site or an env var', () => {
+    const none = new Set<string>();
+    expect(suggestedNewAccount('accounts.google.com', 'ernest@atomi.tech', none)).toEqual({
+      id: 'GOOGLE_ERNEST',
+      label: 'Google · ernest@atomi.tech',
+    });
+    expect(suggestedNewAccount('accounts.google.com', undefined, none)).toEqual({ id: 'GOOGLE', label: 'Google' });
+    expect(suggestedNewAccount('github.com', 'kirinnee', none)).toEqual({
+      id: 'GITHUB_COM_KIRINNEE',
+      label: 'github.com · kirinnee',
+    });
+    expect(suggestedNewAccount('sudo@kirin-box', undefined, none)).toEqual({
+      id: 'SUDO_KIRIN_BOX',
+      label: 'sudo on kirin-box',
+    });
+  });
+
+  it('should never suggest a CLI name an account already has', () => {
+    expect(suggestedNewAccount('accounts.google.com', 'b@x.com', new Set(['GOOGLE_B', 'GOOGLE_B_2'])).id).toBe(
+      'GOOGLE_B_3',
+    );
+    const long = 'a'.repeat(80);
+    const taken = suggestedNewAccount('accounts.google.com', long, new Set()).id;
+    const next = suggestedNewAccount('accounts.google.com', long, new Set([taken])).id;
+    expect(next.length).toBeLessThanOrEqual(64);
+    expect(next.endsWith('_2')).toBe(true);
+  });
+
+  it('should know only a fixed list of providers', () => {
+    expect(providerNameOf('accounts.google.com')).toBe('Google');
+    expect(providerNameOf('login.microsoftonline.com')).toBe('Microsoft');
+    expect(providerNameOf('liftoff.okta.com')).toBe('Okta');
+    expect(providerNameOf('okta.com')).toBeUndefined();
+    expect(providerNameOf('accounts.google.com.evil.example')).toBeUndefined();
   });
 });
 

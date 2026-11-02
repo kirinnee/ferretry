@@ -182,9 +182,45 @@ export async function isPasswordField(element: Pick<ActableLocator, 'getAttribut
   return type?.trim().toLowerCase() === 'password';
 }
 
+/** The words in a field's `name` or `id` that make a text box an identifier box ("identifier", "loginfmt", "username"). */
+const IDENTIFIER_NAME =
+  /(?:^|[^a-z])(?:identifier|user(?:name|id)?|login(?:fmt|_?id|name)?|e-?mail|account)(?:$|[^a-z])/iu;
+/** The input types a username or an email is typed into. */
+const IDENTIFIER_TYPES: ReadonlySet<string> = new Set(['', 'text', 'email']);
+
+/**
+ * The host of the document an IDENTIFIER field is in (an email or username box), or `undefined` for any other field
+ * or one the check cannot read. An identifier box is an `input` of type email, or of type text with an autocomplete of
+ * `username` or `email`, or a name or id that says so. Only names who a page is signing in; it unlocks nothing.
+ */
+export async function identifierFieldHost(element: ActableLocator): Promise<string | undefined> {
+  const read = async (name: string): Promise<string> =>
+    ((await element.getAttribute(name, { timeout: BROWSER_PROBE_TIMEOUT_MS }).catch(() => null)) ?? '')
+      .trim()
+      .toLowerCase();
+  const type = await read('type');
+  if (!IDENTIFIER_TYPES.has(type)) return undefined;
+  const autocomplete = (await read('autocomplete')).split(/\s+/u);
+  const named = IDENTIFIER_NAME.test(await read('name')) || IDENTIFIER_NAME.test(await read('id'));
+  if (type !== 'email' && !autocomplete.includes('username') && !autocomplete.includes('email') && !named)
+    return undefined;
+  const host = await element
+    .evaluate(
+      (field: {
+        readonly tagName?: string;
+        readonly ownerDocument?: { readonly location?: { readonly host?: string } };
+      }) => (field.tagName === 'INPUT' ? (field.ownerDocument?.location?.host ?? '') : ''),
+      '',
+    )
+    .catch(() => '');
+  return typeof host === 'string' && host !== '' ? host.toLowerCase() : undefined;
+}
+
 /** What typing into a field found worth telling the agent. */
 export interface BrowserTypeOutcome {
   readonly passwordField: boolean;
+  /** The field was an identifier box ({@link identifierFieldHost}): its document's host. */
+  readonly identifierHost?: string;
 }
 
 /** Replaces what a field holds with `text` — at once, or one key at a time — and presses Enter if asked. */
@@ -196,12 +232,13 @@ export async function typeInto(
 ): Promise<BrowserTypeOutcome> {
   const field = await browserElementOf(page, target);
   const passwordField = await isPasswordField(field);
+  const identifierHost = passwordField ? undefined : await identifierFieldHost(field);
   if (options.slowly === true) {
     await field.fill('', { timeout: BROWSER_ACT_TIMEOUT_MS });
     await field.pressSequentially(text, { timeout: BROWSER_ACT_TIMEOUT_MS });
   } else await field.fill(text, { timeout: BROWSER_ACT_TIMEOUT_MS });
   if (options.submit === true) await field.press('Enter', { timeout: BROWSER_ACT_TIMEOUT_MS });
-  return { passwordField };
+  return { passwordField, ...(identifierHost === undefined ? {} : { identifierHost }) };
 }
 
 /**

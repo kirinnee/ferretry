@@ -10,6 +10,7 @@ import {
   BROWSER_MAX_DOWNLOAD_NOTICES,
   type BrowserDownloadNotice,
   BrowserDownloadNoticeSchema,
+  BrowserFieldHostSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
   BrowserPageActionSnapshotSchema,
@@ -175,11 +176,14 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
   const downloads = normalizeWorkerDownloads(asRecord(value)['downloads']);
   // Only the exact value means anything: the worker found a password input.
   const passwordField = asRecord(value)['passwordField'] === true;
+  // A host the schema would refuse is dropped, not the act: it only ever names who a page is signing in.
+  const identifierHost = BrowserFieldHostSchema.safeParse(asRecord(value)['identifierHost']);
   return parsed(BrowserPageActionSnapshotSchema, {
     ...snapshot.value,
     actedPageId,
     ...(downloads.length === 0 ? {} : { downloads }),
     ...(passwordField ? { passwordField: true as const } : {}),
+    ...(identifierHost.success && !passwordField ? { identifierHost: identifierHost.data } : {}),
   });
 }
 
