@@ -581,6 +581,9 @@ describe('the publisher fingerprint', () => {
   it('shows 20 characters after fy_daemon_ in the From row, and all of it when tapped', async () => {
     const { view } = await open({});
     await giveText(fileText);
+    const file = q('[data-catalog-file]')?.textContent ?? '';
+    expect(file).toContain('Machine ID:');
+    expect(file).not.toMatch(/·\s*Machine ID/u);
     const button = q('[data-catalog-file] button[aria-expanded]') as HTMLElement;
     const shown = button.textContent ?? '';
     expect(shown).toBe(`${identity.daemonId.slice(0, 'fy_daemon_'.length + 20)}…`);

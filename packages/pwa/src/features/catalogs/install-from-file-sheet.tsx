@@ -16,6 +16,7 @@ import { useKnownProjects } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useAppStore, useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
+import { Fingerprint } from '../shared/shared-parts.tsx';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
 import { listSecrets } from '../secrets/secrets-api.ts';
 import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
@@ -403,14 +404,11 @@ function OpenedFile({
         <p className="m-0 break-words text-cell font-semibold text-fg" data-catalog-file-summary="">
           {revealHidden(fileSummary(opened))}
         </p>
-        <p className="m-0 break-words text-meta text-muted">
-          From {revealHidden(opened.manifest.publisherName)} ·{' '}
-          <TapToExpand
-            label="Publisher fingerprint"
-            short={fingerprintStart(opened.manifest.publisher)}
-            full={opened.manifest.publisher}
-          />
-        </p>
+        <p className="m-0 break-words text-meta text-muted">From {revealHidden(opened.manifest.publisherName)}</p>
+        <Fingerprint
+          head={fingerprintStart(opened.manifest.publisher).replace(/…$/u, '')}
+          full={opened.manifest.publisher}
+        />
         {sharedBy === undefined ? null : (
           <p className="m-0 break-words text-meta text-muted" data-catalog-shared-by="">
             You call this publisher: {revealHidden(sharedBy)}
