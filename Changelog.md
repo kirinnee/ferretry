@@ -1,3 +1,13 @@
+## [4.226.0](https://github.com/kirinnee/ferretry/compare/v4.225.0...v4.226.0) (2026-11-02)
+
+### Features
+
+* **pwa:** one-tap Add with Undo, and the default catalog (catalogs 3c-4) ([#1315](https://github.com/kirinnee/ferretry/issues/1315)) ([1b1ef93](https://github.com/kirinnee/ferretry/commit/1b1ef932b0fc583bdd2478bee27f042a0c438187))
+
+### Fixes
+
+* **pwa:** put a peer message's footer on one row ([#1317](https://github.com/kirinnee/ferretry/issues/1317)) ([dade1e8](https://github.com/kirinnee/ferretry/commit/dade1e8f5854dfa19f28c72094892bcb7f8b694a))
+
 ## [4.225.0](https://github.com/kirinnee/ferretry/compare/v4.224.0...v4.225.0) (2026-11-02)
 
 ### Features
