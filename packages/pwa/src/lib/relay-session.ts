@@ -1426,8 +1426,8 @@ export class RelayClientSession {
     const mode = this.deps.mode;
     // Unreachable rather than refused: only a serving or streaming session reads a `renew`, and both
     // are keyed and hold a device. The guard is the type system's, so nothing below assumes it.
-    if (transcript === undefined || mode.kind === 'pair' || mode.kind === 'join' || mode.kind === 'join-options')
-      return;
+    const unkeyed = mode.kind === 'pair' || mode.kind === 'join' || mode.kind === 'join-options';
+    if (transcript === undefined || unkeyed) return;
     const proof =
       mode.kind === 'member'
         ? await signDeviceProof(this.deps.crypto, mode.member.key, memberRenewMessage(transcript, nonce))
