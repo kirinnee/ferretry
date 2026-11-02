@@ -968,6 +968,14 @@ value. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; th
 a caller of that daemon can open. A sealed bundle is not a secret value in this document's sense — no
 route, command or API still returns one, and `SecretDirectory` still has no getter.
 
+**The download-link key file is the seventh vault holder.** `link-keys.json` seals each public link's key
+(AES-256-GCM under the vault's own `FileSecretKey`, AAD `catalog-link:<linkId>`) so the owner can Copy the link
+again ([catalogs.md](catalogs.md#the-daemon-3f-4)). It keeps the rule: it is not a secret _value_ of the vault, no
+route returns a key but the owner's own Copy answer for their own public link, a one-time link's key is never
+written, and the file is 0600. A ferret is refused Copy, and `links.json`, the audit and every list answer hold no
+key, URL, token or bundle id. A lost vault key makes the link unreadable and Copy answers `link_not_live`; the link
+itself still works for anyone who holds the URL.
+
 ### Who may do it
 
 All three routes are `secrets` / `configure` ([grants.md](grants.md)), so a device switched off on that

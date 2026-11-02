@@ -102,6 +102,7 @@ import {
   sharedDraftRoutes,
   sharedDraftSocketRoutes,
 } from './shared-drafts.ts';
+import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
@@ -484,6 +485,8 @@ export interface MountedSubsystems {
   /** The catalogs this machine publishes: signed files of skills and MCP setups for another machine to install. */
   readonly sharedCatalogs: SharedCatalogSubsystem;
   readonly catalogMembers: CatalogMemberSubsystem;
+  /** The one-item download links this machine has on, and the link store they sit in. */
+  readonly catalogLinks: CatalogLinkSubsystem;
   /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
    *  session, and the operator configuration that decides whether it may spend a session at all. The
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
@@ -637,6 +640,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...secretRoutes(subsystems.secrets),
         ...sharedCatalogRoutes(subsystems.sharedCatalogs),
         ...catalogMemberRoutes(subsystems.catalogMembers),
+        ...catalogLinkRoutes(subsystems.catalogLinks),
         // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
         // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
         // deeper per-session routes that follow.

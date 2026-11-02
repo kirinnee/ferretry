@@ -126,3 +126,10 @@ unreached PATCH /v1/catalog-installs/project/:installId # CORRECT: daemon-first 
 unreached PATCH /v1/catalog-installs/runtime/:installId # CORRECT: daemon-first slice (catalogs 3d-3); the app's update card dials stay and skip in a later slice
 unreached PUT /v1/catalog-shares/:shareId/new-passkey # CORRECT: daemon-first slice (catalogs join-by-proof); the app's "They need a new passkey" control dials it in a later slice
 unreached DELETE /v1/catalog-shares/:shareId/new-passkey # CORRECT: daemon-first slice (catalogs join-by-proof); the app's "They need a new passkey" control dials it in a later slice
+unreached GET /v1/catalog-links/store # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached POST /v1/catalog-links/preview # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached GET /v1/catalog-links # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached POST /v1/catalog-links # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached GET /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached POST /v1/catalog-links/:linkId/copy # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
+unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice

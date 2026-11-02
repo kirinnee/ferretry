@@ -87,6 +87,13 @@ export interface FoundationPaths {
    * STATE: a damaged file is an error, never an empty list. `catalogShares` holds the SHA-256 of each code and
    * never a code.
    */
+  /**
+   * The download links this machine made, and what it must remember about each (docs/catalogs.md § Links).
+   * STATE: a damaged file is an error, never an empty list. It holds no key and no URL.
+   */
+  readonly catalogLinks: string;
+  /** The keys of public links, sealed under `secrets.key`: the one file that can rebuild a link URL. Never read by a route. */
+  readonly catalogLinkKeys: string;
   readonly catalogMembers: string;
   /** The members file as it was before duplicate names were made unique: kept once, never read. */
   readonly catalogMembersBeforeUniqueNames: string;
@@ -148,6 +155,8 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     catalogsBackupV1: join(state, 'catalogs', 'catalogs.v1.json'),
     catalogsBackupV2: join(state, 'catalogs', 'catalogs.v2.json'),
     catalogBlobs: join(state, 'catalogs', 'blobs'),
+    catalogLinks: join(state, 'catalogs', 'links.json'),
+    catalogLinkKeys: join(state, 'catalogs', 'link-keys.json'),
     catalogMembers: join(state, 'catalogs', 'members.json'),
     catalogMembersBeforeUniqueNames: join(state, 'catalogs', 'members.before-unique-names.json'),
     catalogShares: join(state, 'catalogs', 'shares.json'),

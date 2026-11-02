@@ -754,6 +754,30 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseFields: { memberId: ['memberId'] },
   },
   { method: 'DELETE', path: '/v1/catalog-shares/:shareId', event: 'catalog.share.ended', subject: 'shareId' },
+  // Links (docs/catalogs.md § Links). The mint's answer carries the URL, which holds the key; the copy's answer is the
+  // URL alone. Neither rule names a field that could hold one: ids, the kind and the end only, never the URL, the key,
+  // the token or the store's name for the bundle.
+  {
+    method: 'POST',
+    path: '/v1/catalog-links',
+    event: 'catalog.link.minted',
+    responseFields: {
+      linkId: ['link', 'linkId'],
+      itemId: ['link', 'itemId'],
+      version: ['link', 'version'],
+      kind: ['link', 'kind'],
+      expiresAt: ['link', 'expiresAt'],
+      installCap: ['link', 'installCap'],
+    },
+  },
+  { method: 'POST', path: '/v1/catalog-links/:linkId/copy', event: 'catalog.link.copied', subject: 'linkId' },
+  {
+    method: 'DELETE',
+    path: '/v1/catalog-links/:linkId',
+    event: 'catalog.link.ended',
+    subject: 'linkId',
+    responseFields: { state: ['state'] },
+  },
   {
     method: 'DELETE',
     path: '/v1/catalog-members/:memberId',

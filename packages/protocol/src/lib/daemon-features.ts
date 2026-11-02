@@ -217,15 +217,21 @@ export const DAEMON_FEATURES = {
    * reports this name, and keep the one-step create on a daemon that does not.
    */
   pasteRulePasskey: 'copy-rules.passkey.1',
+  /**
+   * Owner links (docs/catalogs.md § Links): `/v1/catalog-links` makes, lists, shows, copies and turns off a link to one
+   * skill or MCP setup, kept at a link store. NOT REPORTED YET: the routes exist from 3f-4, and the name is reported
+   * with moving and editing a link (3f-5), when the app can draw all of it. Until then the app does not offer links.
+   */
+  catalogLinks: 'catalogs.links.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
 
 /**
  * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
- * them, because the daemon-side half is not built yet. Empty while every name is reported. Removing a name from here is how the daemon starts to offer it.
+ * them, because the daemon-side half is not built yet. Holds only `catalogs.links.1` while links are not built end to end. Removing a name from here is how the daemon starts to offer it.
  */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>();
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.catalogLinks]);
 
 /** The names a daemon of this build reports, in a stable order. */
 export const daemonFeatureList = (): readonly DaemonFeature[] =>

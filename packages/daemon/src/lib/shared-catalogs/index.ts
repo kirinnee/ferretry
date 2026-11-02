@@ -21,7 +21,7 @@ export type {
 } from './ports.ts';
 export { CATALOG_REFUSALS, CatalogRefusal } from './refusal.ts';
 export type { CatalogRefusalCode } from './refusal.ts';
-export { publisherLabel, SharedCatalogService } from './service.ts';
-export type { CatalogMembership, SharedCatalogDeps } from './service.ts';
+export { LinkSourceChanged, publisherLabel, SharedCatalogService } from './service.ts';
+export type { CatalogMembership, LinkSubject, SharedCatalogDeps } from './service.ts';
 export { SKILL_WALK_LIMITS } from './skill-source.ts';
 export type { SkillTreePort } from './skill-source.ts';

@@ -113,6 +113,8 @@ describe('foundation paths', () => {
       catalogsBackupV2: '/tmp/fy-home/state/catalogs/catalogs.v2.json',
       catalogBlobs: '/tmp/fy-home/state/catalogs/blobs',
       // The people it shares with and the codes that let them in: fingerprints of codes, never a code.
+      catalogLinks: '/tmp/fy-home/state/catalogs/links.json',
+      catalogLinkKeys: '/tmp/fy-home/state/catalogs/link-keys.json',
       catalogMembers: '/tmp/fy-home/state/catalogs/members.json',
       catalogShares: '/tmp/fy-home/state/catalogs/shares.json',
       catalogMembersBeforeUniqueNames: '/tmp/fy-home/state/catalogs/members.before-unique-names.json',

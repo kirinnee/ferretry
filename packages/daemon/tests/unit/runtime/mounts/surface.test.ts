@@ -1,3 +1,4 @@
+import type { CatalogLinkSubsystem } from '../../../../src/lib/runtime/mounts/catalog-links.ts';
 import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
 import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { describe, it } from 'bun:test';
@@ -851,6 +852,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   secrets: secretSubsystem(),
   sharedCatalogs: { catalogs: {} as SharedCatalogSubsystem['catalogs'] },
   catalogMembers: { members: {} as CatalogMemberSubsystem['members'] },
+  catalogLinks: { links: {} as CatalogLinkSubsystem['links'] },
   warden: new FakeWarden(),
   transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(

@@ -1412,11 +1412,11 @@ only what is known; changing the sentence is one constant (`CODEX_NEXT`).
 
 ## Links (catalogs 3f)
 
-> **NOT BUILT.** Slice 3f-1 delivers the libraries named below (`@ferretry/protocol` and `@ferretry/relay`) and
-> their unit tests, and nothing else. No daemon route, no store Worker, no app screen and no deploy exists yet, so no
-> link can be made today. This section is the contract those later slices implement against. Where a sentence says
-> "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own behind the relay
-> by service binding.
+> **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4,
+> [The daemon](#the-daemon-3f-4)) exist. The Worker is not deployed or bound behind the relay yet (3f-3), no app
+> screen exists (3f-6), and the daemon does not report `catalogs.links.1`, so no client offers links today. Where a
+> sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own
+> behind the relay by service binding.
 
 A **link** is ONE skill or MCP setup, signed by its publisher and shared as a URL. Nobody joins, nothing is revised and
 the publisher is not asked again. Two kinds:
@@ -1514,6 +1514,62 @@ create answer (once; a one-time URL is never shown again) and in a public link's
 widening a link want a passkey proved for the act `share-link` alone, so a `share-catalog` proof never buys a link and
 the reverse. Copying needs only the unlock; turning a link off never asks.
 
+### The daemon (3f-4)
+
+`packages/daemon/src/lib/catalog-links/` is the domain, `adapters/catalog-links/` the file store, the sealed key vault,
+the store client and the store locator, and `lib/runtime/mounts/catalog-links.ts` the routes. Every route is
+`sharing`/`use`, `noStore`, minimum `operator`.
+
+| Route                                 | Caller | What it does                                                                          |
+| ------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| `GET /v1/catalog-links/store`         | any    | whether a store is set up and reachable (no address)                                  |
+| `POST /v1/catalog-links/preview`      | person | what a link would hold and whether it fits; no passkey; nothing is signed or uploaded |
+| `GET /v1/catalog-links[?itemId=]`     | any    | the owner's links, newest first; no URL, key, bundle id or store address              |
+| `POST /v1/catalog-links`              | person | mint; a fresh `share-link` passkey for a governed caller; `201 {link, url}`           |
+| `GET /v1/catalog-links/:linkId`       | any    | one link                                                                              |
+| `POST /v1/catalog-links/:linkId/copy` | person | a **public** link's URL again; a one-time link is `link_not_public`                   |
+| `DELETE /v1/catalog-links/:linkId`    | person | turn off (idempotent, no passkey)                                                     |
+
+A ferret holds the admin token and may only read (`GET`). Preview, mint, copy and turn off answer it 403 `forbidden`
+(`ownerOnly`): a prompt-injected agent that could mint could hand a stranger a skill from this machine, and one that
+could Copy would read a public link's key.
+
+**Where the store is.** `catalogs.linkStore` in `daemon.json` is `{ "source": "discovery" }` (default: the origin the
+relay advertisement names), `{ "url": "https://…" }` (a self-hosted store; links then carry `s=`) or
+`{ "enabled": false }`. The daemon signs only for the **host of the origin it discovered or was configured with**; the
+client uses `redirect: "error"`, `cache: "no-store"` and a 20 s timeout, and reports no store body: a closed refusal
+code, or `unreachable`. Nothing is deployed by this slice; 3f-3 binds the Worker behind the relay.
+
+**Mint**, in this order: locate the store → daemon identity → quota (50 live) → `linkSubject` (the item frozen as a
+shared item, **kept only after the upload succeeds**) → digest check against the preview → sign and envelope → seal the
+key (`vault.put`, public only) → write a `pending` record → upload → keep the item → write `live`. A crash between
+steps leaves a `pending` record. **Boot reconciliation** (and every 60 s) settles it against the store's status: live
+there ⇒ `live`; absent ⇒ `ended`. A link being turned off is `ending` and is retried with jittered backoff until the
+store has confirmed the delete.
+
+**The key.** A public link's key is sealed in `link-keys.json` (AES-256-GCM, AAD `catalog-link:<linkId>`) under the
+vault's own key: the seventh holder in [secrets.md](secrets.md). A one-time link's key is never written; the URL is
+shown once. `links.json` holds ids, kinds, states and times and no URL, key, token or bundle id; `wire-secrets.test.ts`
+walks every owner schema for such a field.
+
+**Audit.** `catalog.link.minted` (link id, item id, version, kind, expiry, install cap), `catalog.link.copied` and
+`catalog.link.ended` ([audit.md](audit.md)). Never the URL, the key, the token or the bundle id.
+
+**Not yet reported.** The feature `catalogs.links.1` stays in `NOT_YET_REPORTED` until 3f-5 and the app land, so no
+client offers links against this daemon yet.
+
+**Built in 3f-4 and left to later slices:**
+
+- 3f-5: move, `PATCH`, refresh, lease and revival (so a public link with no end lapses after 30 days until then),
+  `usedBy.linkIds`, `version_linked`, the `catalog.link.moved|changed|revived` events, an identity rotation ending
+  links, and reporting `catalogs.links.1`.
+- 3f-3 (the Worker binding), 3f-6 (the app), 3f-7 and 3f-8.
+- Preview returns no `matches`, and it needs no summary, so a skill that needs one is `source_refused` at preview.
+  `link_kind_unsupported` is unreachable today. A stored link carries the item's name and kind.
+- **A new item whose upload answer never came is never kept**, so its `pending` public link reconciles to `ended`
+  (`item-gone`). The link is safe (the store was not told, or its delete was retried); the owner makes it again.
+- `storeState` stays `ok` on a link the refresh has just found used.
+
 ### Declared gaps
 
 - **A link cannot be recalled from what was already downloaded.** Turning it off stops new fetches; a copy already
@@ -1591,4 +1647,4 @@ What this does **not** protect against, said plainly (more in design §4.8):
 | **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Sharing › My catalogs, Install from a file). The next phase is 2 (members, live), once decided.                                                                                                                                                                                                                                                                                                                                                                                  |
 | **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). **2b-1 built**: shares, members, the owner routes and `fy catalog share` / `fy member` ([Built in 2b-1](#built-in-2b-1-shares-and-members-on-the-publisher)). **2b-2 built**: relay `join`/`member` records, the member route table, member passkeys, closing sessions on revoke ([Built in 2b-2](#built-in-2b-2-join-and-member-sessions-on-the-publisher)). **2c built**: the app for owners and members ([Built in 2c](#built-in-2c-the-app-for-members)). **2d built**: the end-to-end test of join, passkey, install, join again and revoke in Chromium (`tests/e2e/catalogs-members.e2e.test.ts`). |
-| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started. **Download links (3f)**: the daemon side is built ([The daemon](#the-daemon-3f-4)), no Worker deploy or app yet.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
