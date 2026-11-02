@@ -240,7 +240,15 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       const current = await this.observed(id, nudged, hold, now);
       const deadline = deadlineOf(current, this.settings);
       const after = now < deadline ? current : await this.expire(id, current, reading, verdict, hold, now);
-      if (!isOpenSend(after)) continue;
+      if (!isOpenSend(after)) {
+        // Settled unconfirmed at the hold ceiling with its text still in the composer: the long watch of
+        // `unconfirmedInComposer` takes over, and must be armed now — nothing else would schedule it.
+        if (after.fate === 'unaccounted' && after.typedNotSent === true && strandableText(after) !== undefined) {
+          const look = now + this.settings.busyExtensionMs;
+          next = next === undefined ? look : Math.min(next, look);
+        }
+        continue;
+      }
       // A send this look re-typed is looked at again soon, like any fresh transport.
       const due = deadlineOf(after, this.settings);
       const composerLook = hold === 'composer' ? this.composerLookAt(after, now) : undefined;

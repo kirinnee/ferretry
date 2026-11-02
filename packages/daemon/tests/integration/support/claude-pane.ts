@@ -34,6 +34,12 @@ export class ClaudePane implements TmuxCommandPort {
    */
   stalled = false;
   private pending = '';
+  /**
+   * Typed after the payload, once the pane has been looked at this many times since the fill — after the
+   * fill proved its landing and before the Enter (B144: a person typing between the two).
+   */
+  joinsAfterLooks: { readonly looks: number; readonly text: string } | undefined;
+  private looksSinceFill = 0;
 
   private readonly height = 34;
   private readonly buffers = new Map<string, string>();
@@ -69,7 +75,17 @@ export class ClaudePane implements TmuxCommandPort {
   async execute(argv: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     this.calls.push(argv);
     const command = argv[0];
-    if (command === 'display-message') return ok(this.metadata());
+    if (command === 'display-message') {
+      if (
+        this.joinsAfterLooks !== undefined &&
+        this.composer !== '' &&
+        ++this.looksSinceFill > this.joinsAfterLooks.looks
+      ) {
+        this.composer += this.joinsAfterLooks.text;
+        this.joinsAfterLooks = undefined;
+      }
+      return ok(this.metadata());
+    }
     if (command === 'capture-pane') return ok(`${this.lines().join('\n')}\n`);
     if (command === 'send-keys') return this.keys(argv);
     if (command === 'load-buffer') {

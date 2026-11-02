@@ -923,6 +923,22 @@ describe('B144: text of ours left unsubmitted, the ferret idle', () => {
     should(world.resubmitted).be.empty();
   });
 
+  it('keeps looking at a send settled unconfirmed at the hold ceiling with its text still in the box (review)', async () => {
+    const world = new World(
+      record({ path: 'native-inline', message: 'please re-run the suite', matchText: 'please re-run the suite' }),
+    );
+    world.inPane = 'composer';
+    world.resubmitDeclines = true;
+    world.pane = pane({ activeWork: true });
+    world.target = { id: ID, status: 'running', mode: 'auto', turn: 4, turnState: 'working', turnStateAt: at(0) };
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs + 1_000);
+
+    should(world.only).match({ fate: 'unaccounted', typedNotSent: true });
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.busyExtensionMs);
+  });
+
   it('presses Enter on a long message typed as itself once its nudge is due', async () => {
     const world = new World(
       record({ path: 'native-inline', message: 'please re-run the suite', matchText: 'please re-run the suite' }),

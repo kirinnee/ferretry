@@ -10,8 +10,15 @@
  * queue, and says so only when the pane shows it there.
  */
 
-import { type LandingEvidence, needsQueueKey, queuedWhere, type TmuxController } from '../../lib/tmux/index.ts';
-import { captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
+import {
+  composerHoldsOtherText,
+  frameCursor,
+  type LandingEvidence,
+  needsQueueKey,
+  queuedWhere,
+  type TmuxController,
+} from '../../lib/tmux/index.ts';
+import { ComposerUnconfirmedError, captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
 
 export interface PaneQueueOptions {
   /** Times the composer may be filled from scratch. */
@@ -82,6 +89,13 @@ export class TmuxPaneQueue {
    */
   async queue(session: string, text: string): Promise<PaneQueueOutcome> {
     const evidence = await this.fill(session, text);
+    // Somebody typed beside the payload after the fill: Enter would queue their words with it (B144).
+    const before = await captureFrame(this.tmux, session);
+    if (composerHoldsOtherText(before.visible, frameCursor(before), text))
+      throw new ComposerUnconfirmedError(
+        `the message was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
+        1,
+      );
     const submitted = await this.tmux.sendKey(session, 'Enter').then(
       () => true,
       () => false,

@@ -1817,6 +1817,17 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     should(built.repository.transitions).match([{ event: 'control.turn_reserved', turn: 5, keepReason: true }]);
   });
 
+  it('reserves nothing again for a replayed revive request, answering from its first record (review)', async () => {
+    const built = idle([pane({ alive: false })], unconfirmed());
+    await built.service.send(request()).catch(() => undefined);
+    const reservations = built.repository.transitions.filter(change => change.event === 'control.turn_reserved');
+
+    await built.service.send(request()).catch(() => undefined);
+
+    should(built.repository.transitions.filter(change => change.event === 'control.turn_reserved')).eql(reservations);
+    should(built.ledger.records.get('send-1')).match({ turn: 6 });
+  });
+
   it('starts the turn an unconfirmed typing reserved, once an Enter takes its pointer', async () => {
     const built = idle([pane({ draft: POINTER })], unconfirmed());
     await built.repository.transition(ID, { event: 'control.turn_reserved', turn: 5, keepReason: true });

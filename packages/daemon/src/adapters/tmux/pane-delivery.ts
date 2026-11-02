@@ -15,6 +15,8 @@
 
 import {
   classifySubmit,
+  composerHoldsOtherText,
+  frameCursor,
   type InjectionOutcome,
   type LandingEvidence,
   nextReadinessStep,
@@ -28,7 +30,13 @@ import {
   type StartupDialogOptions,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
-import { ComposerOccupiedError, captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
+import {
+  ComposerOccupiedError,
+  ComposerUnconfirmedError,
+  captureFrame,
+  type DeliverySleep,
+  fillComposer,
+} from './composer-fill.ts';
 
 export interface PaneDeliveryOptions {
   /** Frames to look at while waiting for a prompt before giving up. */
@@ -184,6 +192,13 @@ export class TmuxPaneDelivery {
   private async submit(session: string, text: string, evidence: LandingEvidence): Promise<InjectionOutcome> {
     for (let attempt = 0; attempt < this.settings.submitAttempts; attempt++) {
       const before = await captureFrame(this.tmux, session);
+      // A person who typed after the fill shares the composer with the payload now: Enter would submit their
+      // words with it. Nothing is pressed; the send is typed and unconfirmed, and never typed again.
+      if (composerHoldsOtherText(before.visible, frameCursor(before), text))
+        throw new ComposerUnconfirmedError(
+          `the turn was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
+          1,
+        );
       await this.tmux.sendKey(session, 'Enter');
       // Polls counted from the pane's first repaint after this Enter; until then, time against the ceiling.
       let sinceResponse: number | undefined;

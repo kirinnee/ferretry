@@ -1095,7 +1095,7 @@ export class SessionSendService {
         sendId: request.sendId,
         path: 'revive',
         message: payload,
-        turn: await this.revivedTurn(target),
+        turn: await this.revivedTurn(target, request.sendId),
       });
     });
     if (!accepted.created) return this.settledAs(accepted.record, false);
@@ -1140,8 +1140,13 @@ export class SessionSendService {
    * turn, so a turn a send still names that the session has not reserved (one recorded before reservations
    * existed) is reserved first: the relaunch's file and this record then agree, and neither overwrites it.
    */
-  private async revivedTurn(target: SendTarget): Promise<number> {
-    const turn = nextTurnNumber(target, await this.ports.ledger.list(target.id));
+  private async revivedTurn(target: SendTarget, sendId: string): Promise<number> {
+    const records = await this.ports.ledger.list(target.id);
+    // A replayed request is answered from its first record by `accept`: nothing is reserved for it again,
+    // and its own record is not a turn some OTHER send names.
+    const replayed = records.find(record => record.sendId === sendId && record.fate !== 'withdrawn');
+    if (replayed !== undefined) return replayed.turn ?? target.turn + 1;
+    const turn = nextTurnNumber(target, records);
     if (turn > target.turn + 1)
       await this.ports.repository.transition(target.id, {
         event: 'control.turn_reserved',

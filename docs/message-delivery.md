@@ -476,7 +476,11 @@ decision and the key are a few awaits apart, and a person may type in between, s
 pane again right before Enter and presses only when the composer is the payload and nothing else (its lone
 paste placeholder, for a paste), at a pane that is not mid-turn or behind a prompt. Containment — the payload
 anywhere in the composer — still rules out a retype; it never licenses a key. The person's own **Press Enter**
-(`POST …/sends/:id/enter`) and **Send it** (`/composer`) are held to the same exactness.
+(`POST …/sends/:id/enter`) and **Send it** (`/composer`) are held to the same exactness. So is the delivery's own
+FIRST Enter (`TmuxPaneDelivery.submit`, `TmuxPaneQueue.queue`): a fresh frame before each key that READABLY shows
+anything beside or instead of the payload — a person's words after it, or a paste placeholder whose count
+disagrees, i.e. a person's replacement paste (`composerHoldsOtherText`) — stops the Enter; the send is typed and
+unconfirmed, and never typed again.
 
 **One Enter budget, durably.** The tracker writes the ledger under its own lock and the send service under
 another (the tracker calls the service, so they cannot share one); a tracker write from a stale read used to

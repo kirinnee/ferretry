@@ -263,6 +263,20 @@ describe('a turn pointer typed into a stalled idle pane (annabeth, 2026-11-02)',
   });
 });
 
+describe('a person typing between the fill and the Enter (review finding)', () => {
+  it('presses no Enter on our text joined to theirs, and leaves it unconfirmed, typed once', async () => {
+    const subject = await world();
+    subject.pane.joinsAfterLooks = { looks: 1, text: ' and also delete my draft' };
+
+    await subject.enqueue('send-short', 'please rerun the catalog suite');
+
+    should(subject.pane.enters()).equal(0);
+    should(subject.pane.fills()).have.length(1);
+    should(subject.pane.composer).equal('please rerun the catalog suite and also delete my draft');
+    should(await subject.record('send-short')).match({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
+  });
+});
+
 describe('a long message typed as itself whose Enter was swallowed (braelynn, 2026-11-02)', () => {
   it('presses Enter on the lone paste placeholder once its nudge is due', async () => {
     // braelynn's sat as `[Pasted text #40 +3 lines]` for fourteen hours. A single line this long is typed as
