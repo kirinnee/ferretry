@@ -5,7 +5,12 @@ import {
   conservativeChanges,
   HIDDEN_WARNING,
   MAX_SCANNED,
+  foldedForScan,
+  isKnownTokenShape,
+  joinedLines,
   mayHoldSecret,
+  namesSecret,
+  withoutInvisible,
 } from '../../../src/lib/catalog-installs/conservative-changes.ts';
 
 const base = { format: 'ferretry-catalog-item', version: 1, publisher: 'p', catalogId: 'c', itemId: 'i', name: 'x' };
@@ -146,5 +151,38 @@ describe('conservativeChanges', () => {
     const budget = { remaining: 0 };
     const changes = conservativeChanges(skill(['a.md', 'x\n1\n']), skill(['a.md', 'x\n2\n']), budget);
     should(changes.truncated).equal(true);
+  });
+});
+
+describe('mayHoldSecret over look-alike forms', () => {
+  it('reads full-width letters as the plain ones they stand for', () => {
+    should(mayHoldSecret('ｐａｓｓｗｏｒｄ is here')).equal(true);
+    should(mayHoldSecret(`${'Ａ'.repeat(30)}`)).equal(true);
+    should(mayHoldSecret('ｈｅｌｌｏ ｗｏｒｌｄ')).equal(false);
+  });
+});
+
+describe('the helpers the copy refusal shares', () => {
+  it('strips invisible characters, joins lines, folds, and names secrets', () => {
+    should(withoutInvisible('a​b⟨U+00AD⟩c')).equal('abc');
+    should(joinedLines('a\r\nb\nc')).equal('abc');
+    should(foldedForScan('Ａ​Ｂ')).equal('AB');
+    should(namesSecret('X-Auth')).equal(true);
+    should(namesSecret('colour')).equal(false);
+  });
+
+  it('should know a well-known token by its prefix, length and a digit', () => {
+    should(isKnownTokenShape(`ghp_${'0'.repeat(36)}`)).equal(true);
+    should(isKnownTokenShape(`GHP_${'0'.repeat(36)}`)).equal(true);
+    should(isKnownTokenShape(`sk-ant-api03-${'1'.repeat(20)}`)).equal(true);
+    should(isKnownTokenShape(`xoxb-${'2'.repeat(20)}`)).equal(true);
+    should(isKnownTokenShape(`AKIA${'3'.repeat(16)}`)).equal(true);
+    should(isKnownTokenShape(`akia${'3'.repeat(16)}`)).equal(false);
+    should(isKnownTokenShape(`eyJ${'4'.repeat(30)}`)).equal(true);
+    should(isKnownTokenShape('ghp_short1')).equal(false);
+    should(isKnownTokenShape('sk-learn-is-a-python-library')).equal(false);
+    should(isKnownTokenShape(`ghp_${'0'.repeat(30)}!`)).equal(false);
+    should(isKnownTokenShape(`-----BEGIN${'0'.repeat(30)}`)).equal(false);
+    should(isKnownTokenShape(`plain${'0'.repeat(30)}`)).equal(false);
   });
 });

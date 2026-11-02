@@ -12,6 +12,14 @@ import type {
   CatalogInstallRequest,
   CatalogInstallScope,
 } from './catalog-install.ts';
+import type {
+  LocalSkillInstalled,
+  LocalSkillInstallList,
+  LocalSkillInstallRequest,
+  LocalSkillPreview,
+  LocalSkillPreviewRequest,
+  LocalSkillRemoved,
+} from './local-skill-install.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
@@ -139,6 +147,14 @@ export interface IFyApiClient {
   catalogInstalls(): Promise<CatalogInstallList>;
   /** Remove exactly what one install wrote. */
   removeCatalogInstall(scope: CatalogInstallScope, installId: string): Promise<CatalogInstallRemoved>;
+  /** Review copying one skill from another account or project on this machine. Writes nothing. */
+  previewLocalSkillInstall(scope: CatalogInstallScope, request: LocalSkillPreviewRequest): Promise<LocalSkillPreview>;
+  /** Copy exactly one reviewed local preview. */
+  applyLocalSkillInstall(scope: CatalogInstallScope, request: LocalSkillInstallRequest): Promise<LocalSkillInstalled>;
+  /** The skills this machine copied from itself. */
+  localSkillInstalls(): Promise<LocalSkillInstallList>;
+  /** Remove exactly the files one local copy wrote. */
+  removeLocalSkillInstall(scope: CatalogInstallScope, installId: string): Promise<LocalSkillRemoved>;
   daemonUpdate(): Promise<DaemonUpdateView>;
   /** Start, or schedule for idle, the update to `request.target`; the daemon restarts after answering. */
   startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;

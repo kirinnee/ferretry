@@ -64,6 +64,7 @@ export * from './harness-update.ts';
 export * from './input-request.ts';
 export * from './io-pressure.ts';
 export * from './learning.ts';
+export * from './local-skill-install.ts';
 export * from './login-entries.ts';
 export * from './login-recipes.ts';
 export * from './loopback-firewall.ts';

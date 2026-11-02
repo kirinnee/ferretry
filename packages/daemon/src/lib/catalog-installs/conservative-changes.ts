@@ -138,6 +138,36 @@ function hasCredentialFlag(text: string): boolean {
   return false;
 }
 
+/** `text` with its invisible format characters (and the `⟨U+00AD⟩` marks the review writes for them) taken out. */
+export const withoutInvisible = (text: string): string => text.replace(INVISIBLE, '');
+
+/** `text` with its line breaks taken out, so a name or a value a line break split reads whole again. */
+export const joinedLines = (text: string): string => text.replace(LINE_BREAKS, '');
+
+/** `text` as the scans read it: invisible characters out, and look-alike forms (full-width letters) folded to plain ones. */
+export const foldedForScan = (text: string): string => withoutInvisible(text).normalize('NFKC');
+
+/** Whether a NAME announces a secret, wherever in it the word stands (`api_key`, `apikey`, `X-Auth`, `passphrase`). */
+export const namesSecret = (name: string): boolean => hasAny(name.toLowerCase(), SECRET_WORDS);
+
+/** A well-known token is at least this long, prefix included (`ghp_` plus 36, `AKIA` plus 16, `sk-` plus 20 or more). */
+const MIN_TOKEN_LENGTH = 20;
+const TOKEN_TAIL = /^[A-Za-z0-9_-]+$/u;
+
+/**
+ * Whether `word` is, whole, a well-known token: one of the prefixes above, at least {@link MIN_TOKEN_LENGTH}
+ * characters of letters, digits, `_` and `-`, and a digit in it (a hyphenated word that merely starts `sk-` is
+ * prose). `-----BEGIN` is a key block, not a token, and is not here. Linear.
+ */
+export function isKnownTokenShape(word: string): boolean {
+  if (word.length < MIN_TOKEN_LENGTH || !TOKEN_TAIL.test(word) || !/\d/u.test(word)) return false;
+  const lower = word.toLowerCase();
+  return (
+    LOWER_PREFIXES.some(prefix => !prefix.startsWith('-') && lower.startsWith(prefix)) ||
+    EXACT_PREFIXES.some(prefix => word.startsWith(prefix))
+  );
+}
+
 /** Names, token prefixes and expansions: the things a line break or an invisible character can split. */
 function trips(text: string): boolean {
   const lower = text.toLowerCase();
@@ -157,10 +187,12 @@ function trips(text: string): boolean {
 export function mayHoldSecret(text: string): boolean {
   if (text.length > MAX_SCANNED) return true;
   if (trips(text) || hasLongWord(text) || hasUserInfo(text) || hasCredentialFlag(text)) return true;
-  const unmarked = text.replace(INVISIBLE, '');
+  const unmarked = withoutInvisible(text);
   if (unmarked.length !== text.length && hasLongWord(unmarked)) return true;
-  const joined = unmarked.replace(LINE_BREAKS, '');
-  return joined.length !== text.length && trips(joined);
+  const joined = joinedLines(unmarked);
+  if (joined.length !== text.length && trips(joined)) return true;
+  const folded = foldedForScan(text);
+  return folded !== unmarked && (trips(folded) || hasLongWord(folded));
 }
 
 export const HIDDEN_WARNING = 'Hidden: this may hold a secret. Open the item yourself to read it.';

@@ -16,6 +16,7 @@ import { lstat, mkdir, open, readdir, rename, rm, rmdir } from 'node:fs/promises
 import { dirname, join, posix } from 'node:path';
 import { CATALOG_SKILL_FILE_MAX_BYTES, CATALOG_SKILL_MAX_BYTES } from '@ferretry/protocol';
 import {
+  MAX_SKILL_FOLDER_FILES,
   type SkillFilesReading,
   SkillFolderChanged,
   type SkillFolderChange,
@@ -24,7 +25,6 @@ import {
 } from '../../lib/catalog-installs/ports.ts';
 
 /** More than a skill is: a folder past either limit is refused, not read. */
-export const MAX_SKILL_FOLDER_FILES = 64;
 export const MAX_SKILL_FOLDER_BYTES = 4 * 1024 * 1024;
 
 const NEW_FILE_MODE = 0o644;

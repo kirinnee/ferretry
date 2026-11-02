@@ -679,6 +679,7 @@ interface AutoResumeBoot {
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileCatalogInstallPrefsStore } from '../src/adapters/catalog-installs/prefs-file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
+import { FileLocalSkillInstallStore } from '../src/adapters/local-skill-installs/file-store.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
 import {
   countedFileOperations,
@@ -687,6 +688,7 @@ import {
 } from '../src/adapters/runtime/performance-instruments.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
+import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -12428,7 +12430,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const mounted: Omit<
         MountedSubsystems,
-        'sessionMcp' | 'catalogInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers'
+        'sessionMcp' | 'catalogInstalls' | 'localSkillInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers'
       > = {
         pack: {
           service: packService,
@@ -13523,6 +13525,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),
           fleet: fleetCatalog,
           secretNames: async () => new Set((await secretDirectory.list()).map(secret => secret.name)),
+          now: () => millisecondClock.now(),
+          mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
+        }),
+        localSkillInstalls: new LocalSkillInstallService({
+          crypto: new WebCryptoRelayCrypto(),
+          store: new FileLocalSkillInstallStore(paths, stateFiles),
+          skills: {
+            list: async () => {
+              const inventory = await mounted.catalogs.skillsInventory();
+              return [
+                ...inventory.homes.flatMap(home => home.skills),
+                ...inventory.projects.flatMap(project => project.skills),
+              ];
+            },
+          },
+          skillTree: new NodeSkillFolder(),
+          fleetDirectory: paths.fleet,
+          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
+          skillFiles: new FileProjectSkillFiles(),
+          runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),
+          fleet: fleetCatalog,
           now: () => millisecondClock.now(),
           mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
         }),

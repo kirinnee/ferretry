@@ -176,3 +176,57 @@ describe('the skill folder on disk', () => {
     should(await new NodeSkillFolder().list(join(root, 'plain.txt', 'SKILL.md'), SKILL_WALK_LIMITS)).equal(undefined);
   });
 });
+
+describe('the skill folder kept inside the boundary the inventory listed it under', () => {
+  async function projectWith(folder: string, files: Readonly<Record<string, string>>) {
+    const project = await mkdtemp(join(tmpdir(), 'ferretry-project-'));
+    roots.add(project);
+    const skills = join(project, '.claude', 'skills');
+    await mkdir(join(skills, folder), { recursive: true });
+    for (const [path, content] of Object.entries(files)) await writeFile(join(skills, folder, path), content);
+    return { project, skills, manifest: join(skills, folder, 'SKILL.md') };
+  }
+
+  it('should list and read a folder that resolves inside it, through a link that stays inside', async () => {
+    const { project, skills } = await projectWith('real', { 'SKILL.md': 'abc' });
+    await symlink(join(skills, 'real'), join(skills, 'alias'));
+    const manifest = join(skills, 'alias', 'SKILL.md');
+    const folder = new NodeSkillFolder();
+
+    const listing = await folder.list(manifest, SKILL_WALK_LIMITS, project);
+    const read = await folder.read(manifest, 'SKILL.md', 1_000, project);
+
+    should(listing?.entries.map(entry => entry.path)).deepEqual(['SKILL.md']);
+    should(read.ok && new TextDecoder().decode(read.bytes)).equal('abc');
+  });
+
+  it('should neither list nor read a folder that is a link out of it', async () => {
+    const { project, skills } = await projectWith('real', { 'SKILL.md': 'abc' });
+    const outside = await skill({ 'SKILL.md': 'from elsewhere' });
+    await symlink(outside.root, join(skills, 'leaving'));
+    const manifest = join(skills, 'leaving', 'SKILL.md');
+    const folder = new NodeSkillFolder();
+
+    should(await folder.list(manifest, SKILL_WALK_LIMITS, project)).equal(undefined);
+    should(await folder.read(manifest, 'SKILL.md', 1_000, project)).deepEqual({ ok: false, reason: 'unreadable' });
+    should((await folder.list(manifest, SKILL_WALK_LIMITS))?.entries.length).equal(1);
+  });
+
+  it('should refuse the read of a folder swapped for a link out of it after it was listed', async () => {
+    const { project, skills, manifest } = await projectWith('demo', { 'SKILL.md': 'abc' });
+    const outside = await skill({ 'SKILL.md': 'from elsewhere' });
+    const folder = new NodeSkillFolder();
+    should((await folder.list(manifest, SKILL_WALK_LIMITS, project))?.entries.length).equal(1);
+
+    await rm(join(skills, 'demo'), { recursive: true });
+    await symlink(outside.root, join(skills, 'demo'));
+
+    should(await folder.read(manifest, 'SKILL.md', 1_000, project)).deepEqual({ ok: false, reason: 'unreadable' });
+  });
+
+  it('should answer undefined when the boundary itself is gone', async () => {
+    const { manifest } = await projectWith('demo', { 'SKILL.md': 'abc' });
+
+    should(await new NodeSkillFolder().list(manifest, SKILL_WALK_LIMITS, '/no/such/boundary')).equal(undefined);
+  });
+});
