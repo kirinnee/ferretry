@@ -408,6 +408,7 @@ function OpenItem({
           formKey={card.key}
           history={history}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
+          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}

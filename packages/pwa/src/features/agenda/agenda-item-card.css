@@ -201,6 +201,29 @@
     animation-play-state: paused;
   }
 }
+/* Where motion is reduced the title is cut at a word: the whole title stays in the DOM (still read aloud) but is not
+   drawn, and the cut one (ending in "…") is. The probe only measures candidates. */
+.fy-item-view__title-cut {
+  display: none;
+}
+.fy-item-view__title-probe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.fy-item-view__title[data-cut]:not([data-expanded]) {
+  position: relative;
+  text-overflow: clip;
+}
+.fy-item-view__title[data-cut]:not([data-expanded]) .fy-item-view__title-text {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.fy-item-view__title[data-cut]:not([data-expanded]) .fy-item-view__title-cut {
+  display: inline;
+}
 @keyframes fy-title-marquee {
   0%,
   12% {
@@ -1039,7 +1062,7 @@
   line-height: inherit;
 }
 
-/* An item's title wraps to at most two lines (words break, never mid-word unless one is wider than the row) instead of scrolling: the head row's chevrons already take the width. */
+/* A GATE ITEM's title wraps to two lines instead of scrolling: the head row's chevrons already take the width. */
 .fy-item-view__title[data-wrap] {
   display: -webkit-box;
   overflow: hidden;

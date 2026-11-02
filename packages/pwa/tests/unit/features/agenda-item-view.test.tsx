@@ -1099,15 +1099,15 @@ describe('a form card', () => {
   });
 });
 
-describe('the item title wraps instead of being cut', () => {
-  test('marks every item title as wrapping, not just a gate or machine one', async () => {
+describe('which titles wrap', () => {
+  test('an ordinary item keeps its title on ONE line (it scrolls); only a gate or machine item folds', async () => {
     await draw(
       agendaItem('A60', { title: 'Three answers for the board’s catalog, one per catalog the skills come from' }),
     );
-    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(true);
+    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
   });
 
-  test('clamps it to two lines and breaks at words', () => {
+  test('a wrapping title clamps to two lines and breaks at words', () => {
     const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
     const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
     const body = rule.slice(0, rule.indexOf('}'));

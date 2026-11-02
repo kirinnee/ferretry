@@ -9,7 +9,7 @@
  * every picture) when: a page scrolls sideways; the ask is missing, is not bold, is drawn larger than the card's own
  * text, or is an h1–h6; any segment holds an h1–h6; a segment's heading is not bold; or a heading is drawn larger than
  * the text around it. It also draws a gate card with no project (its header must not open, end or double on a dot) and
- * a card with a long title (two lines at most, cut at a word, nothing sideways).
+ * a card with a long title (ONE line that scrolls; with reduced motion it ends at a whole word and "…").
  */
 
 import { spawnSync } from 'node:child_process';
@@ -203,7 +203,7 @@ const scene = async (where: Where, form: Form, theme: (typeof THEMES)[number]): 
   await context.close();
 };
 
-type Extra = 'gate-noproject' | 'longtitle';
+type Extra = 'gate-noproject' | 'longtitle' | 'longtitle-reduced';
 
 const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[number]): Promise<void> => {
   const width = form === 'phone' ? 390 : 1440;
@@ -212,6 +212,7 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
     ...(form === 'phone' ? PHONE : DESKTOP),
     ...LOCALE,
     colorScheme: theme,
+    reducedMotion: which === 'longtitle-reduced' ? 'reduce' : 'no-preference',
   });
   const page = await context.newPage();
   await page.route('**/*', route =>
@@ -248,18 +249,36 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
     const found = await title.evaluate(node => {
       const style = getComputedStyle(node);
       const line = Number.parseFloat(style.lineHeight);
+      const cut = node.querySelector('.fy-item-view__title-cut');
+      const full = node.querySelector('.fy-item-view__title-text')?.textContent ?? '';
+      const cutRect = cut?.getBoundingClientRect();
       return {
         wrap: node.getAttribute('data-wrap') !== null,
+        marquee: node.getAttribute('data-marquee') !== null,
         lines: Math.round(node.getBoundingClientRect().height / line),
-        sideways: node.scrollWidth - node.clientWidth,
-        text: node.textContent ?? '',
-        whiteSpace: style.whiteSpace,
+        cut: cut?.textContent ?? null,
+        full,
+        cutWidth: cutRect?.width ?? 0,
+        box: node.clientWidth,
+        moving: node.querySelector('.fy-item-view__title-text')?.getAnimations().length ?? 0,
       };
     });
-    check(found.wrap, `${label}: the title does not wrap`);
-    check(found.lines >= 1 && found.lines <= 2, `${label}: the title takes ${found.lines} lines`);
-    check(found.sideways <= 0, `${label}: the title is cut sideways by ${found.sideways}px`);
-    check(found.whiteSpace === 'normal', `${label}: white-space is ${found.whiteSpace}`);
+    check(!found.wrap, `${label}: an ordinary title folds onto two lines`);
+    check(found.marquee, `${label}: a title too long for the row is not set to scroll`);
+    check(found.lines === 1, `${label}: the title takes ${found.lines} lines, wanted one`);
+    if (which === 'longtitle') {
+      check(found.moving > 0, `${label}: the title does not move`);
+      check(found.cut === null, `${label}: a scrolling title is also cut`);
+    } else {
+      check(found.moving === 0, `${label}: the title moves under reduced motion`);
+      const kept = (found.cut ?? '').replace(/…$/u, '');
+      check(found.cut?.endsWith('…') === true, `${label}: the cut title has no "…": ${found.cut}`);
+      check(
+        found.full.startsWith(kept) && found.full.charAt(kept.length) === ' ',
+        `${label}: "${found.cut}" ends inside a word of "${found.full}"`,
+      );
+      check(found.cutWidth <= found.box, `${label}: the cut title is ${found.cutWidth}px in a ${found.box}px box`);
+    }
   }
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check(wide <= 0, `${label}: scrolls sideways by ${wide}px`);
@@ -274,7 +293,8 @@ const extraScene = async (which: Extra, form: Form, theme: (typeof THEMES)[numbe
 for (const form of ['phone', 'desktop'] as const) {
   for (const theme of THEMES) {
     for (const where of ['chat', 'inbox'] as const) await scene(where, form, theme);
-    for (const which of ['gate-noproject', 'longtitle'] as const) await extraScene(which, form, theme);
+    for (const which of ['gate-noproject', 'longtitle', 'longtitle-reduced'] as const)
+      await extraScene(which, form, theme);
   }
 }
 

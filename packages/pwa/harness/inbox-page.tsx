@@ -295,7 +295,8 @@ const GATE_NO_PROJECT = item('G63', 3, 'daemon', {
 } as Partial<AgendaItem>);
 const GATE_NO_PROJECT_CARD = card(GATE_NO_PROJECT, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
 const LONG_TITLE = item('A111', 6, 'ottilie', {
-  title: 'Three answers for the catalog before I can finish the relay setup tonight',
+  title:
+    'Three answers for the catalog before I can finish the relay setup tonight, and the three layouts I would keep if you can spare one more minute',
   subject: 'Which of the three catalog layouts should I keep?',
   ask: options(['Grid', 'List', 'Compact']),
   premise: '- The catalog is drawn three ways today',

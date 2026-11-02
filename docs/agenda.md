@@ -550,9 +550,12 @@ as bold text at the segment's own size, never an h1–h6: the card's own labels 
 you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
 (`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
 
-**A card's title folds, never cuts.** An item's title wraps onto at most two lines (`data-wrap`, a two-line clamp
-that breaks at words) instead of being cut mid-word, and its who/where line ("ferret · task · card · machine")
-puts a dot only between parts that have words (`joinMeta`): a missing part leaves no leading, trailing or doubled dot.
+**A card's title is one line, and never ends mid-word.** The open card's head stays ONE row: a title too wide for it
+scrolls to its end and back (the marquee), as before. Where motion is reduced it does not move: it ends at the last
+whole WORD that fits, then "…" (`wordCut`, drawn in `data-cut`; the whole title stays in the DOM for a screen reader
+and a tap shows all of it). Only a gate item or a machine notice folds onto two lines. A card's who/where line
+("ferret · task · card · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
+leading, trailing or doubled dot.
 
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
 the facts around it — so every NEW item a ferret raises must carry both:

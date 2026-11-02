@@ -1,10 +1,26 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
-import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
+import { type Marquee, marqueeOf, wordCut } from '../../lib/title-marquee.ts';
+
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/** Whether the reader asked for no motion; false where the browser cannot say. */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => globalThis.matchMedia?.(REDUCED_MOTION).matches ?? false);
+  useEffect(() => {
+    const query = globalThis.matchMedia?.(REDUCED_MOTION);
+    if (query === undefined) return undefined;
+    const sync = (): void => setReduced(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+  return reduced;
+}
 
 /**
  * The open item's title on ONE line. One that fits is plain text; one that does not scrolls to its end and back
- * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends in an ellipsis, and a
- * tap shows the whole title (and a second tap folds it again).
+ * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends at a WORD with "…"
+ * (never half a word), and a tap shows the whole title (and a second tap folds it again).
  */
 export function MarqueeTitle({
   title,
@@ -19,10 +35,12 @@ export function MarqueeTitle({
 }) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
+  const probe = useRef<HTMLSpanElement | null>(null);
+  const reduced = useReducedMotion();
+  const [cut, setCut] = useState<string | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: measure again whenever the title changes
   useEffect(() => {
     const outer = box.current;
     const inner = text.current;
@@ -31,6 +49,15 @@ export function MarqueeTitle({
       // An expanded title wraps, so its width says nothing about the one-line row: keep what was measured.
       if (outer.dataset.expanded !== undefined) return;
       const next = marqueeOf(inner.getBoundingClientRect().width, outer.clientWidth);
+      const ruler = probe.current;
+      setCut(
+        next === null || !reduced || ruler === null
+          ? null
+          : wordCut(title, candidate => {
+              ruler.textContent = candidate;
+              return ruler.getBoundingClientRect().width <= outer.clientWidth;
+            }),
+      );
       setMarquee(previous =>
         previous?.distance === next?.distance && previous?.seconds === next?.seconds ? previous : next,
       );
@@ -40,7 +67,7 @@ export function MarqueeTitle({
     const watch = new ResizeObserver(measure);
     watch.observe(outer);
     return () => watch.disconnect();
-  }, [title]);
+  }, [title, reduced]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
   useEffect(() => setExpanded(false), [title]);
@@ -61,6 +88,7 @@ export function MarqueeTitle({
       {...(twoLines ? { 'data-wrap': '' } : {})}
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
+      {...(cut === null ? {} : { 'data-cut': '' })}
       onClick={wrap !== undefined || (marquee === null && !expanded) ? undefined : () => setExpanded(open => !open)}
       ref={box}
       style={style}
@@ -68,6 +96,12 @@ export function MarqueeTitle({
       <span className="fy-item-view__title-text" ref={text}>
         {wrap === undefined ? title : wrap(title)}
       </span>
+      {reduced ? <span aria-hidden="true" className="fy-item-view__title-probe" ref={probe} /> : null}
+      {cut === null ? null : (
+        <span aria-hidden="true" className="fy-item-view__title-cut">
+          {cut}
+        </span>
+      )}
     </h2>
   );
 }

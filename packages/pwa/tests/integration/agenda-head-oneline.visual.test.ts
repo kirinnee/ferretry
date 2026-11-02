@@ -5,9 +5,9 @@
  * old idea of (i) + marquee to keep it into a single line!)" and "the card form have similar problem, and the padding
  * and margins make them even smaller".
  *
- *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row for a title that fits. A title too long
- *    for it folds onto a second line (two at most) — it never scrolls or is cut. The ask moves behind ⓘ, whose panel
- *    hangs under the row and sticks with it.
+ *  - The title, the status dot, ‹ n of N ›, the clock, ⓘ and ✕ share ONE row. A title too long for it scrolls (a
+ *    marquee) — or, under `prefers-reduced-motion`, ends in an ellipsis and opens in full on a tap. The ask moves
+ *    behind ⓘ, whose panel hangs under the row and sticks with it.
  *  - The card is one border level: no frame, no padding of its own inside the view, so a form's fields use the column,
  *    which keeps a 16px gutter on a phone.
  *
@@ -165,30 +165,64 @@ describe('the open item’s head', () => {
           }
         });
 
-        it(`folds a long title onto at most two lines instead of cutting it (${name}, ${family}, ${scheme})`, async () => {
-          for (const motion of ['no-preference', 'reduce'] as const) {
-            const { tab, close } = await open(name, family, scheme, '&title=long', motion);
-            try {
-              const state = await tab.evaluate(() => {
-                const title = document.querySelector('[data-agenda-title]') as HTMLElement;
-                const text = title.querySelector('.fy-item-view__title-text') as HTMLElement;
-                const style = getComputedStyle(title);
-                return {
-                  wraps: title.getAttribute('data-wrap') !== null,
-                  marquee: title.getAttribute('data-marquee') !== null,
-                  running: text.getAnimations().filter(a => a.playState === 'running').length,
-                  lines: Math.round(title.getBoundingClientRect().height / Number.parseFloat(style.lineHeight)),
-                  sideways: title.scrollWidth - title.clientWidth,
-                };
-              });
-              expect(state.wraps, `it is marked as wrapping (${motion})`).toBe(true);
-              expect(state.running, 'nothing scrolls').toBe(0);
-              expect(state.lines, 'two lines at most').toBeLessThanOrEqual(2);
-              expect(state.sideways, 'nothing is cut sideways').toBeLessThanOrEqual(0);
-              if (motion === 'no-preference') await shot(tab, name, `${family}-${scheme}`, 'long-title');
-            } finally {
-              await close();
-            }
+        it(`scrolls a long title in the same one row (${name}, ${family}, ${scheme})`, async () => {
+          const { tab, close } = await open(name, family, scheme, '&title=long');
+          try {
+            const { head } = await headBox(tab);
+            expect(head.height, 'a long title does not make the head taller').toBeLessThanOrEqual(ONE_ROW);
+            const state = await tab.evaluate(() => {
+              const title = document.querySelector('[data-agenda-title]') as HTMLElement;
+              const text = title.querySelector('.fy-item-view__title-text') as HTMLElement;
+              return {
+                marquee: title.getAttribute('data-marquee') !== null,
+                running: text.getAnimations().filter(a => a.playState === 'running').length,
+                overflowing: text.getBoundingClientRect().width > (text.parentElement as HTMLElement).clientWidth,
+              };
+            });
+            expect(state.overflowing, 'the title really is longer than its box').toBe(true);
+            expect(state.marquee, 'it is marked as scrolling').toBe(true);
+            expect(state.running, 'and it scrolls').toBe(1);
+            const room = await tab.evaluate(() => {
+              const title = document.querySelector('[data-agenda-title]') as HTMLElement;
+              const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+              const style = getComputedStyle(title);
+              context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+              return { box: title.clientWidth, sixteenLetters: context.measureText('Which day works ').width };
+            });
+            expect(room.box, 'the title shows at least 16 characters before it scrolls').toBeGreaterThanOrEqual(
+              room.sixteenLetters,
+            );
+            await shot(tab, name, `${family}-${scheme}`, 'long-title');
+          } finally {
+            await close();
+          }
+        });
+
+        it(`ends a long title in an ellipsis under reduced motion, and a tap opens it whole (${name}, ${family}, ${scheme})`, async () => {
+          const { tab, close } = await open(name, family, scheme, '&title=long', 'reduce');
+          try {
+            const rowHeight = (await headBox(tab)).head.height;
+            expect(rowHeight).toBeLessThanOrEqual(ONE_ROW);
+            const still = await tab.evaluate(() => {
+              const text = document.querySelector('.fy-item-view__title-text') as HTMLElement;
+              return {
+                animations: text.getAnimations().filter(a => a instanceof CSSAnimation).length,
+                ellipsis: getComputedStyle(text.parentElement as HTMLElement).textOverflow,
+              };
+            });
+            expect(still.animations, 'nothing moves').toBe(0);
+            expect(still.ellipsis).toBe('ellipsis');
+            await shot(tab, name, `${family}-${scheme}`, 'long-title-reduced');
+            await tab.locator('[data-agenda-title]').click();
+            await framesSettled(tab);
+            const open = await headBox(tab);
+            expect(open.head.height, 'a tap shows the whole title').toBeGreaterThan(rowHeight + 20);
+            await shot(tab, name, `${family}-${scheme}`, 'long-title-expanded');
+            await tab.locator('[data-agenda-title]').click();
+            await framesSettled(tab);
+            expect((await headBox(tab)).head.height, 'a second tap folds it again').toBeLessThanOrEqual(rowHeight + 1);
+          } finally {
+            await close();
           }
         });
 
