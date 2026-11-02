@@ -17,6 +17,7 @@ export function ToTestStep({
   onPrevious,
   onNext,
   onClose,
+  mouseSwipe = false,
 }: {
   readonly row: ToTestCard;
   readonly index: number;
@@ -27,6 +28,7 @@ export function ToTestStep({
   readonly onPrevious: (() => void) | undefined;
   readonly onNext: (() => void) | undefined;
   readonly onClose?: () => void;
+  readonly mouseSwipe?: boolean;
 }) {
   const box = useRef<HTMLElement>(null);
   // The box takes all the room down to the bottom of the page (the tab bar's top on a phone), measured as the deck does.
@@ -41,6 +43,7 @@ export function ToTestStep({
     >
       <ToTestList
         answers={answers}
+        mouseSwipe={mouseSwipe}
         now={now}
         onClose={onClose}
         onNavigate={onNavigate}

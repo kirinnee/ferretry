@@ -290,15 +290,19 @@ const OPENED: Readonly<Record<string, InboxCard>> = {
   'gate-list': GATE_CARD,
 };
 
-const OWNER: readonly InboxCard[] = [
-  card(A5, LEDGER, 'studio'),
-  card(A2, RELAY, 'studio'),
-  card(N1, RELAY, 'studio'),
-  card(A3, RELEASE, 'studio'),
-  card(A6, RUNTIME, 'laptop', LAPTOP),
-  card(W1, CARE, 'studio'),
-  card(W2, CARE, 'studio'),
-];
+/** `?only=A5,A2` keeps just those open items: a short run that can be finished from the keyboard. */
+const ONLY = new URLSearchParams(location.search).get('only')?.split(',') ?? null;
+const OWNER: readonly InboxCard[] = (
+  [
+    card(A5, LEDGER, 'studio'),
+    card(A2, RELAY, 'studio'),
+    card(N1, RELAY, 'studio'),
+    card(A3, RELEASE, 'studio'),
+    card(A6, RUNTIME, 'laptop', LAPTOP),
+    card(W1, CARE, 'studio'),
+    card(W2, CARE, 'studio'),
+  ] as readonly InboxCard[]
+).filter(entry => ONLY === null || ONLY.includes(entry.item.id));
 const FERRET: readonly InboxCard[] = [
   card(WITH('A9', 11, 'Pick the staging region'), NIGHTLY, 'studio'),
   card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),

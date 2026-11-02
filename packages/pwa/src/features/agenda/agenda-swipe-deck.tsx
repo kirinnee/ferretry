@@ -56,7 +56,6 @@ import { type CompassAvailable, compassReading } from './agenda-compass.ts';
 import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
   isLongPress,
-  isTouch,
   type Lock,
   lockOf,
   startsAtScrollTop,
@@ -64,6 +63,8 @@ import {
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
+  ownsKeys,
+  swipesWith,
 } from './agenda-swipe-gesture.ts';
 import { DeckDownContext } from './deck-down-context.ts';
 import { SwipeCompass } from './swipe-reveal.tsx';
@@ -341,9 +342,18 @@ export interface AgendaSwipeDeckProps {
   readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
+  /** A mouse drag swipes too (the desktop run). A mouse never pulls down from the body: that drag selects text. */
+  readonly mouseSwipe?: boolean;
+  /**
+   * The run's keys: ←, ↑ and → answer the card on top and ↓ skips it from anywhere on the page that is not a field,
+   * a menu or a dialog — not only while the card itself is focused.
+   */
+  readonly runKeys?: boolean;
 }
 
 const NO_ACT = (): void => undefined;
+
+const isMouse = (event: { readonly pointerType: string }): boolean => event.pointerType === 'mouse';
 
 export function AgendaSwipeDeck({
   cards,
@@ -356,6 +366,8 @@ export function AgendaSwipeDeck({
   onHold,
   ownGesturesIn,
   reducedMotion,
+  mouseSwipe = false,
+  runKeys = false,
 }: AgendaSwipeDeckProps) {
   const reduced = useReducedMotion(reducedMotion);
   const [drag, setDrag] = useState<RawDrag | null>(null);
@@ -483,6 +495,32 @@ export function AgendaSwipeDeck({
     answer(card, target.action, from);
   };
 
+  // The run's keys read the card on top as of the last render, so one listener serves every card.
+  const keyed = useRef<{ readonly press: (key: string) => void } | null>(null);
+  keyed.current = {
+    press: key => {
+      if (top === undefined) return;
+      if (key === 'ArrowDown') {
+        if (canDown) skip(top, { dx: 0, dy: 0 });
+        return;
+      }
+      const direction = agendaKeyDirection(key);
+      if (direction !== null && targets[direction] !== undefined) give(top, direction, { dx: 0, dy: 0 });
+    },
+  };
+  useEffect(() => {
+    if (!runKeys) return;
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== 'ArrowDown' && agendaKeyDirection(event.key) === null) return;
+      if (ownsKeys(event.target)) return;
+      event.preventDefault();
+      keyed.current?.press(event.key);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [runKeys]);
+
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     swallowClick.current = false;
     const own =
@@ -490,7 +528,7 @@ export function AgendaSwipeDeck({
     // A button in the head or the answer row still lets a pull down start: the row's other swipes are its own.
     if (
       top === undefined ||
-      !isTouch(event) ||
+      !swipesWith(event, mouseSwipe) ||
       (startsOnInteractive(event.target) && !own) ||
       startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
@@ -502,7 +540,12 @@ export function AgendaSwipeDeck({
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
       head: own || startsInHead(event.target),
-      pull: canDown && !own && !startsInHead(event.target) && startsAtScrollTop(event.target, event.currentTarget),
+      pull:
+        canDown &&
+        !own &&
+        !isMouse(event) &&
+        !startsInHead(event.target) &&
+        startsAtScrollTop(event.target, event.currentTarget),
       own,
       startedAt: event.timeStamp,
       moved: false,
@@ -537,6 +580,8 @@ export function AgendaSwipeDeck({
       }
       current.moved = true;
       current.lock = lock;
+      // A mouse drag that became a swipe is not a selection: whatever the press started to select is let go.
+      if (isMouse(event)) window.getSelection()?.removeAllRanges();
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {

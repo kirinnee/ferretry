@@ -1164,13 +1164,40 @@
   margin-right: 8px;
   margin-left: 8px;
 }
-/* On a wide screen the open item and its composer share one comfortable measure. */
+/* On a wide screen the run is a centred column of one readable measure: the bar above it, the card, its keys and the
+   end of the run all sit in it, never full-bleed. */
 @media (min-width: 768px) {
-  .fy-attn-inbox[data-agenda-inbox='card']:not([data-phone]) .fy-attn-inbox__deck--open {
+  .fy-attn-inbox[data-agenda-inbox='card']:not([data-phone]) .fy-attn-inbox__deck,
+  .fy-attn-inbox[data-agenda-inbox='card']:not([data-phone]) .fy-attn-inbox__cardbar {
     width: 100%;
-    max-width: 46rem;
-    margin: 0 auto;
+    max-width: 44rem;
+    margin-right: auto;
+    margin-left: auto;
   }
+}
+/* The run's keys, said once and quietly under the card (a wide screen only). */
+.fy-inbox-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px var(--gap-md);
+  margin: var(--gap-xs) var(--gap-md) 0;
+  color: var(--muted);
+  font-size: var(--text-xs, var(--text-sm));
+}
+.fy-inbox-keys__key {
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-2, var(--surface));
+  padding: 0 5px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+/* A mouse drag that is swiping the card is not selecting its text. */
+.fy-attn-deck__top[data-dragging],
+.fy-totest__surface[data-dragging] {
+  user-select: none;
 }
 
 /* ---- the Snoozed and Replied filters: a row and the button that brings it back ------------------------------ */

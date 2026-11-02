@@ -6,11 +6,13 @@ import {
   LOCK_PX,
   LONG_PRESS_MS,
   lockOf,
+  ownsKeys,
   startsAtScrollTop,
   startsInHead,
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
+  swipesWith,
 } from '../../../src/features/agenda/agenda-swipe-gesture.ts';
 
 const el = (html: string): HTMLElement => {
@@ -205,5 +207,41 @@ describe('the Inbox card’s text', () => {
   it('keeps what is pressed from highlighting', () => {
     expect(css).toMatch(/\.fy-attn-deck__top :is\(button[^)]*\) \{\s*user-select: none/);
     expect(css).toMatch(/\.fy-totest__surface :is\(button[^)]*\) \{\s*user-select: none/);
+  });
+});
+
+describe('swipesWith', () => {
+  it('is true for a finger, and for a mouse only where the host opts in', () => {
+    expect(swipesWith({ pointerType: 'touch' }, false)).toBe(true);
+    expect(swipesWith({ pointerType: 'mouse' }, false)).toBe(false);
+    expect(swipesWith({ pointerType: 'mouse' }, true)).toBe(true);
+    expect(swipesWith({ pointerType: 'pen' }, true)).toBe(false);
+  });
+});
+
+describe('ownsKeys', () => {
+  it('is false for no element and for a plain button', () => {
+    expect(ownsKeys(null)).toBe(false);
+    expect(ownsKeys(document)).toBe(false);
+    expect(ownsKeys(el('<button>Go</button>'))).toBe(false);
+  });
+
+  it('is true inside a field, a menu, a listbox or an editable region', () => {
+    expect(ownsKeys(el('<input />'))).toBe(true);
+    expect(ownsKeys(el('<textarea></textarea>'))).toBe(true);
+    expect(ownsKeys(el('<div role="menu"><button>Pick</button></div>').querySelector('button'))).toBe(true);
+    expect(ownsKeys(el('<ul role="listbox"><li>One</li></ul>').querySelector('li'))).toBe(true);
+    const editable = el('<div></div>');
+    Object.defineProperty(editable, 'isContentEditable', { configurable: true, value: true });
+    expect(ownsKeys(editable)).toBe(true);
+  });
+
+  it('is true inside a dialog of its own, but not on the card, which is a dialog too', () => {
+    expect(ownsKeys(el('<div role="dialog"><button>Pick</button></div>').querySelector('button'))).toBe(true);
+    const card = el('<section role="dialog" data-agenda-view="A1"><button>Open chat</button></section>');
+    expect(ownsKeys(card)).toBe(false);
+    expect(ownsKeys(card.querySelector('button'))).toBe(false);
+    const nested = el('<section role="dialog" data-agenda-view="A1"><div role="dialog"><input /></div></section>');
+    expect(ownsKeys(nested.querySelector('input'))).toBe(true);
   });
 });
