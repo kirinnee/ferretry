@@ -14,7 +14,6 @@ import {
   installRecord,
   itemPreview,
   ownedCatalog,
-  sharedItem,
 } from '../../../support/catalog-views.ts';
 import { healthOf } from '../../../support/health.ts';
 import { byText, click, settle } from '../../../support/dom-form.ts';
@@ -30,7 +29,6 @@ const q = (selector: string): HTMLElement | null => document.querySelector<HTMLE
 const SKILL = '/home/k/.claude/skills/pdf-tools/SKILL.md';
 const source = { kind: 'skill', skill: SKILL } as const;
 const scope = { label: 'User', title: 'A skill of yours', tone: 'muted' } as const;
-const SECOND = `cat_${'d'.repeat(22)}` as const;
 
 type RowOverrides = Partial<Omit<CatalogItemRowProps, 'host' | 'read'>>;
 
@@ -74,6 +72,7 @@ const pickMenu = async (label: string) => {
   await click(byText(document, '[role="menuitem"]', label));
   await settle();
 };
+const menu = (): (string | null)[] => [...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent);
 
 describe('CatalogItemRow rendering', () => {
   it('is the plain compact row without a host: name, scope, description and note, no buttons', async () => {
@@ -116,56 +115,53 @@ describe('CatalogItemRow rendering', () => {
     await view.unmount();
   });
 
-  it('an own skill that is in no catalog has Share and Add, no version, and no ⋯', async () => {
+  it('an own skill in no catalog has no Share or Add on the row, and Publish in a catalog… in the ⋯', async () => {
     const { view } = await show(baseHandlers([]));
-    expect(q('[data-row-share]')?.getAttribute('aria-label')).toBe('Share /pdf-tools');
-    expect(q('[data-row-add]')?.getAttribute('aria-label')).toBe('Add /pdf-tools to a catalog');
-    expect(q('[data-row-share]')?.className).toContain('min-h-[44px]');
+    expect(q('[data-row-share]')).toBeNull();
+    expect(q('[data-row-add]')).toBeNull();
+    expect(q('[data-row-more]')?.className).toContain('min-h-[44px]');
     expect(q('[data-row-version]')).toBeNull();
     expect(q('[data-row-from]')).toBeNull();
-    expect(q('[data-row-more]')).toBeNull();
+    await tap('[data-row-more]');
+    expect(menu()).toEqual(['Publish in a catalog…']);
     await view.unmount();
   });
 
-  it('a skill in a catalog carries its version and an Add to another catalog item', async () => {
+  it('a skill in a catalog carries its version and Publish in another catalog…', async () => {
     const { view } = await show(baseHandlers([ownedCatalog()]));
     expect(q('[data-row-version]')?.textContent).toBe('v2');
     await tap('[data-row-more]');
     expect(document.querySelector('[role="menu"]')?.getAttribute('aria-label')).toBe('More for /pdf-tools');
-    expect(byText(document, '[role="menuitem"]', 'Add to another catalog…')).not.toBeNull();
+    expect(menu()).toEqual(['Publish in another catalog…']);
     await view.unmount();
   });
 
-  it('an installed skill says where it came from, has no Add, and a Remove in the ⋯', async () => {
-    const { view } = await show(baseHandlers([ownedCatalog()], [installRecord('skill', 'pdf-tools')]));
+  it('an installed skill says where it came from and offers only Uninstall', async () => {
+    const { view } = await show(baseHandlers([], [installRecord('skill', 'pdf-tools')]));
     expect(q('[data-row-from]')?.textContent).toMatch(/^from kirin-box · v\d+$/);
     expect(q('[data-row-from]')?.getAttribute('title')).toContain('From Team skills (kirin-box)');
     expect(q('[data-row-version]')).toBeNull();
-    expect(q('[data-row-add]')).toBeNull();
-    expect(q('[data-row-share]')).not.toBeNull();
-    await tap('[data-row-more]');
-    const items = [...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent);
-    expect(items).toEqual(['Remove']);
-    await view.unmount();
-  });
-
-  it("an installed skill that is in none of this machine's catalogs has no Share and no Add, only the ⋯", async () => {
-    const { view } = await show(baseHandlers([], [installRecord('skill', 'pdf-tools')]));
-    expect(q('[data-row-from]')).not.toBeNull();
     expect(q('[data-row-share]')).toBeNull();
-    expect(q('[data-row-add]')).toBeNull();
     expect(q('[data-catalog-sheet]')).toBeNull();
     await tap('[data-row-more]');
-    expect([...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toEqual(['Remove']);
+    expect(menu()).toEqual(['Uninstall']);
     await view.unmount();
   });
 
-  it('an installed skill that this machine also holds in a catalog still shares that catalog, never the add sheet', async () => {
+  it('never offers to publish what someone else’s catalog installed, even when a catalog here holds it', async () => {
     const { view } = await show(baseHandlers([ownedCatalog()], [installRecord('skill', 'pdf-tools')]));
-    expect(q('[data-row-add]')).toBeNull();
-    await tap('[data-row-share]');
-    expect(q('[data-catalog-sheet="add"]')).toBeNull();
-    expect(q('[data-catalog-sheet="share"]')?.textContent).toContain('Team skills');
+    await tap('[data-row-more]');
+    expect(menu()).toEqual(['Uninstall']);
+    await view.unmount();
+  });
+
+  it('has no Versions… or Share: they live in Sharing › My catalogs', async () => {
+    const { view } = await show({
+      ...baseHandlers([ownedCatalog()]),
+      'GET /v1/health': () => healthOf('1.0.0', ['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
+    });
+    await tap('[data-row-more]');
+    expect(menu().join(' ')).not.toMatch(/Versions|Share/u);
     await view.unmount();
   });
 
@@ -200,8 +196,8 @@ describe('CatalogItemRow rendering', () => {
   });
 });
 
-describe('CatalogItemRow Add', () => {
-  it('opens the add sheet and reads the lists again when it saves', async () => {
+describe('CatalogItemRow Publish', () => {
+  it('Publish in a catalog… opens the add sheet, ends with Done, and reads the lists again when it saves', async () => {
     let catalogs = [] as ReturnType<typeof ownedCatalog>[];
     const { fake, view } = await show({
       ...baseHandlers([]),
@@ -212,13 +208,12 @@ describe('CatalogItemRow Add', () => {
         return { itemId: ITEM, kind: 'skill', name: 'pdf-tools', itemVersion: 3, digest: DIGEST };
       },
     });
-    catalogs = [ownedCatalog()];
-    await tap('[data-row-add]');
+    catalogs = [ownedCatalog({ items: [] })];
+    await pickMenu('Publish in a catalog…');
     expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
     await tap('[data-catalog-preview]');
     await tap('[data-catalog-add]');
     expect(q('[data-catalog-landed]')).not.toBeNull();
-    expect(q('[data-catalog-share-now]')).toBeNull();
     expect(q('[data-catalog-done]')?.textContent).toBe('Done');
     expect(fake.calls.filter(call => call.path === '/v1/catalog-installs').length).toBeGreaterThan(1);
     await tap('[data-catalog-done]');
@@ -227,124 +222,21 @@ describe('CatalogItemRow Add', () => {
     await view.unmount();
   });
 
-  it('Add to another catalog… from the ⋯ opens the same sheet', async () => {
+  it('Publish in another catalog… from the ⋯ opens the same sheet', async () => {
     const { view } = await show(baseHandlers([ownedCatalog()]));
-    await pickMenu('Add to another catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
     await view.unmount();
   });
 });
 
-describe('CatalogItemRow Share', () => {
-  it('opens the Share sheet of the one catalog that holds the item, and reads again on close', async () => {
-    const { fake, view } = await show(baseHandlers([ownedCatalog()]));
-    const reads = fake.calls.length;
-    await tap('[data-row-share]');
-    expect(q('[data-catalog-sheet="share"]')?.textContent).toContain('Team skills');
-    await tap('button[aria-label^="Close"]');
-    expect(q('[data-catalog-sheet="share"]')).toBeNull();
-    expect(fake.calls.length).toBeGreaterThan(reads);
-    await view.unmount();
-  });
-
-  it('asks which catalog first when the item is in several', async () => {
-    const second = ownedCatalog({ id: SECOND, name: 'Second' });
-    const { view } = await show(baseHandlers([ownedCatalog(), second]));
-    await tap('[data-row-share]');
-    expect(q('[data-catalog-sheet="share-pick"]')).not.toBeNull();
-    expect([...document.querySelectorAll('[data-row-share-pick]')].map(node => node.textContent)).toEqual([
-      'Team skills',
-      'Second',
-    ]);
-    await tap(`[data-row-share-pick="${SECOND}"]`);
-    expect(q('[data-catalog-sheet="share-pick"]')).toBeNull();
-    expect(q('[data-catalog-sheet="share"]')?.textContent).toContain('Second');
-    await view.unmount();
-  });
-
-  it('can close the picker without choosing', async () => {
-    const { view } = await show(baseHandlers([ownedCatalog(), ownedCatalog({ id: SECOND, name: 'Second' })]));
-    await tap('[data-row-share]');
-    await tap('button[aria-label="Close Share"]');
-    expect(q('[data-catalog-sheet="share-pick"]')).toBeNull();
-    await view.unmount();
-  });
-
-  describe('when the item is in no catalog', () => {
-    const published = { itemId: ITEM, kind: 'skill', name: 'pdf-tools', itemVersion: 1, digest: DIGEST };
-    const emptyCatalog = () => ownedCatalog({ items: [] });
-
-    /** The catalog starts without the item; `after` says what the lists answer once it was added. */
-    const flow = (after: () => unknown) => {
-      let added = false;
-      return {
-        ...baseHandlers([]),
-        'GET /v1/catalogs': () => (added ? after() : { catalogs: [emptyCatalog()] }),
-        [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview(),
-        [`POST /v1/catalogs/${CATALOG}/items`]: () => {
-          added = true;
-          return published;
-        },
-      };
-    };
-    const addIt = async () => {
-      await tap('[data-row-share]');
-      await tap('[data-catalog-preview]');
-      await tap('[data-catalog-add]');
-    };
-
-    it('adds it, then Share it now carries on into the Share sheet of that catalog', async () => {
-      const { view } = await show(flow(() => ({ catalogs: [ownedCatalog()] })));
-      await addIt();
-      expect(q('[data-catalog-done]')?.textContent).toBe('Not now');
-      await tap('[data-catalog-share-now]');
-      expect(q('[data-catalog-sheet="add"]')).toBeNull();
-      expect(q('[data-catalog-sheet="share"]')?.textContent).toContain('Team skills');
-      await view.unmount();
-    });
-
-    it('Not now just closes the sheet', async () => {
-      const { view } = await show(flow(() => ({ catalogs: [ownedCatalog()] })));
-      await addIt();
-      await tap('[data-catalog-done]');
-      expect(q('[data-catalog-sheet="add"]')).toBeNull();
-      expect(q('[data-catalog-sheet="share"]')).toBeNull();
-      await view.unmount();
-    });
-
-    it('says so when the catalog it landed in is not there any more', async () => {
-      const { view } = await show(flow(() => ({ catalogs: [] })));
-      await addIt();
-      await tap('[data-catalog-share-now]');
-      expect(q('[data-catalog-sheet="add"]')).toBeNull();
-      expect(q('[data-catalog-failure]')?.textContent).toContain('That catalog is not there any more.');
-      await tap('[data-row-share]');
-      expect(q('[data-catalog-failure]')).toBeNull();
-      await view.unmount();
-    });
-
-    it('says why when the catalogs cannot be read after adding', async () => {
-      const { view } = await show(
-        flow(() => {
-          throw new FyHttpError('no', 403, 'grant_device_not_granted');
-        }),
-      );
-      await addIt();
-      await tap('[data-catalog-share-now]');
-      expect(q('[data-catalog-sheet="add"]')).toBeNull();
-      expect(q('[data-catalog-failure]')).not.toBeNull();
-      await view.unmount();
-    });
-  });
-});
-
-describe('CatalogItemRow Remove', () => {
+describe('CatalogItemRow Uninstall', () => {
   const withInstall = (extra: Record<string, () => unknown> = {}) => ({
     ...baseHandlers([], [installRecord('skill', 'pdf-tools')]),
     ...extra,
   });
 
-  it('asks first, can keep it, and removes it then reads the lists again', async () => {
+  it('asks first, can keep it, and uninstalls it then reads the lists again', async () => {
     let installs = [installRecord('skill', 'pdf-tools')];
     const { fake, view } = await show({
       ...baseHandlers([]),
@@ -354,22 +246,24 @@ describe('CatalogItemRow Remove', () => {
         return { installId: INSTALL_ID, removed: true };
       },
     });
-    await pickMenu('Remove');
+    await pickMenu('Uninstall');
     expect(q('[data-catalog-remove-confirm]')?.textContent).toContain(
-      'Remove pdf-tools from runtime box, profile default?',
+      'Uninstall pdf-tools from runtime box, profile default?',
     );
+    expect(q('[data-catalog-remove-yes]')?.textContent).toBe('Uninstall it');
     await tap('[data-catalog-remove-no]');
     expect(q('[data-catalog-remove-confirm]')).toBeNull();
-    await pickMenu('Remove');
+    await pickMenu('Uninstall');
     await tap('[data-catalog-remove-yes]');
     expect(fake.calls.some(call => call.method === 'DELETE')).toBe(true);
     expect(q('[data-catalog-remove-confirm]')).toBeNull();
     expect(q('[data-row-from]')).toBeNull();
-    expect(q('[data-row-add]')).not.toBeNull();
+    await tap('[data-row-more]');
+    expect(menu()).toEqual(['Publish in a catalog…']);
     await view.unmount();
   });
 
-  it('says why a removal was refused and keeps the row', async () => {
+  it('says why an uninstall was refused and keeps the row', async () => {
     const { view } = await show(
       withInstall({
         [`DELETE /v1/catalog-installs/runtime/${INSTALL_ID}`]: () => {
@@ -377,7 +271,7 @@ describe('CatalogItemRow Remove', () => {
         },
       }),
     );
-    await pickMenu('Remove');
+    await pickMenu('Uninstall');
     await tap('[data-catalog-remove-yes]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('Nothing was changed');
     expect(q('[data-row-from]')).not.toBeNull();
@@ -385,26 +279,25 @@ describe('CatalogItemRow Remove', () => {
     await view.unmount();
   });
 
-  it('names the catalog on each Remove when the item was installed from several', async () => {
+  it('names the catalog on each Uninstall when the item was installed from several', async () => {
     const second = { ...installRecord('skill', 'pdf-tools'), installId: `cin_${'j'.repeat(22)}` as const };
     const { view } = await show(baseHandlers([], [installRecord('skill', 'pdf-tools'), second]));
     await tap('[data-row-more]');
-    const items = [...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent);
-    expect(items).toEqual(['Remove (from Team skills)', 'Remove (from Team skills)']);
+    expect(menu()).toEqual(['Uninstall (from Team skills)', 'Uninstall (from Team skills)']);
     await view.unmount();
   });
 
-  it('lists Open first and puts Remove after a separator', async () => {
+  it('lists Open first and puts Uninstall after a separator', async () => {
     const { view } = await show(withInstall(), { onOpen: () => undefined });
     await tap('[data-row-more]');
-    const items = [...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent);
-    expect(items).toEqual(['Open SKILL.md', 'Remove']);
+    expect(menu()).toEqual(['Open SKILL.md', 'Uninstall']);
+    expect(q('[data-menu-separator]')).not.toBeNull();
     await view.unmount();
   });
 });
 
 describe('CatalogItemRow without a readable catalog list', () => {
-  it('still offers Share and Add when the lists cannot be read', async () => {
+  it('still offers Publish in a catalog… when the lists cannot be read', async () => {
     const { view } = await show({
       'GET /v1/catalog-installs': () => {
         throw new FyHttpError('boom', 500, 'x');
@@ -413,12 +306,12 @@ describe('CatalogItemRow without a readable catalog list', () => {
         throw new FyHttpError('boom', 500, 'x');
       },
     });
-    expect(q('[data-row-share]')).not.toBeNull();
-    expect(q('[data-row-add]')).not.toBeNull();
+    await tap('[data-row-more]');
+    expect(menu()).toEqual(['Publish in a catalog…']);
     await view.unmount();
   });
 
-  it('a withdrawn item no longer counts as shared', async () => {
+  it('a withdrawn item no longer counts as published', async () => {
     const withdrawn = OwnedCatalogSchema.parse({
       ...ownedCatalog(),
       items: ownedCatalog({}, { withdrawnAt: '2026-10-31T09:30:00.000Z' }).items,
@@ -426,54 +319,5 @@ describe('CatalogItemRow without a readable catalog list', () => {
     const { view } = await show(baseHandlers([withdrawn]));
     expect(q('[data-row-version]')).toBeNull();
     await view.unmount();
-  });
-});
-
-describe('CatalogItemRow Versions', () => {
-  const ITEM_PATH = `/v1/catalog-items/${ITEM}`;
-  const withFeatures = (features: string[]) => ({
-    ...baseHandlers([ownedCatalog()]),
-    'GET /v1/health': () => healthOf('1.0.0', features),
-    [`GET ${ITEM_PATH}`]: () => sharedItem(),
-  });
-
-  it('opens the versions of a held item from the ⋯, read only without versions.2', async () => {
-    const { view } = await show(withFeatures(['catalogs.items.1', 'catalogs.versions.1']));
-    await pickMenu('Versions…');
-    expect(q('[data-catalog-sheet="versions"]')).not.toBeNull();
-    expect(q('[data-version="2"][data-version-current]')).not.toBeNull();
-    expect(q('[data-version-retire]')).toBeNull();
-    await click(q('[aria-label="Close Versions"]'));
-    expect(q('[data-catalog-sheet="versions"]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('can retire from there with versions.2 and reads the row again', async () => {
-    let lists = 0;
-    const { view } = await show({
-      ...withFeatures(['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
-      'GET /v1/catalogs': () => {
-        lists += 1;
-        return { catalogs: [ownedCatalog()] };
-      },
-      [`PATCH ${ITEM_PATH}/versions/1`]: () => ({ itemId: ITEM, version: 1, changed: true, catalogs: [] }),
-    });
-    await pickMenu('Versions…');
-    const before = lists;
-    await tap('[data-version-retire="1"]');
-    await tap('[data-version-confirm-yes]');
-    expect(lists).toBeGreaterThan(before);
-    await view.unmount();
-  });
-
-  it('has no Versions… without the flag, or for an item no catalog holds', async () => {
-    const off = await show(withFeatures(['catalogs.items.1']));
-    await tap('[data-row-more]');
-    expect(document.querySelector('[role="menuitem"]')?.textContent ?? '').not.toContain('Versions');
-    await off.view.unmount();
-    document.body.replaceChildren();
-    const none = await show({ ...withFeatures(['catalogs.versions.1']), 'GET /v1/catalogs': () => ({ catalogs: [] }) });
-    expect(q('[data-row-more]')).toBeNull();
-    await none.view.unmount();
   });
 });

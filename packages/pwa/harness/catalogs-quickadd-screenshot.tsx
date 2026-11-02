@@ -1,8 +1,8 @@
 /**
- * One-tap Add, its Undo toast, the default catalog and "Add to another catalog…" (docs/catalogs.md, "The app
- * (catalogs 3c-4)"): the row before Add, the toast after Add with Undo, after Undo, the review sheet a tap falls
- * back to, "Already in …", the default badge in My catalogs, the ⋯ with Make default, and the frozen review that
- * Add to another catalog… shows. On a phone and a desktop, light and dark.
+ * One-tap Publish from a row's ⋯, its Undo toast, the default catalog and "Publish in another catalog…"
+ * (docs/catalogs.md, "The app (catalogs 3c-4)"): the row, the toast after Publish with Undo, after Undo, the review
+ * sheet a tap falls back to, "Already in …", the default badge in My catalogs, the ⋯ with Make default, and the
+ * frozen review that Publish in another catalog… shows. On a phone and a desktop, light and dark.
  *
  *   bun harness/catalogs-quickadd-screenshot.tsx      # writes harness/out/catalogs-quickadd-*.png
  *
@@ -310,12 +310,6 @@ const open = async (page: Page, theme: string, view: 'rail' | 'catalogs', vp: ke
     await page.locator('[data-catalogs-list]').waitFor({ state: 'visible' });
   } else {
     await page.locator('[data-row-use]').first().waitFor({ state: 'visible' });
-    // One-tap names where it goes only once the machine has said it can.
-    await page.waitForFunction(() =>
-      /studio-mac/u.test(
-        document.querySelector('[data-catalog-item-row="pdf-tools"] [data-row-add]')?.getAttribute('aria-label') ?? '',
-      ),
-    );
   }
   await page.waitForTimeout(300);
 };
@@ -324,6 +318,14 @@ const FRAME = ['[data-frame]'];
 const SHEET = ['[role="dialog"]'];
 
 const row = (name: string) => `[data-catalog-item-row="${name}"]`;
+
+/** Opens a row's ⋯ and picks the one-tap Publish item, once the machine has said it can (the item then names a catalog). */
+const publish = async (page: Page, name: string): Promise<void> => {
+  await page.locator(`${row(name)} [data-row-more]`).click();
+  const item = page.locator('[data-menu-key="publish"]').filter({ hasNotText: 'Publish in a catalog…' });
+  await item.waitFor({ state: 'visible' });
+  await item.click();
+};
 
 const walk = async (page: Page, theme: string, vp: keyof typeof TALL): Promise<void> => {
   await open(page, theme, 'rail', vp);
@@ -336,7 +338,7 @@ const walk = async (page: Page, theme: string, vp: keyof typeof TALL): Promise<v
   await shot(page, '1-row', theme, vp, FRAME);
 
   await page.setViewportSize({ width: WIDTH[vp], height: SHORT[vp] });
-  await page.locator(`${row('pdf-tools')} [data-row-add]`).click();
+  await publish(page, 'pdf-tools');
   await page.locator('[data-catalog-toast-undo]').waitFor({ state: 'visible' });
   await shotScreen(page, '2-toast', theme, vp);
 
@@ -345,12 +347,12 @@ const walk = async (page: Page, theme: string, vp: keyof typeof TALL): Promise<v
   await shotScreen(page, '3-undone', theme, vp);
 
   await open(page, theme, 'rail', vp);
-  await page.locator(`${row('summary')} [data-row-add]`).click();
+  await publish(page, 'summary');
   await page.locator('[data-catalog-sheet="add"] [data-catalog-preview-block]').waitFor({ state: 'visible' });
   await shot(page, '4-review', theme, vp, SHEET);
 
   await open(page, theme, 'rail', vp);
-  await page.locator(`${row('floop')} [data-row-add]`).click();
+  await publish(page, 'floop');
   await page.locator('[data-catalog-toast]').waitFor({ state: 'visible' });
   await shotScreen(page, '5-already', theme, vp);
 
@@ -365,7 +367,7 @@ const walk = async (page: Page, theme: string, vp: keyof typeof TALL): Promise<v
 
   await open(page, theme, 'rail', vp);
   await page.locator(`${row('floop')} [data-row-more]`).click();
-  await page.getByRole('menuitem', { name: 'Add to another catalog…' }).click();
+  await page.getByRole('menuitem', { name: 'Publish in another catalog…' }).click();
   await page.locator('[data-catalog-sheet="add"]').waitFor({ state: 'visible' });
   await page.locator('[data-catalog-preview-block]').waitFor({ state: 'visible' });
   await shot(page, '8-add-another', theme, vp, SHEET);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { SessionFsEntry } from '@ferretry/protocol';
 import { splitFrontMatter } from '../../../../src/features/context-rail/context-rail-lists.tsx';
 import {
+  activeSkillsLine,
   CONTEXT_RAIL_TAB_LABEL,
   contextEmptyCopy,
   docChips,
@@ -77,8 +78,8 @@ describe('skills', () => {
   it('offers a scope chip only when this ferret has a skill from it', () => {
     expect(skillChips(SKILLS.skills, '')).toEqual([
       { key: 'all', label: 'All', count: 4 },
-      { key: 'project', label: 'Project', count: 1 },
-      { key: 'user', label: 'User', count: 2 },
+      { key: 'project', label: 'This project', count: 1 },
+      { key: 'user', label: 'This account', count: 2 },
       { key: 'ferretry', label: 'Ferretry', count: 1 },
     ]);
     expect(skillChips([skill({ name: 'deploy' })], '').map(chip => chip.key)).toEqual(['all', 'user']);
@@ -89,6 +90,14 @@ describe('skills', () => {
     expect(visibleSkills(SKILLS.skills, 'ferretry', 'all').map(entry => entry.name)).toEqual(['babysit-pr']);
     expect(visibleSkills(SKILLS.skills, '', 'user').map(entry => entry.name)).toEqual(['floop', 'summary']);
     expect(loadedSkillCount(SKILLS.skills)).toBe(3);
+  });
+
+  it('says how many skills this session can use, how it inserts one, its account, and a cut-short list', () => {
+    expect(activeSkillsLine(SKILLS)).toBe('3 active in this session · Claude · inserts /name · account claude-work');
+    const { runtime: _runtime, ...noAccount } = SKILLS;
+    expect(activeSkillsLine({ ...noAccount, harness: 'codex', truncated: true })).toBe(
+      '3 active in this session · Codex · inserts $name · the list was cut short',
+    );
   });
 });
 

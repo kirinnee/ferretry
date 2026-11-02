@@ -2478,6 +2478,12 @@ messages and parses both records; both ends use it.
 The daemon's two **catalog** signatures have labels of their own too, so neither can stand in for a member proof, for
 each other, or for anything above: `ferretry-catalog-manifest-v1` signs a catalog manifest and
 `ferretry-catalog-versions-v1` signs the version list of one item in it, each `label ‖ 0x00 ‖ SHA-256(canonical JSON)`.
+`ferretry-catalog-link-v1` signs one catalog link (`docs/catalogs.md` § Links) the same way, so a manifest or version-list
+signature never verifies as a link and the reverse. A link store's requests are signed over length-prefixed transcripts
+under their own labels, `ferretry-link-store-upload-v1`, `ferretry-link-store-delete-v1` and
+`ferretry-link-store-status-v1`, and the sealed envelope binds `ferretry-link-envelope-v1` as its AAD; none of these
+labels is used by anything above, and none of the above is accepted by a link store. (3f-1 ships the libraries only; the
+store itself is not built.)
 
 **`join`: one redemption, then the session ends.**
 

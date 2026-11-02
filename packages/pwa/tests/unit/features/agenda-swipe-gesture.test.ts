@@ -12,7 +12,6 @@ import {
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
-  swipesWith,
 } from '../../../src/features/agenda/agenda-swipe-gesture.ts';
 
 const el = (html: string): HTMLElement => {
@@ -207,15 +206,6 @@ describe('the Inbox card’s text', () => {
   it('keeps what is pressed from highlighting', () => {
     expect(css).toMatch(/\.fy-attn-deck__top :is\(button[^)]*\) \{\s*user-select: none/);
     expect(css).toMatch(/\.fy-totest__surface :is\(button[^)]*\) \{\s*user-select: none/);
-  });
-});
-
-describe('swipesWith', () => {
-  it('is true for a finger, and for a mouse only where the host opts in', () => {
-    expect(swipesWith({ pointerType: 'touch' }, false)).toBe(true);
-    expect(swipesWith({ pointerType: 'mouse' }, false)).toBe(false);
-    expect(swipesWith({ pointerType: 'mouse' }, true)).toBe(true);
-    expect(swipesWith({ pointerType: 'pen' }, true)).toBe(false);
   });
 });
 

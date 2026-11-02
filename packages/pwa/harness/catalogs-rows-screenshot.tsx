@@ -1,15 +1,15 @@
 /**
- * Skill and MCP rows with Share and Add on the side (docs/design/catalogs.md §3 and §8): the Skills list (a skill of
- * your own, one already shared with its version, one installed from someone, one overridden), the MCP list, the ⋯ menu
- * open, Share into the Share sheet, and Add on a skill in no catalog ending in "Share it now". The MCP list has a ⋯ on
- * every row, with Show details opened on two of them. Both lists carry one small "Add from a link…" link and no
- * paste box. On a phone and a desktop, light and dark.
+ * The side panel's ACTIVE skills and MCP servers (docs/catalogs.md "The skill and MCP rows", &B131 A1): the Skills list
+ * with its "N active in this session" header (a project skill, one already published with its version, one installed
+ * from someone, one not active because another wins), the ⋯ menu open on a published skill and on an installed one,
+ * and Publish in a catalog… from the ⋯ on a skill in no catalog. The MCP list has a ⋯ on every row, with Show details
+ * opened on two of them. No row has Share or Add, and neither list has "Add from a link…". On a phone and a desktop,
+ * light and dark.
  *
  *   bun harness/catalogs-rows-screenshot.tsx      # writes harness/out/catalogs-rows-*.png
  *
  * It renders the REAL `ContextRailBody` (the rail the Skills and MCP lists live in) against an invented machine.
- * THE SHARE CODE IN THE PICTURES IS A FIXED FAKE. It fails if any frame scrolls sideways or a button on the row is
- * shorter than 44px on the phone.
+ * It fails if any frame scrolls sideways or a button on the row is shorter than 44px on the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -42,14 +42,11 @@ const MACHINE = 'studio-mac';
 const CONNECTION = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio', daemonName: MACHINE });
 const CATALOG = 'cat_' + 'c'.repeat(22);
 const DIGEST = 'sha256:' + 'ab'.repeat(32);
-const MEMBER_A = 'mbr_' + 'a'.repeat(22);
-const FAKE_CODE = 'fy_share_FAKEFAKEFAKEFAKEFAKEFA';
-const FAKE_LINK = 'https://app.example.test/join#v1;url=https%3A%2F%2Fstudio.example.test;fp=fy_daemon_' + 'q'.repeat(43) + ';share=' + FAKE_CODE;
 const FLOOP_PATH = '/fy/home/.claude/skills/floop/SKILL.md';
 
 const view = new URLSearchParams(location.search).get('view');
 const tab = view.startsWith('mcp') ? 'mcp' : 'skills';
-let added = view === 'skills-share' || view !== 'skills-add';
+let added = view !== 'skills-add';
 
 const owned = (items) => ({
   id: CATALOG, name: 'Team skills', description: '', publisherName: MACHINE, visibility: 'members', revision: 4,
@@ -106,17 +103,6 @@ const MCP = {
   ],
 };
 
-const MEMBERS = [{
-  memberId: MEMBER_A, label: 'Alice', catalogIds: [CATALOG], createdAt: '2026-10-29T09:00:00.000Z',
-  keys: [{ keyId: 'mk_' + '1'.repeat(22), clientName: 'Firefox on a Mac', joinedAt: '2026-10-29T09:05:00.000Z', passkeys: 1 }],
-}];
-const MINTED = {
-  share: {
-    shareId: 'shr_' + 's'.repeat(22), memberId: MEMBER_A, memberLabel: 'Carol', catalogIds: [CATALOG], createdAt: AT,
-    expiresAt: '2026-10-31T09:14:52.000Z', uses: { kind: 'single' }, state: 'live', usedBy: [],
-  },
-  code: FAKE_CODE, link: FAKE_LINK,
-};
 const PREVIEW = {
   catalogId: CATALOG, kind: 'skill', name: 'pdf-tools', summary: 'Split, merge and OCR PDFs',
   location: '/fy/home/.claude/skills/pdf-tools/SKILL.md', version: 1, digest: DIGEST, size: 100,
@@ -129,13 +115,11 @@ const client = {
     if (method === 'GET' && path === '/v1/catalog-installs')
       return { installs: [installRecord('skill', 'review-pr', 2), installRecord('mcp', 'github', 3)] };
     if (method === 'GET' && path === '/v1/catalogs') return { catalogs: catalogs() };
-    if (method === 'GET' && path === '/v1/catalog-members') return { members: MEMBERS };
     if (method === 'POST' && path.endsWith('/items/preview')) return PREVIEW;
     if (method === 'POST' && path.endsWith('/items')) {
       added = true;
       return { itemId: PDF_ITEM.itemId, kind: 'skill', name: 'pdf-tools', itemVersion: 1, digest: DIGEST };
     }
-    if (method === 'POST' && path === '/v1/catalog-shares') return MINTED;
     throw new Error('the harness has no answer for ' + method + ' ' + path);
   },
 };
@@ -280,18 +264,16 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.getByRole('menu').waitFor({ state: 'visible' });
   await shot(page, 'skills-menu-installed', theme, vp, ['[data-frame]', '[role="menu"]']);
 
-  await open(page, theme, 'skills-share');
-  await page.locator('[data-catalog-item-row="floop"] [data-row-share]').click();
-  await page.locator('[data-catalog-sheet="share"]').waitFor({ state: 'visible' });
-  await shot(page, 'share', theme, vp, SHEET);
-
   await open(page, theme, 'skills-add');
-  await page.locator('[data-catalog-item-row="pdf-tools"] [data-row-share]').click();
+  await page.locator('[data-catalog-item-row="pdf-tools"] [data-row-more]').click();
+  await page.getByRole('menu').waitFor({ state: 'visible' });
+  await shot(page, 'skills-menu-unpublished', theme, vp, ['[data-frame]', '[role="menu"]']);
+  await page.getByRole('menuitem', { name: 'Publish in a catalog…' }).click();
   await page.locator('[data-catalog-sheet="add"]').waitFor({ state: 'visible' });
   await page.locator('[data-catalog-preview]').click();
   await page.locator('[data-catalog-add]').click();
-  await page.locator('[data-catalog-share-now]').waitFor({ state: 'visible' });
-  await shot(page, 'add-share-now', theme, vp, SHEET);
+  await page.locator('[data-catalog-landed]').waitFor({ state: 'visible' });
+  await shot(page, 'publish', theme, vp, SHEET);
 
   await open(page, theme, 'mcp');
   await page.locator('[data-row-from]').first().waitFor({ state: 'visible' });

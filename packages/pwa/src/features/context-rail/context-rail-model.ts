@@ -12,7 +12,13 @@
  * many rows does each hold under the current search, and which rows are showing.
  */
 
-import type { McpInventoryServer, SessionFsEntry, SkillEntry, SkillScope } from '@ferretry/protocol';
+import type {
+  McpInventoryServer,
+  SessionFsEntry,
+  SessionSkillsInventory,
+  SkillEntry,
+  SkillScope,
+} from '@ferretry/protocol';
 import { formatBytes } from '../../components/files-model.ts';
 import {
   checkResultOf,
@@ -21,6 +27,7 @@ import {
   mcpRowStatus,
   SKILL_SCOPE_LABEL,
 } from '../mcp/mcp-model.ts';
+import { skillHarnessLabel } from '../skills/skills-catalog.ts';
 
 // ── The sub-tabs ─────────────────────────────────────────────────────────────────────────────────
 
@@ -134,6 +141,18 @@ export const visibleSkills = (skills: readonly SkillEntry[], query: string, chip
 /** How many skills this ferret actually loads: the ones no other scope overrides. */
 export const loadedSkillCount = (skills: readonly SkillEntry[]): number =>
   skills.filter(skill => skill.shadowedBy === undefined).length;
+
+/**
+ * The line above the Skills list, which answers "are these in my system?" in words: how many this session
+ * can use, how it inserts one, which account it runs as, and whether the list was cut short.
+ */
+export const activeSkillsLine = (inventory: SessionSkillsInventory): string =>
+  [
+    `${String(loadedSkillCount(inventory.skills))} active in this session`,
+    skillHarnessLabel(inventory.harness),
+    ...(inventory.runtime === undefined ? [] : [`account ${inventory.runtime}`]),
+    ...(inventory.truncated ? ['the list was cut short'] : []),
+  ].join(' · ');
 
 // ── Docs ─────────────────────────────────────────────────────────────────────────────────────────
 

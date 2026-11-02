@@ -79,6 +79,13 @@ export const TYPICAL_COMPACTION_MS: Readonly<Record<TranscriptHarness, number>> 
 /** A watched compaction longer than this was not one compaction (a parked pane, a clock jump). */
 export const MAX_COMPACTION_MS = 30 * 60_000;
 
+/**
+ * How long a tracked compaction survives frames that do not show its line. A capture can land mid-repaint
+ * (the spinner line gone for one sample) or the line can wrap off the status window; ending the compaction
+ * on that single frame dropped the card and then started a NEW one — a flicker, with its clock back at 0.
+ */
+export const PANE_GRACE_MS = 5_000;
+
 /** How long after a boundary record a still-painted status line is read as lag, not a second compaction. */
 const BOUNDARY_LAG_MS = 3_000;
 
@@ -122,6 +129,12 @@ export interface CompactionTracker {
   readonly tokensBefore?: number;
   /** Set once the finished compaction has been handed to the history, so it is kept exactly once. */
   readonly recorded?: boolean;
+  /** The last bar percentage the pane painted: carried through a frame that paints none. */
+  readonly percent?: number;
+  /** The last `↓` counter the pane painted: carried through a frame that paints none. */
+  readonly tokensWritten?: number;
+  /** When the pane first stopped showing the line, while inside {@link PANE_GRACE_MS}; cleared when it returns. */
+  readonly missedAt?: number;
 }
 
 /** The pane and transcript evidence for one sample. */
@@ -174,6 +187,21 @@ const lastBoundary = (events: readonly TranscriptEvent[]): number => {
     if ((events[index] as TranscriptEvent).kind === 'compaction') return index;
   }
   return -1;
+};
+
+/** The tracker with the pane's newest progress remembered and any gap forgotten; the same object when nothing changed. */
+const remembered = (tracker: CompactionTracker, progress: PaneCompaction | undefined): CompactionTracker => {
+  const percent = progress?.percent ?? tracker.percent;
+  const tokensWritten = progress?.tokensWritten ?? tracker.tokensWritten;
+  if (percent === tracker.percent && tokensWritten === tracker.tokensWritten && tracker.missedAt === undefined) {
+    return tracker;
+  }
+  const { missedAt: _gap, ...kept } = tracker;
+  return {
+    ...kept,
+    ...(percent === undefined ? {} : { percent }),
+    ...(tokensWritten === undefined ? {} : { tokensWritten }),
+  };
 };
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -232,23 +260,25 @@ export const resolveCompaction = (evidence: CompactionEvidence): CompactionVerdi
     phase: 'running',
     startedAt: tracker.startedAt,
     ...(tracker.tokensBefore === undefined ? {} : { tokensBefore: tracker.tokensBefore }),
-    ...(progress?.percent === undefined ? {} : { percent: progress.percent }),
-    ...(progress?.tokensWritten === undefined ? {} : { tokensWritten: progress.tokensWritten }),
+    ...(tracker.percent === undefined ? {} : { percent: tracker.percent }),
+    ...(tracker.tokensWritten === undefined ? {} : { tokensWritten: tracker.tokensWritten }),
     expectedMs: estimate.expectedMs,
     basis: estimate.basis,
   });
 
   if (paneCompacting === true) {
-    if (evidence.tracker !== undefined && !ended)
-      return { compaction: running(evidence.tracker), tracker: evidence.tracker };
+    if (evidence.tracker !== undefined && !ended) {
+      const tracker = remembered(evidence.tracker, progress);
+      return { compaction: running(tracker), tracker };
+    }
     if (boundaryMs !== undefined && nowMs - boundaryMs < BOUNDARY_LAG_MS) {
       return { compaction: done(evidence.tracker), tracker: evidence.tracker };
     }
     const tokensBefore = contextBefore(events, events.length);
-    const tracker: CompactionTracker = {
-      startedAt: instant(nowMs),
-      ...(tokensBefore === undefined ? {} : { tokensBefore }),
-    };
+    const tracker = remembered(
+      { startedAt: instant(nowMs), ...(tokensBefore === undefined ? {} : { tokensBefore }) },
+      progress,
+    );
     return { compaction: running(tracker), tracker };
   }
 
@@ -256,7 +286,16 @@ export const resolveCompaction = (evidence: CompactionEvidence): CompactionVerdi
     return { compaction: running(evidence.tracker), tracker: evidence.tracker };
   }
 
-  // The line is gone and no boundary followed the tracked start: interrupted, or nothing was recorded.
+  // The line is not in this frame and no boundary followed the tracked start: a repaint gap, until it outlasts the grace.
+  if (paneCompacting === false && evidence.tracker !== undefined && !ended) {
+    const missedAt = evidence.tracker.missedAt ?? nowMs;
+    if (nowMs - missedAt < PANE_GRACE_MS) {
+      const tracker = missedAt === evidence.tracker.missedAt ? evidence.tracker : { ...evidence.tracker, missedAt };
+      return { compaction: running(tracker), tracker };
+    }
+  }
+
+  // The line is gone for good and no boundary followed the tracked start: interrupted, or nothing was recorded.
   const kept = ended ? evidence.tracker : undefined;
   return { compaction: done(kept), tracker: kept };
 };

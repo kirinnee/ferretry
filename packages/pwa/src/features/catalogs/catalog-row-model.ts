@@ -54,20 +54,6 @@ export function sharedItemFor(
   );
 }
 
-/** What Share does for this row, before anything is shown. */
-export type SharePlan =
-  | { readonly kind: 'none' }
-  | { readonly kind: 'one'; readonly catalog: OwnedCatalog }
-  | { readonly kind: 'many'; readonly catalogs: readonly OwnedCatalog[] };
-
-export function sharePlan(matches: readonly OwnedMatch[]): SharePlan {
-  const [first, ...rest] = matches;
-  if (first === undefined) return { kind: 'none' };
-  return rest.length === 0
-    ? { kind: 'one', catalog: first.catalog }
-    : { kind: 'many', catalogs: matches.map(match => match.catalog) };
-}
-
 /** The newest version any of this machine's catalogs holds for the item, or `null`. */
 export function ownedVersion(matches: readonly OwnedMatch[]): number | null {
   let newest: number | null = null;
@@ -108,11 +94,11 @@ export function rowChips(installs: readonly CatalogInstall[], matches: readonly 
 }
 
 /**
- * Add is for what this machine could share: not for what someone else's catalog wrote here, which this
+ * Publish is for what this machine could share: not for what someone else's catalog wrote here, which this
  * machine does not own.
  */
 export const canAdd = (installs: readonly CatalogInstall[]): boolean => installs.length === 0;
 
-/** The ⋯ menu's label for Remove: bare for the usual one install, naming the catalog when there are several. */
+/** The ⋯ menu's label for Uninstall: bare for the usual one install, naming the catalog when there are several. */
 export const removeLabel = (install: CatalogInstall, several: boolean): string =>
-  several ? `Remove (from ${revealHidden(install.provenance.catalogName)})` : 'Remove';
+  several ? `Uninstall (from ${revealHidden(install.provenance.catalogName)})` : 'Uninstall';

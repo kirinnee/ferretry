@@ -1,22 +1,25 @@
 /**
- * One skill or MCP server as a compact row, with Share and Add on the side.
+ * One ACTIVE skill or MCP server as a compact row: what this session can use, and where it came from.
  *
  * The context rail's Skills and MCP lists and the session Skills surface all draw THIS row, so an item
- * reads and behaves the same wherever it is listed: its name (tapping it inserts the invocation), a scope
- * chip, the version when one is known, and one line of description. On the right, always visible and at
- * least 44 px tall, are **Share**, **Add** (only for what this machine could share) and **⋯**.
+ * reads and behaves the same wherever it is listed: its name (tapping it inserts the invocation), where it
+ * came from (a scope chip, and "from Ines · v2" for what a catalog install wrote), the version when one of
+ * this machine's catalogs holds it, and one line of description.
  *
- * - **Add** opens the add sheet.
- * - **Share** needs no new route: an item already in exactly one of this machine's catalogs opens that
- *   catalog's Share sheet; in several, a short picker comes first; in none, the add sheet whose last
- *   step offers "Share it now" and carries straight on into the Share sheet for the catalog it landed in.
- * - **⋯** holds Open, Add to another catalog… and, for what a catalog install wrote, Remove, which asks
- *   first as it always has, and **Versions…** (when the machine advertises versions) for what a catalog holds.
+ * NOTHING ON THE ROW PUBLISHES (docs/catalogs.md, &B131): a list of what a session can use is not a shop,
+ * so there is no Share and no Add beside the name. The one control is **⋯**, which holds, in order:
+ * - **Open** the item's file or detail;
+ * - **Publish in ‹default catalog›** (one tap, with Undo) and **Publish in another catalog…**, or
+ *   **Publish in a catalog…** when one tap is not offered — only for what this machine could share, never for
+ *   what someone else's catalog wrote here;
+ * - **Uninstall**, only for what a catalog install wrote. The daemon removes exactly the files that install
+ *   recorded and refuses one changed since, so a skill somebody wrote by hand never gets the item at all.
+ * Sharing a catalog with people, and its versions, live in Sharing › My catalogs.
  */
 
-import type { CatalogInstall, CatalogItemSource, OwnedCatalog } from '@ferretry/protocol';
+import type { CatalogInstall, CatalogItemSource } from '@ferretry/protocol';
 import { revealHidden } from '@ferretry/protocol';
-import { Eye, GitCompare, MoreHorizontal, PackagePlus, Share2, Trash2 } from 'lucide-react';
+import { Eye, MoreHorizontal, PackagePlus, Trash2 } from 'lucide-react';
 import type { SharedItemPreview } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
@@ -27,13 +30,12 @@ import { AddToCatalogSheet, type AddToCatalogSheetProps } from './add-to-catalog
 import { CatalogAddToast, type CatalogToast } from './catalog-add-toast.tsx';
 import { removeCatalogInstall } from './catalog-installs-api.ts';
 import { installRefusal, installsFor, REMOVE_NOTE } from './catalog-install-model.ts';
-import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
+import { FailureLine } from './catalog-parts.tsx';
 import type { CatalogRowsHost, CatalogRowsRead } from './catalog-row-tools.tsx';
-import { canAdd, ownedMatches, removeLabel, rowChips, sharePlan, sharedItemFor } from './catalog-row-model.ts';
-import { listCatalogs, listSharedItems, quickAdd, undoQuickAdd } from './catalogs-api.ts';
+import { canAdd, ownedMatches, removeLabel, rowChips, sharedItemFor } from './catalog-row-model.ts';
+import { listSharedItems, quickAdd, undoQuickAdd } from './catalogs-api.ts';
 import {
   ADDED_TOAST_MS,
-  addDestination,
   addedSentence,
   alreadySentence,
   defaultCatalogName,
@@ -41,12 +43,11 @@ import {
   listedLive,
   NOTE_TOAST_MS,
   ownerRefusal,
+  publishDestination,
   quickAddOutcome,
   reviewSentence,
   undoneSentence,
 } from './catalogs-model.ts';
-import { ShareSheet } from './share-sheet.tsx';
-import { VersionsSheet } from './versions-sheet.tsx';
 
 interface RowScope {
   readonly label: string;
@@ -55,7 +56,7 @@ interface RowScope {
 }
 
 export interface CatalogItemRowProps {
-  /** Without a host the row is the plain compact row: no Share, no Add, no version. */
+  /** Without a host the row is the plain compact row: no Publish, no Uninstall, no version. */
   readonly host?: CatalogRowsHost;
   /** What the host's lists said. Required with a host. */
   readonly read?: CatalogRowsRead;
@@ -64,7 +65,7 @@ export interface CatalogItemRowProps {
   readonly itemName: string;
   /** What the row shows in mono: the invocation, or the server's name. */
   readonly label: string;
-  /** What Add points at, and what a catalog's items are matched against. */
+  /** What Publish points at, and what a catalog's items are matched against. */
   readonly source: CatalogItemSource;
   readonly scope: RowScope;
   /** One line under the name. The whole text is the row's tooltip. */
@@ -80,8 +81,6 @@ export interface CatalogItemRowProps {
   /** Rendered under the row's line: an MCP server's status and its Check and Sign in. */
   readonly children?: ReactNode;
 }
-
-type Adding = 'add' | 'share';
 
 /** What the add sheet opens with when one tap did not finish the job. */
 type SheetStart = Pick<AddToCatalogSheetProps, 'notice' | 'existing'> & { readonly initial?: SharedItemPreview };
@@ -109,14 +108,10 @@ export function CatalogItemRow({
   const createClient = host?.createClient ?? routed;
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const [adding, setAdding] = useState<Adding | null>(null);
-  const [picking, setPicking] = useState<readonly OwnedCatalog[] | null>(null);
-  const [sharing, setSharing] = useState<OwnedCatalog | null>(null);
+  const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
-  const [versionsOf, setVersionsOf] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [tapping, setTapping] = useState(false);
   const tapLock = useRef(false);
   const toastKey = useRef(0);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -126,7 +121,6 @@ export function CatalogItemRow({
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
-  const shareable = host !== undefined && (addable || matches.length > 0);
   const oneTap = addable && read?.features.quickAdd === true;
   const defaultCatalog = read === undefined ? undefined : defaultCatalogOf(read.catalogs, read.defaultCatalogId);
 
@@ -138,7 +132,7 @@ export function CatalogItemRow({
 
   const openSheet = (start: SheetStart): void => {
     setSheetStart(start);
-    setAdding('add');
+    setAdding(true);
   };
 
   const undo = async (token: string, catalogName: string): Promise<void> => {
@@ -156,7 +150,6 @@ export function CatalogItemRow({
   const tapAdd = async (): Promise<void> => {
     if (host === undefined || tapLock.current) return;
     tapLock.current = true;
-    setTapping(true);
     setFailure(null);
     setToast(null);
     try {
@@ -181,7 +174,6 @@ export function CatalogItemRow({
       openSheet({ notice: ownerRefusal(error).sentence });
     } finally {
       tapLock.current = false;
-      setTapping(false);
     }
   };
 
@@ -202,14 +194,6 @@ export function CatalogItemRow({
     }
   };
 
-  const share = (): void => {
-    setFailure(null);
-    const plan = sharePlan(matches);
-    if (plan.kind === 'one') setSharing(plan.catalog);
-    else if (plan.kind === 'many') setPicking(plan.catalogs);
-    else if (addable) setAdding('share');
-  };
-
   const remove = async (install: CatalogInstall): Promise<void> => {
     if (host === undefined) return;
     setBusy(true);
@@ -225,45 +209,30 @@ export function CatalogItemRow({
     }
   };
 
-  const shareNow = async (catalogId: string): Promise<void> => {
-    if (host === undefined) return;
-    try {
-      const list = await listCatalogs(await createClient(host.connection));
-      const catalog = list.catalogs.find(candidate => candidate.id === catalogId);
-      if (catalog === undefined) {
-        setAdding(null);
-        setFailure('That catalog is not there any more.');
-        return;
-      }
-      setAdding(null);
-      setSharing(catalog);
-    } catch (error) {
-      setAdding(null);
-      setFailure(ownerRefusal(error).sentence);
-    }
-  };
-
+  const publishIcon = <PackagePlus size={16} aria-hidden="true" />;
   const items: ContextMenuItem[] = [];
   if (onOpen !== undefined)
     items.push({ key: 'open', label: openLabel, icon: <Eye size={16} aria-hidden="true" />, onSelect: onOpen });
+  // One tap names where it lands; "another catalog" appears once a catalog here already holds the item.
+  if (oneTap)
+    items.push({
+      key: 'publish',
+      label: publishDestination(defaultCatalog, host?.connection.daemonName),
+      icon: publishIcon,
+      onSelect: () => void tapAdd(),
+    });
+  else if (addable && matches.length === 0)
+    items.push({ key: 'publish', label: 'Publish in a catalog…', icon: publishIcon, onSelect: () => openSheet({}) });
   if (addable && matches.length > 0)
     items.push({
-      key: 'add-another',
-      label: 'Add to another catalog…',
-      icon: <PackagePlus size={16} aria-hidden="true" />,
+      key: 'publish-another',
+      label: 'Publish in another catalog…',
+      icon: publishIcon,
       onSelect: () => void addAnother(),
-    });
-  const heldItemId = matches[0]?.item.itemId;
-  if (host !== undefined && read?.features.versions === true && heldItemId !== undefined)
-    items.push({
-      key: 'versions',
-      label: 'Versions…',
-      icon: <GitCompare size={16} aria-hidden="true" />,
-      onSelect: () => setVersionsOf(heldItemId),
     });
   for (const install of installs)
     items.push({
-      key: `remove-${install.installId}`,
+      key: `uninstall-${install.installId}`,
       label: removeLabel(install, installs.length > 1),
       icon: <Trash2 size={16} aria-hidden="true" />,
       danger: true,
@@ -329,63 +298,22 @@ export function CatalogItemRow({
             {nameBlock}
           </button>
         )}
-        {host === undefined && items.length === 0 ? null : (
+        {items.length === 0 ? null : (
           <div className="ml-auto flex shrink-0 items-center gap-1" data-row-controls="">
-            {shareable ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="min-h-[44px] min-w-[5rem] justify-center"
-                aria-label={`Share ${label}`}
-                onClick={share}
-                data-row-share=""
-              >
-                <Share2 size={14} aria-hidden="true" />
-                Share
-              </Button>
-            ) : (
-              <span className="w-[5rem]" aria-hidden="true" />
-            )}
-            {addable ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="min-h-[44px] min-w-[4rem] justify-center"
-                aria-label={
-                  oneTap
-                    ? addDestination(label, defaultCatalog, host?.connection.daemonName)
-                    : `Add ${label} to a catalog`
-                }
-                disabled={tapping}
-                onClick={() => (oneTap ? void tapAdd() : openSheet({}))}
-                data-row-add=""
-              >
-                <PackagePlus size={14} aria-hidden="true" />
-                Add
-              </Button>
-            ) : (
-              <span className="w-[4rem]" aria-hidden="true" />
-            )}
-            {items.length === 0 ? (
-              <span className="w-[44px]" aria-hidden="true" />
-            ) : (
-              <Button
-                ref={moreRef}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="min-h-[44px] min-w-[44px]"
-                aria-label={`More for ${label}`}
-                aria-haspopup="menu"
-                aria-expanded={anchor !== null}
-                onClick={openMenu}
-                data-row-more=""
-              >
-                <MoreHorizontal size={16} aria-hidden="true" />
-              </Button>
-            )}
+            <Button
+              ref={moreRef}
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-h-[44px] min-w-[44px]"
+              aria-label={`More for ${label}`}
+              aria-haspopup="menu"
+              aria-expanded={anchor !== null}
+              onClick={openMenu}
+              data-row-more=""
+            >
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </Button>
           </div>
         )}
       </div>
@@ -398,7 +326,7 @@ export function CatalogItemRow({
             data-catalog-remove-confirm=""
           >
             <p className="m-0 break-words text-cell font-semibold">
-              Remove {revealHidden(itemName)} from {install.destination}?
+              Uninstall {revealHidden(itemName)} from {install.destination}?
             </p>
             <p className="m-0 text-cell">{REMOVE_NOTE}</p>
             <div className="flex flex-wrap gap-xs">
@@ -410,7 +338,7 @@ export function CatalogItemRow({
                 onClick={() => void remove(install)}
                 data-catalog-remove-yes=""
               >
-                {busy ? 'Removing…' : 'Remove it'}
+                {busy ? 'Uninstalling…' : 'Uninstall it'}
               </Button>
               <Button
                 type="button"
@@ -441,73 +369,22 @@ export function CatalogItemRow({
           items={items}
         />
       )}
-      {host === undefined || adding === null ? null : (
+      {host === undefined || !adding ? null : (
         <AddToCatalogSheet
           connection={host.connection}
           source={source}
           label={itemName}
-          onClose={() => setAdding(null)}
+          onClose={() => setAdding(false)}
           onDone={() => read?.reload()}
           {...sheetStart}
           {...(oneTap && defaultCatalog !== undefined ? { preferCatalogId: defaultCatalog.id } : {})}
           {...(oneTap && defaultCatalog === undefined
             ? { suggestNewName: defaultCatalogName(host.connection.daemonName), asDefault: true }
             : {})}
-          {...(adding === 'share' ? { onShareNow: (catalogId: string) => void shareNow(catalogId) } : {})}
-          {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
-        />
-      )}
-      {host === undefined || versionsOf === null ? null : (
-        <VersionsSheet
-          connection={host.connection}
-          itemId={versionsOf}
-          label={itemName}
-          canWrite={read?.features.versions2 === true}
-          onClose={() => setVersionsOf(null)}
-          onChanged={() => read?.reload()}
           {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
         />
       )}
       {toast === null ? null : <CatalogAddToast key={toast.key} toast={toast} onDismiss={dismissToast} />}
-      {picking === null ? null : (
-        <CatalogSheet
-          name="share-pick"
-          title={`Share ${itemName}`}
-          subtitle="It is in more than one of your catalogs. Which one do you want to share?"
-          closeLabel="Close Share"
-          onClose={() => setPicking(null)}
-        >
-          <ul className="m-0 flex list-none flex-col gap-xs p-0">
-            {picking.map(catalog => (
-              <li key={catalog.id}>
-                <Button
-                  type="button"
-                  className="min-h-[44px] w-full justify-start"
-                  onClick={() => {
-                    setPicking(null);
-                    setSharing(catalog);
-                  }}
-                  data-row-share-pick={catalog.id}
-                >
-                  {catalog.name}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </CatalogSheet>
-      )}
-      {host === undefined || sharing === null ? null : (
-        <ShareSheet
-          connection={host.connection}
-          catalog={sharing}
-          onClose={() => {
-            setSharing(null);
-            read?.reload();
-          }}
-          onChanged={() => read?.reload()}
-          {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
-        />
-      )}
     </div>
   );
 }

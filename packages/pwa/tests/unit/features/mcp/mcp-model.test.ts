@@ -191,7 +191,9 @@ describe('ordering and words', () => {
       'ferretry:b',
       'user:a',
     ]);
-    expect(skillOverride(skills[3] ?? skill({ name: 'x' }))).toBe('Overridden by Project');
+    expect(skillOverride(skills[3] ?? skill({ name: 'x' }))).toBe(
+      'Not active: the skill of the same name in This project wins',
+    );
     expect(skillOverride(skill({ name: 'x' }))).toBeUndefined();
   });
 });

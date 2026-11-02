@@ -523,11 +523,11 @@ daemon, so it asks `GET /v1/health` once per read and uses a route only when the
 `catalogs.quick-add.1` for one-tap Add, `catalogs.items.1` for the default catalog, **Make default** and **Add to another
 catalog…**. A machine that cannot be asked (the read fails) offers neither, and every row keeps the sheet it had before.
 
-- **Add is one tap** when the machine says it can. The button's label (and its accessible name) says where the tap goes:
-  "Add ‹skill› to ‹default catalog›", or "Add ‹skill› (makes ‹machine›’s skills)" while no default exists yet. The app
-  never claims a catalog the machine has not made. The tap sends `{source}` to `quick-add`; the button is disabled
-  while it is in flight, and a second tap in the same moment is ignored.
-- **`added`** shows a toast, "Added to ‹catalog›", with **Undo** (44px tall) and a seconds counter. It stays **10
+- **Publish is one tap** when the machine says it can: the row's ⋯ item says where it goes, "Publish in ‹default
+  catalog›", or "Publish in a new catalog, ‹machine›’s skills" while no default exists yet. The app never claims a
+  catalog the machine has not made. The tap sends `{source}` to `quick-add`; picking it again while one is in flight
+  is ignored.
+- **`added`** shows a toast, "Published in ‹catalog›", with **Undo** (44px tall) and a seconds counter. It stays **10
   seconds**, shorter than the daemon's 60-second token, so a slow link still lands. Undo calls `quick-add/undo`
   with the token and shows what it did: **retracted** says "Taken back. It was never in ‹catalog› for anyone.";
   **withdrawn** says "Withdrawn from ‹catalog›. Someone may have seen it, so it shows as withdrawn." A refusal (an
@@ -1061,36 +1061,164 @@ only the count shows. A name the publisher chose is shown with hidden and format
 **Install on a machine** hands the signed manifest and item to the member's **own** daemon's install preview, which
 verifies them again. The offline library is phase 3 and is not built.
 
-### The skill and MCP rows (catalogs 3b)
+### The skill and MCP rows (catalogs 3b, reworked by &B131 A1)
 
 The context rail's **Skills** list, its **MCP** list and the skills surface draw every item with **one** row
-(`features/catalogs/catalog-item-row.tsx`). It replaces the old strip under each row ("From ‹catalog›", Remove, "Add
-to catalog…") and the inline Open button.
+(`features/catalogs/catalog-item-row.tsx`). Since &B131 the side panel lists **what this session can use** and nothing
+on a row publishes: a list of what an agent has is not a shop (owner, 2026-11-02: "the side panel should show skills
+ACTIVE in this session … the add button is too overloaded").
 
-- **Left**: the name in mono (tapping it still inserts the invocation), a scope chip, a version chip when one is known,
-  and one truncated description line (the full text is its tooltip, and **Open SKILL.md** shows the file). Hidden and
-  format characters in any name, publisher or catalog name are marked.
+- **The Skills header** says it in words: "16 active in this session · Claude · inserts /name · account ‹runtime›"
+  (`activeSkillsLine`). The count is the skills no same-named skill elsewhere overrides.
+- **Left**: the name in mono (tapping it still inserts the invocation), where it came from, a version chip when one is
+  known, and one truncated description line (the full text is its tooltip, and **Open SKILL.md** shows the file).
+  Hidden and format characters in any name, publisher or catalog name are marked.
+- **Where it came from**: **This project** (the project's skills folder, so every session in that folder has it),
+  **This account** (the account's own skills folder) or **Ferretry** (built in). A skill another one of the same name
+  overrides stays listed, dimmed, with "Not active: the skill of the same name in ‹place› wins".
 - **Version chip**: `v3` for an item in one of **this machine's** catalogs (the newest version it holds); for an item a
   catalog install wrote, **from ‹publisher› · v2** (the version it is pinned to; the tooltip names the catalog). No
   chip when no version is known. A withdrawn item is not held, so it shows none.
-- **Right, always visible, 44px tall**: **Share**, **Add** (only for items this machine could share, so not for
-  installs from someone else's catalog) and **⋯**. The columns keep their place so rows line up.
 - **Which catalog holds an item** is read from the catalogs list the machine already answers, by source: the
   `SKILL.md` path (a list that only knows a skill's name matches by name) or the MCP server id. No new route.
-- **Add** opens the Add to catalog sheet (on a machine with `catalogs.quick-add.1` it is one tap instead: [The app (catalogs 3c-4)](#the-app-catalogs-3c-4)). When it has saved the item and the row is the one that opened it, the last
-  step offers **Share it now** (or **Not now**): it opens the Share sheet for the catalog the item just joined.
-- **Share** depends on where the item sits: in **one** catalog, the Share sheet for it; in **several**, a small picker of
-  those catalogs and then the Share sheet; in **none**, the Add to catalog sheet, ending in **Share it now**. Sharing
-  still asks for the owner's passkey, as before; nothing about a share reaches the row.
-- **⋯** holds **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details**
-  (so every MCP row has a ⋯), **Add to another catalog…** (items this machine could share) and
-  **Remove** (catalog installs only, with the same confirm; with several installs, one per catalog named
-  "Remove (from ‹catalog›)"). **Versions…** (where the machine advertises `catalogs.versions.1`, [3d-4](#the-owners-versions-in-the-app-catalogs-3d-4)) opens the versions sheet; **Stop sharing** is not here yet.
+- **Right: only ⋯** (44px). There is no Share and no Add on the row, and the side panel has no "Add from a link…".
+  The ⋯ holds, in order:
+  - **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details** (so
+    every MCP row has a ⋯);
+  - **Publish in ‹default catalog›**, one tap with Undo, on a machine with `catalogs.quick-add.1` ([The app (catalogs
+    3c-4)](#the-app-catalogs-3c-4)), or **Publish in a catalog…**, which opens the Add to catalog sheet. Once a catalog
+    here holds the item, **Publish in another catalog…** too. Only for items this machine could share, never for what
+    someone else's catalog installed;
+  - **Uninstall**, for catalog installs only, with the same confirm ("Uninstall ‹item› from ‹place›?"). With several
+    installs there is one per catalog, "Uninstall (from ‹catalog›)". The daemon removes exactly the files the install
+    recorded and refuses one changed since, so a skill somebody wrote by hand never gets the item.
+- **Sharing a catalog with people and its versions live in Sharing › My catalogs**, not on the row.
 - **Show details** (MCP) opens a few plain lines under the row from the inventory the list already read: what it runs
   or its address, where it is declared, its project, the harness, and which runtimes see it with their approval. The
   address has no query and the program no arguments by construction, and hidden characters are marked.
-- A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they moved
-  to Sharing › Shared with me, so the lists stay uncluttered.
+- A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they are in
+  Sharing › Shared with me.
+- **A running Claude Code session picks up a newly installed skill** in an existing `skills/` folder without a restart.
+  A `skills/` folder that did not exist when the session started needs `/reload-skills`
+  ([Claude Code skills](https://code.claude.com/docs/en/skills)). Codex is not yet checked.
+
+## Links (catalogs 3f)
+
+> **NOT BUILT.** Slice 3f-1 delivers the libraries named below (`@ferretry/protocol` and `@ferretry/relay`) and
+> their unit tests, and nothing else. No daemon route, no store Worker, no app screen and no deploy exists yet, so no
+> link can be made today. This section is the contract those later slices implement against. Where a sentence says
+> "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own behind the relay
+> by service binding.
+
+A **link** is ONE skill or MCP setup, signed by its publisher and shared as a URL. Nobody joins, nothing is revised and
+the publisher is not asked again. Two kinds:
+
+- **one-time**: the first fetch uses it up. Ends within a day (default one hour).
+- **public**: anyone holding the URL can install it until its end. Default a week; `never` is allowed, and an optional
+  install cap (1 to 10,000).
+
+Owners decided (2026-11-02): the `share-link` step-up act is confirmed; a public link with no end lapses after 30 days
+of the publishing machine being off and revives when it returns; the store is its own Worker.
+
+### The URL
+
+```
+https://<app>/get#v1;b=<bundleId>;k=<key>;fp=<fy_daemon_…>[;s=<store origin>]
+```
+
+- The key `k` (32 random bytes) lives **only in the fragment**: a browser never sends it, so no server, log, preview
+  fetcher or `Referer` sees it. `b` is the bundle id (16 random bytes), `fp` the publisher the signature must be from.
+- `s` is written only for a self-hosted store, and must be a pure `https:` origin (no path, no user name). Without it
+  the app uses the store it discovers itself.
+- `formatLinkFragment`, `parseLinkFragment` and `catalogLinkUrl` (`catalog-link.ts`) write and read it with the same
+  field reader as pairing and share links. The `/get` reader **refuses** `code`, `share` and `url`; the pairing and
+  share readers refuse `k`. A fragment that is two kinds of link is read by neither.
+
+### The signed document and the bundle
+
+`shared-catalog-link.ts`. The publisher signs `SharedCatalogLink`: publisher, name, `linkId`, `bundleId`, kind,
+`sequence`, `issuedAt`, `notAfter` (`min(expiresAt, issuedAt + 30 days)`), optional `expiresAt` and the item line
+(id, kind, name, summary, version, digest, size). The signature covers
+`"ferretry-catalog-link-v1" ‖ 0x00 ‖ SHA-256(canonical JSON)`. The install cap is **not** signed: the store enforces it
+and changing it needs no re-sign. A one-time link has sequence 1 and an end within a day; an artifact is not a link
+item. The bundle is the signed document plus the one item, whose `catalogId` is `LINK_ITEM_CATALOG_ID`
+(`cat_` and 22 `A`s, the id every shared copy is stored under, so a link item is never mistaken for a catalog item).
+
+`verifyLinkBundle` (`catalog-signature.ts`) checks, in order, that the key hashes to the publisher the URL named, the
+signature, the bundle id and sequence the envelope carried, the end (with 5 minutes of clock skew), and that the item is
+exactly the one the signed line describes (digest, size, version, name, summary). Nothing is shown before it passes.
+
+### The envelope
+
+`link-bundle.ts`. What the store holds is opaque to it:
+
+```
+"FYL1" ‖ uint32be sequence ‖ nonce(12) ‖ AES-256-GCM(ciphertext ‖ tag)
+key = HKDF-SHA256(k, salt = bundleId bytes, info = "ferretry-link-bundle-key-v1/" + decimal(sequence), 32)
+AAD = "ferretry-link-envelope-v1" ‖ 0x00 ‖ bundleId(16) ‖ uint32be sequence
+plaintext = uint32be L ‖ canonical JSON (L bytes) ‖ zero padding to a multiple of 16 KiB
+```
+
+- Padding is exact and all zero, or the envelope is refused. The size class (16 KiB) is all the store learns.
+- The cap is 3 MiB (`LINK_ENVELOPE_MAX_BYTES`); over it is `link_too_big`, which the daemon reports from the preview
+  before it asks for a passkey.
+- The fetch token is `HKDF-SHA256(k, salt = bundleId, info = "ferretry-link-fetch-v1", 32)`. The store keeps only
+  `SHA-256(token)`, which is useless without `k`.
+
+### The store wire
+
+`link-store.ts` (schemas, paths, refusals, transcripts) and `link-store-reducer.ts` (every rule below, as a pure
+`reduceLinkStore(state, event) → [state, response]`; the Worker in 3f-2 only wraps it). Signed requests use the
+transcripts below and the labels listed in [relay-protocol.md](relay-protocol.md) (signing domains); the full
+"hosted link store" chapter of that document is written with the Worker in 3f-2. Each transcript is its label, then
+length-prefixed (uint32be) fields: protocol id `ferretry-link-store/1`, daemon id, the host the store is serving, the
+32-byte nonce, then the action's own fields (an absent optional is the empty string; status ids are sorted and joined
+with `,`). The labels are `ferretry-link-store-upload-v1`, `-delete-v1` and `-status-v1`.
+
+- **Gone is one answer.** Every failed peek or fetch (unknown id, wrong or malformed token, used, ended, lapsed,
+  expired, capped) is the same frozen `410 link_gone`, byte for byte. A public link at its cap stays `live` in its
+  owner's status, and answers 410 to peek and fetch alike.
+- **The token is matched before the wrong-token window.** A request that presents the link's real token is never
+  refused for wrong guesses at its id, so a stranger who knows only a bundle id cannot lock the recipient out or burn
+  a one-time link. Only a wrong token counts toward, and is stopped by, that window.
+- **Limits answer 429 by the id asked for, whether or not it exists**, so a 429 says nothing about an id. Defaults are
+  operator configuration: per daemon 50 live links, 64 MiB and 100 uploads a day; per link 120 fetches a minute, 5,000
+  a day and 20 wrong tokens a minute; per address 60 peeks and fetches and 20 challenges a minute; across the store
+  20,000 live links, 4 GiB, 5,000 uploads and 200,000 fetches a day (one-time fetches count in that last figure).
+- **One-time is serialised.** The first fetch sets `used` and drops the bytes in one step; a racing second fetch gets
+  the uniform 410. A lost response costs the link, which is declared below.
+- **Replace** (public only) is compare-and-swap on `expectSequence`, needs a higher sequence (the store refuses one that
+  does not go up), keeps the kind and keeps the open count. Every upload's clear envelope sequence must equal the
+  sequence the request names, and a sequence never exceeds 2^32 − 1. A **lapsed** public link is revived only by its own owner with a sequence above the stored one. Any
+  other existing id, whatever its state, is `link_exists`.
+- **Delete** ends a link, is idempotent and keeps a tombstone until `max(notAfter, now) + 30 days`, so a replayed URL
+  stays 410 and the id cannot be reused.
+- **Kill switches.** `available: false` refuses challenges and uploads; peek, fetch, delete and status keep working.
+  `serving: false` answers peek and fetch 503, as an emergency act of the operator.
+- **Uploads** may be at most 5 minutes in the past and must end within 30 days (one-time: one day). Every challenge nonce
+  is spent by its first use.
+
+### The owner's wire
+
+`catalog-link.ts` holds the schemas for `/v1/catalog-links` (create, preview, move, update, list, copy, store status) and
+their refusals. An owned link carries **no URL, no key, no bundle id and no store address**; the URL appears only in the
+create answer (once; a one-time URL is never shown again) and in a public link's Copy answer. Making, moving and
+widening a link want a passkey proved for the act `share-link` alone, so a `share-catalog` proof never buys a link and
+the reverse. Copying needs only the unlock; turning a link off never asks.
+
+### Declared gaps
+
+- **A link cannot be recalled from what was already downloaded.** Turning it off stops new fetches; a copy already
+  fetched stays with whoever has it.
+- **A malicious store can withhold or replay until `notAfter`.** It cannot read or alter an item (it holds no key and
+  every check is signed), but it can answer 410 early or serve an older signed copy; the reader refuses a lower
+  sequence it has seen.
+- **A one-time link whose response is lost is spent.** The store cannot know the bytes arrived.
+- **The open count is fetches, not installs.**
+- **A self-hosted store (`s=`) is trusted for availability only**, and the app names its host before fetching.
+- **A lapsed "never" link's id can be squatted once its tombstone is purged.** After the tombstone window another
+  daemon could upload under the same bundle id and the old URL would then reach that daemon's link. It cannot read or
+  forge anything (the key and the signature are the publisher's), so this is an availability gap only.
 
 ## Declared gaps
 

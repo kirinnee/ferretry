@@ -23,6 +23,7 @@ import {
   type CatalogSkill,
   CatalogSkillSchema,
   CatalogSummarySchema,
+  LINK_ITEM_CATALOG_ID,
   type SharedCatalogItem,
   SharedCatalogItemSchema,
   catalogItemReview,
@@ -34,8 +35,8 @@ import { catalogItemCanonical, type RelayCrypto } from '@ferretry/relay';
 import { skillFrontMatter } from '../skills/front-matter.ts';
 import { CatalogRefusal } from './refusal.ts';
 
-/** An id no catalog has: a version's shared copy is written under it so the catalog does not matter. */
-export const NORMALISED_CATALOG_ID = `cat_${'A'.repeat(22)}`;
+/** An id no catalog has: a version's shared copy is written under it so the catalog does not matter. A link's item names it too. */
+export const NORMALISED_CATALOG_ID = LINK_ITEM_CATALOG_ID;
 
 /** An id no item has: a version's content is hashed under it so the identity does not matter. */
 export const NORMALISED_ITEM_ID = `itm_${'A'.repeat(22)}`;

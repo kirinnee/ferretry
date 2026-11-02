@@ -149,7 +149,10 @@ interface OpenItem {
 interface HeldItems {
   readonly gates: readonly OpenItem[];
   readonly followups: readonly OpenItem[];
-  /** The `gate:` references of the card's closed gate items: each of those gates has been asked. */
+  /**
+   * The `gate:` references of the card's gate items the OWNER closed (answered, or said Not needed): each of those
+   * gates has been asked. One the daemon closed itself (moved, a duplicate) is not an answer, so it never stops one.
+   */
   readonly asked: ReadonlySet<string>;
 }
 
@@ -439,8 +442,8 @@ export class GateItems implements CardWriteObserver {
         else followups.push({ sessionId, item });
       }
       for (const item of listed.value.resolved) {
-        if (item.gate !== undefined && item.sourceRef !== null && gateCardOf(item) === cardId)
-          asked.add(item.sourceRef);
+        if (item.resolvedBy !== 'human' || item.gate === undefined || item.sourceRef === null) continue;
+        if (gateCardOf(item) === cardId) asked.add(item.sourceRef);
       }
     }
     return { gates, followups, asked };

@@ -18,7 +18,7 @@
  * - THE WHOLE CARD SWIPES, BY TOUCH ONLY. A touch may start anywhere on the card ({@link ./agenda-swipe-gesture.ts}):
  *   the direction is decided after 10px and kept. Sideways is a swipe (left and right answers). Up or down from the
  *   body is the reader scrolling and is handed to the browser (`touch-action: pan-y`); only the card's head, which
- *   does not scroll, keeps the up answer and Skip. A mouse drag is the reader selecting text, never a swipe; a
+ *   does not scroll, keeps the up answer and Skip. A mouse or trackpad drag is the reader selecting text, never a swipe, on any screen size; a
  *   touch that starts on a link, a button or a field, or inside something that scrolls sideways (a table), is that
  *   element's, never the deck's.
  * - A SCROLL IS NEVER A SWIPE. A drag that moved swallows the click it ends in, so a swipe that ends over a button
@@ -64,7 +64,7 @@ import {
   startsInSidewaysScroller,
   startsOnInteractive,
   ownsKeys,
-  swipesWith,
+  isTouch,
 } from './agenda-swipe-gesture.ts';
 import { DeckDownContext } from './deck-down-context.ts';
 import { SwipeCompass } from './swipe-reveal.tsx';
@@ -342,8 +342,6 @@ export interface AgendaSwipeDeckProps {
   readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
-  /** A mouse drag swipes too (the desktop run). A mouse never pulls down from the body: that drag selects text. */
-  readonly mouseSwipe?: boolean;
   /**
    * The run's keys: ←, ↑ and → answer the card on top and ↓ skips it from anywhere on the page that is not a field,
    * a menu or a dialog — not only while the card itself is focused.
@@ -352,8 +350,6 @@ export interface AgendaSwipeDeckProps {
 }
 
 const NO_ACT = (): void => undefined;
-
-const isMouse = (event: { readonly pointerType: string }): boolean => event.pointerType === 'mouse';
 
 export function AgendaSwipeDeck({
   cards,
@@ -366,7 +362,6 @@ export function AgendaSwipeDeck({
   onHold,
   ownGesturesIn,
   reducedMotion,
-  mouseSwipe = false,
   runKeys = false,
 }: AgendaSwipeDeckProps) {
   const reduced = useReducedMotion(reducedMotion);
@@ -528,7 +523,7 @@ export function AgendaSwipeDeck({
     // A button in the head or the answer row still lets a pull down start: the row's other swipes are its own.
     if (
       top === undefined ||
-      !swipesWith(event, mouseSwipe) ||
+      !isTouch(event) ||
       (startsOnInteractive(event.target) && !own) ||
       startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
@@ -540,12 +535,7 @@ export function AgendaSwipeDeck({
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
       head: own || startsInHead(event.target),
-      pull:
-        canDown &&
-        !own &&
-        !isMouse(event) &&
-        !startsInHead(event.target) &&
-        startsAtScrollTop(event.target, event.currentTarget),
+      pull: canDown && !own && !startsInHead(event.target) && startsAtScrollTop(event.target, event.currentTarget),
       own,
       startedAt: event.timeStamp,
       moved: false,
@@ -580,8 +570,6 @@ export function AgendaSwipeDeck({
       }
       current.moved = true;
       current.lock = lock;
-      // A mouse drag that became a swipe is not a selection: whatever the press started to select is let go.
-      if (isMouse(event)) window.getSelection()?.removeAllRanges();
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {

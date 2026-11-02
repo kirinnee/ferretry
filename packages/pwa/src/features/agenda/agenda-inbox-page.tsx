@@ -22,7 +22,7 @@
  *   no hint line (a wide screen's run has ONE quiet line of its keys under the card, asked for by the owner); the one thing drawn is "Skip" on the ground a card pulled down uncovers (`SwipeReveal`,
  *   where any later down-gesture goes). "Answer quickly" runs the deck from the top on a phone and a wide screen alike. On a wide screen the run is
  *   centred at a readable width, takes ← → ↓ (answer, answer, Skip) and j/k (move) from anywhere that is not a field or
- *   a menu, Esc closes it, a mouse drag swipes, and finishing says "All done". In the list, j/k (or ↑/↓) walk the rows
+ *   a menu, Esc closes it, a finger still swipes (a mouse never does), and finishing says "All done". In the list, j/k (or ↑/↓) walk the rows
  *   and Enter opens one.
  * - ONE TOOLBAR ROW, on a phone and a wide screen alike, in ONE centred column that every block aligns to: the
  *   "Inbox n" title, Show ▾ (Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the
@@ -939,7 +939,7 @@ const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) =>
 export interface AgendaInboxPageProps {
   readonly inbox: AgendaInbox;
   readonly onNavigate: (to: string) => void;
-  /** A phone finishes a run back at the list; a wider screen keys and mouse-drags it and ends on "All done". */
+  /** A phone finishes a run back at the list; a wider screen keys it (a finger still swipes) and ends on "All done". */
   readonly phone: boolean;
   /** The clock card ages read; the browser's otherwise. */
   readonly now?: number;
@@ -1678,7 +1678,6 @@ export function AgendaInboxPage({
             <ToTestStep
               answers={toTestAnswers}
               index={runOrder.indexOf(stepRow.key)}
-              mouseSwipe={!phone}
               now={now}
               onClose={() => setDeckOpen(false)}
               onNavigate={onNavigate}
@@ -1705,7 +1704,6 @@ export function AgendaInboxPage({
                 setGateWhy({ key: card.key, action });
                 return true;
               }}
-              mouseSwipe={!phone}
               onSkip={card => setDeckAt(skipSelection(runOrder, card.key))}
               runKeys={!phone}
               onSnooze={(card, until) => answerCard(host, card, snoozeAction(until))}

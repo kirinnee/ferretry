@@ -1,3 +1,11 @@
+## [4.229.2](https://github.com/kirinnee/ferretry/compare/v4.229.1...v4.229.2) (2026-11-02)
+
+### Fixes
+
+* **board:** one gate item per card across every agenda ([#1336](https://github.com/kirinnee/ferretry/issues/1336)) ([14a023f](https://github.com/kirinnee/ferretry/commit/14a023fdc360759cb16ddef754f53e960846345b))
+* **pwa:** credentials audit PR 2, the app ([#1332](https://github.com/kirinnee/ferretry/issues/1332)) ([7adb0f9](https://github.com/kirinnee/ferretry/commit/7adb0f91b04c769ae128e220c4632cb26eb4bb99))
+* **pwa:** hold the compaction bar through pane gaps; swipe by touch only ([#1338](https://github.com/kirinnee/ferretry/issues/1338)) ([a002039](https://github.com/kirinnee/ferretry/commit/a002039f7472f6ab33404639965f78e6c05e22e2))
+
 ## [4.229.1](https://github.com/kirinnee/ferretry/compare/v4.229.0...v4.229.1) (2026-11-02)
 
 ### Fixes
