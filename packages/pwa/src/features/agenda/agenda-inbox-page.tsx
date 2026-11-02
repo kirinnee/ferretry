@@ -18,10 +18,12 @@
  *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Skip,
  *   as everywhere: the next item, nothing sent, the skipped item stays open. "Not needed" is its own button, never a swipe. On touch the card's top bar and answer row swipe on their own,
  *   exactly as in the chat; the item's head and the who-and-what line are the deck's. A swipe goes into the same
- *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no hint line, no key caption and no banner
- *   naming an answer mid-drag; the one thing drawn is "Skip" on the ground a card pulled down uncovers (`SwipeReveal`,
- *   where any later down-gesture goes). A phone also gets "Answer quickly", the deck from the top; a wide screen walks
- *   the rows with j/k (or ↑/↓) and Enter opens one.
+ *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no banner naming an answer mid-drag and, on a phone,
+ *   no hint line (a wide screen's run has ONE quiet line of its keys under the card, asked for by the owner); the one thing drawn is "Skip" on the ground a card pulled down uncovers (`SwipeReveal`,
+ *   where any later down-gesture goes). "Answer quickly" runs the deck from the top on a phone and a wide screen alike. On a wide screen the run is
+ *   centred at a readable width, takes ← → ↓ (answer, answer, Skip) and j/k (move) from anywhere that is not a field or
+ *   a menu, Esc closes it, a mouse drag swipes, and finishing says "All done". In the list, j/k (or ↑/↓) walk the rows
+ *   and Enter opens one.
  * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
  *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
@@ -47,7 +49,7 @@ import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState }
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
-import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
+import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
 import { itemCardKind } from '../../lib/card-kind.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
@@ -124,9 +126,10 @@ import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
+import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
-import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
+import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers, wordsOf } from './to-test-rows.tsx';
 import { ToTestStep } from './to-test-step.tsx';
 
 /**
@@ -955,7 +958,7 @@ const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) =>
 export interface AgendaInboxPageProps {
   readonly inbox: AgendaInbox;
   readonly onNavigate: (to: string) => void;
-  /** A phone gets "Answer quickly" (the swipe deck); a wider screen walks the rows with j/k. */
+  /** A phone finishes a run back at the list; a wider screen keys and mouse-drags it and ends on "All done". */
   readonly phone: boolean;
   /** The clock card ages read; the browser's otherwise. */
   readonly now?: number;
@@ -1221,12 +1224,68 @@ function Section({
   );
 }
 
-/** Whether a key press belongs to something the reader is typing into or operating, not to the list. */
-const ownedElsewhere = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return target.closest('input, textarea, select, [role="menu"], [role="dialog"], [role="listbox"]') !== null;
+/** One key of the desktop run and what it does on the card on top: the quiet line under the card. */
+interface RunKey {
+  readonly key: string;
+  readonly word: string;
+}
+
+/** The desktop run's shortcuts, said once under the card: the card's own answers by arrow, then moving and closing. */
+function RunKeysHint({ keys }: { readonly keys: readonly RunKey[] }) {
+  return (
+    <p className="fy-inbox-keys" data-inbox-keys="">
+      {keys.map(entry => (
+        <span className="fy-inbox-keys__entry" key={entry.key}>
+          <kbd className="fy-inbox-keys__key">{entry.key}</kbd> {entry.word}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+const RUN_MOVES: readonly RunKey[] = [
+  { key: '↓', word: 'Skip' },
+  { key: 'j k', word: 'Next, previous' },
+  { key: 'Esc', word: 'Close' },
+];
+
+/** The arrows an agenda card answers by, in the words of its own answers, then Skip. */
+const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
+  const targets = swipeTargets(card.item);
+  return [
+    ...(targets.left === undefined ? [] : [{ key: '←', word: targets.left.label }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: targets.up.label }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: targets.right.label }]),
+    ...RUN_MOVES,
+  ];
 };
+
+/** A task card's two answers by arrow, then Skip. */
+const toTestRunKeys = (row: ToTestCard): readonly RunKey[] => {
+  const words = wordsOf(row);
+  return [{ key: '←', word: words.left }, { key: '→', word: words.right }, ...RUN_MOVES];
+};
+
+/** The keys the desktop run answers to at the page: the deck takes the arrows of an agenda card itself. */
+const RUN_KEY_NAMES: ReadonlySet<string> = new Set(['Escape', 'j', 'k', 'ArrowLeft', 'ArrowRight', 'ArrowDown']);
+
+/** The end of a run that answered every card: short, and the way back. */
+function RunDone({ onBack }: { readonly onBack: () => void }) {
+  return (
+    <div className="fy-attn-end" data-agenda-run-done="">
+      <span aria-hidden="true" className="fy-attn-inbox__empty-mark">
+        <CheckCheck size={24} />
+      </span>
+      <h2 className="fy-attn-end__title">All done</h2>
+      <p className="fy-attn-end__text">Nothing else needs you right now.</p>
+      <div className="fy-attn-end__actions">
+        <button className="kt-btn" data-agenda-run-back="" data-variant="primary" onClick={onBack} type="button">
+          Back to Inbox
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function AgendaInboxPage({
   inbox,
@@ -1326,7 +1385,7 @@ export function AgendaInboxPage({
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       const by =
         event.key === 'ArrowDown' || event.key === 'j' ? 1 : event.key === 'ArrowUp' || event.key === 'k' ? -1 : 0;
-      if (by === 0 || ownedElsewhere(event.target)) return;
+      if (by === 0 || ownsKeys(event.target)) return;
       const next = stepSelection(keyState.current.navigable, keyState.current.selectedKey, by);
       if (next === null) return;
       event.preventDefault();
@@ -1363,6 +1422,20 @@ export function AgendaInboxPage({
     setDeckAt(runOrder[0] ?? null);
     setDeckOpen(true);
   };
+  // A desktop run that answered its last card says so, with the way back; a phone returns to its list.
+  const [allDone, setAllDone] = useState(false);
+  const running = deckOpen && filter === 'open' && runOrder.length > 0;
+  const wasRunning = useRef(false);
+  const hasRun = runOrder.length > 0;
+  useEffect(() => {
+    if (running) {
+      wasRunning.current = true;
+      setAllDone(false);
+      return;
+    }
+    setAllDone(!phone && wasRunning.current && !hasRun);
+    wasRunning.current = false;
+  }, [running, hasRun, phone]);
   // A tapped notification's item opens as a card once it is among the open ones; a few seconds without it
   // (or a settled read that lacks it) mean it is no longer open, and the host takes the reader to its chat.
   const openedFor = useRef<string | null>(null);
@@ -1399,6 +1472,36 @@ export function AgendaInboxPage({
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
+
+  // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda card inside the deck; a task card is answered here.
+  // j and k move between cards, Esc closes. Never while the reader is in a field, a menu or a dialog.
+  const runKeys = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  runKeys.current = event => {
+    const at = runOrder.indexOf(deckPlace ?? '');
+    if (event.key === 'Escape') {
+      setAllDone(false);
+      setDeckOpen(false);
+    } else if (event.key === 'j' && at >= 0) setDeckAt(skipSelection(runOrder, deckPlace));
+    else if (event.key === 'k' && at > 0) setDeckAt(runOrder[at - 1] ?? null);
+    else if (stepRow !== undefined && toTestAnswers.answerFor(stepRow.card).pressed === null) {
+      if (event.key === 'ArrowLeft') toTestAnswers.notGood(stepRow);
+      else if (event.key === 'ArrowRight') toTestAnswers.done(stepRow);
+      else if (event.key === 'ArrowDown') setDeckAt(skipSelection(runOrder, stepRow.key));
+    }
+  };
+  const runKeysLive = !phone && (cardOpen || allDone);
+  useEffect(() => {
+    if (!runKeysLive || typeof window === 'undefined') return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.isComposing || ownsKeys(event.target)) return;
+      if (!RUN_KEY_NAMES.has(event.key)) return;
+      event.preventDefault();
+      runKeys.current(event);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [runKeysLive]);
 
   const env: RowEnv = {
     inbox,
@@ -1504,7 +1607,7 @@ export function AgendaInboxPage({
       <NothingMatches onClear={clearFilters} />
     ) : (
       <div className="fy-inbox-body" data-agenda-lists="">
-        {phone && runOrder.length > 0 ? (
+        {runOrder.length > 0 ? (
           <button className="kt-btn fy-inbox-quick" data-agenda-quick="" onClick={startDeck} type="button">
             <Zap aria-hidden="true" size={15} />
             Answer quickly
@@ -1544,6 +1647,17 @@ export function AgendaInboxPage({
         )}
       </div>
     );
+
+  if (allDone && filter === 'open') {
+    return (
+      <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
+        <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
+          <RunDone onBack={() => setAllDone(false)} />
+        </div>
+        <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
+      </main>
+    );
+  }
 
   if (cardOpen) {
     // The phone's quick answers: the card the reader started at on top, the ones AFTER it next in line —
@@ -1596,6 +1710,7 @@ export function AgendaInboxPage({
             <ToTestStep
               answers={toTestAnswers}
               index={runOrder.indexOf(stepRow.key)}
+              mouseSwipe={!phone}
               now={now}
               onClose={() => setDeckOpen(false)}
               onNavigate={onNavigate}
@@ -1608,6 +1723,7 @@ export function AgendaInboxPage({
               row={stepRow}
               total={runOrder.length}
             />
+            {phone ? null : <RunKeysHint keys={toTestRunKeys(stepRow)} />}
           </div>
         ) : (
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
@@ -1621,7 +1737,9 @@ export function AgendaInboxPage({
                 setGateWhy({ key: card.key, action });
                 return true;
               }}
+              mouseSwipe={!phone}
               onSkip={card => setDeckAt(skipSelection(runOrder, card.key))}
+              runKeys={!phone}
               onSnooze={(card, until) => answerCard(host, card, snoozeAction(until))}
               {...(phone ? { ownGesturesIn: VIEW_GESTURES } : {})}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
@@ -1674,6 +1792,7 @@ export function AgendaInboxPage({
                   )}
                 </div>
               )}
+              {phone || deck[0] === undefined ? null : <RunKeysHint keys={agendaRunKeys(deck[0])} />}
             </div>
           </div>
         )}
