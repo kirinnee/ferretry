@@ -41,6 +41,11 @@ export interface LiveFieldHandle {
   setSelectionRange(start: number, end: number): void;
   focus(): void;
   contains(node: Node | null): boolean;
+  /**
+   * Ends a composition in progress (a send was pressed under it), reading the word being composed into
+   * the draft. Answers whether that changed the draft, i.e. whether the host must wait for it.
+   */
+  endComposition(): boolean;
 }
 
 interface LiveFieldEvent {
@@ -310,6 +315,13 @@ export function LiveMarkdownEditor({
   /** The caret when the document has no selection of its own (unfocused, or not yet painted). */
   const caret = useRef({ start: value.length, end: value.length });
   const composing = useRef(false);
+  /** Every text this composition has handed the host: a render that lags behind it is an echo, not a change. */
+  const reported = useRef(new Set<string>());
+  /**
+   * The host replaced the words under a composition (a send, another device): the rest of that composition
+   * was typed into words that are gone, so it is painted over, never read back. A new composition ends it.
+   */
+  const interrupted = useRef(false);
   const past = useRef<Snapshot[]>([]);
   const future = useRef<Snapshot[]>([]);
   /** The last edit kind recorded, so a run of typed characters undoes as one step. */
@@ -349,6 +361,21 @@ export function LiveMarkdownEditor({
       },
       contains(node: Node | null) {
         return root.current?.contains(node) ?? false;
+      },
+      endComposition() {
+        const element = root.current;
+        if (!composing.current || element === null) return false;
+        // The word being composed is the person's: it is read now and goes with the send. Whatever the
+        // keyboard does with the rest of this composition comes after the press, and is not read back.
+        composing.current = false;
+        interrupted.current = true;
+        reported.current.clear();
+        const text = readLiveDocument(element);
+        const changed = text !== rendered.current;
+        rendered.current = text;
+        if (changed) latest.current.onChange({ currentTarget: handle });
+        latest.current.onCompositionEnd?.({ currentTarget: handle });
+        return changed;
       },
     }),
     [],
@@ -409,15 +436,30 @@ export function LiveMarkdownEditor({
   const undo = (): void => travel(past, future);
   const redo = (): void => travel(future, past);
 
-  // The host's value is the truth: a change it made (Vim, a completion, a send, a quote) is painted
-  // here, and remembered so ⌘Z can step back over it too.
+  // The host's value is the truth: a change it made (Vim, a completion, a send, a quote, another
+  // device's edit) is painted here, and remembered so ⌘Z can step back over it too.
+  //
+  // EVEN MID-COMPOSITION. A phone keyboard composes the word being typed (Android always, iOS for its
+  // predictions), and Send does not end that. Left unpainted, a send's clear — or another device's
+  // edit — never reached the screen: the box kept showing the sent words, and the composition's next
+  // input read them back as typing, republishing a sent message to every device. So the host wins
+  // there too, and what is left of that composition is never read back (`interrupted`). Only the
+  // host's ECHO of what the composition already reported is left alone, so typing is never disturbed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `paint` and `record` read refs only
   useLayoutEffect(() => {
-    if (composing.current) return;
     if (value === rendered.current) return;
+    const under = composing.current;
+    if (under) {
+      if (reported.current.has(value)) return;
+      composing.current = false;
+      interrupted.current = true;
+      reported.current.clear();
+    }
     if (rendered.current !== null) record('external', { value: rendered.current, ...caret.current });
     const at = Math.min(caret.current.start, value.length);
     paint(value, rendered.current === null ? { start: value.length, end: value.length } : { start: at, end: at });
+    // Told once the words are painted, so what the host reads is what it now holds.
+    if (under) latest.current.onCompositionEnd?.({ currentTarget: handle });
   }, [value]);
 
   // The style switch repaints in place.
@@ -503,12 +545,18 @@ export function LiveMarkdownEditor({
       // Anything else is left to the platform; the `input` listener reads its result back.
     };
 
-    const onInput = (): void => {
+    const onInput = (event: Event): void => {
+      // The rest of a composition the host replaced the words under: painted over, never read back.
+      if (interrupted.current && (event as InputEvent).isComposing === true) {
+        paint(rendered.current ?? '', caret.current);
+        return;
+      }
       const text = readLiveDocument(element);
       if (composing.current) {
         // Mid-composition the draft follows the document, but the document is not repainted.
         rendered.current = text;
         caret.current = selectionIn(element) ?? caret.current;
+        reported.current.add(text);
         latest.current.onChange({ currentTarget: handle });
         return;
       }
@@ -521,12 +569,21 @@ export function LiveMarkdownEditor({
 
     const onCompositionStartNative = (): void => {
       composing.current = true;
+      interrupted.current = false;
+      reported.current.clear();
       record('compose', { value: rendered.current ?? '', ...currentSelection() });
       latest.current.onCompositionStart?.();
     };
 
     const onCompositionEndNative = (): void => {
+      // Already ended for the host (`interrupted`): the document is put back to what the host holds.
+      if (interrupted.current) {
+        interrupted.current = false;
+        paint(rendered.current ?? '', caret.current);
+        return;
+      }
       composing.current = false;
+      reported.current.clear();
       const text = readLiveDocument(element);
       const at = selectionIn(element) ?? caret.current;
       const changed = text !== rendered.current;
