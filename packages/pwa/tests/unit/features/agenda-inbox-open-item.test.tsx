@@ -285,6 +285,7 @@ describe('the open Inbox item', () => {
     const unregister = registerComposerQuoteTarget({
       daemonId: formCard.daemonId,
       sessionId: formCard.view.config.id,
+      item: formCard.item.id,
       draft: () => draft,
       replaceDraft: next => {
         draft = next;
@@ -313,6 +314,7 @@ describe('the open Inbox item', () => {
     const unregister = registerComposerQuoteTarget({
       daemonId: shipIt.daemonId,
       sessionId: shipIt.view.config.id,
+      item: shipIt.item.id,
       draft: () => draft,
       replaceDraft: next => {
         draft = next;
