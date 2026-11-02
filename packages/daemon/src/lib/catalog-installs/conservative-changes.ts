@@ -64,7 +64,8 @@ const EXACT_PREFIXES = ['AKIA', 'ASIA', 'AIza', 'eyJ'] as const;
 /** A run of base64, base64url or hex characters at least this long is a word that may be a secret. */
 const LONG_WORD = 24;
 
-const INVISIBLE = /\p{Cf}/gu;
+/** An invisible format character as the review writes it (`⟨U+00AD⟩`, `revealHidden`), or as it stands in raw text. */
+const INVISIBLE = /\p{Cf}|⟨U\+[0-9A-F]{4,6}⟩/gu;
 const LINE_BREAKS = /[\r\n]+/gu;
 
 function isWordCharacter(code: number): boolean {
@@ -117,6 +118,26 @@ function hasAny(text: string, needles: readonly string[]): boolean {
   return false;
 }
 
+/**
+ * A short flag that takes a credential: `-u user:pw`, `-a hunter2`, `-p hunter2`, or `-phunter2` (a `-p` with its
+ * value attached, as `mysql` reads it). A flag with a word after it, or a `-p` with one attached.
+ */
+function hasCredentialFlag(text: string): boolean {
+  let index = 0;
+  let flag = '';
+  while (index < text.length) {
+    while (index < text.length && isSpace(text.charCodeAt(index))) index += 1;
+    const start = index;
+    while (index < text.length && !isSpace(text.charCodeAt(index))) index += 1;
+    if (start === index) break;
+    const word = text.slice(start, index);
+    if (flag !== '') return true;
+    if (word === '-u' || word === '-p' || word === '-a') flag = word;
+    else if (word.length > 2 && word.startsWith('-p') && word[2] !== '-') return true;
+  }
+  return false;
+}
+
 /** Names, token prefixes and expansions: the things a line break or an invisible character can split. */
 function trips(text: string): boolean {
   const lower = text.toLowerCase();
@@ -127,13 +148,15 @@ function trips(text: string): boolean {
 
 /**
  * Whether `text` MAY hold a secret: a name that announces one, a well-known token prefix, a `${…}` expansion, a
- * word of 24 or more base64 or hex-like characters, or credentials in an address. Broad on purpose; linear in the
+ * word of 24 or more base64 or hex-like characters, credentials in an address, or a credential flag (`-u`, `-p`, `-a`
+ * and a value). Broad on purpose; linear in the
  * text; a text over {@link MAX_SCANNED} is `true` without being read. Invisible format characters and line breaks
- * are taken out and the names, prefixes and `${` tried again, so one split by either is still seen.
+ * are taken out (and the `⟨U+00AD⟩` marks the review writes for them) and the names, prefixes and `${` tried again, so
+ * one split by either is still seen, in raw text or in the text a person reads.
  */
 export function mayHoldSecret(text: string): boolean {
   if (text.length > MAX_SCANNED) return true;
-  if (trips(text) || hasLongWord(text) || hasUserInfo(text)) return true;
+  if (trips(text) || hasLongWord(text) || hasUserInfo(text) || hasCredentialFlag(text)) return true;
   const joined = text.replace(INVISIBLE, '').replace(LINE_BREAKS, '');
   return joined.length !== text.length && trips(joined);
 }

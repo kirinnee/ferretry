@@ -10,6 +10,8 @@ beforeAll(async () => {
   alice = await newIdentity();
 });
 
+const SOFT_HYPHEN = String.fromCodePoint(0xad);
+const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
 const FOLDER = `${ROOT}/.claude/skills/pdf-tools`;
 const PASSWORD = 'hunter2xyz';
 const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
@@ -228,6 +230,13 @@ describe('see changes never carries text that may be a secret', () => {
     ['an assignment in an expansion', 'run=${X=tok3nvalue99}\n'],
     ['an alternative in an expansion', 'run=${X:+tok3nvalue99}\n'],
     ['user info with no name', 'git clone https://bob:tok3nvalue99@example.com/r.git\n'],
+    ['a soft hyphen inside a name', `pa${SOFT_HYPHEN}ss: hunter2\n`],
+    ['a zero-width space inside a name', `to${ZERO_WIDTH_SPACE}ken=hunter2\n`],
+    ['a lone carriage return inside a name', 'pa\rss: hunter2\n'],
+    ['a lone carriage return inside a name, then more text', 'x\npa\rss: hunter2\nmore\n'],
+    ['a user and password after curl -u', 'curl -u bob:hunter2 https://example.com/\n'],
+    ['a password attached to mysql -p', 'mysql -phunter2 -h db\n'],
+    ['a password after redis-cli -a', 'redis-cli -a hunter2\n'],
     ['a private key block', '-----BEGIN OPENSSH PRIVATE KEY-----\ntok3nvalue99\n'],
   ])('should hide a file with %s, in the whole answer', async (_label, text) => {
     const preview = await skillPreview(text);

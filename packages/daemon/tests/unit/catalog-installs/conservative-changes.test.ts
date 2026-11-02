@@ -48,6 +48,14 @@ describe('mayHoldSecret', () => {
     ['u:p@host'],
     [`pa${String.fromCodePoint(0xad)}ss`],
     ['gh\np_x'],
+    [`pa${String.fromCodePoint(0xad)}ss`.replace(String.fromCodePoint(0xad), '⟨U+00AD⟩')],
+    ['to⟨U+200B⟩ken=x'],
+    ['pa⟨U+000D⟩ss: x'],
+    ['pa\rss: x'],
+    ['curl -u bob:x'],
+    ['mysql -phunter2'],
+    ['redis-cli -a x'],
+    ['  -p   x'],
   ])('should trip on %j', text => {
     should(mayHoldSecret(text)).equal(true);
   });
@@ -59,6 +67,10 @@ describe('mayHoldSecret', () => {
     ['https://example.com/a/b?x=1'],
     ['name@example.com'],
     ['a b: c d'],
+    ['ls -a'],
+    ['run -x y -- -z'],
+    ['-p'],
+    ['-- -p--x'],
   ])('should not trip on %j', text => {
     should(mayHoldSecret(text)).equal(false);
   });

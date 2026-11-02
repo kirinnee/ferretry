@@ -804,8 +804,11 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   `webhook`: `api_key`, `apikey`, `X-Auth`, `passphrase`); a well-known token prefix (`ghp_` `gho_` `ghu_` `ghs_`
   `ghr_`, `github_pat_`, `sk-`, `xox`, `AKIA`, `ASIA`, `glpat-`, `npm_`, `hf_`, `AIza`, `eyJ`, `-----BEGIN`); a
   `${…}` expansion (`${X:-default}` included); any run of 24 or more base64, base64url or hex-like characters; and
-  credentials in an address (`scheme://user:pw@host`, `user:pw@host`). The names, prefixes and `${` are tried again with invisible format
-  characters and line breaks taken out, so a name or token split by one is still seen. **A server's environment
+  credentials in an address (`scheme://user:pw@host`, `user:pw@host`); and a short flag that takes a credential (`-u`,
+  `-p`, `-a` followed by a word, or `-p` with its value attached: `curl -u bob:pw`, `mysql -phunter2`,
+  `redis-cli -a hunter2`). The names, prefixes and `${` are tried again with invisible format characters, the
+  `⟨U+00AD⟩` marks the review writes for them, and line breaks (a lone carriage return too) taken out, so a name or
+  token split by one is still seen, in the text a person reads as well as in raw text. **A server's environment
   values are never shown**: a changed one is only "changed" (hidden), whatever it holds. A new or old warning that
   carries a value (an address, a registry, a package) and trips the detector reads "Hidden: this may hold a secret".
   **Over-hiding is the accepted cost**: a file that merely says "token" or "key" is hidden whole, and a plain file
