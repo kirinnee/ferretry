@@ -17,19 +17,34 @@
 import type { CatalogInstall, CatalogItemSource, OwnedCatalog } from '@ferretry/protocol';
 import { revealHidden } from '@ferretry/protocol';
 import { Eye, MoreHorizontal, PackagePlus, Share2, Trash2 } from 'lucide-react';
-import { type ReactNode, useRef, useState } from 'react';
+import type { SharedItemPreview } from '@ferretry/protocol';
+import { type ReactNode, useCallback, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { useDaemonClient } from '../../lib/store.tsx';
-import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
+import { AddToCatalogSheet, type AddToCatalogSheetProps } from './add-to-catalog-sheet.tsx';
+import { CatalogAddToast, type CatalogToast } from './catalog-add-toast.tsx';
 import { removeCatalogInstall } from './catalog-installs-api.ts';
 import { installRefusal, installsFor, REMOVE_NOTE } from './catalog-install-model.ts';
 import { CatalogSheet, FailureLine } from './catalog-parts.tsx';
 import type { CatalogRowsHost, CatalogRowsRead } from './catalog-row-tools.tsx';
-import { canAdd, ownedMatches, removeLabel, rowChips, sharePlan } from './catalog-row-model.ts';
-import { listCatalogs } from './catalogs-api.ts';
-import { ownerRefusal } from './catalogs-model.ts';
+import { canAdd, ownedMatches, removeLabel, rowChips, sharePlan, sharedItemFor } from './catalog-row-model.ts';
+import { listCatalogs, listSharedItems, quickAdd, undoQuickAdd } from './catalogs-api.ts';
+import {
+  ADDED_TOAST_MS,
+  addDestination,
+  addedSentence,
+  alreadySentence,
+  defaultCatalogName,
+  defaultCatalogOf,
+  listedLive,
+  NOTE_TOAST_MS,
+  ownerRefusal,
+  quickAddOutcome,
+  reviewSentence,
+  undoneSentence,
+} from './catalogs-model.ts';
 import { ShareSheet } from './share-sheet.tsx';
 
 interface RowScope {
@@ -67,6 +82,12 @@ export interface CatalogItemRowProps {
 
 type Adding = 'add' | 'share';
 
+/** What the add sheet opens with when one tap did not finish the job. */
+type SheetStart = Pick<AddToCatalogSheetProps, 'notice' | 'existing'> & { readonly initial?: SharedItemPreview };
+
+/** A toast and what Undo needs; `key` restarts the countdown for a new one. */
+type ToastState = CatalogToast & { readonly key: number };
+
 export function CatalogItemRow({
   host,
   read,
@@ -93,12 +114,91 @@ export function CatalogItemRow({
   const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [tapping, setTapping] = useState(false);
+  const tapLock = useRef(false);
+  const toastKey = useRef(0);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [sheetStart, setSheetStart] = useState<SheetStart>({});
 
   const installs = read === undefined ? [] : installsFor(read.installs, kind, itemName);
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
   const shareable = host !== undefined && (addable || matches.length > 0);
+  const oneTap = addable && read?.features.quickAdd === true;
+  const defaultCatalog = read === undefined ? undefined : defaultCatalogOf(read.catalogs, read.defaultCatalogId);
+
+  const showToast = useCallback((next: CatalogToast): void => {
+    toastKey.current += 1;
+    setToast({ ...next, key: toastKey.current });
+  }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  const openSheet = (start: SheetStart): void => {
+    setSheetStart(start);
+    setAdding('add');
+  };
+
+  const undo = async (token: string, catalogName: string): Promise<void> => {
+    if (host === undefined) return;
+    setToast(current => (current === null ? null : { ...current, undoing: true }));
+    try {
+      const undone = await undoQuickAdd(await createClient(host.connection), token);
+      showToast({ sentence: undoneSentence(undone, catalogName), lifetimeMs: NOTE_TOAST_MS });
+    } catch (error) {
+      showToast({ sentence: ownerRefusal(error).sentence, lifetimeMs: NOTE_TOAST_MS });
+    }
+    read?.reload();
+  };
+
+  const tapAdd = async (): Promise<void> => {
+    if (host === undefined || tapLock.current) return;
+    tapLock.current = true;
+    setTapping(true);
+    setFailure(null);
+    setToast(null);
+    try {
+      const answer = await quickAdd(await createClient(host.connection), { source });
+      const outcome = quickAddOutcome(answer, read?.catalogs ?? []);
+      if (outcome.kind === 'added') {
+        const { catalogName, token } = outcome;
+        showToast({
+          sentence: addedSentence(catalogName),
+          lifetimeMs: ADDED_TOAST_MS,
+          onUndo: () => void undo(token, catalogName),
+        });
+        read?.reload();
+      } else if (outcome.kind === 'already')
+        showToast({ sentence: alreadySentence(outcome.catalogName), lifetimeMs: NOTE_TOAST_MS });
+      else
+        openSheet({
+          notice: reviewSentence(outcome.reasons),
+          ...(outcome.preview === undefined ? {} : { initial: outcome.preview }),
+        });
+    } catch (error) {
+      openSheet({ notice: ownerRefusal(error).sentence });
+    } finally {
+      tapLock.current = false;
+      setTapping(false);
+    }
+  };
+
+  const addAnother = async (): Promise<void> => {
+    if (host === undefined) return;
+    setFailure(null);
+    if (read?.features.items !== true) return openSheet({});
+    try {
+      const list = await listSharedItems(await createClient(host.connection));
+      const item = sharedItemFor(list.items, source);
+      openSheet(
+        item === undefined
+          ? {}
+          : { existing: { itemId: item.itemId, version: item.current, listedIn: listedLive(item) } },
+      );
+    } catch (error) {
+      setFailure(ownerRefusal(error).sentence);
+    }
+  };
 
   const share = (): void => {
     setFailure(null);
@@ -149,7 +249,7 @@ export function CatalogItemRow({
       key: 'add-another',
       label: 'Add to another catalog…',
       icon: <PackagePlus size={16} aria-hidden="true" />,
-      onSelect: () => setAdding('add'),
+      onSelect: () => void addAnother(),
     });
   for (const install of installs)
     items.push({
@@ -243,8 +343,13 @@ export function CatalogItemRow({
                 size="sm"
                 variant="ghost"
                 className="min-h-[44px] min-w-[4rem] justify-center"
-                aria-label={`Add ${label} to a catalog`}
-                onClick={() => setAdding('add')}
+                aria-label={
+                  oneTap
+                    ? addDestination(label, defaultCatalog, host?.connection.daemonName)
+                    : `Add ${label} to a catalog`
+                }
+                disabled={tapping}
+                onClick={() => (oneTap ? void tapAdd() : openSheet({}))}
                 data-row-add=""
               >
                 <PackagePlus size={14} aria-hidden="true" />
@@ -333,10 +438,16 @@ export function CatalogItemRow({
           label={itemName}
           onClose={() => setAdding(null)}
           onDone={() => read?.reload()}
+          {...sheetStart}
+          {...(oneTap && defaultCatalog !== undefined ? { preferCatalogId: defaultCatalog.id } : {})}
+          {...(oneTap && defaultCatalog === undefined
+            ? { suggestNewName: defaultCatalogName(host.connection.daemonName), asDefault: true }
+            : {})}
           {...(adding === 'share' ? { onShareNow: (catalogId: string) => void shareNow(catalogId) } : {})}
           {...(host.createClient === undefined ? {} : { createClient: host.createClient })}
         />
       )}
+      {toast === null ? null : <CatalogAddToast key={toast.key} toast={toast} onDismiss={dismissToast} />}
       {picking === null ? null : (
         <CatalogSheet
           name="share-pick"

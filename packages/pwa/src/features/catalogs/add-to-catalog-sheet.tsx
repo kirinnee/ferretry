@@ -7,14 +7,14 @@
  */
 
 import {
-  type CatalogItemPreview,
   type CatalogItemSource,
   type OwnedCatalog,
   type PublishedCatalogItem,
   revealHidden,
+  type SharedItemPreview,
 } from '@ferretry/protocol';
 import { Share2 } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -23,10 +23,12 @@ import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import {
   addCatalogItem,
+  addExistingItem,
   type CatalogClient,
   type CatalogClientFactory,
   createCatalog,
   listCatalogs,
+  makeDefault,
   previewCatalogItem,
   publishCatalogVersion,
 } from './catalogs-api.ts';
@@ -47,6 +49,14 @@ interface PublishTarget {
   readonly itemId: string;
 }
 
+/** An item this machine already shares, going into one more catalog at the version the person reviews. */
+interface ExistingItem {
+  readonly itemId: string;
+  readonly version: number;
+  /** Catalogs that already list it live; they are not offered. */
+  readonly listedIn: readonly string[];
+}
+
 export interface AddToCatalogSheetProps {
   readonly connection: DaemonConnection;
   /** Where the source is: a SKILL.md path or skill name, or an MCP server id. */
@@ -57,11 +67,25 @@ export interface AddToCatalogSheetProps {
   /** Called after an add or a publish landed, so a list can read again. */
   readonly onDone?: () => void;
   readonly publish?: PublishTarget;
+  /** Open on this review already (a one-tap Add that stopped for it). Changing the catalog keeps it. */
+  readonly initial?: SharedItemPreview;
+  /** One sentence above the review: why the tap stopped, or what refused it. */
+  readonly notice?: string;
+  /** The catalog to preselect, when the machine has a default. */
+  readonly preferCatalogId?: string;
+  /** With no default yet: the name of the new catalog the sheet offers, which becomes the default. */
+  readonly suggestNewName?: string;
+  /** Make a catalog this sheet creates the default. */
+  readonly asDefault?: boolean;
+  /** "Add to another catalog…": add-existing, not a first add from a source. */
+  readonly existing?: ExistingItem;
   /** When given, the last step offers "Share it now" and calls this with the catalog the item landed in. */
   readonly onShareNow?: (catalogId: string) => void;
   /** Test and harness seam; the app uses the daemon-bound client. */
   readonly createClient?: CatalogClientFactory;
 }
+
+const NOT_LISTED: readonly string[] = [];
 
 type CatalogsRead =
   | { readonly kind: 'loading' }
@@ -81,6 +105,12 @@ export function AddToCatalogSheet({
   onClose,
   onDone,
   publish,
+  initial,
+  notice,
+  preferCatalogId,
+  suggestNewName,
+  asDefault = false,
+  existing,
   onShareNow,
   createClient: injected,
 }: AddToCatalogSheetProps) {
@@ -89,13 +119,16 @@ export function AddToCatalogSheet({
   const [read, setRead] = useState<CatalogsRead>({ kind: 'loading' });
   const [choice, setChoice] = useState<CatalogChoice | null>(null);
   const [newName, setNewName] = useState('');
-  const [preview, setPreview] = useState<CatalogItemPreview | null>(null);
+  const [preview, setPreview] = useState<SharedItemPreview | null>(initial ?? null);
+  const [note, setNote] = useState<string | null>(notice ?? null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<OwnerRefusal | null>(null);
   const [landed, setLanded] = useState<Landed | null>(null);
+  const autoPreviewed = useRef(false);
   const pickerId = useId();
   const nameId = useId();
 
+  const listedIn = existing?.listedIn ?? NOT_LISTED;
   const readCatalogs = useCallback(async (): Promise<readonly OwnedCatalog[] | null> => {
     try {
       const list = await listCatalogs(await createClient(connection));
@@ -110,23 +143,31 @@ export function AddToCatalogSheet({
   const start = useCallback(async (): Promise<void> => {
     const catalogs = await readCatalogs();
     if (catalogs === null) return;
+    const eligible = catalogs.filter(catalog => !listedIn.includes(catalog.id));
+    const preferred = eligible.find(catalog => catalog.id === preferCatalogId);
     if (publish !== undefined) setChoice({ kind: 'existing', catalogId: publish.catalogId });
-    else if (catalogs[0] !== undefined) setChoice({ kind: 'existing', catalogId: catalogs[0].id });
+    else if (preferred !== undefined) setChoice({ kind: 'existing', catalogId: preferred.id });
+    else if (suggestNewName !== undefined) {
+      setNewName(suggestNewName);
+      setChoice({ kind: 'new', name: suggestNewName });
+    } else if (eligible[0] !== undefined) setChoice({ kind: 'existing', catalogId: eligible[0].id });
     else setChoice({ kind: 'new', name: '' });
-  }, [readCatalogs, publish]);
+  }, [readCatalogs, publish, listedIn, preferCatalogId, suggestNewName]);
 
   useEffect(() => {
     void start();
   }, [start]);
 
   const catalogs = read.kind === 'ready' ? read.catalogs : [];
+  const eligible = catalogs.filter(catalog => !listedIn.includes(catalog.id));
   const draft: CatalogChoice | null = choice?.kind === 'new' ? { kind: 'new', name: newName } : choice;
   const problem = publish === undefined ? choiceProblem(draft, catalogs) : null;
 
   const choose = (next: CatalogChoice): void => {
     setChoice(next);
-    setPreview(null);
+    if (initial === undefined) setPreview(null);
     setFailure(null);
+    setNote(null);
   };
 
   const runPreview = async (event?: FormEvent): Promise<void> => {
@@ -134,25 +175,37 @@ export function AddToCatalogSheet({
     if (draft === null || (publish === undefined && problem !== null)) return;
     setBusy(true);
     setFailure(null);
+    setNote(null);
     try {
       const client: CatalogClient = await createClient(connection);
       let catalogId = publish?.catalogId;
       if (catalogId === undefined) {
-        const plan = previewPlan(draft, catalogs);
+        const plan = previewPlan(draft, eligible);
         if (plan.kind === 'make-first') {
           catalogId = (await createCatalog(client, plan.name)).id;
           await readCatalogs();
           setChoice({ kind: 'existing', catalogId });
         } else catalogId = plan.catalogId;
       }
-      setPreview(
-        await previewCatalogItem(client, catalogId, publish === undefined ? { source } : { itemId: publish.itemId }),
-      );
+      const itemId = publish?.itemId ?? existing?.itemId;
+      setPreview(await previewCatalogItem(client, catalogId, itemId === undefined ? { source } : { itemId }));
     } catch (error) {
       setPreview(null);
       setFailure(ownerRefusal(error));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** The item moved on since it was read: show what it is now, with the sentence that says so. */
+  const rereadExisting = async (catalogId: string, itemId: string, sentence: string): Promise<void> => {
+    try {
+      const client = await createClient(connection);
+      setPreview(await previewCatalogItem(client, catalogId, { itemId }));
+      setNote(sentence);
+    } catch (error) {
+      setPreview(null);
+      setFailure(ownerRefusal(error));
     }
   };
 
@@ -168,21 +221,36 @@ export function AddToCatalogSheet({
       const catalogId = made?.id ?? known ?? '';
       const catalogName = made?.name ?? catalogs.find(candidate => candidate.id === catalogId)?.name ?? '';
       const published =
-        publish === undefined
-          ? await addCatalogItem(client, catalogId, { source, digest: preview.digest })
-          : await publishCatalogVersion(client, catalogId, publish.itemId, preview.digest);
+        publish !== undefined
+          ? await publishCatalogVersion(client, catalogId, publish.itemId, preview.digest)
+          : existing !== undefined
+            ? await addExistingItem(client, catalogId, existing.itemId, preview.version)
+            : await addCatalogItem(client, catalogId, { source, digest: preview.digest });
+      if (made !== null && asDefault) await makeDefault(client, made.id).catch(() => undefined);
       setLanded({ catalogId, catalogName, published });
       onDone?.();
     } catch (error) {
-      setFailure(ownerRefusal(error));
+      const refusal = ownerRefusal(error);
+      if (existing !== undefined && refusal.previewAgain && draft.kind === 'existing') {
+        await rereadExisting(draft.catalogId, existing.itemId, refusal.sentence);
+      } else setFailure(refusal);
     } finally {
       setBusy(false);
     }
   };
 
-  const plan = draft === null ? null : previewPlan(draft, catalogs);
+  useEffect(() => {
+    if (existing === undefined || autoPreviewed.current || choice?.kind !== 'existing' || preview !== null) return;
+    autoPreviewed.current = true;
+    void runPreview();
+  });
+
+  const plan = draft === null ? null : previewPlan(draft, eligible);
+  const readLabel = plan === null ? 'Preview' : previewButtonLabel(plan);
+  const previewLabel = preview !== null ? 'Read again' : busy ? 'Reading…' : readLabel;
   const state = addState(preview, busy);
-  const title = publish === undefined ? 'Add to catalog' : 'Publish update';
+  const title =
+    publish !== undefined ? 'Publish update' : existing !== undefined ? 'Add to another catalog' : 'Add to catalog';
 
   return (
     <CatalogSheet name="add" title={title} subtitle={label} closeLabel={`Close ${title}`} onClose={onClose}>
@@ -223,7 +291,7 @@ export function AddToCatalogSheet({
         <>
           {publish === undefined ? (
             <form className="flex min-w-0 flex-col gap-sm" onSubmit={event => void runPreview(event)}>
-              {catalogs.length > 0 ? (
+              {eligible.length > 0 ? (
                 <div className="flex min-w-0 flex-col gap-1">
                   <label htmlFor={pickerId} className="text-meta font-semibold text-muted">
                     Catalog
@@ -239,7 +307,7 @@ export function AddToCatalogSheet({
                     }
                     data-catalog-picker=""
                   >
-                    {catalogs.map(catalog => (
+                    {eligible.map(catalog => (
                       <option key={catalog.id} value={catalog.id}>
                         {catalog.name} ·{' '}
                         {plural(catalog.items.filter(item => item.withdrawnAt === undefined).length, 'item')}
@@ -249,7 +317,11 @@ export function AddToCatalogSheet({
                   </select>
                 </div>
               ) : (
-                <p className="m-0 text-cell text-muted">You have no catalog yet. Name one to start.</p>
+                <p className="m-0 text-cell text-muted">
+                  {catalogs.length === 0
+                    ? 'You have no catalog yet. Name one to start.'
+                    : 'It is in all your catalogs already. Name a new one.'}
+                </p>
               )}
               {choice?.kind === 'new' ? (
                 <div className="flex min-w-0 flex-col gap-1">
@@ -276,20 +348,32 @@ export function AddToCatalogSheet({
                   {problem}
                 </p>
               )}
-              <Button type="submit" variant="primary" disabled={busy || problem !== null} data-catalog-preview="">
-                {busy && preview === null ? 'Reading…' : plan === null ? 'Preview' : previewButtonLabel(plan)}
+              <Button
+                type="submit"
+                variant={preview === null ? 'primary' : 'ghost'}
+                size={preview === null ? 'md' : 'sm'}
+                disabled={busy || problem !== null}
+                data-catalog-preview=""
+              >
+                {previewLabel}
               </Button>
             </form>
           ) : (
             <Button
               type="button"
-              variant="primary"
+              variant={preview === null ? 'primary' : 'ghost'}
+              size={preview === null ? 'md' : 'sm'}
               disabled={busy}
               onClick={() => void runPreview()}
               data-catalog-preview=""
             >
-              {busy && preview === null ? 'Reading…' : 'Preview'}
+              {preview !== null ? 'Read again' : busy ? 'Reading…' : 'Preview'}
             </Button>
+          )}
+          {note === null ? null : (
+            <p className="m-0 break-words text-cell text-fg" role="status" data-catalog-notice="">
+              {note}
+            </p>
           )}
           {failure === null ? null : failure.sharingOff ? (
             <SharingOffPanel connection={connection} createClient={createClient} />
@@ -326,7 +410,7 @@ export function AddToCatalogSheet({
 }
 
 /** What would be frozen: where it was read from, what was left out, the warnings and every file. */
-function PreviewBlock({ preview }: { readonly preview: CatalogItemPreview }) {
+function PreviewBlock({ preview }: { readonly preview: SharedItemPreview }) {
   return (
     <section className="flex min-w-0 flex-col gap-sm" aria-label="Preview" data-catalog-preview-block="">
       <div className="flex min-w-0 flex-col gap-0.5">

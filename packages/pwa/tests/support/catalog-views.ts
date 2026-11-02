@@ -5,6 +5,8 @@ import {
   CatalogItemPreviewSchema,
   type OwnedCatalog,
   OwnedCatalogSchema,
+  type OwnedSharedItem,
+  OwnedSharedItemSchema,
 } from '@ferretry/protocol';
 
 const AT = '2026-10-31T09:00:00.000Z';
@@ -99,3 +101,43 @@ export function installRecord(kind: 'skill' | 'mcp' = 'skill', name = 'pdf-tools
     secretBindings: {},
   };
 }
+
+/** An item of the machine's item table, listed live by `CATALOG` unless `change` says otherwise. */
+export function sharedItem(change: Record<string, unknown> = {}): OwnedSharedItem {
+  return OwnedSharedItemSchema.parse({
+    itemId: ITEM,
+    kind: 'skill',
+    name: 'pdf-tools',
+    summary: 'Split, merge and OCR PDFs',
+    source: { kind: 'skill', path: '/home/k/.claude/skills/pdf-tools/SKILL.md' },
+    current: 2,
+    createdAt: AT,
+    catalogs: [{ catalogId: CATALOG, state: 'live' }],
+    versions: [
+      { version: 1, size: 100, publishedAt: AT, summary: 'Split PDFs', usedBy: { catalogIds: [] } },
+      {
+        version: 2,
+        size: 120,
+        publishedAt: AT,
+        summary: 'Split, merge and OCR PDFs',
+        usedBy: { catalogIds: [CATALOG] },
+      },
+    ],
+    ...change,
+  });
+}
+
+export const TOKEN = `cqu_${'t'.repeat(22)}`;
+
+/** What `POST /v1/catalog-items/quick-add` answers when it added the item. */
+export const addedAnswer = (change: Record<string, unknown> = {}) => ({
+  outcome: 'added',
+  catalog: { catalogId: CATALOG, name: 'Team skills', revision: 5, created: false },
+  itemId: ITEM,
+  itemVersion: 2,
+  digest: DIGEST,
+  newItem: true,
+  sourceChanged: false,
+  undo: { token: TOKEN, expiresAt: AT },
+  ...change,
+});
