@@ -13,6 +13,10 @@ import {
   type CatalogItemPreview,
   type CatalogItemPreviewRequest,
   CatalogItemPreviewRequestSchema,
+  CATALOG_ITEMS_PATH,
+  DAEMON_FEATURES,
+  hasFeature,
+  HealthViewSchema,
   CatalogItemPreviewSchema,
   CreateCatalogRequestSchema,
   DeletedCatalogSchema,
@@ -23,9 +27,20 @@ import {
   type OwnedCatalogList,
   OwnedCatalogListSchema,
   OwnedCatalogSchema,
+  type OwnedSharedItemList,
+  OwnedSharedItemListSchema,
   PublishCatalogVersionRequestSchema,
   type PublishedCatalogItem,
   PublishedCatalogItemSchema,
+  QUICK_ADD_PATH,
+  QUICK_ADD_UNDO_PATH,
+  type QuickAddAnswer,
+  QuickAddAnswerSchema,
+  type QuickAddRequest,
+  QuickAddRequestSchema,
+  type QuickAddUndone,
+  QuickAddUndoneSchema,
+  QuickAddUndoRequestSchema,
   SHARED_CATALOGS_PATH,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
@@ -76,6 +91,62 @@ export async function updateCatalog(
   });
 }
 
+/** What this machine says it can do with catalogs. */
+export interface CatalogFeatures {
+  /** The item table, the default catalog and add-existing (`catalogs.items.1`). */
+  readonly items: boolean;
+  /** One-tap Add and its Undo (`catalogs.quick-add.1`). */
+  readonly quickAdd: boolean;
+}
+
+export const NO_CATALOG_FEATURES: CatalogFeatures = { items: false, quickAdd: false };
+
+/**
+ * Reads the machine's advertised features. A machine that cannot be asked offers nothing, so an app that
+ * ships before its daemon keeps today's behaviour.
+ */
+export async function readCatalogFeatures(client: CatalogClient): Promise<CatalogFeatures> {
+  try {
+    const health = await client.request('/v1/health', HealthViewSchema);
+    return {
+      items: hasFeature(health, DAEMON_FEATURES.catalogItems),
+      quickAdd: hasFeature(health, DAEMON_FEATURES.catalogQuickAdd),
+    };
+  } catch {
+    return NO_CATALOG_FEATURES;
+  }
+}
+
+/** Every skill and MCP server this machine shares, once, with the catalogs that list it. Needs `catalogs.items.1`. */
+export async function listSharedItems(client: CatalogClient): Promise<OwnedSharedItemList> {
+  return await client.request(CATALOG_ITEMS_PATH, OwnedSharedItemListSchema);
+}
+
+/** Makes this catalog the default, where one tap adds. Changes no manifest. Needs `catalogs.items.1`. */
+export async function makeDefault(client: CatalogClient, catalogId: string): Promise<OwnedCatalog> {
+  return await updateCatalog(client, catalogId, { role: 'default' });
+}
+
+/**
+ * One tap: the daemon reads the source once and either lists it in the default catalog (`added`, with an Undo),
+ * finds it there (`already`), or writes nothing and hands back what a person must read (`review`).
+ * Needs `catalogs.quick-add.1`.
+ */
+export async function quickAdd(client: CatalogClient, request: QuickAddRequest): Promise<QuickAddAnswer> {
+  return await client.request(QUICK_ADD_PATH, QuickAddAnswerSchema, {
+    method: 'POST',
+    ...jsonBody(QuickAddRequestSchema.parse(request)),
+  });
+}
+
+/** Takes back a one-tap Add, with the token its answer carried. */
+export async function undoQuickAdd(client: CatalogClient, token: string): Promise<QuickAddUndone> {
+  return await client.request(QUICK_ADD_UNDO_PATH, QuickAddUndoneSchema, {
+    method: 'POST',
+    ...jsonBody(QuickAddUndoRequestSchema.parse({ token })),
+  });
+}
+
 export async function deleteCatalog(client: CatalogClient, catalogId: string): Promise<void> {
   await client.request(catalogPath(catalogId), DeletedCatalogSchema, { method: 'DELETE' });
 }
@@ -90,6 +161,16 @@ export async function previewCatalogItem(
     method: 'POST',
     ...jsonBody(CatalogItemPreviewRequestSchema.parse(request)),
   });
+}
+
+/** An item this machine already shares, put in another catalog at the version that was reviewed. Needs `catalogs.items.1`. */
+export async function addExistingItem(
+  client: CatalogClient,
+  catalogId: string,
+  itemId: string,
+  version: number,
+): Promise<PublishedCatalogItem> {
+  return await addCatalogItem(client, catalogId, { itemId, version });
 }
 
 /** The first version of an item, only if its source still hashes to the previewed digest. */

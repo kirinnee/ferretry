@@ -1,3 +1,24 @@
+## [4.225.0](https://github.com/kirinnee/ferretry/compare/v4.224.0...v4.225.0) (2026-11-02)
+
+### Features
+
+* **pwa:** Warden recent triggers, one row per trigger ([#1314](https://github.com/kirinnee/ferretry/issues/1314)) ([12de8c9](https://github.com/kirinnee/ferretry/commit/12de8c9b0d5c90b0d0e6bb10fc2fc73ef3187738))
+
+## [4.224.0](https://github.com/kirinnee/ferretry/compare/v4.223.0...v4.224.0) (2026-11-01)
+
+### Features
+
+* **daemon:** one-tap Add into the default catalog, with Undo (catalogs 3c-3) ([#1308](https://github.com/kirinnee/ferretry/issues/1308)) ([acaf71a](https://github.com/kirinnee/ferretry/commit/acaf71a422c54be360fb60afcc30f069c59821e6))
+* **pwa:** plan-approval cards on the swipe shell in Board Cards ([#1312](https://github.com/kirinnee/ferretry/issues/1312)) ([e788976](https://github.com/kirinnee/ferretry/commit/e788976dd29deb4369cb2e9fa04a37f4de08bc31))
+* **sign-in-rules:** ferret rule suggestions and fy rules (R3c-5) ([#1311](https://github.com/kirinnee/ferretry/issues/1311)) ([adf5195](https://github.com/kirinnee/ferretry/commit/adf5195c393d9c8ed65aca7df8da94ddd38d4486))
+
+### Fixes
+
+* **catalogs:** mint share links for a machine reached through its relay ([#1310](https://github.com/kirinnee/ferretry/issues/1310)) ([d503eda](https://github.com/kirinnee/ferretry/commit/d503eda61a0bef6ac87f4aee57e50ed4d1667cbc))
+* **pwa:** one Inbox count everywhere, and an Updating that ends ([#1313](https://github.com/kirinnee/ferretry/issues/1313)) ([eeaf1f4](https://github.com/kirinnee/ferretry/commit/eeaf1f409f39040814788c6f66af76c1b92d0d48)), closes [#1304](https://github.com/kirinnee/ferretry/issues/1304)
+* **pwa:** tell only a machine that takes it which files are still uploading ([#1309](https://github.com/kirinnee/ferretry/issues/1309)) ([c1b4f7e](https://github.com/kirinnee/ferretry/commit/c1b4f7ef975caca45ffcab9bfeafff99e94d6aa2))
+* **shared-drafts:** budget each device on its own, never meter a send's clear, and never move back on a repeat's answer ([#1306](https://github.com/kirinnee/ferretry/issues/1306)) ([77e1f91](https://github.com/kirinnee/ferretry/commit/77e1f91167125a9947a82c0a889704a4680d6a8f))
+
 ## [4.223.0](https://github.com/kirinnee/ferretry/compare/v4.222.0...v4.223.0) (2026-11-01)
 
 ### Features

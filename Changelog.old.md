@@ -1,3 +1,26 @@
+## [4.224.0](https://github.com/kirinnee/ferretry/compare/v4.223.0...v4.224.0) (2026-11-01)
+
+### Features
+
+* **daemon:** one-tap Add into the default catalog, with Undo (catalogs 3c-3) ([#1308](https://github.com/kirinnee/ferretry/issues/1308)) ([acaf71a](https://github.com/kirinnee/ferretry/commit/acaf71a422c54be360fb60afcc30f069c59821e6))
+* **pwa:** plan-approval cards on the swipe shell in Board Cards ([#1312](https://github.com/kirinnee/ferretry/issues/1312)) ([e788976](https://github.com/kirinnee/ferretry/commit/e788976dd29deb4369cb2e9fa04a37f4de08bc31))
+* **sign-in-rules:** ferret rule suggestions and fy rules (R3c-5) ([#1311](https://github.com/kirinnee/ferretry/issues/1311)) ([adf5195](https://github.com/kirinnee/ferretry/commit/adf5195c393d9c8ed65aca7df8da94ddd38d4486))
+
+### Fixes
+
+* **catalogs:** mint share links for a machine reached through its relay ([#1310](https://github.com/kirinnee/ferretry/issues/1310)) ([d503eda](https://github.com/kirinnee/ferretry/commit/d503eda61a0bef6ac87f4aee57e50ed4d1667cbc))
+* **pwa:** one Inbox count everywhere, and an Updating that ends ([#1313](https://github.com/kirinnee/ferretry/issues/1313)) ([eeaf1f4](https://github.com/kirinnee/ferretry/commit/eeaf1f409f39040814788c6f66af76c1b92d0d48)), closes [#1304](https://github.com/kirinnee/ferretry/issues/1304)
+* **pwa:** tell only a machine that takes it which files are still uploading ([#1309](https://github.com/kirinnee/ferretry/issues/1309)) ([c1b4f7e](https://github.com/kirinnee/ferretry/commit/c1b4f7ef975caca45ffcab9bfeafff99e94d6aa2))
+* **shared-drafts:** budget each device on its own, never meter a send's clear, and never move back on a repeat's answer ([#1306](https://github.com/kirinnee/ferretry/issues/1306)) ([77e1f91](https://github.com/kirinnee/ferretry/commit/77e1f91167125a9947a82c0a889704a4680d6a8f))
+
+## [4.223.0](https://github.com/kirinnee/ferretry/compare/v4.222.0...v4.223.0) (2026-11-01)
+
+### Features
+
+* **pwa:** roomier phone Inbox with swipe-first cards ([#1304](https://github.com/kirinnee/ferretry/issues/1304)) ([8ea3fbb](https://github.com/kirinnee/ferretry/commit/8ea3fbb7ec91d15edf9c8f46ff65e0884b079232))
+* **pwa:** share the composer's files and place across the owner's devices ([#1294](https://github.com/kirinnee/ferretry/issues/1294)) ([8ecb501](https://github.com/kirinnee/ferretry/commit/8ecb501f8d98ff8dc64b1c79cb42be1086e84cab))
+* **sign-in-rules:** report terminal standing rules, the known limit accepted (R3c-T-on) ([#1307](https://github.com/kirinnee/ferretry/issues/1307)) ([f9da4d3](https://github.com/kirinnee/ferretry/commit/f9da4d37e2ec89c3cdb08b0f005c5e0a04e1206e))
+
 ## [4.222.0](https://github.com/kirinnee/ferretry/compare/v4.221.0...v4.222.0) (2026-11-01)
 
 ### Features

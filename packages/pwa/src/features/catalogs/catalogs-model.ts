@@ -6,11 +6,14 @@
  */
 
 import {
-  type CatalogItemPreview,
   type CatalogSourceState,
   CatalogLabelSchema,
   type OwnedCatalog,
   type OwnedCatalogItem,
+  type OwnedSharedItem,
+  type QuickAddAnswer,
+  type QuickAddUndone,
+  type SharedItemPreview,
   PairedDeviceIdSchema,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
@@ -74,6 +77,14 @@ const OWNER_REFUSALS: Readonly<Record<string, string>> = {
   public_unavailable: 'A public catalog is not available yet.',
   signing_unavailable: 'This machine cannot sign right now. Restart it and try again.',
   export_too_big: 'This catalog is too big to export as one file. Withdraw an item or start another catalog.',
+  catalogs_full:
+    'You already have as many catalogs as this machine allows (256). Delete one you do not use, then try again.',
+  items_full: 'This machine already keeps as many shared items as it allows. Stop sharing one, then try again.',
+  item_listed: 'That is already in this catalog.',
+  current_changed: 'The item has a newer version than the one you read. Here is what it is now.',
+  undo_expired: 'Undo ran out of time, so nothing was changed. Withdraw it from the catalog if you want it gone.',
+  source_ambiguous:
+    'This machine shares that more than once, so it cannot tell which one you mean. Pick a catalog below.',
   grant_step_up_required: 'Nothing was changed: the passkey wasn’t confirmed. Try again and confirm it.',
 };
 
@@ -84,7 +95,7 @@ export function ownerRefusal(error: unknown): OwnerRefusal {
   const known = code === undefined ? undefined : OWNER_REFUSALS[code];
   return {
     sentence: known ?? changeRefusalSentence(error),
-    previewAgain: code === 'changed_since_preview',
+    previewAgain: code === 'changed_since_preview' || code === 'current_changed',
     sharingOff: false,
   };
 }
@@ -174,7 +185,7 @@ export function previewButtonLabel(plan: PreviewPlan): string {
 
 /** What Add may do, from the preview in hand. Add is bound to exactly that preview's digest. */
 export function addState(
-  preview: CatalogItemPreview | null,
+  preview: SharedItemPreview | null,
   busy: boolean,
 ): { enabled: boolean; reason: string | null } {
   if (preview === null) return { enabled: false, reason: 'Preview it first, so you can read what will be shared.' };
@@ -185,3 +196,85 @@ export function addState(
     };
   return { enabled: !busy, reason: null };
 }
+
+// ── The default catalog, and one-tap Add ─────────────────────────────────────────────────────────
+
+/** How long the Added toast waits for an Undo. The daemon keeps the token longer (60 s), so a slow link still lands. */
+export const ADDED_TOAST_MS = 10_000;
+
+/** How long the plain toasts ("Already in …", what Undo did) stay. */
+export const NOTE_TOAST_MS = 4_000;
+
+/** "default" on the catalog one tap adds to; the others say nothing. */
+export const roleLabel = (catalog: OwnedCatalog, defaultCatalogId?: string): string | null =>
+  catalog.role === 'default' || catalog.id === defaultCatalogId ? 'default' : null;
+
+/** The catalog one tap adds to, if this machine has made one. */
+export const defaultCatalogOf = (
+  catalogs: readonly OwnedCatalog[],
+  defaultCatalogId: string | undefined,
+): OwnedCatalog | undefined =>
+  catalogs.find(catalog => catalog.id === defaultCatalogId) ?? catalogs.find(catalog => catalog.role === 'default');
+
+/**
+ * The name the machine gives the default catalog the first time one tap makes it ("kirin-box's skills"). The
+ * daemon has the final say; this is what the app says will happen, and the name it offers in the sheet.
+ */
+export function defaultCatalogName(machineName: string | undefined): string {
+  const label = [...(machineName?.trim() ?? '')].slice(0, 71).join('');
+  return label === '' ? 'My skills' : `${label}’s skills`;
+}
+
+/** Where the Add button says it goes. Never claims a catalog the machine has not made yet. */
+export function addDestination(
+  label: string,
+  defaultCatalog: OwnedCatalog | undefined,
+  machineName: string | undefined,
+): string {
+  return defaultCatalog === undefined
+    ? `Add ${label} (makes ${defaultCatalogName(machineName)})`
+    : `Add ${label} to ${defaultCatalog.name}`;
+}
+
+/** What a tap did, as the row shows it. Nothing here decides: the daemon already did. */
+export type QuickAddOutcome =
+  | { readonly kind: 'added'; readonly catalogName: string; readonly token: string }
+  | { readonly kind: 'already'; readonly catalogName: string }
+  | { readonly kind: 'review'; readonly preview: SharedItemPreview | undefined; readonly reasons: readonly string[] };
+
+/** Turns the answer into row state. `catalogs` names a catalog the answer only gave an id for. */
+export function quickAddOutcome(answer: QuickAddAnswer, catalogs: readonly OwnedCatalog[]): QuickAddOutcome {
+  if (answer.outcome === 'added') return { kind: 'added', catalogName: answer.catalog.name, token: answer.undo.token };
+  if (answer.outcome === 'already')
+    return {
+      kind: 'already',
+      catalogName: catalogs.find(catalog => catalog.id === answer.catalogId)?.name ?? 'your default catalog',
+    };
+  return { kind: 'review', preview: answer.preview, reasons: answer.reasons };
+}
+
+const REVIEW_REASONS: Readonly<Record<string, string>> = {
+  warnings: 'It has something to read first.',
+  problems: 'Some files were left out, so read what is shared first.',
+  'needs-summary': 'It needs a one-line summary before it can be shared.',
+};
+
+/** Why one tap stopped and opened the review, in one sentence. */
+export const reviewSentence = (reasons: readonly string[]): string =>
+  reasons
+    .map(reason => REVIEW_REASONS[reason])
+    .filter((sentence): sentence is string => sentence !== undefined)
+    .join(' ');
+
+export const addedSentence = (catalogName: string): string => `Added to ${catalogName}`;
+export const alreadySentence = (catalogName: string): string => `Already in ${catalogName}`;
+
+/** What Undo did. A retraction left no trace; a withdrawal is the ordinary one, which a member may have seen. */
+export const undoneSentence = (undone: QuickAddUndone, catalogName: string): string =>
+  undone.mode === 'retracted'
+    ? `Taken back. It was never in ${catalogName} for anyone.`
+    : `Withdrawn from ${catalogName}. Someone may have seen it, so it shows as withdrawn.`;
+
+/** The catalogs that still list the item live, which are not where it could go next. */
+export const listedLive = (item: OwnedSharedItem): readonly string[] =>
+  item.catalogs.filter(entry => entry.state === 'live').map(entry => entry.catalogId);

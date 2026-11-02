@@ -139,7 +139,7 @@ function OverviewSurface(_: WardenSurfaceProps) {
         </div>
       </section>
       <section className="fixture-card">
-        <h2>Recent actions</h2>
+        <h2>Recent triggers</h2>
         <p>Maryah moved by Jev 96% — restarted its process; its terminal had closed.</p>
         <div className="fixture-actions">
           <button type="button" data-focus="filter" aria-pressed="false">

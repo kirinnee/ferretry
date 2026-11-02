@@ -143,7 +143,7 @@ const SEARCH_ONLY = process.argv.includes('--search-only');
 const CARD_REFS_ONLY = process.argv.includes('--card-refs-only');
 const AGENDA_ONLY = process.argv.includes('--agenda-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
-/** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
+/** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent triggers, nothing else. */
 const WARDEN_ONLY = process.argv.includes('--warden-only');
 /** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
@@ -2442,7 +2442,7 @@ try {
             return;
           }
           if (WARDEN_ONLY) {
-            // The settings card that carries Jev's per-act bars, then the page whose Recent actions show Jev's own.
+            // The settings card that carries Jev's per-act bars, then the page whose Recent triggers show Jev's own.
             const settings = page.locator('[data-testid="warden-config-card"]:has([data-warden-jev-act])').first();
             await settings.waitFor({ state: 'attached' });
             await settings.scrollIntoViewIfNeeded();
@@ -2454,6 +2454,19 @@ try {
             const pageTarget = join(outDir, `warden-page-${SCHEME}-${viewport.name}.png`);
             await captureElement(page, overview, pageTarget);
             process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
+            const triggers = overview.locator('section[aria-labelledby="warden-triggers"]');
+            await triggers.scrollIntoViewIfNeeded();
+            const triggersTarget = join(outDir, `warden-triggers-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, triggers, triggersTarget);
+            process.stdout.write(`📸 Warden triggers ${viewport.name} -> ${triggersTarget}\n`);
+            const joined = triggers
+              .locator('[data-warden-trigger]:has([data-warden-who="jev_llm"]):has([aria-label="Open report"])')
+              .first();
+            await joined.locator('button[aria-expanded]').click();
+            const expandedTarget = join(outDir, `warden-triggers-expanded-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, joined, expandedTarget);
+            process.stdout.write(`📸 Warden trigger timeline ${viewport.name} -> ${expandedTarget}\n`);
+            await joined.locator('button[aria-expanded]').click();
             const actionStats = overview.locator('[data-warden-action-stats]');
             await actionStats.scrollIntoViewIfNeeded();
             const actionsTarget = join(outDir, `warden-actions-${SCHEME}-${viewport.name}.png`);

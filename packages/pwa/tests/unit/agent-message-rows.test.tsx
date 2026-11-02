@@ -118,7 +118,13 @@ describe('a message from another ferret', () => {
       </ReferenceSurfaceProvider>,
     );
     const open = view.root.findByProps({ className: 'fy-peer-open' });
-    expect(open.children.join('')).toBe('Open conversation with Torrey');
+    // The foot's row says only "Open chat ›" — never cut, even on the narrowest phone; the name it
+    // opens stays in the spoken name.
+    expect(open.children[0]).toBe('Open chat');
+    const [chevron, spoken] = open.children.filter(child => typeof child !== 'string');
+    expect(chevron?.props['aria-hidden']).toBe('true');
+    expect(spoken?.props.className).toBe('sr-only');
+    expect(spoken?.children.join('')).toBe(' with Torrey');
     expect(open.props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
     let prevented = 0;
     run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 0, metaKey: true }));
@@ -162,6 +168,23 @@ describe('a message from another ferret', () => {
     );
     expect(reply.root.findByProps({ className: 'fy-peer-kind' }).children).toEqual(['replied']);
     expect(render(<TranscriptRow entry={PEER} />).root.findAllByProps({ className: 'fy-peer-kind' })).toHaveLength(0);
+  });
+
+  test('carries Show more, the quiet link and the time on the foot’s ONE line, controls first', () => {
+    const bulky = { ...PEER, text: '## Status report\n\n- one\n- two\n\nLots more detail follows here.' };
+    const view = render(
+      <ReferenceSurfaceProvider surface={proved([])}>
+        <TranscriptRow entry={bulky} />
+      </ReferenceSurfaceProvider>,
+    );
+    // The three controls that each took a row of their own share the receipt line: the controls as
+    // its `lead` at the left, the time and ticks behind them.
+    const foot = view.root.findByProps({ 'data-message-footer': '' });
+    expect(foot.props['data-side']).toBe('other');
+    expect(foot.findByProps({ 'data-peer-more': '' })).toBeDefined();
+    expect(foot.findByProps({ className: 'fy-peer-sep' }).props['aria-hidden']).toBe('true');
+    expect(foot.findByProps({ className: 'fy-peer-open' })).toBeDefined();
+    expect(foot.findByType('time').children).toEqual([clockOfInstant(PEER.at)?.short ?? '']);
   });
 
   test('carries its time at the foot, on the reader’s clock, never in the header', () => {

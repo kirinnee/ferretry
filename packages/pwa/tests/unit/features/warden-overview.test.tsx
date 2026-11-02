@@ -113,7 +113,7 @@ const tileText = (container: HTMLElement, key: string): string =>
   must(container.querySelector(`[data-stat="${key}"]`), `the ${key} tile`).textContent ?? '';
 
 const rows = (container: HTMLElement): HTMLElement[] => [
-  ...container.querySelectorAll<HTMLElement>('[data-warden-action]'),
+  ...container.querySelectorAll<HTMLElement>('[data-warden-trigger]'),
 ];
 
 const known = [
@@ -298,7 +298,7 @@ describe('WardenOverview', () => {
       expect(text).toContain('Rules only');
       expect(text).toContain('Nothing is being watched right now.');
       expect(text).toContain('No investigations yet today.');
-      expect(text).toContain('The Warden has not acted or blessed anything yet.');
+      expect(text).toContain('The Warden has not flagged or acted on any ferret yet.');
       expect(text).toContain('none reported');
       expect(view.container.querySelector('details summary')?.textContent).toBe('How the Warden works');
       expect(button(view.container, 'Sweep now').disabled).toBe(false);
@@ -583,12 +583,12 @@ describe('WardenOverview stats', () => {
     const view = await render({ status: ready(moved) });
     try {
       // Act
-      const row = must(view.container.querySelector<HTMLElement>('[data-warden-action]'), 'row');
+      const row = must(view.container.querySelector<HTMLElement>('[data-warden-trigger]'), 'row');
       await interact(() => must(row.querySelector<HTMLButtonElement>('button[aria-expanded]'), 'toggle').click());
       const text = view.container.textContent ?? '';
 
       // Assert
-      expect(text).toContain('Moved from claude-a to claude-b');
+      expect(text).toContain('Moved login claude-a → claude-b');
     } finally {
       await view.unmount();
     }
@@ -647,193 +647,21 @@ describe('WardenOverview stats', () => {
   });
 });
 
-describe('WardenOverview recent actions', () => {
-  it('should draw one flat line per action, newest first, with chips, actors and names', async () => {
+describe('WardenOverview recent triggers', () => {
+  it('should list one row per trigger and open its report with the ferret, path and time', async () => {
     // Arrange
     const view = await render({ status: ready(actionsStatus()), sessions: known });
     try {
       // Act
       const list = rows(view.container);
-      const first = must(list[0], 'the first row');
-
-      // Assert
-      expect(list).toHaveLength(4);
-      expect(first.textContent).toContain('Maryah');
-      expect(first.textContent).toContain('Moved');
-      expect(first.textContent).toContain('Jev 96%');
-      expect(first.textContent).toContain('Restarted its process; its terminal had closed.');
-      expect(first.querySelector('.kt-panel')).toBeNull();
-      expect(first.querySelector('[data-actor="jev"]')).not.toBeNull();
-      expect(must(list[1], 'second').querySelector('[data-actor="llm"]')).not.toBeNull();
-      expect(must(list[1], 'second').textContent).toContain('Stopped');
-      expect(must(list[3], 'last').textContent).toContain('Cleared');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should show the investigator as warden-00002A, in upper-case hex', async () => {
-    // Arrange
-    const view = await render({ status: ready(actionsStatus()), sessions: known });
-    try {
-      // Act
-      const llm = must(rows(view.container)[1], 'the LLM row');
-
-      // Assert
-      expect(llm.textContent).toContain('warden-00002A');
-      expect(llm.querySelector('[data-actor="llm"]')?.getAttribute('title')).toBe('LLM · warden-00002A');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should fold consecutive identical repeats into one row with a count and list the times when expanded', async () => {
-    // Arrange
-    const view = await render({ status: ready(actionsStatus()), sessions: known });
-    try {
-      const grouped = must(rows(view.container)[2], 'the grouped row');
-
-      // Act
-      await interact(() => must(grouped.querySelector<HTMLElement>('button[aria-expanded]'), 'toggle').click());
-
-      // Assert
-      expect(grouped.textContent).toContain('×3');
-      expect(grouped.textContent).toContain('2026-07-31 11:30 UTC');
-      expect(grouped.textContent).toContain('2026-07-31 11:10 UTC');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should expand a row to show the full detail and collapse it again', async () => {
-    // Arrange
-    const view = await render({ status: ready(actionsStatus()), sessions: known });
-    try {
-      const row = must(rows(view.container)[0], 'the first row');
-      const toggle = must(row.querySelector<HTMLButtonElement>('button[aria-expanded]'), 'toggle');
-      const closed = toggle.getAttribute('aria-expanded');
-
-      // Act
-      await interact(() => toggle.click());
-      const open = toggle.getAttribute('aria-expanded');
-      const detail = row.textContent ?? '';
-      await interact(() => toggle.click());
-
-      // Assert
-      expect(closed).toBe('false');
-      expect(open).toBe('true');
-      expect(detail).toContain('Jev’s reason: The terminal pane had closed.');
-      expect(detail).toContain('Restarted');
-      expect(detail).toContain('pane lost');
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(row.textContent).not.toContain('Jev’s reason');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should narrow the list by actor and by action, and say so when nothing matches', async () => {
-    // Arrange
-    const view = await render({ status: ready(actionsStatus()), sessions: known });
-    const filter = (group: string, label: string) =>
-      must(
-        [...view.container.querySelectorAll<HTMLButtonElement>(`[aria-label="${group}"] button`)].find(
-          node => node.textContent === label,
-        ),
-        `${group} ${label}`,
-      );
-    try {
-      // Act
-      await interact(() => filter('Filter by actor', 'Jev').click());
-      const jev = rows(view.container).length;
-      await interact(() => filter('Filter by action', 'Cleared').click());
-      const jevCleared = rows(view.container).length;
-      await interact(() => filter('Filter by action', 'Stopped').click());
-      const none = view.container.textContent ?? '';
-      await interact(() => filter('Filter by actor', 'All').click());
-      const stopped = rows(view.container).length;
-
-      // Assert
-      expect(jev).toBe(2);
-      expect(jevCleared).toBe(1);
-      expect(none).toContain('No actions match');
-      expect(stopped).toBe(1);
-      expect(filter('Filter by action', 'Stopped').getAttribute('aria-pressed')).toBe('true');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should show twenty rows, then reveal the rest with Show more', async () => {
-    // Arrange
-    const many = wardenStatus({
-      actions: Array.from({ length: 24 }, (_, index) =>
-        wardenAction({
-          sessionId: `sess-${index}`,
-          at: new Date(NOW - (index + 1) * 60_000).toISOString(),
-          detail: `Nudged number ${index}.`,
-        }),
-      ),
-    });
-    const view = await render({ status: ready(many) });
-    try {
-      // Act
-      const before = rows(view.container).length;
-      await interact(() => button(view.container, 'Show more (4)').click());
-
-      // Assert
-      expect(before).toBe(20);
-      expect(rows(view.container)).toHaveLength(24);
-      expect(view.container.textContent).not.toContain('Show more');
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should open the report from the icon button with the ferret, path and time', async () => {
-    // Arrange
-    const view = await render({ status: ready(actionsStatus()), sessions: known });
-    try {
-      const llm = must(rows(view.container)[1], 'the LLM row');
-
-      // Act
+      const llm = must(list[1], 'the LLM row');
       await interact(() => must(llm.querySelector<HTMLElement>('button[aria-label="Open report"]'), 'report').click());
 
       // Assert
+      expect(list).toHaveLength(4);
+      expect(view.container.textContent).toContain('Recent triggers');
       expect(view.calls.reports).toHaveLength(1);
-      expect(view.calls.reports[0]).toMatchObject({
-        sessionId: 'sess-b',
-        reportPath: 'reports/stop.md',
-        jev: 'Jev: no record — from before Jev’s results were kept',
-      });
-      expect(rows(view.container).filter(row => row.querySelector('[aria-label="Open report"]'))).toHaveLength(1);
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('should say under every LLM row what Jev did first, and under no other', async () => {
-    // Arrange
-    const base = actionsStatus();
-    const status = wardenStatus({
-      ...base,
-      actions: base.actions.map(action =>
-        action.reportPath === undefined
-          ? action
-          : {
-              ...action,
-              jev: { verdict: 'handed_on' as const, why: 'unsure' as const, confidence: 0.21, costUsd: 0.0041 },
-            },
-      ),
-    });
-    const view = await render({ status: ready(status), sessions: known });
-    try {
-      // Act
-      const lines = rows(view.container).map(row => row.querySelector('[data-warden-jev]')?.textContent ?? null);
-
-      // Assert
-      expect(lines.filter(line => line !== null)).toEqual(['Jev: not sure (21%) · $0.0041 → investigated']);
-      expect(must(rows(view.container)[1], 'the LLM row').querySelector('[data-warden-jev]')).not.toBeNull();
+      expect(view.calls.reports[0]).toMatchObject({ sessionId: 'sess-b', reportPath: 'reports/stop.md' });
     } finally {
       await view.unmount();
     }

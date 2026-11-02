@@ -1,7 +1,7 @@
 /**
  * What the Warden page says, worked out without a browser: the status sentence, the Warden-notifications
  * link, the Watching rows and the Investigations rows. The stat tiles, layer lines and chart are in
- * `warden-stats-model.ts`; the Recent-actions rows are in `warden-action-rows-model.ts`.
+ * `warden-stats-model.ts`; the Recent-actions rows are in `warden-trigger-rows-model.ts`.
  *
  * Every judgement about grouping, wording and tone lives here, where it can be proved, rather than in
  * ternaries inside JSX.

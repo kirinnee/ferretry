@@ -15,11 +15,22 @@ import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ACTOR_DOT, type WardenChip } from './warden-vocabulary.ts';
 
-export function WardenChipBadge({ chip, title }: { readonly chip: WardenChip; readonly title?: string }) {
+export function WardenChipBadge({
+  chip,
+  title,
+  wrap = false,
+}: {
+  readonly chip: WardenChip;
+  readonly title?: string;
+  readonly wrap?: boolean;
+}) {
   return (
     <Badge
       tone={chip.tone}
-      className="shrink-0 whitespace-nowrap !normal-case !tracking-normal"
+      className={cn(
+        wrap ? 'min-w-0 max-w-full !whitespace-normal break-words' : 'shrink-0 whitespace-nowrap',
+        '!normal-case !tracking-normal',
+      )}
       {...(title === undefined ? {} : { title })}
     >
       {chip.busy === true && (

@@ -376,7 +376,7 @@ catalog that lists the item live.
 no demoting to none: another catalog replaces it, and deleting the default clears it. `role` and `defaultCatalogId` are
 optional response fields. The CLI: `fy catalog ls` marks the default, `fy catalog default <catalog>` sets it, and
 `fy catalog add <catalog> --item <itemId>` prints the frozen review and asks y/N. The feature flag is
-`catalogs.items.1`. Not here yet: the app's use of these, and versions.
+`catalogs.items.1`. The app's use of these is [The app (catalogs 3c-4)](#the-app-catalogs-3c-4).
 
 ### One-tap Add, and Undo (catalogs 3c-3)
 
@@ -412,6 +412,45 @@ the daemon decides.
   must withdraw the item the ordinary way (nothing does it for them); it also forgets which revisions were signed, which is why no add survives a restart as
   retractable. The feature flag is `catalogs.quick-add.1`. Audit: `catalog.changed`, `publish` or `undo`, ids only
   ([audit.md](audit.md)); a `review` or `already` answer changed nothing and is not recorded.
+
+### The app (catalogs 3c-4)
+
+The skill and MCP rows (`features/catalogs/catalog-item-row.tsx`) use the two routes above. The app ships before the
+daemon, so it asks `GET /v1/health` once per read and uses a route only when the matching flag is there:
+`catalogs.quick-add.1` for one-tap Add, `catalogs.items.1` for the default catalog, **Make default** and **Add to another
+catalog…**. A machine that cannot be asked (the read fails) offers neither, and every row keeps the sheet it had before.
+
+- **Add is one tap** when the machine says it can. The button's label (and its accessible name) says where the tap goes:
+  "Add ‹skill› to ‹default catalog›", or "Add ‹skill› (makes ‹machine›’s skills)" while no default exists yet. The app
+  never claims a catalog the machine has not made. The tap sends `{source}` to `quick-add`; the button is disabled
+  while it is in flight, and a second tap in the same moment is ignored.
+- **`added`** shows a toast, "Added to ‹catalog›", with **Undo** (44px tall) and a seconds counter. It stays **10
+  seconds**, shorter than the daemon's 60-second token, so a slow link still lands. Undo calls `quick-add/undo`
+  with the token and shows what it did: **retracted** says "Taken back. It was never in ‹catalog› for anyone.";
+  **withdrawn** says "Withdrawn from ‹catalog›. Someone may have seen it, so it shows as withdrawn." A refusal (an
+  `undo_expired` token, a lost link) is said in the same toast as a plain sentence. The toast floats over the page
+  (`fy-attn-undo`) and is drawn into `document.body`, so no list or sheet clips it; on a phone it sits above the
+  bottom tab bar. After an Add or an Undo the rows read the catalogs again, so the version chip and the "Add to another
+  catalog…" entry are right.
+- **`already`** is a plain 4-second toast, "Already in ‹catalog›", with no Undo.
+- **`review`** writes nothing and opens the Add sheet on the preview the daemon sent (the frozen copy a person reads,
+  with its warnings and what was left out) and one sentence saying why the tap stopped. The default catalog is
+  preselected; with no default yet, the sheet offers the machine’s default name as the new catalog and makes it the
+  default once the add lands (the **Make default** step is best effort: the add has already succeeded). A
+  `needs-summary` answer carries no preview, so the sheet starts from Preview.
+- **A refused tap** (`catalogs_full`, `items_full`, `source_ambiguous`, `source_refused` and the rest) opens the same
+  sheet with the refusal in one sentence, so the person can pick a catalog by hand.
+- **Sharing › My catalogs** marks the default catalog with a **default** badge, in the list and on the detail. On the
+  detail of any other catalog, **⋯ › Make default** (`PATCH role: "default"`) makes it the default and says so; it is
+  shown only when the machine has `catalogs.items.1`.
+- **Add to another catalog…** (the row's ⋯, for an item already in a catalog) reads `GET /v1/catalog-items`, finds the
+  item by source, and opens the sheet in **add-existing** mode: the catalogs that already list the item live are
+  left out of the picker; the sheet opens already showing the **frozen current version** (a preview by `{itemId}`, no source read; Preview re-reads it); Add sends
+  `{itemId, version}` with the version that was reviewed. If the item moved on (409 `current_changed`, or
+  `changed_since_preview`) the sheet reads the frozen version again, shows it, and says so, and the person adds
+  again. Without `catalogs.items.1` the entry opens the ordinary sheet.
+
+Not here yet: versions, and a way to change the default other than **Make default**.
 
 ### Why a ferret may only list
 
@@ -821,7 +860,7 @@ to catalog…") and the inline Open button.
   installs from someone else's catalog) and **⋯**. The columns keep their place so rows line up.
 - **Which catalog holds an item** is read from the catalogs list the machine already answers, by source: the
   `SKILL.md` path (a list that only knows a skill's name matches by name) or the MCP server id. No new route.
-- **Add** opens the Add to catalog sheet. When it has saved the item and the row is the one that opened it, the last
+- **Add** opens the Add to catalog sheet (on a machine with `catalogs.quick-add.1` it is one tap instead: [The app (catalogs 3c-4)](#the-app-catalogs-3c-4)). When it has saved the item and the row is the one that opened it, the last
   step offers **Share it now** (or **Not now**): it opens the Share sheet for the catalog the item just joined.
 - **Share** depends on where the item sits: in **one** catalog, the Share sheet for it; in **several**, a small picker of
   those catalogs and then the Share sheet; in **none**, the Add to catalog sheet, ending in **Share it now**. Sharing
