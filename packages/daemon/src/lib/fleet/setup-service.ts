@@ -72,15 +72,16 @@ import {
   serializeExportKeys,
   skillSourceReference,
 } from '@ferretry/fleet';
-import type {
-  FleetAccountChange,
-  FleetCloneBundle,
-  FleetCloneFile,
-  FleetSetupRefusalCode,
-  FleetSetupScan,
-  FleetSetupTool,
-  FleetToolInstallRequest,
-  FleetToolInstallResult,
+import {
+  CLONE_BUNDLE_KEYS_LIMIT,
+  type FleetAccountChange,
+  type FleetCloneBundle,
+  type FleetCloneFile,
+  type FleetSetupRefusalCode,
+  type FleetSetupScan,
+  type FleetSetupTool,
+  type FleetToolInstallRequest,
+  type FleetToolInstallResult,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
 import {
@@ -406,28 +407,39 @@ export class FleetSetupService {
       notCopied,
     });
     const path = `${catalog.layout.fleetDirectory}/${EXPORT_KEYS_FILE}`;
+    const remembered = await this.#storedKeys(path);
     const { keys, stored } = assignOriginKeys({
       bundle,
-      previous: parseExportKeys(await this.#storedKeys(path)),
+      previous: parseExportKeys(remembered.text),
       runtimeIds: Object.fromEntries(
         Object.entries(((await catalog.ids()) ?? EMPTY_RUNTIME_IDS).runtimes).map(([name, entry]) => [name, entry.id]),
       ),
       randomBytes: length => this.deps.randomBytes(length),
     });
-    // Bookkeeping: an export that cannot remember its keys still answers with the ones it minted.
-    try {
-      await this.deps.exportKeys.write(path, serializeExportKeys(stored));
-    } catch {
-      // The next export re-derives what it can; a renamed item then looks new rather than copying wrongly.
+    if (Object.keys(keys).length > CLONE_BUNDLE_KEYS_LIMIT) {
+      throw new FleetSetupRefusal(
+        'fleet_setup_refused',
+        `${catalog.machineName()} has more than ${String(CLONE_BUNDLE_KEYS_LIMIT)} items, which is more than one copy can carry. Remove some, then try again.`,
+      );
+    }
+    // Bookkeeping: an export that cannot remember its keys still answers with the ones it minted. A file
+    // that is merely absent or invalid is replaced; one that could not be READ is left alone, because it
+    // may hold keys every target already stamped, and writing fresh ones over it would lose them for good.
+    if (remembered.readable) {
+      try {
+        await this.deps.exportKeys.write(path, serializeExportKeys(stored));
+      } catch {
+        // The next export re-derives what it can; a renamed item then looks new rather than copying wrongly.
+      }
     }
     return { ...bundle, version: 2, daemon, keys };
   }
 
-  async #storedKeys(path: string): Promise<string | undefined> {
+  async #storedKeys(path: string): Promise<{ readonly text: string | undefined; readonly readable: boolean }> {
     try {
-      return await this.deps.exportKeys.read(path);
+      return { text: await this.deps.exportKeys.read(path), readable: true };
     } catch {
-      return undefined;
+      return { text: undefined, readable: false };
     }
   }
 

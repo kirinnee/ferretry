@@ -198,7 +198,7 @@ export const ORIGIN_KEY_PATTERN = /^[a-z2-7]{26}$/u;
 export const OriginKeySchema = z.string().regex(ORIGIN_KEY_PATTERN, 'an origin key is 16 random bytes in base32');
 export type OriginKey = z.infer<typeof OriginKeySchema>;
 
-/** How many keys one bundle may carry: the same ceiling as the items it can hold. */
+/** How many keys one bundle may carry. A source with more items refuses to export rather than send keys it cannot hold. */
 export const CLONE_BUNDLE_KEYS_LIMIT = 8192;
 
 /** A key's subject: `<kind>/<name>`, `profile/<name>`, `runtime/<name>` or `login/<id>`. */

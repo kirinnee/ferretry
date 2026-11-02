@@ -25,6 +25,7 @@ import {
   RetiredFleetConfigError,
 } from '@ferretry/fleet';
 import {
+  CLONE_BUNDLE_KEYS_LIMIT,
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
@@ -694,13 +695,49 @@ describe('exportBundle origin keys', () => {
     should(w.state.keysText).be.undefined();
   });
 
-  it('should mint every key again when the file cannot be read', async () => {
+  it('should answer with minted keys but leave export-keys.json alone when it cannot be read', async () => {
+    // Arrange: a file that holds keys every target may already carry, and a read that fails (not "absent")
     const w = world();
     w.state.reading = configReading(SET_UP_MODEL(), 'r');
-    w.state.keysReadError = new Error('permission denied');
+    w.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+    const first = await exported(w);
+    const kept = w.state.keysText;
+    const writes = w.state.keysWrites;
+    w.state.keysReadError = new Error('input/output error');
+
+    // Act
     const bundle = await exported(w);
+
+    // Assert
     should(bundle.keys['instructions/main']).match(ORIGIN_KEY_PATTERN);
-    should(parseExportKeys(w.state.keysText).items['instructions/main']?.key).equal(bundle.keys['instructions/main']);
+    should(bundle.keys['instructions/main']).not.equal(first.keys['instructions/main']);
+    should(w.state.keysText).equal(kept);
+    should(w.state.keysWrites).equal(writes);
+    w.state.keysReadError = undefined;
+    should((await exported(w)).keys['instructions/main']).equal(first.keys['instructions/main']);
+  });
+
+  it('should refuse in words, and write nothing, when the setup holds more items than a bundle has keys for', async () => {
+    // Arrange
+    const w = world();
+    const base = SET_UP_MODEL();
+    const servers = Object.fromEntries(
+      Array.from({ length: CLONE_BUNDLE_KEYS_LIMIT + 1 }, (_, index) => [
+        `server-${String(index)}`,
+        { command: 'mcp' },
+      ]),
+    );
+    w.state.reading = configReading(
+      parseAccountModel({ ...base, components: { ...base.components, mcp: servers } }),
+      'r',
+    );
+
+    // Act
+    const refusal = await setupRefusal(w.service.exportBundle(), 'fleet_setup_refused');
+
+    // Assert
+    should(refusal.message).containEql(String(CLONE_BUNDLE_KEYS_LIMIT));
+    should(w.state.keysWrites).equal(0);
   });
 
   it('should refuse an export while the daemon has no id to report', async () => {
