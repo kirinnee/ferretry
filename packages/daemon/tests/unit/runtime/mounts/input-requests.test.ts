@@ -525,6 +525,7 @@ describe('account names on the card routes (secrev-1331 M1, L4)', () => {
     const service = {
       list: async () => [card],
       quarantinedUntil: () => undefined,
+      resealed: (request: unknown) => request,
       targetOf: () => ({ kind: 'terminal', key: 'dev' }),
       deliver: async (_session: string, requestId: string, body: unknown) => {
         delivered.push(body);
