@@ -17,15 +17,15 @@ import { useDaemonClient } from '../../lib/store.tsx';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
+import type { MachineSkillEntriesLoader } from '../skills/machine-skills-api.ts';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
-import { VersionsSheet } from './versions-sheet.tsx';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
 import { MarkedText } from './catalog-review-view.tsx';
 import {
   type CatalogClientFactory,
-  deleteCatalog,
   type CatalogFeatures,
+  deleteCatalog,
   exportCatalog,
   listCatalogs,
   makeDefault,
@@ -47,7 +47,7 @@ import {
 } from './catalogs-model.ts';
 import { PublishSkillsSheet } from './publish-skills-sheet.tsx';
 import { ShareSheet } from './share-sheet.tsx';
-import type { MachineSkillEntriesLoader } from '../skills/machine-skills-api.ts';
+import { VersionsSheet } from './versions-sheet.tsx';
 
 export interface CatalogsSurfaceProps {
   readonly connection: DaemonConnection;
@@ -138,6 +138,7 @@ export function CatalogsSurface({
           connection={connection}
           createClient={createClient}
           catalog={read.catalogs.find(candidate => candidate.id === openId)}
+          catalogs={read.catalogs}
           defaultCatalogId={read.defaultCatalogId}
           canMakeDefault={read.features.items}
           features={read.features}
@@ -206,6 +207,7 @@ function CatalogDetail({
   connection,
   createClient,
   catalog,
+  catalogs,
   defaultCatalogId,
   canMakeDefault,
   features,
@@ -218,6 +220,7 @@ function CatalogDetail({
   readonly connection: DaemonConnection;
   readonly createClient: CatalogClientFactory;
   readonly catalog: OwnedCatalog | undefined;
+  readonly catalogs: readonly OwnedCatalog[];
   readonly defaultCatalogId: string | undefined;
   readonly canMakeDefault: boolean;
   readonly features: CatalogFeatures;
@@ -361,7 +364,7 @@ function CatalogDetail({
           </Button>
           <Button type="button" size="sm" disabled={busy} onClick={() => setSharing(true)} data-catalog-share="">
             <Share2 size={16} aria-hidden="true" />
-            Share…
+            Invite people…
           </Button>
           {menu.length === 0 ? null : (
             <Button
@@ -476,6 +479,7 @@ function CatalogDetail({
           connection={connection}
           createClient={createClient}
           catalog={catalog}
+          catalogs={catalogs}
           onClose={() => setSharing(false)}
         />
       ) : null}

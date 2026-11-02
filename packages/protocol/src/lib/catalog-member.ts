@@ -118,7 +118,7 @@ export const CatalogShareCodeSchema = z
 export type CatalogShareCode = z.infer<typeof CatalogShareCodeSchema>;
 
 /** What a person is told when a user ID holds a character they cannot see. */
-export const MEMBER_NAME_HIDDEN_MESSAGE = "A user ID can't contain hidden characters. Type it again.";
+export const MEMBER_NAME_HIDDEN_MESSAGE = "A user ID can't contain hidden or invisible characters. Type it again.";
 
 /** What a person is told when a user ID holds a character no font can be trusted to draw. */
 export const MEMBER_NAME_UNDRAWABLE_MESSAGE =

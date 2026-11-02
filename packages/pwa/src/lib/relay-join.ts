@@ -19,7 +19,9 @@ import {
   type DaemonCarrier,
   isLoopbackHost,
   isLoopbackLinkAddress,
+  type JoinProofOptions,
   type MemberJoinedResponse,
+  type MemberJoinProof,
   type ShareLinkSeed,
 } from '@ferretry/protocol';
 import {
@@ -142,6 +144,8 @@ export interface JoinAttemptOptions {
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
   readonly deadlineMs?: number;
+  /** One of the person's passkeys signing the publisher's challenge; absent on a first join. */
+  readonly passkey?: MemberJoinProof;
 }
 
 /**
@@ -170,6 +174,7 @@ export const joinInSession = async ({
   dial = browserRelayDial,
   heartbeat,
   deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
+  passkey,
 }: JoinAttemptOptions): Promise<MemberJoinedResponse> => {
   const url = connectionSocketUrl(method, seed.daemonId, 'client');
   if (url === null) {
@@ -179,7 +184,15 @@ export const joinInSession = async ({
   const session = new RelayClientSession({
     crypto,
     daemonId: seed.daemonId,
-    mode: { kind: 'join', code: seed.code, clientName, memberKey: keys.publicKey, boxKey: keys.boxKey, key },
+    mode: {
+      kind: 'join',
+      code: seed.code,
+      clientName,
+      memberKey: keys.publicKey,
+      boxKey: keys.boxKey,
+      key,
+      ...(passkey === undefined ? {} : { passkey }),
+    },
     socket,
   });
   let outcome: Awaited<ReturnType<RelayClientSession['joined']>>;
@@ -198,7 +211,86 @@ export const joinInSession = async ({
     throw new JoinOutcomeUnknownError(reason);
   }
   socket.close(1000, 'this join attempt is complete');
-  return outcome.response;
+  // Only a `joined` answers a `join`: the session refuses any other shape before it gets here.
+  return (outcome as Extract<typeof outcome, { kind: 'joined' }>).response;
+};
+
+/** The publisher closed with `4400` on the `join-options` record: it is older than the question. */
+export class JoinOptionsUnknownError extends Error {
+  constructor(override readonly cause: unknown) {
+    super('the publisher does not know join-options');
+    this.name = 'JoinOptionsUnknownError';
+  }
+}
+
+/** What the publisher said joining with this code needs. */
+export type JoinOptionsAnswer =
+  | { readonly kind: 'open'; readonly why: 'first-browser' | 'owner-approved' }
+  | { readonly kind: 'challenge'; readonly memberLabel: string; readonly options: JoinProofOptions };
+
+export interface JoinOptionsAttemptOptions {
+  readonly crypto: RelayClientSessionDependencies['crypto'];
+  readonly seed: ShareLinkSeed;
+  readonly origin: string;
+  readonly method: MemberCarrierMethod;
+  readonly keys: MintedMemberKeys;
+  readonly key: PrivateKeyHandle;
+  readonly dial?: RelayDial;
+  readonly heartbeat?: RelayHeartbeatSchedule;
+  readonly deadlineMs?: number;
+}
+
+/**
+ * One `join-options` attempt over one carrier: what joining with this code needs, asked without spending it.
+ * Rejects with `RelayJoinRefusedError` when the publisher refused inside the channel and `RelaySessionError` otherwise
+ * (an older publisher closes with `4400` on the record it does not know).
+ */
+export const joinOptionsInSession = async ({
+  crypto,
+  seed,
+  origin,
+  method,
+  keys,
+  key,
+  dial = browserRelayDial,
+  heartbeat,
+  deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
+}: JoinOptionsAttemptOptions): Promise<JoinOptionsAnswer> => {
+  const url = connectionSocketUrl(method, seed.daemonId, 'client');
+  if (url === null) {
+    throw new RelaySessionError('this publisher fingerprint cannot address a session', RELAY_CLOSE_CODES.protocolError);
+  }
+  const socket = dial(url);
+  const session = new RelayClientSession({
+    crypto,
+    daemonId: seed.daemonId,
+    mode: { kind: 'join-options', code: seed.code, memberKey: keys.publicKey, origin, key },
+    socket,
+  });
+  let outcome: Awaited<ReturnType<RelayClientSession['joined']>>;
+  try {
+    outcome = await driveRelaySession({
+      socket,
+      session,
+      heartbeat: heartbeat ?? browserHeartbeat,
+      settled: session.joined(),
+      keepAlive: false,
+      deadlineMs,
+    });
+  } catch (reason) {
+    socket.close(1000, 'this join-options attempt is over');
+    if (
+      session.credentialSent() &&
+      reason instanceof RelaySessionError &&
+      reason.code === RELAY_CLOSE_CODES.protocolError
+    ) {
+      throw new JoinOptionsUnknownError(reason);
+    }
+    throw reason;
+  }
+  socket.close(1000, 'this join-options attempt is complete');
+  // Only `join-open` or `join-challenge` answers a `join-options`: the session refuses any other shape.
+  return outcome as JoinOptionsAnswer;
 };
 
 export interface JoinPublisherOptions {
@@ -216,6 +308,8 @@ export interface JoinPublisherOptions {
   readonly relayTimeoutMs?: number;
   /** Whether this app was opened on loopback; read from the page by default (see `inWalkOrder`). */
   readonly servedFromLoopback?: boolean;
+  /** One of the person's passkeys signing the publisher's challenge; absent on a first join. */
+  readonly passkey?: MemberJoinProof;
 }
 
 /** What walking every carrier came to. */
@@ -240,6 +334,7 @@ export const joinPublisher = async (options: JoinPublisherOptions): Promise<Join
         key,
         ...(options.dial === undefined ? {} : { dial: options.dial }),
         ...(options.heartbeat === undefined ? {} : { heartbeat: options.heartbeat }),
+        ...(options.passkey === undefined ? {} : { passkey: options.passkey }),
         ...(method.kind === 'direct'
           ? { deadlineMs: options.directTimeoutMs ?? DIRECT_JOIN_TIMEOUT_MS }
           : options.relayTimeoutMs === undefined
@@ -253,4 +348,58 @@ export const joinPublisher = async (options: JoinPublisherOptions): Promise<Join
     }
   }
   return { kind: 'unreachable', maybeSpentUnheard: spentUnheard, tried: candidates.length };
+};
+
+export interface JoinOptionsWalkOptions {
+  readonly crypto: JoinPublisherOptions['crypto'];
+  readonly seed: ShareLinkSeed;
+  readonly origin: string;
+  readonly keys: MintedMemberKeys;
+  readonly hostedRelayUrl: string | undefined;
+  readonly dial?: RelayDial;
+  readonly heartbeat?: RelayHeartbeatSchedule;
+  readonly directTimeoutMs?: number;
+  readonly relayTimeoutMs?: number;
+  readonly servedFromLoopback?: boolean;
+}
+
+/** What asking every carrier what a join needs came to. `older` is a publisher that does not know the question. */
+export type JoinOptionsResult =
+  | { readonly kind: 'answer'; readonly answer: JoinOptionsAnswer; readonly carrier: MemberCarrierMethod }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'older' }
+  | { readonly kind: 'unreachable' };
+
+/**
+ * Asks the carriers, in the join's order, what joining with this code needs. Each ask is its own session and spends
+ * nothing. Only a TRANSPORT failure advances the walk; a sealed refusal is final, and a publisher that closes with
+ * `4400` on the record (it does not know `join-options`) ends it as `older`, so the app joins as it always did.
+ */
+export const askJoinOptions = async (options: JoinOptionsWalkOptions): Promise<JoinOptionsResult> => {
+  const key = options.crypto.deviceKeyHandle(options.keys.signingKey);
+  const candidates = joinCandidates(options.seed, options.hostedRelayUrl, options.servedFromLoopback);
+  for (const method of candidates) {
+    try {
+      const answer = await joinOptionsInSession({
+        crypto: options.crypto,
+        seed: options.seed,
+        origin: options.origin,
+        method,
+        keys: options.keys,
+        key,
+        ...(options.dial === undefined ? {} : { dial: options.dial }),
+        ...(options.heartbeat === undefined ? {} : { heartbeat: options.heartbeat }),
+        ...(method.kind === 'direct'
+          ? { deadlineMs: options.directTimeoutMs ?? DIRECT_JOIN_TIMEOUT_MS }
+          : options.relayTimeoutMs === undefined
+            ? {}
+            : { deadlineMs: options.relayTimeoutMs }),
+      });
+      return { kind: 'answer', answer, carrier: method };
+    } catch (reason) {
+      if (reason instanceof RelayJoinRefusedError) return { kind: 'refused' };
+      if (reason instanceof JoinOptionsUnknownError) return { kind: 'older' };
+    }
+  }
+  return { kind: 'unreachable' };
 };

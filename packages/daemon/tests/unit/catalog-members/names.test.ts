@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { freeMemberName, renameNotice, uniqueMemberNames } from '../../../src/lib/catalog-members/names.ts';
-import { memberId, iso, storedMember, T0 } from './support.ts';
+import { iso, memberId, storedMember, T0 } from './support.ts';
 
 const keys = (...names: string[]): Set<string> => new Set(names);
 
@@ -124,7 +124,7 @@ describe('uniqueMemberNames', () => {
 describe('renameNotice', () => {
   it('should tell one rename in the owner’s words', () => {
     should(renameNotice([{ memberId: memberId(2), from: 'Alice', to: 'Alice (2)' }])).equal(
-      'Two people here had the same name, so one is now Alice (2). Rename or remove whichever is wrong in Sharing › People.',
+      '2 people had the same user ID, so the later one was renamed: Alice → Alice (2). Each still signs in with their passkeys. Rename or remove whichever is wrong in Sharing › People.',
     );
   });
 
@@ -135,7 +135,7 @@ describe('renameNotice', () => {
         { memberId: memberId(3), from: 'Bob', to: 'Bob (2)' },
       ]),
     ).equal(
-      'Several people here had the same name, so 2 are now Alice (2), Bob (2). Rename or remove whichever is wrong in Sharing › People.',
+      'Several people had the same user ID, so the later ones were renamed: Alice → Alice (2), Bob → Bob (2). Each still signs in with their passkeys. Rename or remove whichever is wrong in Sharing › People.',
     );
   });
 });

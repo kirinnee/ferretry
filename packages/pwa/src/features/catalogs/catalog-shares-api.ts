@@ -18,8 +18,11 @@ import {
   CatalogMemberKeyRemovedSchema,
   type CatalogMemberList,
   CatalogMemberListSchema,
+  CatalogMemberRenameRequestSchema,
   type CatalogMemberRevoked,
   CatalogMemberRevokedSchema,
+  type CatalogMemberView,
+  CatalogMemberViewSchema,
   type CatalogShareList,
   CatalogShareListSchema,
   type CatalogShareMintRequest,
@@ -60,6 +63,15 @@ export async function endShare(client: CatalogClient, shareId: string): Promise<
 /** Every person, the catalogs they may read, and each of their browsers. */
 export async function listMembers(client: CatalogClient): Promise<CatalogMemberList> {
   return await client.request(CATALOG_MEMBERS_PATH, CatalogMemberListSchema);
+}
+
+/** Changes a person's user ID. They keep their browsers, passkeys and installs; a taken ID is a 409 `member_exists`. */
+export async function renameMember(client: CatalogClient, memberId: string, label: string): Promise<CatalogMemberView> {
+  return await client.request(memberPath(memberId), CatalogMemberViewSchema, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(CatalogMemberRenameRequestSchema.parse({ label })),
+  });
 }
 
 /** Removes one browser of a person. Their other browsers keep working. */

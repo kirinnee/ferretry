@@ -26,9 +26,8 @@ import {
   useDaemonClient,
 } from '../../src/lib/store.tsx';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
-import { MemoryMemberKeyStore } from '../support/member-keys.ts';
-import { SEED } from '../support/shared-screens.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { MemoryMemberKeyStore } from '../support/member-keys.ts';
 import {
   AutoCarrierPreferences,
   autoDial,
@@ -40,6 +39,7 @@ import {
   ScriptedSocket,
   settle as settleTasks,
 } from '../support/relay.ts';
+import { SEED } from '../support/shared-screens.ts';
 
 /*
  * A connection model that never retries. The cases that count dials must own every dial: the model's
@@ -680,6 +680,67 @@ describe('StoreProvider', () => {
       expect((await store.members.join(SEED)).kind).toBe('unreachable');
     }
     expect(dialled.length).toBeGreaterThan(0);
+  });
+
+  it('asks the publisher over the relay carrier who an invite is for, and joins with the person’s passkey when it wants one', async () => {
+    const id = await newDaemonIdentity();
+    const seed = { ...SEED, daemonId: id.daemonId };
+    const auto = autoDial(id, {
+      joinChallenge: {
+        memberLabel: 'Alice',
+        options: {
+          challenge: 'AAAA',
+          rpId: 'app.ferretry.test',
+          allowCredentials: [{ type: 'public-key', id: 'qg' }],
+          timeout: 60_000,
+        },
+      },
+      joined: {
+        memberId: 'mbr_AAAAAAAAAAAAAAAAAAAAAA',
+        keyId: 'mk_AAAAAAAAAAAAAAAAAAAAAA',
+        label: 'Alice',
+        daemonId: id.daemonId,
+        daemonName: 'Studio',
+        catalogCount: 1,
+        carriers: [],
+        passkeyWindowEndsAt: '2099-01-01T00:10:00.000Z',
+        memberUnlockDays: 30,
+      },
+    });
+    const bytes = (...values: number[]): ArrayBuffer => Uint8Array.from(values).buffer as ArrayBuffer;
+    const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
+      repository: new MemoryRepository(),
+      connectClient: async () => client('unused'),
+      fetcher: async () => Response.json({}),
+      memberKeys: new MemoryMemberKeyStore(),
+      relayDial: auto.dial,
+      passkeyCredentials: {
+        create: async () => null,
+        get: async () =>
+          ({
+            type: 'public-key',
+            rawId: bytes(0xaa),
+            response: { clientDataJSON: bytes(0x7b), authenticatorData: bytes(1), signature: bytes(2) },
+          }) as unknown as Credential,
+      },
+    });
+
+    const step = await store.members.join(seed);
+    if (step.kind !== 'prove') throw new Error('expected the publisher to ask for a passkey');
+    expect(step.memberLabel).toBe('Alice');
+    expect((auto.requests as { t: string }[]).map(request => request.t)).toEqual(['join-options']);
+
+    const supported = Object.getOwnPropertyDescriptor(globalThis, 'PublicKeyCredential');
+    Object.defineProperty(globalThis, 'PublicKeyCredential', { value: class {}, configurable: true });
+    const ended = await step.prove().finally(() => {
+      if (supported === undefined) Reflect.deleteProperty(globalThis, 'PublicKeyCredential');
+      else Object.defineProperty(globalThis, 'PublicKeyCredential', supported);
+    });
+    expect(ended.kind).toBe('joined');
+    const sent = auto.requests as { t: string; passkey?: { credentialId: string } }[];
+    expect(sent.map(request => request.t)).toEqual(['join-options', 'join']);
+    expect(sent[1]?.passkey?.credentialId).toBe('qg');
   });
 
   it('invalidates notification preferences and push devices for only the removed daemon', async () => {
