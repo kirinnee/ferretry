@@ -447,16 +447,26 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
       type Box = { x: number; y: number; width: number; height: number };
       const same = (a: Box, b: Box): boolean =>
         near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
+      // ONE PAGE serves every family in turn (`openEach`), so each pass names its layout, reloads, and puts
+      // this family's theme back (a reload starts on the first family) — and the last pass leaves the page on
+      // the default, so the next family never inherits a layout this one chose.
+      const chooseLayout = async (layout: 'stacked' | 'row' | 'auto'): Promise<void> => {
+        await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+          key: COMPOSER_DOCK_LAYOUT_KEY,
+          value: layout,
+        });
+        await page.reload();
+        await field().waitFor();
+        await page.evaluate(async next => {
+          document.documentElement.dataset.theme = next;
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))));
+        }, `${family}-${scheme}`);
+        const shown = await page.locator('[data-session-input] form').first().getAttribute('data-composer-dock-layout');
+        if (shown !== layout) fail(`${where}: asked for the ${layout} button layout and the composer shows ${shown}`);
+      };
       for (const layout of ['stacked', 'row', 'auto'] as const) {
         const at = `${where} (${layout})`;
-        if (layout !== 'stacked') {
-          await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
-            key: COMPOSER_DOCK_LAYOUT_KEY,
-            value: layout,
-          });
-          await page.reload();
-          await field().waitFor();
-        }
+        await chooseLayout(layout);
         await field().click();
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
@@ -482,7 +492,7 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         } else {
           if (!(layout === 'stacked' ? stacked : inline)({ attach, send }))
             fail(
-              `${at}: the empty phone composer's controls are not ${layout === 'stacked' ? 'stacked' : 'on one line'}`,
+              `${at}: the empty phone composer's controls are not ${layout === 'stacked' ? 'stacked' : 'on one line'} (attach ${JSON.stringify(attach)}, Send ${JSON.stringify(send)})`,
             );
           for (const [name, before, after] of [
             ['the row', row, writing.row],
@@ -500,6 +510,7 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         await page.locator('[data-session-input] form:not([data-composer-empty])').waitFor();
         await page.waitForTimeout(800);
       }
+      await chooseLayout('stacked');
     });
   };
 

@@ -42,7 +42,11 @@ const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: st
 const DOCK_LAYOUTS: readonly { readonly value: ComposerDockLayout; readonly label: string; readonly detail: string }[] =
   [
     { value: 'stacked', label: 'Stacked', detail: 'Buttons in a column each side, always — the most room to type' },
-    { value: 'row', label: 'One row', detail: 'Buttons side by side, always — a one-line box while the text is' },
+    {
+      value: 'row',
+      label: 'One row',
+      detail: 'Buttons side by side, always: a slimmer box, a little less room to type.',
+    },
     { value: 'auto', label: 'Auto', detail: 'Side by side while empty, stacked once you type' },
   ];
 
