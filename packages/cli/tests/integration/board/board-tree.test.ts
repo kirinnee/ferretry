@@ -51,7 +51,6 @@ function tree() {
     skip: () => Promise.reject(new Error('not used')),
     projects: () => Promise.resolve(boards),
     sessions: () => Promise.resolve([]),
-    switchOf: projectId => Promise.resolve({ projectId, on: true, setBy: 'owner', setAt: null }),
   };
   const laneGateway: ILaneGateway = {
     projects: () => Promise.resolve(boards),

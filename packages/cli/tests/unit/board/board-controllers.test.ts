@@ -1,12 +1,10 @@
 import { describe, it } from 'bun:test';
 import type {
-  BoardProjectId,
   BoardProjectsResponse,
   BoardQueryInput,
   BoardResponse,
   BoardSkipRequest,
   BoardSkipResponse,
-  BoardSwitch,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -120,14 +118,6 @@ class FakeGateway implements IBoardGateway {
 
   sessions() {
     return Promise.resolve(this.sessionList);
-  }
-
-  /** Whether each board is on: `undefined` answers like a daemon with no switch (a 404). */
-  boardOn: boolean | undefined = true;
-
-  switchOf(projectId: BoardProjectId): Promise<BoardSwitch> {
-    if (this.boardOn === undefined) return Promise.reject(new Error('404 not found'));
-    return Promise.resolve({ projectId, on: this.boardOn, setBy: 'default', setAt: null });
   }
 }
 
@@ -473,30 +463,32 @@ describe('fy task create', () => {
     should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
   });
 
-  it('should remind a ferret that made a card on a board that is off, and never refuse it', async () => {
+  it("should send the owner's Yes a card rests on, in any spelling fy agenda takes", async () => {
     // Arrange
-    const off = new FakeGateway();
-    off.boardOn = false;
-    const old = new FakeGateway();
-    old.boardOn = undefined;
-    const owner = new FakeGateway();
-    owner.boardOn = false;
+    const { controller, gateway, log } = harness(new FakeGateway(), DENISHA);
 
     // Act
-    const ferret = harness(off, DENISHA);
-    await ferret.controller.create([], base);
-    const older = harness(old, DENISHA);
-    await older.controller.create([], base);
-    const human = harness(owner);
-    await human.controller.create([], base);
+    await controller.create([], { ...base, approval: '!A12' });
 
     // Assert
-    should(ferret.log).eql([
-      'ok: &F2 created — Todo, denisha, idle',
-      'report: The Ferretry board is off: keep &F2 only if the owner asked for it or your lead gave it to you; otherwise fy task drop &F2 --reason "<why>".',
-    ]);
-    should(older.log).eql(['ok: &F2 created — Todo, denisha, idle']);
-    should(human.log).have.length(1);
+    should(gateway.createCalls[0]?.request).containEql({ approval: 'A12' });
+    should(log).eql(['ok: &F2 created — Todo, denisha, idle']);
+  });
+
+  it('should refuse an approval that is not an agenda item before asking the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = harness(new FakeGateway(), DENISHA);
+
+    // Act
+    const error = await controller.create([], { ...base, approval: 'F12' }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(Error);
+    should((error as Error).message).startWith('--approval: "F12" is not an agenda reference');
+    should(gateway.createCalls).have.length(0);
   });
 
   it('should take the title from the trailing words', async () => {

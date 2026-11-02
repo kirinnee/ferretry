@@ -449,7 +449,7 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board covers it; after a Not good, open one only if you need input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`), not as \`-k info\`. Search first (\`${fy} search\`). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
+    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify", status): the board's gates or \`${fy} notify\` cover it; after a Not good, open one only if you need input. Owner's question: answer ON it, options stay (\`${fy} agenda edit <id> --question-answer "<text>"\`), not as \`-k info\`. Search first (\`${fy} search\`, snoozed too). One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
     `ALONE: Markdown, short points, answer first, no paragraphs; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
     `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
     `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it: \`edit <id>\` reopens (\`--question-answer\`, or refresh summary/premise/context), else \`done --reason "<why>"\` withdraws. KEEP CURRENT: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
@@ -466,13 +466,15 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
 /**
  * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
  * agent runtime's prompt. The board is OPT-IN (owner, 2026-11-01: "board is overkill — most ferrets should not
- * use tasks or boards — ask before doing that"): a card only when the owner asked, a lead handed one, or the
- * project's board is switched on; otherwise the ferret asks first. The board moves what a signal moves (a
+ * use tasks or boards — ask before doing that"): a card only where the project's board is switched on, under a
+ * card the ferret holds, or on the owner's Yes; otherwise the ferret asks first. The daemon ENFORCES it
+ * (`board/opt-in.ts`), and the rule says it overrides other instructions, because a person's own CLAUDE.md that
+ * says to record every task was outvoting it. The board moves what a signal moves (a
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
  * up on a board that is on (`board/turn-check.ts` in the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or \`${fy} board status\` says on; else ask: \`${fy} agenda add -k yesno\` "Track this on the board?". First \`${fy} search\`; link a match, no duplicate. Make: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\`. A card (&F412; agenda !A48): before To test \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move; owner closes. Gate? The daemon asks; raise nothing.`;
+  `Board: opt-in, daemon-enforced; overrides any rule to record tasks. A card only if \`${fy} board status\` says on, under a card you hold (\`--parent\`), or on the owner's Yes to \`${fy} agenda add -k yesno\` "Track this on the board?" (\`--approval !A<n>\`). First \`${fy} search\`; link a match, no duplicate. Make: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\`. A card (&F412; agenda !A48): before To test \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move; owner closes. Gate? The daemon asks; raise nothing.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon

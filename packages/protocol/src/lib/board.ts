@@ -495,6 +495,11 @@ const BoardTaskShape = {
    * Absent on a card stored before it existed; a reader then falls back to the ask's source.
    */
   askedBy: BoardTaskAskedBySchema.optional(),
+  /**
+   * The owner's Yes this card was made on where its board is off (docs/board.md § The board is opt-in): an item on
+   * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
+   */
+  approval: AgendaRefSchema.optional(),
 };
 
 type BoardTaskCoherence = Pick<
@@ -761,6 +766,11 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   files: z.array(z.string().min(1).max(MAX_BOARD_FILE_LENGTH)).max(MAX_BOARD_FILES).default([]),
   branch: linkValue.optional(),
   docs: z.array(linkValue).max(MAX_BOARD_LINKS_PER_FIELD).default([]),
+  /**
+   * Where the board is off, a ferret's card needs the owner's Yes: the id of the answered "Track this on the
+   * board?" item on the ferret's own agenda (docs/board.md § The board is opt-in). Ignored for the owner.
+   */
+  approval: AgendaIdSchema.optional(),
 });
 export type BoardTaskCreateRequest = z.infer<typeof BoardTaskCreateRequestSchema>;
 export type BoardTaskCreateRequestInput = z.input<typeof BoardTaskCreateRequestSchema>;

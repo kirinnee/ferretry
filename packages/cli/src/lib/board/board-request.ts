@@ -25,6 +25,7 @@ import {
   toBullets,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
+import { parseAgendaReference } from '../agenda/reference';
 import { refuse } from '../tasks/errors';
 import { taskTitleIssue } from '../tasks/task-title';
 
@@ -88,6 +89,8 @@ export interface BoardCreateOptions {
   readonly workflow?: string;
   readonly dependsOn?: readonly string[];
   readonly parent?: string;
+  /** The owner's Yes a card rests on where the board is off: an agenda item (`!A12`). */
+  readonly approval?: string;
   readonly assignee?: string;
   readonly pr?: readonly string[];
   readonly branch?: string;
@@ -132,6 +135,15 @@ export function createPrLinks(options: BoardCreateOptions): string[] {
   return trimmedAll(options.pr).map(requirePrUrl);
 }
 
+/** The agenda item `--approval` names, in any spelling `fy agenda` takes (`!A12`, `A12`). */
+const requireApproval = (value: string): string => {
+  try {
+    return parseAgendaReference(value);
+  } catch (error) {
+    return refuse(`--approval: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
 export function buildBoardCreateRequest(
   options: BoardCreateOptions,
   titleWords: readonly string[],
@@ -153,6 +165,7 @@ export function buildBoardCreateRequest(
 
   const workflow = requireChoice(present(options.workflow) ?? 'quick', TaskWorkflowSchema.options, '--workflow');
   const parent = present(options.parent);
+  const approval = present(options.approval);
   const branch = present(options.branch);
   const lane = present(options.lane);
 
@@ -170,6 +183,7 @@ export function buildBoardCreateRequest(
     ...(resolved.projectId === undefined ? {} : { projectId: resolved.projectId }),
     ...(lane === undefined ? {} : { laneId: lane }),
     parent: parent === undefined ? null : requireCardRef(parent, '--parent id'),
+    ...(approval === undefined ? {} : { approval: requireApproval(approval) }),
     assignee: resolved.assignee,
     dependsOn: trimmedAll(options.dependsOn).map(value => ({ task: requireCardRef(value, '--depends-on id') })),
     files: trimmedAll(options.file),

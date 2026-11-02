@@ -12,6 +12,7 @@
  */
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
+  type AgendaRef,
   type BoardActor,
   type BoardActorVia,
   type BoardIdsResponse,
@@ -61,6 +62,7 @@ import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
 import { gateEntry } from './gate-policy.ts';
+import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
 import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
 import type { RelocationAuthority } from '../board-projects/ports.ts';
@@ -70,6 +72,7 @@ import type {
   BoardChangeSink,
   BoardClock,
   BoardDiagnostics,
+  BoardOptIn,
   BoardSnapshot,
   BoardStore,
   LaneSetSource,
@@ -113,6 +116,11 @@ export interface BoardServiceDependencies {
   readonly attachments?: BoardAttachmentSource;
   /** What the owner said to a session, for deciding whether a card's ask is theirs. Absent, no ask matches. */
   readonly ownerWords?: OwnerWords;
+  /**
+   * The board is opt-in (`opt-in.ts`): whether a ferret may make a card where its board is off. Absent, every
+   * board reads as on, as it did before the switch.
+   */
+  readonly optIn?: BoardOptIn;
   /**
    * Told after every committed write of a card, by any path (docs/board.md § Gates ask the owner): the gate items
    * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
@@ -347,6 +355,15 @@ export class BoardService {
    */
   async create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
     await this.refuseSubFerret(caller, 'create cards');
+    // One Yes makes one card: two creates on the same approval are decided one after the other.
+    if (caller.kind === 'ferret' && request.approval !== undefined) {
+      const key = `board:approval:${caller.sessionId}:${request.approval}`;
+      return await this.ports.serial.run(key, async () => await this.createLicensed(request, caller));
+    }
+    return await this.createLicensed(request, caller);
+  }
+
+  private async createLicensed(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
     const machineId = this.requireMachine();
     const owner = sessionOf(caller) ?? request.assignee;
     if (owner === undefined || owner === null) {
@@ -360,6 +377,7 @@ export class BoardService {
       const parent = requireLocalCard(index, request.parent, 'parent');
       requireStanding('adopt', await this.standing(caller, parent), parent);
     }
+    const approval = await this.requireLicence(request, caller, projectId, snapshot.cards);
     const id = await this.ports.store.allocateId(request.kind);
     const card = await this.insert(id, request, {
       machineId,
@@ -368,6 +386,7 @@ export class BoardService {
       projectId,
       laneSet,
       index,
+      approval,
     });
     await this.afterWrite(caller, card, [card.projectId], true);
     return await this.view(await this.ports.store.read(), id);
@@ -695,6 +714,8 @@ export class BoardService {
       readonly projectId: BoardProjectId;
       readonly laneSet: LaneSet;
       readonly index: BoardIndex;
+      /** The owner's Yes the card rests on, when that is what let a ferret make it. */
+      readonly approval?: AgendaRef;
     },
   ): Promise<BoardTask> {
     const made = newCard(request, {
@@ -712,6 +733,7 @@ export class BoardService {
     const card = requireValidCard({
       ...made,
       askedBy: await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true),
+      ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
     await this.ports.store.write(id, async current => {
       if (current !== undefined)
@@ -842,6 +864,52 @@ export class BoardService {
   private requireCard(current: BoardTask | undefined, id: BoardTaskId): BoardTask {
     if (current === undefined) throw new BoardError('not-found', `there is no card &${id} on this machine`);
     return current;
+  }
+
+  /**
+   * The board is opt-in (`opt-in.ts`): a ferret's card on a board that is off needs a parent it holds, the owner's
+   * Yes or the owner's own words asking for it, else it is refused with what to do instead. Answers the approval
+   * the card rests on, when that is what let it through; nobody but a ferret is asked.
+   */
+  private async requireLicence(
+    request: BoardTaskCreateRequest,
+    caller: BoardCaller,
+    projectId: BoardProjectId,
+    cards: readonly BoardTask[],
+  ): Promise<AgendaRef | undefined> {
+    const optIn = this.ports.optIn;
+    if (caller.kind !== 'ferret' || optIn === undefined) return undefined;
+    // A switch that cannot be read is off (docs/board.md): the rule fails closed, never open.
+    const boardOn = await optIn.isOn(projectId).catch(() => false);
+    const named = boardOn ? undefined : request.approval;
+    let problem: string | undefined;
+    if (named !== undefined) {
+      const item = await optIn.answered(caller.sessionId, named).catch(() => undefined);
+      const usedBy = cards.find(card => card.approval?.sessionId === caller.sessionId && card.approval.id === named);
+      problem = approvalProblem(named, item, caller.sessionId, usedBy) ?? undefined;
+    }
+    const facts = {
+      boardOn,
+      parent: request.parent !== null,
+      approved: named !== undefined && problem === undefined,
+      askText: request.ask.text,
+    };
+    const licence =
+      cardLicence({ ...facts, ownerSaid: [] }) ??
+      cardLicence({ ...facts, ownerSaid: await this.ownerSaid(caller.sessionId) });
+    if (licence === 'approval' && named !== undefined) return { sessionId: caller.sessionId, id: named };
+    if (licence !== null) return undefined;
+    const board = await optIn.nameOf(projectId).catch(() => projectId);
+    throw new BoardError('forbidden', offBoardRefusal(board, problem));
+  }
+
+  /** What the owner said to a session; nothing when it cannot be read, so no ask matches. */
+  private async ownerSaid(sessionId: string): Promise<readonly string[]> {
+    try {
+      return (await this.ports.ownerWords?.said(sessionId)) ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */

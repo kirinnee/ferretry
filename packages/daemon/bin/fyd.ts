@@ -86,6 +86,7 @@ import {
   type PackRefusal,
   ProtocolVersionSchema,
   type RegisterProjectRequest,
+  type ResolvedAgendaItem,
   type ResolvedBrowserPorts,
   type RuntimeControlRequest,
   type RuntimeModelChoice,
@@ -2190,6 +2191,8 @@ function createBoardWorld(
   ownerWords: OwnerWords,
   /** The gate items, told after every card write; built after the agenda, so read lazily by the caller. */
   gates: CardWriteObserver,
+  /** One ferret's answered agenda items, for the owner's Yes a card on a board that is off rests on; read lazily. */
+  agendaResolved: (sessionId: string) => Promise<readonly ResolvedAgendaItem[]>,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
@@ -2213,6 +2216,16 @@ function createBoardWorld(
     }),
     serial: new KeyedSerialExecutor(),
   });
+  // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
+  // and every board, so it switches on exactly the boards the owner worked on lately.
+  const switches = new BoardSwitchService(
+    new FileBoardSwitchStore(join(paths.home, 'board', 'switch.json')),
+    {
+      cards: async () => (await store.read()).cards,
+      projects: async () => (await lanes.projects()).map(project => project.id),
+    },
+    { now: () => clock.now() },
+  );
   const board = new BoardService({
     store,
     lanes,
@@ -2237,17 +2250,13 @@ function createBoardWorld(
     subFerrets: new StorageSubFerretDirectory(storage),
     ownerWords,
     gates,
-  });
-  // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
-  // and every board, so it switches on exactly the boards the owner worked on lately.
-  const switches = new BoardSwitchService(
-    new FileBoardSwitchStore(join(paths.home, 'board', 'switch.json')),
-    {
-      cards: async () => (await store.read()).cards,
-      projects: async () => (await lanes.projects()).map(project => project.id),
+    // The board is opt-in (docs/board.md): a ferret's card where the board is off needs the owner's Yes or words.
+    optIn: {
+      isOn: async projectId => await switches.isOn(projectId),
+      nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId,
+      answered: async (sessionId, id) => (await agendaResolved(sessionId)).find(item => item.id === id),
     },
-    { now: () => clock.now() },
-  );
+  });
   const cards = new SessionCards({
     board,
     lanes,
@@ -10168,6 +10177,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           join(createSessionPaths(paths, id).directory, 'turns'),
         ),
         { written: async id => await gateItems?.written(id) },
+        async sessionId => {
+          const listed = await agenda.list(sessionId);
+          if (!listed.ok) throw new Error(listed.error.message);
+          return listed.value.resolved;
+        },
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
