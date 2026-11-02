@@ -43,6 +43,16 @@ describe('the work-search gateway', () => {
     should(headersOf(calls[0]?.init)).not.have.property('x-ferretry-session-id');
   });
 
+  it('should say whether the window is lifted only when the query says', async () => {
+    const { client: fake, calls } = client(response([]));
+    const gateway = new FyWorkSearchGateway(fake);
+
+    await gateway.search({ q: 'x', open: false, all: true }, undefined);
+    await gateway.search({ q: 'x', open: false, all: false }, undefined);
+
+    should(calls.map(call => call.path)).eql(['/v1/search?q=x&all=true', '/v1/search?q=x&all=false']);
+  });
+
   it('should carry the project and the limit, and read the project list and the session directory', async () => {
     const { client: fake, calls } = client(response([]));
 

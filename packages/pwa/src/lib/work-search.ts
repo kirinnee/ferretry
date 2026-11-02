@@ -17,6 +17,8 @@ export interface WorkSearchRequest {
   readonly q: string;
   readonly kind?: WorkKind;
   readonly open?: boolean;
+  /** Also closed work older than the daemon's 30-day window. */
+  readonly all?: boolean;
   readonly limit?: number;
 }
 
@@ -29,6 +31,7 @@ const searchParams = (request: WorkSearchRequest): string => {
   const params = new URLSearchParams({ q: request.q.trim() });
   if (request.kind !== undefined) params.set('kind', request.kind);
   if (request.open === true) params.set('open', 'true');
+  if (request.all === true) params.set('all', 'true');
   if (request.limit !== undefined) params.set('limit', String(request.limit));
   return params.toString();
 };

@@ -896,7 +896,7 @@ describe('McpServer — the search tool', () => {
     )) as { result: { content: { text: string }[] } };
 
     // Assert
-    should(searchCalls).deepEqual([{ q: 'relay', kind: 'agenda', open: true }]);
+    should(searchCalls).deepEqual([{ q: 'relay', kind: 'agenda', open: true, all: false }]);
     const lines = answer.result.content[0]?.text.split('\n') ?? [];
     should(lines[0]).startWith('&F303 task [In progress] Work search');
     should(lines[0]).containEql('make search easy and fast');
@@ -922,8 +922,41 @@ describe('McpServer — the search tool', () => {
     const answer = await request('tools/call', toolCall('search_work', { query: 'nothing here' }));
 
     // Assert
-    should(searchCalls).deepEqual([{ q: 'nothing here', open: false }]);
+    should(searchCalls).deepEqual([{ q: 'nothing here', open: false, all: false }]);
     should(answer).match({ result: { content: [{ text: /No cards or agenda items match/u }] } });
+  });
+
+  it('should pass all through, and say how many older closed items the window hid', async () => {
+    // Arrange
+    const { request, searchCalls } = harness(undefined, {
+      search: async () => ({ ...response([taskHit()]), olderHidden: 2 }),
+    });
+
+    // Act
+    const answer = (await request('tools/call', toolCall('search_work', { query: 'relay', all: true }))) as {
+      result: { content: { text: string }[] };
+    };
+
+    // Assert
+    should(searchCalls).deepEqual([{ q: 'relay', open: false, all: true }]);
+    const lines = answer.result.content[0]?.text.split('\n') ?? [];
+    should(lines.at(-1)).equal('2 older closed items hidden — search_work again with all: true');
+  });
+
+  it('should keep the older-items line when the window left out every match', async () => {
+    // Arrange
+    const { request } = harness(undefined, { search: async () => ({ ...response([]), olderHidden: 1 }) });
+
+    // Act
+    const answer = (await request('tools/call', toolCall('search_work', { query: 'relay' }))) as {
+      result: { content: { text: string }[] };
+    };
+
+    // Assert
+    should(answer.result.content[0]?.text.split('\n')).deepEqual([
+      'No cards or agenda items match “relay”.',
+      '1 older closed item hidden — search_work again with all: true',
+    ]);
   });
 
   it('should refuse arguments it does not take before asking the daemon', async () => {

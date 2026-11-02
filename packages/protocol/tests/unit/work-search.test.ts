@@ -6,6 +6,7 @@ import {
   WorkRelatedRequestSchema,
   WorkRelatedResponseSchema,
   WorkSearchQuerySchema,
+  WorkSearchResponseSchema,
 } from '../../src/lib/work-search.ts';
 
 const TASK_HIT = {
@@ -25,6 +26,28 @@ describe('the work search contract', () => {
   it('should fill a query with its defaults: everything, twenty hits', () => {
     // Act / Assert
     should(WorkSearchQuerySchema.parse({ q: '  relay  ' })).eql({ q: 'relay', open: false, limit: 20 });
+  });
+
+  it('should leave `all` unset unless it is sent, so an older client sends the query it always did', () => {
+    // Act / Assert
+    should(WorkSearchQuerySchema.parse({ q: 'relay', all: true })).eql({
+      q: 'relay',
+      open: false,
+      limit: 20,
+      all: true,
+    });
+    should(WorkSearchQuerySchema.safeParse({ q: 'relay', all: 'yes' }).success).be.false();
+  });
+
+  it('should read a response with or without the count of older closed hits', () => {
+    // Act / Assert
+    should(WorkSearchResponseSchema.parse({ hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } })).not.have.property(
+      'olderHidden',
+    );
+    should(
+      WorkSearchResponseSchema.parse({ hits: [], total: 0, indexed: { tasks: 0, agenda: 0 }, olderHidden: 3 })
+        .olderHidden,
+    ).equal(3);
   });
 
   it.each([

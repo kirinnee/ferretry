@@ -66,6 +66,11 @@ export const WorkSearchQuerySchema = z.strictObject({
   kind: WorkKindSchema.optional(),
   /** Only open work. */
   open: z.boolean().default(false),
+  /**
+   * Lift the closed-work window ({@link WORK_SEARCH_CLOSED_WINDOW_DAYS}). Left out, the answer is the
+   * window's and carries no `olderHidden`, so a client that never sends it sees exactly the old answer.
+   */
+  all: z.boolean().optional(),
   /** One project's cards (agenda items have no project and are kept). */
   project: BoardProjectIdSchema.optional(),
   limit: z.number().int().min(1).max(MAX_WORK_SEARCH_LIMIT).default(DEFAULT_WORK_SEARCH_LIMIT),
@@ -109,6 +114,11 @@ export const WorkSearchResponseSchema = z.strictObject({
   total: NonNegativeIntegerSchema,
   /** How much the index holds, so an empty answer over an empty index reads as such. */
   indexed: z.strictObject({ tasks: NonNegativeIntegerSchema, agenda: NonNegativeIntegerSchema }),
+  /**
+   * Closed, dropped and addressed matches the window left out (`--all` brings them back). Present only when
+   * the query said whether it wants them (`all`), so an older client's strict parse never meets it.
+   */
+  olderHidden: NonNegativeIntegerSchema.optional(),
 });
 export type WorkSearchResponse = z.infer<typeof WorkSearchResponseSchema>;
 

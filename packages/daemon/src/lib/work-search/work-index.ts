@@ -13,6 +13,9 @@
  *    whole query read as one phrase in the title adds more.
  * 3. Open work, then recent work, is lifted: a match on last week's card beats the same match on one
  *    closed a month ago.
+ * 4. Closed, dropped and addressed work older than the window is left out — except an exact id, which
+ *    names one thing and finds it at any age, and a query that asks for `all`. What the window left out is
+ *    counted, so a client can say so instead of looking like the work does not exist.
  */
 import type { WorkField, WorkHit, WorkRelatedStrength, WorkSearchQuery } from '@ferretry/protocol';
 import { WORK_SEARCH_CLOSED_WINDOW_DAYS } from '@ferretry/protocol';
@@ -75,6 +78,8 @@ interface Indexed {
 export interface WorkSearchResult {
   readonly hits: readonly WorkHit[];
   readonly total: number;
+  /** Matches only the closed-work window kept out (zero when the query asked for `all`). */
+  readonly olderHidden: number;
 }
 
 export interface WorkRelatedMatch {
@@ -172,16 +177,24 @@ export class WorkIndex {
     const bare = text.replace(SIGILS, '');
     const tokens = tokensOf(text);
     const scores = new Map<string, number>();
+    const named = new Set<string>();
     if (TASK_ID.test(bare) || AGENDA_ID.test(bare))
-      for (const key of this.byId.get(bare.toUpperCase()) ?? []) scores.set(key, ID_SCORE);
+      for (const key of this.byId.get(bare.toUpperCase()) ?? []) {
+        scores.set(key, ID_SCORE);
+        named.add(key);
+      }
     if (tokens.length > 0)
       for (const [key, score] of this.textScores(tokens, normalizePhrase(text))) {
         scores.set(key, (scores.get(key) ?? 0) + score);
       }
-    const ranked = [...scores]
+    const candidates = [...scores]
       .map(([key, score]) => ({ indexed: this.documents.get(key), score }))
       .filter((entry): entry is { indexed: Indexed; score: number } => entry.indexed !== undefined)
-      .filter(({ indexed }) => passes(query, indexed.document, nowMs))
+      .filter(({ indexed }) => passes(query, indexed.document));
+    const visible = candidates.filter(
+      ({ indexed }) => query.all === true || named.has(indexed.document.key) || withinWindow(indexed.document, nowMs),
+    );
+    const ranked = visible
       .map(({ indexed, score }) => ({ indexed, score: boosted(score, indexed.document, nowMs) }))
       .sort(
         (left, right) =>
@@ -189,6 +202,7 @@ export class WorkIndex {
       );
     return {
       total: ranked.length,
+      olderHidden: candidates.length - visible.length,
       hits: ranked
         .slice(0, query.limit)
         .map(({ indexed, score }) => hitOf(indexed.document, score, tokens, scores.get(indexed.document.key) ?? 0)),
@@ -343,8 +357,7 @@ const lowerBound = (sorted: readonly string[], value: string): number => {
 const withinWindow = (document: WorkDocument, nowMs: number): boolean =>
   document.identity.state === 'open' || nowMs - document.updatedAtMs <= CLOSED_WINDOW_MS;
 
-const passes = (query: WorkSearchQuery, document: WorkDocument, nowMs: number): boolean => {
-  if (!withinWindow(document, nowMs)) return false;
+const passes = (query: WorkSearchQuery, document: WorkDocument): boolean => {
   if (query.kind !== undefined && document.kind !== query.kind) return false;
   if (query.open && document.identity.state !== 'open') return false;
   if (query.project !== undefined && document.identity.kind === 'task' && document.identity.projectId !== query.project)

@@ -19,6 +19,7 @@ export interface WorkSearchAsk {
   readonly q: string;
   readonly kind?: WorkKind;
   readonly open?: boolean;
+  readonly all?: boolean;
   readonly limit?: number;
 }
 
@@ -41,7 +42,7 @@ interface Answer {
 }
 
 const askKeyOf = (ask: WorkSearchAsk): string =>
-  `${ask.q.trim()}\u0000${ask.kind ?? ''}\u0000${ask.open === true ? 1 : 0}\u0000${ask.limit ?? ''}`;
+  `${ask.q.trim()}\u0000${ask.kind ?? ''}\u0000${ask.open === true ? 1 : 0}\u0000${ask.all === true ? 1 : 0}\u0000${ask.limit ?? ''}`;
 
 export function useWorkSearch(
   port: WorkSearchPort | undefined,
@@ -55,6 +56,7 @@ export function useWorkSearch(
   const q = request?.q;
   const kind = request?.kind;
   const open = request?.open;
+  const all = request?.all;
   const limit = request?.limit;
 
   useEffect(() => {
@@ -63,6 +65,7 @@ export function useWorkSearch(
       q,
       ...(kind === undefined ? {} : { kind }),
       ...(open === undefined ? {} : { open }),
+      ...(all === undefined ? {} : { all }),
       ...(limit === undefined ? {} : { limit }),
     };
     const controller = new AbortController();
@@ -87,7 +90,7 @@ export function useWorkSearch(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [port, daemonKey, askKey, q, kind, open, limit, debounceMs]);
+  }, [port, daemonKey, askKey, q, kind, open, all, limit, debounceMs]);
 
   if (!live || answer === null || answer.daemonKey !== daemonKey) {
     return live ? { ...NOTHING, pending: true } : NOTHING;

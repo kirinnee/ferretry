@@ -11,6 +11,7 @@ export function registerWorkSearchCommands(program: Command, controller: WorkSea
     .option('--kind <kind>', `only ${WorkKindSchema.options.join(' | ')}`)
     .option('--open', 'only work still to do')
     .option('--project <name>', "only this project's cards (agenda items are kept)")
+    .option('--all', 'also find closed, dropped and addressed work older than 30 days')
     .option('--limit <n>', 'at most this many hits (default 20)')
     .option('--session <id>', 'act as this session instead of the ambient FY_SESSION_ID')
     .option('--json', 'print the daemon response as JSON')
