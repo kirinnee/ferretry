@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { MachineAgendaPort, MachineMembersStore, MachineRaise } from '../../../src/lib/agenda/index.ts';
 import { AUTO_MOVE_FAILED_REF, AutoMoveFailures } from '../../../src/lib/warden/auto-move-failures.ts';
+import { INPUT_STUCK_REF, StuckInputList } from '../../../src/lib/warden/input-stuck-list.ts';
 import { ORPHANS_REF, OrphanList } from '../../../src/lib/warden/orphan-list.ts';
 import type { WardenCardNotice } from '../../../src/lib/warden/orphans.ts';
 
@@ -218,5 +219,40 @@ describe('the orphaned cards item', () => {
     for (let index = 0; index < 14; index += 1)
       await list.add(notice(`F${String(index + 10)}`, `card ${String(index)}`));
     should(raised.at(-1)?.request.context).containEql('…and 2 more.');
+  });
+});
+
+describe('the stuck-input item (B144)', () => {
+  const stuck = (sessionId: string, since: string) => ({
+    sessionId,
+    title: sessionId,
+    line: `${sessionId}: send s-1 stuck since ${since} — Enter was pressed and did not take`,
+    since,
+  });
+
+  it('should list every stuck ferret in one item that pings, oldest wait first, and name a single one', async () => {
+    const { port, raised } = machine();
+    const list = new StuckInputList(new Members(), port);
+
+    await list.add(stuck('annabeth', '2026-11-02T15:00:00Z'));
+    should(raised[0]).containDeep({
+      ref: INPUT_STUCK_REF,
+      members: ['annabeth'],
+      request: { title: 'annabeth is stuck on an unsent message', notice: true, ping: true },
+    });
+    await list.add(stuck('braelynn', '2026-11-02T05:40:00Z'));
+    should(raised[1]?.request.title).equal('2 ferrets are stuck on unsent messages');
+    should(raised[1]?.request.waitingSince).equal('2026-11-02T05:40:00Z');
+    should(raised[1]?.request.context).match(/- annabeth: send s-1/);
+  });
+
+  it('should close the item when the last ferret leaves, and ignore one it never held', async () => {
+    const { port, resolved, raised } = machine();
+    const list = new StuckInputList(new Members(), port);
+    await list.remove('nobody');
+    should(raised).be.empty();
+    await list.add(stuck('annabeth', '2026-11-02T15:00:00Z'));
+    await list.remove('annabeth');
+    should(resolved).eql([INPUT_STUCK_REF]);
   });
 });

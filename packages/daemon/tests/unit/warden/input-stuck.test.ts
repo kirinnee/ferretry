@@ -1,0 +1,178 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  detectStuckInput,
+  planStuckInput,
+  STUCK_INPUT_HORIZON_MS,
+  STUCK_INPUT_MS,
+  type StuckInputSend,
+  stuckInputCandidates,
+  stuckInputNoticeLine,
+  stuckSendOf,
+  type WardenSessionView,
+} from '../../../src/lib/warden/index.ts';
+
+/**
+ * A ferret idle with a message of ours typed and unsent in its box — the two of 2026-11-02, read from the
+ * same facts the Warden reads: the session's state and its send ledger.
+ */
+
+const NOW = Date.parse('2026-11-02T15:10:00.000Z');
+const MINUTE = 60_000;
+const iso = (ms: number): string => new Date(ms).toISOString();
+
+const ferret = (
+  id: string,
+  state: Partial<WardenSessionView['state']> = {},
+  config: Partial<WardenSessionView['config']> = {},
+): WardenSessionView => ({
+  config: { id, mode: 'auto', teammate: id, ...config },
+  state: { status: 'running', turnState: 'your-turn', turnStateAt: iso(NOW - 21 * MINUTE), ...state },
+  hasLiveMonitor: true,
+});
+
+/** annabeth's turn pointer: typed into a stalled pane at 15:00:32, never seen to land, never submitted. */
+const pointer = (over: Partial<StuckInputSend> = {}): StuckInputSend => ({
+  sendId: 'send-63',
+  path: 'turn-file',
+  fate: 'unaccounted',
+  unaccountedReason: 'landing_unconfirmed',
+  acceptedAt: iso(NOW - 10 * MINUTE),
+  attemptAt: iso(NOW - 10 * MINUTE),
+  fateAt: iso(NOW - 10 * MINUTE + 25_000),
+  fromName: 'tamika',
+  ...over,
+});
+
+/** braelynn's: a lead's message typed mid-turn whose Enter was swallowed, left there when the turn ended. */
+const swallowed = (over: Partial<StuckInputSend> = {}): StuckInputSend => ({
+  sendId: 'send-lead',
+  path: 'native-inline',
+  fate: 'accepted',
+  typedNotSent: true,
+  acceptedAt: iso(NOW - 30 * MINUTE),
+  attemptAt: iso(NOW - 30 * MINUTE),
+  deadlineAt: iso(NOW + MINUTE),
+  ...over,
+});
+
+describe('which ferrets are looked at', () => {
+  it('should look at autonomous ferrets idle at their prompt long enough, and nothing else', () => {
+    const fleet = [
+      ferret('idle'),
+      ferret('fresh', { turnStateAt: iso(NOW - MINUTE) }),
+      ferret('working', { turnState: 'working' }),
+      ferret('stopped', { status: 'stopped' }),
+      ferret('owner', {}, { mode: 'interactive' }),
+      ferret('warden', {}, { label: 'fleet-warden' }),
+    ];
+
+    should(stuckInputCandidates(fleet, NOW).map(view => view.config.id)).eql(['idle']);
+  });
+});
+
+describe('when a send is stuck in the box', () => {
+  it('should find an unconfirmed pointer the ferret never took a turn on', () => {
+    should(stuckSendOf([pointer()], iso(NOW - 21 * MINUTE), NOW)?.sendId).equal('send-63');
+  });
+
+  it('should find a message whose Enter was swallowed mid-turn, the turn having ended after it was typed', () => {
+    should(stuckSendOf([swallowed()], iso(NOW - 29 * MINUTE), NOW)?.sendId).equal('send-lead');
+  });
+
+  it('should not call a send stuck once the ferret took a turn after the ledger last spoke of it', () => {
+    should(stuckSendOf([pointer()], iso(NOW - 5 * MINUTE), NOW)).be.undefined();
+    should(stuckSendOf([swallowed({ deadlineAt: iso(NOW - 20 * MINUTE) })], iso(NOW - 5 * MINUTE), NOW)).be.undefined();
+  });
+
+  it('should leave alone a send too young, too old, settled, never typed, held, carried by a revive, or proven', () => {
+    const turnEnded = iso(NOW - 2 * STUCK_INPUT_HORIZON_MS);
+    const young = iso(NOW - STUCK_INPUT_MS + 1_000);
+    const cases: StuckInputSend[] = [
+      pointer({ attemptAt: young, acceptedAt: young, fateAt: young }),
+      pointer({
+        attemptAt: iso(NOW - STUCK_INPUT_HORIZON_MS - MINUTE),
+        acceptedAt: iso(NOW - STUCK_INPUT_HORIZON_MS - MINUTE),
+      }),
+      pointer({ fate: 'delivered' }),
+      pointer({ fate: 'cancelled' }),
+      pointer({ untyped: true }),
+      pointer({ held: true }),
+      pointer({ path: 'revive' }),
+      pointer({ unaccountedReason: 'transcript_unreadable' }),
+      swallowed({ typedNotSent: false }),
+    ];
+    for (const send of cases) should(stuckSendOf([send], turnEnded, NOW)).be.undefined();
+  });
+
+  it('should name the newest stuck send when there are several', () => {
+    const older = pointer({ sendId: 'older', attemptAt: iso(NOW - 15 * MINUTE), acceptedAt: iso(NOW - 15 * MINUTE) });
+    should(stuckSendOf([older, pointer()], iso(NOW - 21 * MINUTE), NOW)?.sendId).equal('send-63');
+  });
+});
+
+describe('the flag', () => {
+  it('should say who, what, since when, and carry the send as its episode', () => {
+    const [flag] = detectStuckInput([ferret('annabeth')], new Map([['annabeth', [pointer()]]]), NOW);
+
+    should(flag).match({
+      kind: 'input_stuck',
+      sessionId: 'annabeth',
+      teammate: 'annabeth',
+      since: iso(NOW - 10 * MINUTE),
+      idleMinutes: 10,
+      subject: 'input:annabeth:send-63',
+      sendId: 'send-63',
+    });
+    should(flag?.detail).match(/a message from tamika \(send send-63\) was typed and never seen to land/);
+  });
+
+  it('should flag nothing for a ferret whose ledger could not be read', () => {
+    should(detectStuckInput([ferret('annabeth')], new Map(), NOW)).be.empty();
+  });
+});
+
+describe('what the Warden does about it', () => {
+  const stuck = [{ sessionId: 'annabeth', sendId: 'send-63' }];
+
+  it('should press once for a new episode, then notice only if the press did not end it', () => {
+    should(planStuckInput({ stuck, memory: {}, enabled: true }).steps).eql([
+      { kind: 'press', sessionId: 'annabeth', sendId: 'send-63' },
+    ]);
+    should(
+      planStuckInput({ stuck, memory: { annabeth: { sendId: 'send-63', press: 'submitted' } }, enabled: true }).steps,
+    ).eql([{ kind: 'notice', sessionId: 'annabeth', sendId: 'send-63', press: 'submitted' }]);
+    should(
+      planStuckInput({ stuck, memory: { annabeth: { sendId: 'send-63', noticedAt: iso(NOW) } }, enabled: true }).steps,
+    ).be.empty();
+  });
+
+  it('should treat a different stuck send as a new episode, and clear a ferret no longer flagged', () => {
+    const plan = planStuckInput({
+      stuck,
+      memory: { annabeth: { sendId: 'send-62', noticedAt: iso(NOW) }, braelynn: { sendId: 'x', noticedAt: iso(NOW) } },
+      enabled: true,
+    });
+    should(plan.steps).eql([{ kind: 'press', sessionId: 'annabeth', sendId: 'send-63' }]);
+    should(plan.recovered).eql(['braelynn']);
+  });
+
+  it('should press and notice nothing while the Warden is off, but still clear recoveries', () => {
+    const plan = planStuckInput({ stuck: [], memory: { braelynn: { sendId: 'x' } }, enabled: false });
+    should(plan.steps).be.empty();
+    should(plan.recovered).eql(['braelynn']);
+  });
+
+  it('should say on the notice what the Enter did', () => {
+    const flag = { sessionId: 'annabeth', teammate: 'annabeth', since: iso(NOW) };
+    should(stuckInputNoticeLine(flag, 'send-63', 'holding')).match(
+      /^annabeth \(annabeth\): send send-63 stuck since .* Enter was pressed and did not take$/,
+    );
+    should(stuckInputNoticeLine(flag, 'send-63', 'absent')).match(/never arrived — send it again/);
+    should(stuckInputNoticeLine(flag, 'send-63', 'refused')).match(/could not be pressed/);
+    should(stuckInputNoticeLine(flag, 'send-63', 'submitted')).match(/Enter was pressed and it is still idle$/);
+    should(stuckInputNoticeLine({ sessionId: 'annabeth' }, 'send-63', undefined)).match(
+      /^annabeth: send send-63 stuck since unknown/,
+    );
+  });
+});

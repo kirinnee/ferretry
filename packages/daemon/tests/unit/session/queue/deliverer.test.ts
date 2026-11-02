@@ -167,6 +167,20 @@ describe('handing over a queue', () => {
     should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
   });
 
+  it('should wait as unreadable when the box cannot be read again after clearing a draft of ours', async () => {
+    const world = new World(message('a', 'agent'));
+    world.pane = pane({ activeWork: false, draft: 'Read the file /x/turns/turn-063.md now, then …' });
+    world.ownDraft = () => {
+      world.pane = 'unreadable';
+      return { kind: 'clear' };
+    };
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).be.empty();
+    should(world.state('a')?.waitReason).equal('unreadable');
+  });
+
   it("should leave a person's draft alone, waiting with no send named behind it", async () => {
     const world = new World(message('a', 'agent'));
     world.pane = pane({ activeWork: false, draft: 'half a question' });

@@ -444,6 +444,11 @@ export const WardenAnomalyKindSchema = z.enum([
    * (`report-overdue.ts`). Its `sessionId` is the sub-ferret.
    */
   'report_overdue',
+  /**
+   * A ferret idle at its prompt with a message of Ferretry's own typed in its box and never submitted
+   * (`input-stuck.ts`). Its `sessionId` is that ferret.
+   */
+  'input_stuck',
 ]);
 export type WardenAnomalyKind = z.infer<typeof WardenAnomalyKindSchema>;
 

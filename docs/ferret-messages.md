@@ -183,6 +183,13 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
   notice; the notice clears itself once a ferret is on the card again. Nothing is investigated: the flag
   never reaches Jev, an investigation or the Warden's spawn fingerprint. It is shown on the Warden page
   as **card orphaned**.
+- **A ferret stuck on an unsent message.** A ferret idle at its prompt with a message of Ferretry's own typed in
+  its box and never submitted is the Warden anomaly `input_stuck` (`packages/daemon/src/lib/warden/input-stuck.ts`),
+  shown on the Warden page as **stuck unsent**. It is facts only — the session's state and its send ledger — and
+  never reaches Jev or an investigation. The Warden presses Enter on it once per episode, through the send path's
+  verified re-submit; if that does not submit it, the ferret's health becomes `stalled` and it is named on the
+  `warden:input-stuck` machine item ([agenda.md](agenda.md#the-machine-agenda)). The whole rule is in
+  [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message).
 - **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines

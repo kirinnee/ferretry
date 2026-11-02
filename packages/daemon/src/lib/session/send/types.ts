@@ -262,7 +262,8 @@ export const IDLE_SEND_STATUSES: ReadonlySet<SessionStatus> = new Set([
 
 /** One durable state change a send or an interrupt makes, named by the event it journals. */
 export interface SendTransition {
-  readonly event: 'turn.started' | 'control.interrupted';
+  /** `control.input_stuck` / `control.input_unstuck`: the Warden's health mark for a ferret stuck on an unsent message. */
+  readonly event: 'turn.started' | 'control.interrupted' | 'control.input_stuck' | 'control.input_unstuck';
   readonly status?: SessionStatus | undefined;
   readonly health?: SessionHealth | undefined;
   readonly turn?: number | undefined;

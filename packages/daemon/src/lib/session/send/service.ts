@@ -889,12 +889,15 @@ export class SessionSendService {
   /**
    * The Warden's one press for a send it found stuck (`input-stuck.ts`): the same verified Enter, allowed
    * one past {@link STRANDED_ENTER_LIMIT} because the Warden presses once per episode and then escalates.
+   * `absent` when an idle, undialogued pane shows an EMPTY box: the message is not sitting there at all.
    */
   async resubmitStuck(id: SessionId, sendId: string): Promise<StrandedEnterOutcome> {
-    const outcome = await this.ports.serial.run(id, async () => {
+    const outcome = await this.ports.serial.run(id, async (): Promise<StrandedEnterOutcome> => {
       const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
-      if (current === undefined) return 'refused' as const;
-      return (await this.enterOwnText(id, current, 'warden', STRANDED_ENTER_LIMIT + 1)).outcome;
+      if (current === undefined) return 'refused';
+      const pane = await this.ports.terminal.observe(id);
+      if (this.finishable(pane) && pane.draft === undefined) return 'absent';
+      return (await this.enterOwnText(id, current, 'warden', STRANDED_ENTER_LIMIT + 1, pane)).outcome;
     });
     if (outcome !== 'refused') this.ports.tracking.track(id);
     return outcome;

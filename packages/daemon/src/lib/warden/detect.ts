@@ -32,7 +32,9 @@ export type WardenAnomalyKind =
   /** A card in an active or review lane whose ferret is finished, with nothing alive under it (`orphans.ts`). */
   | 'orphaned_card'
   /** A sub-ferret that has not answered its parent's last message, its turn long ended (`report-overdue.ts`). */
-  | 'report_overdue';
+  | 'report_overdue'
+  /** A ferret idle with a message of ours typed in its box and never submitted (`input-stuck.ts`). */
+  | 'input_stuck';
 
 export interface WardenAnomaly {
   readonly kind: WardenAnomalyKind;
@@ -114,6 +116,7 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   owner_request: 'You asked for an investigation',
   orphaned_card: 'A card has no ferret working it',
   report_overdue: 'A sub-ferret has not answered its parent',
+  input_stuck: 'A ferret is stuck on an unsent message',
 };
 
 export function wardenAnomalySubject(kind: WardenAnomalyKind): string {

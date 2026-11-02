@@ -28,6 +28,12 @@ export class ClaudePane implements TmuxCommandPort {
   cursor: 'caret' | 'lost' = 'caret';
   /** Typed into the composer just AFTER the next literal or paste lands — a person mid-sentence. */
   typesAfterNextFill: string | undefined;
+  /**
+   * True: a STALLED harness — typed keys wait in the pty, undrawn, until `wake()` (B144: a pane too busy to
+   * draw a turn pointer before the fill stopped looking, which drew it later and never got its Enter).
+   */
+  stalled = false;
+  private pending = '';
 
   private readonly height = 34;
   private readonly buffers = new Map<string, string>();
@@ -48,6 +54,13 @@ export class ClaudePane implements TmuxCommandPort {
     });
   }
 
+  /** The stalled harness reads what was waiting in its pty, and draws it. */
+  wake(): void {
+    this.stalled = false;
+    this.composer += this.pending;
+    this.pending = '';
+  }
+
   /** Every Enter sent to the pane. */
   enters(): number {
     return this.calls.filter(call => call[0] === 'send-keys' && !call.includes('-l') && call.at(-1) === 'Enter').length;
@@ -66,7 +79,7 @@ export class ClaudePane implements TmuxCommandPort {
     if (command === 'paste-buffer') {
       const name = String(argv[argv.indexOf('-b') + 1]);
       this.pastes += 1;
-      this.composer += `[Pasted text #${this.pastes} +${(this.buffers.get(name) ?? '').split('\n').length} lines]`;
+      this.draw(`[Pasted text #${this.pastes} +${(this.buffers.get(name) ?? '').split('\n').length} lines]`);
       this.buffers.delete(name);
       this.afterFill();
       return ok('');
@@ -77,11 +90,13 @@ export class ClaudePane implements TmuxCommandPort {
   private keys(argv: readonly string[]): TmuxCommandResult {
     const literal = argv.indexOf('-l');
     if (literal >= 0) {
-      this.composer += String(argv[literal + 1]);
+      this.draw(String(argv[literal + 1]));
       this.afterFill();
       return ok('');
     }
     const key = String(argv.at(-1));
+    // A stalled harness reads nothing, Enter included: the key is lost behind the undrawn text.
+    if (this.stalled) return ok('');
     if (key === 'C-u') {
       const rows = this.rows();
       const last = rows.at(-1) ?? '';
@@ -98,6 +113,12 @@ export class ClaudePane implements TmuxCommandPort {
       this.composer = '';
     }
     return ok('');
+  }
+
+  /** Typed text reaches the composer, or waits in the pty while the harness is stalled. */
+  private draw(text: string): void {
+    if (this.stalled) this.pending += text;
+    else this.composer += text;
   }
 
   private afterFill(): void {

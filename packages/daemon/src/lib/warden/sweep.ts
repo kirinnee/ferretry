@@ -215,6 +215,16 @@ import {
   parentExchangeOf,
   planOverdueReports,
 } from './report-overdue.ts';
+import {
+  detectStuckInput,
+  planStuckInput,
+  type StuckInputPress,
+  type StuckInputSend,
+  type StuckInputTold,
+  stuckInputCandidates,
+  stuckInputNoticeLine,
+} from './input-stuck.ts';
+import type { StuckInputNotice } from './input-stuck-list.ts';
 import type { WardenReviveService } from './revive-service.ts';
 import { resolveReviveWatch, watchRevive } from './revive-watch.ts';
 import {
@@ -424,6 +434,24 @@ export interface WardenExchangeReader {
   sends(sessionId: string): Promise<readonly ExchangeSend[]>;
 }
 
+/**
+ * A ferret idle with a message of ours unsubmitted in its box (`input-stuck.ts`): its ledger to read, the send
+ * path's one verified Enter, the health it is marked with, and the machine notice that names it.
+ */
+export interface WardenStuckInputPort {
+  /** Every send the session was sent, the latest line of each. */
+  sends(sessionId: string): Promise<readonly StuckInputSend[]>;
+  /** One verified Enter on that send's own text, through the send path; what it did. */
+  resubmit(sessionId: string, sendId: string): Promise<StuckInputPress>;
+  /** Marks the session `stalled`, so nothing reads it as healthy while its message sits there. */
+  markStalled(sessionId: string, reason: string): Promise<void>;
+  /** Takes that mark off a session that recovered, when it still carries it. */
+  clearStalled(sessionId: string): Promise<void>;
+  /** The one machine item that lists every ferret in this state. Each throws when it cannot be written. */
+  add(notice: StuckInputNotice): Promise<void>;
+  remove(sessionId: string): Promise<void>;
+}
+
 export interface WardenBoardPort {
   /** Every card as the board derives it; `undefined` when the board could not be read. */
   read(): Promise<WardenBoardRead | undefined>;
@@ -473,6 +501,8 @@ export interface WardenSweepPorts {
   readonly board?: WardenBoardPort;
   /** The send ledgers. Absent: no sub-ferret is reported overdue. */
   readonly exchanges?: WardenExchangeReader;
+  /** Ferrets stuck on an unsent message of ours. Absent: none is looked for. */
+  readonly stuckInput?: WardenStuckInputPort;
   /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
   readonly jevChecks: WardenJevCheckLog;
   /** Wall-clock milliseconds. */
@@ -1074,7 +1104,10 @@ export class WardenSweepService {
     // OVERDUE REPORTS, likewise beside them and never to Jev or an investigation: the rule is facts and its
     // remedy a message (`report-overdue.ts`).
     const overdue = await this.detectOverdue(fleet, nowMs);
-    const flagged = [...detected.anomalies, ...orphans, ...overdue.anomalies];
+    // INPUT STUCK, likewise: facts, and a remedy that is the send path's own Enter (`input-stuck.ts`).
+    const stuck = await this.detectStuck(fleet, nowMs);
+    const stuckFlags = stuck.map(({ sendId: _sendId, ...anomaly }): WardenAnomaly => anomaly);
+    const flagged = [...detected.anomalies, ...orphans, ...overdue.anomalies, ...stuckFlags];
 
     let state = parseWardenRuntimeState(await this.ports.state.read());
     const today = triageDayFor(state.triageDay, nowMs);
@@ -1132,7 +1165,15 @@ export class WardenSweepService {
             at,
             force: options.force,
           });
-    const final = await this.escalateOverdue({ ...overdue, fleet, state: told, config, at, force: options.force });
+    const overdueTold = await this.escalateOverdue({
+      ...overdue,
+      fleet,
+      state: told,
+      config,
+      at,
+      force: options.force,
+    });
+    const final = await this.handleStuck({ stuck, state: overdueTold, config, at, force: options.force });
     await this.ports.state.write(final);
 
     // LAST, and deliberately so. Everything above — detection, the report
@@ -1150,7 +1191,7 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      anomalies: [...anomalies, ...orphaned, ...overdue.anomalies].map(wireAnomaly),
+      anomalies: [...anomalies, ...orphaned, ...overdue.anomalies, ...stuckFlags].map(wireAnomaly),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -2517,6 +2558,99 @@ export class WardenSweepService {
       exchanges.set(child.config.id, parentExchangeOf(childSends, parentSends, child.config.id, parent.config.id));
     }
     return { anomalies: detectOverdueReports(candidates, exchanges, nowMs), exchanges };
+  }
+
+  /**
+   * The ferrets idle with a send of ours stuck in their box (`input-stuck.ts`). Only the candidates' ledgers are
+   * read; one that cannot be read proves nothing this sweep.
+   */
+  private async detectStuck(
+    fleet: readonly WardenFleetSession[],
+    nowMs: number,
+  ): Promise<readonly (WardenAnomaly & { readonly sendId: string })[]> {
+    const port = this.ports.stuckInput;
+    if (port === undefined) return [];
+    const candidates = stuckInputCandidates(fleet, nowMs);
+    const ledgers = new Map<string, readonly StuckInputSend[]>();
+    for (const candidate of candidates) {
+      const sends = await port.sends(candidate.config.id).catch(() => undefined);
+      if (sends !== undefined) ledgers.set(candidate.config.id, sends);
+    }
+    return detectStuckInput(candidates, ledgers, nowMs);
+  }
+
+  /**
+   * Press Enter once for each new stuck send; when that did not submit it, mark the ferret stalled and name it
+   * on the machine notice; take a ferret that recovered off it (`input-stuck.ts`). A notice that could not be
+   * written is journalled and not remembered, so the next sweep tries again.
+   */
+  private async handleStuck(input: {
+    readonly stuck: readonly (WardenAnomaly & { readonly sendId: string })[];
+    readonly state: WardenRuntimeState;
+    readonly config: WardenConfig;
+    readonly at: string;
+    readonly force: boolean;
+  }): Promise<WardenRuntimeState> {
+    const port = this.ports.stuckInput;
+    if (port === undefined) return input.state;
+    const plan = planStuckInput({
+      stuck: input.stuck,
+      memory: input.state.stuckInput ?? {},
+      enabled: input.force || input.config.enabled,
+    });
+    const memory: Record<string, StuckInputTold> = { ...input.state.stuckInput };
+    for (const sessionId of plan.recovered) {
+      const cleared = await port.remove(sessionId).then(
+        () => true,
+        () => false,
+      );
+      if (!cleared) continue;
+      if (memory[sessionId]?.noticedAt !== undefined) await port.clearStalled(sessionId).catch(() => undefined);
+      delete memory[sessionId];
+      this.ports.journal.record('fleet.warden_input_recovered', { sessionId });
+    }
+    const byId = new Map(input.stuck.map(anomaly => [anomaly.sessionId, anomaly]));
+    const notice = async (sessionId: string, sendId: string, press: StuckInputPress | undefined): Promise<void> => {
+      const anomaly = byId.get(sessionId);
+      if (anomaly === undefined) return;
+      const line = stuckInputNoticeLine(anomaly, sendId, press);
+      await port
+        .markStalled(sessionId, `a message (send ${sendId}) sits unsent in its input box`)
+        .catch(() => undefined);
+      const posted = await port
+        .add({ sessionId, title: anomaly.teammate ?? sessionId, line, since: anomaly.since ?? input.at })
+        .then(
+          () => true,
+          () => false,
+        );
+      if (!posted) {
+        this.ports.journal.record('fleet.warden_input_notice_failed', { sessionId, sendId });
+        return;
+      }
+      memory[sessionId] = { ...memory[sessionId], sendId, noticedAt: input.at };
+      this.ports.journal.record('fleet.warden_input_noticed', {
+        sessionId,
+        sendId,
+        ...(press === undefined ? {} : { press }),
+      });
+    };
+    for (const step of plan.steps) {
+      if (step.kind === 'notice') {
+        await notice(step.sessionId, step.sendId, step.press);
+        continue;
+      }
+      const press = await port.resubmit(step.sessionId, step.sendId).catch((): StuckInputPress => 'refused');
+      memory[step.sessionId] = { sendId: step.sendId, pressedAt: input.at, press };
+      this.ports.journal.record('fleet.warden_input_resubmitted', {
+        sessionId: step.sessionId,
+        sendId: step.sendId,
+        outcome: press,
+      });
+      // Submitted: the ferret takes its turn, and the next sweep finds it moving. Anything else is escalated now.
+      if (press !== 'submitted') await notice(step.sessionId, step.sendId, press);
+    }
+    const { stuckInput: _previous, ...rest } = input.state;
+    return Object.keys(memory).length === 0 ? rest : { ...rest, stuckInput: memory };
   }
 
   /**

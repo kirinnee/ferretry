@@ -300,6 +300,7 @@ export const JEV_ACTS_BY_KIND: Readonly<Record<WardenAnomalyKind, readonly Triag
   owner_request: [],
   orphaned_card: [],
   report_overdue: [],
+  input_stuck: [],
 };
 
 /** The acts Jev is offered for one flag. A flag about several ferrets is no one ferret's to act on. */

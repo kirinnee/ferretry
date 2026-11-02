@@ -46,6 +46,7 @@ import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
 import type { OrphanMemory } from './orphans.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
+import type { StuckInputMemory } from './input-stuck.ts';
 import type { OverdueMemory } from './report-overdue.ts';
 import type { ReviveState } from './revive.ts';
 import type { ReviveWatch } from './revive-watch.ts';
@@ -76,6 +77,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'owner_request',
   'orphaned_card',
   'report_overdue',
+  'input_stuck',
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
@@ -415,6 +417,11 @@ export interface WardenRuntimeState {
    * (`report-overdue.ts`), keyed by session id, kept while each lives: what stops it repeating either.
    */
   readonly overdue?: OverdueMemory;
+  /**
+   * The ferrets the Warden pressed Enter for, or named on the stuck-input notice (`input-stuck.ts`), keyed by
+   * session id, kept while each is flagged: what stops it pressing or noticing again every sweep.
+   */
+  readonly stuckInput?: StuckInputMemory;
 }
 
 /**
@@ -487,6 +494,17 @@ const RuntimeStateSchema = z.object({
     .optional(),
   overdue: z
     .record(z.string(), z.object({ asked: Instant, nudgedAt: Instant.optional(), toldParentAt: Instant.optional() }))
+    .optional(),
+  stuckInput: z
+    .record(
+      z.string(),
+      z.object({
+        sendId: z.string().min(1),
+        pressedAt: Instant.optional(),
+        press: z.enum(['submitted', 'holding', 'absent', 'refused']).optional(),
+        noticedAt: Instant.optional(),
+      }),
+    )
     .optional(),
 });
 

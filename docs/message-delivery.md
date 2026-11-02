@@ -28,7 +28,10 @@ this page, which is still how a message reaches the pane.
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
   included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
   permission form on screen, a session still launching, or a pane it cannot read, and says which as the
-  `waitReason` (`waitReasonOf`). A stopped session is not held: the send path revives it.
+  `waitReason` (`waitReasonOf`). A stopped session is not held: the send path revives it. A "draft" that is
+  a send of this session's OWN, typed by the daemon and never submitted, is not a person's: the deliverer has
+  the send path finish it (`clearOwnDraft`) and goes on, or — when the Enter does not take — names it as the
+  message's `waitBehind` ([below](#b144-a-ferret-idle-behind-its-own-unsent-message)).
 - **Deliverer** — `QueueDeliverer` (`lib/session/queue/deliverer.ts`) is the one owner of WHEN and IN WHAT
   ORDER. It marks a message `typing` on disk, then hands it to the tracked send path under the message's
   own id (`SendPathQueueTransport`), which does the HOW: the turn file, the turn record, the busy-pane
@@ -444,16 +447,70 @@ the composer still holds exactly that draft (`changed` otherwise), and the app t
 own message. The terminal makes the same occupied check again immediately before its first keystroke; a
 refusal there withdraws the just-accepted record, which is honest because nothing was typed.
 
-### The tracker presses Enter again for a pointer of ours
+### The tracker presses Enter again for text of ours
 
 The transport already presses Enter a bounded number of times while the payload is visibly still there.
-A pointer that outlives that is the tracker's: on a look where the composer still holds exactly the
-send's pointer, it asks the send service (`resubmit`) for one more verified Enter at each of
-`submitNudgesMs` (4 s, 12 s, 30 s after the attempt typed it). The service re-checks everything under the
-session's lock, counts the nudge on the record (`submitNudges`, daemon-only) BEFORE the key, and presses
-only at an idle, undialogued pane. A pointer is said to be **typed, not sent** only once the last nudge
-has had `typedStableMs` to take; a message typed as itself is never nudged, because a person may have
-typed the same words.
+Text that outlives that is the tracker's: on a look where the composer still holds exactly the send's own
+text, it asks the send service (`resubmit`) for one more verified Enter at each of `submitNudgesMs` (4 s,
+12 s, 30 s after the attempt typed it). The service re-checks everything under the session's lock, counts
+the nudge on the record (`submitNudges`, daemon-only) BEFORE the key, and presses only at an idle,
+undialogued pane; a nudge that falls due mid-turn or behind a dialog is not pressed, and is tried again
+every `deferredNudgeMs` (5 s) — still owed after the row says "typed, not sent", so a long turn ending gets
+its Enter. A pointer is said to be **typed, not sent** only once the last nudge has had `typedStableMs` to
+take.
+
+"Its own text" (`strandableText`, `showsOwnText` in `lib/session/send/stranded.ts`) is a pointer — or,
+since B144, a message typed AS ITSELF (`direct`, `native-inline`) of at least `OWN_TEXT_MIN` (12)
+characters: the fill typed it into a composer it proved empty, so text that is exactly it is the send's.
+A shorter message could be a word a person typed and is never pressed. Re-wrapped and `…`-clipped text
+matches as for a pointer, and a message that travelled as a paste matches the composer only when one
+collapsed placeholder (`[Pasted text #40 +3 lines]`) is ALL it shows — and only when no other unsettled
+send would match it too.
+
+## B144: a ferret idle behind its own unsent message
+
+On 2026-11-02 two ferrets sat idle for hours with a message typed in their box and never submitted. annabeth:
+a peer's turn pointer typed at 15:00:32 into a pane too busy to draw it; the fill saw nothing in its window and
+settled it `unaccounted` (`landing_unconfirmed`); the pane drew it later; nothing pressed Enter. braelynn: a
+lead's message typed mid-turn whose Enter was swallowed, left as `[Pasted text #40 +3 lines]` when the turn
+ended. Every later message to either waited, the Warden called both `healthy`, and `fy send` told every sender
+"queued in the agent's own queue (it auto-submits at the turn boundary)" for messages never typed. Four causes,
+four fixes:
+
+1. **The tracker never looked at an unconfirmed send's composer.** It skipped every send that was not open, so
+   a `landing_unconfirmed` send whose keys arrived late got no Enter. Now, for up to `strandedWatchMs`
+   (10 min) after its typing, such a send's composer is looked at (every `busyExtensionMs` while the text is not
+   there), and its own text found there gets the same bounded, verified nudges. An Enter that takes re-opens it
+   (`entered`) and starts the turn it carried; the transcript then proves it. A message typed as itself is now
+   nudged too (above), which is braelynn's.
+2. **The queue held every message behind the "draft" — our own pointer.** The send path already finished a
+   stranded pointer before typing (`withoutStrandedPointer`), but the deliverer waited on `draft` and never
+   reached it. Now the deliverer asks the send path (`finishOwnDraft`) whose the draft is: ours and submitted
+   (`clear`), it reads the box again and delivers; ours and stuck, the message waits as `draft` with
+   `waitBehind: <sendId>`; a person's, it waits as before. All callers' Enters on one send share one budget,
+   `STRANDED_ENTER_LIMIT` (5), counted before each key.
+3. **The next send reused the turn number.** An unconfirmed pointer never started its turn, so the next send
+   claimed the same number and overwrote the very turn file the pointer named — what the agent read when the
+   pointer was finally submitted. A turn file now takes the next number past the session's turn AND past every
+   turn a non-withdrawn send of the session still names (`nextTurnNumber`).
+4. **`fy send` claimed a queue the message was not in.** A queued answer whose ledger has no record yet is in
+   FERRETRY's queue, untyped. The send answer now carries the queue's `waitReason` and `waitBehind`
+   (`SendResult`), and `fy send` says "NOT delivered yet: it is waiting in Ferretry's queue … because …" — and,
+   behind an unconfirmed send of ours, that a re-submit was attempted and the Warden flags it. `fy send --wait`
+   treats the ledger's 404 for such a message as still waiting, never as "no such send", and ends a long wait
+   saying it was never typed, without failing — a script that resent on failure would make a copy.
+
+**The Warden's backstop — `input_stuck`** (`lib/warden/input-stuck.ts`). A send is stuck when it was typed by the
+daemon (not held, not untyped, not a revive), is `accepted`, `queued` or `unaccounted`, and either the tracker
+last saw its text in the composer (`typedNotSent`) or its landing was never seen (`landing_unconfirmed`) — and
+the ferret's last turn ended no later than the ledger last spoke of the send. An autonomous ferret at
+`your-turn` for `STUCK_INPUT_MS` (3 min) with such a send typed that long, within a day, is flagged. Once per
+episode the Warden presses Enter through the send path (`resubmitStuck`, one press past the daemon's own
+budget; `absent` when an idle pane shows an empty box). If that does not submit it, the ferret's health is set
+`stalled` (journal `control.input_stuck`) and it is named on the `warden:input-stuck` machine item
+([agenda.md](agenda.md#the-machine-agenda)); when it is no longer flagged it leaves the item and the mark is
+taken off (`control.input_unstuck`). Nothing is pressed or noticed while the Warden is off; the flag is still
+shown. The flag never reaches Jev, an investigation or the spawn fingerprint.
 
 ## What a message row can say
 
@@ -546,6 +603,12 @@ all cancelled** and **Clear stuck messages** do it in bulk. If repair later find
 transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in place.
 
 ## Declared gaps
+
+- **A message held in Claude's own queue while the ferret is idle is not pushed.** Claude submits what it
+  queued at the turn boundary; a queue still drawn at an idle prompt is not driven with `ctrl+x ctrl+s`, which is
+  unmeasured here. Its send stays `queued` and the transcript decides.
+- **An interactive session is not flagged `input_stuck`.** It is the owner's own terminal; the send path's
+  nudges and the queue's clearing still apply to it.
 
 - **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
   rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows
