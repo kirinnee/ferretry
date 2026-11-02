@@ -523,11 +523,11 @@ daemon, so it asks `GET /v1/health` once per read and uses a route only when the
 `catalogs.quick-add.1` for one-tap Add, `catalogs.items.1` for the default catalog, **Make default** and **Add to another
 catalog…**. A machine that cannot be asked (the read fails) offers neither, and every row keeps the sheet it had before.
 
-- **Add is one tap** when the machine says it can. The button's label (and its accessible name) says where the tap goes:
-  "Add ‹skill› to ‹default catalog›", or "Add ‹skill› (makes ‹machine›’s skills)" while no default exists yet. The app
-  never claims a catalog the machine has not made. The tap sends `{source}` to `quick-add`; the button is disabled
-  while it is in flight, and a second tap in the same moment is ignored.
-- **`added`** shows a toast, "Added to ‹catalog›", with **Undo** (44px tall) and a seconds counter. It stays **10
+- **Publish is one tap** when the machine says it can: the row's ⋯ item says where it goes, "Publish in ‹default
+  catalog›", or "Publish in a new catalog, ‹machine›’s skills" while no default exists yet. The app never claims a
+  catalog the machine has not made. The tap sends `{source}` to `quick-add`; picking it again while one is in flight
+  is ignored.
+- **`added`** shows a toast, "Published in ‹catalog›", with **Undo** (44px tall) and a seconds counter. It stays **10
   seconds**, shorter than the daemon's 60-second token, so a slow link still lands. Undo calls `quick-add/undo`
   with the token and shows what it did: **retracted** says "Taken back. It was never in ‹catalog› for anyone.";
   **withdrawn** says "Withdrawn from ‹catalog›. Someone may have seen it, so it shows as withdrawn." A refusal (an
@@ -1002,36 +1002,46 @@ only the count shows. A name the publisher chose is shown with hidden and format
 **Install on a machine** hands the signed manifest and item to the member's **own** daemon's install preview, which
 verifies them again. The offline library is phase 3 and is not built.
 
-### The skill and MCP rows (catalogs 3b)
+### The skill and MCP rows (catalogs 3b, reworked by &B131 A1)
 
 The context rail's **Skills** list, its **MCP** list and the skills surface draw every item with **one** row
-(`features/catalogs/catalog-item-row.tsx`). It replaces the old strip under each row ("From ‹catalog›", Remove, "Add
-to catalog…") and the inline Open button.
+(`features/catalogs/catalog-item-row.tsx`). Since &B131 the side panel lists **what this session can use** and nothing
+on a row publishes: a list of what an agent has is not a shop (owner, 2026-11-02: "the side panel should show skills
+ACTIVE in this session … the add button is too overloaded").
 
-- **Left**: the name in mono (tapping it still inserts the invocation), a scope chip, a version chip when one is known,
-  and one truncated description line (the full text is its tooltip, and **Open SKILL.md** shows the file). Hidden and
-  format characters in any name, publisher or catalog name are marked.
+- **The Skills header** says it in words: "16 active in this session · Claude · inserts /name · account ‹runtime›"
+  (`activeSkillsLine`). The count is the skills no same-named skill elsewhere overrides.
+- **Left**: the name in mono (tapping it still inserts the invocation), where it came from, a version chip when one is
+  known, and one truncated description line (the full text is its tooltip, and **Open SKILL.md** shows the file).
+  Hidden and format characters in any name, publisher or catalog name are marked.
+- **Where it came from**: **This project** (the project's skills folder, so every session in that folder has it),
+  **This account** (the account's own skills folder) or **Ferretry** (built in). A skill another one of the same name
+  overrides stays listed, dimmed, with "Not active: the skill of the same name in ‹place› wins".
 - **Version chip**: `v3` for an item in one of **this machine's** catalogs (the newest version it holds); for an item a
   catalog install wrote, **from ‹publisher› · v2** (the version it is pinned to; the tooltip names the catalog). No
   chip when no version is known. A withdrawn item is not held, so it shows none.
-- **Right, always visible, 44px tall**: **Share**, **Add** (only for items this machine could share, so not for
-  installs from someone else's catalog) and **⋯**. The columns keep their place so rows line up.
 - **Which catalog holds an item** is read from the catalogs list the machine already answers, by source: the
   `SKILL.md` path (a list that only knows a skill's name matches by name) or the MCP server id. No new route.
-- **Add** opens the Add to catalog sheet (on a machine with `catalogs.quick-add.1` it is one tap instead: [The app (catalogs 3c-4)](#the-app-catalogs-3c-4)). When it has saved the item and the row is the one that opened it, the last
-  step offers **Share it now** (or **Not now**): it opens the Share sheet for the catalog the item just joined.
-- **Share** depends on where the item sits: in **one** catalog, the Share sheet for it; in **several**, a small picker of
-  those catalogs and then the Share sheet; in **none**, the Add to catalog sheet, ending in **Share it now**. Sharing
-  still asks for the owner's passkey, as before; nothing about a share reaches the row.
-- **⋯** holds **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details**
-  (so every MCP row has a ⋯), **Add to another catalog…** (items this machine could share) and
-  **Remove** (catalog installs only, with the same confirm; with several installs, one per catalog named
-  "Remove (from ‹catalog›)"). **Versions…** (where the machine advertises `catalogs.versions.1`, [3d-4](#the-owners-versions-in-the-app-catalogs-3d-4)) opens the versions sheet; **Stop sharing** is not here yet.
+- **Right: only ⋯** (44px). There is no Share and no Add on the row, and the side panel has no "Add from a link…".
+  The ⋯ holds, in order:
+  - **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details** (so
+    every MCP row has a ⋯);
+  - **Publish in ‹default catalog›**, one tap with Undo, on a machine with `catalogs.quick-add.1` ([The app (catalogs
+    3c-4)](#the-app-catalogs-3c-4)), or **Publish in a catalog…**, which opens the Add to catalog sheet. Once a catalog
+    here holds the item, **Publish in another catalog…** too. Only for items this machine could share, never for what
+    someone else's catalog installed;
+  - **Uninstall**, for catalog installs only, with the same confirm ("Uninstall ‹item› from ‹place›?"). With several
+    installs there is one per catalog, "Uninstall (from ‹catalog›)". The daemon removes exactly the files the install
+    recorded and refuses one changed since, so a skill somebody wrote by hand never gets the item.
+- **Sharing a catalog with people and its versions live in Sharing › My catalogs**, not on the row.
 - **Show details** (MCP) opens a few plain lines under the row from the inventory the list already read: what it runs
   or its address, where it is declared, its project, the harness, and which runtimes see it with their approval. The
   address has no query and the program no arguments by construction, and hidden characters are marked.
-- A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they moved
-  to Sharing › Shared with me, so the lists stay uncluttered.
+- A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they are in
+  Sharing › Shared with me.
+- **A running Claude Code session picks up a newly installed skill** in an existing `skills/` folder without a restart.
+  A `skills/` folder that did not exist when the session started needs `/reload-skills`
+  ([Claude Code skills](https://code.claude.com/docs/en/skills)). Codex is not yet checked.
 
 ## Declared gaps
 

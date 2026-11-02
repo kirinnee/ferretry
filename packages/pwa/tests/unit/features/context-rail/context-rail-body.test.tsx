@@ -326,7 +326,7 @@ describe('ContextRailBody — Skills', () => {
     expect(rows(root, 'data-row-use')).toEqual(['summary', 'floop', 'babysit-pr', 'summary']);
     expect(rows(root, 'data-context-skill-scope')).toEqual(['project', 'user', 'ferretry', 'user']);
     expect(rows(root, 'data-context-chip')).toEqual(['all', 'project', 'user', 'ferretry']);
-    expect(text(root, '[data-row-note]')).toBe('Overridden by Project');
+    expect(text(root, '[data-row-note]')).toBe('Not active: the skill of the same name in This project wins');
     expect(root.textContent).toContain('Claude · inserts /name');
 
     await click(root, '[data-row-use="floop"]');
@@ -335,7 +335,7 @@ describe('ContextRailBody — Skills', () => {
     await click(root, '[data-context-chip="user"]');
     expect(rows(root, 'data-row-use')).toEqual(['floop', 'summary']);
     await search(root, 'green');
-    expect(text(root, '[data-context-note]')).toBe('Nothing under User matches “green”.');
+    expect(text(root, '[data-context-note]')).toBe('Nothing under This account matches “green”.');
   });
 
   it('opens a skill’s SKILL.md and shows it as the document it is', async () => {
@@ -603,21 +603,29 @@ describe('ContextRailBody — catalogs', () => {
       'GET /v1/catalogs': () => ({ catalogs: [ownedCatalog()] }),
     });
 
-  it('shows where a skill came from, offers Add to catalog and one small link to Sharing, with no paste box, on the Skills tab', async () => {
+  it('lists the active skills with where each came from, publishes only from the ⋯, and has no Share, Add or link', async () => {
     const client = fake();
     const { root } = await body({ tab: 'skills', catalogs: { connection: STUDIO, createClient: client.factory } });
+    expect(text(root, '[data-context-skills-active]')).toBe(
+      '3 active in this session · Claude · inserts /name · account claude-work',
+    );
     const floop = must(root.querySelector('[data-context-skill-scope] [data-catalog-item-row="floop"]'), 'floop row');
     expect(floop.querySelector('[data-row-from]')?.textContent).toContain('from');
-    expect(floop.querySelector('[data-row-add]')).toBeNull();
-    expect(floop.querySelector('[data-row-share]')).toBeNull();
-    expect(root.querySelectorAll('[data-row-add]')).toHaveLength(3);
-    expect(root.querySelectorAll('[data-row-share]')).toHaveLength(3);
     expect(root.querySelectorAll('[data-row-from]')).toHaveLength(1);
-    expect(text(root, '[data-catalog-add-link]')).toBe('Add from a link…');
+    expect(root.querySelector('[data-row-add]')).toBeNull();
+    expect(root.querySelector('[data-row-share]')).toBeNull();
+    expect(root.querySelector('[data-catalog-add-link]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
     expect(root.querySelector('[data-catalog-link-input]')).toBeNull();
-    expect(root.querySelector('[data-catalog-more]')).toBeNull();
-    await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-add]');
+    await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-more]');
+    const publish = must(
+      [...root.ownerDocument.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        entry => entry.textContent === 'Publish in a catalog…',
+      ),
+      'the Publish item',
+    );
+    await interact(() => publish.click());
+    await settle();
     expect(root.querySelector('[data-catalog-sheet="add"]')).not.toBeNull();
     expect(client.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
   });
@@ -641,7 +649,7 @@ describe('ContextRailBody — catalogs', () => {
       await interact(() => item.click());
       await settle();
     };
-    await pick('scratch', 'Show details', ['Show details']);
+    await pick('scratch', 'Show details', ['Show details', 'Publish in a catalog…']);
     const details = must(root.querySelector('[data-context-mcp="scratch"] [data-mcp-details]'), 'the details');
     expect(details.textContent).toContain('Runs');
     expect(details.textContent).not.toContain('Declared in');
@@ -657,16 +665,14 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-mcp-details]')).toBeNull();
   });
 
-  it('does the same on the MCP tab, matching a server by name', async () => {
+  it('says where a server came from on the MCP tab, matched by name, with no Share, Add or link', async () => {
     const client = fake();
     const { root } = await body({ tab: 'mcp', catalogs: { connection: STUDIO, createClient: client.factory } });
     expect(root.querySelector('[data-context-mcp="github"] [data-row-from]')).not.toBeNull();
     expect(root.querySelector('[data-context-mcp="linear"] [data-row-from]')).toBeNull();
-    expect(root.querySelector('[data-context-mcp="github"] [data-row-add]')).toBeNull();
-    expect(root.querySelector('[data-context-mcp="linear"] [data-row-add]')).not.toBeNull();
-    expect(root.querySelector('[data-context-mcp="github"] [data-row-share]')).toBeNull();
-    expect(root.querySelector('[data-context-mcp="linear"] [data-row-share]')).not.toBeNull();
-    expect(root.querySelectorAll('[data-catalog-add-link]')).toHaveLength(1);
+    expect(root.querySelector('[data-row-add]')).toBeNull();
+    expect(root.querySelector('[data-row-share]')).toBeNull();
+    expect(root.querySelector('[data-catalog-add-link]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
     expect(root.querySelector('[data-catalog-link-input]')).toBeNull();
   });

@@ -259,15 +259,11 @@ export function defaultCatalogName(machineName: string | undefined): string {
   return label === '' ? 'My skills' : `${label}’s skills`;
 }
 
-/** Where the Add button says it goes. Never claims a catalog the machine has not made yet. */
-export function addDestination(
-  label: string,
-  defaultCatalog: OwnedCatalog | undefined,
-  machineName: string | undefined,
-): string {
+/** What the one-tap Publish item says it does. Never claims a catalog the machine has not made yet. */
+export function publishDestination(defaultCatalog: OwnedCatalog | undefined, machineName: string | undefined): string {
   return defaultCatalog === undefined
-    ? `Add ${label} (makes ${defaultCatalogName(machineName)})`
-    : `Add ${label} to ${defaultCatalog.name}`;
+    ? `Publish in a new catalog, ${defaultCatalogName(machineName)}`
+    : `Publish in ${defaultCatalog.name}`;
 }
 
 /** What a tap did, as the row shows it. Nothing here decides: the daemon already did. */
@@ -300,7 +296,7 @@ export const reviewSentence = (reasons: readonly string[]): string =>
     .filter((sentence): sentence is string => sentence !== undefined)
     .join(' ');
 
-export const addedSentence = (catalogName: string): string => `Added to ${catalogName}`;
+export const addedSentence = (catalogName: string): string => `Published in ${catalogName}`;
 export const alreadySentence = (catalogName: string): string => `Already in ${catalogName}`;
 
 /** What Undo did. A retraction left no trace; a withdrawal is the ordinary one, which a member may have seen. */

@@ -5,7 +5,6 @@ import {
   ownedVersion,
   removeLabel,
   rowChips,
-  sharePlan,
   versionChip,
 } from '../../../../src/features/catalogs/catalog-row-model.ts';
 import { installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
@@ -44,16 +43,8 @@ describe('ownedMatches', () => {
   });
 });
 
-describe('sharePlan and ownedVersion', () => {
+describe('ownedVersion', () => {
   const one = ownedCatalog();
-  const other = ownedCatalog({ id: `cat_${'d'.repeat(22)}`, name: 'Second' });
-
-  it('plans none, one and many', () => {
-    expect(sharePlan([])).toEqual({ kind: 'none' });
-    expect(sharePlan(ownedMatches([one], skillPath))).toMatchObject({ kind: 'one', catalog: { name: 'Team skills' } });
-    const plan = sharePlan(ownedMatches([one, other], skillPath));
-    expect(plan.kind === 'many' && plan.catalogs.map(c => c.name)).toEqual(['Team skills', 'Second']);
-  });
 
   it('reports the newest version any catalog holds', () => {
     expect(ownedVersion([])).toBeNull();
@@ -93,8 +84,8 @@ describe('rowChips, canAdd, removeLabel', () => {
     expect(canAdd([installRecord()])).toBe(false);
   });
 
-  it('names the catalog on Remove only when several installs exist', () => {
-    expect(removeLabel(installRecord(), false)).toBe('Remove');
-    expect(removeLabel(installRecord(), true)).toBe('Remove (from Team skills)');
+  it('names the catalog on Uninstall only when several installs exist', () => {
+    expect(removeLabel(installRecord(), false)).toBe('Uninstall');
+    expect(removeLabel(installRecord(), true)).toBe('Uninstall (from Team skills)');
   });
 });

@@ -306,3 +306,7 @@ packages/pwa/src/lib/board-card-stack.ts # the Tasks tab's Cards order (to test,
 packages/pwa/src/features/shared/shared-screens-model.ts # the member screens' sentences and rules, used by join-screen.tsx and shared-with-me.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/shared/use-clock.ts # the join screen's passkey countdown clock, used by join-screen.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/features/shared/shared-installs.ts # which items a person installed from a publisher, used by shared-with-me.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+# The owner's sharing screens (catalogs 2c), reached only from the .tsx app tree once the side panel's rows
+# stopped opening the Share sheet (&B131: nothing on an active-skills row publishes).
+packages/pwa/src/features/catalogs/catalog-shares-api.ts # the owner's share and member routes, used by share-sheet.tsx, catalog-members.tsx and versions-sheet.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/features/catalogs/catalog-sharing-model.ts # the share sheet's and People's sentences and rules, used by share-sheet.tsx and catalog-members.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
