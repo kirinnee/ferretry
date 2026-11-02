@@ -312,3 +312,46 @@ export const joinOutbox = (
     ),
   ];
 };
+
+/** What taking one message back out of a session's queue came to: gone, or already in the agent's hands. */
+export type QueueWithdrawal = 'withdrawn' | 'taken';
+
+/**
+ * Takes a message the owner just sent back out of the queue, the same way the chat cancels a waiting message:
+ * this device's outbox first, then the machine's queue route. The machine saying it was already typed (409) or no
+ * longer knows it (404) means the agent has it — `taken`, not a failure. Any other refusal throws.
+ */
+export const withdrawQueued = async (
+  client: Pick<IFyApiClient, 'request'> | null,
+  sessionId: string,
+  sendId: string,
+  outbox?: Pick<SendOutbox, 'edit' | 'cancel'>,
+): Promise<QueueWithdrawal> => {
+  try {
+    const done = await queueActions(client, sessionId, () => undefined, outbox).cancel({ sendId });
+    if (!done) throw new Error('That machine is not reachable from this browser.');
+    return 'withdrawn';
+  } catch (reason) {
+    if (reason instanceof QueueActionError && reason.kind !== 'other') return 'taken';
+    throw reason;
+  }
+};
+
+/**
+ * Undo of an Inbox reply: finds the machine the reply went to among the paired ones and withdraws the message there.
+ * A machine that is no longer paired throws, so the page can say the card could not be put back honestly.
+ */
+export const withdrawReplyVia =
+  <Connection extends { readonly daemonId: string }>(
+    machines: readonly { readonly connection: Connection }[],
+    clients: { client(connection: Connection): Promise<Pick<IFyApiClient, 'request'> | null> },
+    outbox: Pick<SendOutbox, 'edit' | 'cancel'>,
+  ) =>
+  async (
+    card: { readonly daemonId: string; readonly view: { readonly config: { readonly id: string } } },
+    sendId: string,
+  ) => {
+    const machine = machines.find(each => each.connection.daemonId === card.daemonId);
+    if (machine === undefined) throw new Error('That machine is no longer paired with this browser.');
+    return await withdrawQueued(await clients.client(machine.connection), card.view.config.id, sendId, outbox);
+  };
