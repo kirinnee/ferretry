@@ -71,6 +71,13 @@ summary is [security.md](security.md).
   Components show "Copied from ‹your label for that machine›", or "‹name› (the name it gave itself)"
   when this browser does not know the id. A clone through the CLI has no browser, so it records the
   name only.
+  From a version 2 bundle every copied item also carries `clonedFromKey`, the origin key the source gave
+  it, and the target keeps a **last-copied record** (`setup/clone-base.json`, mode 0600) of what the source
+  looked like at each copy: digests, sizes and paths, never content or a secret. It is written in the same
+  all-or-nothing batch as the copy, filed under the daemon id the browser verified (else the one the bundle
+  reports of itself — and a bundle that names another machine than the one picked is refused), and
+  garbage-collected on every copy from that source; a Replace rewrites it. A copy never touches a login's
+  sign-in or any secret (account-model.md K10–K18).
 - **Bounded.** A settings or hooks document too deep or too large to walk key by key (64 levels, 2,000
   values) is said to be so and shown whole; the walk never recurses.
 - **3d. Copying B into A shows B's setup to A — said out loud.** The Clone source step now says the

@@ -20,6 +20,7 @@
  *
  * Pure: no IO.
  */
+import { ORIGIN_KEY_PATTERN } from '@ferretry/protocol';
 
 /** A located finding: the path to the value inside the document, never the value. */
 export interface SecretFinding {
@@ -72,10 +73,17 @@ export function shannonEntropy(value: string): number {
   return bits;
 }
 
+/**
+ * `clonedFromKey` holds an origin key: 16 random bytes that name an item across two machines. It ends in
+ * "key" and reads as random, but it opens nothing — it is an identifier, not a credential.
+ */
+const ORIGIN_KEY_FIELD = 'clonedFromKey';
+
 /** Whether `value`, found under `key`, looks like a raw secret. */
 export function looksLikeRawSecret(key: string | number | undefined, value: string): boolean {
   if (KNOWN_SHAPES.some(shape => shape.test(value))) return true;
   if (typeof key !== 'string' || !CREDENTIAL_KEY.test(key)) return false;
+  if (key === ORIGIN_KEY_FIELD && ORIGIN_KEY_PATTERN.test(value)) return false;
   const trimmed = value.trim();
   if (REFERENCE.test(trimmed) || trimmed.length < MIN_SECRET_LENGTH || /\s/u.test(trimmed)) return false;
   // A path or a URL under a "…key" name (a key file, a JWKS endpoint) is where a secret is, not one.

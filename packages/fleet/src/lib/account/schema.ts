@@ -743,6 +743,8 @@ export const LayerReferenceTextSchema = z.string().check(ctx => {
  */
 export const LayeredProfileSchema = z.strictObject({
   layers: z.array(LayerReferenceTextSchema).default([]),
+  /** The source's origin key for this profile, set by Clone: how a repeat copy finds it again. */
+  clonedFromKey: NonEmptyString.optional(),
 });
 export type LayeredProfile = z.infer<typeof LayeredProfileSchema>;
 
@@ -763,6 +765,8 @@ export const RuntimeSchema = z.strictObject({
   agent: z.boolean().default(false),
   /** Switched off without deleting it (`./disabled.ts`). */
   disabled: DisabledSchema.optional(),
+  /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
+  clonedFromKey: NonEmptyString.optional(),
 });
 export type Runtime = z.infer<typeof RuntimeSchema>;
 

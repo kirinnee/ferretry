@@ -47,6 +47,7 @@ import type { HarnessKind } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
 import { skillSourceReference } from './adapt.ts';
 import { cloudCredentialSentence, parseCloudCredential } from './environment.ts';
+import { type CloneBaseEntry, cloneBaseEntries, cloneOriginKeys } from './clone-base.ts';
 import { freeName } from './import.ts';
 import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import {
@@ -272,6 +273,13 @@ export interface ClonePlan {
   readonly skipped: readonly string[];
   /** Where "Default runtime for new agents" ended up. */
   readonly defaultRuntime: CloneDefault;
+  /**
+   * What this copy leaves as the source's side of each item it wrote, for the "last copied" record
+   * (`./clone-base.ts`). Empty for a bundle without origin keys (version 1). Digests, sizes and paths only.
+   */
+  readonly base: readonly CloneBaseEntry[];
+  /** Every origin key the source holds, including the items this copy left out. */
+  readonly sourceKeys: ReadonlySet<string>;
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text. */
@@ -437,6 +445,13 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     clonedFrom: bundle.machine,
     ...(options.sourceDaemon === undefined ? {} : { clonedFromDaemon: options.sourceDaemon }),
   };
+  // The source's origin key for each item, stamped on its copy so a repeat copy finds it again. A key two
+  // items claim is stamped on neither: it could only mislink.
+  const originKeys = cloneOriginKeys(offered);
+  const keyed = (reference: string): { clonedFromKey?: string } => {
+    const key = originKeys.get(reference);
+    return key === undefined ? {} : { clonedFromKey: key };
+  };
   const replace = options.mode === 'replace';
   const base: AccountModel = replace
     ? {
@@ -459,12 +474,13 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     const label = credential.label ?? credential.email;
     credentials[id] =
       credential.store === 'environment'
-        ? ({ ...environmentCredential(credential), ...origin } as Credential)
+        ? ({ ...environmentCredential(credential), ...origin, ...keyed(`login/${credential.id}`) } as Credential)
         : {
             harness: credential.harness,
             store: 'ferretry',
             ...(label === undefined ? {} : { label }),
             ...origin,
+            ...keyed(`login/${credential.id}`),
           };
   }
 
@@ -484,7 +500,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       if (free !== name) renamed.push({ what: 'component', from: `${kind}/${name}`, to: `${kind}/${free}` });
       componentNames.set(`${kind}/${name}`, `${kind}/${free}`);
       const { clonedFrom: _claimed, clonedFromDaemon: _claimedDaemon, clonedFromKey: _claimedKey, ...own } = value;
-      const copy: Record<string, unknown> = { ...own, ...origin };
+      const copy: Record<string, unknown> = { ...own, ...origin, ...keyed(`${kind}/${name}`) };
       const file = copy.file;
       if (typeof file === 'string' && isAssetRelative(file)) {
         const moved = fileMoves.get(file) ?? movedFile(file, name, free, usedFiles);
@@ -525,6 +541,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
         if (reference?.kind === 'profile') return `profile/${profileNames.get(reference.name) as string}`;
         return componentNames.get(layer) as string;
       }) as LayeredProfile['layers'],
+      ...keyed(`profile/${name}`),
     };
   }
   const runtimes: Record<string, Runtime> = { ...base.runtimes };
@@ -543,6 +560,7 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       profile: profileNames.get(runtime.profile) as string,
       agent: runtime.agent,
       ...(runtime.harness === undefined ? {} : { harness: runtime.harness }),
+      ...keyed(`runtime/${name}`),
     };
     slotRuntimes.set(credential, [...(slotRuntimes.get(credential) ?? []), free]);
     const harness = runtimeHarness(source, runtime) as HarnessKind;
@@ -660,6 +678,8 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     }),
     skipped,
     defaultRuntime,
+    base: cloneBaseEntries(offered, bundle, credentialIds),
+    sourceKeys: new Set(originKeys.values()),
   };
 }
 

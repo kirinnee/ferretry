@@ -150,5 +150,11 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
         await keyWriter.write(path, text);
       },
     },
+    cloneBase: {
+      read: async path => (await keyWriter.read(path)) ?? undefined,
+      write: async (path, text) => {
+        await keyWriter.write(path, text);
+      },
+    },
   };
 }

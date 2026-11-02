@@ -11,7 +11,13 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
-import { EXPORT_KEYS_FILE, parseExportKeys, resolveDefaultRuntime } from '@ferretry/fleet';
+import {
+  CLONE_BASE_FILE,
+  EXPORT_KEYS_FILE,
+  parseCloneBase,
+  parseExportKeys,
+  resolveDefaultRuntime,
+} from '@ferretry/fleet';
 import should from 'should';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
@@ -242,7 +248,10 @@ describe('the first run and Clone over real files', () => {
       summary: 'Copied 1 runtime from studio. Sign in once for 1 runtime: claude-you.',
     });
     const model = await declared(target);
-    should(model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'ferretry', clonedFrom: 'studio' });
+    should(model.credentials['claude-you']).match({ harness: 'claude', store: 'ferretry', clonedFrom: 'studio' });
+    should(model.credentials['claude-you']?.clonedFromKey).equal(
+      bundle.version === 2 ? bundle.keys['login/claude-you'] : undefined,
+    );
     should(Object.keys(model.runtimes)).deepEqual(['claude-default']);
     should(await readFile(path.join(target.fleet, 'assets', 'skills', 'review', 'SKILL.md'), 'utf8')).containEql(
       'Review it.',
@@ -340,6 +349,124 @@ describe('Clone and the default runtime for new agents over real files', () => {
     const model = await declared(chosen);
     should(Object.keys(model.runtimes).toSorted()).deepEqual(['claude-default', 'claude-kirin']);
     should(model.machine.defaultRuntime).equal('claude-default');
+  });
+});
+
+describe('the last-copied record over real files', () => {
+  const FAKE_SIGN_IN = JSON.stringify({
+    claudeAiOauth: { accessToken: 'placeholder-signed-in', refreshToken: 'placeholder-refresh' },
+  });
+
+  /** Everything a signed-in login and its secrets are, as bytes: its file, its sign-in, its secret values. */
+  async function credentialBytes(on: Machine): Promise<Record<string, string>> {
+    const sign = path.join(on.fleet, 'credentials');
+    const files = await filesUnder(sign);
+    const bytes: Record<string, string> = {};
+    for (const file of files) bytes[`credentials/${file}`] = await readFile(path.join(sign, file), 'utf8');
+    // The login's declaration may be re-rendered by the apply; what it MEANS must not move.
+    bytes['logins/work'] = JSON.stringify((await declared(on)).credentials.work);
+    for (const [name, value] of on.secrets) bytes[`secret:${name}`] = value;
+    return bytes;
+  }
+
+  /** A target with its own signed-in login ("work") and a secret, beside everything a copy may write. */
+  async function signedInTarget(name: string): Promise<Machine> {
+    const target = await targetWithOwnDefault(name);
+    await mkdir(path.join(target.fleet, 'credentials', 'work'), { recursive: true });
+    await writeFile(path.join(target.fleet, 'credentials', 'work', '.credentials.json'), FAKE_SIGN_IN, { mode: 0o600 });
+    target.secrets.set('GITHUB_TOKEN', FAKE_SECRET);
+    return target;
+  }
+
+  it.each(['alongside', 'replace'] as const)(
+    'should leave a signed-in login and its secrets byte-identical across a %s copy that writes the record',
+    async mode => {
+      // Arrange
+      const source = await machine('studio', { claude: true });
+      await importHost(source);
+      const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+      const target = await signedInTarget('work-linux');
+      const before = await credentialBytes(target);
+      should(Object.keys(before)).containEql('credentials/work/.credentials.json');
+
+      // Act
+      const staged = await target.catalog.propose({ kind: 'clone.import', mode, bundle });
+      await target.catalog.apply(staged.id, { governed: false } as never);
+
+      // Assert: the login the person already signed in is untouched, to the byte, and so is every secret.
+      const after = await credentialBytes(target);
+      should(after).deepEqual(before);
+      const record = path.join(target.fleet, CLONE_BASE_FILE);
+      should((await stat(record)).mode & 0o777).equal(0o600);
+      should(Object.keys(parseCloneBase(await readFile(record, 'utf8')).sources)).deepEqual(['daemon-source']);
+    },
+  );
+
+  it('should file no content, no email and no secret in the record, and survive a second copy and a Replace', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await signedInTarget('work-linux');
+    const record = path.join(target.fleet, CLONE_BASE_FILE);
+
+    // Act
+    const first = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await target.catalog.apply(first.id, { governed: false } as never);
+    const afterFirst = await readFile(record, 'utf8');
+    const again = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await target.catalog.apply(again.id, { governed: false } as never);
+    const replace = await target.catalog.propose({ kind: 'clone.import', mode: 'replace', bundle });
+    await target.catalog.apply(replace.id, { governed: false } as never);
+
+    // Assert
+    for (const text of [afterFirst, await readFile(record, 'utf8')]) {
+      should(text).not.containEql('Be kind.');
+      should(text).not.containEql('Review it.');
+      should(text).not.containEql(FAKE_SECRET);
+      should(text).not.containEql('placeholder');
+      should(Object.keys(parseCloneBase(text).sources)).deepEqual(['daemon-source']);
+    }
+    const model = await declared(target);
+    should(Object.keys(model.runtimes)).deepEqual(['claude-default']);
+  });
+
+  it('should treat a damaged record as absent and replace it with a fresh one', async () => {
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await machine('work-linux', { claude: false });
+    const record = path.join(target.fleet, CLONE_BASE_FILE);
+    await mkdir(path.dirname(record), { recursive: true });
+    await writeFile(record, '{ not json', { mode: 0o600 });
+
+    const staged = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await target.catalog.apply(staged.id, { governed: false } as never);
+
+    should(Object.keys(parseCloneBase(await readFile(record, 'utf8')).sources)).deepEqual(['daemon-source']);
+  });
+
+  it('should forget one source in the record alone, leaving the login and its secrets byte-identical', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await signedInTarget('work-linux');
+    const record = path.join(target.fleet, CLONE_BASE_FILE);
+    const staged = await target.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await target.catalog.apply(staged.id, { governed: false } as never);
+    const before = await credentialBytes(target);
+
+    // Act
+    const forgot = await target.setup.forgetCloneSource('daemon-source');
+    const forgotAgain = await target.setup.forgetCloneSource('daemon-source');
+
+    // Assert
+    should(forgot).be.true();
+    should(forgotAgain).be.false();
+    should(Object.keys(parseCloneBase(await readFile(record, 'utf8')).sources)).deepEqual([]);
+    should((await stat(record)).mode & 0o777).equal(0o600);
+    should(await credentialBytes(target)).deepEqual(before);
   });
 });
 

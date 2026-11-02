@@ -12,7 +12,9 @@ import {
   buildCloneBundle,
   builtInModelCatalogs,
   builtInPresets,
+  CLONE_BASE_FILE,
   EXPORT_KEYS_FILE,
+  parseCloneBase,
   originKeyOfId,
   parseExportKeys,
   FleetApplyFailureError,
@@ -66,6 +68,7 @@ const LAYOUT: FleetLayout = {
 
 const RECORD_PATH = `/state/fleet/${IMPORT_RECORD_FILE}`;
 const KEYS_PATH = `/state/fleet/${EXPORT_KEYS_FILE}`;
+const BASE_PATH = `/state/fleet/${CLONE_BASE_FILE}`;
 const SECRET_VALUE = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
 
 /** A host with Claude Code signed in, instructions, settings holding one secret, and one skill. */
@@ -161,6 +164,7 @@ interface World {
     keysReadError: unknown;
     keysWriteError: unknown;
     keysWrites: number;
+    baseWrites: string[];
   };
 }
 
@@ -211,6 +215,7 @@ function world(
     keysReadError: undefined,
     keysWriteError: undefined,
     keysWrites: 0,
+    baseWrites: [],
   };
   let drawn = 0;
   const deps: FleetSetupServiceDeps = {
@@ -277,6 +282,14 @@ function world(
         should(path).equal(KEYS_PATH);
         state.keysText = text;
         state.keysWrites += 1;
+      },
+    },
+    cloneBase: {
+      read: async path => state.assets[path],
+      write: async (path, text) => {
+        should(path).equal(BASE_PATH);
+        state.baseWrites.push(text);
+        state.assets[path] = text;
       },
     },
     ...options.overrides,
@@ -1217,6 +1230,169 @@ describe('the clone.import executor', () => {
     should(
       await noNames.service.executors.clone.describe({ kind: 'clone.import', mode: 'alongside', bundle: BUNDLE() }),
     ).containEql('work-mac');
+  });
+});
+
+// ── The "last copied" record ─────────────────────────────────────────────────────────────────────
+
+describe('the clone-base record', () => {
+  /** A v2 bundle from a source machine that has this setup, as its own export answers it. */
+  const sourceBundle = async (daemon = 'daemon-source'): Promise<unknown> => {
+    const source = world({ catalog: { machineName: () => 'work-mac' }, overrides: { daemonId: () => daemon } });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = 'Main.\n';
+    return await source.service.exportBundle();
+  };
+  const target = (extra: Parameters<typeof world>[0] = {}) =>
+    world({ ...extra, overrides: { daemonId: () => 'daemon-target', ...extra.overrides } });
+  const clone = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'alongside', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+  const batchRecord = (w: World) => (w.applied[0]?.documents ?? []).find(document => document.path === BASE_PATH);
+
+  it("should ride the copy's own batch, with its own revision, and file the source under what it said of itself", async () => {
+    // Arrange
+    const w = target();
+    const change = clone(await sourceBundle());
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    const record = batchRecord(w);
+    should(record?.mode).equal(0o600);
+    should(record?.expect).equal('absent');
+    const parsed = parseCloneBase(record?.content);
+    const source = parsed.sources['daemon-source'];
+    should(source?.verified).equal('self');
+    should(source?.name).equal('work-mac');
+    should(source?.lastCopiedAt).equal('2026-10-13T08:00:00.000Z');
+    should(Object.values(source?.items ?? {}).map(item => item.kind)).containEql('login');
+    should(w.state.baseWrites).deepEqual([]);
+  });
+
+  it('should hold no content, no email and no secret value', async () => {
+    const w = target();
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    const text = batchRecord(w)?.content ?? '';
+    should(text).not.containEql('Main.');
+    should(text).not.containEql('you@example.com');
+  });
+
+  it('should not be written when the batch fails, so it never claims a copy that did not land', async () => {
+    const w = target();
+    w.state.apply = async () => {
+      throw new Error('disk full');
+    };
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await thrown(w.service.executors.clone.execute(change));
+    should(w.state.baseWrites).deepEqual([]);
+    should(w.state.assets[BASE_PATH]).be.undefined();
+  });
+
+  it('should trust the id the browser verified, and refuse an export that names another machine', async () => {
+    const ok = target();
+    const same = clone(await sourceBundle(), { source: { daemonId: 'daemon-source' } });
+    await ok.service.executors.clone.describe(same);
+    await ok.service.executors.clone.execute(same);
+    should(parseCloneBase(batchRecord(ok)?.content).sources['daemon-source']?.verified).equal('browser');
+
+    const refused = target();
+    const refusal = await catalogRefusal(
+      refused.service.executors.clone.describe(clone(await sourceBundle(), { source: { daemonId: 'daemon-other' } })),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('That export says it is from another machine than the one you picked.');
+    should(refused.applied).deepEqual([]);
+  });
+
+  it('should write no record for a version 1 bundle, and stamp no key on what it copies', async () => {
+    const w = target();
+    const change = clone(BUNDLE());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(batchRecord(w)).be.undefined();
+    should(configTextOf(w.applied[0]?.documents ?? [])).not.containEql('clonedFromKey');
+  });
+
+  it('should stamp every item a version 2 copy writes with the key its source gave it', async () => {
+    const w = target();
+    const bundle = FleetCloneBundleSchema.parse(await sourceBundle());
+    if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
+    const change = clone(bundle);
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    const model = modelOfWrites(w.applied[0]?.documents ?? []);
+    // Names may move (a copy never overwrites); the key is what says which item is which.
+    const stamped = (items: Readonly<Record<string, { clonedFromKey?: string }>>): (string | undefined)[] =>
+      Object.values(items).map(item => item.clonedFromKey);
+    should(stamped(model.components.instructions)).containEql(bundle.keys['instructions/main']);
+    should(stamped(model.profiles)).containEql(bundle.keys['profile/default']);
+    should(stamped(model.runtimes)).containEql(bundle.keys['runtime/claude-default']);
+    should(stamped(model.credentials)).containEql(bundle.keys['login/claude-you']);
+  });
+
+  it('should add to what an earlier copy recorded, and rewrite the source on a Replace', async () => {
+    // Arrange: an earlier record for another machine that still has a copy linked here.
+    const w = target();
+    const bundle = FleetCloneBundleSchema.parse(await sourceBundle());
+    if (bundle.version !== 2) throw new Error('expected a version 2 bundle');
+    const first = clone(bundle);
+    await w.service.executors.clone.describe(first);
+    await w.service.executors.clone.execute(first);
+    const recorded = batchRecord(w)?.content ?? '';
+    const again = target();
+    again.state.assets[BASE_PATH] = recorded;
+    again.state.reading = configReading(modelOfWrites(w.applied[0]?.documents ?? []), 'r');
+
+    // Act: a Replace of the same source
+    const replace = clone(bundle, { mode: 'replace' });
+    await again.service.executors.clone.describe(replace);
+    await again.service.executors.clone.execute(replace);
+
+    // Assert
+    const source = parseCloneBase(batchRecord(again)?.content).sources['daemon-source'];
+    should(Object.keys(source?.items ?? {}).toSorted()).deepEqual(
+      Object.keys(parseCloneBase(recorded).sources['daemon-source']?.items ?? {}).toSorted(),
+    );
+  });
+
+  it('should still describe and execute when the copy happens at a later instant than the review', async () => {
+    let tick = 0;
+    const w = target({ catalog: { now: () => Date.parse('2026-10-13T08:00:00.000Z') + ++tick * 1000 } });
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(w.applied).have.length(1);
+  });
+
+  it('should treat an unreadable record as absent and write a fresh one', async () => {
+    const w = target();
+    w.state.assets[BASE_PATH] = '{not json';
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(Object.keys(parseCloneBase(batchRecord(w)?.content).sources)).deepEqual(['daemon-source']);
+  });
+
+  it('should forget one source, writing only the record, and say whether it knew it', async () => {
+    const w = target();
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    w.state.assets[BASE_PATH] = batchRecord(w)?.content ?? '';
+
+    should(await w.service.forgetCloneSource('daemon-nobody')).equal(false);
+    should(w.state.baseWrites).deepEqual([]);
+    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
+    should(w.applied).have.length(1);
   });
 });
 

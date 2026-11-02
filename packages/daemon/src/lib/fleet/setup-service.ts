@@ -36,11 +36,15 @@
  * request; nothing is launched to find anything out, and no provider is called.
  */
 import {
+  applyCloneToBase,
   assignOriginKeys,
   type AccountModel,
   buildCloneBundle,
+  CLONE_BASE_FILE,
   type ClonePlan,
   CloneRefusal,
+  cloneSourceIdentity,
+  CloneSourceMismatch,
   cloneSources,
   describeClone,
   EMPTY_RUNTIME_IDS,
@@ -48,6 +52,7 @@ import {
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
+  forgetCloneSource,
   type FleetModelApplyPlan,
   freeName,
   HARNESS_DISPLAY_NAMES,
@@ -62,11 +67,13 @@ import {
   type ModelCatalogSources,
   mergeImport,
   mergeImportRecord,
+  parseCloneBase,
   parseCloneBundle,
   parseExportKeys,
   parseSettings,
   planClone,
   planImport,
+  serializeCloneBase,
   type SettingsObject,
   skillFrontmatterKeys,
   serializeExportKeys,
@@ -175,6 +182,11 @@ export interface FleetSetupServiceDeps {
   randomBytes(length: number): Uint8Array;
   /** `setup/export-keys.json`: the origin keys this machine gave what it exported (state, never configuration). */
   readonly exportKeys: {
+    read(path: string): Promise<string | undefined>;
+    write(path: string, text: string): Promise<void>;
+  };
+  /** `setup/clone-base.json` outside a copy: only forgetting a source writes it alone (a copy writes it in its own batch). */
+  readonly cloneBase: {
     read(path: string): Promise<string | undefined>;
     write(path: string, text: string): Promise<void>;
   };
@@ -654,12 +666,14 @@ export class FleetSetupService {
     const machine = change.names?.target ?? host;
     let bundle: FleetCloneBundle;
     let plan: ClonePlan;
+    let source: ReturnType<typeof cloneSourceIdentity>;
     const reading = await this.#read();
     try {
       bundle = parseCloneBundle(change.bundle);
       if (bundle.machine === host) {
         throw new CloneRefusal(`That setup was exported from ${machine} itself; pick another machine to copy from.`);
       }
+      source = cloneSourceIdentity(bundle, change.source?.daemonId, change.names?.source);
       plan = planClone(reading.model, bundle, {
         mode: change.mode,
         machine,
@@ -672,10 +686,14 @@ export class FleetSetupService {
         ...(change.defaultRuntime === undefined ? {} : { defaultRuntime: change.defaultRuntime }),
       });
     } catch (error) {
-      if (error instanceof CloneRefusal) throw new FleetCatalogRefusal('fleet_change_refused', error.message);
+      if (error instanceof CloneRefusal || error instanceof CloneSourceMismatch) {
+        throw new FleetCatalogRefusal('fleet_change_refused', error.message);
+      }
       throw error;
     }
-    const documents = await this.#documents(reading, plan.model, plan.files, []);
+    // The record of what was copied rides this batch, so it can never claim a copy that did not land.
+    const record = await this.#cloneBaseDocument(change, plan, source);
+    const documents = await this.#documents(reading, plan.model, plan.files, record === undefined ? [] : [record]);
     const busiest = plan.slots.toSorted((left, right) => right.runtimes.length - left.runtimes.length)[0];
     return {
       model: plan.model,
@@ -690,11 +708,50 @@ export class FleetSetupService {
               `Sign in once for ${plural(busiest.runtimes.length, 'runtime')}: ${busiest.email ?? busiest.label ?? busiest.id}.`,
             ]),
       ].join(' '),
-      fingerprint: this.#fingerprint(documents, []),
+      fingerprint: this.#fingerprint(documents, [], record === undefined ? [] : [record.path]),
     };
   }
 
+  /**
+   * The "last copied" record after this copy (`clone-base.json`, docs/design/account-model.md §3.8), as a
+   * document for the copy's own batch. None for a bundle that carries no origin keys (version 1) or no
+   * source identity: there is then nothing to link a later copy to.
+   */
+  async #cloneBaseDocument(
+    change: CloneChange,
+    plan: ClonePlan,
+    source: ReturnType<typeof cloneSourceIdentity>,
+  ): Promise<{ readonly path: string; readonly content: string } | undefined> {
+    if (source === undefined || plan.sourceKeys.size === 0) return undefined;
+    const path = this.#cloneBasePath();
+    const next = applyCloneToBase(parseCloneBase(await this.deps.cloneBase.read(path)), {
+      source,
+      at: new Date(this.deps.catalog.now()).toISOString(),
+      replace: change.mode === 'replace',
+      copied: plan.base,
+      sourceKeys: plan.sourceKeys,
+      model: plan.model,
+    });
+    return { path, content: serializeCloneBase(next) };
+  }
+
+  /**
+   * Forget one source: the next copy from it starts as if there had been none. Only the record changes —
+   * nothing copied, no login, no secret. Answers whether there was anything to forget.
+   */
+  async forgetCloneSource(sourceId: string): Promise<boolean> {
+    const path = this.#cloneBasePath();
+    const before = parseCloneBase(await this.deps.cloneBase.read(path));
+    if (before.sources[sourceId] === undefined) return false;
+    await this.deps.cloneBase.write(path, serializeCloneBase(forgetCloneSource(before, sourceId)));
+    return true;
+  }
+
   // ── Writing ────────────────────────────────────────────────────────────────────────────────────
+
+  #cloneBasePath(): string {
+    return `${this.deps.catalog.layout.fleetDirectory}/${CLONE_BASE_FILE}`;
+  }
 
   #recordPath(): string {
     return `${this.deps.catalog.layout.fleetDirectory}/${IMPORT_RECORD_FILE}`;
@@ -732,10 +789,22 @@ export class FleetSetupService {
     return documents;
   }
 
-  #fingerprint(documents: readonly FleetDocumentWrite[], secrets: readonly string[]): string {
+  /**
+   * What a person reviewed. A document in `timed` holds the instant of the apply, which differs between the
+   * review and the apply, so it counts by the revision it replaces rather than by its text.
+   */
+  #fingerprint(
+    documents: readonly FleetDocumentWrite[],
+    secrets: readonly string[],
+    timed: readonly string[] = [],
+  ): string {
     return this.deps.digest(
       JSON.stringify({
-        documents: documents.map(document => [document.path, this.deps.digest(document.content), document.expect]),
+        documents: documents.map(document => [
+          document.path,
+          timed.includes(document.path) ? '' : this.deps.digest(document.content),
+          document.expect,
+        ]),
         secrets,
       }),
     );
