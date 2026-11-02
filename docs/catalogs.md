@@ -10,10 +10,12 @@ runs. The full approved design, with the people, sharing codes, offline library 
 come, is [design/catalogs.md](design/catalogs.md); the Sharing page, skill rows, versions and links that build on it are
 [design/catalogs-sharing.md](design/catalogs-sharing.md). Where they differ, this page wins for what exists.
 
-**Where it is in the app.** The **Sharing** page, `/d/<machine>/sharing/<tab>`, with four tabs: **My catalogs**
-(`catalogs`), **Shared with me** (`shared`), **People** (`people`) and **Skills** (`skills`). Phone: **More › Sharing**.
-Desktop: the top bar, the sidebar footer and the narrow rail. The palette also finds **Sharing**, **Shared with me** and
-**Share a skill…**. Settings › Machine › Catalogs is only a link to Sharing › My catalogs. `/shared` stays for a browser
+**Where it is in the app.** The **Sharing** page, `/d/<machine>/sharing/<tab>`, works like a marketplace (&B131) with
+three tabs: **Subscriptions** (`shared`, the first and default tab: what you subscribe to and can install), **My
+catalogs** (`catalogs`: what this machine publishes) and **People** (`people`). The old **Skills** tab is gone; an
+address naming it opens Subscriptions. Phone: **More › Sharing**. Desktop: the top bar, the sidebar footer and the
+narrow rail. The palette also finds **Sharing**, **Subscriptions** and **Publish skills…** (which opens My catalogs).
+Settings › Machine › Catalogs is only a link to Sharing › My catalogs. `/shared` stays for a browser
 with no machine.
 Which parts are live is the [phase table](#what-is-built) at the end. The machine that makes a catalog is
 [the publisher side](#the-publisher-side).
@@ -957,7 +959,10 @@ now has `join` and `member` ([relay-protocol.md](relay-protocol.md) §14 "Member
 
 ### Built in 2c: the app for members
 
-**Owner, in Sharing › My catalogs.** A catalog's **Share…** sheet makes a code for a new person (by name) or an
+**Owner, in Sharing › My catalogs.** A catalog's **Publish skills** (&B131 A3) lists every skill on this
+machine once, by its SKILL.md path, with where it lives ("account claude-work", "project app", "Ferretry"), says which
+ones the catalog already holds and their version, and publishes the rest through the same Add to catalog sheet, aimed
+at that catalog; it reads `GET /v1/skills`. Its **Share…** sheet makes a code for a new person (by name) or an
 existing member (with the warning "whoever opens this can read everything they can read" shown before anything is
 made), for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
 (act `share-catalog`) and shows the link **once**: a QR drawn in the page, Copy link, a countdown and **End this code
@@ -965,9 +970,9 @@ now**. The app keeps and logs nothing about the code. **People and codes** lists
 browsers (remove one browser, take away a catalog, revoke the member with the plain sentence of what stops) and the
 shares (live, used, expired).
 
-**Adding a catalog is by link.** **Add a catalog from a link** is a paste field at the top of Sharing › Shared with me
-and Sharing › My catalogs. The context rail's Skills and MCP lists carry none: each has one small text link, **Add from
-a link…**, that opens Sharing › Shared with me. A `/join` link (any app origin; read by path and fragment) opens `/join` with its
+**Subscribing is by link.** **Subscribe with a link** is a paste field at the top of Sharing › Subscriptions, and only
+there: My catalogs is the publisher's page and has neither it nor Install from a file. Subscribing installs nothing.
+The context rail's Skills and MCP lists carry no link of their own (&B131 A1). A `/join` link (any app origin; read by path and fragment) opens `/join` with its
 fragment, the same page the phone's camera opens, so there is one way in. A link whose fragment does not parse says
 "This link is damaged or incomplete. Ask for a new one."; a pairing link says it links a device; anything else says it
 is not a catalog share link. **Install from a file…** lives under **More** next to the paste field, for offline swaps. There is no in-app
@@ -990,7 +995,13 @@ link**, or last **Forget this catalog**. Leaving answers `200` and is never show
 refusal. A browser that already has a key opens a member session and redeems the code (`share_other_member` and
 `share_new_member` have their own sentences).
 
-**Shared with me (online only).** Each publisher shows the person's own label and the first 20 characters of its
+**Subscriptions (online only): a store page per publisher.** One line under each publisher says that nothing installs
+or updates by itself: "Install what you want; each install stays on its version until you update it." Every item is a
+**store row**: its name and version (`v3`), one line of what it is, and on the right **Install** (when this browser has
+a paired machine to install on; it opens the item's review and install hand-off) or **Installed** once a paired
+machine's install records hold it. The installed version and Update / Stay / Skip / Move to version replace that
+right side in a later slice. **Unsubscribe** (was Leave) stops showing the publisher; what you installed stays and
+keeps working. Each publisher shows the person's own label and the first 20 characters of its
 fingerprint. Every manifest and item is verified before it is shown. **An item that opens must be the one the list names**: after the item verifies, its id
 and version have to equal the entry the person tapped, otherwise it is refused ("This item is not the one the catalog
 lists, so it was not opened.") and nothing from it is shown. **Withdrawn items are said, not hidden**: each catalog

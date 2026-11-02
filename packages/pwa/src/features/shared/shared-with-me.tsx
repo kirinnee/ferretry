@@ -465,7 +465,7 @@ function WithdrawnNote({
 }
 
 /**
- * ONE ITEM ON A STORE PAGE (&B131 A3): its name and version, one line of what it is, and what you can do with it.
+ * ONE ITEM ON A STORE PAGE (&B131 A3): its name and version (the title says both), one line of what it is, and what you can do with it.
  *
  * Subscribing installs nothing: the right side is **Install** (or nothing, with no machine paired to install on) until
  * this browser's machines hold it, and then **Installed**. Opening the name or Install shows the item's full review
@@ -523,12 +523,7 @@ function StoreItemRow({
           onClick={() => void open()}
           data-shared-item={entry.itemId}
         >
-          <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs">
-            <span className="break-words text-cell font-semibold text-fg">{title}</span>
-            <span className="fy-info-chip" data-tone="muted" data-shared-item-version="">
-              v{entry.version}
-            </span>
-          </span>
+          <span className="break-words text-cell font-semibold text-fg">{title}</span>
           <span className="break-words text-meta text-muted">{opening ? OPENING_ITEM : summary}</span>
         </button>
         {installed ? (

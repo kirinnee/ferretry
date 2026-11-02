@@ -541,7 +541,7 @@ describe('the store page', () => {
   it('says nothing installs or updates by itself, and shows each item’s version', async () => {
     const { view } = await open({ list: async () => [studio], browse: browseOk });
     expect(q('[data-shared-pinned]')?.textContent).toBe(PINNED_NOTE);
-    expect(q(`[data-shared-item-row="${firstItem()}"] [data-shared-item-version]`)?.textContent).toMatch(/^v\d+$/u);
+    expect(q(`[data-shared-item-row="${firstItem()}"] [data-shared-item]`)?.textContent).toMatch(/version \d+/u);
     await view.unmount();
   });
 

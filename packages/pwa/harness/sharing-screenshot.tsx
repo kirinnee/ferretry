@@ -1,6 +1,7 @@
 /**
- * The Sharing page (docs/design/catalogs-sharing.md, slice 3a): its four tabs, and the places that lead to
- * it: the phone's More sheet, the desktop top bar, the sidebar footer and the narrow rail. On a phone and a
+ * The Sharing page as a marketplace (docs/catalogs.md, &B131 A3): Subscriptions with a store page (one item Installed,
+ * the rest with Install), My catalogs, a catalog with + Publish skills and its picker, and People; and the places that
+ * lead to it: the phone's More sheet, the desktop top bar, the sidebar footer and the narrow rail. On a phone and a
  * desktop, light and dark.
  *
  *   bun harness/sharing-screenshot.tsx      # writes harness/out/sharing-*.png
@@ -90,13 +91,25 @@ const client = {
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return schema.parse({ publisher: PUBLISHER, catalogs: CATALOGS });
     if (method === 'GET' && path === '/v1/catalog-members') return { members: MEMBERS };
     if (method === 'GET' && path === '/v1/catalog-shares') return { shares: SHARES };
-    if (method === 'GET' && path === '/v1/catalog-installs') return schema.parse({ installs: [] });
+    if (method === 'GET' && path === '/v1/catalog-installs') return schema.parse({ installs: INSTALLS });
     throw new Error('the harness has no answer for ' + method + ' ' + path);
   },
 };
 const createClient = async () => client;
 
 const fixture = await sharedItemFixture();
+// The first item a paired machine already installed, so the store page shows Installed beside Install.
+const INSTALLS = [{
+  installId: 'cin_' + 'i'.repeat(22), installedAt: AT,
+  provenance: {
+    publisher: fixture.identity.daemonId, publisherName: 'kirin-box', catalogId: 'cat_' + 'x'.repeat(22),
+    catalogName: 'Team skills', itemId: fixture.entries[0].itemId, kind: fixture.entries[0].kind, name: fixture.entries[0].name,
+    version: fixture.entries[0].version, digest: fixture.entries[0].digest,
+  },
+  target: { scope: 'runtime', runtime: 'claude-work', profile: 'default' },
+  destination: 'runtime claude-work, profile default',
+  secretBindings: {},
+}];
 const ok = value => ({ kind: 'ok', value });
 const never = new Promise(() => undefined);
 const SUBSCRIPTION = {
@@ -116,16 +129,16 @@ const members = {
   tryAgain: async () => ({ kind: 'refused' }),
 };
 
-const skill = (name, description, scope, origin) => ({ name, description, scope, origin });
-const loadSkills = async () => ({
-  harness: 'claude',
-  skills: [
-    skill('floop', 'Review a diff and say what to fix.', 'global', 'claude'),
-    skill('kteam', 'Coordinate detached teammates.', 'global', 'both'),
-    skill('pdf-tools', 'Split, merge and OCR PDFs.', 'global', 'claude'),
-    skill('run', 'Launch the project app.', 'project', 'claude'),
-  ],
+const skill = (name, description, extra = {}) => ({
+  name, description, harness: 'claude', scope: 'user', path: '/home/k/.claude/skills/' + name + '/SKILL.md',
+  runtimes: ['claude-work'], ...extra,
 });
+const loadMachineSkills = async () => [
+  skill('floop', 'Review a diff and say what to fix.'),
+  skill('kteam', 'Coordinate detached teammates.'),
+  skill('pdf-tools', 'Split, merge and OCR PDFs.'),
+  skill('run', 'Launch the project app.', { scope: 'project', path: '/work/app/.claude/skills/run/SKILL.md', project: { root: '/work/app' } }),
+];
 
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'catalogs';
@@ -142,7 +155,8 @@ const page = tab => (
       members={members}
       machines={[{ connection: CONNECTION, name: 'studio-mac' }]}
       createClient={createClient}
-      loadSkills={loadSkills}
+      loadMachineSkills={loadMachineSkills}
+      installHost={{ createClient }}
     />
   </div>
 );
@@ -152,7 +166,7 @@ const sessions = [
   sessionView('ora', { config: { teammate: 'ora', label: 'Plain chores', mode: 'interactive', cwd: '/work/chores' }, state: { lastActivityAt: AT } }),
 ];
 
-if (['catalogs', 'shared', 'people', 'skills'].includes(view)) {
+if (['catalogs', 'shared', 'people'].includes(view)) {
   createRoot(root).render(page(view));
 } else if (view === 'full') {
   createRoot(root).render(
@@ -171,7 +185,7 @@ if (['catalogs', 'shared', 'people', 'skills'].includes(view)) {
             members={members}
             machines={[{ connection: CONNECTION, name: 'studio-mac' }]}
             createClient={createClient}
-            loadSkills={loadSkills}
+            loadMachineSkills={loadMachineSkills}
           />
         </div>
       </div>
@@ -281,17 +295,21 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-catalogs-list]').waitFor({ state: 'visible' });
   await shot(page, 'tab-my-catalogs', theme, vp);
 
+  await page.locator('[data-catalog-open="Team skills"]').click();
+  await page.locator('[data-catalog-publish-skills]').waitFor({ state: 'visible' });
+  await shot(page, 'catalog-detail', theme, vp);
+  await page.locator('[data-catalog-publish-skills]').click();
+  await page.locator('[data-publish-skill]').first().waitFor({ state: 'visible' });
+  await shot(page, 'publish-skills', theme, vp, '[role="dialog"]');
+
   await open(page, theme, 'shared');
-  await page.locator('[data-shared-publisher]').first().waitFor({ state: 'visible' });
-  await shot(page, 'tab-shared-with-me', theme, vp);
+  await page.locator('[data-shared-item-row]').first().waitFor({ state: 'visible' });
+  await page.locator('[data-shared-item-installed]').first().waitFor({ state: 'visible' });
+  await shot(page, 'tab-subscriptions', theme, vp);
 
   await open(page, theme, 'people');
   await page.locator('[data-members-person]').first().waitFor({ state: 'visible' });
   await shot(page, 'tab-people', theme, vp);
-
-  await open(page, theme, 'skills');
-  await page.getByText('pdf-tools').first().waitFor({ state: 'visible' });
-  await shot(page, 'tab-skills', theme, vp);
 
   if (vp === 'phone') {
     await open(page, theme, 'more');
