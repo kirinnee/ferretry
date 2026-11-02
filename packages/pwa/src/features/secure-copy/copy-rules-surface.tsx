@@ -31,6 +31,7 @@ import {
   readCopySettings,
   removeRule,
   stagePasteRule,
+  stageProfileTargets,
 } from '../../lib/secure-copy.ts';
 import { CopyRulesCard } from './copy-rules-card.tsx';
 
@@ -134,10 +135,10 @@ export function CopyRulesSurface({
     [client, connection.daemonId, staging],
   );
 
-  /** One staged rule through its passkey: made, or nothing approved (a dismissed prompt is not an error). */
+  /** One staged change through its passkey: made, or nothing approved (a dismissed prompt is not an error). */
   const approve = useCallback(
-    async (next: CopyClient, staged: PasteRuleStaged): Promise<boolean> => {
-      const outcome = await confirmPasteRuleStage(next, askPasskey, staged);
+    async (next: CopyClient, staged: PasteRuleStaged, taken = false): Promise<boolean> => {
+      const outcome = await confirmPasteRuleStage(next, askPasskey, staged, { taken });
       if (outcome.kind === 'failed') throw new Error(outcome.words);
       return outcome.kind === 'made';
     },
@@ -151,7 +152,7 @@ export function CopyRulesSurface({
     [write, staging, approve],
   );
   const approveWaiting = useCallback(
-    (staged: PasteRuleStaged) => write(next => approve(next, staged)),
+    (staged: PasteRuleStaged) => write(next => approve(next, staged, true)),
     [write, approve],
   );
   const denyWaiting = useCallback(
@@ -159,9 +160,16 @@ export function CopyRulesSurface({
     [write],
   );
   const remove = useCallback((id: string) => write(next => removeRule(next, id)), [write]);
+  // Turning profile targets ON widens every terminal rule it could match: staged with its own passkey on a machine that
+  // stages paste changes (secrev-1334 M2). Turning it off is the one-step write.
   const changeSettings = useCallback(
-    (settings: PasteRuleSettings) => write(next => changeCopySettings(next, settings)),
-    [write],
+    (settings: PasteRuleSettings) =>
+      write(async next =>
+        staging && settings.allowProfileTargets
+          ? await approve(next, await stageProfileTargets(next))
+          : await changeCopySettings(next, settings),
+      ),
+    [write, staging, approve],
   );
 
   if (failure !== null && failure.daemonId === connection.daemonId)

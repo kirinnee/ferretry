@@ -211,15 +211,49 @@ describe('the task-plan routes: a ferret never answers its own plan', () => {
 });
 
 describe('the task-plan routes: approving', () => {
-  it('should approve paste lines from the machine at once, with no passkey, as a paste plan always was', async () => {
-    const { dispatch, service, rules } = await served();
+  it('should stage a paste-only selection and allow it only with a passkey bound to that stage (!A244)', async () => {
+    const { dispatch, routes, service, rules } = await served();
     const plan = await service.propose(SESSION, { lines: [SIGN_IN, PASTE] });
+    const other = await service.propose(SESSION, { lines: [PASTE] });
+    const OWNER = { kind: 'owner', actor: { kind: 'host' } } as const;
 
     const answer = await dispatch.dispatch(post(`${base(plan.id)}/approval`, { lines: [{ line: 1 }] }));
+    const stage = (jsonBody(answer).staged as { stage: TaskPlanStageId }).stage;
+    const elsewhere = await handled(routes, 'POST', `${base(other.id)}/approval`, {
+      credential: DEVICE,
+      body: { lines: [{ line: 0 }] },
+    });
+    const otherSubject = service.boundSubjectOf((elsewhere.body.staged as { stage: TaskPlanStageId }).stage);
+    const commit = async (credential: AuthenticatedCredential, proofs: { act: string; subject?: string }[]) =>
+      await handled(routes, 'POST', `${base(plan.id)}/approval/${stage}/commit`, { credential, proofs });
+
+    // The machine's token, a held window (an unstamped proof), and a proof bound to another plan's stage.
+    const refusals = [
+      await commit(HOST, []),
+      await commit(DEVICE, [{ act: 'approve-task-plan' }]),
+      await commit(DEVICE, [{ act: 'approve-task-plan', subject: otherSubject }]),
+    ];
+    should(answer.status).equal(201);
+    should(jsonBody(answer)).match({ outcome: 'staged', staged: { lines: [1], plan: plan.id } });
+    should(refusals.map(refusal => [refusal.status, refusal.body.code])).eql(
+      refusals.map(() => [403, STEP_UP_REQUIRED_CODE]),
+    );
+    should(rules.list(OWNER)).have.length(0);
+
+    const proved = await commit(DEVICE, [{ act: 'approve-task-plan', subject: service.boundSubjectOf(stage) }]);
+
+    should(proved).match({ status: 200, body: { state: 'approved', answered: { proof: 'passkey' } } });
+    should(rules.list(OWNER)).have.length(1);
+  });
+
+  it('should decline with nothing ticked at once, with no passkey', async () => {
+    const { dispatch, service } = await served();
+    const plan = await service.propose(SESSION, { lines: [PASTE] });
+
+    const answer = await dispatch.dispatch(post(`${base(plan.id)}/approval`, { lines: [] }));
 
     should(answer.status).equal(200);
-    should(jsonBody(answer)).match({ outcome: 'answered', plan: { state: 'approved', answered: { proof: 'none' } } });
-    should(rules.list({ kind: 'owner', actor: { kind: 'host' } })).have.length(1);
+    should(jsonBody(answer)).match({ outcome: 'answered', plan: { state: 'declined' } });
   });
 
   it('should refuse the machine a ticked sign-in without a passkey proof, whatever its settings', async () => {
@@ -317,7 +351,7 @@ describe('the task-plan routes: approving', () => {
     const page = await dispatch.dispatch(post(`${base(plan.id)}/approval`, { lines: [{ line: 0 }] }));
     const paste = await dispatch.dispatch(post(`${base(plan.id)}/approval`, { lines: [{ line: 1 }] }));
 
-    should([page.status, paste.status]).eql([403, 200]);
+    should([page.status, paste.status]).eql([403, 201]);
   });
 
   it('should show a machine-staged selection on the plan card, and drop it with no change made', async () => {
@@ -381,18 +415,21 @@ describe('the task-plan routes: revoke, and the kept paste-plan route', () => {
     const beyond = await dispatch.dispatch(
       post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [1] }),
     );
-    const approved = await dispatch.dispatch(
+    const ticked = await dispatch.dispatch(
       post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }),
     );
 
     should(jsonBody(listed)).match({ plans: [{ id: plan.id, items: [{ to: { program: 'vercel' } }] }] });
     should((jsonBody(listed).plans as { items: unknown[] }[])[0]?.items).have.length(1);
     should(beyond.status).equal(400);
-    should(approved.status).equal(200);
-    should(jsonBody(approved)).match({ state: 'approved', approved: [0] });
-    should(service.get({ kind: 'owner', actor: { kind: 'host' } }, SESSION, plan.id).lines.map(line => line.state)).eql(
-      ['declined', 'approved'],
+    // The one-step route can't carry the passkey a tick now needs (!A244): it allows nothing.
+    should(ticked.status).equal(409);
+    should(jsonBody(ticked).code).equal('needs_passkey');
+    should(service.get({ kind: 'owner', actor: { kind: 'host' } }, SESSION, plan.id).state).equal('pending');
+    const declined = await dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [] }),
     );
+    should(jsonBody(declined)).match({ state: 'declined' });
   });
 });
 

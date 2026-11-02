@@ -177,7 +177,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       },
     },
     {
-      // STAGE: paste lines only (or nothing ticked) are answered at once; any ticked sign-in line is held for its passkey.
+      // STAGE: nothing ticked is a decline, answered at once; any ticked line is held for its passkey (owner ruling on !A244).
       method: 'POST',
       path: '/v1/sessions/:sessionId/task-plans/:planId/approval',
       ...CONFIGURE,
@@ -192,7 +192,6 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
         const refused = refusedReach(context, reach) ?? refusedAccountNames(context);
         if (refused !== undefined) return refused;
         const answer = await plans.stage(caller, sessionId, planId, approval).catch(taskPlanAnswered);
-        if (answer.outcome === 'answered' && reach.store) spentSecretWrite(context);
         return jsonResponse(TaskPlanApprovalAnswerSchema.parse(answer), answer.outcome === 'staged' ? 201 : 200);
       },
     },

@@ -159,9 +159,10 @@ export class PlanController {
       !(await this.ports.gateway.features()).includes(DAEMON_FEATURES.taskPlan)
     )
       throw new Error(
-        'a sign-in line can only be confirmed on the plan card in the app, and this daemon does not report that card yet: nothing was staged. Allow the paste lines now, or the sign-in lines once the app shows plan cards',
+        'a sign-in line can only be confirmed on the plan card in the app, and this daemon does not report that card yet: nothing was staged',
       );
     const answer = await this.ports.gateway.stage(plan.sessionId, plan.id, approval);
+    // Answered at once only for a decline, or by a daemon from before every tick needed the passkey (!A244).
     if (answer.outcome === 'answered') {
       this.ports.out.success(
         options.json === true ? JSON.stringify(answer.plan, null, 2) : this.#answered(answer.plan, approval),

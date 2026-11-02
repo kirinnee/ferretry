@@ -351,6 +351,30 @@ describe('a staged paste rule (!A244)', () => {
     ).deepEqual(['Any ferret on this machine', 'Any number', 'No end: until you remove it']);
   });
 
+  it('should word every source, destination and life the way the passkey prompt shows it', () => {
+    const until = (expiresInSeconds: number) =>
+      secureCopy.pasteRuleWords({ ...RULE, expiresInSeconds }).rows.find(row => row.label === 'Until')?.value;
+
+    should(secureCopy.pasteFromWords({ kind: 'browser', origin: 'https://github.com' })).equal(
+      'text on https://github.com',
+    );
+    should(secureCopy.pasteFromWords({ kind: 'clipboard', origin: 'https://github.com' })).equal(
+      'the clipboard of https://github.com',
+    );
+    should(secureCopy.pasteToWords({ kind: 'browser', origin: 'https://vercel.com' })).equal(
+      'a field on https://vercel.com',
+    );
+    should(secureCopy.pasteToWords({ kind: 'secret', name: 'VERCEL_TOKEN' })).equal('the secret VERCEL_TOKEN');
+    should([until(86_400), until(3 * 86_400), until(3_600), until(2_700), until(61), until(60)]).deepEqual([
+      'For 1 day from approval',
+      'For 3 days from approval',
+      'For 1 hour from approval',
+      'For 45 minutes from approval',
+      'For 61 seconds from approval',
+      'For 1 minute from approval',
+    ]);
+  });
+
   it('should bind its subject to the stage and the exact request, nothing else', () => {
     const stage = `prs_${'a'.repeat(24)}` as const;
     const other = `prs_${'b'.repeat(24)}` as const;

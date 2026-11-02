@@ -276,7 +276,7 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
         staging={machineOffers(health, DAEMON_FEATURES.pasteRulePasskey)}
         {...(requirePasteRule === undefined
           ? {}
-          : { askPasskey: (stage, words) => requirePasteRule(connection, stage, words) })}
+          : { askPasskey: (stage, words, act) => requirePasteRule(connection, stage, words, act) })}
       />
       {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
         <TaskPlansSurface connection={connection} createClient={createClient} />

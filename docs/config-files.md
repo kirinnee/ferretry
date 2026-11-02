@@ -110,14 +110,18 @@ left out.
 
 ## Routes
 
-| Route                       | Grant                                                                                                                               | Does                                                   |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `GET /v1/config/status`     | `fleet.use`                                                                                                                         | every file, its state, every issue, every held edit    |
-| `GET /v1/config/file?path=` | the file's capability, `use`                                                                                                        | one file (or the starter a new one begins with) + etag |
-| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                                                                              | write a file that checks; a loosening may be held      |
-| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                                                                          | confirm one held edit by its etag                      |
-| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243) | the owner sets or clears one default account line      |
-| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                | the `config.*` tools                                   |
+| Route                       | Grant                                                                                                                                | Does                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `GET /v1/config/status`     | `fleet.use`                                                                                                                          | every file, its state, every issue, every held edit    |
+| `GET /v1/config/file?path=` | the file's capability, `use`                                                                                                         | one file (or the starter a new one begins with) + etag |
+| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                                                                               | write a file that checks; a loosening may be held      |
+| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                                                                           | confirm one held edit by its etag                      |
+| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely to set or change a line, none to remove one (!A243)¹ | the owner sets or clears one default account line      |
+| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                                                                                 | the `config.*` tools                                   |
+
+¹ Removing one default can still change which account a card offers first: a narrower line (a project or a folder)
+that is removed lets a broader `sites` line for the same place apply. Removing never adds an account or a line, and
+owner decision !A243 accepts it as tap-free.
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone

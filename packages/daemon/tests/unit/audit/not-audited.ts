@@ -124,6 +124,10 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'the old one-step create makes nothing: it answers that a paste rule needs its own passkey (owner decision !A244)',
   'POST /v1/copy-rules/stages': 'stages a paste rule, which allows nothing; the commit that would is audited',
   'DELETE /v1/copy-rules/stages/:stage': 'drops a staged paste rule; allows nothing',
+  'POST /v1/copy-rules/stages/:stage/bind':
+    'a paired device takes a machine-staged paste change to approve it with its own passkey; it allows nothing, and the commit that would is audited',
+  'POST /v1/copy-rules/settings/stages':
+    'stages turning on programs in your own profile, which changes nothing; the commit that would is audited',
   'POST /v1/sign-in-rules/stages/:stage/confirm-in-app':
     'shows a rule staged at the machine in the app; it approves nothing, and the commit that would is audited',
   'POST /v1/sign-in-rules/stages/:stage/bind':

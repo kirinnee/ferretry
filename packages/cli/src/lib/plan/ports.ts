@@ -40,6 +40,8 @@ export interface ICopyGateway {
    * passkey bound to its stage, which the machine's token cannot prove, so the owner commits it in the app.
    */
   stageRule(rule: PasteRuleCreate): Promise<PasteRuleStaged>;
+  /** STAGES turning on programs in your own profile, with the rules it widens; the owner approves it in the app. */
+  stageProfileTargets(): Promise<PasteRuleStaged>;
   /** Where a staged paste rule stands, for the wait. */
   ruleStage(stage: string): Promise<PasteRuleStageView>;
   removeRule(id: string): Promise<void>;

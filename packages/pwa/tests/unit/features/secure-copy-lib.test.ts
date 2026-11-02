@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import type { PasteRule } from '@ferretry/protocol';
+import type { PasteRule, PasteRuleStaged } from '@ferretry/protocol';
 import {
   addRule,
   answerPlan,
+  confirmPasteRuleStage,
   fromWords,
   listPlans,
   listRules,
@@ -172,5 +173,46 @@ describe('the add-rule form', () => {
     );
     expect(problem({ count: '0' })).toBe('A count is a whole number from 1 to 100, or empty for no count.');
     expect(problem({ hours: '721' })).toBe('Hours are more than 0 and at most 720 (30 days), or empty for no end.');
+  });
+});
+
+describe('confirming one staged paste change', () => {
+  const STAGED: PasteRuleStaged = {
+    stage: `prs_${'1'.repeat(24)}`,
+    kind: 'rule',
+    does: 'Ferretry pastes what gh prints into vercel in a terminal, for any ferret on this machine, without asking.',
+    rows: [{ label: 'Staged', value: 'At this machine, 2026-11-02 09:00 UTC' }],
+    runsAnything: false,
+    expiresAt: '2026-11-02T09:02:00.000Z',
+  };
+
+  it('drops its own stage and says why when the passkey prompt fails, and never commits', async () => {
+    const { client, calls } = fakeClient(() => ({ stage: STAGED.stage, dropped: true }));
+
+    const outcome = await confirmPasteRuleStage(
+      client,
+      async () => {
+        throw new Error('the passkey sheet closed');
+      },
+      STAGED,
+    );
+
+    expect(outcome).toEqual({ kind: 'failed', words: 'the passkey sheet closed' });
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([`DELETE /v1/copy-rules/stages/${STAGED.stage}`]);
+  });
+
+  it('says why a commit failed after the passkey, and drops nothing then', async () => {
+    const { client, calls } = fakeClient(call => {
+      if (call.path.endsWith('/commit')) throw new Error('the daemon is gone');
+      return STAGED;
+    });
+
+    const outcome = await confirmPasteRuleStage(client, async () => true, STAGED, { taken: true });
+
+    expect(outcome).toEqual({ kind: 'failed', words: 'the daemon is gone' });
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      `POST /v1/copy-rules/stages/${STAGED.stage}/bind`,
+      `POST /v1/copy-rules/stages/${STAGED.stage}/commit`,
+    ]);
   });
 });

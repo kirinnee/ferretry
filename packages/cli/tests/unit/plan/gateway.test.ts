@@ -88,6 +88,44 @@ describe('ProtocolCopyGateway', () => {
     should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
   });
 
+  it('should stage a paste rule and read its stage, with no way to commit one', async () => {
+    const STAGED = {
+      stage: `prs_${'1'.repeat(24)}`,
+      kind: 'rule',
+      does: 'Ferretry pastes what gh prints into vercel in a terminal, for any ferret on this machine, without asking.',
+      rows: [
+        { label: 'From', value: 'what gh prints' },
+        { label: 'To', value: 'vercel in a terminal' },
+        { label: 'Who', value: 'Any ferret on this machine' },
+        { label: 'Pastes', value: 'Any number' },
+        { label: 'Until', value: 'No end: until you remove it' },
+      ],
+      runsAnything: false,
+      expiresAt: '2026-10-31T12:02:00.000Z',
+    };
+    const { calls, copy } = gateway((path, method) =>
+      method === 'POST'
+        ? STAGED
+        : path === '/v1/health'
+          ? health({ features: ['copy-rules.passkey.1'] })
+          : { ...STAGED, state: 'approved', rule: RULE.id },
+    );
+
+    should(await copy.stageRule({ from: RULE.from, to: RULE.to })).eql(STAGED);
+    should(await copy.stageProfileTargets()).eql(STAGED);
+    should(await copy.ruleStage(STAGED.stage)).match({ state: 'approved', rule: RULE.id });
+    should(await copy.features()).eql(['copy-rules.passkey.1']);
+    should(calls.map(call => `${call.method} ${call.path}`)).eql([
+      'POST /v1/copy-rules/stages',
+      'POST /v1/copy-rules/settings/stages',
+      `GET /v1/copy-rules/stages/${STAGED.stage}`,
+      'GET /v1/health',
+    ]);
+    should(calls[0]?.body).eql({ from: RULE.from, to: RULE.to });
+    should(calls.every(call => !call.path.endsWith('/commit'))).be.true();
+    should(Object.keys(Object.getPrototypeOf(copy) as object)).not.containEql('commitRule');
+  });
+
   it('should refuse a reply that does not match the protocol', async () => {
     const { copy } = gateway(() => ({ rules: [{ ...RULE, value: 'ghp_x' }] }));
 

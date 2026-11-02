@@ -98,6 +98,7 @@ export const STEP_UP_ACTS_EVERY_CALLER = [
   'approve-task-plan',
   'approve-sign-in-rule',
   'approve-paste-rule',
+  'allow-profile-targets',
 ] as const satisfies readonly StepUpAct[];
 export type EveryCallerStepUpAct = (typeof STEP_UP_ACTS_EVERY_CALLER)[number];
 /** An act the machine itself (its admin token, on loopback) is never asked to prove. */
@@ -110,14 +111,16 @@ export const stepUpSkippableAtMachine = (act: StepUpAct): act is MachineSkippabl
 /**
  * The kind of staged thing each every-caller act is bound to: a 2FA seed's stage for `add-2fa-key`, a task-plan
  * selection's stage for `approve-task-plan`, a standing rule's stage for `approve-sign-in-rule`, a paste rule's stage
- * for `approve-paste-rule`. A proof asked with another act's stage is refused before any challenge is minted, so one
- * ceremony can never be dressed up as another.
+ * for `approve-paste-rule` and a staged "programs in my own profile" for `allow-profile-targets` (one kind of stage, its
+ * own act and subject domain each). A proof asked with another act's stage is refused before any challenge is minted, so
+ * one ceremony can never be dressed up as another.
  */
 export const STEP_UP_SUBJECTS = {
   'add-2fa-key': TwoFactorStageIdSchema,
   'approve-task-plan': TaskPlanStageIdSchema,
   'approve-sign-in-rule': SignInRuleStageIdSchema,
   'approve-paste-rule': PasteRuleStageIdSchema,
+  'allow-profile-targets': PasteRuleStageIdSchema,
 } as const satisfies Record<EveryCallerStepUpAct, z.ZodType<string>>;
 /** The stage id an every-caller act's proof is bound to. */
 export type StepUpSubjectOf<Act extends EveryCallerStepUpAct> = z.infer<(typeof STEP_UP_SUBJECTS)[Act]>;
@@ -414,16 +417,17 @@ export const STEP_UP_ACTS = {
   addTwoFactorKey: 'add-2fa-key',
   /**
    * Letting secure-copy rules paste into programs from the owner's OWN profile (`~/.nix-profile`), which any process
-   * running as the owner — every ferret — can change (docs/secure-copy.md, owner decision !A182). Turning it OFF
-   * never asks.
+   * running as the owner — every ferret — can change (docs/secure-copy.md, owner decision !A182). It widens every
+   * terminal paste rule, so it is asked of EVERY caller, the machine included, and bound to the one staged change and the
+   * rules it widens (`profileTargetsApprovalSubject`, secrev-1334 M2, under !A244). Turning it OFF never asks.
    */
   allowProfileTargets: 'allow-profile-targets',
   /**
    * Approving the SIGN-IN lines of a ferret's task plan (task-plan.ts, docs/secure-copy.md): Ferretry then types an
    * account's password, and maybe its code, with no tap. The admin token every ferret holds could otherwise approve a
    * ferret's own plan, so this is asked of EVERY caller, the machine itself included, and its proof is bound to the one
-   * staged selection it commits (`taskPlanApprovalSubject`). A selection of paste lines only never asks; revoking never
-   * asks.
+   * staged selection it commits (`taskPlanApprovalSubject`). A selection of paste lines asks too (owner ruling on
+   * !A244); only declining and revoking never ask.
    */
   approveTaskPlan: 'approve-task-plan',
   /**

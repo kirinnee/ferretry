@@ -257,10 +257,12 @@ describe('the passkey step-up wire', () => {
       'approve-task-plan',
       'approve-sign-in-rule',
       'approve-paste-rule',
+      'allow-profile-targets',
     ]);
     // Every other act is one the machine itself is never asked to prove; these, every caller is.
     should(stepUp.StepUpActSchema.options.filter(act => !stepUp.stepUpSkippableAtMachine(act))).deepEqual([
       'add-2fa-key',
+      'allow-profile-targets',
       'approve-task-plan',
       'approve-sign-in-rule',
       'approve-paste-rule',

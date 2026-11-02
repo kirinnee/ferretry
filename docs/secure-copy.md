@@ -176,7 +176,7 @@ without ever reading it. It is the same input request, with the store as the des
 
 ### Approving in advance
 
-On screen: Settings › this machine › **Secure copy** › Pastes approved in advance.
+On screen: Settings › Secure copy › Pastes approved in advance.
 
 - **A paste rule** allows pastes from a source (`command:<program>`, `browser:<origin>`, `clipboard:<origin>`) to
   a destination (`terminal:<program>`, `browser:<origin>`, `secret:<NAME>`), for one session or any, with an
@@ -191,9 +191,16 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   stage (`subject`: the staged rule `prs_…`, `pasteRuleApprovalSubject(stage, canonical)`). The commit
   (`POST /v1/copy-rules/stages/:stage/commit`) takes only that proof: a held step-up window, an unlock, a proof for
   another act or another stage, and the machine's own token are all answered the step-up demand, and nothing is
-  made. A stage lives one passkey challenge (two minutes), in memory only; at most eight wait at once.
-  `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it under
-  Settings › Secure copy › Pastes approved in advance › **Waiting for your passkey** (or Deny it). The old
+  made. A stage lives one passkey challenge (two minutes), in memory only.
+- **Who may answer a stage** (secrev-1334 L1, L2). A stage a paired device made is that device's alone: no other
+  device sees it, gets its challenge or commits it. A stage the machine made (`fy copy rules add`, `fy copy rules
+profile on`) is listed for every paired device under Settings › Secure copy › Pastes approved in advance ›
+  **Waiting for your passkey**; Approve with passkey… first TAKES it (`POST /v1/copy-rules/stages/:stage/bind`), and
+  from then on only that device gets its challenge or commits it. The machine reads and drops only its own stages and
+  never commits one. Every stage's rows end with **Staged**: "At this machine" or "On <device name>", and when, so a
+  stage nobody expected stands out. Each stager keeps at most eight waiting: a new one drops that stager's own oldest,
+  never another's. A dismissed prompt drops a stage this device made, and leaves a machine's stage waiting (Deny
+  drops it). `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it there. The old
   one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; an app or `fy` on a
   daemon that does not report `copy-rules.passkey.1` keeps the one-step add.
 - **Narrowing and removing stay tap-free.** Removing a rule (`DELETE /v1/copy-rules/:ruleId`) and dropping a staged
@@ -240,11 +247,14 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
   the agent's reason (shown as its words). The owner allows some or all with `fy plan approve <id> 1 3`
-  (`fy copy plan approve` is the same command; none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
+  (`fy copy plan approve` is the same command; none declines; it stages and waits for the passkey in the app like any
+  plan), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
   generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
   the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
   rule). Two answers arriving together make the rules once. Closing the card approves nothing. A paste plan is now a
-  [task plan](#task-plans) of paste lines only, answered the same way.
+  [task plan](#task-plans) of paste lines only, answered the same way: allowing any line needs the plan's bound
+  passkey (owner ruling on !A244), and the old one-step `POST …/copy-plans/:pid/approve` only declines now (a tick is
+  `409 needs_passkey`).
 - **A plan's rules live in memory only.** They are kept apart from the owner's own rules, never written to the rules
   file, and end with their plan: at its expiry, when it is revoked, and when its session ends. A restart forgets them,
   so those pastes ask again. Plan rules a store from before this change still holds are dropped when the daemon reads it.
@@ -261,7 +271,8 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 > ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
 > The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3) or on the card.
 > `secure.preapprove` still raises paste-only task plans. An app that doesn't know `task-plan.1` draws a plan with
-> paste lines as the old copy-plan card, as it always did.
+> paste lines as the old copy-plan card; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
+> Decline still works.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
@@ -289,7 +300,8 @@ The rules the contract fixes:
   domains (or `tool@host`), the recipe version and the field identities with history. A change to any one of them
   changes the subject. A plan record with an approved sign-in line and no passkey answer, or a passkey answer from
   the machine itself, doesn't parse. Whatever the daemon resolved, the bytes bind a page line only to web hosts and a
-  terminal line only to `sudo`, `su` or `doas`. A selection of paste lines only keeps the paste plan's rule.
+  terminal line only to `sudo`, `su` or `doas`. A selection of paste lines only needs the same passkey (owner ruling
+  on !A244): any ticked line, paste or sign-in, is staged and bound.
 - **The ferret learns nothing about secret fields.** Its view (`taskPlanAgentView`) has each line's state, the
   picked account's name and uses left. It has no `can`, `history`, flags, reasons or code tick. When a plan doesn't
   fill a card, the ferret gets one sentence for every reason. The owner's card gets the reason as a fixed sentence
@@ -362,8 +374,8 @@ a ferret's words: a plain item with the same text is a plain item.
   says: "This stops misuse through a ferret's tools and page text; it can't stop a ferret
   that reads Ferretry's own files."
 - **Stage, passkey, commit.** `POST /v1/sessions/:sid/task-plans/:pid/approval` with the ticks and picks. Nothing
-  ticked declines the plan; paste lines only are approved at once, with no passkey. Any ticked sign-in line is
-  STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
+  ticked declines the plan, at once and with no passkey. Any ticked line, a paste line included (owner ruling on
+  !A244), is STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
   sign-in removed, moved to another account or with other login domains than the card showed is refused) and holds
   the canonical bytes for 2 minutes. One stage per plan: a new one drops the old. The app runs the passkey for
   `approve-task-plan` with the stage as its subject (`POST /v1/step-up/options` binds the challenge to that
@@ -372,7 +384,7 @@ a ferret's words: a plain item with the same text is a plain item.
   once; without one it answers the ordinary step-up demand. It never reads the grants, an unlock or
   `stepUpOnActions`, so the machine's token can never commit a sign-in line. All or nothing: the plan's paste rules
   and its sign-in grants are made together, or the plan stays pending. No device with a passkey: `409
-passkey_required` ("Add a passkey in Settings › Security first"); paste lines can still be approved alone.
+passkey_required` ("Add a passkey in Settings › Security first"); only declining works without one.
 - **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
   the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
   made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
@@ -435,12 +447,16 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
   a rule for sudo.
 - **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
   saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
-- **Who may turn it on:** the owner only. A ferret is refused before its request is read
-  (`PUT /v1/copy-rules/settings`). At the machine it takes effect at once; from a paired device it needs
-  `terminal.configure` and a passkey proved for this one act (`allow-profile-targets`), claimed in one step, so a
-  passkey proved for something else never turns it on. Turning it off never asks. At the machine,
-  `fy copy rules profile on|off` sets it through the same route (on prints the risk as a warning); a caller the daemon
-  governs (off this machine) is told that turning it on needs a passkey, and to switch it on in the app. It is kept beside the rules in
+- **Who may turn it on:** the owner only, and only with a passkey bound to what it widens (secrev-1334 M2, under
+  !A244), from every caller, the machine included. Turning it on is **staged** (`POST /v1/copy-rules/settings/stages`,
+  `terminal.configure`): the daemon lists, as Widens rows, every paste rule a program from your profile could satisfy
+  now, and the act `allow-profile-targets` is bound to that stage and that list
+  (`profileTargetsApprovalSubject(stage, canonical)`, its own domain). The commit
+  (`POST /v1/copy-rules/settings/stages/:stage/commit`) takes only that proof, and refuses (`profile_targets_changed`)
+  if the list it would widen changed since. `PUT /v1/copy-rules/settings` turning it on makes nothing
+  (`409 profile_targets_passkey_needed`); turning it off never asks. A ferret is refused before its request is read.
+  `fy copy rules profile on` stages at the machine, prints the rows and the risk, and waits for the passkey in the app
+  (Waiting for your passkey); `off` is the one-step write. It is kept beside the rules in
   `<state>/secure-copy/rules.json`; a file that cannot be read holds it off. "The owner only" is the honest-client
   boundary in [honest limits](#honest-limits): a ferret that reads the admin token is taken for the owner here too.
 - **What you see:** while the setting is on or off, every terminal rule a program from your profile could satisfy

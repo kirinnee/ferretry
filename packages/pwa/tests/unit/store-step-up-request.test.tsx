@@ -6,6 +6,7 @@ import {
   createAppStore,
   StoreProvider,
   useAddKeyStepUp,
+  useApprovePasteRuleStepUp,
   useApproveSignInRuleStepUp,
   useApproveTaskPlanStepUp,
   useStepUpRequest,
@@ -119,6 +120,52 @@ describe('useApproveSignInRuleStepUp', () => {
     const prompt = store.stepUp.snapshot();
     expect(prompt?.acts).toEqual([words.does]);
     expect(prompt?.words).toEqual(words);
+    store.stepUp.dismiss();
+    expect(await answer).toBe(false);
+    await view.unmount();
+  });
+});
+
+type ApprovePasteRule = ReturnType<typeof useApprovePasteRuleStepUp>;
+
+function ApprovePasteRuleProbe({ onAsk }: { readonly onAsk: (ask: ApprovePasteRule) => void }) {
+  onAsk(useApprovePasteRuleStepUp());
+  return null;
+}
+
+describe('useApprovePasteRuleStepUp', () => {
+  it('is no prompt at all outside the app’s store', async () => {
+    let ask: ApprovePasteRule = () => Promise.resolve(true);
+    const view = await mount(<ApprovePasteRuleProbe onAsk={value => (ask = value)} />);
+
+    expect(ask).toBeUndefined();
+    await view.unmount();
+  });
+
+  it('asks the one prompt for the act it is given, bound to the stage, with the daemon rows as structure', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+    });
+    let ask: ApprovePasteRule;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <ApprovePasteRuleProbe onAsk={value => (ask = value)} />
+      </StoreProvider>,
+    );
+    const words = {
+      does: 'Ferretry pastes what gh prints into vercel in a terminal, for any ferret on this machine, without asking.',
+      rows: [{ label: 'Staged', value: 'At this machine, 2026-11-02 09:00 UTC' }],
+      warnings: [],
+    };
+
+    const answer = ask?.(alpha, `prs_${'a'.repeat(24)}` as never, words, 'allow-profile-targets');
+
+    const prompt = store.stepUp.snapshot();
+    expect(prompt?.acts).toEqual([words.does]);
+    expect(prompt?.words).toEqual(words);
+    expect(prompt?.bound).toBe(true);
     store.stepUp.dismiss();
     expect(await answer).toBe(false);
     await view.unmount();

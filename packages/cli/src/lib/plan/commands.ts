@@ -16,7 +16,8 @@ paste it by name; each paste asks you on a card unless a paste rule you made her
                                     a paste rule: pastes from what gh prints into the vercel program go unasked;
                                     it is only STAGED here, and you make it with your passkey in the app
   rules rm <id>                     end a paste rule
-  rules profile on|off              whether a paste rule may match a program in your own profile (~/.nix-profile)
+  rules profile on|off              whether a paste rule may match a program in your own profile (~/.nix-profile);
+                                    on is only STAGED here, and you approve it with your passkey in the app
   plan ls | approve | revoke        the same as \`plan\` (see \`plan --help\`)
 
 Every paste a paste rule allows is still raised, audited and shown in the log. A ferret cannot run these commands.
@@ -29,8 +30,8 @@ const PLAN_HELP = `The owner's command for a ferret's plan: the sign-ins and pas
                                                 allow those lines; no numbers declines the plan
   revoke <id> [1 2 ...]                         end those lines (all of them with no numbers)
 
-A paste line is allowed at once. A sign-in line is only STAGED here: you confirm it with your passkey on the plan's
-card in the app, and this command waits for your answer. Nothing signs in until you do. --totp on a line also lets
+Every line, a paste line too, is only STAGED here: you confirm the selection with your passkey on the plan's card in
+the app, and this command waits for your answer. Nothing is allowed until you do; declining needs no passkey. --totp on a line also lets
 Ferretry type its 2FA code: ${AUTOMATED_CODE_WARNING} A ferret cannot run these commands.
 
 ${TASK_PLAN_HONEST_LIMIT}`;

@@ -832,6 +832,30 @@ describe('attention needs-info command', () => {
     should(gateway.applied[0]?.request).not.have.property('task');
   });
 
+  it('should surface a feature read that failed for any other reason, and raise nothing', async () => {
+    // Arrange — not "could not ask the daemon": a fault of its own, which must not pass for an older daemon
+    const gateway = new RecordingAgendaGateway(board, afterAdd);
+    gateway.features = async () => {
+      throw new TypeError('a bug in the reply handling');
+    };
+    const out = new CapturingOutput();
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerAgendaCommands(program, new AgendaController(gateway, out, SESSION), async () => {});
+
+    // Act
+    const failed = await program
+      .parseAsync(['node', 'fy', ...withBrief(['agenda', 'add', 'Try it', '--title', 'Try it', '--task', 'F12'])])
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should(failed).be.instanceOf(TypeError);
+    should(gateway.applied).have.length(0);
+  });
+
   it('should leave the card to the focus card when --offer-close comes with a bare --task', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
