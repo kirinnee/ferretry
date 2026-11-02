@@ -11,6 +11,7 @@ import {
   queueActions,
   readSessionQueue,
   withdrawQueued,
+  withdrawReplyVia,
 } from '../../src/lib/send-queue.ts';
 
 const message = (overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
@@ -397,5 +398,39 @@ describe('withdrawQueued', () => {
   test('any other refusal, or no way to reach the machine, throws so Undo can say the reply may still arrive', async () => {
     expect(withdrawQueued(failing(500) as never, 's', 'm1')).rejects.toThrow('server words');
     expect(withdrawQueued(null, 's', 'm1')).rejects.toThrow('not reachable');
+  });
+});
+
+describe('withdrawReplyVia', () => {
+  const card = { daemonId: 'studio', view: { config: { id: 's1' } } };
+  const studio = { daemonId: 'studio' };
+
+  test('takes the reply back from the machine it went to, through that machine’s client', async () => {
+    const asked: string[] = [];
+    const clients = {
+      client: async (connection: { daemonId: string }) => {
+        asked.push(connection.daemonId);
+        return {
+          request: async (path: string) => {
+            asked.push(path);
+            return message();
+          },
+        } as never;
+      },
+    };
+    const outbox = { edit: async () => 'gone' as const, cancel: async () => 'gone' as const };
+    const take = withdrawReplyVia([{ connection: studio }], clients, outbox as never);
+    expect(await take(card, 'm1')).toBe('withdrawn');
+    expect(asked).toEqual(['studio', '/v1/sessions/s1/queue/m1']);
+  });
+
+  test('refuses a machine that is no longer paired, without asking anyone', async () => {
+    const clients = {
+      client: async () => {
+        throw new Error('never asked');
+      },
+    };
+    const take = withdrawReplyVia([{ connection: { daemonId: 'laptop' } }], clients, {} as never);
+    expect(take(card, 'm1')).rejects.toThrow('no longer paired');
   });
 });

@@ -188,3 +188,60 @@ describe('Undo', () => {
     expect(replied.getSnapshot().entries).toEqual([]);
   });
 });
+
+describe('the overlay with several cards', () => {
+  it('deals the cards Undo brought back among the others in waiting order, longest-waiting first', async () => {
+    const { replied } = agenda();
+    replied.mark(card, { words: 'hi', sendId: 'm1', disposition: 'queued' });
+    await replied.undo();
+    const dealt = withRepliedCards([other], replied.getSnapshot());
+    expect(dealt.map(each => each.key)).toEqual([other.key, card.key]);
+  });
+
+  it('lists the cards under Replied newest first, ties by key', () => {
+    const { replied, time } = agenda();
+    time.advance(1_000);
+    replied.mark(card, { words: 'hi' });
+    const older = {
+      ...other,
+      item: { ...other.item, parked: { reason: 'replied', at: '2020-01-01T00:00:00.000Z' } },
+    } as never as typeof other;
+    const sameInstant = { ...older, key: 'zz', item: older.item } as typeof other;
+    const parked = withRepliedParked([older, sameInstant], replied.getSnapshot());
+    expect(parked.map(each => each.key)).toEqual([other.key, 'zz', card.key]);
+  });
+});
+
+describe('the overlay housekeeping', () => {
+  it('undoes the reply named by its key, and nothing for a key it does not hold', async () => {
+    const { replied, log } = agenda();
+    replied.mark(card, { words: 'hi', sendId: 'm1', disposition: 'queued' });
+    await replied.undo('nope');
+    expect(log).toEqual([]);
+    await replied.undo(card.key);
+    expect(log).toEqual(['withdraw m1', 'unsnooze']);
+  });
+
+  it('stops asking the page to open a card once it has, and ignores a card it never brought back', async () => {
+    const { replied } = agenda();
+    replied.mark(card, { words: 'hi' });
+    replied.revealed(card.key);
+    expect(replied.getSnapshot().entries[0]?.reveal).toBe(false);
+    await replied.undo();
+    expect(replied.getSnapshot().entries[0]?.reveal).toBe(true);
+    replied.revealed('nope');
+    expect(replied.getSnapshot().entries[0]?.reveal).toBe(true);
+    replied.revealed(card.key);
+    expect(replied.getSnapshot().entries[0]?.reveal).toBe(false);
+  });
+
+  it('forgets a notice once the toast has said it, and does nothing when there is none', async () => {
+    const { replied } = agenda();
+    replied.clearNotice();
+    replied.mark(card, { words: 'hi' });
+    await replied.undo();
+    expect(replied.getSnapshot().notice).not.toBeNull();
+    replied.clearNotice();
+    expect(replied.getSnapshot().notice).toBeNull();
+  });
+});

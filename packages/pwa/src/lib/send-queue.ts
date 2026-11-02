@@ -336,3 +336,22 @@ export const withdrawQueued = async (
     throw reason;
   }
 };
+
+/**
+ * Undo of an Inbox reply: finds the machine the reply went to among the paired ones and withdraws the message there.
+ * A machine that is no longer paired throws, so the page can say the card could not be put back honestly.
+ */
+export const withdrawReplyVia =
+  <Connection extends { readonly daemonId: string }>(
+    machines: readonly { readonly connection: Connection }[],
+    clients: { client(connection: Connection): Promise<Pick<IFyApiClient, 'request'> | null> },
+    outbox: Pick<SendOutbox, 'edit' | 'cancel'>,
+  ) =>
+  async (
+    card: { readonly daemonId: string; readonly view: { readonly config: { readonly id: string } } },
+    sendId: string,
+  ) => {
+    const machine = machines.find(each => each.connection.daemonId === card.daemonId);
+    if (machine === undefined) throw new Error('That machine is no longer paired with this browser.');
+    return await withdrawQueued(await clients.client(machine.connection), card.view.config.id, sendId, outbox);
+  };
