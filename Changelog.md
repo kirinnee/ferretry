@@ -1,3 +1,9 @@
+## [4.251.1](https://github.com/kirinnee/ferretry/compare/v4.251.0...v4.251.1) (2026-11-02)
+
+### Fixes
+
+* **agenda:** keep a gate answer's receipt with the answered item ([#1393](https://github.com/kirinnee/ferretry/issues/1393)) ([c37ea9e](https://github.com/kirinnee/ferretry/commit/c37ea9eb728009f44ac093f5311bf093e9ee5a05))
+
 ## [4.251.0](https://github.com/kirinnee/ferretry/compare/v4.250.0...v4.251.0) (2026-11-02)
 
 ### Features
