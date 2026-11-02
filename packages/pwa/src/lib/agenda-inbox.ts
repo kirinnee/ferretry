@@ -24,6 +24,7 @@ import {
   agendaDeepLinkFromFragment,
   agendaInDiscussion,
   agendaTurn,
+  isMachineAgendaId,
   LEGACY_ATTENTION_LINK_PARAMETER,
   type ResolvedAgendaItem,
   type SessionAgendaSummary,
@@ -241,7 +242,9 @@ export const agendaSummaryKey = (summary: SessionAgendaSummary): string =>
 
 /** Where a conversation opens AT an item: the session's page, naming the item (`?agenda=A3`). */
 export const agendaConversationPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  `${daemonSessionPath(daemonId, sessionId)}?${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  isMachineAgendaId(sessionId)
+    ? inboxTargetPath(daemonId, sessionId, id)
+    : `${daemonSessionPath(daemonId, sessionId)}?${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
 
 /** The item a conversation link names (`?agenda=A3` or the older `?attention=A3`), or `null` for none or a malformed one. */
 export const agendaTargetFromSearch = (search: string): AgendaId | null => {

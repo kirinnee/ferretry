@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
+import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -45,6 +45,7 @@ import {
   ChevronRight,
   CloudOff,
   Laptop,
+  Server,
   SkipForward,
   Undo2,
   Users,
@@ -119,7 +120,7 @@ import { BoardSendBack } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
-import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { browserClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
 import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
@@ -322,11 +323,15 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
   const who = inboxWho(card);
   return (
     <CardMetaLine
-      chat={{
-        to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
-        onNavigate,
-        hooks: { 'data-inbox-open-chat': '' },
-      }}
+      chat={
+        isMachineAgendaId(card.view.config.id)
+          ? undefined
+          : {
+              to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
+              onNavigate,
+              hooks: { 'data-inbox-open-chat': '' },
+            }
+      }
       hooks={{ 'data-inbox-who': '' }}
     >
       <CardKindChip kind={itemCardKind(card.item)} />
@@ -396,6 +401,7 @@ function OpenItem({
         ) : (
           <InboxWhoLine card={card} onNavigate={onNavigate} />
         )}
+        {isMachineAgendaId(card.view.config.id) ? <MachineNotes item={card.item} /> : null}
         <AgendaItemView
           busy={false}
           closeLabel="Back to the Inbox"
@@ -405,6 +411,7 @@ function OpenItem({
           formKey={card.key}
           history={history}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
+          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={card.item}
           onAct={act}
           onClose={place.onClose}
@@ -425,6 +432,46 @@ function OpenItem({
   );
 }
 
+/**
+/** The ferrets a machine notice lists, as `name (id): reason` lines; a line of any other shape is not one. */
+const FERRET_LINE = /^(.+) \(([^()\s]+)\): (.*)$/;
+
+const ferretsOf = (context: string | null | undefined): readonly { readonly name: string; readonly id: string }[] =>
+  (context ?? '').split('\n').flatMap(line => {
+    const match = FERRET_LINE.exec(line);
+    return match === null ? [] : [{ name: match[1] ?? '', id: match[2] ?? '' }];
+  });
+
+/** Why a machine notice was raised and what to do about it: the owner's command per listed ferret, tap to copy. */
+function MachineNotes({ item }: { readonly item: InboxCard['item'] }) {
+  const ferrets = ferretsOf(item.context);
+  return (
+    <div className="fy-inbox-machine-notes" data-inbox-machine-notes="">
+      <section>
+        <h3 className="fy-inbox-machine-notes__title">Why</h3>
+        <p data-inbox-machine-why="">{item.why}</p>
+      </section>
+      <section>
+        <h3 className="fy-inbox-machine-notes__title">What to do</h3>
+        <p data-inbox-machine-fix="">{item.howToResolve}</p>
+        {ferrets.length === 0 ? null : (
+          <ul className="fy-inbox-machine-notes__moves" data-inbox-machine-moves="">
+            {ferrets.map(ferret => {
+              const command = `fy migrate ${ferret.id} -a <runtime>`;
+              return (
+                <li data-inbox-machine-move={ferret.id} key={ferret.id}>
+                  <span className="fy-inbox-machine-notes__ferret">{ferret.name}</span>
+                  <code>{command}</code>
+                  <CopyButton label={`Copy the move command for ${ferret.name}`} text={command} write={copyWriter} />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
 /** A gate item's one quiet line: what it is (the lane's verb), the project, the ferret, and the way to its chat. */
 function GateMeta({
   card,
@@ -1007,6 +1054,8 @@ interface RowEnv {
   readonly rowRef: (key: string) => (element: HTMLAnchorElement | null) => void;
   /** Opens an item here, as the deck's top card. */
   readonly onOpen: (key: string) => void;
+  /** More than one machine is paired: the Machine group then says which machine it is. */
+  readonly severalMachines: boolean;
 }
 
 /** One item: its title and age, its ask on one line, and under it where it stands, its kind and its reference. */
@@ -1107,43 +1156,58 @@ function NoticeRow({ card, env }: { readonly card: InboxCard; readonly env: RowE
 
 /** One ferret: who and where on its header (a link to the chat), its items, then its notifications. */
 function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: RowEnv }) {
+  const head = (
+    <>
+      {group.machine ? (
+        <Server aria-hidden="true" className="fy-inbox-group__icon" data-agenda-group-icon="" size={16} />
+      ) : null}
+      <span className="fy-inbox-group__ferret">{group.ferret}</span>
+      {group.task === null ? null : (
+        <>
+          <span aria-hidden="true" className="fy-inbox-group__dot">
+            ·
+          </span>
+          <span className="fy-inbox-group__task">{group.task}</span>
+        </>
+      )}
+      {group.card === null ? null : (
+        <>
+          <span aria-hidden="true" className="fy-inbox-group__dot">
+            ·
+          </span>
+          <span className="fy-inbox-group__card" data-agenda-group-card="">
+            {group.card}
+          </span>
+        </>
+      )}
+      <span aria-hidden="true" className="fy-inbox-group__dot">
+        ·
+      </span>
+      <span className="fy-inbox-group__machine">{group.machineName}</span>
+      {group.via === null ? null : (
+        <span className="fy-inbox-group__via" data-agenda-group-via="">
+          via {group.via}
+        </span>
+      )}
+    </>
+  );
   return (
     <li className="fy-inbox-group" data-agenda-group={group.key}>
-      <RouteLink
-        className="fy-inbox-group__head"
-        data-agenda-group-link=""
-        onNavigate={env.onNavigate}
-        to={daemonSessionPath(group.daemonId, group.view.config.id)}
-      >
-        <span className="fy-inbox-group__ferret">{group.ferret}</span>
-        {group.task === null ? null : (
-          <>
-            <span aria-hidden="true" className="fy-inbox-group__dot">
-              ·
-            </span>
-            <span className="fy-inbox-group__task">{group.task}</span>
-          </>
-        )}
-        {group.card === null ? null : (
-          <>
-            <span aria-hidden="true" className="fy-inbox-group__dot">
-              ·
-            </span>
-            <span className="fy-inbox-group__card" data-agenda-group-card="">
-              {group.card}
-            </span>
-          </>
-        )}
-        <span aria-hidden="true" className="fy-inbox-group__dot">
-          ·
-        </span>
-        <span className="fy-inbox-group__machine">{group.machineName}</span>
-        {group.via === null ? null : (
-          <span className="fy-inbox-group__via" data-agenda-group-via="">
-            via {group.via}
-          </span>
-        )}
-      </RouteLink>
+      {group.machine ? (
+        // The machine agenda has no chat: its header names the machine's own notices and goes nowhere.
+        <div className="fy-inbox-group__head" data-agenda-group-machine="">
+          {head}
+        </div>
+      ) : (
+        <RouteLink
+          className="fy-inbox-group__head"
+          data-agenda-group-link=""
+          onNavigate={env.onNavigate}
+          to={daemonSessionPath(group.daemonId, group.view.config.id)}
+        >
+          {head}
+        </RouteLink>
+      )}
       <ul aria-label={`${group.ferret}'s items`} className="fy-inbox-group__rows">
         {group.items.map(card => (
           <ItemRow card={card} env={env} group={group} key={card.key} />
@@ -1533,6 +1597,7 @@ export function AgendaInboxPage({
     onNavigate,
     selectedKey,
     onOpen: openAt,
+    severalMachines: machines.length > 1,
     rowRef: key => element => {
       if (element === null) rowRefs.delete(key);
       else rowRefs.set(key, element);
@@ -1797,6 +1862,7 @@ export function AgendaInboxPage({
                 />
               ) : deck[0] === undefined ||
                 renderComposer === undefined ||
+                isMachineAgendaId(deck[0].view.config.id) ||
                 isGateItem(deck[0].item) ||
                 // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
                 deck[0].item.signInRuleSuggestion !== undefined ? null : (

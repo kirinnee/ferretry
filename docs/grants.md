@@ -191,6 +191,8 @@ only the owner's shell and paired devices — not a grant. A test pins this choi
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
+The machine agenda's routes (`GET` and `POST /v1/machine/agenda`, [agenda.md](agenda.md#the-machine-agenda)) sit on
+the same axis: owner-only, `caller: 'person'`, no grant, and a non-human actor is refused with 403.
 The one governed act inside the agenda is an answer that **confirms a held configuration change**
 ([agenda.md](agenda.md#confirming-a-configuration-change)): it asks that file's grant, exactly as
 `POST /v1/config/confirm` does. The answer route therefore declares `consultsGrants` — no demand of its own,

@@ -1671,9 +1671,15 @@ function snooze(ledger: AgendaLedger, command: SnoozeCommand): AgendaMutation {
   return replaceItem(ledger, item, command.at, 'parked');
 }
 
-/** The owner brings a parked item (snoozed, or replied to) back to their queue now. */
+/**
+ * The owner brings a parked item (snoozed, or replied to) back to their queue now. The daemon's own `system` actor
+ * may too, for the one thing only it knows: the machine agenda's item gained a member the owner has not seen.
+ */
 function unsnooze(ledger: AgendaLedger, command: UnsnoozeCommand): AgendaMutation {
-  if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner unsnoozes an item');
+  const daemonItself = command.actor.kind === 'daemon' && command.actor.cause === 'system';
+  if (command.actor.kind !== 'human' && !daemonItself) {
+    return failure('forbidden', 'only the owner unsnoozes an item');
+  }
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (target.item.parked === undefined) return unchanged(ledger);

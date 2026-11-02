@@ -204,6 +204,10 @@ describe('conversation links', () => {
     expect(agendaConversationPath(STUDIO, 'ses 1', 'A3')).toBe('/d/studio/session/ses%201?agenda=A3');
   });
 
+  test('a machine item opens in the Inbox, not a conversation', () => {
+    expect(agendaConversationPath(STUDIO, 'machine-agenda', 'A3')).not.toContain('/session/');
+  });
+
   test('reads a well-formed item id and refuses anything else', () => {
     expect(agendaTargetFromSearch('?agenda=A3')).toBe('A3');
     expect(agendaTargetFromSearch('?agenda=a3')).toBeNull();

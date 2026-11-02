@@ -16,7 +16,14 @@
  * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
  */
 
-import { type AgendaItem, agendaTitle, agendaWakeAt, formatTaskRef, type SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  agendaTitle,
+  agendaWakeAt,
+  formatTaskRef,
+  isMachineAgendaId,
+  type SessionView,
+} from '@ferretry/protocol';
 import { matchesMode, sessionsBarNames } from '../shell/sessions-bar-model.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
@@ -40,6 +47,8 @@ export interface FerretGroup {
   /** The sub-ferret's own name when the group's session is not the owner's thread it is named for; `null` when it is. */
   readonly via: string | null;
   readonly machineName: string;
+  /** The machine's own agenda (docs/agenda.md § The machine agenda): no ferret, no chat, always first. */
+  readonly machine: boolean;
   /** The ferret is idle until the owner answers. */
   readonly stopped: boolean;
   /** Agenda items (not plain notifications), in the agenda's order. */
@@ -50,7 +59,11 @@ export interface FerretGroup {
 
 const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringify([daemonId, sessionId]);
 
-const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true;
+/**
+ * A plain notification line (Clear, or tap to open its chat). The machine's own notices are never lines: they have no
+ * chat, so each is a full row that opens its detail — which ferrets, why, and the command that fixes it.
+ */
+const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true && !isMachineAgendaId(card.view.config.id);
 
 /** The card a conversation works on, as it is written: `&F12`. */
 const cardOf = (view: SessionView): string | null =>
@@ -106,6 +119,7 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
           ? null
           : (ownNames.ferret ?? ownNames.title),
       machineName: head.machineName,
+      machine: isMachineAgendaId(head.view.config.id),
       stopped: sessionAgendaSummary(head.view.state)?.stopped === true,
       items: ordered.flatMap(item => byItem.get(item) ?? []),
       notices: members.filter(isNoticeCard),
@@ -118,7 +132,8 @@ const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
     const item = lead(group);
     if (item !== undefined) rank.set(item, group);
   }
-  return sortAgenda([...rank.keys()]).flatMap(item => rank.get(item) ?? []);
+  const ranked = sortAgenda([...rank.keys()]).flatMap(item => rank.get(item) ?? []);
+  return [...ranked.filter(group => group.machine), ...ranked.filter(group => !group.machine)];
 };
 
 /** The inbox's three sections. */

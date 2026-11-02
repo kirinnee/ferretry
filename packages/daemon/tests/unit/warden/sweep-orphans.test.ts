@@ -78,18 +78,29 @@ describe('an orphaned card', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const raised = subject.board('worker');
     board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
     await subject.service.run({ force: false });
 
     // Assert
     should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'worker', notice: { task: { id: 'F1' } } });
-    should(raised.map(item => item.sourceRef)).eql(['warden-orphan:F1']);
-    should(subject.resolved.map(entry => [entry.sessionId, entry.sourceRef])).eql([['worker', 'warden-orphan:F1']]);
-    should(subject.board('worker')).be.empty();
+    should(subject.notices[0]).containDeep({ sessionId: 'machine', notice: { task: { id: 'F1' } } });
+    should(subject.resolved.map(entry => [entry.sessionId, entry.sourceRef])).eql([['machine', 'warden-orphan:F1']]);
     should(subject.state()).not.have.property('orphans');
     should(journalTypes(subject)).containEql('fleet.warden_orphan_cleared');
+  });
+
+  it('should say nothing cleared, and keep the card remembered, when the machine agenda refuses to take it off', async () => {
+    // Arrange
+    const board = boardPort(boardOf(orphanView()));
+    const subject = harness({ config: enabled(), fleet: [worker], board, removeFails: true });
+
+    // Act
+    await subject.service.run({ force: false });
+    board.set(boardOf(cardView({ assignee: 'worker' }, { activity: 'active' })));
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).not.containEql('fleet.warden_orphan_cleared');
   });
 
   it('should be shown but told to nobody while the Warden is off', async () => {
@@ -145,7 +156,7 @@ describe('an orphaned card', () => {
 
     // Assert
     should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
+    should(subject.notices[0]).containDeep({ sessionId: 'machine', notice: { task: { id: 'F1' } } });
     should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
     should(journalTypes(subject)).not.containEql('fleet.warden_orphan_failed');
   });
@@ -188,7 +199,7 @@ describe('an orphaned card', () => {
     // Assert
     should(subject.remedies).be.empty();
     should(subject.notices).have.length(1);
-    should(subject.notices[0]).containDeep({ sessionId: 'lead', notice: { task: { id: 'F1' } } });
+    should(subject.notices[0]).containDeep({ sessionId: 'machine', notice: { task: { id: 'F1' } } });
     should(subject.state().orphans?.F1).containEql({ via: 'notice', to: 'lead' });
   });
 

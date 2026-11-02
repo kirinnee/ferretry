@@ -1,4 +1,4 @@
-import { DoctorReportSchema, HealthViewSchema, type QueuedMessage } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema, isMachineAgendaId, type QueuedMessage } from '@ferretry/protocol';
 import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
@@ -2308,6 +2308,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
         );
       }}
       readConversation={async card => {
+        if (isMachineAgendaId(card.view.config.id)) return [];
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
         return await readItemConversation(

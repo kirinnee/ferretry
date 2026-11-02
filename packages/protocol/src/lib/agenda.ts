@@ -1532,3 +1532,13 @@ export const sessionNotificationPath = (sessionId: string): string => `/session/
 /** Where an Agenda notification opens: its conversation, AT the item (`?attention=A3`). */
 export const agendaNotificationPath = (sessionId: string, id: AgendaId): string =>
   `${sessionNotificationPath(sessionId)}?${LEGACY_ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+
+/**
+ * The id the MACHINE AGENDA goes by (docs/agenda.md § The machine agenda): the daemon's own ledger for notices that
+ * belong to no ferret. The daemon keys its ledger and its snapshot by it and the app reads that snapshot as the
+ * conversation of this name, so it lives here, once, for both. No ferret can hold it: sessions are minted by the
+ * daemon from `<base36 ms>-<hex>`.
+ */
+export const MACHINE_AGENDA_ID = 'machine-agenda';
+
+export const isMachineAgendaId = (sessionId: string): boolean => sessionId === MACHINE_AGENDA_ID;

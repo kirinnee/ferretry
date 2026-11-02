@@ -5,7 +5,12 @@
  * one of them wears.
  */
 import { describe, expect, it } from 'bun:test';
-import { agendaNotificationPath, type AgendaId, type PushNotificationPayload } from '@ferretry/protocol';
+import {
+  agendaNotificationPath,
+  type AgendaId,
+  MACHINE_AGENDA_ID,
+  type PushNotificationPayload,
+} from '@ferretry/protocol';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../src/lib/agenda-inbox.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON, showGroupedNotification } from '../../src/lib/notify.ts';
 import {
@@ -60,6 +65,17 @@ describe('a tap, per kind of push', () => {
   it('an agenda item lands on that item in the Inbox', () => {
     const payload = push({ kind: 'attention', sessionId: 's1', url: agendaNotificationPath('s1', 'A3') });
     expect(tapTarget(payload)).toBe(`${HOME}/inbox?session=s1&agenda=A3`);
+  });
+
+  it('a machine notice lands on its item in the Inbox, never on a conversation page', () => {
+    const payload = push({
+      kind: 'attention',
+      sessionId: MACHINE_AGENDA_ID,
+      url: agendaNotificationPath(MACHINE_AGENDA_ID, A3),
+    });
+    expect(tapTarget(payload)).toBe(`${HOME}/inbox?session=${MACHINE_AGENDA_ID}&agenda=A3`);
+    // A push that named no page the worker may open still opens the Inbox, not a machine-agenda conversation.
+    expect(tapTarget(push({ kind: 'attention', sessionId: MACHINE_AGENDA_ID, url: '/' }))).toBe(`${HOME}/inbox`);
   });
 
   it('a ping, a deadline, a wake-up and a stop all carry their item, so all land on it', () => {
