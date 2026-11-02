@@ -802,8 +802,14 @@
   gap: 8px;
   font-weight: var(--weight-strong);
 }
+/* The question, its "(pick any)" and its "Needs an answer" wrap as one run, so a wrapped note starts where the
+   question does instead of a margin's width in. */
 .fy-form__label {
+  display: flex;
   min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
   overflow-wrap: anywhere;
 }
 .fy-form__label :is(p, .md) {
@@ -811,7 +817,6 @@
   font-weight: inherit;
 }
 .fy-form__hint {
-  margin-left: 6px;
   color: var(--muted);
   font-size: var(--text-sm);
   font-weight: normal;
@@ -822,24 +827,78 @@
   min-width: 0;
   border: 0;
 }
+.fy-form__needed {
+  padding: 0 6px;
+  border: var(--stroke, 1px) solid var(--warn, var(--accent));
+  border-radius: var(--radius-badge);
+  color: var(--warn, var(--accent));
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: normal;
+  white-space: nowrap;
+}
+/* EVERY OPTION ONE ROW: the same height and gap for a radio and a checkbox, with or without a meaning under it. The
+   PICKED row is filled and edged in the accent; "Recommended" is only a tag, so the two never look alike. */
 .fy-form__options {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   padding-left: calc(1.4em + 8px);
 }
 .fy-form__option {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-  min-height: 36px;
-  padding: 4px 0;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control);
   cursor: pointer;
 }
+.fy-form__option[data-on] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-form__option[data-on] .fy-form__option-name {
+  font-weight: var(--weight-strong);
+}
+/* The controls are drawn here, not by the browser: a native box's unpicked edge is near-invisible on a dark ground. */
 .fy-form__option input {
-  margin-top: 4px;
-  accent-color: var(--accent);
+  display: grid;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  place-content: center;
+  border: var(--stroke-control, var(--stroke, 1px)) solid var(--fg-soft, var(--muted));
+  border-radius: 50%;
+  background: var(--bg);
+  appearance: none;
+  cursor: pointer;
+}
+.fy-form__option input[type='checkbox'] {
+  border-radius: var(--radius-input, var(--radius-control));
+}
+.fy-form__option input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+/* A picked radio is a dot inside a ring: the ground shows between them. */
+.fy-form__option input[type='radio']:checked {
+  background: radial-gradient(circle, var(--accent) 0 45%, var(--bg) 50%);
+}
+.fy-form__option input[type='checkbox']:checked::before {
+  width: 10px;
+  height: 6px;
+  margin-top: -2px;
+  border: solid var(--accent-fg, var(--bg));
+  border-width: 0 0 var(--stroke-heavy, var(--stroke)) var(--stroke-heavy, var(--stroke));
+  content: '';
+  transform: rotate(-45deg);
+}
+.fy-form__option input:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .fy-form__option-text {
   display: flex;
@@ -852,10 +911,14 @@
   font-size: var(--text-sm);
 }
 .fy-form__rec {
-  margin-left: 6px;
-  color: var(--accent);
-  font-size: var(--text-sm);
+  margin-left: 8px;
+  padding: 0 6px;
+  border: var(--stroke, 1px) dashed var(--accent-border, var(--accent));
+  border-radius: var(--radius-badge);
+  color: var(--accent-strong, var(--accent));
+  font-size: var(--text-xs, 0.75rem);
   font-weight: normal;
+  white-space: nowrap;
 }
 .fy-form__seg {
   display: flex;
@@ -863,7 +926,11 @@
   padding-left: calc(1.4em + 8px);
 }
 .fy-form__seg-btn {
+  display: inline-flex;
   flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-height: 40px;
   border: var(--stroke, 1px) solid var(--border);
   border-radius: var(--radius-control);
@@ -874,9 +941,44 @@
 }
 .fy-form__seg-btn[data-on] {
   border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent-strong, var(--accent));
+  background: var(--accent);
+  color: var(--accent-fg, var(--bg));
   font-weight: var(--weight-strong);
+}
+.fy-form__seg-btn[data-on] .fy-form__rec {
+  border-color: currentColor;
+  color: inherit;
+}
+.fy-form__seg-check {
+  flex: none;
+}
+/* THE FOOT: the count and how to send, pinned to the bottom of the open item's scroller while the form is in view, so
+   neither hides under the composer; its bottom padding clears the composer's fade. */
+.fy-form__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0 -12px -12px;
+  padding: 8px 12px calc(var(--flow-3, 12px) + 4px);
+  border-top: var(--stroke, 1px) solid var(--border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--surface);
+}
+.fy-form__progress {
+  margin: 0;
+  color: var(--warn, var(--fg));
+  font-weight: var(--weight-strong);
+}
+.fy-form__foot[data-done] .fy-form__progress {
+  color: var(--ok, var(--fg));
+}
+.fy-form__instruction {
+  margin: 0;
+  color: var(--fg);
 }
 .fy-form__seg-btn:focus-visible,
 .fy-form__option input:focus-visible {
@@ -891,6 +993,12 @@
     padding: 0;
     border: 0;
     background: transparent;
+  }
+  .fy-card__need[data-agenda-need='form'] .fy-form__foot {
+    margin: 0 calc(-1 * var(--fy-view-gutter, 16px));
+    padding-inline: var(--fy-view-gutter, 16px);
+    border-radius: 0;
+    background: var(--bg);
   }
 }
 

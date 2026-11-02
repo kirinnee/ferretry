@@ -17,11 +17,10 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
-import { withFormSend } from '../../lib/agenda-form-send.ts';
-import { useFormChanges } from '../../lib/agenda-form-state.ts';
+import { useFormComposer } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -87,21 +86,15 @@ export function AgendaInboxComposer({
     };
   }, [clientFor, connection]);
   const api = client?.daemonId === connection.daemonId ? client.api : null;
-  const changes = useFormChanges(formKey ?? '');
-  const answer = useRef(answerForm);
-  answer.current = answerForm;
-  const forForm = answerForm !== undefined;
-  const about = useMemo(() => {
-    if (api === null) return null;
-    const chat = withReferencePrefix(api, () => [itemId]);
-    return forForm ? withFormSend(chat, () => answer.current?.()) : chat;
-  }, [api, itemId, forForm]);
-  if (about === null) return null;
+  const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
+  const form = useFormComposer(chat, answerForm, formKey);
+  const forForm = form.allowEmptySend;
+  if (form.api === null) return null;
   return (
     <Composer
       allowEmptySend={forForm}
-      {...(forForm ? { clearErrorOn: changes } : {})}
-      api={about}
+      {...(form.clearErrorOn === undefined ? {} : { clearErrorOn: form.clearErrorOn })}
+      api={form.api}
       compact={compact}
       daemon={connection}
       disabled={disabled}
