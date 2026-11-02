@@ -1,3 +1,9 @@
+## [4.251.0](https://github.com/kirinnee/ferretry/compare/v4.250.0...v4.251.0) (2026-11-02)
+
+### Features
+
+* **agenda:** attach files to a gate item's Not good ([#1390](https://github.com/kirinnee/ferretry/issues/1390)) ([da83030](https://github.com/kirinnee/ferretry/commit/da83030ac8722361c85ea57650f8504170913e9e))
+
 ## [4.250.0](https://github.com/kirinnee/ferretry/compare/v4.249.0...v4.250.0) (2026-11-02)
 
 ### Features
