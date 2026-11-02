@@ -890,7 +890,10 @@ describe('evaluateConfigFiles: account-defaults.yaml is held for the owner', () 
       {
         path: 'account-defaults.yaml',
         etag: digest(FIRST),
-        changes: ['changes which account a card offers first for app.clickup.com in every session on this machine'],
+        changes: [
+          'changes which account a card offers first for app.clickup.com in every session on this machine',
+          "Ferretry can't tell who edited the file, so it waits for you",
+        ],
       },
     ]);
     should(actual.effective.accountDefaults).deepEqual({});
@@ -918,8 +921,34 @@ describe('evaluateConfigFiles: account-defaults.yaml is held for the owner', () 
     // Assert
     should(actual.pending[0]?.changes).deepEqual([
       'changes which account a card offers first for app.clickup.com in every session on this machine',
+      "Ferretry can't tell who edited the file, so it waits for you",
     ]);
     should(actual.effective.accountDefaults).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+  });
+
+  it('should say why a removal on disk waits, in the held item’s own words', () => {
+    // Arrange
+    const accepted = acceptedOf([file('account-defaults.yaml', FIRST)]);
+
+    // Act
+    const edited = evaluate([file('account-defaults.yaml', '{}\n')], accepted);
+    const deleted = evaluate([], accepted);
+
+    // Assert
+    should(edited.pending[0]?.changes.join('; ')).containEql(
+      "Ferretry can't tell who edited the file, so it waits for you",
+    );
+    should(deleted.pending[0]?.changes.join('; ')).containEql(
+      "Ferretry can't tell who edited the file, so it waits for you",
+    );
+  });
+
+  it('should not put the note on another file’s held change', () => {
+    // Act
+    const actual = evaluate([file('logins/work.yaml', LOGIN_TEXT)]);
+
+    // Assert
+    should(actual.pending.flatMap(entry => entry.changes).join('; ')).not.containEql('who edited');
   });
 
   it('should put the file in effect once it is the accepted version', () => {

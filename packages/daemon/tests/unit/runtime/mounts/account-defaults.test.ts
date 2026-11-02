@@ -429,6 +429,7 @@ describe('PUT /v1/accounts/defaults', () => {
     should(pending.map(p => p.path)).deepEqual([PATH]);
     should(pending[0]?.changes).deepEqual([
       'changes which account a card offers first for github.com in every session on this machine',
+      "Ferretry can't tell who edited the file, so it waits for you",
     ]);
     should(text(w)).containEql('github.com: GITHUB');
   });
@@ -512,6 +513,7 @@ describe('a raw write to account-defaults.yaml that takes defaults away (!A243)'
     should((await w.config.load()).evaluation.pending[0]?.changes).deepEqual([
       'changes which account a card offers first for github.com in every session on this machine',
       'changes which account a card offers first for app.clickup.com in every session on this machine',
+      "Ferretry can't tell who edited the file, so it waits for you",
     ]);
   });
 
@@ -538,6 +540,7 @@ describe('a raw write to account-defaults.yaml that takes defaults away (!A243)'
     should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
     should((await w.config.load()).evaluation.pending[0]?.changes).deepEqual([
       'changes which account a card offers first for app.clickup.com in every session on this machine',
+      "Ferretry can't tell who edited the file, so it waits for you",
     ]);
   });
 
