@@ -18,6 +18,7 @@ import { NO_HELD_REPLIES } from '../runtime/mounts/support.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
 import { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import { type AttachmentOriginalsPort, SessionAttachmentStore } from '../../../src/lib/attachments/index.ts';
+import { keepLatest } from '../../../src/lib/board/gate-items.ts';
 import {
   type AgendaActor,
   AgendaAgentClearer,
@@ -1119,6 +1120,7 @@ class MemoryOriginals implements AttachmentOriginalsPort {
 
 describe('a Not good with files, against the real attachment store', () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const OTHER_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]);
   const NOWHERE = `att_${'d'.repeat(64)}`;
   const AGENT: AgendaActor = { kind: 'agent', sessionId: 'grandchild', name: null };
 
@@ -1135,8 +1137,8 @@ describe('a Not good with files, against the real attachment store', () => {
     });
     await world.gates.backfill();
     const session = overrides.assignee === 'gone' ? 'child' : 'grandchild';
-    const upload = async (to: string) =>
-      (await store.upload(to, { filename: 'flicker.png', mime: 'image/png', bytes: PNG })).id;
+    const upload = async (to: string, bytes = PNG) =>
+      (await store.upload(to, { filename: 'flicker.png', mime: 'image/png', bytes })).id;
     return { world, upload, session, item: world.open(session)[0] as AgendaItem, originals };
   };
 
@@ -1431,6 +1433,131 @@ describe('a Not good with files, against the real attachment store', () => {
       should(world.reopen.notices).have.length(1);
     });
 
+    describe('a repeat of the same choice that is not the same answer', () => {
+      const answered = async () => {
+        const { world, upload, session, item } = await atGate();
+        const id = await upload(session);
+        const body = {
+          action: 'resolve',
+          id: item.id,
+          response: choose('Not good'),
+          note: 'still flickers',
+          attachments: { from: session, ids: [id] },
+        };
+        const first = await send(world, session, body);
+        should(first.status).equal(200);
+        return { world, upload, session, item, id, body };
+      };
+      const staleAfter = async (change: (done: Awaited<ReturnType<typeof answered>>) => Promise<object> | object) => {
+        // Arrange
+        const done = await answered();
+        const stale = { ...done.body, ...(await change(done)) };
+
+        // Act
+        const response = await send(done.world, done.session, stale);
+
+        // Assert
+        should(response).match({ status: 409, body: { code: 'gate_moved_on' } });
+        should(done.world.reopen.notices).have.length(1);
+        should(done.world.stored().laneId).equal('implement');
+        should(done.world.closed(done.session)).have.length(1);
+      };
+
+      it('refuses other words, and delivers nothing', async () => {
+        await staleAfter(() => ({ note: 'the header is gone too' }));
+      });
+
+      it('refuses other files', async () => {
+        await staleAfter(async ({ upload, session }) => ({
+          attachments: { from: session, ids: [await upload(session, OTHER_PNG)] },
+        }));
+      });
+
+      it('refuses files that do not exist', async () => {
+        await staleAfter(({ session }) => ({ attachments: { from: session, ids: [`att_${'e'.repeat(64)}`] } }));
+      });
+
+      it('refuses files brought where the first brought none, and none where it brought some', async () => {
+        await staleAfter(() => ({ attachments: undefined }));
+      });
+
+      it('refuses files from another session', async () => {
+        const done = await answered();
+
+        const response = await send(done.world, done.session, {
+          ...done.body,
+          attachments: { from: 'stranger', ids: [done.id] },
+        });
+
+        should(response).match({ status: 400, body: { code: 'invalid' } });
+        should(done.world.reopen.notices).have.length(1);
+      });
+
+      it('refuses blank words', async () => {
+        const done = await answered();
+
+        const response = await send(done.world, done.session, { ...done.body, note: '  \n ' });
+
+        should(response).match({ status: 400, body: { code: 'invalid' } });
+        should(done.world.reopen.notices).have.length(1);
+      });
+
+      it('takes the same words with other spacing as the same answer', async () => {
+        const done = await answered();
+
+        const response = await send(done.world, done.session, { ...done.body, note: '  still flickers\n' });
+
+        should(response.status).equal(200);
+        should(done.world.reopen.notices).have.length(1);
+      });
+
+      it('answers the exact repeat twice with success, and reopens once', async () => {
+        const done = await answered();
+
+        const again = await send(done.world, done.session, done.body);
+        const third = await send(done.world, done.session, done.body);
+
+        should([again.status, third.status]).eql([200, 200]);
+        should(done.world.reopen.notices).have.length(1);
+      });
+
+      it('takes one of two different answers to the same choice sent at once, and refuses the other', async () => {
+        // Arrange
+        const { world, upload, session, item } = await atGate();
+        const one = await upload(session);
+        const two = await upload(session, OTHER_PNG);
+        const bodyOf = (note: string, id: string) => ({
+          action: 'resolve',
+          id: item.id,
+          response: choose('Not good'),
+          note,
+          attachments: { from: session, ids: [id] },
+        });
+
+        // Act
+        const both = await Promise.all([
+          send(world, session, bodyOf('first words', one)),
+          send(world, session, bodyOf('second words', two)),
+        ]);
+
+        // Assert
+        should(both.map(each => each.status).sort()).eql([200, 409]);
+        should(world.reopen.notices).have.length(1);
+      });
+
+      it('after a restart, takes a repeat with the same words and no files, and refuses files it cannot vouch for', async () => {
+        const done = await answered();
+        (done.world.gates as unknown as { receipts: Map<string, string> }).receipts.clear();
+
+        const bare = await send(done.world, done.session, { ...done.body, attachments: undefined });
+        const files = await send(done.world, done.session, done.body);
+        const words = await send(done.world, done.session, { ...done.body, attachments: undefined, note: 'other' });
+
+        should([bare.status, files.status, words.status]).eql([200, 409, 409]);
+        should(done.world.reopen.notices).have.length(1);
+      });
+    });
+
     it('still refuses files on an item that is no gate item', async () => {
       // Arrange
       const { world, upload, session } = await atGate();
@@ -1655,7 +1782,7 @@ describe('the security review’s ways around a gate item (&F364 PR B)', () => {
     should(world.stored().laneId).equal('tested');
   });
 
-  it('takes two Not goods at once in turn: one reopen, one follow-up, the second an unchanged success', async () => {
+  it('takes two different Not goods at once in turn: one reopen, one follow-up, the second refused as already answered', async () => {
     // Arrange
     const { world, item } = await atGate();
 
@@ -1667,7 +1794,7 @@ describe('the security review’s ways around a gate item (&F364 PR B)', () => {
 
     // Assert
     should(first).match({ handled: true, mutation: { ok: true } });
-    should(second).match({ handled: true, mutation: { ok: true, change: 'unchanged' } });
+    should(second).match({ handled: true, refused: { code: 'moved-on' } });
     should(world.reopen.notices).have.length(1);
     should(world.open().map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
   });
@@ -2714,5 +2841,21 @@ describe('one owner ask per thing: a gate attaches to the card’s thread', () =
     world.agenda.attachGate = original;
 
     should(world.warnings.join('\n')).match(/could not attach the gate/);
+  });
+});
+
+describe('the receipts of answered gate items', () => {
+  it('keeps the latest few, forgetting the oldest first, and a key set again counts as latest', () => {
+    const kept = new Map<string, string>();
+    for (const key of ['a', 'b', 'c']) keepLatest(kept, key, key, 2);
+    should([...kept.keys()]).eql(['b', 'c']);
+
+    keepLatest(kept, 'b', 'again', 2);
+    keepLatest(kept, 'd', 'd', 2);
+
+    should([...kept]).eql([
+      ['b', 'again'],
+      ['d', 'd'],
+    ]);
   });
 });

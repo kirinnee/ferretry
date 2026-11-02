@@ -299,6 +299,8 @@ export class GateItems implements CardWriteObserver {
   private readonly holders = new Map<string, Set<string>>();
   /** The one read of every agenda behind {@link holders}, once it has started. */
   private scanning: Promise<void> | undefined;
+  /** What each answered gate item was answered WITH ({@link fingerprint}), so only an identical repeat is a replay. */
+  private readonly receipts = new Map<string, string>();
 
   constructor(private readonly ports: GateItemsDependencies) {}
 
@@ -420,6 +422,9 @@ export class GateItems implements CardWriteObserver {
           mutation: await this.ports.agenda.attachGate(answer.sessionId, answer.id, left, gate),
         };
       }
+      // Kept before the item closes, so a repeat that finds it closed finds the receipt too.
+      const receipt = receiptKey(answer);
+      keepLatest(this.receipts, receipt, fingerprint(answer, decision), RECEIPTS_KEPT);
       const mutation = await this.ports.agenda.answer(
         answer.sessionId,
         answer.id,
@@ -427,6 +432,7 @@ export class GateItems implements CardWriteObserver {
         answer.actor,
         decision.note,
       );
+      if (!mutation.ok) this.receipts.delete(receipt);
       return { handled: true, mutation };
     } finally {
       this.answering.delete(card.task.id);
@@ -437,7 +443,10 @@ export class GateItems implements CardWriteObserver {
   /**
    * An answer that repeats one the owner already gave to a gate item (a lost response replayed, or the same request
    * twice): the item comes back unchanged and nothing moves, as any answer to a closed item does. `undefined` when the
-   * item is no answered gate item, or was answered otherwise. The refusals of a first answer still apply.
+   * item is no answered gate item, or was answered with another choice. The refusals of a first answer still apply,
+   * and so does the WHOLE of it: the same choice with other words or other files is a stale tab, refused, never a
+   * success that drops them. A daemon restarted since keeps the choice and the words on the item but not its files,
+   * so it takes a repeat only when that brings none.
    */
   private async replayed(
     answer: GateAnswer,
@@ -451,6 +460,16 @@ export class GateItems implements CardWriteObserver {
     }
     const denied = answer.permitted?.();
     if (denied !== undefined) return refused('forbidden', denied);
+    const decision = decide(closed.gate, answer);
+    if ('code' in decision) return { handled: true, refused: decision };
+    const unfit = this.filesRefusal(answer, decision);
+    if (unfit !== undefined) return { handled: true, refused: unfit };
+    const receipt = this.receipts.get(receiptKey(answer));
+    const same =
+      receipt === undefined
+        ? answer.attachments === undefined && closed.resolutionNote === decision.note
+        : receipt === fingerprint(answer, decision);
+    if (!same) return refused('moved-on', `${answer.id} was already answered, differently: nothing was sent`);
     const mutation = await this.ports.agenda.answer(answer.sessionId, answer.id, answer.response, answer.actor);
     return { handled: true, mutation };
   }
@@ -893,6 +912,26 @@ type Decision =
       readonly words?: string;
     }
   | { readonly kind: 'not-yet'; readonly note: string | null; readonly words?: string };
+
+/** How many answered gate items keep a receipt: a repeat is a lost response or a stale tab, never long after. */
+const RECEIPTS_KEPT = 64;
+
+const receiptKey = (answer: GateAnswer): string => `${answer.sessionId}/${answer.id}`;
+
+/** Everything an answer says, as the daemon reads it: the choice, the owner's normalized words and the files as sent. */
+const fingerprint = (answer: GateAnswer, decision: Decision): string =>
+  JSON.stringify([
+    answer.response,
+    decision.words ?? '',
+    answer.attachments === undefined ? null : [answer.attachments.from, answer.attachments.ids],
+  ]);
+
+/** Sets `key`, forgetting the oldest keys beyond `limit`. */
+export const keepLatest = (map: Map<string, string>, key: string, value: string, limit: number): void => {
+  map.delete(key);
+  map.set(key, value);
+  for (const oldest of [...map.keys()].slice(0, Math.max(0, map.size - limit))) map.delete(oldest);
+};
 
 const refused = (code: GateRefusal['code'], message: string): GateAnswerOutcome => ({
   handled: true,
