@@ -13,7 +13,7 @@ opens an agenda item only if it needs something from them to fix it. The ferret'
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
 given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re !A163 …] what is X?"), the
-ferret answers ON that item: `fy agenda edit !A163 --question-answer "<text>"` brings it back with an "Answer to your
+ferret answers ON that item: `fy agenda edit !A163 --question-answer "<text>"` brings it back (even from the replied pile) with an "Answer to your
 question" block above its own options, which stay visible and answerable. **A question item keeps its own answer shape
 until the owner answers it with one of its answers, or the ferret closes it with `done`.** The owner's reply never turns
 it into a Got it, and an answer is never a separate `--kind info` item standing in for it: tapping Got it on an info item
@@ -171,11 +171,13 @@ fields. **A chat reply is not a turn at all: it parks the item** (see "Parked it
 
 ## Handing it back
 
-On the ferret's turn there are three ways out. Only `edit` — with the whole card refreshed — brings back an item the owner's
-reply parked (see "Parked items"); a bare `surface` is refused there. **None of the first two pings the owner.**
+On the ferret's turn there are three ways out. An item the owner's reply parked (see "Parked items") is off their list:
+a plain `edit` updates the card and leaves it parked, only `edit --back` — with the whole card refreshed — brings it
+back, and a bare `surface` is refused there. **None of the first two pings the owner.**
 
 - `fy agenda edit <id> …` — change the card (settled answers, what is still open, new options). Any edit by
-  the raising agent on its own turn hands the item back to the owner, even one that changes nothing.
+  the raising agent on its own turn hands the item back to the owner, even one that changes nothing. (Not an item
+  the owner replied to: that edit keeps it parked, unless it carries `--back`.)
 - `fy agenda surface <id> [--why "…"]` — hand it back as it stands.
 - `fy agenda done <id>` / `dismiss <id>` — close it, if the talk settled it.
 
@@ -194,7 +196,9 @@ The ferret receives the message as
 owner at once (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
 and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
 referenced. If the ferret finishes a turn without touching a referenced item, the daemon nudges it once
-(nudge-once keys on the `[re !A…` opener); after that it stays quiet.
+(nudge-once keys on the `[re !A…` opener); after that it stays quiet. The nudge says the item is off the owner's
+list: "Owner replied about !A5; it is off their list. Do the work, then `fy agenda done A5`. Use `fy agenda edit A5
+--back …` only if you need something NEW from them." It never says it is the ferret's turn to hand the item back.
 
 Picking an option on the card (`respond`) still answers the item, exactly as before. `--other "<words>"`
 remains on the CLI and in the app for "none of the options"; chat no longer guesses it.
@@ -215,14 +219,19 @@ would lose it when the ferret still needs something.
 - **The words are kept.** The reply text is a `replied` entry in the item's history, cut at the detail limit. A
   reply with no words (a bare chip) records the entry without a note. Any wait (more information, a discussion)
   ends: the reply answered it.
-- **The ferret decides what happens next.** It brings the item back with `fy agenda edit <id> --summary "…"
---premise "…" --context "…"`, on the owner's turn — **fresh**: `waitingSince` is now, so it reads as new and
-  unread. **The whole card is refreshed on every reply**: the owner's words changed what is going on, so the
-  ask, the premise and the context are all written again (restating one unchanged is fine) and the card stays an
-  isolated, self-contained statement of the situation. An `edit` that leaves one out is refused (`invalid`,
-  naming the missing flags), and so is a bare `fy agenda surface <id>` of a replied item. The owner, the
-  daemon's timer and a snoozed or never-replied item are unaffected. `fy agenda done <id>` closes it when the
-  reply settled it.
+- **It stays off the list until there is something new.** The owner has answered, so the ferret does the work. A
+  plain `fy agenda edit <id> …` by the ferret updates the card (the living summary) and **leaves it parked**: no
+  `waitingSince` bump, nothing unread, no badge. `fy agenda done <id>` / `dismiss <id>` closes it **without telling
+  the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified (they had
+  already replied)", and the item shows under Resolved as usual.
+- **`--back` is the one way back.** When the ferret needs something NEW from the owner it runs
+  `fy agenda edit <id> --back --summary "…" --premise "…" --context "…"`, on the owner's turn — **fresh**:
+  `waitingSince` is now, so it reads as new and unread. **The whole card is refreshed**: the owner's words changed
+  what is going on, so the ask, the premise and the context are all written again (restating one unchanged is
+  fine) and the card stays an isolated, self-contained statement of the situation. A `--back` that leaves one out
+  is refused (`invalid`, naming the missing flags), and so is a bare `fy agenda surface <id>` of a replied item.
+  An answer to the owner's own question (`--question-answer`) counts as new and needs no `--back`. The owner, the
+  daemon's timer and a snoozed or never-replied item are unaffected.
 - The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list").
 - Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a response, as `done`.
 - **Warden items follow the same rule.** A daemon-raised item the owner replied to parks like any other; it is
@@ -439,12 +448,13 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.                                     |
 | `add --offer-close`     | With `--task`: the owner may close the card with the same tap that resolves it.                           |
 | `add --task <card>`     | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)). |
-| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.                                   |
-| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).                               |
+| `edit <id>`             | Reword; on the ferret's turn hands it to the owner. A replied item stays parked.                          |
+| `edit <id> --back`      | Needs something NEW from the owner: bring a replied item back, whole card refreshed.                      |
+| `surface <id>`          | Hand it back to the owner, unchanged (silent). Refused for a replied item.                                |
 | `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                              |
 | `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.                                        |
-| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)                                   |
-| `dismiss <id>`          | Close without answering; agents only their own.                                                           |
+| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a replied item.         |
+| `dismiss <id>`          | Close without answering; agents only their own. Quiet on a replied item.                                  |
 | `ls` / `show`           | Open items with turn and blocking fields / one item in full.                                              |
 | `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.                                   |
 

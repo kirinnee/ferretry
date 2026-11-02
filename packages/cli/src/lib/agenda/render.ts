@@ -106,7 +106,7 @@ function itemLines(item: AgendaItem): string[] {
     );
   } else if (item.parked?.reason === 'replied') {
     lines.push(
-      `${INDENT}replied ${item.parked.at}: parked — bring it back with \`agenda edit ${item.id} --summary … --premise … --context …\` (the whole card, refreshed), or \`agenda done\` it`,
+      `${INDENT}replied ${item.parked.at}: off the owner's list — do the work, then \`agenda done ${item.id}\`; \`agenda edit ${item.id} --back --summary … --premise … --context …\` (the whole card, refreshed) only if you need something NEW from them`,
     );
   } else if (agendaInDiscussion(item)) {
     lines.push(

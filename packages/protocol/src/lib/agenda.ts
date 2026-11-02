@@ -1312,6 +1312,12 @@ export const AgendaActionRequestSchema = z
       clear: z.array(AgendaClearableFieldSchema).min(1).max(3).optional(),
       /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
       now: z.literal(true).optional(),
+      /**
+       * `--back`: the ferret needs something NEW from the owner, so an item they REPLIED to returns to their list
+       * (fresh, with the whole card refreshed). Without it an edit of a replied item only rewrites the card: it stays
+       * parked and nothing reaches the owner.
+       */
+      back: z.literal(true).optional(),
     }),
     z.strictObject({
       action: z.literal('resolve'),
