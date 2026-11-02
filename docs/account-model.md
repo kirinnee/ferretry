@@ -78,8 +78,8 @@ change, like every other. There are three ways to choose, and they ask the same 
 
 ## Reaching it
 
-**Browser:** Settings → **Machines** → a machine → Runtimes, Credentials, Profiles, Components,
-Settings. The link is `#machines/<name>/<tab>`.
+**Browser:** Settings → **Machines** → a machine → Runtimes, Agents, Sign-ins, Profiles (with its Components section), Browser,
+Machine. The link is `#machines/<name>/<tab>`.
 
 **Terminal** (`fy`; the name is derived from `packages/cli/package.json`):
 

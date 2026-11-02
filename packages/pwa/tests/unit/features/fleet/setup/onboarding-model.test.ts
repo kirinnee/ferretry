@@ -192,8 +192,8 @@ describe('set up later', () => {
     expect(href('pair')).toBe('/d/studio/settings#machines/Work%20Mac/machine/devices');
     expect(href('start')).toBe('/d/studio/settings#machines/Work%20Mac/machine/clone');
     expect(href('speedups')).toBe('/d/studio/settings#machines/Work%20Mac/machine/speedups');
-    expect(href('warden')).toBe('/d/studio/settings#machines/Work%20Mac/machine/warden');
-    expect(href('learning')).toBe('/d/studio/settings#machines/Work%20Mac/machine/learning');
+    expect(href('warden')).toBe('/d/studio/settings#machines/Work%20Mac/agents/warden');
+    expect(href('learning')).toBe('/d/studio/settings#machines/Work%20Mac/agents/learning');
   });
 
   it('links Claude Code and Codex to the machine’s Runtimes tab', () => {
@@ -201,8 +201,8 @@ describe('set up later', () => {
     expect(href('codex')).toBe('/d/studio/settings#machines/Work%20Mac/runtimes');
   });
 
-  it('links Agent controls to the machine tab itself', () => {
-    expect(href('controls')).toBe('/d/studio/settings#machines/Work%20Mac/machine');
+  it('links Agent controls to the Agents tab', () => {
+    expect(href('controls')).toBe('/d/studio/settings#machines/Work%20Mac/agents');
   });
 
   it('links Voice to this device’s Dictation setting, not to the machine', () => {
@@ -234,7 +234,7 @@ describe('what Done says', () => {
     expect(row(list, 'voice').state).toBe('skipped');
     expect(row(list, 'voice').later).toBe('/d/studio/settings#dictation');
     expect(row(list, 'warden').state).toBe('not visited');
-    expect(row(list, 'warden').later).toBe('/d/studio/settings#machines/Work%20Mac/machine/warden');
+    expect(row(list, 'warden').later).toBe('/d/studio/settings#machines/Work%20Mac/agents/warden');
   });
 
   it('never offers a later link for pairing, even when it is not set', () => {

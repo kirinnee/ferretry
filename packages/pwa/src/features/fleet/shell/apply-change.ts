@@ -7,7 +7,7 @@
  * step-up: the daemon refuses the request with `403 grant_step_up_required`, the carrier asks for the
  * passkey and sends the same request once more, so neither call needs anything extra from this module.
  *
- * Every tab (Runtimes, Credentials, Profiles, Components, Settings) uses this module, so the rules
+ * Every tab (Runtimes, Agents, Sign-ins, Profiles, Settings) uses this module, so the rules
  * are written once:
  *
  * - **Nothing throws.** Each call answers `applied` or `refused`, and a refusal is ONE sentence a

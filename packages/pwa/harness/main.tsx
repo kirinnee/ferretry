@@ -2163,6 +2163,8 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       format: setUp ? 'version-2' : 'none',
       setUp,
       agentPermissions: 'auto',
+      autoResume: true,
+      agendaMode: true,
       defaultRuntime: setUp ? 'claude-default' : null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       ...(setUp

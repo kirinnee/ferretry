@@ -13,7 +13,7 @@ import { cn } from '../../../lib/class-names.ts';
 import { budgetMeterRows, budgetScopeNote } from './credentials-model.ts';
 import { METER_LABEL, METER_WORDS } from './meter-layout.ts';
 
-/** A login's budget as the Credentials tab shows it, wherever a row or page lists one. */
+/** A login's budget as the Sign-ins tab shows it, wherever a row or page lists one. */
 export function BudgetMeter({
   budget,
   machineName,

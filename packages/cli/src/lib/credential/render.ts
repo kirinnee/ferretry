@@ -60,7 +60,7 @@ function budgetLines(budget: FleetCredentialBudget | undefined, binaryName: stri
   return lines;
 }
 
-/** Where the login lives, in the words the Credentials tab uses. */
+/** Where the login lives, in the words the Sign-ins tab uses. */
 function whereKept(credential: FleetCredentialView): string {
   if (credential.sharedWithTerminal) return `shared with ${credential.harness} in your terminal`;
   if (credential.store === 'environment') return 'read from the environment';
@@ -90,7 +90,7 @@ export function renderCredentialRow(credential: FleetCredentialView, binaryName:
   ];
 }
 
-/** The Credentials tab in a terminal. */
+/** The Sign-ins tab in a terminal. */
 export function renderCredentialList(list: FleetCredentialList, binaryName: string): string {
   if (list.credentials.length === 0) {
     return `No logins on ${list.machine} yet. Add one with \`${binaryName} credential add claude\` (or codex).`;

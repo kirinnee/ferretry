@@ -377,7 +377,7 @@ export const FleetCredentialBudgetSchema = z.strictObject({
 });
 export type FleetCredentialBudget = z.infer<typeof FleetCredentialBudgetSchema>;
 
-/** One credential, as the Credentials tab shows it. */
+/** One credential, as the Sign-ins tab shows it. */
 export const FleetCredentialViewSchema = z.strictObject({
   id: FleetCredentialIdSchema,
   harness: HarnessKindSchema,

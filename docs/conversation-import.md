@@ -18,7 +18,7 @@ one of two sources:
 
 ### Keep in sync
 
-Settings › Machine › Conversations › **Keep in sync** is `machine.conversations.listComputer` in
+Settings › Machine › Agents › Conversations › **Keep in sync** is `machine.conversations.listComputer` in
 `machine.yaml`, **on by default**. It governs LISTING only:
 
 - On: a `source=synced` listing also reads the computer's homes. They are read when the list is opened

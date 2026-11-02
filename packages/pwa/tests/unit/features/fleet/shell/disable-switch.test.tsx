@@ -127,7 +127,7 @@ describe('the switch on a login', () => {
   it('should be on in the list, and ask for a reason and a length before switching off', async () => {
     // Arrange
     const calls: Call[] = [];
-    const view = await openCredentials('#machines/studio-mac/credentials', {}, calls);
+    const view = await openCredentials('#machines/studio-mac/sign-ins', {}, calls);
     const toggle = switchOf(view.container, 'codex');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
 
@@ -144,7 +144,7 @@ describe('the switch on a login', () => {
   it('should send the reason and the end, then read the machine again', async () => {
     // Arrange
     const calls: Call[] = [];
-    const view = await openCredentials('#machines/studio-mac/credentials', {}, calls);
+    const view = await openCredentials('#machines/studio-mac/sign-ins', {}, calls);
     await click(switchOf(view.container, 'codex'), 'switch');
 
     // Act
@@ -167,7 +167,7 @@ describe('the switch on a login', () => {
 
   it('should hold the submit while the day is not after today', async () => {
     // Arrange
-    const view = await openCredentials('#machines/studio-mac/credentials');
+    const view = await openCredentials('#machines/studio-mac/sign-ins');
     await click(switchOf(view.container, 'codex'), 'switch');
 
     // Act
@@ -187,7 +187,7 @@ describe('the switch on a login', () => {
   it('should close the form on Cancel without sending anything', async () => {
     // Arrange
     const calls: Call[] = [];
-    const view = await openCredentials('#machines/studio-mac/credentials', {}, calls);
+    const view = await openCredentials('#machines/studio-mac/sign-ins', {}, calls);
     await click(switchOf(view.container, 'codex'), 'switch');
 
     // Act
@@ -202,7 +202,7 @@ describe('the switch on a login', () => {
     // Arrange
     const calls: Call[] = [];
     const view = await openCredentials(
-      '#machines/studio-mac/credentials',
+      '#machines/studio-mac/sign-ins',
       { 'GET /v1/fleet/credentials': credentialsWith('codex') },
       calls,
     );
@@ -224,7 +224,7 @@ describe('the switch on a login', () => {
 
   it('should also sit on the login’s own page', async () => {
     // Act
-    const view = await openCredentials('#machines/studio-mac/credentials/claude-work');
+    const view = await openCredentials('#machines/studio-mac/sign-ins/claude-work');
 
     // Assert
     expect(
@@ -235,7 +235,7 @@ describe('the switch on a login', () => {
 
   it('should lock the switch, with the reason, when this device may not change the fleet', async () => {
     // Act
-    const view = await openCredentials('#machines/studio-mac/credentials/claude-work', {
+    const view = await openCredentials('#machines/studio-mac/sign-ins/claude-work', {
       'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'not-granted' }),
     });
 
@@ -248,7 +248,7 @@ describe('the switch on a login', () => {
 
   it('should say why when a switch-on is refused', async () => {
     // Arrange
-    const view = await openCredentials('#machines/studio-mac/credentials', {
+    const view = await openCredentials('#machines/studio-mac/sign-ins', {
       'GET /v1/fleet/credentials': credentialsWith('codex'),
       [PROPOSE]: new Error('nope'),
     });
@@ -348,7 +348,7 @@ describe('the switch on a runtime', () => {
       'Off because its login claude-personal is disabled',
     );
     const link = must(view.container.querySelector<HTMLAnchorElement>('[data-disable-login-link]'), 'link');
-    expect(link.getAttribute('href')).toBe('#machines/studio-mac/credentials/claude-personal');
+    expect(link.getAttribute('href')).toBe('#machines/studio-mac/sign-ins/claude-personal');
     expect(proposed(calls)).toEqual([]);
   });
 

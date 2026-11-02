@@ -583,7 +583,7 @@ describe('the account row', () => {
     // Act
     await accountField([account(), codex, archived], health);
 
-    // Assert — the words are the daemon's own, so this row and the Credentials tab cannot disagree.
+    // Assert — the words are the daemon's own, so this row and the Sign-ins tab cannot disagree.
     expect(rowText(0)).toContain('ready');
     expect(rowText(1)).toContain('needs sign-in');
     expect(rowText(2)).toContain('refresh due');

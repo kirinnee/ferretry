@@ -86,13 +86,13 @@ describe('MachinesSurface', () => {
     const tabs = Array.from(view.container.querySelectorAll('[data-machine-tab]'));
     expect(tabs.map(tab => tab.textContent)).toEqual([
       'Runtimes',
-      'Credentials',
+      'Agents',
+      'Sign-ins',
       'Profiles',
-      'Components',
       'Browser',
       'Machine',
     ]);
-    expect(tabs.map(tab => tab.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null, null]);
+    expect(tabs.map(tab => tab.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null, null]);
     for (const tab of tabs) expect(tab.querySelector('svg')).not.toBeNull();
     expect(view.container.querySelector('[data-machine-tab-panel]')?.getAttribute('data-machine-tab-panel')).toBe(
       'profiles',
@@ -108,8 +108,8 @@ describe('MachinesSurface', () => {
   it('opens a tab by asking the page for its address', async () => {
     const opened: string[] = [];
     const view = await mount(surface({ opened }));
-    await click(view.container, '[data-machine-tab="credentials"]');
-    expect(opened).toEqual(['studio:credentials']);
+    await click(view.container, '[data-machine-tab="sign-ins"]');
+    expect(opened).toEqual(['studio:sign-ins']);
     await view.unmount();
   });
 

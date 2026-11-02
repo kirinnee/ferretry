@@ -33,7 +33,7 @@ export function QuotaReadout({ quota, showUnknown = false, className = '' }: Quo
     return (
       <span
         className={`${classes} fy-quota-warning`}
-        title="This wrapper is not logged in — account usage is unavailable. Sign its login in under Settings › Machines › Credentials."
+        title="This wrapper is not logged in — account usage is unavailable. Sign its login in under Settings › Machines › Sign-ins."
       >
         quota auth!
       </span>

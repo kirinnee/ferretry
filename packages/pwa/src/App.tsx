@@ -55,12 +55,12 @@ import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selecto
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
-import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
-import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
+import { SignInsSurface } from './features/fleet/credentials/sign-ins-surface.tsx';
 import type { FleetClientFactory } from './features/fleet/fleet-client.ts';
+import { AgentsTab } from './features/fleet/machine/agents-tab.tsx';
 import { BrowserTab } from './features/fleet/machine/browser-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
-import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
+import { ProfilesSurface } from './features/fleet/profiles/profiles-surface.tsx';
 import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
 import { isMachineSetupStepId } from './features/fleet/setup/onboarding-model.ts';
@@ -1887,14 +1887,14 @@ function SessionRoute({
 
 /**
  * The Machines tabs (docs/design/account-model.md §4.2). ONE LINE PER TAB, each the shell's empty frame
- * until the unit that fills it replaces its own line: Runtimes and Credentials U17, Profiles and
- * Components U18, Settings U19.
+ * until the unit that fills it replaces its own line: Runtimes U17, Sign-ins U17, Profiles (with Components)
+ * U18, Agents and Machine U19.
  */
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   runtimes: RuntimesTab,
-  credentials: CredentialsTab,
-  profiles: ProfilesTab,
-  components: ComponentsSurface,
+  agents: AgentsTab,
+  'sign-ins': SignInsSurface,
+  profiles: ProfilesSurface,
   browser: BrowserTab,
   machine: MachineSettingsSurface,
 };

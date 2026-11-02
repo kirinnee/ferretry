@@ -48,7 +48,7 @@ and a ferret's list says it for that ferret.
   server another scope overrides says which.
 - **Info › Context › Skills**: every skill that ferret sees, labelled Project, User or Ferretry, with
   "Overridden by …" on the losers of a same-name clash, and **Open** to read its SKILL.md.
-- **Settings › Machine › Components › MCP servers**: each row carries the same status, Check and Sign in.
+- **Settings › Machine › Profiles › Built from › MCP servers**: each row carries the same status, Check and Sign in.
   Components stays the place to create and edit servers and skills.
 
 A failure in these places is said in plain words — "Liftoff MBP isn't reachable right now" — with the

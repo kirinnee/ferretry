@@ -1,5 +1,5 @@
 /**
- * The three catalogue reads the Profiles and Components tabs share: components, profile stacks and
+ * The three catalogue reads the Profiles tab (with its Components section) share: components, profile stacks and
  * runtimes (docs/design/account-model.md §7), made through the app's client pool.
  *
  * One read of all three, because every page on these tabs needs at least two of them — a component's

@@ -10,7 +10,6 @@ import { type DaemonConnectionRecord, DaemonConnectionStore } from '../../../../
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
-  APPLY_PATH,
   type Call,
   FRESH_MACHINE,
   machineAnswer,
@@ -18,14 +17,11 @@ import {
   NOTHING_INSTALLED,
   runtimes,
   runtimeView,
-  STAGED,
   STUDIO,
   scan,
   scriptedClient,
   WORK,
 } from '../setup/setup-support.ts';
-
-const OUTCOME = { outcome: 'executed', executor: 'setup', summary: 'Saved' };
 
 const settle = async (): Promise<void> => {
   await interact(async () => {
@@ -132,383 +128,6 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('shows both permission modes with their sentences and no Save until the other is chosen', async () => {
-    await withTab({}, async ({ q }) => {
-      const section = must(q('[data-setup-section="agent-permissions"]'), 'agent permissions');
-      expect(section.querySelector('[data-setup-choice="auto"]')?.textContent).toContain('Auto mode');
-      expect(section.querySelector('[data-setup-choice="auto"]')?.textContent).toContain(
-        'Agents work on their own and stop to ask before anything that looks risky.',
-      );
-      expect(section.querySelector('[data-setup-choice="skip"]')?.textContent).toContain('Skip all permission checks');
-      expect(section.querySelector('[data-setup-choice="skip"]')?.textContent).toContain(
-        'Agents never stop to ask. They can change any file and run any command on studio-mac.',
-      );
-      expect(section.querySelector<HTMLInputElement>('[data-setup-choice="auto"] input')?.checked).toBe(true);
-      expect(q('[data-agent-permissions-hint]')?.textContent).toContain('Applies to new sessions.');
-      expect(q('[data-change-submit]')).toBeNull();
-    });
-  });
-
-  it('choosing the other mode offers Save and Keep, and Keep puts the choice back', async () => {
-    await withTab({}, async ({ q }) => {
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      expect(q('[data-setup-choice="skip"] input') as HTMLInputElement).toHaveProperty('checked', true);
-      expect(q('[data-change-submit]')?.textContent).toBe('Save agent permissions');
-      expect(q('[data-agent-permissions-undo]')?.textContent).toBe('Keep Auto mode');
-      await click(q('[data-agent-permissions-undo]'), 'keep');
-      expect(q('[data-change-submit]')).toBeNull();
-      expect(q('[data-setup-choice="auto"] input') as HTMLInputElement).toHaveProperty('checked', true);
-    });
-  });
-
-  it('says how many running sessions keep the old mode, once a change is pending', async () => {
-    await withTab({ machine: machineView({ runningSessions: 3 }) }, async ({ q }) => {
-      expect(q('[data-setup-note="agent-permissions-running"]')).toBeNull();
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      const note = must(q('[data-setup-note="agent-permissions-running"]'), 'running sessions note');
-      expect(note.textContent).toContain('3 running sessions keep the old mode (Auto mode) until restarted.');
-      expect(q('[data-agent-permissions-hint]')).toBeNull();
-    });
-    await withTab({ machine: machineView({ runningSessions: 1 }) }, async ({ q }) => {
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      expect(q('[data-setup-note="agent-permissions-running"]')?.textContent).toContain(
-        '1 running session keeps the old mode (Auto mode) until restarted.',
-      );
-    });
-    await withTab({ machine: machineView({ agentPermissions: 'skip', runningSessions: 2 }) }, async ({ q }) => {
-      await click(q('[data-setup-choice="auto"] input'), 'auto radio');
-      expect(q('[data-setup-note="agent-permissions-running"]')?.textContent).toContain(
-        '2 running sessions keep the old mode (Skip all permission checks) until restarted.',
-      );
-      expect(q('[data-agent-permissions-undo]')?.textContent).toBe('Keep Skip all permission checks');
-    });
-  });
-
-  it('Save sends the machine.settings change and asks the shell to check the machine again', async () => {
-    await withTab(
-      {
-        answers: {
-          '/v1/fleet/proposals': STAGED,
-          [APPLY_PATH]: OUTCOME,
-        },
-      },
-      async ({ q, calls, retried }) => {
-        await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(JSON.stringify(staged.body)).toContain('"kind":"machine.settings"');
-        expect(JSON.stringify(staged.body)).toContain('"agentPermissions":"skip"');
-        expect(calls.some(call => call.path === APPLY_PATH)).toBe(true);
-        expect(retried.count).toBe(1);
-      },
-    );
-  });
-
-  it('Save asks the shell to re-read the machine QUIETLY when it offers that, not to show "checking"', async () => {
-    const calls: Call[] = [];
-    const retried = { count: 0 };
-    const refreshed = { count: 0 };
-    const tabProps = props({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, calls, retried);
-    const view = await mount(
-      <MachineSettingsTab
-        {...tabProps}
-        onRefresh={() => {
-          refreshed.count += 1;
-        }}
-      />,
-    );
-    try {
-      await settle();
-      const q = (selector: string) => view.container.querySelector(selector);
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      expect(refreshed.count).toBe(1);
-      expect(retried.count).toBe(0);
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  it('a refused Save says why and does not ask the shell to check again', async () => {
-    await withTab({ answers: { '/v1/fleet/proposals': new Error('unreachable') } }, async ({ q, retried }) => {
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
-      expect(retried.count).toBe(0);
-    });
-  });
-
-  describe('What agents may control (T)', () => {
-    it('shows all three switched on by default, and Save sends only the one that moved', async () => {
-      await withTab(
-        {
-          answers: {
-            '/v1/fleet/proposals': STAGED,
-            [APPLY_PATH]: OUTCOME,
-          },
-        },
-        async ({ q, calls, retried }) => {
-          const section = must(q('[data-setup-section="agent-control"]'), 'agent control section');
-          expect(section.querySelector('[data-setup-choice="terminals"] input')).toHaveProperty('checked', true);
-          expect(section.querySelector('[data-setup-choice="browsers"] input')).toHaveProperty('checked', true);
-          expect(section.querySelector('[data-setup-choice="files"] input')).toHaveProperty('checked', true);
-          expect(q('[data-change-submit]')).toBeNull();
-
-          await click(q('[data-setup-choice="terminals"] input'), 'terminals checkbox');
-          expect(q('[data-change-submit]')?.textContent).toBe('Save what agents may control');
-          await click(q('[data-change-submit]'), 'save agent control');
-
-          const staged = must(
-            calls.find(call => call.path === '/v1/fleet/proposals'),
-            'the staged change call',
-          );
-          expect(staged.body).toEqual({
-            change: {
-              kind: 'machine.settings',
-              agentPermissions: 'auto',
-              defaultRuntime: 'claude-default',
-              agentControl: {
-                terminals: false,
-                browsers: true,
-                files: true,
-                ferretrySettings: false,
-                pageScripts: false,
-              },
-            },
-          });
-          expect(retried.count).toBe(1);
-        },
-      );
-    });
-
-    it('offers Page scripts off by default, saying plainly it can read sign-ins, and sends it when turned on', async () => {
-      await withTab(
-        {
-          answers: {
-            '/v1/fleet/proposals': STAGED,
-            [APPLY_PATH]: OUTCOME,
-          },
-        },
-        async ({ q, calls }) => {
-          const row = must(q('[data-setup-choice="pageScripts"]'), 'the Page scripts row');
-          expect(row.querySelector('input')).toHaveProperty('checked', false);
-          expect(row.textContent).toContain('Page scripts');
-          expect(row.textContent).toContain('your sign-ins');
-          expect(row.textContent).toContain('shared agent profile');
-
-          await click(q('[data-setup-choice="pageScripts"] input'), 'page scripts checkbox');
-          await click(q('[data-change-submit]'), 'save agent control');
-
-          const staged = must(
-            calls.find(call => call.path === '/v1/fleet/proposals'),
-            'the staged change call',
-          );
-          expect(staged.body).toEqual({
-            change: {
-              kind: 'machine.settings',
-              agentPermissions: 'auto',
-              defaultRuntime: 'claude-default',
-              agentControl: {
-                terminals: true,
-                browsers: true,
-                files: true,
-                ferretrySettings: false,
-                pageScripts: true,
-              },
-            },
-          });
-        },
-      );
-    });
-
-    it('Undo puts every switch back to how it was', async () => {
-      await withTab({}, async ({ q }) => {
-        await click(q('[data-setup-choice="terminals"] input'), 'terminals checkbox');
-        await click(q('[data-setup-choice="files"] input'), 'files checkbox');
-        expect(q('[data-change-submit]')).not.toBeNull();
-        await click(q('[data-agent-control-undo]'), 'undo');
-        expect(q('[data-setup-choice="terminals"] input')).toHaveProperty('checked', true);
-        expect(q('[data-setup-choice="files"] input')).toHaveProperty('checked', true);
-        expect(q('[data-change-submit]')).toBeNull();
-      });
-    });
-
-    it('offers Ferretry settings as a fourth switch, off by default, and Save turns it on', async () => {
-      await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
-        const choice = must(q('[data-setup-choice="ferretrySettings"]'), 'Ferretry settings switch');
-        expect(choice.textContent).toContain('Ferretry settings');
-        expect(choice.textContent).toContain("an agent's edit that loosens anything still waits for you");
-        expect(choice.querySelector('input')).toHaveProperty('checked', false);
-
-        await click(choice.querySelector('input'), 'Ferretry settings checkbox');
-        await click(q('[data-change-submit]'), 'save agent control');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(staged.body).toMatchObject({
-          change: {
-            agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
-          },
-        });
-      });
-    });
-  });
-
-  it('holds no browser settings: mode and proxy are the Browser tab’s, and a save here carries the mode on', async () => {
-    await withTab(
-      {
-        machine: machineView({ browserMode: 'window', browserProxy: null }),
-        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
-      },
-      async ({ q, calls }) => {
-        expect(q('[data-setup-section="browser-mode"]')).toBeNull();
-        expect(q('[data-setup-section="browser-proxy"]')).toBeNull();
-        await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(JSON.stringify(staged.body)).toContain('"browserMode":"window"');
-      },
-    );
-  });
-
-  it('hides Auto-resume for a daemon that predates it, and never sends it one', async () => {
-    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
-      expect(q('[data-setup-section="auto-resume"]')).toBeNull();
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      const staged = must(
-        calls.find(call => call.path === '/v1/fleet/proposals'),
-        'the staged change call',
-      );
-      expect(JSON.stringify(staged.body)).not.toContain('autoResume');
-    });
-  });
-
-  it('shows Auto-resume On, and Save sends Off with a way to Keep On', async () => {
-    await withTab(
-      {
-        machine: machineView({ autoResume: true }),
-        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
-      },
-      async ({ q, calls, retried }) => {
-        const section = must(q('[data-setup-section="auto-resume"]'), 'auto-resume');
-        expect(section.querySelector('[data-setup-choice="on"]')?.textContent).toContain('ferrets that were running');
-        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="on"] input')?.checked).toBe(true);
-        expect(q('[data-auto-resume-summary]')).toBeNull();
-        await click(q('[data-setup-choice="off"] input'), 'off radio');
-        expect(q('[data-change-submit]')?.textContent).toBe('Save auto-resume');
-        expect(q('[data-auto-resume-undo]')?.textContent).toBe('Keep On');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(JSON.stringify(staged.body)).toContain('"autoResume":false');
-        expect(retried.count).toBe(1);
-      },
-    );
-  });
-
-  it('shows Off, undoes a pending switch, and lists what the last restart resumed and could not', async () => {
-    await withTab(
-      {
-        machine: machineView({
-          autoResume: false,
-          lastAutoResume: {
-            at: '2026-10-21T08:00:00.000Z',
-            resumed: 5,
-            skipped: [{ sessionId: 'abc', reason: 'its runtime is signed out' }],
-          },
-        }),
-        answers: { '/v1/fleet/proposals': new Error('unreachable') },
-      },
-      async ({ q }) => {
-        expect(q('[data-setup-choice="off"] input') as HTMLInputElement).toHaveProperty('checked', true);
-        expect(q('[data-auto-resume-summary]')?.textContent).toContain('Resumed 5 ferrets after restart');
-        expect(q('[data-auto-resume-skipped]')?.textContent).toBe(
-          'Couldn’t auto-resume abc: its runtime is signed out',
-        );
-        await click(q('[data-setup-choice="on"] input'), 'on radio');
-        await click(q('[data-auto-resume-undo]'), 'keep');
-        expect(q('[data-change-submit]')).toBeNull();
-      },
-    );
-  });
-
-  it('says one ferret in the singular', async () => {
-    await withTab(
-      {
-        machine: machineView({
-          autoResume: true,
-          lastAutoResume: { at: '2026-10-21T08:00:00.000Z', resumed: 1, skipped: [] },
-        }),
-      },
-      async ({ q }) => {
-        expect(q('[data-auto-resume-summary]')?.textContent).toBe('Resumed 1 ferret after restart');
-      },
-    );
-  });
-
-  it('hides Agenda mode for a daemon that predates it, and never sends it one', async () => {
-    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
-      expect(q('[data-setup-section="agenda-mode"]')).toBeNull();
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      const staged = must(
-        calls.find(call => call.path === '/v1/fleet/proposals'),
-        'the staged change call',
-      );
-      expect(JSON.stringify(staged.body)).not.toContain('agendaMode');
-    });
-  });
-
-  it('shows Agenda mode On, and Save sends Off with a way to Keep On', async () => {
-    await withTab(
-      {
-        machine: machineView({ agendaMode: true }),
-        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
-      },
-      async ({ q, calls, retried }) => {
-        const section = must(q('[data-setup-section="agenda-mode"]'), 'agenda-mode');
-        expect(section.querySelector('[data-setup-choice="on"]')?.textContent).toContain('keep an agenda');
-        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="on"] input')?.checked).toBe(true);
-        await click(section.querySelector('[data-setup-choice="off"] input'), 'off radio');
-        expect(q('[data-change-submit]')?.textContent).toBe('Save agenda mode');
-        expect(q('[data-agenda-mode-undo]')?.textContent).toBe('Keep On');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(JSON.stringify(staged.body)).toContain('"agendaMode":false');
-        expect(retried.count).toBe(1);
-      },
-    );
-  });
-
-  it('shows Agenda mode Off and undoes a pending switch', async () => {
-    await withTab(
-      {
-        machine: machineView({ agendaMode: false }),
-        answers: { '/v1/fleet/proposals': new Error('unreachable') },
-      },
-      async ({ q }) => {
-        const section = must(q('[data-setup-section="agenda-mode"]'), 'agenda-mode');
-        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="off"] input')?.checked).toBe(true);
-        await click(section.querySelector('[data-setup-choice="on"] input'), 'on radio');
-        await click(q('[data-agenda-mode-undo]'), 'keep');
-        expect(q('[data-change-submit]')).toBeNull();
-      },
-    );
-  });
-
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');
@@ -558,7 +177,7 @@ describe('MachineSettingsTab', () => {
       expect(setup.querySelector('[data-settings-action="clone"]')?.textContent).toContain(
         'Copy settings from another machine…',
       );
-      expect(setup.querySelector('[data-settings-action="clone"]')?.textContent).toContain(
+      expect(setup.querySelector('[data-settings-action="clone"]')?.getAttribute('title')).toContain(
         'Secrets come only when you pick them; logins never travel.',
       );
       expect(setup.querySelector('[data-settings-action="export"]')?.textContent).toContain('Export settings');
@@ -691,45 +310,55 @@ describe('MachineSettingsTab', () => {
     );
   });
 
-  describe('the paired daemon’s connection and security panels', () => {
-    /** Records every call the tab makes, and draws a marker for the list or the open panel. */
+  describe('the daemon panels the Machine tab draws as groups', () => {
+    /** Records every group and panel the tab asks for, and draws a marker for each. */
     const panelsSpy = () => {
       const asked: (string | undefined)[] = [];
       let open: ((panel: string | null) => void) | undefined;
-      const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen) => {
-        asked.push(panel);
+      const daemonPanels: NonNullable<MachineSettingsTabProps['daemonPanels']> = (panel, onOpen, group) => {
+        asked.push(group ?? panel);
         open = onOpen;
-        return panel === undefined ? <ul data-panels-list="" /> : <section data-panel-shown={panel} />;
+        return panel === undefined ? <ul data-panels-group={group} /> : <section data-panel-shown={panel} />;
       };
       return { asked, daemonPanels, open: (panel: string | null) => must(open, 'the open callback')(panel) };
     };
 
-    it('lists them between Setup and About this machine once the machine answers', async () => {
+    it('asks for Devices & access and Health first, then Tools, the advanced list and About around Setup and the facts', async () => {
       const spy = panelsSpy();
       await withTab({ daemonPanels: spy.daemonPanels }, async ({ q }) => {
-        const list = must(q('[data-machine-settings] [data-panels-list]'), 'the panel list');
-        const setup = must(q('[data-setup-section="setup"]'), 'setup');
-        const facts = must(q('[data-setup-section="facts"]'), 'facts');
-        expect(setup.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-        expect(list.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
-        expect(spy.asked.every(panel => panel === undefined)).toBe(true);
+        expect([...new Set(spy.asked)]).toEqual(['devices-access', 'health', 'tools', 'advanced', 'about']);
+        const order = [
+          ...(q('[data-machine-settings]')?.querySelectorAll('[data-panels-group], [data-setup-section]') ?? []),
+        ].map(node => node.getAttribute('data-panels-group') ?? `section:${node.getAttribute('data-setup-section')}`);
+        expect(order).toEqual([
+          'devices-access',
+          'health',
+          'section:tools',
+          'tools',
+          'section:setup',
+          'advanced',
+          'section:facts',
+          'about',
+        ]);
       });
     });
 
-    it('still lists them while the machine has not answered, because Host checks matter most then', async () => {
+    it('still draws the two groups that matter most while the machine has not answered', async () => {
       const spy = panelsSpy();
       await withTab({ machine: null, checking: true, daemonPanels: spy.daemonPanels }, async ({ q }) => {
         expect(q('[data-machine-settings-waiting]')).not.toBeNull();
-        expect(q('[data-panels-list]')).not.toBeNull();
+        expect(q('[data-panels-group="devices-access"]')).not.toBeNull();
+        expect(q('[data-panels-group="health"]')).not.toBeNull();
+        expect(q('[data-panels-group="about"]')).toBeNull();
       });
     });
 
     it('opens one by moving the address, and shows a panel the address names even with no answer', async () => {
       const spy = panelsSpy();
       await withTab({ daemonPanels: spy.daemonPanels }, async ({ q, browser }) => {
-        await interact(() => spy.open('warden'));
-        expect(browser.location.hash).toBe('#machines/studio-mac/machine/warden');
-        expect(q('[data-panel-shown="warden"]')).not.toBeNull();
+        await interact(() => spy.open('host-checks'));
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine/host-checks');
+        expect(q('[data-panel-shown="host-checks"]')).not.toBeNull();
         expect(q('[data-machine-settings]')).toBeNull();
         await interact(() => spy.open(null));
         expect(browser.location.hash).toBe('#machines/studio-mac/machine');
@@ -751,8 +380,20 @@ describe('MachineSettingsTab', () => {
       );
     });
 
+    it('shows the tab for a panel word that belongs to another tab', async () => {
+      const spy = panelsSpy();
+      for (const panel of ['warden', 'accounts', 'secrets', 'secure-copy'])
+        await withTab(
+          { hash: `#machines/studio-mac/machine/${panel}`, daemonPanels: spy.daemonPanels },
+          async ({ q }) => {
+            expect(q('[data-panel-shown]')).toBeNull();
+            expect(q('[data-machine-settings]')).not.toBeNull();
+          },
+        );
+    });
+
     it('treats a panel word as nothing to show when the shell supplies no panels', async () => {
-      await withTab({ hash: '#machines/studio-mac/machine/warden' }, async ({ q }) => {
+      await withTab({ hash: '#machines/studio-mac/machine/host-checks' }, async ({ q }) => {
         expect(q('[data-machine-settings]')).not.toBeNull();
       });
     });
@@ -761,7 +402,7 @@ describe('MachineSettingsTab', () => {
   it('states the machine facts', async () => {
     await withTab({}, async ({ q }) => {
       const facts = must(q('[data-setup-section="facts"]'), 'facts');
-      expect(facts.querySelector('h4')?.textContent).toBe('About this machine');
+      expect(facts.querySelector('h4')?.textContent).toBe('This machine');
       expect(facts.textContent).toContain('Namestudio-mac');
       expect(facts.textContent).toContain('StatusOnline');
       expect(facts.textContent).toContain('Runtimes2');
@@ -863,104 +504,5 @@ describe('MachineSettingsSurface', () => {
       await view.unmount();
       window.location.hash = saved;
     }
-  });
-});
-
-describe('MachineSettingsTab › Conversations › Keep in sync', () => {
-  const READ = '/v1/config/file?path=machine.yaml';
-  const WRITE = '/v1/config/file';
-  const file = (text: string) => ({
-    path: 'machine.yaml',
-    absolutePath: '/home/you/.ferretry/config/machine.yaml',
-    kind: 'machine',
-    schema: 'machine',
-    exists: true,
-    text,
-    etag: 'etag-1',
-    state: 'ok',
-    issues: [],
-  });
-  const keep = (q: (selector: string) => Element | null): HTMLElement =>
-    must(q('[data-keep-in-sync]') as HTMLElement | null, 'switch');
-
-  it('shows it on when the file cannot be read, since on is the default', async () => {
-    // Arrange
-    const setup: Setup = {};
-
-    // Act / Assert
-    await withTab(setup, async ({ q }) => {
-      expect(keep(q).getAttribute('aria-checked')).toBe('true');
-      expect(q('[data-keep-in-sync-hint]')?.textContent).toContain('Read-only; nothing is imported');
-    });
-  });
-
-  it('shows what machine.yaml says, and ignores a file that does not parse', async () => {
-    // Arrange
-    const off: Setup = { answers: { [READ]: file('conversations:\n  listComputer: false\n') } };
-    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
-
-    // Act / Assert
-    await withTab(off, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('false'));
-    await withTab(broken, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('true'));
-  });
-
-  it('writes the key against the etag it read when switched off, then back on', async () => {
-    // Arrange
-    let text = '# mine\n';
-    const answers = {
-      [READ]: () => file(text),
-      [WRITE]: (call: Call) => {
-        text = (call.body as { text: string }).text;
-        return { path: 'machine.yaml', etag: 'etag-2', outcome: 'applied' };
-      },
-    };
-
-    // Act / Assert
-    await withTab({ answers }, async ({ q, calls }) => {
-      await click(keep(q), 'switch');
-      expect(keep(q).getAttribute('aria-checked')).toBe('false');
-      const put = must(calls.find(call => call.path === WRITE) ?? null, 'put');
-      expect(put.headers['if-match']).toBe('etag-1');
-      expect(text).toContain('# mine');
-      expect(text).toContain('listComputer: false');
-      await click(keep(q), 'switch');
-      expect(keep(q).getAttribute('aria-checked')).toBe('true');
-      expect(text).toContain('listComputer: true');
-      expect(q('[data-keep-in-sync-note]')).toBeNull();
-    });
-  });
-
-  it('says a held change is not in effect yet', async () => {
-    // Arrange
-    const answers = {
-      [READ]: file(''),
-      [WRITE]: { path: 'machine.yaml', etag: 'etag-2', outcome: 'pending' },
-    };
-
-    // Act / Assert
-    await withTab({ answers }, async ({ q }) => {
-      await click(keep(q), 'switch');
-      expect(q('[data-keep-in-sync-note]')?.textContent).toBe('Saved, but not in effect until you confirm it.');
-    });
-  });
-
-  it('says so when the file has a problem or the machine refuses', async () => {
-    // Arrange
-    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
-    const refused: Setup = { answers: { [READ]: file(''), [WRITE]: new Error('The machine said no.') } };
-
-    // Act / Assert
-    await withTab(broken, async ({ q }) => {
-      await click(keep(q), 'switch');
-      expect(q('[data-keep-in-sync-note]')?.textContent).toBe(
-        'machine.yaml has a problem; fix it in the Files panel first.',
-      );
-      expect(keep(q).getAttribute('aria-checked')).toBe('true');
-    });
-    await withTab(refused, async ({ q }) => {
-      await click(keep(q), 'switch');
-      expect(q('[data-keep-in-sync-note]')?.textContent?.length).toBeGreaterThan(0);
-      expect(keep(q).getAttribute('aria-checked')).toBe('true');
-    });
   });
 });

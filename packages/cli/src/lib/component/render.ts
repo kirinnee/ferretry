@@ -54,7 +54,7 @@ export function renderComponent(component: FleetComponentView): string {
   ].join('\n');
 }
 
-/** The Components tab in a terminal, one group per kind. */
+/** The Components section of the Profiles tab in a terminal, one group per kind. */
 export function renderComponentCatalog(groups: readonly FleetComponentGroup[], binaryName: string): string {
   const lines: string[] = [];
   for (const group of groups) {

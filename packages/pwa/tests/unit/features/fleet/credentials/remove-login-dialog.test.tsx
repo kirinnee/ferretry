@@ -25,7 +25,7 @@ import {
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
 const LIST = 'GET /v1/fleet/credentials';
-const HASH = '#machines/studio-mac/credentials';
+const HASH = '#machines/studio-mac/sign-ins';
 
 afterEach(() => {
   window.location.hash = '';
