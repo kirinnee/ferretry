@@ -1,3 +1,9 @@
+## [4.243.0](https://github.com/kirinnee/ferretry/compare/v4.242.0...v4.243.0) (2026-11-02)
+
+### Features
+
+* **agenda:** raise machine notices for ownerless ferrets and make the could-not-be-moved view runnable ([#1367](https://github.com/kirinnee/ferretry/issues/1367)) ([5e3a0c6](https://github.com/kirinnee/ferretry/commit/5e3a0c6e43e8e711ab87d62332aebb598cac807e))
+
 ## [4.242.0](https://github.com/kirinnee/ferretry/compare/v4.241.1...v4.242.0) (2026-11-02)
 
 ### Features

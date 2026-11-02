@@ -1,3 +1,9 @@
+## [4.242.0](https://github.com/kirinnee/ferretry/compare/v4.241.1...v4.242.0) (2026-11-02)
+
+### Features
+
+* **agenda:** one machine agenda, one item per Warden/budget cause ([#1355](https://github.com/kirinnee/ferretry/issues/1355)) ([c2fcdb4](https://github.com/kirinnee/ferretry/commit/c2fcdb4ef481729669ca7c4935bff7e976320847))
+
 ## [4.241.1](https://github.com/kirinnee/ferretry/compare/v4.241.0...v4.241.1) (2026-11-02)
 
 ### Fixes
