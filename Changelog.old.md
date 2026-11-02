@@ -1,3 +1,14 @@
+## [4.230.0](https://github.com/kirinnee/ferretry/compare/v4.229.2...v4.230.0) (2026-11-02)
+
+### Features
+
+* **pwa:** the side panel lists the skills active in this session (B131 A1) ([#1337](https://github.com/kirinnee/ferretry/issues/1337)) ([3328fe9](https://github.com/kirinnee/ferretry/commit/3328fe99271e89f8f28c71dc5dc25f58ec3638a5))
+* **relay:** the signed link bundle and the link-store wire (catalogs 3f-1) ([#1335](https://github.com/kirinnee/ferretry/issues/1335)) ([4fc49c2](https://github.com/kirinnee/ferretry/commit/4fc49c23223ee33765f227a915ae1a664c74eccd))
+
+### Fixes
+
+* **board:** only the owner's closing of a gate counts as asked ([#1340](https://github.com/kirinnee/ferretry/issues/1340)) ([7d62642](https://github.com/kirinnee/ferretry/commit/7d626425bc935d0c77d4425989f4c8344bf581de))
+
 ## [4.229.2](https://github.com/kirinnee/ferretry/compare/v4.229.1...v4.229.2) (2026-11-02)
 
 ### Fixes
