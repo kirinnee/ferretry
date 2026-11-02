@@ -976,7 +976,7 @@ describe('the mounted daemon surface', () => {
       2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
-      3 + // the setup scan, tool install and the clone export
+      4 + // the setup scan, tool install, the clone export and the clone review
       1 + // the security log read
       1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
