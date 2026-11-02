@@ -1109,14 +1109,18 @@ with `,`). The labels are `ferretry-link-store-upload-v1`, `-delete-v1` and `-st
 - **Gone is one answer.** Every failed peek or fetch (unknown id, wrong or malformed token, used, ended, lapsed,
   expired, capped) is the same frozen `410 link_gone`, byte for byte. A public link at its cap stays `live` in its
   owner's status, and answers 410 to peek and fetch alike.
+- **The token is matched before the wrong-token window.** A request that presents the link's real token is never
+  refused for wrong guesses at its id, so a stranger who knows only a bundle id cannot lock the recipient out or burn
+  a one-time link. Only a wrong token counts toward, and is stopped by, that window.
 - **Limits answer 429 by the id asked for, whether or not it exists**, so a 429 says nothing about an id. Defaults are
   operator configuration: per daemon 50 live links, 64 MiB and 100 uploads a day; per link 120 fetches a minute, 5,000
   a day and 20 wrong tokens a minute; per address 60 peeks and fetches and 20 challenges a minute; across the store
-  20,000 live links, 4 GiB, 5,000 uploads and 200,000 fetches a day.
+  20,000 live links, 4 GiB, 5,000 uploads and 200,000 fetches a day (one-time fetches count in that last figure).
 - **One-time is serialised.** The first fetch sets `used` and drops the bytes in one step; a racing second fetch gets
   the uniform 410. A lost response costs the link, which is declared below.
-- **Replace** (public only) is compare-and-swap on `expectSequence`, needs a higher sequence, keeps the kind and keeps
-  the open count. A **lapsed** public link is revived only by its own owner with a sequence above the stored one. Any
+- **Replace** (public only) is compare-and-swap on `expectSequence`, needs a higher sequence (the store refuses one that
+  does not go up), keeps the kind and keeps the open count. Every upload's clear envelope sequence must equal the
+  sequence the request names, and a sequence never exceeds 2^32 − 1. A **lapsed** public link is revived only by its own owner with a sequence above the stored one. Any
   other existing id, whatever its state, is `link_exists`.
 - **Delete** ends a link, is idempotent and keeps a tombstone until `max(notAfter, now) + 30 days`, so a replayed URL
   stays 410 and the id cannot be reused.
@@ -1143,6 +1147,9 @@ the reverse. Copying needs only the unlock; turning a link off never asks.
 - **A one-time link whose response is lost is spent.** The store cannot know the bytes arrived.
 - **The open count is fetches, not installs.**
 - **A self-hosted store (`s=`) is trusted for availability only**, and the app names its host before fetching.
+- **A lapsed "never" link's id can be squatted once its tombstone is purged.** After the tombstone window another
+  daemon could upload under the same bundle id and the old URL would then reach that daemon's link. It cannot read or
+  forge anything (the key and the signature are the publisher's), so this is an availability gap only.
 
 ## Declared gaps
 

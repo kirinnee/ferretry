@@ -246,6 +246,8 @@ describe('opening an envelope', () => {
       openLinkEnvelope(relayCrypto, KEY, BUNDLE_ID, await forge(plaintext));
     // Not a multiple of the bucket.
     should(await refusal(new Uint8Array(100))).match({ refusal: 'malformed_envelope' });
+    // Past the size floor, yet still not a multiple of the bucket.
+    should(await refusal(new Uint8Array(LINK_PADDING_BUCKET_BYTES + 1))).match({ refusal: 'malformed_envelope' });
     // A length longer than the plaintext.
     should(await refusal(padded(body, LINK_PADDING_BUCKET_BYTES))).match({ refusal: 'malformed_envelope' });
     // A zero length.

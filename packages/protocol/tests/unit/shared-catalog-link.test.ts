@@ -104,6 +104,7 @@ describe('the signed link document', () => {
       SharedCatalogLinkSchema.safeParse(publicLink({ expiresAt: at(90 * DAY), notAfter: at(30 * DAY) })).success,
     ).toBe(true);
     expect(SharedCatalogLinkSchema.safeParse(publicLink({ sequence: 9 })).success).toBe(true);
+    expect(SharedCatalogLinkSchema.safeParse(publicLink({ sequence: 0xffffffff })).success).toBe(true);
   });
 
   it('should accept an MCP item and a harness on a link item', () => {
@@ -156,6 +157,7 @@ describe('the signed link document', () => {
       { kind: 'private' },
       { sequence: 0 },
       { sequence: 1.5 },
+      { sequence: 0x1_0000_0000 },
       { issuedAt: 'yesterday' },
       { notAfter: 'later' },
       { expiresAt: 'never' },

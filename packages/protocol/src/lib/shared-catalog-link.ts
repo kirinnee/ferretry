@@ -86,7 +86,7 @@ export const SharedCatalogLinkSchema = z
     linkId: CatalogLinkIdSchema,
     bundleId: LinkBundleIdSchema,
     kind: CatalogLinkKindSchema,
-    sequence: z.number().int().min(1),
+    sequence: z.number().int().min(1).max(0xffffffff),
     /** The instant of this upload. */
     issuedAt: InstantSchema,
     /** The hard end of this signed copy: `min(expiresAt, issuedAt + 30 days)`. */

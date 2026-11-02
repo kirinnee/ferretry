@@ -28,6 +28,14 @@ const OTHER = `fy_daemon_${'B'.repeat(43)}`;
 const ID = b64(16, 1);
 const ID2 = b64(16, 2);
 const ID3 = b64(16, 3);
+/** An envelope's size: the least one the store accepts (a 16 KiB pad, a header and a tag) with room to spare. */
+const BASE = 16_500;
+const envelopeOf = (length: number, sequence: number): Uint8Array => {
+  const bytes = new Uint8Array(length).fill(9);
+  bytes.set(new TextEncoder().encode('FYL1'), 0);
+  new DataView(bytes.buffer).setUint32(4, sequence, false);
+  return bytes;
+};
 
 type LimitPatch = { [K in keyof LinkStoreLimits]?: Partial<LinkStoreLimits[K]> };
 const limitsWith = (patch: LimitPatch): LinkStoreLimits => ({
@@ -49,7 +57,7 @@ function harness(limits: LinkStoreLimits = DEFAULT_LINK_STORE_LIMITS) {
 }
 type Harness = ReturnType<typeof harness>;
 
-const meta = (changes: Partial<LinkUploadMetadata> = {}, bytes = 100): LinkUploadMetadata =>
+const meta = (changes: Partial<LinkUploadMetadata> = {}, bytes = BASE): LinkUploadMetadata =>
   ({
     daemonId: OWNER,
     publicKey: b64(44, 2),
@@ -70,16 +78,18 @@ interface UploadOptions {
   readonly daemonId?: string;
   readonly metadata?: Partial<LinkUploadMetadata>;
   readonly bytes?: number;
+  readonly envelopeSequence?: number;
   readonly now?: number;
 }
 const upload = (h: Harness, options: UploadOptions = {}) => {
-  const bytes = options.bytes ?? 100;
+  const bytes = options.bytes ?? BASE;
+  const metadata = meta(options.metadata, bytes);
   return h.go({
     type: 'upload',
     daemonId: options.daemonId ?? OWNER,
     bundleId: options.bundleId ?? ID,
-    metadata: meta(options.metadata, bytes),
-    envelope: new Uint8Array(bytes).fill(9),
+    metadata,
+    envelope: envelopeOf(bytes, options.envelopeSequence ?? metadata.sequence),
     now: options.now ?? T0,
   });
 };
@@ -204,7 +214,7 @@ describe('uploading', () => {
   it('should store a link and say so', () => {
     const h = harness();
     should(upload(h)).deepEqual({ ok: true, kind: 'stored', sequence: 1 });
-    should(statusOf(h)).match({ state: 'live', kind: 'public', sequence: 1, opens: 0, storedBytes: 100 });
+    should(statusOf(h)).match({ state: 'live', kind: 'public', sequence: 1, opens: 0, storedBytes: BASE });
   });
 
   it('should refuse every upload while the store is not taking new links', () => {
@@ -219,7 +229,7 @@ describe('uploading', () => {
       type: 'upload',
       daemonId: OWNER,
       bundleId: ID,
-      metadata: meta({}, 100),
+      metadata: meta({}, BASE),
       envelope: new Uint8Array(99),
       now: T0,
     });
@@ -253,12 +263,12 @@ describe('uploading', () => {
     fetch(h);
     fetch(h);
     const replaced = upload(h, {
-      bytes: 200,
+      bytes: BASE + 100,
       metadata: { action: 'replace', sequence: 2, expectSequence: 1, fetchVerifier: b64(32, 5) },
     });
     should(replaced).deepEqual({ ok: true, kind: 'stored', sequence: 2 });
-    should(statusOf(h)).match({ sequence: 2, opens: 2, storedBytes: 200 });
-    should(linkStoreMetrics(h.state()).storedBytes).equal(200);
+    should(statusOf(h)).match({ sequence: 2, opens: 2, storedBytes: BASE + 100 });
+    should(linkStoreMetrics(h.state()).storedBytes).equal(BASE + 100);
     should(code(fetch(h))).equal('link_gone');
     should(code(fetch(h, { verifier: b64(32, 5) }))).equal('fetch');
   });
@@ -270,6 +280,34 @@ describe('uploading', () => {
     const stale = upload(h, { metadata: { action: 'replace', sequence: 3, expectSequence: 1 } });
     should(code(stale)).equal('link_sequence_conflict');
     should(statusOf(h)).match({ sequence: 2 });
+  });
+
+  it('should refuse a replace whose sequence does not go up', () => {
+    const h = harness();
+    upload(h, { metadata: { sequence: 3 } });
+    for (const sequence of [1, 3]) {
+      const down = upload(h, {
+        metadata: { action: 'replace', sequence, expectSequence: 3 },
+      });
+      should(code(down)).equal('link_sequence_conflict');
+    }
+    should(statusOf(h)).match({ sequence: 3 });
+  });
+
+  it('should refuse an upload whose envelope does not carry the sequence the request names', () => {
+    const h = harness();
+    should(code(upload(h, { envelopeSequence: 2 }))).equal('link_bad_request');
+    const short = h.go({
+      type: 'upload',
+      daemonId: OWNER,
+      bundleId: ID,
+      metadata: meta({}, 100),
+      envelope: new Uint8Array(100).fill(9),
+      now: T0,
+    });
+    should(code(short)).equal('link_bad_request');
+    should(h.state().bundles.size).equal(0);
+    should(code(upload(h))).equal('stored');
   });
 
   it('should refuse a replace of what is not there, is not theirs, has ended, or is another kind', () => {
@@ -344,7 +382,7 @@ describe('quotas and capacity', () => {
   });
 
   it('should cap stored bytes per daemon, counting a replace by what it adds', () => {
-    const h = harness(limitsWith({ perDaemon: { bytes: 250 } }));
+    const h = harness(limitsWith({ perDaemon: { bytes: 2 * BASE + 50 } }));
     upload(h, { bundleId: ID });
     upload(h, { bundleId: ID2 });
     should(code(upload(h, { bundleId: ID3 }))).equal('link_store_full');
@@ -356,8 +394,8 @@ describe('quotas and capacity', () => {
           metadata: { action: 'replace', sequence: expect + 1, expectSequence: expect },
         }),
       );
-    should(replace(151, 1)).equal('link_store_full');
-    should(replace(150, 1)).equal('stored');
+    should(replace(BASE + 51, 1)).equal('link_store_full');
+    should(replace(BASE + 50, 1)).equal('stored');
   });
 
   it('should cap uploads a day per daemon and across the store, and start again the next day', () => {
@@ -382,7 +420,7 @@ describe('quotas and capacity', () => {
       code(upload(links, { bundleId: ID, metadata: { action: 'replace', sequence: 2, expectSequence: 1 } })),
     ).equal('stored');
 
-    const bytes = harness(limitsWith({ global: { bytes: 150 } }));
+    const bytes = harness(limitsWith({ global: { bytes: BASE + 50 } }));
     upload(bytes, { bundleId: ID });
     should(code(upload(bytes, { bundleId: ID2, daemonId: OTHER }))).equal('link_store_capacity');
 
@@ -456,7 +494,7 @@ describe('deleting and status', () => {
       notAfter: iso(T0 + 7 * DAY),
       expiresAt: iso(T0 + 8 * DAY),
       installCap: 5,
-      storedBytes: 100,
+      storedBytes: BASE,
     });
     should(Object.keys(response.status.links[1] ?? {})).not.containEql('installCap');
     should(Object.keys(response.status.links[1] ?? {})).not.containEql('expiresAt');
@@ -492,8 +530,8 @@ describe('peeking and fetching', () => {
     if (!first.ok || first.kind !== 'fetch') throw new Error('no fetch');
     should(first.linkKind).equal('public');
     should(first.sequence).equal(1);
-    should(first.envelope.length).equal(100);
-    should(first.envelope[0]).equal(9);
+    should(first.envelope.length).equal(BASE);
+    should(first.envelope[8]).equal(9);
     fetch(h);
     should(statusOf(h)).match({ state: 'live', opens: 2 });
   });
@@ -582,6 +620,17 @@ describe('peeking and fetching', () => {
     should(code(fetch(h, { bundleId: ID, now: T0 + DAY }))).equal('fetch');
   });
 
+  it('should count one-time fetches in the store-wide day count, and refuse them over it', () => {
+    const h = harness(limitsWith({ global: { fetchesPerDay: 1 }, perIp: { fetchesPerMinute: 1000 } }));
+    const oneTime = { kind: 'one-time', notAfter: iso(T0 + DAY) } as const;
+    upload(h, { bundleId: ID, metadata: oneTime });
+    upload(h, { bundleId: ID2, metadata: { ...oneTime, fetchVerifier: b64(32, 2) } });
+    should(code(fetch(h, { bundleId: ID }))).equal('fetch');
+    should(code(fetch(h, { bundleId: ID2, verifier: b64(32, 2) }))).equal('link_store_capacity');
+    should(statusOf(h, ID2)).match({ state: 'live' });
+    should(code(fetch(h, { bundleId: ID2, verifier: b64(32, 2), now: T0 + DAY / 2 }))).equal('link_store_capacity');
+  });
+
   it('should limit requests from one address a minute, peeks and fetches alike', () => {
     const h = harness(limitsWith({ perIp: { fetchesPerMinute: 2 } }));
     upload(h);
@@ -601,12 +650,29 @@ describe('peeking and fetching', () => {
       should(fetch(h, { bundleId, verifier: b64(32, 8) })).equal(LINK_GONE);
       should(fetch(h, { bundleId, verifier: b64(32, 8) })).equal(LINK_GONE);
     }
-    const real = fetch(h);
-    const missing = fetch(h, { bundleId: unknown });
+    const real = fetch(h, { verifier: b64(32, 8) });
+    const missing = fetch(h, { bundleId: unknown, verifier: b64(32, 8) });
     should(real).deepEqual(missing);
     should(code(real)).equal('link_rate_limited');
-    should(code(fetch(h, { now: T0 + MIN }))).equal('fetch');
-    should(code(fetch(h, { bundleId: unknown, now: T0 + MIN }))).equal('link_gone');
+    should(code(fetch(h, { verifier: b64(32, 8), now: T0 + MIN }))).equal('link_gone');
+    should(code(fetch(h, { bundleId: unknown, verifier: b64(32, 8), now: T0 + MIN }))).equal('link_gone');
+  });
+
+  it('should still serve the real token while strangers fill the wrong-token window', () => {
+    const h = harness(limitsWith({ perIp: { fetchesPerMinute: 1000 } }));
+    upload(h);
+    for (let tries = 0; tries < 25; tries++) fetch(h, { verifier: b64(32, 8) });
+    should(code(fetch(h, { verifier: b64(32, 8) }))).equal('link_rate_limited');
+    should(code(peek(h))).equal('peek');
+    should(code(fetch(h))).equal('fetch');
+  });
+
+  it('should let the real recipient of a one-time link through a full wrong-token window, once', () => {
+    const h = harness(limitsWith({ perIp: { fetchesPerMinute: 1000 } }));
+    upload(h, { metadata: { kind: 'one-time', notAfter: iso(T0 + DAY) } });
+    for (let tries = 0; tries < 25; tries++) fetch(h, { verifier: b64(32, 8) });
+    should(code(fetch(h))).equal('fetch');
+    should(code(fetch(h))).equal('link_gone');
   });
 });
 
@@ -680,7 +746,7 @@ describe('sweeping and metrics', () => {
   it('should count, and name nothing', () => {
     const h = harness();
     upload(h, { bundleId: ID });
-    upload(h, { bundleId: ID2, bytes: 50, daemonId: OTHER });
+    upload(h, { bundleId: ID2, bytes: BASE - 50, daemonId: OTHER });
     h.go({ type: 'delete', daemonId: OTHER, bundleId: ID2, now: T0 });
     const metrics = linkStoreMetrics(h.state());
     should(metrics).deepEqual({
@@ -688,7 +754,7 @@ describe('sweeping and metrics', () => {
       serving: true,
       owners: 2,
       liveLinks: 1,
-      storedBytes: 100,
+      storedBytes: BASE,
       tombstones: 1,
     });
     const text = JSON.stringify(metrics);

@@ -156,7 +156,7 @@ export const LinkStatusSchema = z.strictObject({
       bundleId: LinkBundleIdSchema,
       state: LinkStoreLinkStateSchema,
       kind: CatalogLinkKindSchema.optional(),
-      sequence: z.number().int().min(1).optional(),
+      sequence: z.number().int().min(1).max(0xffffffff).optional(),
       opens: z.number().int().min(0).optional(),
       notAfter: InstantSchema.optional(),
       expiresAt: InstantSchema.optional(),

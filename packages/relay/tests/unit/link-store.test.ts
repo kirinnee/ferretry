@@ -356,6 +356,7 @@ describe('the other wire schemas', () => {
     ).be.true();
     should(LinkStatusSchema.safeParse({ version: 1, links: [{ ...row, state: 'gone' }] }).success).be.false();
     should(LinkStatusSchema.safeParse({ version: 1, links: [{ ...row, secret: 1 }] }).success).be.false();
+    should(LinkStatusSchema.safeParse({ version: 1, links: [{ ...row, sequence: 0x1_0000_0000 }] }).success).be.false();
     should(LinkFetchRequestSchema.safeParse({ token: b64(32) }).success).be.true();
     should(LinkFetchRequestSchema.safeParse({ token: b64(31) }).success).be.false();
     should(LinkFetchRequestSchema.safeParse({ token: b64(32), extra: 1 }).success).be.false();

@@ -25,6 +25,7 @@
  * Nothing here logs, and nothing here holds a key: the store sees `SHA-256(token)`, never the token.
  */
 import { bytesEqual, fromBase64UrlFixed } from './binary.ts';
+import { linkEnvelopeSequence } from './link-bundle.ts';
 import {
   LINK_GONE_SENTENCE,
   LINK_STORE_CHALLENGE_SECONDS,
@@ -358,6 +359,7 @@ function upload(state: LinkStoreState, event: Extract<LinkStoreEvent, { type: 'u
   if (!state.available) return [state, fail('link_store_unavailable')];
   const notAfter = Date.parse(metadata.notAfter);
   const reach = metadata.kind === 'one-time' ? MAX_ONE_TIME_MS : MAX_LEASE_MS;
+  if (linkEnvelopeSequence(envelope) !== metadata.sequence) return [state, fail('link_bad_request')];
   if (envelope.length !== metadata.envelopeBytes || notAfter <= now || notAfter - now > reach + LINK_UPLOAD_SKEW_MS)
     return [state, fail('link_bad_request')];
 
@@ -369,7 +371,8 @@ function upload(state: LinkStoreState, event: Extract<LinkStoreEvent, { type: 'u
     if (existing === undefined || existing.owner !== daemonId || existing.state !== 'live')
       return [state, fail('link_unknown')];
     if (existing.kind !== metadata.kind) return [state, fail('link_bad_request')];
-    if (metadata.expectSequence !== existing.sequence) return [state, fail('link_sequence_conflict')];
+    if (metadata.expectSequence !== existing.sequence || metadata.sequence <= existing.sequence)
+      return [state, fail('link_sequence_conflict')];
     replacedBytes = owner.leases.get(bundleId)?.bytes ?? 0;
     opens = existing.opens;
   } else if (existing !== undefined) {
@@ -467,17 +470,19 @@ function open(state: LinkStoreState, event: Extract<LinkStoreEvent, { type: 'pee
   const byIp = state.fetchTimesByIp.get(event.ip) ?? [];
   if (byIp.length >= limits.perIp.fetchesPerMinute) return [state, fail('link_rate_limited')];
   const counted: LinkStoreState = { ...state, fetchTimesByIp: put(state.fetchTimesByIp, event.ip, [...byIp, now]) };
-  // Keyed by the id whether or not it exists, so a 429 says nothing about whether the id is real.
-  const wrong = counted.wrongTokenTimes.get(bundleId) ?? [];
-  if (wrong.length >= limits.perLink.wrongTokensPerMinute) return [counted, fail('link_rate_limited')];
-
   const row = counted.bundles.get(bundleId);
   const presented = fromBase64UrlFixed(event.tokenVerifier, 32);
   const stored = row === undefined ? null : fromBase64UrlFixed(row.fetchVerifier, 32);
   const matches =
     bytesEqual(presented ?? ZERO_VERIFIER, stored ?? ZERO_VERIFIER) && presented !== null && stored !== null;
-  if (row === undefined || !matches)
+  // The token is matched FIRST and a match skips the wrong-token window: whoever holds the real link is
+  // never locked out by strangers guessing at its id. The window is keyed by the id whether or not it
+  // exists, so a 429 says nothing about whether the id is real.
+  if (row === undefined || !matches) {
+    const wrong = counted.wrongTokenTimes.get(bundleId) ?? [];
+    if (wrong.length >= limits.perLink.wrongTokensPerMinute) return [counted, fail('link_rate_limited')];
     return [{ ...counted, wrongTokenTimes: put(counted.wrongTokenTimes, bundleId, [...wrong, now]) }, LINK_GONE];
+  }
   const end = Math.min(Date.parse(row.notAfter), row.expiresAt === undefined ? Infinity : Date.parse(row.expiresAt));
   if (row.state !== 'live' || row.envelope === null || now >= end) return [counted, LINK_GONE];
 
@@ -493,22 +498,28 @@ function open(state: LinkStoreState, event: Extract<LinkStoreEvent, { type: 'pee
     return [counted, { ok: true, kind: 'peek', peek }];
   }
 
+  const day = dayOf(now);
+  const globalCount = counted.fetchesToday.day === day ? counted.fetchesToday.count : 0;
+  if (globalCount >= limits.global.fetchesPerDay) return [counted, fail('link_store_capacity')];
+  const fetchesToday = { day, count: globalCount + 1 };
+
   if (row.kind === 'one-time') {
     const used = releaseLease(
-      { ...counted, bundles: put(counted.bundles, bundleId, { ...tombstoned(row, 'used', now), opens: 1 }) },
+      {
+        ...counted,
+        bundles: put(counted.bundles, bundleId, { ...tombstoned(row, 'used', now), opens: 1 }),
+        fetchesToday,
+      },
       row.owner,
       bundleId,
     );
     return [used, { ok: true, kind: 'fetch', envelope: row.envelope, linkKind: 'one-time', sequence: row.sequence }];
   }
 
-  const day = dayOf(now);
   const minute = recent(row.fetchTimes, now);
   const dayCount = row.fetchDay.day === day ? row.fetchDay.count : 0;
   if (minute.length >= limits.perLink.fetchesPerMinute || dayCount >= limits.perLink.fetchesPerDay)
     return [counted, fail('link_rate_limited')];
-  const globalCount = counted.fetchesToday.day === day ? counted.fetchesToday.count : 0;
-  if (globalCount >= limits.global.fetchesPerDay) return [counted, fail('link_store_capacity')];
   const served: BundleRow = {
     ...row,
     opens: row.opens + 1,
@@ -516,7 +527,7 @@ function open(state: LinkStoreState, event: Extract<LinkStoreEvent, { type: 'pee
     fetchDay: { day, count: dayCount + 1 },
   };
   return [
-    { ...counted, bundles: put(counted.bundles, bundleId, served), fetchesToday: { day, count: globalCount + 1 } },
+    { ...counted, bundles: put(counted.bundles, bundleId, served), fetchesToday },
     { ok: true, kind: 'fetch', envelope: row.envelope, linkKind: 'public', sequence: row.sequence },
   ];
 }
