@@ -904,6 +904,12 @@ export const SessionViewSchema = z.object({
   outdated: SessionOutdatedSchema.optional(),
   /** How full the context window is; absent while unknown (see {@link SessionContextSchema}). */
   context: SessionContextSchema.optional(),
+  /**
+   * When the owner pinned this ferret to the top of the sidebar; absent while it is not pinned. Derived when
+   * the view is read from the owner's pin list, never part of the session's own config, so it rides the
+   * polled list to every device the owner has open.
+   */
+  pinnedAt: InstantSchema.optional(),
   directory: z.string().min(1),
   /**
    * The highest event sequence this session's journal held when the view was read: where a reader

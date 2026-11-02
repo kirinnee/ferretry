@@ -1161,6 +1161,14 @@ export class FyApiClient implements IFyApiClient {
     return this.#post(id, 'rename', RenameSessionRequestSchema, { name, teammate, clearParent }, SessionViewSchema);
   }
 
+  pinSession(id: string): Promise<SessionView> {
+    return this.#post(id, 'pin', z.strictObject({}), {}, SessionViewSchema);
+  }
+
+  unpinSession(id: string): Promise<SessionView> {
+    return this.#post(id, 'unpin', z.strictObject({}), {}, SessionViewSchema);
+  }
+
   signal(id: string, kind: SignalKind, message?: string, options: SignalOptions = {}): Promise<SessionView> {
     return this.#post(id, 'signal', SignalSessionRequestSchema, { kind, message, ...options }, SessionViewSchema);
   }

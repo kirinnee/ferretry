@@ -35,6 +35,7 @@ describe('SESSION_ACTION_IDS', () => {
       'rename',
       'fork',
       'copy-id',
+      'pin',
       'move-login',
       'move-harness',
       'move-machine',
@@ -44,6 +45,47 @@ describe('SESSION_ACTION_IDS', () => {
       'resume',
       'stop',
     ]);
+  });
+});
+
+describe('CORE_SESSION_ACTIONS — pinning', () => {
+  const entryFor = (ctx: CoreActionContext) =>
+    sessionActionSections(CORE_SESSION_ACTIONS, ctx)
+      .flatMap(section => section.entries)
+      .find(entry => entry.id === SESSION_ACTION_IDS.pin);
+
+  it('offers Pin to top only where the host can pin, and asks to pin', async () => {
+    expect(entryFor(context('running'))).toBeUndefined();
+    const asked: boolean[] = [];
+    const entry = entryFor(
+      context('running', {
+        setPinned: async pinned => {
+          asked.push(pinned);
+        },
+      }),
+    );
+    expect(entry?.label).toBe('Pin to top');
+    if (entry?.kind === 'run') await entry.run();
+    expect(asked).toEqual([true]);
+  });
+
+  it('offers Unpin on a pinned ferret, even a finished one, and asks to unpin', async () => {
+    const asked: boolean[] = [];
+    const entry = entryFor(
+      context('completed', {
+        view: sessionView('a1', { state: { status: 'completed' }, pinnedAt: '2026-11-02T10:00:00.000Z' }),
+        setPinned: async pinned => {
+          asked.push(pinned);
+        },
+      }),
+    );
+    expect(entry?.label).toBe('Unpin');
+    if (entry?.kind === 'run') await entry.run();
+    expect(asked).toEqual([false]);
+  });
+
+  it('is withheld from a connection that may not control the ferret', () => {
+    expect(entryFor(context('running', { canControl: false, setPinned: async () => undefined }))).toBeUndefined();
   });
 });
 

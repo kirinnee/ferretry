@@ -75,6 +75,8 @@ import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filt
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import { DEFAULT_LIST_FILTER, type SessionsListFilter, sessionsBarView, sidebarCompact } from './sessions-bar-model.ts';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
+import { SessionsBarPinned } from './sessions-bar-pinned.tsx';
+import { SessionPinContext, type TogglePin } from './session-pin-context.ts';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
 
@@ -153,6 +155,8 @@ export interface SessionsBarProps {
   readonly density?: Density | null;
   /** The device setting "Group Needs you at the top"; absent means on. */
   readonly groupNeedsYou?: boolean;
+  /** Pins or unpins a row's ferret from its hover control. Absent, rows carry no such control. */
+  readonly onTogglePin?: TogglePin;
   /** The reader chose a density in the bar's options menu. Absent: the bar offers no such menu. */
   readonly onDensityChange?: (density: Density) => void;
   /** The kind filter this device remembered, read when the bar opens. Absent or null: Interactive. */
@@ -356,6 +360,7 @@ const allMachinesFor = (props: SessionsBarProps, listFilter: SessionsListFilter)
         keep: (machine, view) => machine === props.daemonId && view.config.id === props.activeSessionId,
         sortRows: true,
         groupNeedsYou: props.groupNeedsYou ?? true,
+        pinnedFirst: true,
       });
 
 const densityWord = (density: Density | null | undefined): 'compact' | 'comfortable' =>
@@ -416,7 +421,10 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
             <p className="fy-sbar__empty" role="status">
               Reading sessions…
             </p>
-          ) : listFilter.mode !== 'all' && machineView.needsYou.length === 0 && machineView.machines.length === 0 ? (
+          ) : listFilter.mode !== 'all' &&
+            machineView.pinned.length === 0 &&
+            machineView.needsYou.length === 0 &&
+            machineView.machines.length === 0 ? (
             <p className="fy-sbar__empty">{sessionsBarEmptyMessage(listFilter, hiddenStopped)}</p>
           ) : (
             <SessionsBarMachines
@@ -434,7 +442,7 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           <p className="fy-sbar__empty" role="status">
             Reading sessions…
           </p>
-        ) : view.groups.length === 0 && view.needsYou.length === 0 ? (
+        ) : view.groups.length === 0 && view.needsYou.length === 0 && view.pinned.length === 0 ? (
           <div className="fy-sbar__empty">
             <p className="m-0">
               {listFilter.mode === 'all' && props.createRuntimeHref !== undefined
@@ -455,6 +463,12 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           </div>
         ) : (
           <>
+            <SessionsBarPinned
+              isActive={row => row.view.config.id === activeSessionId}
+              learns={row => props.learningPassive?.has(row.view.config.id) === true}
+              onNavigate={navigate}
+              rows={view.pinned.map(row => ({ daemonId, view: row }))}
+            />
             <SessionsBarNeedsYou
               isActive={row => row.view.config.id === activeSessionId}
               learns={row => props.learningPassive?.has(row.view.config.id) === true}
@@ -636,8 +650,8 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
             view={machineView}
           />
         ) : (
-          // Unread dots lead (`view.needsYou`), then the project groups' sessions.
-          [...view.needsYou, ...view.groups.flatMap(group => group.rows)].map(row => (
+          // Pinned dots lead, then the unread ones (`view.needsYou`), then the project groups' sessions.
+          [...view.pinned, ...view.needsYou, ...view.groups.flatMap(group => group.rows)].map(row => (
             <li key={row.config.id}>
               <SessionsRailDot
                 active={row.config.id === activeSessionId}
@@ -809,8 +823,10 @@ export function SessionsBar(props: SessionsBarProps) {
     );
   return (
     <SessionMenuContext.Provider value={open}>
-      {bar}
-      {menu === null ? null : props.renderSessionMenu?.(menu, close)}
+      <SessionPinContext.Provider value={props.onTogglePin}>
+        {bar}
+        {menu === null ? null : props.renderSessionMenu?.(menu, close)}
+      </SessionPinContext.Provider>
     </SessionMenuContext.Provider>
   );
 }

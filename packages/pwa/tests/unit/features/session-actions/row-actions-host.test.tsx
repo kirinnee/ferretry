@@ -87,6 +87,8 @@ interface Calls {
   readonly resume: string[];
   readonly migrate: unknown[][];
   readonly rename: unknown[][];
+  readonly pin: string[];
+  readonly unpin: string[];
   readonly fork: unknown[][];
   readonly fetches: string[];
 }
@@ -100,7 +102,7 @@ const setup = (
     moveRefusal?: boolean;
   } = {},
 ) => {
-  const calls: Calls = { stop: [], resume: [], migrate: [], rename: [], fork: [], fetches: [] };
+  const calls: Calls = { stop: [], resume: [], migrate: [], rename: [], pin: [], unpin: [], fork: [], fetches: [] };
   const record = { ...alpha, pairedAt: 1, lastSelectedAt: 1 };
   const client = {
     request: async () => grants(options.warden ?? false),
@@ -141,6 +143,14 @@ const setup = (
     rename: async (...args: unknown[]) => {
       calls.rename.push(args);
       return sessionView('s-run', { config: { teammate: 'hadi', name: 'Renamed' } });
+    },
+    pinSession: async (id: string) => {
+      calls.pin.push(id);
+      return sessionView(id, { config: { teammate: 'hadi' }, pinnedAt: '2026-11-02T10:00:00.000Z' });
+    },
+    unpinSession: async (id: string) => {
+      calls.unpin.push(id);
+      return sessionView(id, { config: { teammate: 'hadi' } });
     },
     messages: async () => ({
       messages: [{ point: { v: 1, byteOffset: 4 }, selectionBinding: 'b' }],
@@ -264,6 +274,7 @@ describe('the sessions bar row actions', () => {
     expect(must(root.querySelector('[role="menu"]'), 'menu').getAttribute('aria-label')).toBe('Hadi actions');
     expect(ids(root)).toEqual([
       'open',
+      'pin',
       'rename',
       'fork',
       'copy-id',
@@ -442,6 +453,25 @@ describe('the sessions bar row actions', () => {
     expect(calls.rename).toHaveLength(1);
     expect(calls.rename[0]?.[0]).toBe('s-run');
     expect(seen.closes).toContain(true);
+  });
+
+  it('pins through the machine’s own client and publishes the pinned view', async () => {
+    const { root, calls, store } = await show();
+    expect(item(root, 'pin').textContent).toContain('Pin to top');
+    await choose(root, 'pin');
+    expect(calls.pin).toEqual(['s-run']);
+    const published = store.fleet
+      .getSnapshot()
+      .daemons.get(ALPHA as DaemonId)
+      ?.byId.get('s-run');
+    expect(published?.pinnedAt).toBe('2026-11-02T10:00:00.000Z');
+  });
+
+  it('offers Unpin on a pinned ferret and unpins it', async () => {
+    const { root, calls } = await show({ view: { ...RUNNING, pinnedAt: '2026-11-02T10:00:00.000Z' } as SessionView });
+    expect(item(root, 'pin').textContent).toContain('Unpin');
+    await choose(root, 'pin');
+    expect(calls.unpin).toEqual(['s-run']);
   });
 
   it('forks through the latest message and opens the fork', async () => {

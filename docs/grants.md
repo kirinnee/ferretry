@@ -189,6 +189,14 @@ only the owner's shell and paired devices — not a grant. An Inbox card's own d
 `?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. A test pins this choice
 (`tests/unit/runtime/mounts/shared-drafts.test.ts`), so making drafts governed is a reviewed decision.
 
+**Pinned agents are the owner's preference.** `POST /v1/sessions/:sessionId/pin` and `…/unpin` are `operator`
+with **no capability** and `caller: 'person'`: a pin only decides where a ferret is listed in the owner's own
+sidebar, so it is strictly less than any change to the ferret, and a device that may use the app may pin. What
+guards it is **who acts** — every ferret is refused at the boundary — not a grant. The list is kept per
+machine in `state/agent-pins.json` (session ids and instants only), and rides `GET /v1/sessions` as `pinnedAt`
+on the view. A test pins this choice (`tests/unit/runtime/mounts/session-pin.test.ts`), so making pinning
+governed is a reviewed decision.
+
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.

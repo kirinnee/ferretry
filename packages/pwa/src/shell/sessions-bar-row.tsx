@@ -22,6 +22,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import { Pin, PinOff } from 'lucide-react';
 import { type ReactNode, useContext, useState } from 'react';
 import { OutdatedGlyph, useOutdatedMarkState } from '../features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
@@ -32,8 +33,10 @@ import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { SessionMenuContext } from './session-menu-context.ts';
+import { SessionPinContext } from './session-pin-context.ts';
 import {
   agendaWords,
+  isStopped,
   rowPreview,
   sessionRowPath,
   sessionsBarDirectory,
@@ -71,6 +74,8 @@ export function SessionsBarRow({
   const preview = rowPreview(view);
   const outdated = useOutdatedMarkState(view);
   const openMenu = useContext(SessionMenuContext);
+  const togglePin = useContext(SessionPinContext);
+  const pinned = view.pinnedAt !== undefined;
   const [pressing, setPressing] = useState(false);
   const gesture = useRowContextGesture<SessionView>(
     openMenu === undefined ? undefined : (target, x, y, trigger) => openMenu({ view: target, daemonId }, x, y, trigger),
@@ -104,12 +109,14 @@ export function SessionsBarRow({
       </span>
     );
   return (
-    <li data-sbar-depth={depth}>
+    <li data-sbar-depth={depth} data-sbar-pinnable={togglePin === undefined ? undefined : ''}>
       <RouteLink
         aria-current={active ? 'page' : undefined}
         className="fy-sbar__session"
         aria-haspopup={gesture === undefined ? undefined : 'menu'}
         data-sbar-pressing={pressing ? '' : undefined}
+        data-sbar-pinned={pinned ? '' : undefined}
+        data-sbar-stopped={isStopped(view) ? '' : undefined}
         data-sbar-session={view.config.id}
         data-sbar-unread={unread > 0 ? '' : undefined}
         onNavigate={onNavigate}
@@ -149,6 +156,18 @@ export function SessionsBarRow({
           </span>
         </span>
       </RouteLink>
+      {togglePin === undefined ? null : (
+        <button
+          aria-label={pinned ? `Unpin ${name}` : `Pin ${name} to top`}
+          className="fy-sbar__pin"
+          data-sbar-pin-toggle=""
+          onClick={() => togglePin({ view, daemonId })}
+          title={pinned ? 'Unpin' : 'Pin to top'}
+          type="button"
+        >
+          {pinned ? <PinOff aria-hidden="true" size={13} /> : <Pin aria-hidden="true" size={13} />}
+        </button>
+      )}
       {children}
     </li>
   );

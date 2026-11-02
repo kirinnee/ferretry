@@ -413,6 +413,8 @@ interface ShellOptions {
    * silent on first sight, so a transition is the only thing that delivers.
    */
   readonly sessionStatus?: () => SessionStatus;
+  /** Receives `pin:<daemon>:<id>` / `unpin:<daemon>:<id>` for each pin the stub daemon is asked to change. */
+  readonly pins?: string[];
   /** Overrides on the opened session's state, e.g. a working turn and when it began. */
   readonly sessionState?: Partial<SessionView['state']>;
   /** Daemon-owned normalized transcript tail returned by `logs`. */
@@ -666,6 +668,14 @@ const appStore = async (
           nextCursor: null,
         }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
+        pinSession: async (sessionId: string) => {
+          options.pins?.push(`pin:${connection.daemonId}:${sessionId}`);
+          return sessionView(sessionId, { pinnedAt: '2026-11-01T10:00:00.000Z' });
+        },
+        unpinSession: async (sessionId: string) => {
+          options.pins?.push(`unpin:${connection.daemonId}:${sessionId}`);
+          return sessionView(sessionId);
+        },
         start: async () => sessionView('started'),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
         // below, it runs until it is cancelled, and a cancelled one ends.
@@ -4684,6 +4694,34 @@ describe('the sessions bar', () => {
       await interact(() => store.controls.setDeviceControls({ sessionsList: 'current' }));
       expect(view.container.querySelector('[data-sbar-machine-group]')).toBeNull();
       expect(view.container.querySelectorAll('[data-sessions-bar="column"] [data-sbar-session="one"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('pins a ferret from its row on the machine that owns it, then unpins it from the Pinned group', async () => {
+    const pins: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
+      sessions: ['one'],
+      pins,
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      const toggle = (group: string) =>
+        must(
+          column.querySelector<HTMLElement>(`${group} [data-sbar-session="one"] ~ [data-sbar-pin-toggle]`),
+          'the pin button',
+        );
+      await interact(() => toggle(`[data-sbar-machine-group="${BETA}"]`).click());
+      await settle();
+      expect(pins).toEqual([`pin:${BETA}:one`]);
+      expect(column.querySelector('[data-sbar-pinned-group] [data-sbar-session="one"]')).not.toBeNull();
+
+      await interact(() => toggle('[data-sbar-pinned-group]').click());
+      await settle();
+      expect(pins).toEqual([`pin:${BETA}:one`, `unpin:${BETA}:one`]);
+      expect(column.querySelector('[data-sbar-pinned-group]')).toBeNull();
     } finally {
       await view.unmount();
     }

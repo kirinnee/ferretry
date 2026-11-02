@@ -262,6 +262,11 @@ import {
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
 import {
+  PinAgentController,
+  ProtocolSessionPinGateway,
+  registerSessionPinCommands,
+} from '../src/lib/session/pin-agent.ts';
+import {
   ProtocolSessionCredentialGateway,
   RevokeCredentialController,
   registerSessionCredentialCommands,
@@ -593,6 +598,8 @@ type SharedDaemonClient = Pick<
   | 'list'
   | 'get'
   | 'stop'
+  | 'pinSession'
+  | 'unpinSession'
   | 'migrate'
   | 'conversionPreview'
   | 'restart'
@@ -639,6 +646,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     list: async (): Promise<readonly SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
+    pinSession: async (id: string) => (await client()).pinSession(id),
+    unpinSession: async (id: string) => (await client()).unpinSession(id),
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
     conversionPreview: async (id, agent, model) => (await client()).conversionPreview(id, agent, model),
@@ -1239,6 +1248,15 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerSessionCredentialCommands(
       program,
       new RevokeCredentialController(new ProtocolSessionCredentialGateway(client), presenter, BINARY_NAME),
+      presenter,
+    );
+  },
+  // `fy session pin` and `unpin`: the owner's pinned agents, at the top of the sidebar.
+  ({ program, world, client }) => {
+    const presenter = new SessionPresenter(world.io, new SystemClock());
+    registerSessionPinCommands(
+      program,
+      new PinAgentController(new ProtocolSessionPinGateway(client), presenter),
       presenter,
     );
   },
