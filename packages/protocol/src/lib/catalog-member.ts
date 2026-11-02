@@ -24,7 +24,7 @@ import { isLoopbackLinkAddress } from './address.ts';
 import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './pairing.ts';
-import { CatalogLabelSchema, SharedCatalogIdSchema } from './shared-catalog.ts';
+import { CatalogLabelSchema, HIDDEN_IN_LINE, SharedCatalogIdSchema } from './shared-catalog.ts';
 
 export const CATALOG_SHARES_PATH = '/v1/catalog-shares' as const;
 export const CATALOG_MEMBERS_PATH = '/v1/catalog-members' as const;
@@ -116,16 +116,243 @@ export const CatalogShareCodeSchema = z
   .brand<'CatalogShareCode'>();
 export type CatalogShareCode = z.infer<typeof CatalogShareCodeSchema>;
 
-/** A member's name, as the owner wrote it ("Alice", "Workshop Oct 31"). The catalog label's rules. */
-export const CatalogMemberLabelSchema = CatalogLabelSchema;
+/** What a person is told when a user ID holds a character they cannot see. */
+export const MEMBER_NAME_HIDDEN_MESSAGE = "A user ID can't contain hidden characters. Type it again.";
+
+/** What a person is told when a user ID holds a character no font can be trusted to draw. */
+export const MEMBER_NAME_UNDRAWABLE_MESSAGE =
+  "A user ID can't contain unassigned or private-use characters. Type it again.";
+
+/** What a person is told when a user ID mixes scripts that can pass for one another ("Аlice" with a Cyrillic А). */
+export const MEMBER_NAME_MIXED_SCRIPT_MESSAGE =
+  "A user ID can't mix scripts that look alike (for example Latin and Cyrillic letters). Type it again.";
+
+const UNDRAWABLE = /[\p{Co}\p{Cn}]/u;
+const NEUTRAL = /[\p{Script=Common}\p{Script=Inherited}]/u;
+
+/** Every script Unicode 13 names. A letter of a newer script counts as one script of its own, "Unknown". */
+const SCRIPT_NAMES = [
+  'Adlam',
+  'Ahom',
+  'Anatolian_Hieroglyphs',
+  'Arabic',
+  'Armenian',
+  'Avestan',
+  'Balinese',
+  'Bamum',
+  'Bassa_Vah',
+  'Batak',
+  'Bengali',
+  'Bhaiksuki',
+  'Bopomofo',
+  'Brahmi',
+  'Braille',
+  'Buginese',
+  'Buhid',
+  'Canadian_Aboriginal',
+  'Carian',
+  'Caucasian_Albanian',
+  'Chakma',
+  'Cham',
+  'Cherokee',
+  'Chorasmian',
+  'Coptic',
+  'Cuneiform',
+  'Cypriot',
+  'Cyrillic',
+  'Deseret',
+  'Devanagari',
+  'Dives_Akuru',
+  'Dogra',
+  'Duployan',
+  'Egyptian_Hieroglyphs',
+  'Elbasan',
+  'Elymaic',
+  'Ethiopic',
+  'Georgian',
+  'Glagolitic',
+  'Gothic',
+  'Grantha',
+  'Greek',
+  'Gujarati',
+  'Gunjala_Gondi',
+  'Gurmukhi',
+  'Han',
+  'Hangul',
+  'Hanifi_Rohingya',
+  'Hanunoo',
+  'Hatran',
+  'Hebrew',
+  'Hiragana',
+  'Imperial_Aramaic',
+  'Inscriptional_Pahlavi',
+  'Inscriptional_Parthian',
+  'Javanese',
+  'Kaithi',
+  'Kannada',
+  'Katakana',
+  'Kayah_Li',
+  'Kharoshthi',
+  'Khitan_Small_Script',
+  'Khmer',
+  'Khojki',
+  'Khudawadi',
+  'Lao',
+  'Latin',
+  'Lepcha',
+  'Limbu',
+  'Linear_A',
+  'Linear_B',
+  'Lisu',
+  'Lycian',
+  'Lydian',
+  'Mahajani',
+  'Makasar',
+  'Malayalam',
+  'Mandaic',
+  'Manichaean',
+  'Marchen',
+  'Masaram_Gondi',
+  'Medefaidrin',
+  'Meetei_Mayek',
+  'Mende_Kikakui',
+  'Meroitic_Cursive',
+  'Meroitic_Hieroglyphs',
+  'Miao',
+  'Modi',
+  'Mongolian',
+  'Mro',
+  'Multani',
+  'Myanmar',
+  'Nabataean',
+  'Nandinagari',
+  'New_Tai_Lue',
+  'Newa',
+  'Nko',
+  'Nushu',
+  'Nyiakeng_Puachue_Hmong',
+  'Ogham',
+  'Ol_Chiki',
+  'Old_Hungarian',
+  'Old_Italic',
+  'Old_North_Arabian',
+  'Old_Permic',
+  'Old_Persian',
+  'Old_Sogdian',
+  'Old_South_Arabian',
+  'Old_Turkic',
+  'Oriya',
+  'Osage',
+  'Osmanya',
+  'Pahawh_Hmong',
+  'Palmyrene',
+  'Pau_Cin_Hau',
+  'Phags_Pa',
+  'Phoenician',
+  'Psalter_Pahlavi',
+  'Rejang',
+  'Runic',
+  'Samaritan',
+  'Saurashtra',
+  'Sharada',
+  'Shavian',
+  'Siddham',
+  'SignWriting',
+  'Sinhala',
+  'Sogdian',
+  'Sora_Sompeng',
+  'Soyombo',
+  'Sundanese',
+  'Syloti_Nagri',
+  'Syriac',
+  'Tagalog',
+  'Tagbanwa',
+  'Tai_Le',
+  'Tai_Tham',
+  'Tai_Viet',
+  'Takri',
+  'Tamil',
+  'Tangut',
+  'Telugu',
+  'Thaana',
+  'Thai',
+  'Tibetan',
+  'Tifinagh',
+  'Tirhuta',
+  'Ugaritic',
+  'Vai',
+  'Wancho',
+  'Warang_Citi',
+  'Yi',
+  'Zanabazar_Square',
+] as const;
+const SCRIPTS = SCRIPT_NAMES.map(name => [name, new RegExp(String.raw`\p{Script=${name}}`, 'u')] as const);
+
+/**
+ * UTS #39 "highly restrictive": one script alone, or one of the three East Asian sets, each with Latin. Common
+ * and Inherited characters (digits, spaces, punctuation, combining marks) never count as a script.
+ */
+const ALLOWED_MIXES: readonly ReadonlySet<string>[] = [
+  new Set(['Latin', 'Han', 'Hiragana', 'Katakana']),
+  new Set(['Latin', 'Han', 'Bopomofo']),
+  new Set(['Latin', 'Han', 'Hangul']),
+];
+
+function scriptsOf(text: string): ReadonlySet<string> {
+  const found = new Set<string>();
+  for (const character of text) {
+    if (NEUTRAL.test(character)) continue;
+    found.add(SCRIPTS.find(([, pattern]) => pattern.test(character))?.[0] ?? 'Unknown');
+  }
+  return found;
+}
+
+/** True when `text` mixes scripts beyond what UTS #39 "highly restrictive" allows. */
+function mixesScripts(text: string): boolean {
+  const found = scriptsOf(text);
+  return found.size > 1 && !ALLOWED_MIXES.some(allowed => [...found].every(script => allowed.has(script)));
+}
+
+/**
+ * A member's name, as the owner wrote it ("Alice", "Workshop Oct 31"): their user ID on this machine. The catalog
+ * label's rules, which refuse every hidden, format and control character, because an invisible character would
+ * make two look-alike IDs; no private-use or unassigned code point, which a font may draw as nothing; and no
+ * name that mixes look-alike scripts. What stays possible is a name wholly in one script that looks like another
+ * (an all-Cyrillic "аlісе" beside a Latin "alice"); no rule over letters alone can see that.
+ */
+export const CatalogMemberLabelSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .refine(text => text.trim() === text, 'no spaces at the start or the end')
+  .refine(text => !HIDDEN_IN_LINE.test(text), MEMBER_NAME_HIDDEN_MESSAGE)
+  .refine(text => !UNDRAWABLE.test(text), MEMBER_NAME_UNDRAWABLE_MESSAGE)
+  .refine(text => !mixesScripts(text), MEMBER_NAME_MIXED_SCRIPT_MESSAGE);
+
+/**
+ * What makes two names the SAME person: NFKC (so a full-width or ligature look-alike is the same name), trimmed,
+ * every run of whitespace collapsed to one space, and case-folded. A name is a member's ID on this machine, so
+ * "Alice", "alice", "ＡＬＩＣＥ" and "Alice  " are one person. Pure and total; the stored name keeps the owner's own
+ * spelling, only comparison uses this.
+ */
+export function memberNameKey(name: string): string {
+  const folded = name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toUpperCase().toLowerCase();
+  return folded.normalize('NFKC');
+}
 
 /** What the joining browser calls itself ("Firefox on a Mac"). Shown to the owner; never trusted. */
 export const MemberClientNameSchema = CatalogLabelSchema;
 
 // ── The owner's side (routes on A, `sharing.use`) ────────────────────────────────────────────────
 
-/** Who a share is for: a new person the owner names, or a member who already exists. */
-export const CatalogShareMemberSchema = z.discriminatedUnion('kind', [
+/**
+ * Who a share is for. `{ name }` is the person's ID on this machine and the daemon resolves it: a name that
+ * is already somebody's (compared by {@link memberNameKey}) reaches that same person, an unknown name makes
+ * (and reserves) a new one. The two `kind` arms are what older apps send: `new` is refused with
+ * `member_exists` when the name is taken, so it can never make a second person of the same name.
+ */
+export const CatalogShareMemberSchema = z.union([
+  z.strictObject({ name: CatalogMemberLabelSchema }),
   z.strictObject({ kind: z.literal('new'), label: CatalogMemberLabelSchema }),
   z.strictObject({ kind: z.literal('existing'), memberId: CatalogMemberIdSchema }),
 ]);
@@ -133,7 +360,9 @@ export type CatalogShareMember = z.infer<typeof CatalogShareMemberSchema>;
 
 /**
  * Single use: the code burns on its first redemption. Multi use: it ends at its expiry, at its cap, or
- * when the owner ends it, and every browser joins the ONE member the share names (owner decision Q3).
+ * when the owner ends it, and every browser joins the ONE member the share names (owner decision Q3). That
+ * member is a NEW person: until a joiner proves they are the person (join-by-proof), a code for many people
+ * is never allowed to reach someone who is already in (the daemon refuses it `member_exists`).
  */
 export const CatalogShareUsesSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('single') }),
@@ -162,8 +391,8 @@ export const CatalogShareMintRequestSchema = z
     uses: CatalogShareUsesSchema,
   })
   .refine(
-    request => request.uses.kind === 'single' || request.member.kind === 'new',
-    'a code for many people makes its own member: name it',
+    request => request.uses.kind === 'single' || !('kind' in request.member) || request.member.kind === 'new',
+    'a code for many people cannot name someone already in yet: name a new person, or use a single-use code',
   );
 export type CatalogShareMintRequest = z.infer<typeof CatalogShareMintRequestSchema>;
 
@@ -232,6 +461,8 @@ export type CatalogMemberView = z.infer<typeof CatalogMemberViewSchema>;
 
 export const CatalogMemberListSchema = z.strictObject({
   members: z.array(CatalogMemberViewSchema).max(CATALOG_MAX_MEMBERS),
+  /** Only for `GET /v1/catalog-members?name=…`: the id of the person that name already is, so a share sheet can say so. */
+  match: CatalogMemberIdSchema.optional(),
 });
 export type CatalogMemberList = z.infer<typeof CatalogMemberListSchema>;
 
@@ -338,6 +569,8 @@ export type SharedRedeemResponse = z.infer<typeof SharedRedeemResponseSchema>;
  * - `members_full`: the publisher holds its most members or keys; the code is left live.
  * - `member_unknown`, `member_key_unknown`, `catalog_unknown`, `share_unknown`: the owner named an id this
  *   publisher does not have.
+ * - `member_exists`: a name is somebody's already (a person is their name on this machine). The refusal carries
+ *   that person's `memberId`; a mint by `{ name }` never raises it, it reaches that person instead.
  */
 export const CATALOG_SHARE_REFUSALS = [
   'share_refused',
@@ -348,6 +581,7 @@ export const CATALOG_SHARE_REFUSALS = [
   'member_key_unknown',
   'catalog_unknown',
   'share_unknown',
+  'member_exists',
 ] as const;
 export const CatalogShareRefusalSchema = z.enum(CATALOG_SHARE_REFUSALS);
 export type CatalogShareRefusal = z.infer<typeof CatalogShareRefusalSchema>;

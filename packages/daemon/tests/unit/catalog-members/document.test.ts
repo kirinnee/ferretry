@@ -7,6 +7,7 @@ import {
   documentProblem,
   EMPTY_MEMBERS_DOCUMENT,
   EMPTY_SHARES_DOCUMENT,
+  LegacyMembersDocumentSchema,
   MembersDocumentSchema,
   SHARE_SUCCESS_WINDOW_MAX,
   SharesDocumentSchema,
@@ -255,5 +256,34 @@ describe('the stored list of shares: size', () => {
 
     // Assert
     should(parsed.success).be.false();
+  });
+});
+
+describe('a member name is a user ID', () => {
+  it('should refuse two members whose names are the same once cased and spaced alike', () => {
+    const document = membersDoc(storedMember(1, { label: 'Alice' }), storedMember(2, { label: 'ALICE' }));
+
+    const problem = documentProblem(MembersDocumentSchema.safeParse(document));
+
+    should(problem).containEql(`${memberId(2)} has the same name as`);
+  });
+
+  it('should read an old file with a shared name only through the legacy check', () => {
+    const document = membersDoc(storedMember(1, { label: 'Sam' }), storedMember(2, { label: 'sam' }));
+
+    should(MembersDocumentSchema.safeParse(document).success).be.false();
+    should(LegacyMembersDocumentSchema.safeParse(document).success).be.true();
+  });
+
+  it('should keep every other rule in the legacy check', () => {
+    const document = membersDoc(storedMember(1), storedMember(1));
+
+    should(LegacyMembersDocumentSchema.safeParse(document).success).be.false();
+  });
+
+  it('should accept names that differ', () => {
+    const document = membersDoc(storedMember(1, { label: 'Sam' }), storedMember(2, { label: 'Sam (2)' }));
+
+    should(MembersDocumentSchema.safeParse(document).success).be.true();
   });
 });

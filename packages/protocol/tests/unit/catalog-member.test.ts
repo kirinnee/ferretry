@@ -80,15 +80,30 @@ describe('minting a share', () => {
     }
   });
 
-  it('makes a many-person code its own member, and refuses one for an existing member', () => {
+  it('makes a many-person code name a person by ID, and refuses one for a member already in until join-by-proof', () => {
     const multi = { ...request, uses: { kind: 'multi', cap: 50 } };
     expect(CatalogShareMintRequestSchema.safeParse(multi).success).toBe(true);
+    expect(CatalogShareMintRequestSchema.safeParse({ ...multi, member: { name: 'Alice' } }).success).toBe(true);
     expect(
       CatalogShareMintRequestSchema.safeParse({ ...multi, member: { kind: 'existing', memberId: MEMBER } }).success,
     ).toBe(false);
     expect(
       CatalogShareMintRequestSchema.safeParse({ ...request, member: { kind: 'existing', memberId: MEMBER } }).success,
     ).toBe(true);
+  });
+
+  it('names a person by their user ID alone, and still takes the two older arms', () => {
+    for (const who of [{ name: 'Alice' }, { kind: 'new', label: 'Alice' }, { kind: 'existing', memberId: MEMBER }]) {
+      expect(CatalogShareMintRequestSchema.safeParse({ ...request, member: who }).success).toBe(true);
+    }
+    for (const who of [
+      { name: '' },
+      { name: ' Alice' },
+      { name: 'Al\u200Bice' },
+      { name: 'Alice', memberId: MEMBER },
+    ]) {
+      expect(CatalogShareMintRequestSchema.safeParse({ ...request, member: who }).success).toBe(false);
+    }
   });
 
   it('bounds the cap, and names each catalog once', () => {
@@ -357,5 +372,128 @@ describe('the owner’s member management answers', () => {
     ]) {
       expect(CatalogMemberCatalogRemovedSchema.safeParse(bad).success).toBe(false);
     }
+  });
+});
+
+describe('a person’s user ID', () => {
+  const {
+    memberNameKey,
+    CatalogMemberLabelSchema,
+    CatalogMemberListSchema,
+    MEMBER_NAME_HIDDEN_MESSAGE,
+    MEMBER_NAME_MIXED_SCRIPT_MESSAGE,
+    MEMBER_NAME_UNDRAWABLE_MESSAGE,
+  } = member;
+
+  it('is the same ID however it is cased, spaced or composed', () => {
+    const key = memberNameKey('Alice Smith');
+    for (const same of [
+      'alice smith',
+      'ALICE SMITH',
+      '  Alice   Smith ',
+      'Alice\tSmith',
+      'Alice Smith',
+      'ＡＬＩＣＥ Ｓｍｉｔｈ',
+    ]) {
+      expect(memberNameKey(same)).toBe(key);
+    }
+    expect(memberNameKey('Alicia Smith')).not.toBe(key);
+    expect(memberNameKey('Zoë')).toBe(memberNameKey('Zoë'));
+    expect(memberNameKey('Straße')).toBe(memberNameKey('STRASSE'));
+  });
+
+  it('refuses hidden characters in the words a person reads', () => {
+    for (const hidden of ['Al​ice', 'Al‮ice', 'Al\u0000ice']) {
+      const parsed = CatalogMemberLabelSchema.safeParse(hidden);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_HIDDEN_MESSAGE);
+    }
+    expect(MEMBER_NAME_HIDDEN_MESSAGE).toBe("A user ID can't contain hidden characters. Type it again.");
+    expect(CatalogMemberLabelSchema.safeParse('Alice (2)').success).toBe(true);
+  });
+
+  it('refuses private-use and unassigned code points', () => {
+    for (const bad of [
+      String.fromCodePoint(0xe000),
+      String.fromCodePoint(0x378),
+      `Al${String.fromCodePoint(0xf0000)}`,
+    ]) {
+      const parsed = CatalogMemberLabelSchema.safeParse(bad);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_UNDRAWABLE_MESSAGE);
+    }
+  });
+
+  it('refuses a name that mixes look-alike scripts, however it is spelled', () => {
+    const cyrillicA = String.fromCodePoint(0x410);
+    const greekOmicron = String.fromCodePoint(0x3bf);
+    for (const mixed of [
+      `${cyrillicA}lice`,
+      `b${greekOmicron}b`,
+      `Alice ${cyrillicA}lice`,
+      '\u0410\u03bf',
+      'Алиса Smith',
+      'αβγ abc',
+      'Alice שלום',
+    ]) {
+      const parsed = CatalogMemberLabelSchema.safeParse(mixed);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues.map(issue => issue.message)).toContain(MEMBER_NAME_MIXED_SCRIPT_MESSAGE);
+    }
+  });
+
+  it('allows one script alone, and the three East Asian sets with Latin', () => {
+    for (const fine of [
+      'Alice',
+      'Алиса',
+      'Αλέξανδρος',
+      'שלום',
+      'علي',
+      '李雷',
+      'ひらがな',
+      'カタカナ',
+      '한국어',
+      // Japanese: Latin + Han + Hiragana + Katakana
+      'Tanaka 田中 たなか タナカ',
+      // Chinese: Latin + Han + Bopomofo
+      'Li 李雷 ㄌㄧˇ',
+      // Korean: Latin + Han + Hangul
+      'Kim 金 김',
+      // Digits, spaces, punctuation and combining marks are never a second script
+      'Алиса 2 (бета)',
+      'Zoe\u0308 – 7',
+      '李雷 2.0',
+    ]) {
+      expect(CatalogMemberLabelSchema.safeParse(fine).success).toBe(true);
+    }
+  });
+
+  it('refuses every mix outside those sets, including Cyrillic with Greek and Korean with Japanese', () => {
+    for (const mixed of [
+      'Алиса αβγ', // Cyrillic + Greek
+      '한국어 ひらがな', // Hangul + Hiragana
+      'ㄌㄧˇ ひらがな', // Bopomofo + Hiragana
+      '한국어 ㄌㄧˇ', // Hangul + Bopomofo
+      'Alice 한국어 ひらがな', // Latin + Hangul + Hiragana
+      'Алиса 李雷', // Cyrillic + Han
+    ]) {
+      expect(CatalogMemberLabelSchema.safeParse(mixed).success).toBe(false);
+    }
+  });
+
+  it('counts a letter of a script newer than the table as a script of its own', () => {
+    const vithkuqi = String.fromCodePoint(0x10570);
+    expect(CatalogMemberLabelSchema.safeParse(`Alice${vithkuqi}`).success).toBe(false);
+    expect(CatalogMemberLabelSchema.safeParse(vithkuqi).success).toBe(true);
+  });
+
+  it('can be looked up, and the list answers who holds it by ID alone', () => {
+    expect(CatalogMemberListSchema.parse({ members: [] })).toEqual({ members: [] });
+    expect(CatalogMemberListSchema.parse({ members: [], match: MEMBER })).toEqual({ members: [], match: MEMBER });
+    expect(CatalogMemberListSchema.safeParse({ members: [], match: 'Alice' }).success).toBe(false);
+  });
+
+  it('names the refusal for a taken ID', () => {
+    expect(member.CATALOG_SHARE_REFUSALS).toContain('member_exists');
   });
 });

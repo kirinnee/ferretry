@@ -23,11 +23,13 @@ import {
 import type {
   CatalogDirectory,
   MemberAuditSink,
+  MembersUpgrade,
   MemberSessionCloser,
   ShareCodeHasher,
   ShareLinkSource,
   ShareLinkTarget,
 } from '../../../src/lib/catalog-members/ports.ts';
+import type { MemberRename } from '../../../src/lib/catalog-members/names.ts';
 import { CatalogMemberRefusal } from '../../../src/lib/catalog-members/refusal.ts';
 import { CatalogMemberService, type NewMemberKey } from '../../../src/lib/catalog-members/service.ts';
 
@@ -184,6 +186,8 @@ class MemoryStore<D> {
   writes = 0;
   failing = false;
   unreadable: Error | undefined;
+  /** The upgrade the next `read` is said to have found due (members only). */
+  upgrade: MembersUpgrade | undefined;
   /** Every document that reached the disk, serialised, so a test can search them. */
   readonly history: string[] = [];
   #gate: Promise<void> | undefined;
@@ -198,6 +202,12 @@ class MemoryStore<D> {
     this.reads += 1;
     if (this.unreadable !== undefined) throw this.unreadable;
     return this.document;
+  }
+
+  takeUpgrade(): MembersUpgrade | undefined {
+    const upgrade = this.upgrade;
+    this.upgrade = undefined;
+    return upgrade;
   }
 
   async write(document: D): Promise<void> {
@@ -238,13 +248,17 @@ export interface RigOptions {
   compare?: DigestComparison;
   /** Leave the documents unread, as a caller that forgot `ready` would. */
   unloaded?: boolean;
+  /** An upgrade the members file is said to have found due when it was read. */
+  upgrade?: MembersUpgrade;
 }
 
 export async function rig(options: RigOptions = {}) {
   const log: string[] = [];
   const clock = { now: T0 };
   const members = new MemoryStore<MembersDocument>(options.members ?? EMPTY_MEMBERS_DOCUMENT, 'members', log);
+  members.upgrade = options.upgrade;
   const shares = new MemoryStore<SharesDocument>(options.shares ?? EMPTY_SHARES_DOCUMENT, 'shares', log);
+  const renamed: (readonly MemberRename[])[] = [];
   const audit = new MemoryAudit();
   const randomness = { calls: 0 };
   const known = new Set(options.known ?? catalogIds(1, 100));
@@ -277,11 +291,12 @@ export async function rig(options: RigOptions = {}) {
     links,
     sessions,
     audit,
+    onRenamed: renames => renamed.push(renames),
     now: () => clock.now,
     ...(options.compare === undefined ? {} : { compare: options.compare }),
   });
   if (options.unloaded !== true) await service.ready();
-  return { service, members, shares, audit, clock, log, randomness, known, linkState };
+  return { service, members, shares, audit, clock, log, randomness, known, linkState, renamed };
 }
 
 export const newKey = (n: number, clientName = `Browser ${String(n)}`): NewMemberKey => ({
@@ -304,6 +319,24 @@ export const multiFor = (
 ): CatalogShareMintRequest => ({
   catalogIds: [...ids],
   member: { kind: 'new', label },
+  expiresIn: '1h',
+  uses: { kind: 'multi', cap },
+});
+
+export const singleNamed = (name: string, ids: readonly string[] = [catalogId(1)]): CatalogShareMintRequest => ({
+  catalogIds: [...ids],
+  member: { name },
+  expiresIn: '1h',
+  uses: { kind: 'single' },
+});
+
+export const multiNamed = (
+  name: string,
+  cap = 200,
+  ids: readonly string[] = [catalogId(1)],
+): CatalogShareMintRequest => ({
+  catalogIds: [...ids],
+  member: { name },
   expiresIn: '1h',
   uses: { kind: 'multi', cap },
 });

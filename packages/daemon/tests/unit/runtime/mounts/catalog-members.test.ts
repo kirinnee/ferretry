@@ -104,8 +104,8 @@ class FakeMembers implements Members {
     this.#record('endShare', shareId);
     return { ...SHARE_VIEW, state: 'ended' } as never;
   }
-  async listMembers() {
-    this.#record('listMembers');
+  async listMembers(name?: string) {
+    this.#record('listMembers', ...(name === undefined ? [] : [name]));
     return { members: [MEMBER_VIEW] } as never;
   }
   async renameMember(memberId: string, label: string) {
@@ -135,6 +135,7 @@ interface Answer {
   readonly body: Record<string, unknown>;
   readonly code?: string;
   readonly message?: string;
+  readonly extra?: Readonly<Record<string, unknown>>;
   /** How many proofs the route actually took. */
   readonly claimed: number;
   /** Every act the route asked to claim a proof for. */
@@ -148,6 +149,7 @@ async function drive(
   body: unknown,
   caller: Caller = HOST,
   proofs: { left: number } = { left: caller.proofs ?? 0 },
+  query: readonly (readonly [string, string])[] = [],
 ): Promise<Answer> {
   const found = new ApiRouter(catalogMemberRoutes({ members })).lookup(method, path);
   if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
@@ -157,6 +159,7 @@ async function drive(
     request: request({
       method,
       path,
+      query,
       headers: { 'content-type': 'application/json' },
       reads: bodyReads(),
       ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
@@ -194,6 +197,7 @@ async function drive(
       body: { error: error.message },
       code: error.code,
       message: error.message,
+      extra: error.extra,
       claimed,
       claimedActs,
     };
@@ -322,14 +326,25 @@ describe('minting a share', () => {
     should(members.calls).deepEqual([]);
   });
 
-  it('refuses a code for many people that names no one, as the protocol does', async () => {
+  it('refuses a code for many people that names someone already in, until join-by-proof, and spends no proof', async () => {
     const members = new FakeMembers();
     const many = { ...MINT, member: { kind: 'existing', memberId: MEMBER }, uses: { kind: 'multi', cap: 5 } };
 
-    const answer = await drive(members, 'POST', '/v1/catalog-shares', many);
+    const answer = await drive(members, 'POST', '/v1/catalog-shares', many, FRESH_DEVICE);
 
     should(answer.status).equal(400);
+    should(answer.claimedActs).deepEqual([]);
     should(members.calls).deepEqual([]);
+  });
+
+  it('hands a code for many people that names a person by ID to the service, which says whether they are in', async () => {
+    const members = new FakeMembers();
+    const many = { ...MINT, member: { name: 'Alice' }, uses: { kind: 'multi', cap: 5 } };
+
+    const answer = await drive(members, 'POST', '/v1/catalog-shares', many);
+
+    should(answer.status).equal(201);
+    should(members.calls.map(call => call.act)).deepEqual(['mint']);
   });
 
   it('asks again for the proof once it is spent: a refused mint does not refund it', async () => {
@@ -351,6 +366,7 @@ describe('how a refusal is worded in HTTP', () => {
     share_refused: 409,
     share_other_member: 409,
     share_new_member: 409,
+    member_exists: 409,
     members_full: 409,
     member_unknown: 404,
     member_key_unknown: 404,
@@ -617,6 +633,65 @@ describe('removing a person, a browser, or a catalog', () => {
   });
 });
 
+describe('a person’s user ID on the wire', () => {
+  it('lists with no name by default', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'GET', '/v1/catalog-members', undefined);
+
+    should(answer.status).equal(200);
+    should(members.calls).deepEqual([{ act: 'listMembers', args: [] }]);
+  });
+
+  it('hands the name to the service so the share sheet can say who is already in', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'GET', '/v1/catalog-members', undefined, HOST, undefined, [['name', 'Alice']]);
+
+    should(answer.status).equal(200);
+    should(members.calls).deepEqual([{ act: 'listMembers', args: ['Alice'] }]);
+  });
+
+  it('refuses a name with a hidden character, in the words a person reads', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'GET', '/v1/catalog-members', undefined, HOST, undefined, [
+      ['name', 'Al\u200Bice'],
+    ]);
+
+    should(answer.status).equal(400);
+    should(answer.code).equal('invalid_name');
+    should(answer.message).equal("A user ID can't contain hidden characters. Type it again.");
+    should(members.calls).deepEqual([]);
+  });
+
+  it('refuses any other parameter instead of ignoring it', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'GET', '/v1/catalog-members', undefined, HOST, undefined, [['nam', 'Alice']]);
+
+    should(answer.status).equal(400);
+    should(answer.code).equal('unknown_parameter');
+    should(members.calls).deepEqual([]);
+  });
+
+  it('answers a taken name 409 member_exists with the person who has it', async () => {
+    const members = new FakeMembers();
+    members.failure = new CatalogMemberRefusal(
+      'member_exists',
+      'Someone here already has the user ID Alice. Pick another.',
+      MEMBER,
+    );
+
+    const answer = await drive(members, 'PATCH', `/v1/catalog-members/${MEMBER}`, { label: 'Alice' });
+
+    should(answer.status).equal(409);
+    should(answer.code).equal('member_exists');
+    should(answer.message).equal('Someone here already has the user ID Alice. Pick another.');
+    should(answer.extra).deepEqual({ memberId: MEMBER });
+  });
+});
+
 /**
  * The same routes in front of the real service, so "the code is in the mint's answer and nowhere else" is
  * proved against what the service really returns, not against what a stub was told to say.
@@ -624,6 +699,9 @@ describe('removing a person, a browser, or a catalog', () => {
 describe('the code leaves in one answer only', () => {
   class MemoryMembers {
     document: MembersDocument = EMPTY_MEMBERS_DOCUMENT;
+    takeUpgrade() {
+      return undefined;
+    }
     async read() {
       return this.document;
     }

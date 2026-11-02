@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { CATALOG_SHARES_LISTED_MAX, type CatalogShareMintRequest } from '@ferretry/protocol';
+import { CATALOG_SHARES_LISTED_MAX } from '@ferretry/protocol';
 import should from 'should';
 import {
   catalogId,
@@ -40,12 +40,14 @@ const crowded = () =>
       keys: Array.from({ length: 199 }, (_, index) => storedKey(index + 1)),
     }),
   );
-const roomy = (): CatalogShareMintRequest => ({
-  catalogIds: [catalogId(2)],
-  member: { kind: 'existing', memberId: memberId(7) },
-  expiresIn: '1h',
-  uses: { kind: 'multi', cap: 10 },
-});
+// A code for many people that names member 7. The mint refuses to make one until join-by-proof, so it is filed directly.
+const roomy = (n: number, catalogs: readonly string[] = [catalogId(2)]) =>
+  storedShare(n, {
+    memberId: memberId(7),
+    memberKind: 'existing',
+    catalogIds: [...catalogs],
+    uses: { kind: 'multi', cap: 10 },
+  });
 const by = { keyId: keyId(7), clientName: 'Browser 7' };
 
 describe('a join in flight when the owner takes something away', () => {
@@ -142,18 +144,17 @@ describe('a join in flight when the owner takes something away', () => {
 
   it('should free the room the voided reservation held', async () => {
     // Arrange
-    const r = await rig({ members: crowded() });
-    const minted = await r.service.mint(roomy());
-    const reservation = joinOf(r.service.admitJoin(minted.code, T0));
-    should(refusedOf(r.service.admitJoin(minted.code, T0)).reason).equal('member-keys');
+    const r = await rig({ members: crowded(), shares: sharesDoc(roomy(5), roomy(6, [catalogId(3)])) });
+    const code = codeOf(5);
+    const reservation = joinOf(r.service.admitJoin(code, T0));
+    should(refusedOf(r.service.admitJoin(code, T0)).reason).equal('member-keys');
 
     // Act
     await r.service.forgetCatalog(catalogId(2));
     await refusal(() => r.service.commit(reservation, newKey(70)));
 
     // Assert
-    const other = await r.service.mint({ ...roomy(), catalogIds: [catalogId(3)] });
-    should(r.service.admitJoin(other.code, T0).ok).be.true();
+    should(r.service.admitJoin(codeOf(6), T0).ok).be.true();
     should(r.members.document.members).have.length(1);
   });
 
@@ -222,13 +223,13 @@ describe('a redeem in flight when the owner takes something away', () => {
 describe('a reservation that nobody commits', () => {
   it('should lapse after thirty seconds, free its room and refuse a late commit', async () => {
     // Arrange
-    const r = await rig({ members: crowded() });
-    const minted = await r.service.mint(roomy());
-    const reservation = joinOf(r.service.admitJoin(minted.code, T0));
-    should(refusedOf(r.service.admitJoin(minted.code, T0 + 29_000)).reason).equal('member-keys');
+    const r = await rig({ members: crowded(), shares: sharesDoc(roomy(5)) });
+    const code = codeOf(5);
+    const reservation = joinOf(r.service.admitJoin(code, T0));
+    should(refusedOf(r.service.admitJoin(code, T0 + 29_000)).reason).equal('member-keys');
 
     // Act
-    const later = r.service.admitJoin(minted.code, T0 + 31_000);
+    const later = r.service.admitJoin(code, T0 + 31_000);
     r.clock.now = T0 + 31_000;
     const error = await refusal(() => r.service.commit(reservation, newKey(70)));
 

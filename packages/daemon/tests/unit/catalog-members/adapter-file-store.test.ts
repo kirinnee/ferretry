@@ -36,6 +36,7 @@ const PATHS = {
   catalogs: '/state/catalogs',
   catalogMembers: '/state/catalogs/members.json',
   catalogShares: '/state/catalogs/shares.json',
+  catalogMembersBeforeUniqueNames: '/state/catalogs/members.before-unique-names.json',
 } as unknown as FoundationPaths;
 
 const SPKI = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.alloc(32, 1)]).toString('base64url');
@@ -159,6 +160,20 @@ describe('the members store', () => {
     should(refusal.message).containEql('is listed twice');
   });
 
+  it('refuses to write two people of one name, and writes nothing', async () => {
+    const { files, members } = build();
+    const first = MEMBERS.members[0];
+    if (first === undefined) throw new Error('fixture');
+    const twin = { ...first, memberId: `mbr_${'n'.repeat(22)}`, keys: [], label: 'ALICE' };
+
+    const refusal = await failure(async () => await members.write({ ...MEMBERS, members: [first, twin] }));
+
+    should(refusal.refusal).equal('store_damaged');
+    should(refusal.message).startWith('members.json was not written: ');
+    should(refusal.message).endWith('Nothing was changed.');
+    should(files.calls).deepEqual([]);
+  });
+
   it('lets a failed write through as it is and leaves the old file', async () => {
     const { files, members } = build();
     await members.write(MEMBERS);
@@ -172,6 +187,142 @@ describe('the members store', () => {
     should((thrown as Error).message).equal('read-only file system');
     should(await members.read()).deepEqual(MEMBERS);
     should(files.calls.filter(call => call.startsWith('setMode'))).have.length(1);
+  });
+});
+
+describe('the members store: names that were not yet IDs', () => {
+  const twin = (label: string, createdAt: string) => ({
+    ...MEMBERS.members[0],
+    memberId: `mbr_${label === 'Alice' ? 'a' : 'b'}${'m'.repeat(21)}`,
+    keys: [],
+    label,
+    createdAt,
+  });
+  const OLD = JSON.stringify({ ...MEMBERS, members: [twin('alice', '2026-02-01T00:00:00.000Z'), twin('Alice', AT)] });
+
+  it('reads a file with two people of one name as the later one renamed, and writes nothing yet', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, OLD);
+
+    const document = await members.read();
+
+    should(document.members.map(member => member.label)).deepEqual(['alice (2)', 'Alice']);
+    should(files.calls).deepEqual([]);
+    should(files.files.get(PATHS.catalogMembers)).equal(OLD);
+  });
+
+  it('hands over the rename once, and commits it with the original put aside first', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+
+    const upgrade = members.takeUpgrade();
+    await upgrade?.commit();
+
+    should(upgrade?.renames.map(rename => rename.to)).deepEqual(['alice (2)']);
+    should(members.takeUpgrade()).equal(undefined);
+    should(files.calls.filter(call => call.startsWith('writeTextAtomic'))).deepEqual([
+      'writeTextAtomic /state/catalogs/members.before-unique-names.json',
+      'writeTextAtomic /state/catalogs/members.json',
+    ]);
+    should(files.files.get(PATHS.catalogMembersBeforeUniqueNames)).equal(OLD);
+    should((await members.read()).members.map(member => member.label)).deepEqual(['alice (2)', 'Alice']);
+    should(members.takeUpgrade()).equal(undefined);
+  });
+
+  it('repeats the rename when the write never happened, and the file on disk is still the old one', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+    files.failWriteWith = new Error('read-only file system');
+    const crash = await members
+      .takeUpgrade()
+      ?.commit()
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    should((crash as Error).message).equal('read-only file system');
+    should(files.files.get(PATHS.catalogMembers)).equal(OLD);
+    files.failWriteWith = undefined;
+    await members.read();
+    should(members.takeUpgrade()?.renames).have.length(1);
+  });
+
+  it('keeps the first original when the upgrade runs again over a different file', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembersBeforeUniqueNames, 'the first original');
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+
+    await members.takeUpgrade()?.commit();
+
+    should(files.files.get(PATHS.catalogMembersBeforeUniqueNames)).equal('the first original');
+    should(files.files.get('/state/catalogs/members.before-unique-names.2.json')).equal(OLD);
+  });
+
+  it('numbers past every backup that holds something else', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembersBeforeUniqueNames, 'one');
+    files.files.set('/state/catalogs/members.before-unique-names.2.json', 'two');
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+
+    await members.takeUpgrade()?.commit();
+
+    should(files.files.get('/state/catalogs/members.before-unique-names.3.json')).equal(OLD);
+  });
+
+  it('reuses the backup that already holds exactly this file instead of adding another', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembersBeforeUniqueNames, OLD);
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+
+    await members.takeUpgrade()?.commit();
+
+    should([...files.files.keys()].sort()).deepEqual(
+      [PATHS.catalogMembersBeforeUniqueNames, PATHS.catalogMembers].sort(),
+    );
+  });
+
+  it('writes no new members file when the backup could not be written', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, OLD);
+    await members.read();
+    files.failWriteWith = new Error('disk full');
+
+    await members
+      .takeUpgrade()
+      ?.commit()
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+
+    should(files.calls.filter(call => call.startsWith('writeTextAtomic'))).deepEqual([
+      'writeTextAtomic /state/catalogs/members.before-unique-names.json',
+    ]);
+    should(files.files.get(PATHS.catalogMembers)).equal(OLD);
+  });
+
+  it('has nothing to hand over for a file whose names were already unique', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, JSON.stringify(MEMBERS));
+
+    await members.read();
+
+    should(members.takeUpgrade()).equal(undefined);
+  });
+
+  it('still refuses a file that is wrong in any other way', async () => {
+    const { files, members } = build();
+    files.files.set(PATHS.catalogMembers, JSON.stringify({ ...MEMBERS, members: [{ memberId: 'x' }] }));
+
+    const refusal = await failure(async () => await members.read());
+
+    should(refusal.refusal).equal('store_damaged');
   });
 });
 

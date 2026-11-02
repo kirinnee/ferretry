@@ -3,6 +3,7 @@ export {
   CATALOG_SHARES_SCHEMA_VERSION,
   EMPTY_MEMBERS_DOCUMENT,
   EMPTY_SHARES_DOCUMENT,
+  LegacyMembersDocumentSchema,
   MembersDocumentSchema,
   SharesDocumentSchema,
 } from './document.ts';
@@ -13,11 +14,14 @@ export type {
   CatalogSharesStore,
   MemberAuditSink,
   MemberSessionCloser,
+  MembersUpgrade,
   ShareCodeHasher,
   ShareLinkSource,
   ShareLinkTarget,
 } from './ports.ts';
 export { shareLinkTarget } from './link-target.ts';
+export { renameNotice, uniqueMemberNames } from './names.ts';
+export type { MemberRename } from './names.ts';
 export { CATALOG_MEMBER_REFUSALS, CatalogMemberRefusal } from './refusal.ts';
 export type { CatalogMemberRefusalCode } from './refusal.ts';
 export { CatalogMemberService } from './service.ts';

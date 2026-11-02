@@ -867,6 +867,65 @@ and redeems an hour per share, 10 failed joins a minute per peer on the direct c
 join and leaves the code live. A member key unused for 90 days is removed; the member stays. Until the sweep reaches it, such a key is already
 refused (`4403`) and opening a session never refreshes it: one predicate decides both.
 
+### A member's name is their user ID
+
+A member's name is the **user ID** the owner knows them by, and it is unique on this machine. On the wire it is
+still the `label` of a member and the `name` of a person in a mint, so nothing already built has to change.
+
+- **One name, one person.** Two names are the same ID when `memberNameKey` (protocol) gives the same text: Unicode
+  NFKC, trimmed, inner whitespace collapsed, case-folded. "Alice", " ALICE " and "Ａｌｉｃｅ" are one ID. NFKC also
+  makes "bob²" and "bob2" one ID, so the stored spelling is what a screen should show. The schema refuses what a
+  person cannot see or read as one name, each with its own message: hidden and format characters, private-use and
+  unassigned code points (some fonts draw them as nothing or a box), and a name that mixes scripts the way a
+  look-alike does. A name may be in any one script, and may add Latin to the East Asian sets that are written
+  together (Japanese: Han, Hiragana, Katakana; Chinese: Han, Bopomofo; Korean: Han, Hangul), as Unicode's "highly
+  restrictive" rule has it; digits, spaces and punctuation belong to no script. So "Аlice" with a Cyrillic А and
+  "bοb" with a Greek ο are refused. **A gap remains:** a name written wholly in one script can still look like
+  another (an all-Cyrillic name that looks Latin), and no check here catches it. Only the owner types names, and a
+  joiner never picks one. The members file refuses two members with the same key. Every write checks the schema
+  first, so a duplicate is a refusal with nothing written (`store_damaged`, "members.json was not written"). A
+  file that already holds one (written before names were IDs) is upgraded, below, not called damaged.
+- **Mint names a person by ID.** `member` takes `{ "name": "Alice" }`: whoever holds that ID is reached
+  (`existing`), and an ID nobody holds makes a new person. The older arms stay accepted. `{ "kind": "new",
+"label" }` for an ID that is taken is refused `409 member_exists` with the `memberId` that holds it ("Someone
+  here already has the user ID ‹id›. Pick another."), so a mint never makes a second person of the same ID. A
+  code for many people may name a person who has **not joined yet** (every browser then joins that one new
+  person) but is **refused** for someone already in (`409 member_exists`, or a 400 for `{ "kind": "existing" }`):
+  until a joiner proves a passkey of the person (join by proof, a later change), a forwarded code would let up to
+  its cap of strangers in as them. Use a single-use code to add catalogs to an existing person.
+- **A new ID is reserved.** An invite for an ID nobody holds yet holds it, as the shares themselves do (nothing
+  is stored apart): the ID is held while any live share that names the person has not been used, and while a join
+  with it is in flight, and lets go by itself when every invite naming them is used up, ended or expired and they
+  have no browser. Removing a person who never joined frees the ID too. Once someone joins, the ID is theirs.
+- **Rename keeps the person.** `PATCH /v1/catalog-members/:memberId` needs an ID nobody else holds or has
+  reserved (`409 member_exists`); a person may change the case or spacing of their own. The `memberId` keeps
+  every browser, catalog and passkey, and codes already minted still reach them. The rename is audited as
+  `catalog.member.renamed` (member id only; the old and new names are the owner's own text).
+- **Asking first.** `GET /v1/catalog-members?name=Alice` also answers `match`, the `memberId` that holds or
+  has reserved that ID (nothing else, no name), so a share sheet can say "Alice is already in" before it mints.
+  The same capability as the list; any other query parameter is a `400`.
+- **Upgrading a machine that already has twins.** A `members.json` written before names were IDs may hold two
+  people of one name. It is not damaged: the first read keeps the **oldest** member's name and makes the later
+  ones "‹name› (2)", "(3)", … (within 80 characters). Nobody is merged, and no browser, catalog or passkey moves.
+  The original file is kept as `state/catalogs/members.before-unique-names.json`, then the new one is written
+  atomically, once; a crash before that leaves the old file and the next boot does it again. A name that was
+  already unique never changes, and no one is given an ID someone already held (so a file with "Alice", "alice" and
+  "Alice (2)" becomes "Alice", "alice (3)" and "Alice (2)": the second is renamed to the first number nobody holds).
+  The backup is never replaced: when the plain name is taken by a different file, the next is numbered
+  (`members.before-unique-names.2.json`). The upgrade runs in the same queue as every other write, and only
+  after its write succeeded is each rename audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs
+  only) and the owner told once; if it cannot write, the members file is refused as unreadable, with nothing
+  half-done and nothing audited, and the next boot tries again. The notice: "Two people here had the same name, so one is now ‹id› (2). Rename or remove whichever is wrong in
+  Sharing › People." (the plural names how many).
+- **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
+  (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
+  and the join flow are unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id`
+  stays per browser on purpose: a passkey manager that syncs would let one browser's registration overwrite
+  another's if two shared a `user.id`, so the people of one ID would lose each other's passkeys.
+- **Removal is final.** Removing a person writes the members file first, then ends the invites that name them. If
+  either write fails, the person is already gone in memory and their sessions are closed; asking again finishes
+  the writes, and a restart does too (the person is gone from the file, the invites are still live to end).
+
 ### Built in 2b-1: shares and members on the publisher
 
 The publisher daemon keeps two files, `state/catalogs/members.json` and `shares.json` (directory 0700, files

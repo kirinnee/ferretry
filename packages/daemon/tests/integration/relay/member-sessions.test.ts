@@ -197,6 +197,7 @@ async function publisher() {
     members: {
       passkeyAdded: async keyId => await members.passkeyAdded(keyId),
       access: async keyId => await members.access(keyId),
+      keyIdsOf: async memberId => await members.keyIdsOf(memberId),
     },
     catalogNames: async () => new Map([[CATALOG, 'Workshop']]),
     allowedOrigins: () => [APP_ORIGIN],

@@ -50,9 +50,9 @@ describe('owner sharing routes', () => {
     try {
       await mintShare(client, {
         catalogIds: [CATALOG],
-        member: { kind: 'existing', memberId: MEMBER_A },
+        member: { name: 'Al\u200Bice' },
         expiresIn: '1h',
-        uses: { kind: 'multi', cap: 5 },
+        uses: { kind: 'single' },
       });
     } catch (error) {
       thrown = error;

@@ -985,6 +985,7 @@ import {
   MemberDispatcher,
   MemberGateway,
   MemberJoinGate,
+  renameNotice,
   MemberPasskeyService,
   MigrationPreflight,
   type MigrationReportStore,
@@ -13272,8 +13273,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         audit: auditLog,
+        // People who shared a name were renamed once, on the first read of an older file: the owner reads it at boot.
+        onRenamed: renames => {
+          if (renames.length > 0) bootNotices.state(renameNotice(renames));
+        },
         now: () => millisecondClock.now(),
       });
+      // Read now rather than at the first request, so a rename the upgrade made is told at boot.
+      void catalogMembers.ready().catch(() => undefined);
       const sharedCatalogNames = async (): Promise<ReadonlyMap<string, string>> =>
         new Map((await sharedCatalogs.list()).catalogs.map(catalog => [catalog.id, catalog.name]));
       const facts = (): NonNullable<typeof memberFacts> => {
@@ -13297,6 +13304,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         members: {
           passkeyAdded: async keyId => await catalogMembers.passkeyAdded(keyId),
           access: async keyId => await catalogMembers.access(keyId),
+          keyIdsOf: async memberId => await catalogMembers.keyIdsOf(memberId),
         },
         catalogNames: sharedCatalogNames,
         allowedOrigins: () => facts().origins(),

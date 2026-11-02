@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogShareMintRequest } from '@ferretry/protocol';
@@ -53,6 +53,7 @@ async function fixture() {
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   const files = new StateFileSystem(paths);
   const audited: unknown[] = [];
+  const notices: unknown[] = [];
   /** A fresh service over the same disk: what a daemon restart builds. */
   const boot = () =>
     new CatalogMemberService({
@@ -76,8 +77,11 @@ async function fixture() {
         },
       },
       now: () => NOW,
+      onRenamed: renames => {
+        notices.push(renames);
+      },
     });
-  return { paths, audited, boot };
+  return { paths, audited, notices, boot };
 }
 
 /** Mints for a new person and joins one browser, as the admission step and the commit would. */
@@ -267,5 +271,82 @@ describe('the sharing files on disk', () => {
     const { minted } = await mintAndJoin(boot());
 
     should(JSON.stringify(audited)).not.containEql(minted.code);
+  });
+});
+
+describe('names that were not yet IDs, on a real disk', () => {
+  const AT = '2026-01-01T00:00:00.000Z';
+  const person = (letter: string, label: string, createdAt: string) => ({
+    memberId: `mbr_${letter.repeat(22)}`,
+    label,
+    catalogIds: [CAT],
+    createdAt,
+    keys: [],
+  });
+  const legacy = (): string =>
+    JSON.stringify({
+      schemaVersion: 1,
+      members: [person('a', 'alice', AT), person('b', 'Alice', '2026-02-01T00:00:00.000Z')],
+    });
+  const labelsOn = async (path: string): Promise<string[]> =>
+    (JSON.parse(await readFile(path, 'utf8')).members as { label: string }[]).map(member => member.label);
+
+  async function legacyFixture(text: string = legacy()) {
+    const made = await fixture();
+    await mkdir(made.paths.catalogs, { recursive: true, mode: 0o700 });
+    await writeFile(made.paths.catalogMembers, text);
+    return made;
+  }
+
+  it('should rename the later person once, put the original aside first, and tell the owner and the audit once', async () => {
+    const { boot, paths, audited, notices } = await legacyFixture();
+    const before = legacy();
+
+    const service = boot();
+    await service.ready();
+    const restarted = boot();
+    await restarted.ready();
+
+    should(await labelsOn(paths.catalogMembers)).deepEqual(['alice', 'Alice (2)']);
+    should(await readFile(paths.catalogMembersBeforeUniqueNames, 'utf8')).equal(before);
+    should(await mode(paths.catalogMembers)).equal(0o600);
+    should(await mode(paths.catalogMembersBeforeUniqueNames)).equal(0o600);
+    should(notices).have.length(1);
+    should(audited).have.length(1);
+    should(JSON.stringify(audited)).not.containEql('Alice');
+  });
+
+  it('should keep the first original when a second file of duplicates is upgraded later', async () => {
+    const { boot, paths } = await legacyFixture();
+    const first = legacy();
+    await boot().ready();
+    const later = JSON.stringify({
+      schemaVersion: 1,
+      members: [person('c', 'Sam', AT), person('d', 'sam', '2026-03-01T00:00:00.000Z')],
+    });
+    await writeFile(paths.catalogMembers, later);
+
+    await boot().ready();
+
+    should(await readFile(paths.catalogMembersBeforeUniqueNames, 'utf8')).equal(first);
+    should(await readFile(paths.catalogMembersBeforeUniqueNames.replace(/\.json$/u, '.2.json'), 'utf8')).equal(later);
+    should(await labelsOn(paths.catalogMembers)).deepEqual(['Sam', 'sam (2)']);
+  });
+
+  it('should not load, and leave the file as it was, when the original cannot be put aside', async () => {
+    const { boot, paths, audited, notices } = await legacyFixture();
+    await mkdir(paths.catalogMembersBeforeUniqueNames);
+
+    const failure = await boot()
+      .ready()
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    should(failure).be.instanceOf(Error);
+    should(await readFile(paths.catalogMembers, 'utf8')).equal(legacy());
+    should(notices).deepEqual([]);
+    should(audited).deepEqual([]);
   });
 });

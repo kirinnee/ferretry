@@ -4,11 +4,24 @@
  */
 import type { AuditEntry } from '../audit/types.ts';
 import type { MembersDocument, SharesDocument } from './document.ts';
+import type { MemberRename } from './names.ts';
+
+/**
+ * The one-time upgrade of a members file written before a name was an ID: people who shared a name were renamed in
+ * the document `read` answered. `commit` puts the original aside and writes the upgraded file, atomically; until
+ * it has, the file on disk is still the old one, so a crash before it simply repeats the upgrade.
+ */
+export interface MembersUpgrade {
+  readonly renames: readonly MemberRename[];
+  commit(): Promise<void>;
+}
 
 /** `state/catalogs/members.json`. A damaged file is an error from `read`, never an empty document. */
 export interface CatalogMembersStore {
   read(): Promise<MembersDocument>;
   write(document: MembersDocument): Promise<void>;
+  /** The upgrade the last `read` found to be due, once; `undefined` when it found none. */
+  takeUpgrade(): MembersUpgrade | undefined;
 }
 
 /** `state/catalogs/shares.json`. Holds the SHA-256 of each code and never a code. */
