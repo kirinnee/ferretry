@@ -16,6 +16,9 @@ set -euo pipefail
 #      Smoke darwin-arm64 stays ungated;
 #   5. realworld.yaml's `pull_request.paths` triggers on every input of every job, so a pull request that
 #      changes one is never left without the run that would measure it.
+#   6. the macOS RUNNER POLICY (section 7 below): macOS is advisory on a pull request, so a runner GitHub
+#      never gave a job cannot fail a required check, and required and retried on `main` and a release tag;
+#      only the free standard `macos-15` is ever asked for.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -227,4 +230,98 @@ block_has tmux-38 '^    needs: changes$' 'must need changes'
 block_has tmux-38 "^    if: needs[.]changes[.]outputs[.]tmux38 == 'true'\$" 'must run only when tmux38 is true'
 block_has tmux-38 'nix develop [.]#ci-tmux38 ' 'must run in the ci-tmux38 shell'
 
-echo "✅ macOS relevance holds: every input of the three optional macOS jobs selects its job, main runs them all, and realworld.yaml triggers on each"
+# ─── 7. macOS is advisory on a pull request and required (and retried) on main and a release tag ────
+
+smoke_workflow=".github/workflows/smoke-darwin.yaml"
+cd_workflow=".github/workflows/cd.yaml"
+[ -f "${smoke_workflow}" ] || fail "${smoke_workflow} is missing"
+[ -f "${cd_workflow}" ] || fail "${cd_workflow} is missing"
+
+workflow_job_block() {
+  awk -v id="$2" '
+    $0 == "  " id ":" { in_job = 1; print; next }
+    in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+    in_job { print }
+  ' "$1"
+}
+workflow_job_has() {
+  local file="$1" id="$2" pattern="$3" what="$4" block
+  block="$(workflow_job_block "${file}" "${id}")"
+  [ -n "${block}" ] || fail "${file} has no job '${id}'"
+  rg -q -- "${pattern}" <<<"${block}" || fail "${file}: job '${id}' ${what}"
+}
+
+# No new spend: the only macOS runner is the free standard `macos-15` of a public repository — never a
+# larger, a Namespace or a self-hosted one — and only the files that own a macOS job may use it.
+mapfile -t mac_runner_files < <(rg -l -i 'macos|mac-os|darwin.*runs-on' .github/workflows | sort)
+for file in "${mac_runner_files[@]}"; do
+  case "${file}" in
+  .github/workflows/smoke-darwin.yaml | .github/workflows/realworld.yaml | .github/workflows/harness-contract-latest.yaml | .github/workflows/ci.yaml | .github/workflows/cd.yaml) ;;
+  *) fail "${file}: a workflow outside the macOS policy mentions macOS; route it through smoke-darwin.yaml or declare it here" ;;
+  esac
+done
+unexpected_macos="$(rg -N --no-filename -v '^[[:space:]]*#' .github/workflows scripts/ci/macos-relevance.sh | rg -o 'macos-[0-9]+[A-Za-z0-9-]*' | rg -v '^macos-15$' || true)"
+[ -z "${unexpected_macos}" ] || fail "a macOS runner other than the free standard macos-15 is named: ${unexpected_macos}"
+macos_jobs="$(rg -c '^    runs-on: macos-15$' .github/workflows/smoke-darwin.yaml .github/workflows/realworld.yaml | sort | tr '\n' ' ')"
+[ "${macos_jobs}" = '.github/workflows/realworld.yaml:2 .github/workflows/smoke-darwin.yaml:3 ' ] ||
+  fail "the macOS job inventory changed (smoke-darwin.yaml 3 attempts, realworld.yaml 2 jobs); update this validator and docs/standards/ci-cd together: ${macos_jobs}"
+[ "$(rg -c 'os: \[ubuntu-latest, macos-15\]' .github/workflows/harness-contract-latest.yaml)" = 1 ] ||
+  fail 'harness-contract-latest.yaml: the macos-15 matrix leg is the only macOS job allowed there'
+if rg -n -i 'runs-on:.*(macos-[0-9]+-(large|xlarge|intel)|nscloud-mac|macos-latest-(large|xlarge))|runs-on:.*self-hosted' .github/workflows >/dev/null; then
+  fail 'a workflow asks for a paid or self-hosted macOS runner; the macOS pool is the free standard macos-15 only (docs/standards/ci-cd, "macOS runner shortage")'
+fi
+
+# The reusable smoke: three attempts, each a bounded `macos-15` job that records that it started, a
+# backoff between them that runs only on a pull-request-free, never-started attempt, and one verdict.
+for attempt in attempt-1 attempt-2 attempt-3; do
+  workflow_job_has "${smoke_workflow}" "${attempt}" '^    runs-on: macos-15$' 'must run on the free macos-15 runner'
+  workflow_job_has "${smoke_workflow}" "${attempt}" '^    timeout-minutes: [0-9]+$' 'must state timeout-minutes'
+  workflow_job_has "${smoke_workflow}" "${attempt}" 'started=true' 'must record that it started, so the verdict can tell "no runner" from "failed"'
+done
+for backoff in backoff-1 backoff-2; do
+  workflow_job_has "${smoke_workflow}" "${backoff}" "cancelled' && needs[.]attempt-[12][.]outputs[.]started != 'true'" 'must re-queue only an attempt that never started'
+done
+workflow_job_has "${smoke_workflow}" backoff-1 '!inputs[.]advisory' 'must not retry on an advisory (pull request) run'
+workflow_job_has "${smoke_workflow}" verdict 'scripts/ci/macos-smoke-verdict[.]sh' 'must judge through scripts/ci/macos-smoke-verdict.sh'
+workflow_job_has "${smoke_workflow}" verdict 'ADVISORY: [$][{][{] inputs[.]advisory [}][}]' 'must pass inputs.advisory to the verdict'
+rg -q '^  workflow_call:' "${smoke_workflow}" || fail "${smoke_workflow}: must be a workflow_call"
+[ "$(rg -c 'runs-on: macos-' "${smoke_workflow}")" = 3 ] || fail "${smoke_workflow}: exactly three attempts may use a macOS runner"
+
+# ci.yaml: Linux smoke stays a required matrix with no macOS leg; Darwin smoke is advisory only on a pull request.
+if workflow_job_block "${ci_workflow}" smoke | rg -v "^[[:space:]]*#" | rg -qi "darwin|macos"; then
+  fail "${ci_workflow}: the Linux smoke matrix must not carry a macOS leg; Smoke darwin-arm64 is the smoke-darwin job"
+fi
+workflow_job_has "${ci_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
+workflow_job_has "${ci_workflow}" smoke-darwin "^      advisory: [\$][{][{] github[.]event_name == 'pull_request' [}][}]\$" 'must be advisory on a pull request and only there'
+workflow_job_has "${ci_workflow}" smoke-darwin '^    needs: compile$' 'must need compile'
+if workflow_job_block "${ci_workflow}" smoke-darwin | rg -q '^    if:'; then
+  fail "${ci_workflow}: Smoke darwin-arm64 must run on every pull request, not be gated on \`changes\`"
+fi
+
+# cd.yaml: a release tag requires the darwin smoke, with its retries, before anything is published.
+workflow_job_has "${cd_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
+workflow_job_has "${cd_workflow}" smoke-darwin '^      advisory: false$' 'must be required (advisory: false) on a release tag'
+workflow_job_has "${cd_workflow}" goreleaser '^    needs: smoke-darwin$' 'must wait for the darwin smoke'
+
+# realworld.yaml: the macOS proofs are advisory on a pull request and unmasked everywhere else; the Linux
+# leg of Harness Contract (and of its nightly twin) is never masked.
+for job in darwin-confinement safari-sandbox-shell; do
+  workflow_job_has "${workflow}" "${job}" "^    continue-on-error: [\$][{][{] github[.]event_name == 'pull_request' [}][}]\$" 'must be advisory on a pull request and only there'
+done
+workflow_job_has "${workflow}" harness-contract "^    continue-on-error: [\$][{][{] github[.]event_name == 'pull_request' && startsWith[(]matrix[.]os, 'macos'[)] [}][}]\$" 'must mask only its macOS leg, and only on a pull request'
+workflow_job_has ".github/workflows/harness-contract-latest.yaml" latest "^    continue-on-error: [\$][{][{] github[.]event_name == 'pull_request' && startsWith[(]matrix[.]os, 'macos'[)] [}][}]\$" 'must mask only its macOS leg, and only on a pull request'
+workflow_job_has "${workflow}" macos-advisory 'scripts/ci/macos-advisory[.]sh' 'must say which macOS jobs had no runner'
+
+# The verdict, run on canned results, decides as the doctrine says.
+verdict() {
+  NEEDS="$1" ADVISORY="$2" GITHUB_STEP_SUMMARY=/dev/null scripts/ci/macos-smoke-verdict.sh >/dev/null 2>&1
+}
+unstarted='{"attempt-1":{"result":"cancelled","outputs":{}},"attempt-2":{"result":"skipped","outputs":{}},"attempt-3":{"result":"skipped","outputs":{}}}'
+verdict "${unstarted}" true || fail "a pull request whose macOS smoke never got a runner must not fail"
+verdict "${unstarted}" false && fail "main or a release tag whose macOS smoke never got a runner must fail after its retries"
+ran_and_failed='{"attempt-1":{"result":"failure","outputs":{"started":"true"}},"attempt-2":{"result":"skipped","outputs":{}},"attempt-3":{"result":"skipped","outputs":{}}}'
+verdict "${ran_and_failed}" true && fail "a macOS smoke that ran and failed must fail, even on a pull request"
+passed_late='{"attempt-1":{"result":"cancelled","outputs":{}},"attempt-2":{"result":"cancelled","outputs":{}},"attempt-3":{"result":"success","outputs":{"started":"true"}}}'
+verdict "${passed_late}" false || fail "a macOS smoke that passes on a retry must pass"
+
+echo "✅ macOS relevance holds: every input of the three optional macOS jobs selects its job, main runs them all, realworld.yaml triggers on each, and macOS is advisory on a pull request and required (and retried) on main and a release tag"

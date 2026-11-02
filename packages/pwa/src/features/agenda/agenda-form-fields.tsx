@@ -6,13 +6,18 @@
  *   yes / no      a two-part Yes | No
  *   free text     "Type it below." — the composer is its answer
  *
- * The asker's recommended value is already picked and says so. The picks live in `agendaForms`; the composer's one
- * Send combines them with its text (`agenda-form-send.ts`). Where no composer takes the send (the chat), the
- * fields are a numbered list to read, not controls.
+ * The asker's recommended value is already picked and says so with a "Recommended" tag; what is PICKED is the filled
+ * row (or the pressed half with its check), so the two never read alike. A required field with nothing picked says
+ * "Needs an answer", and a foot pinned to the bottom of the scroller counts what is answered and says how to send —
+ * so it is never hidden under the composer. The picks live in `agendaForms`; the composer's one
+ * Send combines them with its text (`agenda-form-send.ts`), the Inbox's and the chat's alike. Where no composer can
+ * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
  */
 
 import { type AgendaFormField, FORM_NO, FORM_YES, formFieldRequired } from '@ferretry/protocol';
+import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
+import { formProgress } from '../../lib/agenda-form-send.ts';
 import { agendaForms, type FormPicks, toggled } from '../../lib/agenda-form-state.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 
@@ -28,6 +33,14 @@ const optionsOf = (field: AgendaFormField): readonly { readonly label: string; r
 
 const isRecommended = (field: AgendaFormField, label: string): boolean =>
   (field.recommended ?? []).some(value => value.trim() === label);
+
+/** "2 of 3 answered", or that all are: the fields answered on the card. */
+const progressWords = ({ answered, total }: { readonly answered: number; readonly total: number }): string =>
+  answered === total
+    ? total === 1
+      ? 'Answered'
+      : `All ${String(total)} answered`
+    : `${String(answered)} of ${String(total)} answered`;
 
 function Hint({ field }: { readonly field: AgendaFormField }) {
   if (field.type === 'many')
@@ -62,6 +75,9 @@ function Choices({
             onClick={() => onPick(option.label)}
             type="button"
           >
+            {picks.includes(option.label) ? (
+              <Check aria-hidden="true" className="fy-form__seg-check" size={16} />
+            ) : null}
             {plainLabel(option.label)}
             {isRecommended(field, option.label) ? <span className="fy-form__rec">Recommended</span> : null}
           </button>
@@ -71,7 +87,7 @@ function Choices({
   return (
     <fieldset aria-labelledby={group} className="fy-form__options">
       {optionsOf(field).map(option => (
-        <label className="fy-form__option" key={option.label}>
+        <label className="fy-form__option" data-on={picks.includes(option.label) || undefined} key={option.label}>
           <input
             checked={picks.includes(option.label)}
             disabled={disabled}
@@ -93,66 +109,98 @@ function Choices({
   );
 }
 
-/** The form's fields, picks on the card. `formKey` names the open item's picks; `null` draws the fields to read only. */
+/**
+ * The form's fields, picks on the card. `formKey` names the open item's picks; `null` draws the fields to read only.
+ * `instruction` is the foot's "how to send" line, drawn (with the count) only while the form can be answered here.
+ */
 export function AgendaFormFields({
   fields,
   formKey,
   picks,
   disabled,
   renderProse,
+  instruction = null,
 }: {
   readonly fields: readonly AgendaFormField[];
   readonly formKey: string | null;
   readonly picks: FormPicks;
   readonly disabled: boolean;
   readonly renderProse: Prose;
+  readonly instruction?: string | null;
 }) {
   const base = useId();
+  const progress = formProgress(fields, picks);
+  const foot = formKey !== null && instruction !== null;
   return (
-    <ol className="fy-form" data-agenda-form="">
-      {fields.map((field, index) => {
-        const group = `${base}-${field.id}`;
-        const live = formKey !== null;
-        return (
-          <li className="fy-form__field" data-agenda-form-field={field.id} data-type={field.type} key={field.id}>
-            <div className="fy-form__q" id={group}>
-              <span aria-hidden="true" className="fy-card__wanted-n">
-                {index + 1}.
-              </span>
-              <div className="fy-form__label">
-                {renderProse(field.label)}
-                <Hint field={field} />
+    <>
+      <ol className="fy-form" data-agenda-form="">
+        {fields.map((field, index) => {
+          const group = `${base}-${field.id}`;
+          const live = formKey !== null;
+          const needed =
+            live && field.type !== 'text' && formFieldRequired(field) && (picks[field.id] ?? []).length === 0;
+          return (
+            <li className="fy-form__field" data-agenda-form-field={field.id} data-type={field.type} key={field.id}>
+              <div className="fy-form__q" id={group}>
+                <span aria-hidden="true" className="fy-card__wanted-n">
+                  {index + 1}.
+                </span>
+                <div className="fy-form__label">
+                  {renderProse(field.label)}
+                  <Hint field={field} />
+                  {needed ? (
+                    <span className="fy-form__needed" data-agenda-form-needed="">
+                      Needs an answer
+                    </span>
+                  ) : null}
+                </div>
               </div>
-            </div>
-            {field.type === 'text' ? (
-              <p className="fy-card__wanted-choices" data-agenda-form-text="">
-                {live ? 'Type it below.' : 'Answered in the reply box.'}
-              </p>
-            ) : live ? (
-              <Choices
-                disabled={disabled}
-                field={field}
-                group={group}
-                onPick={label =>
-                  agendaForms.set(
-                    formKey,
-                    fields,
-                    field.id,
-                    toggled(picks[field.id] ?? [], label, field.type === 'many'),
-                  )
-                }
-                picks={picks[field.id] ?? []}
-              />
-            ) : (
-              <p className="fy-card__wanted-choices" data-agenda-form-options="">
-                {optionsOf(field)
-                  .map(option => option.label)
-                  .join(' / ')}
-              </p>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+              {field.type === 'text' ? (
+                <p className="fy-card__wanted-choices" data-agenda-form-text="">
+                  {live ? 'Type it below.' : 'Answered in the reply box.'}
+                </p>
+              ) : live ? (
+                <Choices
+                  disabled={disabled}
+                  field={field}
+                  group={group}
+                  onPick={label =>
+                    agendaForms.set(
+                      formKey,
+                      fields,
+                      field.id,
+                      toggled(picks[field.id] ?? [], label, field.type === 'many'),
+                    )
+                  }
+                  picks={picks[field.id] ?? []}
+                />
+              ) : (
+                <p className="fy-card__wanted-choices" data-agenda-form-options="">
+                  {optionsOf(field)
+                    .map(option => option.label)
+                    .join(' / ')}
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {foot ? (
+        <div
+          className="fy-form__foot"
+          data-agenda-form-foot=""
+          data-done={progress.answered === progress.total || undefined}
+        >
+          {progress.total === 0 ? null : (
+            <p aria-live="polite" className="fy-form__progress" data-agenda-form-progress="" role="status">
+              {progressWords(progress)}
+            </p>
+          )}
+          <p className="fy-form__instruction" data-agenda-need-lead="">
+            {instruction}
+          </p>
+        </div>
+      ) : null}
+    </>
   );
 }

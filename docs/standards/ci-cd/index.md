@@ -136,7 +136,7 @@ worst 74. The queue, not the work, held pull requests up, and there is no paid p
 
 So a pull request runs **Smoke on every run** and the other three **only when their inputs change**.
 `main`, a manual dispatch and any doubt run all four, so a path list that missed an input shows up
-one merge later. Smoke stays in `ci.yaml`. The other three, and the job that decides them, are the
+one merge later. Smoke stays in `ci.yaml` (as the `smoke-darwin` call into the reusable `smoke-darwin.yaml`, [below](#macos-runner-shortage)). The other three, and the job that decides them, are the
 realworld tier's: they live in `realworld.yaml`, so a macOS queue never holds up a pull request or a
 release, and a failure on `main` files an issue ([Realworld workflow](#realworld-workflow)).
 
@@ -170,17 +170,70 @@ to the matrix.
   in or out through `fromJSON(needs.changes.outputs.harness_os)`; the check keeps its name,
   `Harness Contract (macos-15)`, when it runs and is absent when it does not.
 
+## macOS runner shortage
+
+**GitHub's macOS pool can have no runner to give.** When it does, the job waits about 15 minutes and
+GitHub **cancels** it with "job not acquired by Runner": no step ran, so nothing failed and nothing was
+proved. On 2026-11-02 that cancelled `Smoke darwin-arm64`, `Harness Contract (macos-15)` and
+`Containment (macOS)` on pull request after pull request and turned them red. `timeout-minutes` cannot help (it
+bounds a job that has a runner, not the queue), and there is no paid pool to buy out of it, so the policy is
+about **how a missing runner is read**, never about spending: every macOS job asks for the free standard
+`macos-15`, never a larger, a Namespace or a self-hosted macOS runner.
+
+| Where                       | A macOS job that ran and failed                                                    | A macOS job that never got a runner                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Pull request**            | red for `Smoke darwin-arm64`; the realworld macOS proofs are masked (never gating) | **advisory**: a warning and the job-summary line `macOS runner not available; advisory on PRs` |
+| **`main` push**             | red; `Smoke darwin-arm64` holds `Release` back, the realworld proofs file an issue | smoke: re-queued up to 3 times, then red; realworld proofs: one attempt, not reported          |
+| **Release tag** (`cd.yaml`) | red; nothing is published                                                          | re-queued up to 3 times, then red, saying the runner was unavailable                           |
+
+The Linux jobs are never softened: `Smoke linux-x64-baseline`, `Smoke linux-arm64`, `Unit`/`Integration`
+Tests, SIT and the Linux leg of `Harness Contract` stay required on every event.
+
+- **Smoke is one reusable workflow, `smoke-darwin.yaml`.** `ci.yaml` (needs `compile`) and `cd.yaml`
+  (needs its own `compile`, so a release proves the darwin binary on a Mac before GoReleaser publishes) call it
+  with `advisory: ${{ github.event_name == 'pull_request' }}` and `advisory: false`. It has three `macos-15`
+  attempts (`timeout-minutes: 10` each), a Linux backoff between them (120 s, then 300 s), and a `Verdict` job
+  on Linux: the check that stands for the smoke. Each attempt's first step writes `started=true` to its job
+  outputs, so a cancelled attempt with no `started` is **"no runner"** and one with `started` is **"cut
+  off"**. Only "no runner" re-queues, and only off a pull request.
+- **A smoke that ran and failed is never retried**, on a pull request or off one: the flake rule below
+  (fix the root, never retry) still holds. `scripts/ci/macos-smoke-verdict.sh` judges the attempts: any pass is green; any failure is
+  red; all cancelled is `macOS runner not available; advisory on PRs` (green, warning) on a pull request and
+  `macOS runner not available after N attempt(s)` (red, with "not a smoke failure" and "re-run the job") elsewhere.
+  It writes the same line to the job summary.
+- **The realworld macOS proofs** (`Containment (macOS)`, `Sandbox Shell (Safari)`, `Harness Contract
+(macos-15)` and the nightly `Harness Contract (latest) (macos-15)`) carry a pull-request-only
+  `continue-on-error`, so on a PR neither a lost runner nor a failed proof reddens the workflow; the Linux legs
+  are not masked. The mask cannot tell the two apart (GitHub reports a masked failure as a success), so a real
+  macOS failure on a PR is visible only in that job's log. That is accepted: these are the realworld tier, which
+  never gated a PR or a release ([Release gating](#release-gating)). `macOS Advisory`
+  (`scripts/ci/macos-advisory.sh`) writes the summary line when a job was cancelled. On `main` and the nightly
+  they run unmasked, **once** (no re-queue), and `report` files an issue when one fails; a job that never got a
+  runner there is cancelled and is not reported, and the next push or nightly runs it again.
+- **The raw macOS check can still read "cancelled".** A check run GitHub cancelled stays cancelled whatever the
+  workflow does. What the policy changes is every verdict built on it: `Smoke darwin-arm64 / Verdict`
+  is green on a PR whose macOS smoke never started, and no required Linux check depends on a macOS job. Merge on the
+  Linux checks and `Verdict`; read a cancelled raw macOS check as "no runner", not as a failure.
+- **Held by `scripts/validate/macos-relevance.sh`** (section 7): `ci.yaml` calls `smoke-darwin.yaml` as advisory
+  on pull requests only, with no macOS leg in the Linux `smoke` matrix; `cd.yaml` calls it with
+  `advisory: false` and `goreleaser` needs it; the three attempts are `macos-15` with a ceiling and a `started`
+  marker; the backoffs re-queue only a never-started attempt and never on a pull request; the realworld and
+  nightly `continue-on-error` masks only macOS legs, only on a pull request; no workflow outside the policy
+  names a macOS runner; none asks for a paid or self-hosted one; and the verdict script decides the canned cases
+  above as written.
+
 ## Workflow split
 
-| Workflow                    | Trigger                                                                     | Responsibility                                                                   |
-| --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `CI`                        | push to `main`, pull request, manual dispatch                               | gates, tests, compile, SIT, cross-platform smoke                                 |
-| `E2E`                       | pull request (docs/model-catalog-only ones skip inside), manual dispatch    | the e2e tier's fast journeys in three shards, into `E2E Journeys`                |
-| `E2E Slow`                  | nightly, manual dispatch, pull requests touching relay or connection code   | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys`               |
-| `Realworld`                 | push to `main`, nightly, manual dispatch, pull requests touching its inputs | the realworld tier, the macOS jobs and the pinned harness contract; files issues |
-| `Harness Contract (latest)` | nightly, manual dispatch                                                    | the contract suite against the newest upstream harnesses, files issues           |
-| `Release`                   | `CI` completed successfully on `main`                                       | semantic-release: version, changelog, `vX.Y.Z` tag                               |
-| `CD`                        | push of a `v*.*.*` tag                                                      | GoReleaser publishes the release and its channels                                |
+| Workflow                        | Trigger                                                                     | Responsibility                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `CI`                            | push to `main`, pull request, manual dispatch                               | gates, tests, compile, SIT, cross-platform smoke                                                     |
+| `E2E`                           | pull request (docs/model-catalog-only ones skip inside), manual dispatch    | the e2e tier's fast journeys in three shards, into `E2E Journeys`                                    |
+| `E2E Slow`                      | nightly, manual dispatch, pull requests touching relay or connection code   | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys`                                   |
+| `Realworld`                     | push to `main`, nightly, manual dispatch, pull requests touching its inputs | the realworld tier, the macOS jobs and the pinned harness contract; files issues                     |
+| `Harness Contract (latest)`     | nightly, manual dispatch                                                    | the contract suite against the newest upstream harnesses, files issues                               |
+| `Smoke darwin-arm64 (reusable)` | called by `CI` and `CD`                                                     | the darwin smoke, with the macOS runner policy (advisory on a pull request, retried elsewhere)       |
+| `Release`                       | `CI` completed successfully on `main`                                       | semantic-release: version, changelog, `vX.Y.Z` tag                                                   |
+| `CD`                            | push of a `v*.*.*` tag                                                      | compile and darwin smoke (required, retried), then GoReleaser publishes the release and its channels |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
 pushes the tag, the tag fires CD. Nothing else publishes anything. `Realworld` and
@@ -188,18 +241,19 @@ pushes the tag, the tag fires CD. Nothing else publishes anything. `Realworld` a
 
 ## CI jobs
 
-| Job              | Runs                                                                             | Notes                                                                         |
-| ---------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                         | matrix `[format, gates]`: treefmt, and every other hook, in parallel          |
-| `build-checks`   | `nix build .#default`, `wrangler deploy --dry-run` ×2, `scripts/ci/build-pwa.sh` | the install bundle, both relay Workers and the Pages bundle, in one job       |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                    | matrix over `config/test-groups.json`                                         |
-| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                    |
-| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                         |
-| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                      |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light; the full gallery in dark, as one leg per viewport |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |
+| Job              | Runs                                                                             | Notes                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                         | matrix `[format, gates]`: treefmt, and every other hook, in parallel                                                           |
+| `build-checks`   | `nix build .#default`, `wrangler deploy --dry-run` ×2, `scripts/ci/build-pwa.sh` | the install bundle, both relay Workers and the Pages bundle, in one job                                                        |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                    | matrix over `config/test-groups.json`                                                                                          |
+| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                                                                     |
+| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                                                                          |
+| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                                                                       |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light; the full gallery in dark, as one leg per viewport                                                  |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                                                                        |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                                                                       |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one Linux runner per build target; required                                                                  |
+| `smoke-darwin`   | `smoke-darwin.yaml` (`Smoke darwin-arm64`)                                       | `needs: compile`; advisory on a pull request, required and retried on `main` ([macOS runner shortage](#macos-runner-shortage)) |
 
 Notable details:
 
@@ -250,7 +304,8 @@ Notable details:
   leg would, which is why there is no such leg. The viewports are walked one after the other: walking
   them at once, as three software-rendered Chromes on a 4x8, timed out in 3 of 7 runs under load.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
-  `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-15`. This is the one job that
+  `linux-arm64` on `ubuntu-24.04-arm`; `darwin-arm64` on `macos-15` is the separate `smoke-darwin`
+  job, whose runner may not come (see [macOS runner shortage](#macos-runner-shortage)). Smoke is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).
@@ -426,7 +481,8 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
 - Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
   `precommit` 10, `build-checks` 20, `pwa-screenshot` 20, `test` (unit) 15, `compile` 15, `sit` 10,
   `smoke` 10, the two ledgers 5; `E2E`/`E2E Slow` relevance and summary 5; `Harness Contract (latest)`
-  20 and its report 10; `CD` `goreleaser` 30 and `sign` 15; `Deploy PWA to Pages` build 15, sign 10,
+  20 and its report 10; `CD` `compile` 15, `goreleaser` 30 and `sign` 15; the darwin smoke
+  (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,
   deploy 10; `Deploy Hosted Relay` jobs 20; `Release` 20.
 - A new job states its ceiling when it is added, sized from its first green runs.
   `scripts/validate/job-ceilings.sh` refuses a workflow job without one.
@@ -496,7 +552,10 @@ merges in quick succession cannot race for the same version.
 with the default token do not trigger further workflows, so a `GITHUB_TOKEN` tag would leave CD
 un-fired and no release published. The job passes `secrets.RELEASE_TOKEN`.
 
-`CD` reacts to the tag, checks out with `fetch-depth: 0`, and runs
+`CD` reacts to the tag. Before it publishes anything it compiles the binaries once more and starts the
+darwin-arm64 one on a real Mac (`smoke-darwin`, `advisory: false`): a release proves darwin works, a macOS
+runner that never comes is re-queued up to 3 times, and only then does the release stop, saying the runner was
+unavailable ([macOS runner shortage](#macos-runner-shortage)). `goreleaser` `needs` that job. It then checks out with `fetch-depth: 0`, and runs
 `nix develop .#releaser -c ./scripts/release/publish.sh` — the `.#releaser` shell is the only
 one with `goreleaser` and `go`. GoReleaser owns the GitHub release, archives, checksums, the
 installer, and the in-repo Homebrew cask. See

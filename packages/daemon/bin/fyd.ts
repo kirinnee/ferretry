@@ -730,10 +730,12 @@ import {
   AgendaBuzz,
   AgendaChangeFanout,
   AgendaConversation,
+  AgendaDraftSessions,
   AgendaReplyBatcher,
   AgendaReplyDelivery,
   AgendaResurfacer,
   AgendaHomes,
+  AgendaItemDraftDiscard,
   AgendaService,
   migrateToAgendaHomes,
   foldNoticesIntoMachineAgenda,
@@ -3634,7 +3636,7 @@ function createSessionSendSubsystem(
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
         const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
-        if (turn.referenced.length > 0) await conversation.settle(id, turn);
+        if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
           ...(await view(id, 'took the message')),
@@ -10206,6 +10208,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
+      // The owner's shared drafts are built with the rest of the subsystems, further down; an item that closes
+      // deletes its draft through this, which reads nothing until requests flow.
+      const sharedDraftsHolder: { service?: SharedDraftService } = {};
       let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
       const boardWorld = createBoardWorld(
         paths,
@@ -10823,6 +10828,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
+          new AgendaItemDraftDiscard({
+            discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
+          }),
           // The owner dismissing an input card without its form cancels the request behind it.
           new InputCardClosedObserver(async (sessionId, id) => await inputRequests?.cardDismissed(sessionId, id)),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
@@ -12585,6 +12594,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })(),
         redactor: secretRedactor,
       });
+      const sharedDraftService = new SharedDraftService(
+        new AgendaDraftSessions(new FilePinSessionDirectory(paths, stateFiles), agendaBoards),
+        new FileSharedDraftRepository(paths, stateFiles, new KeyedSerialExecutor()),
+        clock,
+        {
+          after: (milliseconds, action) => {
+            const timer = setTimeout(action, milliseconds);
+            return { cancel: () => clearTimeout(timer) };
+          },
+        },
+        // A generation must never repeat across restarts, so it is random rather than counted.
+        { next: () => crypto.randomUUID() },
+      );
+      sharedDraftsHolder.service = sharedDraftService;
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -12810,19 +12833,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
-        sharedDrafts: new SharedDraftService(
-          new FilePinSessionDirectory(paths, stateFiles),
-          new FileSharedDraftRepository(paths, stateFiles, new KeyedSerialExecutor()),
-          clock,
-          {
-            after: (milliseconds, action) => {
-              const timer = setTimeout(action, milliseconds);
-              return { cancel: () => clearTimeout(timer) };
-            },
-          },
-          // A generation must never repeat across restarts, so it is random rather than counted.
-          { next: () => crypto.randomUUID() },
-        ),
+        sharedDrafts: sharedDraftService,
         // Who has each session's composer open, and on which of the owner's devices. Memory only.
         sharedDraftStream: {
           presence: new SharedDraftPresence(),

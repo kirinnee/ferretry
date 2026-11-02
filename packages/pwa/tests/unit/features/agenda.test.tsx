@@ -18,6 +18,7 @@ import {
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
+import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
@@ -1072,5 +1073,151 @@ describe('a sign-in rule suggestion card', () => {
       '5b1f2a40-6c7d-4e8f-9a0b-1c2d3e4f5a6b',
     );
     run(() => view.unmount());
+  });
+});
+
+describe('a form opened in the chat (#B143)', () => {
+  // The Inbox's form, filled in from the chat: the same card, the same picks, and the composer's Send is its answer.
+  const formItem = (id: string, extra: Record<string, unknown> = {}): AgendaItem =>
+    item(id, {
+      kind: 'form',
+      ask: { kind: 'open-question' },
+      fields: [
+        {
+          id: '1',
+          type: 'one',
+          label: 'Which region?',
+          name: 'Region',
+          options: [{ label: 'EU', description: 'data stays in Europe' }, { label: 'US' }],
+          recommended: ['EU'],
+        },
+        {
+          id: '2',
+          type: 'many',
+          label: 'Which alerts?',
+          name: 'Alerts',
+          options: [{ label: 'Page' }, { label: 'Mail' }],
+        },
+        { id: '3', type: 'yesno', label: 'OK to restart?', name: 'Restart' },
+        { id: '4', type: 'text', label: 'Anything else?', required: false },
+      ],
+      ...extra,
+    });
+  const responses: unknown[] = [];
+  const recording = (landing: Promise<void> = Promise.resolve()): AgendaActionClient => ({
+    ...client(),
+    respond: async (_c, _s, id, response) => {
+      calls.push(`respond:${id}`);
+      responses.push(response);
+      await landing;
+    },
+  });
+  const typed = (draft: string) =>
+    registerComposerQuoteTarget({ ...scope, draft: () => draft, replaceDraft: () => undefined });
+  const inputs = (view: ReturnType<typeof render>, type: string) =>
+    view.root.findAll(node => node.type === 'input' && node.props.type === type);
+  const yesNo = (view: ReturnType<typeof render>) =>
+    view.root.findAll(node => node.type === 'button' && node.props.className === 'fy-form__seg-btn');
+  const cardId = (view: ReturnType<typeof render>): string | undefined =>
+    view.root.findAllByType(AgendaItemView)[0]?.props.item.id;
+  const openForm = (id: string, extra: Partial<HostProps> = {}) =>
+    mount({ snapshot: board([formItem(id)]), focus: { target: id as AgendaId, seq: 1 }, ...extra });
+  afterEach(() => {
+    responses.length = 0;
+  });
+
+  test('draws its fields as controls, keyed as the Inbox keys the item, and the composer’s Send answers it', () => {
+    const view = openForm('A60');
+    expect(view.root.findByType(AgendaItemView).props.formKey).toBe(inboxCardKey(connection.daemonId, 'chat', 'A60'));
+    expect(inputs(view, 'radio').map(radio => [radio.props.value, radio.props.checked])).toEqual([
+      ['EU', true],
+      ['US', false],
+    ]);
+    expect(inputs(view, 'checkbox')).toHaveLength(2);
+    expect(yesNo(view)).toHaveLength(2);
+    expect(textOf(view.root.findByProps({ 'data-agenda-form-text': '' }))).toBe('Type it below.');
+    expect(JSON.stringify(view.toJSON())).not.toContain('Open this in the Inbox');
+    expect(live().composer.answerForm).toBeDefined();
+    expect(live().composer.formKey).toBe(inboxCardKey(connection.daemonId, 'chat', 'A60'));
+    expect(live().placeholder).toBe('Anything else for Johnnie?');
+  });
+
+  test('Send answers with every pick and the typed words, and the view waits for the answer to land', async () => {
+    let land: () => void = () => undefined;
+    const landing = new Promise<void>(resolve => {
+      land = resolve;
+    });
+    const answered: string[] = [];
+    const dispose = typed('ship it Friday');
+    const view = openForm('A61', { clientOverride: recording(landing), onAnswered: () => answered.push('answered') });
+    run(() => inputs(view, 'radio')[1]?.props.onChange());
+    run(() => inputs(view, 'checkbox')[0]?.props.onChange());
+    run(() => yesNo(view)[0]?.props.onClick());
+
+    run(() => live().composer.answerForm?.());
+    // The composer reports its send at once; the form's view stays until the machine has the answer.
+    run(() => live().composer.onSent());
+    expect(cardId(view)).toBe('A61');
+    expect(calls).toEqual(['respond:A61']);
+    expect(responses).toEqual([
+      {
+        kind: 'form',
+        answers: [
+          { id: '1', picked: 'US' },
+          { id: '2', picked: ['Page'] },
+          { id: '3', picked: 'Yes' },
+          { id: '4', picked: 'ship it Friday' },
+        ],
+      },
+    ]);
+
+    await runAsync(async () => {
+      land();
+      await landing;
+    });
+    expect(cardId(view)).toBeUndefined();
+    expect(answered).toEqual(['answered']);
+    // The view closing is not the confirmation: a line above the composer says what went, until dismissed.
+    const sentLine = view.root.findByProps({ 'data-agenda-sent': 'A61' });
+    expect(textOf(sentLine)).toBe('Sent to Johnnie: Region: US · Alerts: Page · Restart: Yes');
+    run(() => sentLine.findByProps({ 'aria-label': 'Dismiss' }).props.onClick());
+    expect(view.root.findAll(node => node.props['data-agenda-sent'] !== undefined)).toHaveLength(0);
+    dispose();
+  });
+
+  test('asks once about an empty required field, then sends it as it is', async () => {
+    const view = openForm('A62', { clientOverride: recording() });
+    expect(() => live().composer.answerForm?.()).toThrow('Not answered yet: 2. Alerts, 3. Restart.');
+    expect(calls).toEqual([]);
+    await runAsync(async () => {
+      live().composer.answerForm?.();
+    });
+    expect(responses).toEqual([{ kind: 'form', answers: [{ id: '1', picked: 'EU' }] }]);
+    // No composer send followed in this test, so the landed answer closed the view.
+    expect(cardId(view)).toBeUndefined();
+  });
+
+  test('a refused answer leaves the card open with the machine’s reason', async () => {
+    const view = openForm('A63', { clientOverride: client(true) });
+    run(() => yesNo(view)[1]?.props.onClick());
+    run(() => inputs(view, 'checkbox')[1]?.props.onChange());
+    await runAsync(async () => {
+      live().composer.answerForm?.();
+      live().composer.onSent();
+    });
+    expect(cardId(view)).toBe('A63');
+    expect(view.root.findByType(AgendaItemView).props.error).toBe('The machine said no.');
+    expect(view.root.findAll(node => node.props['data-agenda-sent'] !== undefined)).toHaveLength(0);
+  });
+
+  test('a settled form is read, not filled in: no picks key, and a reply is plain chat about it', () => {
+    const view = mount({
+      snapshot: board([], {}, [{ ...formItem('A64'), ...resolvedItem('A64'), kind: 'form' }]),
+      focus: { target: 'A64' as AgendaId, seq: 1 },
+    });
+    expect(cardId(view)).toBe('A64');
+    expect(view.root.findByType(AgendaItemView).props.formKey).toBeUndefined();
+    expect(inputs(view, 'radio')).toHaveLength(0);
+    expect(live().composer.answerForm).toBeUndefined();
   });
 });

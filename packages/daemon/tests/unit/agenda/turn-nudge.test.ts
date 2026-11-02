@@ -303,17 +303,18 @@ describe('attentionNudge — an item written about and left as it was', () => {
   const left = (overrides: Partial<FinishedTurn> = {}): FinishedTurn =>
     turn({ opener: '[re !A5 «x»] ok', reply: 'Understood, thanks.', discussed: ['A5'], ...overrides });
 
-  it('should nudge once to update the card, surface it or close it', () => {
+  it('should nudge once to do the work and close it, naming --back for something new', () => {
     // Act
     const actual = attentionNudge(left(), TOP, 'fy');
 
     // Assert
     should(actual?.asks).deepEqual(['discussed !A5']);
     should(actual?.message).startWith(AGENDA_NUDGE_MARK);
-    should(actual?.message).containEql('The owner wrote about !A5 and it is your turn');
-    should(actual?.message).containEql('fy agenda edit A5');
-    should(actual?.message).containEql('fy agenda surface A5');
+    should(actual?.message).containEql('Owner replied about !A5; it is off their list.');
     should(actual?.message).containEql('fy agenda done A5');
+    should(actual?.message).containEql('fy agenda edit A5 --back');
+    should(actual?.message).not.containEql('your turn');
+    should(actual?.message).not.containEql('agenda surface');
     should(actual?.message).not.match(/Attention/u);
   });
 
@@ -360,9 +361,22 @@ describe('discussionNudgeMessage', () => {
     const actual = discussionNudgeMessage(['A5', 'A6'], 'zz');
 
     // Assert
-    should(actual).containEql('The owner wrote about !A5, !A6');
-    should(actual).containEql('`zz agenda edit A5`');
+    should(actual).containEql('Owner replied about !A5, !A6; they are off their list.');
+    should(actual).containEql('`zz agenda edit A5 --back …`');
     should(actual).containEql('`zz agenda done A5`');
+  });
+
+  it('should never say it is the ferret’s turn, for one item or several', () => {
+    // Act
+    const one = discussionNudgeMessage(['A5'], 'zz');
+    const several = discussionNudgeMessage(['A5', 'A6'], 'zz');
+
+    // Assert
+    should(one).equal(
+      `${AGENDA_NUDGE_MARK} Owner replied about !A5; it is off their list. Do the work, then \`zz agenda done A5\`. Use \`zz agenda edit A5 --back …\` only if you need something NEW from them.`,
+    );
+    should(one).not.match(/your turn/u);
+    should(several).not.match(/your turn/u);
   });
 });
 
@@ -488,7 +502,7 @@ describe('AgendaTurnNudge', () => {
 
     // Assert
     should(first).be.true();
-    should(harness.sent[0]?.[2]).containEql('The owner wrote about !A5');
+    should(harness.sent[0]?.[2]).containEql('Owner replied about !A5');
     should(harness.sent[0]?.[1]).equal(harness.sent[1]?.[1]);
     should(harness.recorded).have.length(2);
   });

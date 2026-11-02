@@ -1,11 +1,14 @@
 /**
- * THE OPEN INBOX ITEM'S COMPOSER — the chat's own `Composer`, bound to the ferret that asked, so what the owner
- * types under an item in the Inbox is exactly what they would have typed under it in the chat:
+ * THE OPEN INBOX ITEM'S COMPOSER — the chat's own `Composer`, bound to the ferret that asked and to THIS item's own
+ * draft, so what the owner types under an item is a reply to that item and nothing else:
  *
  * - IT GOES TO THAT FERRET'S CHAT, ABOUT THE ITEM: the message carries the item's reference (`!A5 …`) through the
  *   same `withReferencePrefix` the chat's "about !A5" chip uses, so the daemon delivers it as `[re !A5 …]`.
- * - IT IS THE SAME DRAFT: drafts are kept per conversation, so a word typed here is there when the chat opens, and
- *   a quick reply tapped on the item takes it as its note (`agenda-inbox-page.tsx`).
+ * - IT HAS ITS OWN DRAFT, NOT THE CHAT'S: each card keeps a draft of its own (the composer's `draftSlot`), synced
+ *   across the owner's devices like the chat's but never with it. Typing here never shows in the ferret's chat box
+ *   (nor what is typed there under this card), and two cards of one ferret never share a box. A quick reply tapped
+ *   on the item takes THIS draft as its note (`agenda-inbox-page.tsx`). Closing the item discards its draft; a
+ *   reply that leaves it open empties only what was sent.
  *
  * A FORM ITEM'S Send answers the form: `answerForm` (the page's) combines the picks on the card with what is typed, and
  * the message is not sent as chat. It may throw the one sentence the composer shows (empty fields, asked once).
@@ -14,11 +17,10 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
-import { withFormSend } from '../../lib/agenda-form-send.ts';
-import { useFormChanges } from '../../lib/agenda-form-state.ts';
+import { useFormComposer } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -84,24 +86,19 @@ export function AgendaInboxComposer({
     };
   }, [clientFor, connection]);
   const api = client?.daemonId === connection.daemonId ? client.api : null;
-  const changes = useFormChanges(formKey ?? '');
-  const answer = useRef(answerForm);
-  answer.current = answerForm;
-  const forForm = answerForm !== undefined;
-  const about = useMemo(() => {
-    if (api === null) return null;
-    const chat = withReferencePrefix(api, () => [itemId]);
-    return forForm ? withFormSend(chat, () => answer.current?.()) : chat;
-  }, [api, itemId, forForm]);
-  if (about === null) return null;
+  const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
+  const form = useFormComposer(chat, answerForm, formKey);
+  const forForm = form.allowEmptySend;
+  if (form.api === null) return null;
   return (
     <Composer
       allowEmptySend={forForm}
-      {...(forForm ? { clearErrorOn: changes } : {})}
-      api={about}
+      {...(form.clearErrorOn === undefined ? {} : { clearErrorOn: form.clearErrorOn })}
+      api={form.api}
       compact={compact}
       daemon={connection}
       disabled={disabled}
+      draftSlot={itemId}
       {...(dictationSettings === undefined ? {} : { dictationSettings })}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}

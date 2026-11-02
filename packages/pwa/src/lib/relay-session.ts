@@ -38,8 +38,10 @@
 
 import {
   type DeviceKeyRotation,
+  type JoinProofOptions,
   MAX_TUNNEL_BODY_BYTES,
   type MemberJoinedResponse,
+  type MemberJoinProof,
   OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
   type PairingResponse,
@@ -75,6 +77,7 @@ import {
   maySend,
   memberAuthMessage,
   memberJoinMessage,
+  memberJoinOptionsMessage,
   memberRenewMessage,
   newReceiveWindow,
   newSendWindow,
@@ -308,6 +311,16 @@ export type RelayTunnelClientMessage =
       readonly memberKey: string;
       readonly boxKey: string;
       readonly proof: string;
+      /** One of the person's passkeys signing the challenge a `join-challenge` issued; absent on a first join. */
+      readonly passkey?: MemberJoinProof;
+    }
+  | {
+      readonly t: 'join-options';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly code: string;
+      readonly memberKey: string;
+      readonly origin: string;
+      readonly proof: string;
     }
   | {
       readonly t: 'member';
@@ -421,6 +434,20 @@ export type RelaySessionMode =
       readonly memberKey: string;
       readonly boxKey: string;
       readonly key: PrivateKeyHandle;
+      /** The assertion of one of the person's passkeys, when the publisher's `join-challenge` asked for one. */
+      readonly passkey?: MemberJoinProof;
+    }
+  /**
+   * A join-options session: what joining with this code needs, asked without spending it. One sealed outcome
+   * (`join-open`, `join-challenge` or the generic `join-refused`), then the session closes.
+   */
+  | {
+      readonly kind: 'join-options';
+      readonly code: string;
+      readonly memberKey: string;
+      /** The page's origin: the passkeys offered are the ones made there. */
+      readonly origin: string;
+      readonly key: PrivateKeyHandle;
     }
   /** A member request session: the member route table (`/v1/shared/*`) and nothing else. */
   | { readonly kind: 'member'; readonly member: SessionMemberClaim }
@@ -497,7 +524,10 @@ export class RelayPairingRefusedError extends Error {
 }
 
 /** What a join session produced, once the sealed outcome has been latched. */
-export type RelayJoinOutcome = { readonly kind: 'joined'; readonly response: MemberJoinedResponse };
+export type RelayJoinOutcome =
+  | { readonly kind: 'joined'; readonly response: MemberJoinedResponse }
+  | { readonly kind: 'open'; readonly why: 'first-browser' | 'owner-approved' }
+  | { readonly kind: 'challenge'; readonly memberLabel: string; readonly options: JoinProofOptions };
 
 /** The one reason a join is refused with. One sentence for every cause: a used, expired, ended or unknown link. */
 export const JOIN_REFUSED_REASON = 'join_refused' as const;
@@ -605,6 +635,16 @@ const credentialRecord = async (
       memberKey: mode.memberKey,
       boxKey: mode.boxKey,
       proof: await signDeviceProof(crypto, mode.key, memberJoinMessage(transcript, mode.memberKey, mode.boxKey)),
+      ...(mode.passkey === undefined ? {} : { passkey: mode.passkey }),
+    };
+  if (mode.kind === 'join-options')
+    return {
+      t: 'join-options',
+      protocol: SESSION_PROTOCOL_ID,
+      code: mode.code,
+      memberKey: mode.memberKey,
+      origin: mode.origin,
+      proof: await signDeviceProof(crypto, mode.key, memberJoinOptionsMessage(transcript, mode.memberKey, mode.origin)),
     };
   if (mode.kind === 'member')
     return {
@@ -815,7 +855,7 @@ export class RelayClientSession {
   }
 
   /**
-   * The sealed outcome of a join session.
+   * The sealed outcome of a join or join-options session.
    *
    * Rejects with `RelayJoinRefusedError` when the publisher refused inside the channel, and with a
    * `RelaySessionError` when nothing reached it at all: the two facts a client keeps apart.
@@ -1386,7 +1426,8 @@ export class RelayClientSession {
     const mode = this.deps.mode;
     // Unreachable rather than refused: only a serving or streaming session reads a `renew`, and both
     // are keyed and hold a device. The guard is the type system's, so nothing below assumes it.
-    if (transcript === undefined || mode.kind === 'pair' || mode.kind === 'join') return;
+    const unkeyed = mode.kind === 'pair' || mode.kind === 'join' || mode.kind === 'join-options';
+    if (transcript === undefined || unkeyed) return;
     const proof =
       mode.kind === 'member'
         ? await signDeviceProof(this.deps.crypto, mode.member.key, memberRenewMessage(transcript, nonce))
@@ -1452,6 +1493,25 @@ export class RelayClientSession {
         return;
       }
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'the publisher did not answer this join');
+      return;
+    }
+    if (mode === 'join-options') {
+      if (message.t === 'join-open') {
+        this.#conclude();
+        this.#settleJoin?.({ kind: 'open', why: message.why });
+        return;
+      }
+      if (message.t === 'join-challenge') {
+        this.#conclude();
+        this.#settleJoin?.({ kind: 'challenge', memberLabel: message.memberLabel, options: message.options });
+        return;
+      }
+      if (message.t === 'join-refused') {
+        this.#conclude();
+        this.#refuseJoin?.(new RelayJoinRefusedError());
+        return;
+      }
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'the publisher did not answer this join-options');
       return;
     }
     if (mode === 'auth' || mode === 'member') {

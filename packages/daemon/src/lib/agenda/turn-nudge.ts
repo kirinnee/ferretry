@@ -159,11 +159,16 @@ export function agendaNudgeMessage(
   return `${AGENDA_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the agenda, not every reply.${already} Raise each as its own agenda item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
 }
 
-/** The words of the nudge for items the owner wrote about and the ferret answered in chat only. Short on purpose. */
+/**
+ * The words of the nudge for items the owner replied to and the ferret answered in chat only. Short on purpose.
+ * A replied item is parked, off the owner's list, so it is never "your turn": the words say to do the work and close
+ * the item, and name `--back` as the one way to ask the owner for something new.
+ */
 export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
   const named = ids.map(id => `!${id}`).join(', ');
   const first = ids[0] as string;
-  return `${AGENDA_NUDGE_MARK} The owner wrote about ${named} and it is your turn — update its card (\`${binary} agenda edit ${first}\`: decided so far, still open, fresh options), hand it back (\`${binary} agenda surface ${first}\`) or close it (\`${binary} agenda done ${first}\`).`;
+  const off = ids.length === 1 ? 'it is off their list' : 'they are off their list';
+  return `${AGENDA_NUDGE_MARK} Owner replied about ${named}; ${off}. Do the work, then \`${binary} agenda done ${first}\`. Use \`${binary} agenda edit ${first} --back …\` only if you need something NEW from them.`;
 }
 
 /**

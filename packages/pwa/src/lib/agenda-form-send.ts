@@ -11,14 +11,39 @@ import {
   type AgendaFormAnswer,
   type AgendaFormField,
   type AgendaItem,
+  formAnswerOf,
   formFieldName,
   formMissing,
+  formValues,
 } from '@ferretry/protocol';
+import { useMemo, useRef } from 'react';
 import type { InboxAction } from './agenda-answers.ts';
-import { agendaForms, type FormPicks } from './agenda-form-state.ts';
+import { agendaForms, type FormPicks, useFormChanges } from './agenda-form-state.ts';
 
-/** The label the sent form carries in the undo toast and in history. */
+/** The label a sent form carries when nothing on the card was picked (only the reply box answered it). */
 const FORM_SENT_LABEL = 'Form';
+
+/**
+ * What a sent form says it answered, in the undo toast and the chat's "sent" line: each field picked on the card,
+ * "Region: US · Alerts: Page, Mail". The typed words are the conversation's own message, so they are not repeated.
+ */
+export const formSentSummary = (fields: readonly AgendaFormField[], answers: readonly AgendaFormAnswer[]): string => {
+  const picked = fields.flatMap(field => {
+    if (field.type === 'text') return [];
+    const values = formValues(formAnswerOf(answers, field));
+    return values.length === 0 ? [] : [`${formFieldName(field)}: ${values.join(', ')}`];
+  });
+  return picked.length === 0 ? FORM_SENT_LABEL : picked.join(' · ');
+};
+
+/** How many of the fields answered ON THE CARD are answered so far; the reply box's own field is not counted. */
+export const formProgress = (
+  fields: readonly AgendaFormField[],
+  picks: FormPicks,
+): { readonly answered: number; readonly total: number } => {
+  const onCard = fields.filter(field => field.type !== 'text');
+  return { answered: onCard.filter(field => (picks[field.id] ?? []).length > 0).length, total: onCard.length };
+};
 
 /** The answers a form has so far: one per field the owner filled in, in the form's order. */
 export const formAnswersFrom = (
@@ -62,7 +87,12 @@ export const planFormSend = (
   const note = hasTextField || typed.trim() === '' ? {} : { note: typed.trim() };
   return {
     kind: 'send',
-    action: { kind: 'respond', label: FORM_SENT_LABEL, response: { kind: 'form', answers: [...answers] }, ...note },
+    action: {
+      kind: 'respond',
+      label: formSentSummary(fields, answers),
+      response: { kind: 'form', answers: [...answers] },
+      ...note,
+    },
   };
 };
 
@@ -104,3 +134,35 @@ export const withFormSend = <T extends { readonly send: (...args: never[]) => un
       };
     },
   });
+
+/** What a composer under an open form item is given: its client, and whether Send needs no words. */
+export interface FormComposer<T> {
+  readonly api: T;
+  /** A form item is open: Send answers it even with an empty box. */
+  readonly allowEmptySend: boolean;
+  /** Bumped when a pick changes, so the "Not answered yet" line under the box goes away with it. */
+  readonly clearErrorOn?: number;
+}
+
+/**
+ * THE COMPOSER OF AN OPEN FORM ITEM, the Inbox's and the chat's alike: with `answerForm` its Send answers the form
+ * through {@link withFormSend}; without it the client is `api` itself and the composer chats as it always does.
+ * `formKey` names the open form's picks.
+ */
+export const useFormComposer = <T extends { readonly send: (...args: never[]) => unknown } | null>(
+  api: T,
+  answerForm: (() => void) | undefined,
+  formKey: string | undefined,
+): FormComposer<T> => {
+  const changes = useFormChanges(formKey ?? '');
+  const answer = useRef(answerForm);
+  answer.current = answerForm;
+  const forForm = answerForm !== undefined;
+  const client = useMemo(
+    () => (api === null || !forForm ? api : withFormSend(api, () => answer.current?.())),
+    [api, forForm],
+  );
+  return forForm
+    ? { api: client, allowEmptySend: true, clearErrorOn: changes }
+    : { api: client, allowEmptySend: false };
+};

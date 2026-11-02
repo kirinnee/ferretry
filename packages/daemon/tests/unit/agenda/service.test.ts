@@ -452,6 +452,24 @@ describe('Agenda service: parking', () => {
     should(tooSoon).containDeep({ ok: false, error: { code: 'rate-limited' } });
   });
 
+  it('should keep a replied item parked on an edit, and bring it back to the owner only with back', async () => {
+    // Arrange
+    const { service } = createService();
+    await service.raise(SESSION, request, AGENT);
+    await service.reply(SESSION, 'A1', HUMAN, 'go x y z');
+    const refresh = { subject: 'Which region?', premise: 'A release is ready.', context: 'It changes the service.' };
+
+    // Act
+    const quiet = await service.edit(SESSION, 'A1', refresh, AGENT);
+    const refused = await service.edit(SESSION, 'A1', { stillOpen: 'Which region?' }, AGENT, false, true);
+    const back = await service.edit(SESSION, 'A1', refresh, AGENT, false, true);
+
+    // Assert
+    should(quiet).containDeep({ ok: true, item: { parked: { reason: 'replied' } } });
+    should(refused).containDeep({ ok: false, error: { code: 'invalid' } });
+    should(back.ok ? back.item?.parked : 'refused').be.undefined();
+  });
+
   it('should wake a snoozed item on an edit with now', async () => {
     // Arrange
     const { service } = createService();

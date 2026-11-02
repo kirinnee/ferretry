@@ -95,4 +95,80 @@ describe('FileSharedDraftRepository', () => {
       await rm(subject.home, { recursive: true, force: true });
     }
   });
+
+  it("should keep an item's draft in its own owner-only file, apart from the chat's, and list it", async () => {
+    // Arrange
+    const subject = await fixture();
+    const item = { ...draft('for the card', 1), slot: 'A5' };
+    try {
+      // Act
+      await subject.repository.save(draft('for the chat', 1));
+      await subject.repository.save(item);
+
+      // Assert — two files, two drafts: neither reads as the other.
+      const itemFile = sharedDraftFile(subject.paths, 'agent-1', 'A5');
+      should(itemFile).equal(join(subject.paths.state, 'shared-drafts', 'agent-1.items', 'A5.json'));
+      should((await stat(itemFile)).mode & 0o777).equal(0o600);
+      should(await subject.repository.load('agent-1')).deepEqual(draft('for the chat', 1));
+      should(await subject.repository.load('agent-1', 'A5')).deepEqual(item);
+      should(await subject.repository.load('agent-1', 'A6')).be.undefined();
+      should(await subject.repository.items('agent-1')).deepEqual(['A5']);
+    } finally {
+      await rm(subject.home, { recursive: true, force: true });
+    }
+  });
+
+  it('should treat an item file that names another slot, or none, as no draft for that item', async () => {
+    // Arrange
+    const subject = await fixture();
+    const itemFile = sharedDraftFile(subject.paths, 'agent-1', 'A5');
+    try {
+      await mkdir(join(subject.paths.state, 'shared-drafts', 'agent-1.items'), { recursive: true });
+
+      // Act / Assert
+      await writeFile(itemFile, JSON.stringify({ ...draft('x', 1), slot: 'A6' }));
+      should(await subject.repository.load('agent-1', 'A5')).be.undefined();
+      await writeFile(itemFile, JSON.stringify(draft('x', 1)));
+      should(await subject.repository.load('agent-1', 'A5')).be.undefined();
+    } finally {
+      await rm(subject.home, { recursive: true, force: true });
+    }
+  });
+
+  it("should delete an item's draft outright and leave the chat's, and a missing one is no error", async () => {
+    // Arrange
+    const subject = await fixture();
+    try {
+      await subject.repository.save(draft('for the chat', 1));
+      await subject.repository.save({ ...draft('for the card', 1), slot: 'A5' });
+
+      // Act
+      await subject.repository.remove('agent-1', 'A5');
+      await subject.repository.remove('agent-1', 'A9');
+
+      // Assert
+      should(await subject.repository.load('agent-1', 'A5')).be.undefined();
+      should(await subject.repository.items('agent-1')).be.empty();
+      should(await subject.repository.load('agent-1')).deepEqual(draft('for the chat', 1));
+    } finally {
+      await rm(subject.home, { recursive: true, force: true });
+    }
+  });
+
+  it('should list only item drafts: no folder is none, and stray names or folders are skipped', async () => {
+    // Arrange
+    const subject = await fixture();
+    const folder = join(subject.paths.state, 'shared-drafts', 'agent-1.items');
+    try {
+      // Act / Assert — no item has ever had a draft.
+      should(await subject.repository.items('agent-1')).be.empty();
+      await subject.repository.save({ ...draft('kept', 1), slot: 'A2' });
+      await writeFile(join(folder, 'notes.txt'), 'not a draft');
+      await writeFile(join(folder, 'not-an-id.json'), '{}');
+      await mkdir(join(folder, 'A3.json'));
+      should(await subject.repository.items('agent-1')).deepEqual(['A2']);
+    } finally {
+      await rm(subject.home, { recursive: true, force: true });
+    }
+  });
 });

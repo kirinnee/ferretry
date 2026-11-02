@@ -165,6 +165,9 @@ jobs:
   darwin-confinement:
     name: Containment (macOS)
     timeout-minutes: 20
+    # Advisory on a pull request (docs/standards/ci-cd, "macOS runner shortage"): a macOS proof that fails there is
+    # a warning, and `macos-advisory` below says when no runner came. On `main` and the nightly it is not masked.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     needs: changes
     if: needs.changes.outputs.containment == 'true'
     permissions:
@@ -188,6 +191,9 @@ jobs:
   safari-sandbox-shell:
     name: Sandbox Shell (Safari)
     timeout-minutes: 20
+    # Advisory on a pull request (docs/standards/ci-cd, "macOS runner shortage"): a macOS proof that fails there is
+    # a warning, and `macos-advisory` below says when no runner came. On `main` and the nightly it is not masked.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     needs: changes
     if: needs.changes.outputs.safari == 'true'
     permissions:
@@ -235,6 +241,8 @@ jobs:
     name: Harness Contract (${{ matrix.os }})
     timeout-minutes: 30
     needs: changes
+    # The Linux leg is never masked. The macos-15 leg is advisory on a pull request, like the two jobs above.
+    continue-on-error: ${{ github.event_name == 'pull_request' && startsWith(matrix.os, 'macos') }}
     permissions:
       contents: read
     # The account model shares one login across many runtimes through mechanisms Claude Code and
@@ -278,6 +286,28 @@ jobs:
           name: harness-contract-pinned-${{ matrix.os }}
           path: ${{ runner.temp }}/harness-contract/
           if-no-files-found: warn
+
+  # The macOS jobs above are advisory on a pull request: a runner GitHub never gave them is a cancelled job
+  # with no step run, and nothing failed. This writes that down in a job summary instead of leaving a bare
+  # red cross to be misread. It never fails; on `main` and the nightly the jobs are unmasked and `report` files
+  # the issue.
+  macos-advisory:
+    name: macOS Advisory
+    timeout-minutes: 5
+    needs: [darwin-confinement, safari-sandbox-shell, harness-contract]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Say which macOS jobs had no runner
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: ./scripts/ci/macos-advisory.sh
 
   # TMUX 3.8, the release Homebrew ships and the owner runs. CI pins nixpkgs' 3.7b, a cached binary (nix/env.nix
   # says why); 3.8 differs again — a dead pane prints no pid — so the integration groups that drive a real

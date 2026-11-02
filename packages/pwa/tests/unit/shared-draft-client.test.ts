@@ -29,6 +29,31 @@ describe('shared draft client', () => {
     expect(sharedDraftPath(scope)).toBe('/v1/sessions/sess%20one/shared-draft');
   });
 
+  test('reads an Inbox card’s own draft from the same route, naming its item', async () => {
+    const card = daemonSessionScope(daemon, 'sess one', 'A5');
+    const calls: string[] = [];
+    const draft = await fetchSharedDraft(daemon, card, async input => {
+      calls.push(String(input));
+      return Response.json({ ...snapshot, slot: 'A5' });
+    });
+    expect(draft.slot).toBe('A5');
+    expect(calls).toEqual(['https://up.example.test/v1/sessions/sess%20one/shared-draft?item=A5']);
+    expect(sharedDraftPath(card)).toBe('/v1/sessions/sess%20one/shared-draft?item=A5');
+  });
+
+  test('refuses the chat’s draft for a card, and a card’s for the chat (an older machine ignores ?item=)', async () => {
+    const card = daemonSessionScope(daemon, 'sess one', 'A5');
+    await expect(fetchSharedDraft(daemon, card, async () => Response.json(snapshot))).rejects.toMatchObject({
+      status: 502,
+    });
+    await expect(
+      fetchSharedDraft(daemon, card, async () => Response.json({ ...snapshot, slot: 'A6' })),
+    ).rejects.toMatchObject({ status: 502 });
+    await expect(
+      fetchSharedDraft(daemon, scope, async () => Response.json({ ...snapshot, slot: 'A5' })),
+    ).rejects.toMatchObject({ status: 502 });
+  });
+
   test('posts an edit as JSON and returns the edit as the daemon sequenced it', async () => {
     let sent: RequestInit | undefined;
     const result = await editSharedDraft(

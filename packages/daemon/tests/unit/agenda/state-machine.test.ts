@@ -1831,6 +1831,8 @@ describe('Agenda state machine reply', () => {
     applyAgendaCommand(ledger, { action: 'surface', actor, id: 'A1', ...(why === undefined ? {} : { why }), at });
   const editing = (ledger: AgendaLedger, patch: EditAgendaPatch, actor: AgendaActor = AGENT): AgendaMutation =>
     applyAgendaCommand(ledger, { action: 'edit', actor, id: 'A1', patch, at: THIRD });
+  const bringingBack = (ledger: AgendaLedger, patch: EditAgendaPatch): AgendaMutation =>
+    applyAgendaCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, back: true, at: THIRD });
 
   it('should park the item as replied, keeping the words in its history, and leave it open', () => {
     // Arrange
@@ -1992,17 +1994,17 @@ describe('Agenda state machine reply', () => {
 
     // Assert
     should(refused.error.code).equal('invalid');
-    should(refused.error.message).containEql('fy agenda edit A1 --summary');
+    should(refused.error.message).containEql('fy agenda edit A1 --back --summary');
     should(refused.error.message).containEql('--premise');
     should(refused.error.message).containEql('--context');
   });
 
-  it('should come back fresh on the owner’s turn when the ferret edits the whole card, keeping its id and history', () => {
+  it('should come back fresh on the owner’s turn when the ferret edits the whole card with back, keeping its id and history', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger, HUMAN, SECOND, 'A1', 'Why us?'));
 
     // Act
-    const back = succeeded(editing(replied.ledger, REFRESH));
+    const back = succeeded(bringingBack(replied.ledger, REFRESH));
 
     // Assert
     const snapshot = agendaSnapshot(back.ledger);
@@ -2019,7 +2021,7 @@ describe('Agenda state machine reply', () => {
     should(back.item?.history).deepEqual([{ at: SECOND, kind: 'replied', note: 'Why us?' }]);
   });
 
-  it('should come back with the new wording, fresh, when the ferret edits it', () => {
+  it('should come back with the new wording, fresh, when the ferret edits it with back', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger));
 
@@ -2030,6 +2032,7 @@ describe('Agenda state machine reply', () => {
         actor: AGENT,
         id: 'A1',
         patch: { ...REFRESH, stillOpen: 'Which region?' },
+        back: true,
         at: THIRD,
       }),
     );
@@ -2063,6 +2066,7 @@ describe('Agenda state machine reply', () => {
         actor: AGENT,
         id: 'A1',
         patch: unchangedPatch,
+        back: true,
         at: THIRD,
       }),
     );
@@ -2073,7 +2077,7 @@ describe('Agenda state machine reply', () => {
     should(back.item?.waitingSince).equal(THIRD);
   });
 
-  it('should refuse the ferret’s edit of it unless the summary, premise and context are all given', () => {
+  it('should refuse the ferret’s back of it unless the summary, premise and context are all given', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger));
     const legacy: AgendaLedger = {
@@ -2090,12 +2094,12 @@ describe('Agenda state machine reply', () => {
     };
 
     // Act
-    const noSummary = failed(editing(replied.ledger, { premise: 'p', context: 'c' }));
-    const noPremise = failed(editing(replied.ledger, { subject: 's', context: 'c' }));
-    const blankContext = failed(editing(replied.ledger, { subject: 's', premise: 'p', context: '  ' }));
-    const nullContext = failed(editing(replied.ledger, { subject: 's', premise: 'p', context: null }));
-    const nothing = failed(editing(replied.ledger, { stillOpen: 'Which region?' }));
-    const legacyRefused = failed(editing(closedAsReplied, { subject: 's' }));
+    const noSummary = failed(bringingBack(replied.ledger, { premise: 'p', context: 'c' }));
+    const noPremise = failed(bringingBack(replied.ledger, { subject: 's', context: 'c' }));
+    const blankContext = failed(bringingBack(replied.ledger, { subject: 's', premise: 'p', context: '  ' }));
+    const nullContext = failed(bringingBack(replied.ledger, { subject: 's', premise: 'p', context: null }));
+    const nothing = failed(bringingBack(replied.ledger, { stillOpen: 'Which region?' }));
+    const legacyRefused = failed(bringingBack(closedAsReplied, { subject: 's' }));
 
     // Assert
     should(noSummary.error.code).equal('invalid');
@@ -2107,6 +2111,91 @@ describe('Agenda state machine reply', () => {
     should(nullContext.error.message).containEql('missing --context');
     should(nothing.error.message).containEql('missing --summary, --premise, --context');
     should(legacyRefused.error.message).containEql('missing --premise, --context');
+  });
+
+  it('should update the card but keep it parked, unread-free and off the owner’s list when the ferret edits it', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger, HUMAN, SECOND, 'A1', 'go x y z'));
+
+    // Act
+    const edited = succeeded(editing(replied.ledger, { stillOpen: 'Working on x' }));
+
+    // Assert
+    should(edited.changed).be.true();
+    should(edited.item?.stillOpen).equal('Working on x');
+    should(edited.item?.parked).deepEqual({ reason: 'replied', at: SECOND });
+    should(edited.item?.waitingSince).equal(replied.item?.waitingSince);
+    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['replied']);
+    should(edited.item?.revisions?.map(revision => revision.changed)).deepEqual([['stillOpen']]);
+  });
+
+  it('should keep it parked when the ferret refreshes the whole card without back', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger));
+
+    // Act
+    const edited = succeeded(editing(replied.ledger, REFRESH));
+
+    // Assert
+    should(edited.item?.parked?.reason).equal('replied');
+    should(edited.item?.waitingSince).equal(replied.item?.waitingSince);
+    should(edited.item?.subject).equal(REFRESH.subject);
+  });
+
+  it('should refuse a back without the whole card refreshed, and accept one with it', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger));
+
+    // Act
+    const refused = failed(bringingBack(replied.ledger, { stillOpen: 'Which region?' }));
+    const back = succeeded(bringingBack(replied.ledger, REFRESH));
+
+    // Assert
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).containEql('missing --summary, --premise, --context');
+    should(back.item?.parked).be.undefined();
+    should(back.item?.waitingSince).equal(THIRD);
+  });
+
+  it('should refuse a plain edit being told to come back by a ferret that is not the raiser', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger));
+
+    // Act
+    const refused = failed(editing(replied.ledger, REFRESH, OTHER_AGENT));
+
+    // Assert
+    should(refused.error.code).equal('forbidden');
+  });
+
+  it('should close it quietly, saying so, when the ferret does the work and marks it done or dismisses it', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger));
+
+    // Act
+    const done = succeeded(
+      applyAgendaCommand(replied.ledger, { action: 'resolve', actor: AGENT, id: 'A1', note: 'Done.', at: THIRD }),
+    );
+    const dismissed = succeeded(
+      applyAgendaCommand(replied.ledger, { action: 'dismiss', actor: AGENT, id: 'A1', note: 'Done.', at: THIRD }),
+    );
+
+    // Assert
+    for (const closed of [done, dismissed]) {
+      should(closed.notes).deepEqual(['A1 closed; the owner is not notified (they had already replied)']);
+      should(agendaSnapshot(closed.ledger).items).have.length(0);
+      should(agendaSnapshot(closed.ledger).resolved.map(item => item.id)).deepEqual(['A1']);
+    }
+  });
+
+  it('should add no quiet-close note when the ferret closes an item that was never replied to', () => {
+    // Act
+    const done = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: AGENT, id: 'A1', note: 'Done.', at: THIRD }),
+    );
+
+    // Assert
+    should(done.notes ?? []).deepEqual([]);
   });
 
   it('should let the owner and the daemon edit it without refreshing the whole card', () => {
@@ -2189,6 +2278,7 @@ describe('Agenda state machine reply', () => {
         actor: AGENT,
         id: 'A1',
         patch: { ...REFRESH, subject: 'Reworded' },
+        back: true,
         at: THIRD,
       }),
     );
@@ -2196,6 +2286,37 @@ describe('Agenda state machine reply', () => {
     // Assert
     should(agendaSnapshot(back.ledger).items.map(item => item.subject)).deepEqual(['Reworded']);
     should(back.item?.history?.map(entry => entry.kind)).containEql('updated');
+  });
+
+  it('should refuse the edit of a legacy closed replied item by the ferret without back, and leave it closed', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const legacy: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
+
+    // Act — the whole card refreshed, but no word that the ferret needs something new.
+    const refused = failed(
+      applyAgendaCommand(legacy, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { ...REFRESH, subject: 'Reworded' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).match(/add --back to bring it back/);
+    should(agendaSnapshot(legacy).items).be.empty();
   });
 
   it('should refuse the edit of a legacy closed replied item into a full board', () => {
@@ -2223,6 +2344,7 @@ describe('Agenda state machine reply', () => {
       actor: AGENT,
       id: 'A1',
       patch: REFRESH,
+      back: true,
       at: THIRD,
     });
 
@@ -3975,7 +4097,16 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     const replied = succeeded(replying(raised(AGENT, REGION).ledger));
 
     // Act
-    const refused = failed(editing(replied.ledger, { stillOpen: 'Which region?' }));
+    const refused = failed(
+      applyAgendaCommand(replied.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { stillOpen: 'Which region?' },
+        back: true,
+        at: THIRD,
+      }),
+    );
 
     // Assert
     should(refused.error.message).containEql('missing --summary, --premise, --context');

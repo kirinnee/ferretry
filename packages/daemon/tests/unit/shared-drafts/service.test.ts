@@ -3,6 +3,7 @@ import {
   applyTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
   SHARED_DRAFT_ITEMS_BUDGET,
+  SHARED_DRAFT_MAX_ITEM_DRAFTS,
   type SharedDraftItem,
   type SharedDraftSnapshot,
   sharedDraftFrameBytes,
@@ -25,18 +26,40 @@ const G = 'gen-1';
 
 class MemoryDrafts implements SharedDraftRepository {
   readonly saved: SharedDraftSnapshot[] = [];
+  readonly removed: string[] = [];
   fail = false;
 
+  /** `stored` is keyed by session id for a chat draft, and `session/item` for an item's. */
   constructor(private readonly stored: Readonly<Record<string, SharedDraftSnapshot>> = {}) {}
 
-  async load(sessionId: string): Promise<SharedDraftSnapshot | undefined> {
-    const newest = [...this.saved].reverse().find(snapshot => snapshot.sessionId === sessionId);
-    return newest ?? this.stored[sessionId];
+  async load(sessionId: string, slot?: string): Promise<SharedDraftSnapshot | undefined> {
+    if (this.removed.includes(`${sessionId}/${slot}`) && slot !== undefined) return undefined;
+    const newest = [...this.saved]
+      .reverse()
+      .find(snapshot => snapshot.sessionId === sessionId && snapshot.slot === slot);
+    return newest ?? this.stored[slot === undefined ? sessionId : `${sessionId}/${slot}`];
   }
 
   async save(snapshot: SharedDraftSnapshot): Promise<void> {
     if (this.fail) throw new Error('disk full');
     this.saved.push(snapshot);
+  }
+
+  async remove(sessionId: string, slot: string): Promise<void> {
+    this.removed.push(`${sessionId}/${slot}`);
+    for (let index = this.saved.length - 1; index >= 0; index -= 1) {
+      const snapshot = this.saved[index];
+      if (snapshot?.sessionId === sessionId && snapshot.slot === slot) this.saved.splice(index, 1);
+    }
+  }
+
+  async items(sessionId: string): Promise<readonly string[]> {
+    const slots = new Set<string>();
+    for (const snapshot of this.saved)
+      if (snapshot.sessionId === sessionId && snapshot.slot !== undefined) slots.add(snapshot.slot);
+    for (const [key, snapshot] of Object.entries(this.stored))
+      if (key.startsWith(`${sessionId}/`) && snapshot.slot !== undefined) slots.add(snapshot.slot);
+    return [...slots].filter(slot => !this.removed.includes(`${sessionId}/${slot}`));
   }
 }
 
@@ -59,6 +82,8 @@ const subject = (
   options: {
     readonly repository?: MemoryDrafts;
     readonly sessions?: readonly string[];
+    /** The agenda items open on every known session; A1 to A3 by default. */
+    readonly openItems?: readonly string[];
     readonly memoryLimit?: number;
     readonly generation?: string;
     readonly editsPerSecond?: number;
@@ -68,8 +93,9 @@ const subject = (
   const repository = options.repository ?? new MemoryDrafts();
   const timers = new ManualTimers();
   const known = new Set(options.sessions ?? ['s1', 's2', 's3']);
+  const open = new Set(options.openItems ?? ['A1', 'A2', 'A3']);
   const service = new SharedDraftService(
-    { has: async sessionId => known.has(sessionId) },
+    { has: async sessionId => known.has(sessionId), hasOpenItem: async (_sessionId, item) => open.has(item) },
     repository,
     options.clock ?? { now: () => AT },
     timers,
@@ -341,9 +367,11 @@ describe('SharedDraftService', () => {
         });
         saved.push(snapshot);
       },
+      remove: async () => undefined,
+      items: async () => [],
     };
     const service = new SharedDraftService(
-      { has: async () => true },
+      { has: async () => true, hasOpenItem: async () => true },
       slow,
       { now: () => AT },
       new ManualTimers(),
@@ -660,18 +688,174 @@ describe('SharedDraftService', () => {
     let loads = 0;
     const repository = new MemoryDrafts();
     const counting: SharedDraftRepository = {
-      load: async sessionId => {
+      load: async (sessionId, slot) => {
         loads += 1;
-        return await repository.load(sessionId);
+        return await repository.load(sessionId, slot);
       },
       save: async snapshot => await repository.save(snapshot),
+      remove: async (sessionId, slot) => await repository.remove(sessionId, slot),
+      items: async sessionId => await repository.items(sessionId),
     };
-    const service = new SharedDraftService({ has: async () => true }, counting, { now: () => AT }, new ManualTimers(), {
-      next: () => G,
-    });
+    const service = new SharedDraftService(
+      { has: async () => true, hasOpenItem: async () => true },
+      counting,
+      { now: () => AT },
+      new ManualTimers(),
+      {
+        next: () => G,
+      },
+    );
 
     await Promise.all([service.read('s1'), service.read('s1'), service.read('s1')]);
 
     should(loads).equal(1);
+  });
+});
+
+describe('SharedDraftService draft slots (&B142)', () => {
+  const typed = async (service: SharedDraftService, text: string, slot?: string) =>
+    await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: [text] },
+      undefined,
+      slot === undefined ? {} : { slot },
+    );
+
+  it('keeps the chat draft and each item draft of one session apart, down to their revisions', async () => {
+    // Arrange
+    const { service } = subject();
+
+    // Act
+    await typed(service, 'chat words');
+    await typed(service, 'first card', 'A1');
+    await typed(service, 'second card', 'A2');
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [10, '!'] });
+
+    // Assert
+    should(await service.read('s1')).match({ text: 'chat words!', rev: 2 });
+    should(await service.read('s1', 'A1')).match({ slot: 'A1', text: 'first card', rev: 1 });
+    should(await service.read('s1', 'A2')).match({ slot: 'A2', text: 'second card', rev: 1 });
+    should(await service.read('s1')).not.have.property('slot');
+  });
+
+  it('tells only the listeners of one draft about its edits', async () => {
+    // Arrange
+    const { service } = subject();
+    const chat: SharedDraftChange[] = [];
+    const card: SharedDraftChange[] = [];
+    service.subscribe('s1', change => chat.push(change));
+    service.subscribe('s1', change => card.push(change), 'A1');
+
+    // Act
+    await typed(service, 'to the card', 'A1');
+    await typed(service, 'to the chat');
+
+    // Assert
+    should(card.map(change => change.applied.text)).deepEqual([['to the card']]);
+    should(chat.map(change => change.applied.text)).deepEqual([['to the chat']]);
+  });
+
+  it('answers a catch-up for one draft from that draft alone', async () => {
+    // Arrange
+    const { service } = subject();
+    await typed(service, 'chat');
+    await typed(service, 'card', 'A1');
+
+    // Act
+    const missed = await service.since('s1', { generation: G, epoch: 0, rev: 0 }, 'A1');
+
+    // Assert
+    should(missed?.map(change => change.applied.text)).deepEqual([['card']]);
+  });
+
+  it('writes an item draft to its own record, naming its slot, and the chat draft to the record it always had', async () => {
+    // Arrange
+    const { service, repository, timers } = subject();
+    await typed(service, 'chat');
+    await typed(service, 'card', 'A1');
+
+    // Act
+    timers.fire();
+    await settle();
+
+    // Assert
+    should(repository.saved.map(snapshot => [snapshot.slot, snapshot.text])).deepEqual([
+      [undefined, 'chat'],
+      ['A1', 'card'],
+    ]);
+  });
+
+  it('refuses an item that is not open on the session, or a session it is on but another holds', async () => {
+    // Arrange
+    const { service } = subject();
+
+    // Act / Assert
+    await should(service.read('s1', 'A9')).be.rejectedWith({ name: 'SharedDraftError', code: 'not-found' });
+    await should(typed(service, 'x', 'A9')).be.rejectedWith({ name: 'SharedDraftError', code: 'not-found' });
+    await should(service.read('nope', 'A1')).be.rejectedWith({ name: 'SharedDraftError', code: 'not-found' });
+  });
+
+  it('bounds the item drafts of one session, while every existing one stays editable', async () => {
+    // Arrange — a session already holding as many item drafts as it may.
+    const stored: Record<string, SharedDraftSnapshot> = {};
+    for (let index = 1; index <= SHARED_DRAFT_MAX_ITEM_DRAFTS; index += 1)
+      stored[`s1/A${index}`] = {
+        v: 1,
+        sessionId: 's1',
+        slot: `A${index}`,
+        generation: G,
+        epoch: 0,
+        rev: 1,
+        text: 'kept',
+        items: [],
+        updatedAt: AT,
+      };
+    const open = Array.from({ length: SHARED_DRAFT_MAX_ITEM_DRAFTS + 1 }, (_, index) => `A${index + 1}`);
+    const { service } = subject({ repository: new MemoryDrafts(stored), openItems: open });
+
+    // Act / Assert
+    await should(typed(service, 'one too many', `A${SHARED_DRAFT_MAX_ITEM_DRAFTS + 1}`)).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'too-many-drafts',
+    });
+    should(await service.read('s1', 'A1')).match({ text: 'kept' });
+    await should(typed(service, 'chat is never counted')).be.fulfilled();
+  });
+
+  it('discards an item draft with the item: memory, disk, and a write still waiting', async () => {
+    // Arrange
+    const { service, repository, timers } = subject();
+    await typed(service, 'card', 'A1');
+    await typed(service, 'chat');
+
+    // Act
+    await service.discard('s1', 'A1');
+    timers.fire();
+    await settle();
+
+    // Assert — the item's words are gone from both, the chat draft is untouched, and nothing writes the item again.
+    should(repository.removed).deepEqual(['s1/A1']);
+    should(repository.saved.map(snapshot => snapshot.slot)).deepEqual([undefined]);
+    should(await service.read('s1')).match({ text: 'chat' });
+  });
+
+  it('starts an item that was discarded and opens again from nothing', async () => {
+    // Arrange
+    const { service } = subject();
+    await typed(service, 'before', 'A1');
+    await service.discard('s1', 'A1');
+
+    // Act
+    const reread = await service.read('s1', 'A1');
+
+    // Assert
+    should(reread).match({ text: '', rev: 0 });
+  });
+
+  it('discards an item that never had a draft without trouble, and never touches the chat draft', async () => {
+    const { service } = subject();
+    await typed(service, 'chat');
+    await service.discard('s1', 'A3');
+    should(await service.read('s1')).match({ text: 'chat' });
   });
 });

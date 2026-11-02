@@ -57,7 +57,6 @@ import { DaemonTaskReferences } from '../../components/daemon-task-references.ts
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
-import { itemCardKind } from '../../lib/card-kind.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -73,6 +72,7 @@ import {
   snoozeAction,
   UNSNOOZE_ACTION,
 } from '../../lib/agenda-inbox.ts';
+import { findRows, isFinding } from '../../lib/agenda-inbox-find.ts';
 import {
   type FerretGroup,
   filterInboxCards,
@@ -92,9 +92,9 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
-import { findRows, isFinding } from '../../lib/agenda-inbox-find.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
+import { itemCardKind } from '../../lib/card-kind.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -120,24 +120,24 @@ import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
-import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { useAnsweredSuggestionSweep } from '../secure-copy/answered-suggestion-sweep.ts';
+import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { CardKindChip } from './card-kind-chip.tsx';
-import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
-import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
-import { InboxFindResults } from './inbox-find-results.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
+import { CardKindChip } from './card-kind-chip.tsx';
+import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
+import { FilterMenu, FindToggle } from './inbox-filter-menu.tsx';
+import { InboxFindResults } from './inbox-find-results.tsx';
 import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers, wordsOf } from './to-test-rows.tsx';
 import { ToTestStep } from './to-test-step.tsx';
 
@@ -287,11 +287,15 @@ const inputFormFor = (
       };
 };
 
-/** The conversation an item belongs to, as the composer registers itself under it. */
-const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id);
+/**
+ * The card's own composer, as it registers itself: its ferret's conversation and THIS item's draft slot. The chat
+ * box registers under the conversation alone, so a quote or a quick reply here never reads or empties the chat's
+ * words, nor another card's.
+ */
+const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id, card.item.id);
 
 /**
- * Answers the open item: what is typed in its ferret's composer rides as the answer's note (the chat's own rule,
+ * Answers the open item: what is typed in the item's own composer rides as the answer's note (the chat's own rule,
  * `withComposerNote`), and the composer is emptied once it is spent.
  */
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {

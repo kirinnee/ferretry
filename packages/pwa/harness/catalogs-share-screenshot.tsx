@@ -1,12 +1,13 @@
 /**
- * Sharing a catalog with people (docs/design/catalogs.md §5.2 and §5.5): the Share sheet for a new person,
- * the Share sheet for someone already in (with its warning), the link shown once with its QR, and People and
- * codes with two browsers and the revoke confirm. On a phone and a desktop, light and dark.
+ * Sharing a catalog with people (docs/design/catalogs.md §5.2 and §5.5, &B131 B3): Invite people with a new
+ * user ID, with one already here, with "They need a new passkey" ticked by the owner and pre-ticked for a person with
+ * no passkey left, and the daemon's refusal of a taken ID; the link shown once with its QR; People with a user ID on
+ * each card, Change user ID and its taken-ID refusal, and the revoke confirm. On a phone and a desktop, light and dark.
  *
  *   bun harness/catalogs-share-screenshot.tsx      # writes harness/out/catalogs-share-*.png
  *
- * Scenes: share-new, share-existing, share-link, share-link-relayed (a loopback-only machine on its relay),
- * share-unreachable (no address and no relay), members, members-revoke, plus the way IN for a member: paste-link
+ * Scenes: share-new, share-existing, share-new-passkey, share-pre-ticked, share-taken, share-link, share-link-relayed (a loopback-only machine on its relay),
+ * share-unreachable (no address and no relay), members, members-rename, members-rename-taken, members-revoke, plus the way IN for a member: paste-link
  * (Settings › Sharing › Catalogs with a share link pasted), paste-link-other (a link that is not a share link) and
  * skills-entry (the same field and the More menu where the Skills tab shows them).
  *
@@ -50,6 +51,7 @@ const CATALOG = 'cat_' + 'c'.repeat(22);
 const OTHER = 'cat_' + 'r'.repeat(22);
 const MEMBER_A = 'mbr_' + 'a'.repeat(22);
 const MEMBER_B = 'mbr_' + 'b'.repeat(22);
+const MEMBER_C = 'mbr_' + 'd'.repeat(22);
 const SHARE_1 = 'shr_' + 's'.repeat(22);
 const SHARE_2 = 'shr_' + 't'.repeat(22);
 const FAKE_CODE = 'fy_share_FAKEFAKEFAKEFAKEFAKEFA';
@@ -65,31 +67,35 @@ const CATALOGS = [owned(CATALOG, 'Team skills'), owned(OTHER, 'Reading list')];
 
 const MEMBERS = [
   {
-    memberId: MEMBER_A, label: 'Alice', catalogIds: [CATALOG, OTHER], createdAt: '2026-10-29T09:00:00.000Z',
+    memberId: MEMBER_A, label: 'alice', catalogIds: [CATALOG, OTHER], createdAt: '2026-10-29T09:00:00.000Z',
     keys: [
       { keyId: 'mk_' + '1'.repeat(22), clientName: 'Firefox on a Mac', joinedAt: '2026-10-29T09:05:00.000Z', lastSeenAt: '2026-10-31T07:00:00.000Z', passkeys: 1 },
       { keyId: 'mk_' + '2'.repeat(22), clientName: 'Chrome on a phone', joinedAt: '2026-10-30T18:30:00.000Z', passkeys: 0 },
     ],
   },
   {
-    memberId: MEMBER_B, label: 'Bob', catalogIds: [CATALOG], createdAt: '2026-10-30T09:00:00.000Z',
+    memberId: MEMBER_B, label: 'bob', catalogIds: [CATALOG], createdAt: '2026-10-30T09:00:00.000Z',
     keys: [{ keyId: 'mk_' + '3'.repeat(22), clientName: 'Safari on an iPad', joinedAt: '2026-10-30T09:10:00.000Z', lastSeenAt: '2026-10-30T20:00:00.000Z', passkeys: 1 }],
+  },
+  {
+    memberId: MEMBER_C, label: 'dana', catalogIds: [CATALOG], createdAt: '2026-10-30T12:00:00.000Z',
+    keys: [{ keyId: 'mk_' + '4'.repeat(22), clientName: 'Chrome on a laptop', joinedAt: '2026-10-30T12:10:00.000Z', passkeys: 0 }],
   },
 ];
 const SHARES = [
   {
-    shareId: SHARE_1, memberId: MEMBER_B, memberLabel: 'Bob', catalogIds: [CATALOG], createdAt: '2026-10-31T08:30:00.000Z',
+    shareId: SHARE_1, memberId: MEMBER_B, memberLabel: 'bob', catalogIds: [CATALOG], createdAt: '2026-10-31T08:30:00.000Z',
     expiresAt: '2026-10-31T09:30:00.000Z', uses: { kind: 'single' }, state: 'live', usedBy: [],
   },
   {
-    shareId: SHARE_2, memberId: MEMBER_A, memberLabel: 'Alice', catalogIds: [CATALOG], createdAt: '2026-10-29T09:00:00.000Z',
+    shareId: SHARE_2, memberId: MEMBER_A, memberLabel: 'alice', catalogIds: [CATALOG], createdAt: '2026-10-29T09:00:00.000Z',
     expiresAt: '2026-10-29T10:00:00.000Z', uses: { kind: 'single' }, state: 'spent',
     usedBy: [{ clientName: 'Firefox on a Mac', keyId: 'mk_' + '1'.repeat(22), at: '2026-10-29T09:05:00.000Z' }],
   },
 ];
 const MINTED = {
   share: {
-    shareId: SHARE_1, memberId: MEMBER_B, memberLabel: 'Carol', catalogIds: [CATALOG], createdAt: AT,
+    shareId: SHARE_1, memberId: MEMBER_B, memberLabel: 'carol', catalogIds: [CATALOG], createdAt: AT,
     expiresAt: '2026-10-31T09:14:52.000Z', uses: { kind: 'single' }, state: 'live', usedBy: [],
   },
   code: FAKE_CODE,
@@ -102,7 +108,14 @@ const client = {
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return { catalogs: CATALOGS };
     if (method === 'GET' && path === '/v1/catalog-members') return { members: MEMBERS };
     if (method === 'GET' && path === '/v1/catalog-shares') return { shares: SHARES };
+    if (method === 'PATCH' && path.startsWith('/v1/catalog-members/')) {
+      const label = JSON.parse(init.body).label;
+      if (label === 'bob') throw new FyHttpError('Someone here already has the user ID bob. Pick another.', 409, 'member_exists');
+      return { ...MEMBERS[0], label };
+    }
     if (method === 'POST' && path === '/v1/catalog-shares') {
+      if (view === 'share-taken')
+        throw new FyHttpError('Someone here already has the user ID bob.', 409, 'member_exists');
       if (view === 'share-unreachable')
         throw new FyHttpError('no carrier', 503, 'share_link_unavailable');
       return view === 'share-link-relayed' ? { ...MINTED, link: FAKE_RELAYED_LINK } : MINTED;
@@ -126,7 +139,7 @@ if (view === 'paste-link' || view === 'paste-link-other') {
       <AddCatalogEntry host={{ connection: CONNECTION, createClient }} />
     </section>,
   );
-} else if (view === 'members' || view === 'members-revoke') {
+} else if (view === 'members' || view === 'members-revoke' || view === 'members-rename' || view === 'members-rename-taken') {
   mountPage(
     <CatalogMembersPanel
       connection={CONNECTION}
@@ -135,7 +148,13 @@ if (view === 'paste-link' || view === 'paste-link-other') {
       onBack={() => undefined}
       now={() => NOW}
       timeZone="UTC"
-      initialConfirm={view === 'members-revoke' ? { kind: 'revoke', memberId: MEMBER_A } : null}
+      initialConfirm={
+        view === 'members-revoke'
+          ? { kind: 'revoke', memberId: MEMBER_A }
+          : view === 'members-rename' || view === 'members-rename-taken'
+            ? { kind: 'rename', memberId: MEMBER_A }
+            : null
+      }
     />,
   );
 } else {
@@ -144,6 +163,7 @@ if (view === 'paste-link' || view === 'paste-link-other') {
       connection={CONNECTION}
       createClient={createClient}
       catalog={CATALOGS[0]}
+      catalogs={CATALOGS}
       onClose={() => undefined}
       now={() => NOW}
       copyText={async () => undefined}
@@ -245,59 +265,100 @@ const open = async (page: Page, theme: string, view: string): Promise<void> => {
 
 const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await open(page, theme, 'share-new');
-  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-user-id]').fill('carol');
+  await page.locator('[data-share-user-id-line]').waitFor({ state: 'visible' });
   await shot(page, 'share-new', theme, vp);
 
   await open(page, theme, 'share-existing');
-  await page.locator('[data-share-who-existing]').check();
-  await page.locator('[data-share-existing-warning]').waitFor({ state: 'visible' });
+  await page.locator('[data-share-user-id]').fill('al');
+  await page.locator('[data-share-suggestion]').first().waitFor({ state: 'visible' });
+  await shot(page, 'share-suggest', theme, vp);
+  await page.locator('[data-share-user-id]').fill('alice');
+  await page.locator('[data-share-new-passkey]').waitFor({ state: 'visible' });
   await shot(page, 'share-existing', theme, vp);
 
+  await open(page, theme, 'share-new-passkey');
+  await page.locator('[data-share-user-id]').fill('alice');
+  await page.locator('[data-share-new-passkey-box]').check();
+  await shot(page, 'share-new-passkey', theme, vp);
+
+  await open(page, theme, 'share-pre-ticked');
+  await page.locator('[data-share-user-id]').fill('dana');
+  await page.locator('[data-share-new-passkey]').waitFor({ state: 'visible' });
+  await shot(page, 'share-pre-ticked', theme, vp);
+
+  await open(page, theme, 'share-hidden');
+  await page.locator('[data-share-user-id]').fill('ali\u200bce');
+  await page.locator('[data-catalog-failure]').waitFor({ state: 'visible' });
+  await shot(page, 'share-hidden', theme, vp);
+
+  await open(page, theme, 'share-taken');
+  await page.locator('[data-share-user-id]').fill('bob');
+  await page.locator('[data-share-uses-multi]').check();
+  await page.locator('[data-share-cap]').fill('5');
+  await page.locator('[data-share-confirm]').click();
+  await page.locator('[data-catalog-failure]').waitFor({ state: 'visible' });
+  await shot(page, 'share-taken', theme, vp);
+
   await open(page, theme, 'share-link');
-  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-user-id]').fill('carol');
   await page.locator('[data-share-confirm]').click();
   await page.locator('[data-share-qr]').waitFor({ state: 'visible' });
   await shot(page, 'share-link', theme, vp);
 
   // A machine on 127.0.0.1 reached through the hosted relay: the link is made, and the relay is named beside it.
   await open(page, theme, 'share-link-relayed');
-  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-user-id]').fill('carol');
   await page.locator('[data-share-confirm]').click();
   await page.locator('[data-share-relayed]').waitFor({ state: 'visible' });
   await shot(page, 'share-link-relayed', theme, vp);
 
   // No address and no relay: nothing is made, and the sentence says what to set.
   await open(page, theme, 'share-unreachable');
-  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-user-id]').fill('carol');
   await page.locator('[data-share-confirm]').click();
   await page.locator('[data-catalog-failure]').waitFor({ state: 'visible' });
   await shot(page, 'share-unreachable', theme, vp);
 
-  await open(page, theme, 'paste-link');
-  await page
-    .locator('[data-catalog-link-input]')
-    .fill(
-      'https://app.example.test/join#v1;url=https%3A%2F%2Fstudio.example.test;fp=fy_daemon_' +
-        'q'.repeat(43) +
-        ';share=fy_share_FAKEFAKEFAKEFAKEFAKEFA',
-    );
-  await shot(page, 'paste-link', theme, vp, '[data-catalogs-surface]');
+  // The paste field now lives in Subscriptions (&B131 A1), so these three scenes are opt-in until they are re-aimed.
+  if (process.argv.includes('--entry')) {
+    await open(page, theme, 'paste-link');
+    await page
+      .locator('[data-catalog-link-input]')
+      .fill(
+        'https://app.example.test/join#v1;url=https%3A%2F%2Fstudio.example.test;fp=fy_daemon_' +
+          'q'.repeat(43) +
+          ';share=fy_share_FAKEFAKEFAKEFAKEFAKEFA',
+      );
+    await shot(page, 'paste-link', theme, vp, '[data-catalogs-surface]');
 
-  await open(page, theme, 'paste-link-other');
-  await page.locator('[data-catalog-link-input]').fill('https://example.com/skills');
-  await page.locator('[data-catalog-link-add]').click();
-  await page
-    .locator('[data-catalog-link-form] [role="alert"], [data-catalog-link-form] [data-catalog-failure]')
-    .first()
-    .waitFor({ state: 'visible' });
-  await shot(page, 'paste-link-other', theme, vp, '[data-catalogs-surface]');
+    await open(page, theme, 'paste-link-other');
+    await page.locator('[data-catalog-link-input]').fill('https://example.com/skills');
+    await page.locator('[data-catalog-link-add]').click();
+    await page
+      .locator('[data-catalog-link-form] [role="alert"], [data-catalog-link-form] [data-catalog-failure]')
+      .first()
+      .waitFor({ state: 'visible' });
+    await shot(page, 'paste-link-other', theme, vp, '[data-catalogs-surface]');
 
-  await open(page, theme, 'skills-entry');
-  await shot(page, 'skills-entry', theme, vp, '[data-skills-frame]');
+    await open(page, theme, 'skills-entry');
+    await shot(page, 'skills-entry', theme, vp, '[data-skills-frame]');
+  }
 
   await open(page, theme, 'members');
-  await page.locator('[data-members-person="Alice"]').waitFor({ state: 'visible' });
+  await page.locator('[data-members-person="alice"]').waitFor({ state: 'visible' });
   await shot(page, 'members', theme, vp, '[data-catalog-members]');
+
+  await open(page, theme, 'members-rename');
+  await page.locator('[data-members-rename-form]').waitFor({ state: 'visible' });
+  await page.locator('[data-members-rename-input]').fill('alicia');
+  await shot(page, 'members-rename', theme, vp, '[data-catalog-members]');
+
+  await open(page, theme, 'members-rename-taken');
+  await page.locator('[data-members-rename-form]').waitFor({ state: 'visible' });
+  await page.locator('[data-members-rename-input]').fill('bob');
+  await page.locator('[data-members-rename-problem]').waitFor({ state: 'visible' });
+  await shot(page, 'members-rename-taken', theme, vp, '[data-catalog-members]');
 
   await open(page, theme, 'members-revoke');
   await page.locator('[data-members-confirm]').waitFor({ state: 'visible' });

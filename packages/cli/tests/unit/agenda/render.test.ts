@@ -614,8 +614,8 @@ describe('agenda turns', () => {
     should(snoozed).containEql('snoozed by the owner until 2026-07-31T15:00:00.000Z');
     should(snoozed).containEql('agenda surface --now');
     should(snoozed).not.containEql("owner's turn");
-    should(replied).containEql('replied 2026-07-31T09:10:00.000Z: parked');
-    should(replied).containEql('agenda edit A3 --summary … --premise … --context …');
+    should(replied).containEql("replied 2026-07-31T09:10:00.000Z: off the owner's list");
+    should(replied).containEql('agenda edit A3 --back --summary … --premise … --context …');
     should(replied).not.containEql('agenda surface');
     should(replied).containEql('agenda done');
   });

@@ -6,9 +6,12 @@ import { describe, it } from 'bun:test';
 import { CatalogShareCodeSchema, type ShareLinkSeed } from '@ferretry/protocol';
 import should from 'should';
 import {
+  askJoinOptions,
+  JoinOptionsUnknownError,
   JoinOutcomeUnknownError,
   joinCandidates,
   joinInSession,
+  joinOptionsInSession,
   joinPublisher,
   memberCandidates,
 } from '../../src/lib/relay-join.ts';
@@ -303,5 +306,170 @@ describe('walking the carriers to join', () => {
 
     const none = dialByHost({});
     should(await walk(id, none.dial)).eql({ kind: 'unreachable', maybeSpentUnheard: false, tried: 2 });
+  });
+});
+
+const ORIGIN = 'https://app.ferretry.test';
+const OPTIONS = {
+  challenge: 'AAAA',
+  rpId: 'app.ferretry.test',
+  allowCredentials: [{ type: 'public-key', id: 'qg' }],
+  timeout: 60_000,
+};
+const PASSKEY = { credentialId: 'qg', clientDataJSON: 'e30', authenticatorData: 'AQ', signature: 'Ag' };
+
+describe('asking what a join needs, in one session', () => {
+  const ask = async (
+    id: Awaited<ReturnType<typeof newDaemonIdentity>>,
+    auto: ReturnType<typeof autoDial>,
+    deadlineMs?: number,
+  ) => {
+    const keys = await testMemberKeys();
+    return joinOptionsInSession({
+      crypto: relayCrypto,
+      seed: seedFor(id.daemonId),
+      origin: ORIGIN,
+      method: { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
+      keys,
+      key: relayCrypto.deviceKeyHandle(keys.signingKey),
+      dial: auto.dial,
+      ...(deadlineMs === undefined ? { heartbeat: () => () => undefined } : { deadlineMs }),
+    });
+  };
+
+  it('should refuse a fingerprint that cannot address a session rather than dialling', async () => {
+    const keys = await testMemberKeys();
+    const reason = await reasonOf(
+      joinOptionsInSession({
+        crypto: relayCrypto,
+        seed: seedFor('sha256:legacy'),
+        origin: ORIGIN,
+        method: { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
+        keys,
+        key: relayCrypto.deviceKeyHandle(keys.signingKey),
+        dial: () => {
+          throw new Error('nothing may be dialled for an unverifiable fingerprint');
+        },
+      }),
+    );
+    should(reason).be.instanceof(RelaySessionError);
+  });
+
+  it('should send one join-options record naming the page origin, and say open', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOpen: 'first-browser' });
+    should(await ask(id, auto)).eql({ kind: 'open', why: 'first-browser' });
+    should(auto.requests).have.length(1);
+    should(auto.requests[0]).match({ t: 'join-options', code: CODE, origin: ORIGIN });
+    should(auto.sockets[0]?.closed?.code).equal(1000);
+  });
+
+  it('should bring back the challenge and the name it is for', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinChallenge: { memberLabel: 'Alice', options: OPTIONS } });
+    should(await ask(id, auto)).eql({ kind: 'challenge', memberLabel: 'Alice', options: OPTIONS });
+  });
+
+  it('should reject the one generic refusal as its own class', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOptionsRefused: true });
+    should(await reasonOf(ask(id, auto))).be.instanceof(RelayJoinRefusedError);
+  });
+
+  it('should say the publisher does not know the question when it closes with 4400 on the record', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOptionsUnknown: true });
+    should(await reasonOf(ask(id, auto))).be.instanceof(JoinOptionsUnknownError);
+  });
+
+  it('should fail as a plain transport error when nothing answers', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOptionsSilently: true });
+    const reason = await reasonOf(ask(id, auto, 30));
+    should(reason).be.instanceof(RelaySessionError);
+    should(reason).not.be.instanceof(JoinOptionsUnknownError);
+  });
+});
+
+describe('walking the carriers to ask what a join needs', () => {
+  const walk = async (
+    id: Awaited<ReturnType<typeof newDaemonIdentity>>,
+    dial: (url: string) => never | unknown,
+    relayTimeoutMs?: number,
+  ) =>
+    askJoinOptions({
+      crypto: relayCrypto,
+      seed: { daemonUrl: 'https://studio.example', daemonId: id.daemonId, code: CODE },
+      origin: ORIGIN,
+      keys: await testMemberKeys(),
+      hostedRelayUrl: HOSTED,
+      dial: dial as never,
+      heartbeat: noHeartbeat,
+      directTimeoutMs: 30,
+      ...(relayTimeoutMs === undefined ? {} : { relayTimeoutMs }),
+    });
+
+  it('should ask the publisher’s own address first', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinChallenge: { memberLabel: 'Alice', options: OPTIONS } });
+    should(await walk(id, auto.dial)).match({
+      kind: 'answer',
+      answer: { kind: 'challenge', memberLabel: 'Alice' },
+      carrier: { kind: 'direct' },
+    });
+  });
+
+  it('should move to the rendezvous when the direct address does not answer', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOpen: 'first-browser' });
+    const routes = dialByHost({ 'relay.ferretry.test': auto.dial });
+    should(await walk(id, routes.dial)).match({ kind: 'answer', answer: { kind: 'open' }, carrier: { kind: 'relay' } });
+    should(routes.dialled).have.length(2);
+  });
+
+  it('should ask over the rendezvous with its own deadline when one is given', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOpen: 'owner-approved' });
+    const routes = dialByHost({ 'relay.ferretry.test': auto.dial });
+    should(await walk(id, routes.dial, 30)).match({ kind: 'answer', carrier: { kind: 'relay' } });
+  });
+
+  it('should stop at a refusal and not carry the code to the next carrier', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOptionsRefused: true });
+    should(await walk(id, auto.dial)).eql({ kind: 'refused' });
+    should(auto.sockets).have.length(1);
+  });
+
+  it('should say an older publisher is older, so the join goes on as it always did', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joinOptionsUnknown: true });
+    should(await walk(id, auto.dial)).eql({ kind: 'older' });
+    should(auto.sockets).have.length(1);
+  });
+
+  it('should say unreachable when no carrier answers', async () => {
+    const id = await newDaemonIdentity();
+    should(await walk(id, dialByHost({}).dial)).eql({ kind: 'unreachable' });
+  });
+});
+
+describe('joining with a passkey assertion', () => {
+  it('should carry the assertion on the join record over the walk', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joined: joinedFor(id.daemonId) });
+    const result = await joinPublisher({
+      crypto: relayCrypto,
+      seed: { daemonUrl: 'https://studio.example', daemonId: id.daemonId, code: CODE },
+      clientName: 'phone',
+      keys: await testMemberKeys(),
+      hostedRelayUrl: HOSTED,
+      dial: auto.dial as never,
+      heartbeat: noHeartbeat,
+      directTimeoutMs: 30,
+      passkey: PASSKEY,
+    });
+    should(result).match({ kind: 'joined' });
+    should(auto.requests[0]).match({ t: 'join', passkey: PASSKEY });
   });
 });

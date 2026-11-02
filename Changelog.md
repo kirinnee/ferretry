@@ -1,3 +1,25 @@
+## [4.248.0](https://github.com/kirinnee/ferretry/compare/v4.247.0...v4.248.0) (2026-11-02)
+
+### Features
+
+* **pwa:** add skills from this machine (&B131 A4) ([#1363](https://github.com/kirinnee/ferretry/issues/1363)) ([0f27862](https://github.com/kirinnee/ferretry/commit/0f2786247f724d2b6d0ad487629e8a49c7f06cca))
+* **pwa:** invite people by user ID, change user ID, join screens (&B131 B3) ([#1362](https://github.com/kirinnee/ferretry/issues/1362)) ([0f45c32](https://github.com/kirinnee/ferretry/commit/0f45c323dee42ed25731eea2585382c6f89cde0a))
+
+### Fixes
+
+* **pwa:** answer a form item from the chat, the Inbox's way ([#1376](https://github.com/kirinnee/ferretry/issues/1376)) ([989efae](https://github.com/kirinnee/ferretry/commit/989efae6c816f05d5f4e6099fe146a451be7f223))
+
+## [4.247.0](https://github.com/kirinnee/ferretry/compare/v4.246.0...v4.247.0) (2026-11-02)
+
+### Features
+
+* **pwa:** default runtime as a compact select on the Runtimes tab ([#1381](https://github.com/kirinnee/ferretry/issues/1381)) ([16c309e](https://github.com/kirinnee/ferretry/commit/16c309e531d7d7072f57c69658b88ffdfe0fc0c2))
+
+### Fixes
+
+* **agenda:** a replied item stays off the owner's list until there is something new ([#1377](https://github.com/kirinnee/ferretry/issues/1377)) ([e16b697](https://github.com/kirinnee/ferretry/commit/e16b697ecdc8f0d89b2866d3b7b442a29301c973))
+* **inbox:** give each Inbox card its own synced draft slot ([#1379](https://github.com/kirinnee/ferretry/issues/1379)) ([6e694ef](https://github.com/kirinnee/ferretry/commit/6e694ef1b7b0514f86b1a3f45db8285692ce81dc))
+
 ## [4.246.0](https://github.com/kirinnee/ferretry/compare/v4.245.0...v4.246.0) (2026-11-02)
 
 ### Features

@@ -1,0 +1,25 @@
+# What one macOS smoke attempt runs once its job has a runner: take the compiled binaries, make sure
+# tmux exists (no macOS image ships it), and start and stop one real session
+# (.github/workflows/smoke-darwin.yaml says how the attempts are chained and judged).
+name: Smoke darwin-arm64 attempt
+description: Download the compiled binaries and run the shipped darwin-arm64 binary through scripts/release/smoke.sh.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/download-binaries
+    # The smoke starts a real session, and a session lives in a tmux pane; macOS never ships tmux.
+    - name: Install tmux
+      shell: bash
+      run: |
+        if command -v tmux >/dev/null 2>&1; then
+          tmux -V
+        else
+          brew install tmux
+        fi
+    # download-artifact drops the exec bit; smoke.sh restores it. The binary name is derived from the
+    # CLI package's bin key so the job stays rename-proof.
+    - name: Smoke
+      shell: bash
+      run: |
+        prefix="$(jq -r '.bin | to_entries[0].key' packages/cli/package.json)"
+        ./scripts/release/smoke.sh "dist/bin/${prefix}-darwin-arm64"

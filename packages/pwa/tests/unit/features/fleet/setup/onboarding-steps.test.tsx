@@ -641,7 +641,7 @@ describe('OnboardingControlsStep', () => {
     expect(text('[data-onboarding-step-body="controls"]')).toContain('What ferrets on studio-mac may control');
     expect(q('[data-setup-section="agent-control"]')).not.toBeNull();
     expect(q('[data-setup-section="default-runtime"]')).not.toBeNull();
-    expect(q('[data-setup-choice="claude-review"]')).not.toBeNull();
+    expect(q('[data-default-runtime-select] option[value="claude-review"]')).not.toBeNull();
   });
 });
 

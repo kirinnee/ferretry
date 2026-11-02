@@ -10,7 +10,12 @@
  * offline: a publisher that cannot be reached says so in one line.
  */
 
-import type { CatalogInstall, SessionSkillsInventory } from '@ferretry/protocol';
+import type {
+  CatalogInstall,
+  LocalSkillInstall,
+  MachineSkillsInventory,
+  SessionSkillsInventory,
+} from '@ferretry/protocol';
 import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useKnownProjects } from '../../hooks/use-projects.ts';
@@ -25,8 +30,9 @@ import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { listCatalogInstalls } from '../catalogs/catalog-installs-api.ts';
 import { FailureLine } from '../catalogs/catalog-parts.tsx';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
+import { listLocalSkillInstalls } from '../catalogs/local-skill-installs-api.ts';
 import { readFleetRuntimes } from '../fleet/catalog-api.ts';
-import { readSessionSkillsInventory } from '../mcp/mcp-api.ts';
+import { readMachineSkills, readSessionSkillsInventory } from '../mcp/mcp-api.ts';
 import type { SharedController } from '../shared/shared-controller.ts';
 import { installedNames } from '../shared/shared-installs.ts';
 import { type OpenedSharedItem, SharedItemSheet } from '../shared/shared-item-sheet.tsx';
@@ -46,6 +52,7 @@ import {
   INSTALLED_LABEL,
   installPlan,
   landedSentence,
+  landingSentence,
   NO_SKILLS_FOUND,
   NO_SUBSCRIPTIONS,
   newInstalls,
@@ -62,6 +69,9 @@ import {
   updatedLine,
 } from './add-skills-model.ts';
 import { ContextFilterChips } from './context-rail-parts.tsx';
+import { LocalSkillInstallSheet } from './local-skill-install-sheet.tsx';
+import { MachineGroup } from './machine-skills-group.tsx';
+import { filterMachineRows, type MachineSkillRow, machineRows, targetOptions } from './machine-skills-model.ts';
 
 type SharedPort = Pick<SharedController, 'list' | 'browse' | 'unlock' | 'openItem'>;
 
@@ -146,6 +156,9 @@ function AddSkillsBody({
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [unreached, setUnreached] = useState<readonly string[]>([]);
   const [shown, setShown] = useState<Shown | null>(null);
+  const [machine, setMachine] = useState<MachineSkillsInventory | null | undefined>(undefined);
+  const [copies, setCopies] = useState<readonly LocalSkillInstall[] | null>(null);
+  const [copying, setCopying] = useState<MachineSkillRow | null>(null);
   const before = useRef<readonly CatalogInstall[] | null>(null);
   const live = useRef(true);
   // True while any read of every list is under way, so a tab coming back never starts a second one on top of it.
@@ -170,6 +183,22 @@ function AddSkillsBody({
   const readInstalls = useCallback(async (): Promise<readonly CatalogInstall[] | null> => {
     try {
       return (await listCatalogInstalls(await createClient(connection))).installs;
+    } catch {
+      return null;
+    }
+  }, [createClient, connection]);
+
+  const readMachine = useCallback(async (): Promise<MachineSkillsInventory | null> => {
+    try {
+      return await readMachineSkills(await createClient(connection));
+    } catch {
+      return null;
+    }
+  }, [createClient, connection]);
+
+  const readCopies = useCallback(async (): Promise<readonly LocalSkillInstall[] | null> => {
+    try {
+      return (await listLocalSkillInstalls(await createClient(connection))).installs;
     } catch {
       return null;
     }
@@ -241,6 +270,18 @@ function AddSkillsBody({
   }, [readInstalls]);
 
   useEffect(() => {
+    void readMachine().then(read => {
+      if (live.current) setMachine(read);
+    });
+  }, [readMachine]);
+
+  useEffect(() => {
+    void readCopies().then(read => {
+      if (live.current) setCopies(read);
+    });
+  }, [readCopies]);
+
+  useEffect(() => {
     void readInventory().then(read => {
       if (!live.current) return;
       setInventory(read);
@@ -264,12 +305,20 @@ function AddSkillsBody({
     if (reading.current) return;
     reading.current = true;
     setRefreshing(true);
-    const [names, read, session] = await Promise.all([load(true), readInstalls(), readInventory()]);
+    const [names, read, session, onMachine, made] = await Promise.all([
+      load(true),
+      readInstalls(),
+      readInventory(),
+      readMachine(),
+      readCopies(),
+    ]);
     reading.current = false;
     if (!live.current) return;
     if (read !== null) setInstalls(read);
     if (session !== null) setInventory(session);
-    setUnreached(names);
+    if (onMachine !== null) setMachine(onMachine);
+    if (made !== null) setCopies(made);
+    setUnreached(onMachine === null ? [...names, machineName] : names);
     setUpdatedAt(clock.now().getTime());
     setRefreshing(false);
   };
@@ -323,6 +372,31 @@ function AddSkillsBody({
     const harness = inventory?.harness ?? 'claude';
     setLanded(fresh.map(item => landedSentence(item, plan, inventory, harness)).join(' '));
     // The session now sees more; the next install's sentence compares against that.
+    void readInventory().then(read => {
+      if (live.current && read !== null) setInventory(read);
+    });
+  };
+
+  const options = targetOptions(projects, runtimes);
+  const allMachine = useMemo(
+    () =>
+      machine === undefined || machine === null
+        ? machine
+        : inventory === null
+          ? inventoryFailed
+            ? null
+            : undefined
+          : machineRows(machine, inventory, new Set((copies ?? []).map(copy => copy.origin.path))),
+    [machine, inventory, inventoryFailed, copies],
+  );
+  const shownMachine =
+    allMachine === undefined || allMachine === null ? allMachine : filterMachineRows(allMachine, query);
+
+  const closeCopy = async (installed: LocalSkillInstall | null): Promise<void> => {
+    setCopying(null);
+    if (installed === null) return;
+    setCopies(await readCopies());
+    setLanded(landingSentence(installed, plan, inventory, inventory?.harness ?? 'claude'));
     void readInventory().then(read => {
       if (live.current && read !== null) setInventory(read);
     });
@@ -419,6 +493,30 @@ function AddSkillsBody({
             </p>
           )}
           {failure === null ? null : <FailureLine sentence={failure} />}
+          {subs !== null &&
+          (subs.length > 0 || (allMachine !== undefined && allMachine !== null && allMachine.length > 0)) ? (
+            <div className="flex min-w-0 flex-col gap-xs">
+              <label htmlFor={searchId} className="sr-only">
+                {ADD_SKILLS_SEARCH_LABEL}
+              </label>
+              <div className="relative min-w-0">
+                <Search
+                  size={14}
+                  aria-hidden
+                  className="pointer-events-none absolute left-control-x top-1/2 -translate-y-1/2 text-muted"
+                />
+                <input
+                  id={searchId}
+                  type="search"
+                  className="kt-input w-full !pl-9"
+                  placeholder={ADD_SKILLS_SEARCH_LABEL}
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                  data-add-skills-search=""
+                />
+              </div>
+            </div>
+          ) : null}
           {subs === null ? (
             <p className="m-0 text-cell text-muted" role="status">
               {READING_SUBSCRIPTIONS}
@@ -429,30 +527,11 @@ function AddSkillsBody({
             </p>
           ) : (
             <>
-              <div className="flex min-w-0 flex-col gap-xs">
-                <label htmlFor={searchId} className="sr-only">
-                  {ADD_SKILLS_SEARCH_LABEL}
-                </label>
-                <div className="relative min-w-0">
-                  <Search
-                    size={14}
-                    aria-hidden
-                    className="pointer-events-none absolute left-control-x top-1/2 -translate-y-1/2 text-muted"
-                  />
-                  <input
-                    id={searchId}
-                    type="search"
-                    className="kt-input w-full !pl-9"
-                    placeholder={ADD_SKILLS_SEARCH_LABEL}
-                    value={query}
-                    onChange={event => setQuery(event.target.value)}
-                    data-add-skills-search=""
-                  />
-                </div>
-                {chips.length === 0 ? null : (
+              {chips.length === 0 ? null : (
+                <div className="flex min-w-0 flex-col gap-xs">
                   <ContextFilterChips label={CATALOG_FILTER_LABEL} chips={chips} value={active} onChange={setChip} />
-                )}
-              </div>
+                </div>
+              )}
               <div className="flex min-w-0 flex-col gap-md" data-add-skills-catalogs="">
                 {groups.flatMap(({ sub, label, state }) =>
                   state.kind === 'ok'
@@ -514,6 +593,12 @@ function AddSkillsBody({
               )}
             </>
           )}
+          <MachineGroup
+            rows={shownMachine}
+            all={allMachine === undefined || allMachine === null ? 0 : allMachine.length}
+            truncated={machine !== undefined && machine !== null && machine.truncated}
+            onInstall={setCopying}
+          />
           <div>
             <Button
               type="button"
@@ -528,6 +613,16 @@ function AddSkillsBody({
           </div>
         </div>
       </div>
+      {copying === null ? null : (
+        <LocalSkillInstallSheet
+          row={copying}
+          connection={connection}
+          createClient={createClient}
+          initial={plan.draft}
+          options={options}
+          onClose={installed => void closeCopy(installed)}
+        />
+      )}
       {shown === null ? null : (
         <SharedItemSheet
           shown={shown.item}

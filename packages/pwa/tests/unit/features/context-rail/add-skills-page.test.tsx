@@ -85,6 +85,8 @@ const hostWith = (
   const fake = fakeClient({
     'GET /v1/fleet/runtimes': () => ({ runtimes: [{ id: 'rt-work', wrapper: 'claude-work', profile: 'default' }] }),
     'GET /v1/secrets': () => ({ v: 1, health: 'ready', secrets: [], references: [] }),
+    'GET /v1/skills': () => ({ homes: [], projects: [], truncated: false }),
+    'GET /v1/skill-installs/local': () => ({ installs: [] }),
     ...routes,
   });
   return {

@@ -1086,8 +1086,11 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   (`members.before-unique-names.2.json`). The upgrade runs in the same queue as every other write, and only
   after its write succeeded is each rename audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs
   only) and the owner told once; if it cannot write, the members file is refused as unreadable, with nothing
-  half-done and nothing audited, and the next boot tries again. The notice: "Two people here had the same name, so one is now ‹id› (2). Rename or remove whichever is wrong in
-  Sharing › People." (the plural names how many).
+  half-done and nothing audited, and the next boot tries again. The notice: "2 people had the same user ID, so the later one was renamed: alice → alice (2). Each still signs in with
+  their passkeys. Rename or remove whichever is wrong in Sharing › People." (for several people: "Several people had the
+  same user ID, so the later ones were renamed: …"). **GAP:** the notice has no path to the app yet. The daemon
+  holds it for its own log (`bootNotices`, stderr), and no route or event carries it to the owner's browser, so the app
+  cannot show it once. The sentence is final so that the day a channel exists nothing about the words changes.
 - **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
   (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
   is unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id` stays per browser on
@@ -1129,8 +1132,26 @@ browser is no longer on the list, so it cannot prove either, and another person'
 cross-member refusal is unchanged.
 
 **The app shows the sentence, the wire does not.** The daemon answers `join-refused` and nothing more. The app, which
-knows from `join-challenge` whose passkey it asked for, says: "Use ‹Alice›'s passkey, or ask ‹owner› to let you set up
-a new one."
+knows from `join-challenge` whose passkey it asked for, says it (&B131 B3, `join-screen.tsx`). Every name is the
+person's user ID with hidden characters spelled out (`revealHidden`); ‹machine› is the host of the link, on every
+screen, because the machine has not named itself before the join: one name from the first screen to the last.
+
+- **The heading** is "You're signing in as **alice** on ‹machine›." on every screen after the Join tap.
+- **A first invite** (`join-open`, or an older daemon): once joined, "Create a passkey for **alice**. You'll use it to
+  sign in here." The join answer is what names the person, so this line is shown after the join, not before.
+- **A later invite** (`join-challenge`): "Sign in with your **alice** passkey to add this browser." and a **Sign in
+  with passkey** button. The challenge is asked for on the **Join tap**, never on page load, and the passkey on the
+  tap after it, because a browser only opens its passkey sheet from a tap. Nothing is filed until then.
+- **No passkey here:** "This invite is for **alice**. Use alice's passkey (on another device: choose "use a phone or
+  tablet"), or ask the person who sent you this link to let you set up a new one." with **Try again** (asks for a
+  fresh challenge) and **Back to start**. It is shown when this browser has no passkey the daemon listed, when the
+  person dismisses or times out the browser's sheet (a browser says all three the same way on purpose), and when the
+  daemon refuses the proof: a wrong passkey and an expired challenge look the same as a dead code on the wire. ‹owner›
+  is "the person who sent you this link", because the owner's own name is not known before joining.
+- **On a relay** the same screens appear: `join-options` and `join` are each their own session, over the same carrier
+  walk as a plain join (direct first, then the rendezvous), and only a transport failure moves the walk on. The two
+  sessions carry the same browser key, because the challenge is per (share, browser key). An older daemon's `4400` on
+  `join-options` makes the app send a plain `join`, but only once the options record has actually been sent.
 
 #### Lost devices: "They need a new passkey"
 
@@ -1264,13 +1285,35 @@ now has `join` and `member` ([relay-protocol.md](relay-protocol.md) §14 "Member
 **Owner, in Sharing › My catalogs.** A catalog's **Publish skills** (&B131 A3) lists every skill on this
 machine once, by its SKILL.md path, with where it lives ("account claude-work", "project app", "Ferretry"), says which
 ones the catalog already holds and their version, and publishes the rest through the same Add to catalog sheet, aimed
-at that catalog; it reads `GET /v1/skills`. Its **Share…** sheet makes a code for a new person (by name) or an
-existing member (with the warning "whoever opens this can read everything they can read" shown before anything is
-made), for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
+at that catalog; it reads `GET /v1/skills`. Its **Invite people…** sheet (&B131 B3) has one field, **Their user ID** (help: "Unique on this machine. They'll
+create a passkey under it and sign in with it. The same ID always means the same person."; placeholder "e.g. alice"),
+and no new/existing choice. As the owner types it lists up to five people already here whose ID holds the text
+(those that start with it first); nothing is listed once the text is exactly someone's ID. Under the field one line says what the ID
+means: for someone already here "**alice** already has access here (2 browsers · Team skills). This invite reaches
+the same person: they sign in with their alice passkey."; for an ID nobody holds "New user ID. The person who opens
+this invite creates a passkey for **alice**."; for an ID with a hidden character the daemon's refusal ("A user ID
+can't contain hidden or invisible characters. Type it again.") and no invite. The app sends the typed ID as the
+member name and the daemon decides whether it is a new, an existing or a reserved person. A multi-use invite for an ID
+somebody holds or has reserved shows the daemon's 409 `member_exists` sentence ("Someone here already has the user
+ID **sam**.") plainly. **GAP:** an ID reserved by an invite nobody has used is not in the people list, so the
+sheet calls it "New user ID" and the daemon's 409 is the only thing that stops a multi-use invite for it.
+The warning "whoever opens this can read everything they can read" is shown before anything is made, for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
 (act `share-catalog`) and shows the link **once**: a QR drawn in the page, Copy link, a countdown and **End this code
-now**. The app keeps and logs nothing about the code. **People and codes** lists each member with their catalogs and
-browsers (remove one browser, take away a catalog, revoke the member with the plain sentence of what stops) and the
-shares (live, used, expired).
+now**. The app keeps and logs nothing about the code. **People and codes** lists each person, titled by their
+**user ID** (the card's title is the ID itself, with no repeated "User ID" label), with their catalogs and browsers (remove one browser, take away a catalog,
+revoke the member with the plain sentence of what stops) and the shares (live, used, expired).
+
+**They need a new passkey (D8).** For a person who is already here, on a **single-use** invite only, the sheet offers
+the checkbox "They need a new passkey (lost or new device)" with the line "Only tick this if alice can't use their
+passkey any more. Whoever opens this invite can then sign in as alice." It is **never automatic**: it is
+unticked unless the person has no passkey on any browser, in which case it is pre-ticked with "alice has no passkey
+left, so this invite lets them create one." and the owner can untick it. The app works that out from the people list,
+because the daemon only reports `noPasskeyLeft` on the mint answer, after the choice. A many-use invite never offers it (the daemon answers 400 `new_passkey_multi`).
+
+**Change user ID.** Each person's card has **Change user ID**. The form says "alice becomes alicia. They keep
+their browsers, passkeys and installs." It calls `PATCH /v1/catalog-members/:memberId` with `{ "label" }`. An ID
+someone holds answers 409 `member_exists` and the form stays open with "Someone here already has the user ID **sam**.
+Pick another." Any other failure closes the form with the plain failure line.
 
 **Subscribing is by link.** **Subscribe with a link** is a paste field at the top of Sharing › Subscriptions, and only
 there: My catalogs is the publisher's page and has neither it nor Install from a file. Subscribing installs nothing.
@@ -1421,6 +1464,42 @@ session** and **Refresh** at the top; the install review stays a sheet over it. 
 `.agents/skills` folder name, which suggests a running session may notice a new skill. Confirming that a _running
 session actually uses it_ needs a paid model run, which this slice did not make. Until it is checked the page claims
 only what is known; changing the sentence is one constant (`CODEX_NEXT`).
+
+### + Add skills, On this machine (&B131 A4)
+
+The Add skills page has a second group under the subscriptions, **On this machine**
+(`features/context-rail/machine-skills-group.tsx`, `machine-skills-model.ts`,
+`local-skill-install-sheet.tsx`). It is the app for ["Copying a skill from this machine"](#copying-a-skill-from-this-machine).
+
+- **What it lists**: the machine's skills inventory (`GET /v1/skills`: every account and every registered
+  project) **minus what this session already sees**. A skill is "already seen" when the session lists the same
+  `SKILL.md` path or the same name (case-folded). A skill listed by an account and a project at the same path is
+  one row. Each row has the name, "‹runtime› account" or "project ‹name›" with the agent, the description and
+  **Install** (or **Installed**, when the copy record holds a copy made from that path). The search field above
+  narrows both groups by every word typed.
+- **When it cannot be read** the group says so in one line ("Press Refresh to try again"), and the rest of the page still works. Refresh re-reads it too; if it still fails, the "Could not reach" line names this machine. An empty list says
+  that no other account or project has a skill this session lacks; a truncated inventory says some are not shown.
+- **Install** opens a sheet in two steps. First the **place**, defaulted exactly as the catalog installs above are
+  (**This project** when the session's folder is inside a registered project, otherwise **This account**). Then
+  **Review before installing** calls the preview route, and the review shows what the machine returned:
+  - the machine's **warning** sentences, each with its severity;
+  - **From** (the account or project and the path), **Into** (the destination), and **Replaces** when an earlier
+    copy would be replaced;
+  - **Not copied** (each file left behind, with the machine's reason);
+  - **every file in full**, with hidden characters marked, never hidden.
+- **A refusal has no Install button.** A password or key in a file is the machine's own sentence, "‹file› line ‹n›
+  holds what looks like a password or key. Remove it, then copy the skill.", shown as written (the daemon never
+  returns the text it matched). A source over the file cap, a skill that is gone, a place that is unknown, a
+  conflict and an expired preview each say what happened and that **nothing was installed**; an expired or unknown
+  preview offers **Preview again**. Changing the place drops a review that was already read.
+- **Install** asks the person's passkey (the `catalog-install` step-up) and applies exactly the previewed bytes.
+  A missing passkey says so and changes nothing.
+- **After it lands** the page says "Installed", where it went, any note the machine added, and the Skills list
+  re-reads. The sentence about the session is the one A2 uses, so the two sources never word it differently:
+  Claude "It is active in this session now.", Codex "It is active from the next session.", and a place the session
+  does not read says so.
+- **Wording**: the button is **Install** and the row **Installed**; **Add** is only the "+ Add skills" button. The
+  search field is labelled "Search skills" (it covers both groups).
 
 ## Links (catalogs 3f)
 

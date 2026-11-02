@@ -22,7 +22,7 @@ import type {
   FleetRunningSession,
   FleetRuntimeView,
 } from '@ferretry/protocol';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../../../hooks/use-dialog-focus.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
@@ -52,13 +52,38 @@ export interface RuntimeActionButtonsProps {
   readonly refusal: string | null;
   readonly onRename: () => void;
   readonly onRemove: () => void;
+  /** Present only on an agent runtime that is not the default yet. */
+  readonly onMakeDefault?: () => void;
 }
 
-/** Rename, and Remove in the destructive style. Disabled, with the reason, when the caller may not. */
-export function RuntimeActionButtons({ runtime, refusal, onRename, onRemove }: RuntimeActionButtonsProps) {
+/**
+ * Make default (when offered), Rename, and Remove in the destructive style, always on ONE line: icons alone below `sm`, named
+ * by `aria-label`, so a row never grows taller for its actions. Disabled, with the reason, when the caller may not.
+ */
+export function RuntimeActionButtons({
+  runtime,
+  refusal,
+  onRename,
+  onRemove,
+  onMakeDefault,
+}: RuntimeActionButtonsProps) {
   const reason = refusal ?? undefined;
   return (
-    <span className="flex flex-wrap gap-2" data-runtime-actions={runtime.name}>
+    <span className="flex gap-2" data-runtime-actions={runtime.name}>
+      {onMakeDefault === undefined ? null : (
+        <Button
+          type="button"
+          size="sm"
+          disabled={refusal !== null}
+          title={reason}
+          aria-label={`Make ${runtime.name} the default runtime`}
+          data-runtime-make-default={runtime.name}
+          onClick={onMakeDefault}
+        >
+          <Star size={14} aria-hidden="true" />
+          <span className="hidden sm:inline">Make default</span>
+        </Button>
+      )}
       <Button
         type="button"
         size="sm"
@@ -69,7 +94,7 @@ export function RuntimeActionButtons({ runtime, refusal, onRename, onRemove }: R
         onClick={onRename}
       >
         <Pencil size={14} aria-hidden="true" />
-        Rename
+        <span className="hidden sm:inline">Rename</span>
       </Button>
       <Button
         type="button"
@@ -82,7 +107,7 @@ export function RuntimeActionButtons({ runtime, refusal, onRename, onRemove }: R
         onClick={onRemove}
       >
         <Trash2 size={14} aria-hidden="true" />
-        Remove
+        <span className="hidden sm:inline">Remove</span>
       </Button>
     </span>
   );

@@ -8,7 +8,6 @@ import {
   FAKE_CODE,
   FAKE_LINK,
   FAKE_RELAYED_LINK,
-  MEMBER_A,
   memberView,
   mintResponse,
   SHARE_1,
@@ -55,37 +54,130 @@ const choose = async (selector: string) => {
 };
 
 describe('ShareSheet form', () => {
-  it('asks for a name and keeps the passkey button off until there is one', async () => {
+  it('has one field, with its help and a placeholder, and no passkey button until there is an ID', async () => {
     const { view } = await open({});
+    const field = q('[data-share-user-id]') as HTMLInputElement;
+    expect(document.querySelector(`label[for="${field.id}"]`)?.textContent).toBe('Their user ID');
+    expect(field.placeholder).toBe('e.g. alice');
+    expect(q('[data-share-user-id-help]')?.textContent).toBe(
+      "Unique on this machine. They'll create a passkey under it and sign in with it. The same ID always means the same person.",
+    );
+    expect(q('[data-share-who-new]')).toBeNull();
     expect(q('[data-share-confirm]')?.hasAttribute('disabled')).toBe(true);
-    expect(q('[data-share-problem]')?.textContent).toContain('Type the name');
-    await typeInto(q('[data-share-name]'), 'Carol');
+    expect(q('[data-share-problem]')?.textContent).toContain('Type their user ID');
+    await typeInto(q('[data-share-user-id]'), 'carol');
     expect(q('[data-share-confirm]')?.hasAttribute('disabled')).toBe(false);
     expect(q('[data-share-confirm]')?.textContent).toContain('Confirm with passkey');
     await view.unmount();
   });
 
-  it('shows the existing-member warning before anything is minted', async () => {
+  it('says a new user ID is new', async () => {
     const { view, fake } = await open({});
-    await choose('[data-share-who-existing]');
-    expect(q('[data-share-existing-warning]')?.textContent).toContain('read everything Alice can read');
+    await typeInto(q('[data-share-user-id]'), 'carol');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe(
+      'New user ID. The person who opens this invite creates a passkey for carol.',
+    );
+    expect(q('[data-share-user-id-line] strong')?.textContent).toBe('carol');
+    expect(q('[data-share-new-passkey]')).toBeNull();
     expect(fake.calls.some(call => call.method === 'POST')).toBe(false);
-    expect(q('[data-share-uses-multi]')?.hasAttribute('disabled')).toBe(true);
-    expect(q('[data-share-many-note]')).not.toBeNull();
     await view.unmount();
   });
 
-  it('disables "someone already in" when no one has joined', async () => {
-    const { view } = await open({ 'GET /v1/catalog-members': () => ({ members: [] }) });
-    expect(q('[data-share-who-existing]')?.hasAttribute('disabled')).toBe(true);
-    expect(q('[data-share-no-members]')).not.toBeNull();
+  it('says an existing user ID reaches the same person, before anything is made', async () => {
+    const { view, fake } = await open({}, { catalogs: [ownedCatalog()] });
+    await typeInto(q('[data-share-user-id]'), 'alice');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe(
+      'Alice already has access here (2 browsers · Team skills). This invite reaches the same person: they sign in with their Alice passkey.',
+    );
+    expect(q('[data-share-user-id-line] strong')?.textContent).toBe('Alice');
+    expect(fake.calls.some(call => call.method === 'POST')).toBe(false);
+    await view.unmount();
+  });
+
+  it('names the catalogs by the one being shared when no list is given', async () => {
+    const { view } = await open({});
+    await typeInto(q('[data-share-user-id]'), 'alice');
+    expect(q('[data-share-user-id-line]')?.textContent).toContain('2 browsers · Team skills');
+    await view.unmount();
+  });
+
+  it('suggests people already here as you type, and picks one', async () => {
+    const { view } = await open({});
+    expect(q('[data-share-suggestions]')).toBeNull();
+    await typeInto(q('[data-share-user-id]'), 'ali');
+    expect([...document.querySelectorAll('[data-share-suggestion]')].map(node => node.textContent)).toEqual(['Alice']);
+    await choose('[data-share-suggestion]');
+    expect((q('[data-share-user-id]') as HTMLInputElement).value).toBe('Alice');
+    expect(q('[data-share-suggestions]')).toBeNull();
+    expect(q('[data-share-user-id-line]')?.textContent).toContain('already has access here');
+    await view.unmount();
+  });
+
+  it('refuses hidden characters in their words and keeps the button off', async () => {
+    const { view } = await open({});
+    await typeInto(q('[data-share-user-id]'), 'ca\u200brol');
+    expect(q('[data-catalog-failure]')?.textContent).toBe(
+      "A user ID can't contain hidden or invisible characters. Type it again.",
+    );
+    expect(q('[data-catalog-failure]')?.getAttribute('role')).toBe('alert');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe('');
+    expect(q('[data-share-user-id]')?.getAttribute('aria-invalid')).toBe('true');
+    expect(q('[data-share-problem]')).toBeNull();
+    expect(q('[data-share-confirm]')?.hasAttribute('disabled')).toBe(true);
+    expect(text()).not.toContain('\u200b');
+    await view.unmount();
+  });
+
+  it('offers the new-passkey box only for an existing person on a single-use invite, off until ticked', async () => {
+    const { view, fake } = await open({ 'POST /v1/catalog-shares': () => mintResponse() });
+    await typeInto(q('[data-share-user-id]'), 'alice');
+    expect(q('[data-share-new-passkey-box]')?.hasAttribute('checked')).toBe(false);
+    expect((q('[data-share-new-passkey-box]') as HTMLInputElement).checked).toBe(false);
+    expect(q('[data-share-new-passkey]')?.textContent).toContain('They need a new passkey (lost or new device)');
+    expect(q('[data-share-new-passkey-help]')?.textContent).toBe(
+      "Only tick this if Alice can't use their passkey any more. Whoever opens this invite can then sign in as Alice.",
+    );
+    await choose('[data-share-uses-multi]');
+    expect(q('[data-share-new-passkey]')).toBeNull();
+    await choose('[data-share-uses-single]');
+    await choose('[data-share-new-passkey-box]');
+    expect((q('[data-share-new-passkey-box]') as HTMLInputElement).checked).toBe(true);
+    await choose('[data-share-confirm]');
+    expect(fake.calls.find(call => call.method === 'POST')?.body).toMatchObject({
+      member: { name: 'alice' },
+      uses: { kind: 'single' },
+      newPasskey: true,
+    });
+    await view.unmount();
+  });
+
+  it('never asks for a new passkey unless ticked', async () => {
+    const { view, fake } = await open({ 'POST /v1/catalog-shares': () => mintResponse() });
+    await typeInto(q('[data-share-user-id]'), 'alice');
+    await choose('[data-share-confirm]');
+    const body = fake.calls.find(call => call.method === 'POST')?.body as Record<string, unknown>;
+    expect('newPasskey' in body).toBe(false);
+    await view.unmount();
+  });
+
+  it('pre-ticks it, with its own line, when the person has no passkey left; the owner can still untick', async () => {
+    const lost = memberView({ keys: [{ ...(memberView().keys[0] as object), passkeys: 0 }] });
+    const { view } = await open({ 'GET /v1/catalog-members': () => ({ members: [lost] }) });
+    await typeInto(q('[data-share-user-id]'), 'alice');
+    expect((q('[data-share-new-passkey-box]') as HTMLInputElement).checked).toBe(true);
+    expect(q('[data-share-new-passkey-help]')?.textContent).toBe(
+      'Alice has no passkey left, so this invite lets them create one.',
+    );
+    await choose('[data-share-new-passkey-box]');
+    expect((q('[data-share-new-passkey-box]') as HTMLInputElement).checked).toBe(false);
+    expect(q('[data-share-new-passkey-help]')?.textContent).toContain("Only tick this if Alice can't");
     await view.unmount();
   });
 
   it('asks for a cap when many people may join, and sends the choices', async () => {
     const response = mintResponse({ share: shareView({ uses: { kind: 'multi', cap: 30 } }) });
     const { view, fake } = await open({ 'POST /v1/catalog-shares': () => response });
-    await typeInto(q('[data-share-name]'), 'Crew');
+    await typeInto(q('[data-share-user-id]'), 'crew');
     await choose('[data-share-uses-multi]');
     expect((q('[data-share-cap]') as HTMLInputElement).value).toBe('50');
     await typeInto(q('[data-share-cap]'), '1');
@@ -95,7 +187,7 @@ describe('ShareSheet form', () => {
     expect([...select.options].map(option => option.value)).toEqual(['15m', '1h', '3h', '8h', '1d']);
     await choose('[data-share-confirm]');
     const minted = fake.calls.find(call => call.method === 'POST');
-    expect(minted?.body).toMatchObject({ member: { kind: 'new', label: 'Crew' }, uses: { kind: 'multi', cap: 30 } });
+    expect(minted?.body).toMatchObject({ member: { name: 'crew' }, uses: { kind: 'multi', cap: 30 } });
     await view.unmount();
   });
 
@@ -105,7 +197,7 @@ describe('ShareSheet form', () => {
         throw new FyHttpError('no', 409, 'members_full');
       },
     });
-    await typeInto(q('[data-share-name]'), 'Carol');
+    await typeInto(q('[data-share-user-id]'), 'Carol');
     await choose('[data-share-confirm]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('Revoke someone first');
     expect(q('[data-share-link]')).toBeNull();
@@ -131,7 +223,7 @@ describe('ShareSheet form', () => {
       },
       'GET /v1/devices': () => ({ devices: [] }),
     });
-    await typeInto(q('[data-share-name]'), 'Carol');
+    await typeInto(q('[data-share-user-id]'), 'Carol');
     await choose('[data-share-confirm]');
     expect(q('[data-sharing-off]')).not.toBeNull();
     await view.unmount();
@@ -142,7 +234,7 @@ describe('ShareSheet result', () => {
   const minted = { 'POST /v1/catalog-shares': () => mintResponse() };
   const makeLink = async (extra: Record<string, unknown> = {}, handlers = minted) => {
     const opened = await open(handlers, extra);
-    await typeInto(q('[data-share-name]'), 'Carol');
+    await typeInto(q('[data-share-user-id]'), 'Carol');
     await choose('[data-share-confirm]');
     return opened;
   };
@@ -276,14 +368,31 @@ describe('ShareSheet result', () => {
     await view.unmount();
   });
 
-  it('mints for an existing person with a single-use code', async () => {
+  it('mints for an existing person by their user ID, single-use', async () => {
     const { view, fake } = await open({ 'POST /v1/catalog-shares': () => mintResponse() });
-    await choose('[data-share-who-existing]');
+    await typeInto(q('[data-share-user-id]'), 'ALICE');
     await choose('[data-share-confirm]');
     expect(fake.calls.find(call => call.method === 'POST')?.body).toMatchObject({
-      member: { kind: 'existing', memberId: MEMBER_A },
+      member: { name: 'ALICE' },
       uses: { kind: 'single' },
     });
+    expect(text()).toContain('Invite for Alice');
+    await view.unmount();
+  });
+
+  it('says plainly that a user ID is taken when a multi-use invite names a reserved one', async () => {
+    const { view } = await open({
+      'POST /v1/catalog-shares': () => {
+        throw new FyHttpError('Someone here already has the user ID sam. Pick another.', 409, 'member_exists');
+      },
+    });
+    await typeInto(q('[data-share-user-id]'), 'sam');
+    await choose('[data-share-uses-multi]');
+    expect(q('[data-share-user-id-line]')?.textContent).toContain('New user ID');
+    await choose('[data-share-confirm]');
+    expect(q('[data-catalog-failure]')?.textContent).toContain('Someone here already has the user ID sam.');
+    expect(q('[data-share-user-id-line]')?.textContent).toBe('');
+    expect(q('[data-share-link]')).toBeNull();
     await view.unmount();
   });
 });

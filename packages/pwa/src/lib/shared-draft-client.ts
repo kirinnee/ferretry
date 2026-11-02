@@ -21,8 +21,12 @@ import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
+/** The query naming an item's own draft; the chat's is the bare route, as it always was. */
+export const sharedDraftItemQuery = (scope: DaemonSessionScope): string =>
+  scope.item === undefined ? '' : `?item=${encodeURIComponent(scope.item)}`;
+
 export const sharedDraftPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/shared-draft`;
+  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/shared-draft${sharedDraftItemQuery(scope)}`;
 
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -43,9 +47,15 @@ const answer = async (fetcher: DaemonFetch, request: { readonly url: string; rea
   return (await response.json()) as unknown;
 };
 
+/**
+ * An answer is this composer's only when it names its session AND its slot. The slot check is what keeps an
+ * older daemon honest: it ignores `?item=` and answers with the chat's draft, which would otherwise be shown
+ * under an Inbox card.
+ */
 const ownSession = (scope: DaemonSessionScope, snapshot: SharedDraftSnapshot): SharedDraftSnapshot => {
   if (snapshot.sessionId !== scope.sessionId)
     throw new DaemonResponseError(502, 'the daemon answered with another session’s draft');
+  if (snapshot.slot !== scope.item) throw new DaemonResponseError(502, 'the daemon answered with another draft slot');
   return snapshot;
 };
 

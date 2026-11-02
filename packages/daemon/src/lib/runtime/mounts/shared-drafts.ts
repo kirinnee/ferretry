@@ -1,4 +1,4 @@
-import { SHARED_DRAFT_ERROR_CODES, SharedDraftEditSchema } from '@ferretry/protocol';
+import { type AgendaId, AgendaIdSchema, SHARED_DRAFT_ERROR_CODES, SharedDraftEditSchema } from '@ferretry/protocol';
 import { type ApiActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
@@ -34,6 +34,10 @@ import type { SentDraftClearer } from './session-send.ts';
  * would have parsed.
  *
  * `noStore` because a draft is live and private: no cache should ever hold one.
+ *
+ * ONE DRAFT PER SLOT. With no query a route is the session's chat draft, exactly as before slots; `?item=A5`
+ * is the reply box of that agenda item, a draft of its own. A malformed item is a 422, one the session does
+ * not have open a 404 — the same answers every other bad address gets here.
  */
 
 const OWNER_ACTOR_KINDS: ReadonlySet<string> = new Set(['admin-cli', 'device']);
@@ -51,6 +55,7 @@ const ERROR_STATUS: Readonly<Record<SharedDraftErrorCode, readonly [number, stri
   'too-many-items': [413, SHARED_DRAFT_ERROR_CODES.tooManyItems],
   'rate-limited': [429, SHARED_DRAFT_ERROR_CODES.rateLimited],
   invalid: [422, SHARED_DRAFT_ERROR_CODES.invalid],
+  'too-many-drafts': [413, SHARED_DRAFT_ERROR_CODES.tooManyDrafts],
 };
 
 /** Whether this caller is the owner: their own shell, or one of their paired devices. */
@@ -73,6 +78,17 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
+/** The agenda item a request names with `?item=`, or nothing for the session's chat draft. */
+function queryItem(context: RouteContext): AgendaId | undefined {
+  const values = context.request.query.get('item') ?? [];
+  if (values.length > 1) throw new ApiError(400, 'query parameter "item" may appear only once', 'invalid_query');
+  if (values[0] === undefined) return undefined;
+  const parsed = AgendaIdSchema.safeParse(values[0]);
+  if (!parsed.success)
+    throw new ApiError(422, 'item is not an agenda item id such as A5', SHARED_DRAFT_ERROR_CODES.invalid);
+  return parsed.data;
+}
+
 function reraise(error: unknown): never {
   if (error instanceof SharedDraftError) {
     const [status, code] = ERROR_STATUS[error.code];
@@ -83,17 +99,18 @@ function reraise(error: unknown): never {
 
 async function read(drafts: SharedDraftService, context: RouteContext): Promise<ApiResponse> {
   assertDraftOwner(context.actor);
-  return jsonResponse(await drafts.read(pathSessionId(context)).catch(reraise));
+  return jsonResponse(await drafts.read(pathSessionId(context), queryItem(context)).catch(reraise));
 }
 
 async function edit(drafts: SharedDraftService, context: RouteContext): Promise<ApiResponse> {
   assertDraftOwner(context.actor);
   const sessionId = pathSessionId(context);
+  const slot = queryItem(context);
   const request = await parseBody(context.request, SharedDraftEditSchema, { maxBytes: SHARED_DRAFT_MAX_BODY_BYTES });
   // The wire answer is the edit and the draft; whether it was a repeat is the stream's business.
   // Counted against this caller's own budget, the same one its stream edits use.
   const { repeatOf: _repeatOf, ...result } = await drafts
-    .edit(sessionId, request, undefined, { author: context.actor ?? '' })
+    .edit(sessionId, request, undefined, { author: context.actor ?? '', ...(slot === undefined ? {} : { slot }) })
     .catch(reraise);
   return jsonResponse(result);
 }
@@ -181,9 +198,11 @@ export function sharedDraftSocketRoutes(
         assertDraftOwner(context.actor);
         const sessionId = pathSessionId(context);
         const position = streamPosition(context);
-        await drafts.read(sessionId).catch(reraise);
+        const slot = queryItem(context);
+        await drafts.read(sessionId, slot).catch(reraise);
         const target: SharedDraftStreamTarget = {
           sessionId,
+          ...(slot === undefined ? {} : { slot }),
           peer: subsystem.nextPeer(),
           device: await deviceLabel(subsystem, context.actor),
           author: context.actor ?? '',
@@ -218,8 +237,9 @@ export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): Sent
         sent: true,
       },
       sharedDraftOrigin(actor, 'send', requestId),
-      // A send's clear is the daemon's, not typing: a flood from any device never drops it.
-      { metered: false },
+      // A send's clear is the daemon's, not typing: a flood from any device never drops it. It clears the
+      // draft the send named, and no other: an item's reply never touches the chat draft, nor the reverse.
+      { metered: false, ...(sent.slot === undefined ? {} : { slot: sent.slot }) },
     );
   };
 }

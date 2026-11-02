@@ -117,6 +117,7 @@ import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import { useFormComposer } from '../agenda-form-send.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
 import type { DaemonBoardStore } from '../board-store.ts';
@@ -1567,7 +1568,13 @@ export function SessionChatPage({
     agendaSent();
     onSent();
   }, [agendaSent, onSent]);
-  const composerClient = useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]);
+  // An open form item's Send answers the form, the Inbox's way (`useFormComposer`); otherwise it chats about the item.
+  const agendaForm = useFormComposer(
+    useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]),
+    agendaComposer.answerForm,
+    agendaComposer.formKey,
+  );
+  const composerClient = agendaForm.api;
   const chat = (
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
       {/* A zero-height row, so the pill overlays the top of the transcript without moving a line of it. */}
@@ -1687,6 +1694,8 @@ export function SessionChatPage({
           ) : (
             <Composer
               api={composerClient}
+              allowEmptySend={agendaForm.allowEmptySend}
+              {...(agendaForm.clearErrorOn === undefined ? {} : { clearErrorOn: agendaForm.clearErrorOn })}
               {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
               {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}

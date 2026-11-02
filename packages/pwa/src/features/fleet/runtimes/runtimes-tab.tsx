@@ -9,7 +9,7 @@
 
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
-import { type MouseEvent, useState } from 'react';
+import { type MouseEvent, useRef, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonNewSessionPath } from '../../../lib/pages/routes.ts';
@@ -23,6 +23,8 @@ import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { skippedItems } from '../shell/skipped-model.ts';
 import { AddRuntime } from './add-runtime.tsx';
+import { DefaultRuntimeControl } from './default-runtime.tsx';
+import { isDefaultRuntime } from './default-runtime-model.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
 import { RemoveRuntimeDialog, RenameRuntimeDialog, RuntimeActionButtons } from './runtime-actions.tsx';
 import { runtimeActionRefusal } from './runtime-actions-model.ts';
@@ -378,6 +380,7 @@ function RuntimeRow({
   online,
   refusal,
   onAct,
+  onMakeDefault,
   changes,
   reload,
 }: {
@@ -388,6 +391,8 @@ function RuntimeRow({
   readonly online: boolean;
   readonly refusal: string | null;
   readonly onAct: (act: RuntimeAct) => void;
+  /** Offered on an agent runtime that is not the default; absent while the machine has not answered. */
+  readonly onMakeDefault?: (name: string) => void;
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
 }) {
@@ -423,6 +428,11 @@ function RuntimeRow({
                     {runtime.agent || runtime.disabled !== undefined ? (
                       <span className="flex flex-wrap gap-1">
                         {runtime.agent ? <Badge tone="accent">Agent</Badge> : null}
+                        {isDefaultRuntime(machine, runtime) ? (
+                          <Badge tone="ok" data-runtime-default-badge="">
+                            Default
+                          </Badge>
+                        ) : null}
                         {runtime.disabled === undefined ? null : (
                           <Badge tone="warn" data-runtime-disabled-badge="">
                             Disabled
@@ -446,6 +456,12 @@ function RuntimeRow({
             refusal={refusal}
             onRename={() => onAct({ kind: 'rename', name: runtime.name })}
             onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+            {...(onMakeDefault === undefined ||
+            !runtime.agent ||
+            runtime.disabled !== undefined ||
+            isDefaultRuntime(machine, runtime)
+              ? {}
+              : { onMakeDefault: () => onMakeDefault(runtime.name) })}
           />
         </div>
       </div>
@@ -483,6 +499,8 @@ export function RuntimesTab({
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [act, setAct] = useState<RuntimeAct | null>(null);
+  const [pickedDefault, setPickedDefault] = useState<string | null>(null);
+  const defaultRef = useRef<HTMLDivElement | null>(null);
   const refusal = runtimeActionRefusal(changes.authority);
 
   // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
@@ -603,6 +621,12 @@ export function RuntimesTab({
     );
 
   const runtimes = data.runtimes.runtimes;
+  // A row's Make default fills the control's pick, so the one apply panel is the only way to save it.
+  const makeDefault = (name: string): void => {
+    changes.clear();
+    setPickedDefault(name);
+    defaultRef.current?.scrollIntoView?.({ block: 'nearest' });
+  };
   return (
     <section className="flex min-w-0 flex-col gap-4" data-runtimes-tab="">
       {state.kind === 'failed' ? (
@@ -627,8 +651,24 @@ export function RuntimesTab({
         </div>
       ) : (
         <>
+          {machine === null ? null : (
+            <div ref={defaultRef} className="scroll-mt-4 border-b border-border-soft pb-4">
+              <DefaultRuntimeControl
+                machine={machine}
+                machineName={machineName}
+                runtimes={runtimes}
+                changes={changes}
+                picked={pickedDefault}
+                onPick={setPickedDefault}
+                onSaved={() => {
+                  (onRefresh ?? onRetry)();
+                  void reload();
+                }}
+              />
+            </div>
+          )}
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <p className="m-0 text-cell text-muted">
+            <p className="m-0 text-cell text-muted" data-runtimes-count="">
               {runtimes.length} {runtimes.length === 1 ? 'runtime' : 'runtimes'} on {machineName}
             </p>
             <span className="flex flex-wrap gap-2">
@@ -652,6 +692,7 @@ export function RuntimesTab({
                   online={online}
                   refusal={refusal}
                   onAct={open}
+                  {...(machine === null ? {} : { onMakeDefault: makeDefault })}
                   changes={changes}
                   reload={reload}
                 />

@@ -10,7 +10,6 @@ import {
   isKeyRefused,
   JOIN_REFUSED_SENTENCE,
   NOT_SHOWN_SENTENCE,
-  passkeyHeading,
   passkeyWindow,
   problemFor,
   publisherLine,
@@ -70,11 +69,7 @@ describe('passkeyWindow', () => {
   });
 });
 
-describe('passkeyHeading and publisherLine', () => {
-  it('should name the member and the publisher', () => {
-    should(passkeyHeading('Alice', 'Studio')).equal('Add a passkey for Alice on Studio');
-  });
-
+describe('publisherLine', () => {
   it('should show the person’s own label, the publisher’s name and the head of the fingerprint', async () => {
     const daemonId = `fy_daemon_${'abcdefghij'.repeat(4)}`;
     const line = publisherLine(await testSubscription(daemonId, { ownLabel: 'Work box', daemonName: 'kirin-box' }));
@@ -87,9 +82,8 @@ describe('passkeyHeading and publisherLine', () => {
     });
   });
 
-  it('should mark hidden characters in a name the publisher chose, in the heading and the line', async () => {
+  it('should mark hidden characters in a name the publisher chose', async () => {
     const hidden = 'Stu\u202Edio';
-    should(passkeyHeading(hidden, hidden)).not.containEql('\u202E');
     const line = publisherLine(await testSubscription('fy_daemon_x', { ownLabel: hidden, daemonName: hidden }));
     should(line.label).not.containEql('\u202E');
     should(line.publisherName).not.containEql('\u202E');
