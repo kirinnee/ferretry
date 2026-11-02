@@ -5,7 +5,6 @@ import type {
   BoardResponse,
   BoardSkipRequest,
   BoardSkipResponse,
-  BoardSwitch,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -61,10 +60,6 @@ class FakeBoardGateway implements IBoardGateway {
 
   sessions(): Promise<readonly SessionDirectoryEntry[]> {
     return Promise.resolve([{ id: 'session-8', callsign: 'denisha' }]);
-  }
-
-  switchOf(projectId: BoardSwitch['projectId']): Promise<BoardSwitch> {
-    return Promise.resolve({ projectId, on: true, setBy: 'owner', setAt: null });
   }
 }
 
