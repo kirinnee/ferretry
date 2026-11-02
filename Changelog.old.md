@@ -1,3 +1,13 @@
+## [4.232.0](https://github.com/kirinnee/ferretry/compare/v4.231.0...v4.232.0) (2026-11-02)
+
+### Features
+
+* **board:** the daemon refuses a ferret's card where the board is off ([#1341](https://github.com/kirinnee/ferretry/issues/1341)) ([94ddfad](https://github.com/kirinnee/ferretry/commit/94ddfad5669f0b243130045210e2577d83657999))
+
+### Fixes
+
+* **fleet:** a linear secret redactor that never hides less than before ([#1347](https://github.com/kirinnee/ferretry/issues/1347)) ([58e7d67](https://github.com/kirinnee/ferretry/commit/58e7d674d8de151447af43576776a0f505948fdb))
+
 ## [4.231.0](https://github.com/kirinnee/ferretry/compare/v4.230.1...v4.231.0) (2026-11-02)
 
 ### Features
