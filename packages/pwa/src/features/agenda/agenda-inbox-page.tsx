@@ -339,11 +339,9 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
     >
       <CardKindChip kind={itemCardKind(card.item)} />
       {joinMeta(
-        hasWords(who.ferret) ? (
-          <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-            {who.ferret}
-          </span>
-        ) : null,
+        <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+          {who.ferret}
+        </span>,
         hasWords(who.task) ? <span data-inbox-who-task="">{who.task}</span> : null,
         hasWords(who.card) ? (
           <span className="fy-meta-line__card" data-inbox-who-card="">
@@ -524,11 +522,9 @@ function GateMeta({
       <CardKindChip kind={itemCardKind(item)} />
       {joinMeta(
         hasWords(gate.projectName) ? <span data-inbox-gate-project="">{gate.projectName}</span> : null,
-        hasWords(inboxWho(card).ferret) ? (
-          <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
-            {inboxWho(card).ferret}
-          </span>
-        ) : null,
+        <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+          {inboxWho(card).ferret}
+        </span>,
       )}
     </CardMetaLine>
   );
