@@ -80,6 +80,8 @@ export interface MachineFileValue {
  */
 export const ProfileFileSchema = z.strictObject({
   contents: z.array(LayerReferenceTextSchema).default([]),
+  /** The origin key a copy stamped: which item on the source machine this one came from. */
+  clonedFromKey: z.string().min(1).optional(),
 });
 export type ProfileFile = z.infer<typeof ProfileFileSchema>;
 
@@ -119,7 +121,7 @@ export interface ConfigValues {
   readonly machine: MachineFileValue;
   readonly login: z.infer<typeof CredentialSchema>;
   readonly component: ComponentOf<ConfigComponentKind>;
-  readonly profile: { readonly layers: readonly LayerReferenceText[] };
+  readonly profile: { readonly layers: readonly LayerReferenceText[]; readonly clonedFromKey?: string };
   readonly runtime: z.infer<typeof RuntimeSchema>;
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
@@ -139,7 +141,12 @@ export function configValue(schema: ConfigSchemaId, parsed: unknown): ConfigValu
       return { machine, advanced };
     }
     case 'profile':
-      return { layers: (parsed as ProfileFile).contents };
+      return {
+        layers: (parsed as ProfileFile).contents,
+        ...((parsed as ProfileFile).clonedFromKey === undefined
+          ? {}
+          : { clonedFromKey: (parsed as ProfileFile).clonedFromKey }),
+      };
     case 'warden':
       return wardenConfigFromFile(parsed as z.infer<typeof WardenFileSchema>);
     case 'learning':
@@ -159,7 +166,12 @@ export function configFileBody(schema: ConfigSchemaId, value: ConfigValues[keyof
       return { ...machine, advanced };
     }
     case 'profile':
-      return { contents: [...(value as ConfigValues['profile']).layers] };
+      return {
+        contents: [...(value as ConfigValues['profile']).layers],
+        ...((value as ConfigValues['profile']).clonedFromKey === undefined
+          ? {}
+          : { clonedFromKey: (value as ConfigValues['profile']).clonedFromKey }),
+      };
     default:
       return value;
   }

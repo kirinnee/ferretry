@@ -164,6 +164,17 @@ describe('looksLikeRawSecret — a high-entropy value under a credential key', (
     should(looksLikeRawSecret('API_KEY', sixteen)).be.true();
     should(looksLikeRawSecret('API_KEY', fifteen)).be.false();
   });
+
+  it('should not flag an origin key under clonedFromKey, but still flag anything else there', () => {
+    // Arrange: 26 random-looking base32 characters, as a copy stamps them
+    const originKey = 'q7zk2px5mlw4tnr6sbd3fgh2jk';
+
+    // Act + Assert
+    should(originKey).have.length(26);
+    should(looksLikeRawSecret('clonedFromKey', originKey)).be.false();
+    should(looksLikeRawSecret('API_KEY', originKey)).be.true();
+    should(looksLikeRawSecret('clonedFromKey', RANDOM_LOOKING)).be.true();
+  });
 });
 
 describe('shannonEntropy', () => {
