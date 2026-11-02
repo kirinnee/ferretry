@@ -299,17 +299,28 @@ const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly Pa
 /** What a hidden value is replaced by in a component's text. */
 const HIDDEN_TEXT = '‹hidden›';
 
-/** `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is. */
-const ASSIGNMENT = /([A-Za-z_][A-Za-z0-9_.-]*)(["']?\s*[:=]\s*["']?)([^\s"'`,;)}\]]+)/gu;
+/**
+ * `NAME=value`, `name: value`, `"name": "value"` — a value with the name that says what it is.
+ *
+ * LINEAR: a name starts only where a run of name characters starts (the look-behind), so a long run with no
+ * separator after it is scanned once, not once from every character in it.
+ */
+const ASSIGNMENT = /(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+)(["']?\s*[:=]\s*["']?)([^\s"'`,;)}\]]+)/gu;
 
 /** One bare word of text, for a value whose own shape says it is a token. */
 const WORD = /[^\s"'`,;()[\]{}<>]+/gu;
 
-/** A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. */
-export function redactText(text: string): { readonly text: string; readonly redacted: boolean } {
+/**
+ * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
+ * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
+ */
+export function redactText(
+  text: string,
+  isSecret: (name: string, value: string) => boolean = looksSecret,
+): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
   const named = text.replace(ASSIGNMENT, (whole, name: string, separator: string, value: string) => {
-    if (!looksSecret(name, value)) return whole;
+    if (!isSecret(name, value)) return whole;
     redacted = true;
     return `${name}${separator}${HIDDEN_TEXT}`;
   });

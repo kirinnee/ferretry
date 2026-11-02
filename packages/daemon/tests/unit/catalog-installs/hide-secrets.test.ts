@@ -148,10 +148,77 @@ describe('hideSecrets: names, flags and addresses', () => {
       `API_TOKEN=${HIDDEN_DIFFERENT}\n`,
     );
   });
+});
 
-  it('should hide a file too long to check for a split secret', () => {
-    const [one] = hideSecrets(skill(['a.md', 'x\n'.repeat(20_001)]), skill());
-    should((one as { skill: { files: { content: string }[] } }).skill.files[0]?.content).equal(HIDDEN);
+describe('hideSecrets: leftovers', () => {
+  const contentOf = (item: unknown) => (item as { skill: { files: { content: string }[] } }).skill.files[0]?.content;
+  const one = (text: string) => contentOf(hideSecrets(skill(['a.md', text]), skill())[0]);
+  const TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+
+  it.each([
+    ['trailing space', `notes\ngh \np_${TOKEN.slice(3)}\n`],
+    ['a bare carriage return', `notes\rgh\rp_${TOKEN.slice(3)}\r`],
+    ['a path before the break', `see path/gh\np_${TOKEN.slice(3)}\n`],
+    ['blank lines between', `notes\ngh\n\n   \np_${TOKEN.slice(3)}\n`],
+  ])('should hide a token split across lines with %s', (_label, text) => {
+    should(one(text)).equal(HIDDEN);
+  });
+
+  it('should cut a short password after its name, on the same line or the next', () => {
+    should(one('password: hunter2\nrest')).equal(`password: ${HIDDEN}\nrest`);
+    should(one('password:\nhunter2\nrest')).equal(`password:\n${HIDDEN}\nrest`);
+  });
+
+  it('should hide PASS and DB_PASS values and the argument after --pass, and leave -p alone', () => {
+    const [shown] = hideSecrets(
+      command({ args: ['--pass', 'hunter2', '-p', '5432'], env: { PASS: 'hunter2', DB_PASS: 'x1' } }),
+      command({}),
+    );
+    should((shown as { mcp: { args: string[]; env: unknown } }).mcp.args).eql(['--pass', HIDDEN, '-p', '5432']);
+    should((shown as { mcp: { env: unknown } }).mcp.env).eql({ PASS: HIDDEN, DB_PASS: HIDDEN });
+  });
+});
+
+describe('hideSecrets: bounded work', () => {
+  // A quadratic pattern would take minutes on these; hiding them whole takes none, because no pattern runs on them.
+  const WITHIN_MS = 5000;
+  const contentOf = (item: unknown) => (item as { skill: { files: { content: string }[] } }).skill.files[0]?.content;
+  const timed = (text: string) => {
+    const started = performance.now();
+    const [one] = hideSecrets(skill(['a.md', text]), skill());
+    return { shown: contentOf(one), took: performance.now() - started };
+  };
+
+  it('should hide a 256 KiB single-line file whole, without running a pattern on it', () => {
+    const { shown, took } = timed('a'.repeat(256 * 1024));
+    should(shown).equal(HIDDEN);
+    should(took).be.below(WITHIN_MS);
+  });
+
+  it('should hide a hundred-line file with one 20 KB line, and a 40 KB hex line, whole', () => {
+    const { shown, took } = timed(`${'one short line\n'.repeat(100)}${'ab'.repeat(10_000)}\nend\n`);
+    should(shown).equal(HIDDEN);
+    should(took).be.below(WITHIN_MS);
+    const hex = timed('0123456789abcdef'.repeat(2_560));
+    should(hex.shown).equal(HIDDEN);
+    should(hex.took).be.below(WITHIN_MS);
+  });
+
+  it('should hide a file with a word over 1 KiB on a line under 4 KiB, and keep one with only short words', () => {
+    should(timed(`ok\n${'x'.repeat(1_500)} tail\n`).shown).equal(HIDDEN);
+    should(timed(`${'word '.repeat(700)}\n`).shown).equal(`${'word '.repeat(700)}\n`);
+  });
+
+  it('should finish on a long run of query marks, many short lines and many blank lines', () => {
+    const started = performance.now();
+    hideSecrets(command({ command: `run ${'?'.repeat(1_000)}` }), command({}));
+    const shown = timed(`${'x\n'.repeat(19_000)}${'\n'.repeat(100_000)}end`).shown;
+    should(shown).equal(`${'x\n'.repeat(19_000)}${'\n'.repeat(100_000)}end`);
+    should(performance.now() - started).be.below(WITHIN_MS);
+  });
+
+  it('should hide a file with too many lines to check for a split secret, whole', () => {
+    should(timed('x\ny\n'.repeat(10_001)).shown).equal(HIDDEN);
   });
 });
 

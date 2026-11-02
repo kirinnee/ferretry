@@ -1799,6 +1799,43 @@ describe('redactText', () => {
   });
 });
 
+describe('redactText: bounded work', () => {
+  // Quadratic work on a run of name characters takes minutes at this size; linear work takes milliseconds. The
+  // margin is a thousandfold, so this is a bound on the pattern and not a timing of the machine.
+  const WITHIN_MS = 5000;
+  const timed = (text: string) => {
+    const started = performance.now();
+    const actual = redactText(text);
+    return { actual, took: performance.now() - started };
+  };
+
+  it('should finish on a very long run of name characters with no separator', () => {
+    const { actual, took } = timed('a'.repeat(256 * 1024));
+    should(actual.redacted).equal(false);
+    should(took).be.below(WITHIN_MS);
+  });
+
+  it('should finish on a long run of name characters ended by a separator, and still hide its value', () => {
+    const { actual, took } = timed(`${'a-b.c_'.repeat(40_000)}=value\nAPI_TOKEN=ghp_abcdefghijklmnop`);
+    should(actual.redacted).equal(true);
+    should(actual.text).match(/API_TOKEN=‹hidden›$/u);
+    should(took).be.below(WITHIN_MS);
+  });
+
+  it('should finish on a long run of separators and spaces', () => {
+    should(timed(`${'= '.repeat(100_000)}x`).took).be.below(WITHIN_MS);
+    should(timed(`a${' '.repeat(200_000)}b`).took).be.below(WITHIN_MS);
+  });
+
+  it('should ask the rule it is given instead of the fleet one', () => {
+    should(redactText('password: hunter2', (name, value) => name === 'password' && value === 'hunter2')).deepEqual({
+      text: 'password: ‹hidden›',
+      redacted: true,
+    });
+    should(redactText('password: hunter2').redacted).equal(false);
+  });
+});
+
 describe('flattenSettings', () => {
   it('should treat an empty document as no entries', () => {
     // Act & Assert

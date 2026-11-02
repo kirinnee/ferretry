@@ -10,7 +10,7 @@
  * offered side then says {@link HIDDEN_DIFFERENT}: a reader learns THAT it changes, never what it was.
  */
 import { looksSecret } from '@ferretry/fleet';
-import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/protocol';
+import { announcesKey, MIN_SECRET_VALUE_LENGTH } from '@ferretry/protocol';
 import type { CatalogMcpSetup, SharedCatalogItem } from '@ferretry/protocol';
 import { redactText } from '../fleet/catalog.ts';
 
@@ -24,27 +24,52 @@ const WHOLE_PLACEHOLDER = /^\$\{secret:[A-Za-z0-9_.-]+\}$/u;
 const INDIRECT = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
 const USER_INFO = /\/\/[^/@\s]+@/gu;
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----/u;
-const QUERY_PARAMETER = /([?&#;])([^=&#;\s]+)=([^&#;\s]*)/gu;
+const QUERY_PARAMETER = /([?&#;])([^=&#;?\s]+)=([^&#;\s]*)/gu;
 const FLAG_WITH_VALUE = /^(--?[^=\s]+)=(.+)$/u;
+const LINE_BREAK = /\r\n|\r|\n/u;
+const WORD_CHARACTER = /[A-Za-z0-9_]/u;
 /** Longest file, in lines, that is checked for a secret split over lines; a longer one is hidden whole. */
 const MAX_CHECKED_LINES = 20_000;
 /** How much text after a line break is joined to the word before it when looking for a split secret. */
 const SPAN = 256;
+/** A line longer than this, or a word longer than {@link MAX_WORD}, is hidden whole with no pattern run on it. */
+const MAX_LINE = 4096;
+const MAX_WORD = 1024;
 
-/** Whether a NAME says its value is a secret, at any length: the fleet's own rule, asked with a value long enough. */
-const announcesSecret = (name: string): boolean => looksSecret(name, 'x'.repeat(MIN_SECRET_VALUE_LENGTH));
+/** Whether a NAME says its value is a secret, at any length: the fleet's own rule and the catalog's own list of key words. */
+const announcesSecret = (name: string): boolean =>
+  looksSecret(name, 'x'.repeat(MIN_SECRET_VALUE_LENGTH)) || announcesKey(name);
 
 const isReference = (value: string): boolean => value === '' || WHOLE_PLACEHOLDER.test(value) || INDIRECT.test(value);
 
+/** A value beside its name that is hidden: a name that announces a secret at any length, or a value that looks like one. */
+const isSecretValue = (name: string, value: string): boolean =>
+  !isReference(value) && (announcesSecret(name) || looksSecret(name, value));
+
+/**
+ * Whether text is too big to be worth reading: a line over {@link MAX_LINE} or a word over {@link MAX_WORD}. Checked
+ * with plain scans (linear) BEFORE any pattern runs, because the text is a publisher's, or whoever typed it here.
+ */
+function oversized(text: string): boolean {
+  for (const line of text.split(LINE_BREAK)) {
+    if (line.length > MAX_LINE) return true;
+    if (line.length > MAX_WORD && line.split(/\s+/u).some(word => word.length > MAX_WORD)) return true;
+  }
+  return false;
+}
+
 /** Text with every secret-looking value on a line cut out, and the user info and query values of an address. */
 const redacted = (text: string): string =>
-  redactText(
-    text
-      .replace(USER_INFO, `//${HIDDEN}@`)
-      .replace(QUERY_PARAMETER, (whole, mark: string, name: string, value: string) =>
-        looksSecret(name, value) ? `${mark}${name}=${HIDDEN}` : whole,
-      ),
-  ).text;
+  oversized(text)
+    ? HIDDEN
+    : redactText(
+        text
+          .replace(USER_INFO, `//${HIDDEN}@`)
+          .replace(QUERY_PARAMETER, (whole, mark: string, name: string, value: string) =>
+            isSecretValue(name, value) ? `${mark}${name}=${HIDDEN}` : whole,
+          ),
+        isSecretValue,
+      ).text;
 
 /**
  * `shown` (the cut text of `raw`), told apart from the other side when the raw texts differ but what is shown does
@@ -57,17 +82,26 @@ const marked = (shown: string, raw: string, there?: { readonly shown: string; re
 
 /**
  * A secret split across lines (`gh` / `p_abc…`) is no single line's secret: at each line break the last word of the
- * line is joined to the text after it and tried again.
+ * line (and the part of it after its last non-word character, `path/gh`) is joined to the next `SPAN` characters
+ * after it and tried again. The lines are already known to be short ({@link redacted}).
  */
 function splitSecret(text: string): boolean {
-  const lines = text.replaceAll(HIDDEN, '').split(/\r?\n/u);
+  const lines = text
+    .replaceAll(HIDDEN, '')
+    .split(LINE_BREAK)
+    .map(line => line.trim())
+    .filter(line => line !== '');
   if (lines.length > MAX_CHECKED_LINES) return true;
   for (let index = 0; index < lines.length - 1; index += 1) {
     const last = (lines[index] ?? '').split(/\s+/u).at(-1) ?? '';
-    if (last === '') continue;
     let tail = '';
-    for (let next = index + 1; next < lines.length && tail.length < SPAN; next += 1) tail += (lines[next] ?? '').trim();
+    for (let next = index + 1; next < lines.length && tail.length < SPAN; next += 1) tail += lines[next] ?? '';
+    tail = tail.slice(0, SPAN);
+    let start = last.length;
+    while (start > 0 && WORD_CHARACTER.test(last[start - 1] ?? '')) start -= 1;
+    const after = last.slice(start);
     if (redactText(last + tail).redacted) return true;
+    if (after !== last && redactText(after + tail).redacted) return true;
   }
   return false;
 }
@@ -80,7 +114,7 @@ function shownFile(text: string): string {
 }
 
 const shownValue = (name: string, value: string): string =>
-  isReference(value) ? value : announcesSecret(name) || looksSecret(name, value) ? HIDDEN : redacted(value);
+  isReference(value) ? value : isSecretValue(name, value) ? HIDDEN : redacted(value);
 
 /** An argument: the value of a flag that names a secret (`--password x`, `--token=x`) at any length, else its own lines cut. */
 function shownArg(arg: string, previous: string | undefined): string {

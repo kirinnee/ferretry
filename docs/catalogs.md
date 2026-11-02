@@ -794,15 +794,19 @@ is automatic: an update is always a new preview and a new yes (and, from a gover
   read from this machine's own bytes, so BOTH sides of the comparison, the installed copy and the offered item,
   go through the fleet's own rules first (`looksSecret`, `redactText`): (a) an environment value that is not a
   whole `${secret:…}` placeholder (or an indirect `$VAR`) is shown as `‹hidden›` at **any length** when its NAME
-  announces a secret (`PASSWORD`, `TOKEN`, …), or when `looksSecret(name, value)` flags it (a known token prefix);
+  announces a secret (`PASSWORD`, `PASS`, `TOKEN`, …, the fleet's rule plus the catalog's key words; in a file the same
+  rule reads `password: x` and `password:⏎x`), or when `looksSecret(name, value)` flags it (a known token prefix);
   any other value has its user info and secret-looking query values cut; (b) a skill file has each line that holds
   such a value cut to `‹hidden›`, for runtime and project skills alike; (c) a server's command, arguments and
   address have the same lines cut, and an address's user name and password and its secret-looking query values;
   an argument that follows a flag naming a secret (`--password x`), or is that flag's `=` value, is cut too;
-  (d) a file whose lines **joined across each line break** still hold a secret (one split over lines, indented or
-  not), or that holds a private key block, is hidden whole. Wherever a value is cut and the raw texts of the two
+  (d) a file whose lines **joined across each line break** (`\n`, `\r\n` or a lone `\r`, blank lines skipped, the
+  part of the last word after its last non-word character tried too) still hold a secret (one split over lines), or that holds a private key block, is hidden whole. Wherever a value is cut and the raw texts of the two
   sides differ while what is shown is the same, the offered side reads `‹hidden, different›` (in a file, an
-  environment value, the command, an argument or the address), so a change is never shown as no change. The rest of the answer
+  environment value, the command, an argument or the address), so a change is never shown as no change. **Work is
+  bounded**: text with a line over 4 KiB or a word over 1 KiB, or a file of more than 20 000 lines, is hidden whole
+  before any pattern runs on it (the text is a publisher's, or whoever typed it here), and the fleet's own
+  `redactText` reads a name only where a run of name characters starts, so it is linear. The rest of the answer
   (`edited`, warnings, the refusal text) names paths and servers only, never text from disk; the full `review`
   is the offered item, the publisher's own text.
 - **Keep my edits, or replace them.** If the place is held by this install and the only differences are
