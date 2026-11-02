@@ -157,6 +157,7 @@ interface World {
     daemon: string | undefined;
     /** `setup/export-keys.json` as the machine holds it. */
     keysText: string | undefined;
+    keysReadError: unknown;
     keysWriteError: unknown;
     keysWrites: number;
   };
@@ -206,6 +207,7 @@ function world(
     locate: { claude: '/usr/bin/claude' },
     daemon: 'daemon-source',
     keysText: undefined,
+    keysReadError: undefined,
     keysWriteError: undefined,
     keysWrites: 0,
   };
@@ -265,7 +267,10 @@ function world(
       return Uint8Array.from({ length }, (_, index) => (drawn * 37 + index * 11) % 256);
     },
     exportKeys: {
-      read: async path => (path === KEYS_PATH ? state.keysText : undefined),
+      read: async path => {
+        if (state.keysReadError !== undefined) throw state.keysReadError;
+        return path === KEYS_PATH ? state.keysText : undefined;
+      },
       write: async (path, text) => {
         if (state.keysWriteError !== undefined) throw state.keysWriteError;
         should(path).equal(KEYS_PATH);
@@ -687,6 +692,15 @@ describe('exportBundle origin keys', () => {
     const bundle = await exported(w);
     should(bundle.keys['instructions/main']).match(ORIGIN_KEY_PATTERN);
     should(w.state.keysText).be.undefined();
+  });
+
+  it('should mint every key again when the file cannot be read', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    w.state.keysReadError = new Error('permission denied');
+    const bundle = await exported(w);
+    should(bundle.keys['instructions/main']).match(ORIGIN_KEY_PATTERN);
+    should(parseExportKeys(w.state.keysText).items['instructions/main']?.key).equal(bundle.keys['instructions/main']);
   });
 
   it('should refuse an export while the daemon has no id to report', async () => {
