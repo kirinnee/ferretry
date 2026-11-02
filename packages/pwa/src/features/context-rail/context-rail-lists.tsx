@@ -16,8 +16,11 @@ import { Markdown } from '../../components/markdown.tsx';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
 import { type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { Button } from '../../shell/primitives.tsx';
 import { SKILL_SCOPE_LABEL, SKILL_SCOPE_TITLE, skillOverride, sortedSkills } from '../mcp/mcp-model.ts';
 import { skillInsertText } from '../skills/skills-catalog.ts';
+import { ADD_SKILLS_BUTTON } from './add-skills-model.ts';
+import { type AddSkillsHost, AddSkillsSheet } from './add-skills-sheet.tsx';
 import {
   activeSkillsLine,
   CONTEXT_RAIL_SEARCH_LABEL,
@@ -65,6 +68,8 @@ export interface ContextSkillsPanelProps extends ListPanelProps<SessionSkillsInv
   readonly machineName: string;
   /** Lets rows say where an installed skill came from, and offer Publish and Uninstall in their ⋯. */
   readonly catalogs?: CatalogRowsHost;
+  /** Lets the Skills tab open "+ Add skills". Without it the button is not drawn. */
+  readonly addSkills?: AddSkillsHost;
 }
 
 export function ContextSkillsPanel({
@@ -78,8 +83,10 @@ export function ContextSkillsPanel({
   loadSkillFile,
   machineName,
   catalogs,
+  addSkills,
 }: ContextSkillsPanelProps) {
   const [opened, setOpened] = useState<SkillEntry | null>(null);
+  const [adding, setAdding] = useState(false);
   const rows = useCatalogRows(catalogs);
   const { load, reload } = read;
   if (load.kind === 'failed')
@@ -114,9 +121,16 @@ export function ContextSkillsPanel({
         onChipChange={onChipChange}
         {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })}
       />
-      <p className="m-0 text-2xs text-faint" data-context-skills-active="">
-        {activeSkillsLine(load.value)}
-      </p>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-xs">
+        <p className="m-0 min-w-0 text-2xs text-faint" data-context-skills-active="">
+          {activeSkillsLine(load.value)}
+        </p>
+        {addSkills === undefined ? null : (
+          <Button type="button" size="sm" onClick={() => setAdding(true)} data-context-add-skills="">
+            {ADD_SKILLS_BUTTON}
+          </Button>
+        )}
+      </div>
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('skills', total, query, chipLabel)}</ContextNote>
       ) : (
@@ -150,6 +164,17 @@ export function ContextSkillsPanel({
       )}
       {opened === null || loadSkillFile === undefined ? null : (
         <SkillFileSheet skill={opened} load={loadSkillFile} machineName={machineName} onClose={() => setOpened(null)} />
+      )}
+      {!adding || addSkills === undefined ? null : (
+        <AddSkillsSheet
+          host={addSkills}
+          inventory={load.value}
+          onInstalled={() => {
+            reload();
+            rows.reload();
+          }}
+          onClose={() => setAdding(false)}
+        />
       )}
     </div>
   );

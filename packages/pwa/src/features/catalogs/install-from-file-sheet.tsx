@@ -73,6 +73,8 @@ interface InstallSource {
 
 export interface InstallFromFileSheetProps {
   readonly source?: InstallSource;
+  /** Where to install unless the person picks another place: seeds the first choice, nothing more. */
+  readonly preferredTarget?: TargetDraft;
   readonly connection: DaemonConnection;
   readonly onClose: () => void;
   readonly host?: InstallHost;
@@ -100,6 +102,7 @@ function InstallSheetBody({
   host,
   projects,
   source,
+  preferredTarget,
 }: InstallFromFileSheetProps & { readonly projects: readonly Project[] }) {
   const routed = useDaemonClient();
   const createClient: CatalogClientFactory = host?.createClient ?? routed;
@@ -110,7 +113,7 @@ function InstallSheetBody({
   const [opened, setOpened] = useState<OpenedCatalogFile | null>(source?.opened ?? null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [itemId, setItemId] = useState<string | null>(source?.itemId ?? null);
-  const [draft, setDraft] = useState<TargetDraft>({});
+  const [draft, setDraft] = useState<TargetDraft>(preferredTarget ?? {});
   const [runtimes, setRuntimes] = useState<TargetOptions['runtimes']>([]);
   const [allowOlder, setAllowOlder] = useState(false);
   const [preview, setPreview] = useState<CatalogInstallPreview | null>(null);

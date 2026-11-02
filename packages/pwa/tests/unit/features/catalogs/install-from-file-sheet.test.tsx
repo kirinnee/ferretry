@@ -662,4 +662,25 @@ describe('an item a member already opened', () => {
     expect(fake.calls.some(call => `${call.method} ${call.path}` === RUNTIME_APPLY)).toBe(true);
     await view.unmount();
   });
+
+  it('starts on the place it is asked to prefer, and the person can still change it', async () => {
+    const fake = fakeClient({ ...baseHandlers });
+    const opened = await openCatalogFile(fileText, crypto);
+    if (!opened.ok) throw new Error(opened.sentence);
+    const view = await mount(
+      <InstallFromFileSheet
+        connection={connection}
+        source={{ opened: opened.opened, itemId: MCP_ID, publisherLabel: 'Studio' }}
+        preferredTarget={{ scope: 'project', projectRoot: '/work/proj', harness: 'claude' }}
+        onClose={() => undefined}
+        host={{ createClient: fake.factory, crypto, projects: PROJECTS }}
+      />,
+    );
+    await settle();
+    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('project');
+    expect((q('[data-catalog-project]') as HTMLSelectElement).value).toBe('/work/proj');
+    await choose('[data-catalog-scope]', 'runtime');
+    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('runtime');
+    await view.unmount();
+  });
 });

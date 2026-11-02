@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import type { TargetDraft } from '../../../../src/features/catalogs/catalog-install-model.ts';
 import { type InstallMachine, SharedItemSheet } from '../../../../src/features/shared/shared-item-sheet.tsx';
 import { NOT_PAIRED_NOTE } from '../../../../src/features/shared/shared-screens-model.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -53,7 +54,12 @@ const agreeingPreview = (which: 'skill' | 'mcp' = 'mcp') => {
   });
 };
 
-async function sheet(which: 'skill' | 'mcp', list: InstallMachine[], handlers: Parameters<typeof fakeClient>[0] = {}) {
+async function sheet(
+  which: 'skill' | 'mcp',
+  list: InstallMachine[],
+  handlers: Parameters<typeof fakeClient>[0] = {},
+  preferredTarget?: TargetDraft,
+) {
   const asked: string[] = [];
   const closed: string[] = [];
   const fake = fakeClient({
@@ -66,6 +72,7 @@ async function sheet(which: 'skill' | 'mcp', list: InstallMachine[], handlers: P
       shown={shown(which)}
       publisherLabel="Studio"
       machines={list}
+      {...(preferredTarget === undefined ? {} : { preferredTarget })}
       installHost={{
         createClient: async connection => {
           asked.push(connection.daemonId);
@@ -164,6 +171,20 @@ describe('Install on a machine', () => {
     expect(q('[data-catalog-sheet="shared-item"]')).toBeNull();
     await click(q('button[aria-label="Close Install on a machine"]'));
     expect(q('[data-catalog-sheet="shared-item"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('hands the preferred place to the install sheet as its first choice', async () => {
+    const { view } = await sheet(
+      'skill',
+      machines(alpha),
+      {},
+      { scope: 'runtime', runtime: 'box', profile: 'default' },
+    );
+    await click(q('[data-shared-install-button]'));
+    await settle();
+    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('runtime');
+    expect((q('[data-catalog-runtime]') as HTMLSelectElement).value).toBe('box');
     await view.unmount();
   });
 });

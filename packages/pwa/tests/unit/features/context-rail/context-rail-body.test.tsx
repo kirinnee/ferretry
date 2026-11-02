@@ -5,7 +5,7 @@
  * lazy read every sub-tab shares.
  */
 
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
   MCP_OAUTH_PATH,
   type McpCheckResult,
@@ -41,6 +41,11 @@ import {
   fakeChannels,
   mcpFlow,
 } from '../fleet/mcp-sign-in-support.ts';
+import { crypto as testCrypto } from '../../../support/catalog-files.ts';
+import type { MemberSubscription } from '../../../../src/lib/member-keys.ts';
+import type { AddSkillsHost } from '../../../../src/features/context-rail/add-skills-sheet.tsx';
+import { testSubscription } from '../../../support/member-keys.ts';
+import { fakeMembers, okAttempt, type SharedItemFixture, sharedItemFixture } from '../../../support/shared-screens.ts';
 import { DOCS, MCP, NOW, SKILLS, skill } from './context-rail-fixtures.ts';
 
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
@@ -683,5 +688,71 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-row-add]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-link]')).toBeNull();
+  });
+});
+
+describe('ContextRailBody — + Add skills', () => {
+  let shared: SharedItemFixture;
+  let studio: MemberSubscription;
+  beforeAll(async () => {
+    shared = await sharedItemFixture();
+    studio = await testSubscription(shared.identity.daemonId, { ownLabel: 'Studio' });
+  });
+
+  const addSkillsHost = (installs: () => unknown, events: string[] = []): AddSkillsHost => {
+    const fake = fakeClient({
+      'GET /v1/catalog-installs': installs as () => never,
+      'GET /v1/fleet/runtimes': () => ({ runtimes: [{ id: 'rt-work', wrapper: 'claude-work', profile: 'default' }] }),
+      'GET /v1/secrets': () => ({ v: 1, health: 'ready', secrets: [], references: [] }),
+    });
+    const entry = shared.entries.find(candidate => candidate.itemId === shared.skill.itemId);
+    const { members } = fakeMembers({
+      list: async () => [studio],
+      browse: async () => okAttempt(shared.browse),
+      openItem: async () =>
+        okAttempt({ item: shared.skill, opened: shared.opened, entry: must(entry, 'the skill entry') }),
+    });
+    return {
+      connection: STUDIO,
+      machineName: 'studio-mac',
+      cwd: '/work/app',
+      onSubscribe: () => events.push('subscribe'),
+      install: { createClient: fake.factory, crypto: testCrypto, projects: [{ name: 'app', path: '/work/app' }] },
+      members,
+    };
+  };
+
+  it('is not there unless the host gives the panel somewhere to add from', async () => {
+    const { root } = await body({ tab: 'skills' });
+    expect(root.querySelector('[data-context-add-skills]')).toBeNull();
+  });
+
+  it('sits by the active line, opens the sheet, and closes it again', async () => {
+    const { root } = await body({ tab: 'skills', addSkills: addSkillsHost(() => ({ installs: [] })) });
+    expect(text(root, '[data-context-add-skills]')).toBe('+ Add skills');
+    await click(root, '[data-context-add-skills]');
+    expect(document.querySelector('[data-catalog-sheet="add-skills"]')).not.toBeNull();
+    await click(document, 'button[aria-label="Close Add skills"]');
+    expect(document.querySelector('[data-catalog-sheet="add-skills"]')).toBeNull();
+  });
+
+  it('reads the session’s skills again after an install lands', async () => {
+    let reads = 0;
+    const installs = [[], [], [installRecord('skill', 'pdf-tools')]];
+    let at = 0;
+    const loadSkills = async () => {
+      reads += 1;
+      return SKILLS;
+    };
+    const { root } = await body({
+      tab: 'skills',
+      loadSkills,
+      addSkills: addSkillsHost(() => ({ installs: installs[Math.min(at++, 2)] })),
+    });
+    const before = reads;
+    await click(root, '[data-context-add-skills]');
+    await click(document, '[data-add-skills-install]');
+    await click(document, 'button[aria-label="Close pdf-tools"]');
+    expect(reads).toBeGreaterThan(before);
   });
 });

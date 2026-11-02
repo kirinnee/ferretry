@@ -146,7 +146,7 @@ import type { DaemonUsageStore } from '../usage-store.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath } from './routes.ts';
+import { daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath, daemonSharingPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -1363,6 +1363,10 @@ export function SessionChatPage({
     );
   const infoControls = infoRuntimeControls ?? runtimePickers(true) ?? undefined;
 
+  const sessionCwd = session.config.cwd;
+  const canNavigate = onNavigate !== undefined;
+  const navigateRef = useRef(onNavigate);
+  navigateRef.current = onNavigate;
   /**
    * INFO — every LOOK for this ferret. The Context tab is the old "This folder" rail (Files, Instructions,
    * Skills and MCP, each server and skill with its scope), and Signals adds the Warden's verdicts to its
@@ -1395,9 +1399,19 @@ export function SessionChatPage({
         mcpSignIn: { connection, createClient, machineName: contextDependencies.machineName },
         catalogs: { connection },
         onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
+        ...(!canNavigate
+          ? {}
+          : {
+              addSkills: {
+                connection,
+                machineName: contextDependencies.machineName,
+                ...(sessionCwd === undefined ? {} : { cwd: sessionCwd }),
+                onSubscribe: () => navigateRef.current?.(daemonSharingPath(connection.daemonId, 'shared')),
+              },
+            }),
       },
     };
-  }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient]);
+  }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate, sessionCwd]);
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   boardFullRef.current = tasksFull;
   collapseBoardRef.current = () => tasks.setExpanded(false);
