@@ -195,6 +195,7 @@ export class CatalogMemberService {
   #state: State | undefined;
   #loading: Promise<void> | undefined;
   readonly #held = new Map<string, Held>();
+  readonly #unfinishedRemovals = new Set<string>();
   readonly #compare: DigestComparison;
 
   constructor(private readonly deps: CatalogMemberDeps) {
@@ -208,7 +209,7 @@ export class CatalogMemberService {
    * awaits this in step 1, because the admission step itself cannot wait.
    */
   async ready(): Promise<void> {
-    if (this.#state !== undefined) return;
+    if (this.#state !== undefined && this.#loading === undefined) return;
     this.#loading ??= this.#load().finally(() => {
       this.#loading = undefined;
     });
@@ -217,35 +218,45 @@ export class CatalogMemberService {
 
   async #load(): Promise<void> {
     const [members, shares] = await Promise.all([this.deps.members.read(), this.deps.shares.read()]);
-    this.#state ??= { members, shares };
     const upgrade = this.deps.members.takeUpgrade();
-    if (upgrade !== undefined) await this.#upgraded(upgrade);
+    if (upgrade === undefined) {
+      this.#state ??= { members, shares };
+      return;
+    }
+    // In the write queue, so nothing else touches the shares file while the upgrade is being written.
+    await this.#serially(async () => {
+      await this.#upgraded(upgrade, { members, shares });
+    });
   }
 
   /**
    * The file was written before a name was an ID and people shared one: the later ones were renamed in memory.
-   * Audited by ID (the names are the owner's own text, so they stay out of the log), written once with the
-   * original put aside, and told to the owner once. A disk that will not take the write leaves the old file,
-   * and the next boot does it again.
+   * The original is put aside and the upgraded file written first; only once that has succeeded is the upgrade
+   * audited (by ID: the names are the owner's own text, so they stay out of the log) and told to the owner, once.
+   * A disk that will not take the write refuses the load: nothing is served from a state that is not on disk
+   * with its original kept, nothing is audited or announced, and the next attempt starts again from the old file.
    */
-  async #upgraded(upgrade: MembersUpgrade): Promise<void> {
-    for (const rename of upgrade.renames) await this.#renamed(rename);
-    const { shares } = this.#loaded();
+  async #upgraded(upgrade: MembersUpgrade, loaded: State): Promise<void> {
     const renamed = new Map(upgrade.renames.map(rename => [rename.memberId, rename.to] as const));
     const followed: SharesDocument = {
-      ...shares,
-      shares: shares.shares.map(share => {
+      ...loaded.shares,
+      shares: loaded.shares.shares.map(share => {
         const label = renamed.get(share.memberId);
         return label === undefined ? share : { ...share, memberLabel: label };
       }),
     };
-    this.#state = { ...this.#loaded(), shares: followed };
     try {
       await upgrade.commit();
-      if (upgrade.renames.length > 0) await this.deps.shares.write(followed);
-    } catch {
-      // The old file is still there, untouched or backed up; the next boot repeats this.
+    } catch (error) {
+      throw new CatalogMemberRefusal(
+        'store_damaged',
+        `members.json could not be upgraded so every name is unique (${error instanceof Error ? error.message : 'the write failed'}). Nothing was changed; it is tried again next time.`,
+      );
     }
+    this.#state ??= { members: loaded.members, shares: followed };
+    // The labels a waiting invite carries follow the rename; if this write fails they are corrected at the next shares write.
+    if (upgrade.renames.length > 0) await this.deps.shares.write(followed).catch(() => undefined);
+    for (const rename of upgrade.renames) await this.#renamed(rename);
     this.deps.onRenamed?.(upgrade.renames);
   }
 
@@ -504,7 +515,7 @@ export class CatalogMemberService {
           'shares_full',
           `${String(CATALOG_SHARES_LISTED_MAX)} shares are stored. Old ones are forgotten after 30 days; end some, or try again later.`,
         );
-      const who = this.#whoFor(request.member, now);
+      const who = this.#whoFor(request.member, request.uses, now);
       const existing = who.existing;
       if (new Set([...(existing?.catalogIds ?? []), ...request.catalogIds]).size > CATALOG_SHARE_MAX_CATALOGS)
         throw new CatalogMemberRefusal(
@@ -596,7 +607,8 @@ export class CatalogMemberService {
 
   /**
    * Removes a person: their record and every browser, and ends the shares that name them. The members file is
-   * written first. Asked again after a failure between the two writes, it finishes the job.
+   * written first. Asked again after a failure of either write, in this process or after a restart, it finishes the job:
+   * the person is gone in memory at once, and the invites that name them are ended on disk by the retry.
    *
    * Every browser goes exactly as removing one does (`closeKey`): its passkeys are forgotten, which tells the
    * passkeys-changed signal. Only once the record is gone from disk: a members write that failed leaves the person, and
@@ -608,7 +620,9 @@ export class CatalogMemberService {
       const state = this.#loaded();
       const member = state.members.members.find(entry => entry.memberId === memberId);
       const named = state.shares.shares.filter(share => share.memberId === memberId && share.state === 'live');
-      if (member === undefined && named.length === 0)
+      // Removal is final in memory at once, so a write that failed is finished by asking again, not by a restart.
+      const unfinished = this.#unfinishedRemovals.has(memberId);
+      if (member === undefined && named.length === 0 && !unfinished)
         throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
       this.#void(reservation => reservation.memberId === memberId);
       const members: MembersDocument = {
@@ -620,13 +634,15 @@ export class CatalogMemberService {
       let failure: unknown;
       let removedKeys: readonly string[] = [];
       try {
-        if (member !== undefined) {
+        if (member !== undefined || unfinished) {
           await this.deps.members.write(members);
-          removedKeys = member.keys.map(key => key.keyId);
+          removedKeys = member?.keys.map(key => key.keyId) ?? [];
         }
-        if (shares !== state.shares) await this.deps.shares.write(shares);
+        if (shares !== state.shares || unfinished) await this.deps.shares.write(shares);
+        this.#unfinishedRemovals.delete(memberId);
       } catch (error) {
         failure = error;
+        this.#unfinishedRemovals.add(memberId);
       }
       // Closing what is open does not wait on a write: the person's access is already gone in memory.
       await this.deps.sessions.closeMember(memberId);
@@ -834,6 +850,14 @@ export class CatalogMemberService {
     );
   }
 
+  #alreadyIn(member: StoredMember): CatalogMemberRefusal {
+    return new CatalogMemberRefusal(
+      'member_exists',
+      `${member.label} is already in. A code for many people can't add to someone already in yet; use a single-use code.`,
+      member.memberId,
+    );
+  }
+
   /**
    * Who a share is for. A `{ name }` reaches whoever holds that user ID, member or reserved, and otherwise makes
    * and reserves a new person; the older `new` arm is refused when the name is taken, so no mint ever makes a
@@ -841,6 +865,7 @@ export class CatalogMemberService {
    */
   #whoFor(
     member: CatalogShareMintRequest['member'],
+    uses: CatalogShareMintRequest['uses'],
     now: number,
   ): {
     readonly kind: 'new' | 'existing';
@@ -852,6 +877,7 @@ export class CatalogMemberService {
     if ('kind' in member && member.kind === 'existing') {
       const found = state.members.members.find(entry => entry.memberId === member.memberId);
       if (found === undefined) throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
+      if (uses.kind === 'multi') throw this.#alreadyIn(found);
       return { kind: 'existing', memberId: found.memberId, label: found.label, existing: found };
     }
     const name = 'kind' in member ? member.label : member.name;
@@ -860,6 +886,9 @@ export class CatalogMemberService {
       return { kind: 'new', memberId: `mbr_${randomText(this.deps.crypto)}`, label: name, existing: undefined };
     if ('kind' in member) throw this.#taken(name, holder.memberId);
     const found = state.members.members.find(entry => entry.memberId === holder.memberId);
+    // Until a joiner can prove they are the person (join-by-proof), a code for many people never reaches someone
+    // who is already in: every stranger who held it would arrive as them. A person only reserved may still have one.
+    if (found !== undefined && uses.kind === 'multi') throw this.#alreadyIn(found);
     return { kind: found === undefined ? 'new' : 'existing', ...holder, existing: found };
   }
 

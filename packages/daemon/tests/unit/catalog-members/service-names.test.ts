@@ -97,13 +97,36 @@ describe('a name is a user ID: minting', () => {
     should(error.memberId).equal(first.share.memberId);
   });
 
-  it('should let a code for many people name someone already in', async () => {
+  it('should refuse a code for many people that names someone already in, until join-by-proof', async () => {
     const r = await rig({ members: membersDoc(alice()) });
 
-    const minted = await r.service.mint(multiNamed('Alice', 10));
+    const byName = await refusal(() => r.service.mint(multiNamed('ALICE', 10)));
+    const byId = await refusal(() => r.service.mint({ ...singleForMember(1), uses: { kind: 'multi', cap: 10 } }));
+
+    for (const error of [byName, byId]) {
+      should(error.refusal).equal('member_exists');
+      should(error.memberId).equal(memberId(1));
+    }
+    should(byName.message).containEql('is already in');
+    should(r.shares.writes).equal(0);
+  });
+
+  it('should let a code for many people name a person who is only reserved, not yet joined', async () => {
+    const r = await rig();
+    const first = await r.service.mint(singleNamed('Bob'));
+
+    const crowd = await r.service.mint(multiNamed('bob', 10));
+
+    should(crowd.share.memberId).equal(first.share.memberId);
+    should(r.shares.document.shares.map(share => share.memberKind)).eql(['new', 'new']);
+  });
+
+  it('should still give a single-use code to someone already in', async () => {
+    const r = await rig({ members: membersDoc(alice()) });
+
+    const minted = await r.service.mint(singleNamed('Alice'));
 
     should(minted.share.memberId).equal(memberId(1));
-    should(minted.share.uses).eql({ kind: 'multi', cap: 10 });
   });
 
   it('should still give a code for many people a new person when it names one', async () => {
@@ -220,9 +243,11 @@ describe('a name is a user ID: renaming', () => {
   it('should let a person change the case or spacing of their own ID', async () => {
     const r = await rig({ members: pair() });
 
+    const same = await r.service.renameMember(memberId(1), 'ALICE');
     const view = await r.service.renameMember(memberId(1), 'ALICE  B');
     const back = await r.service.renameMember(memberId(1), 'alice');
 
+    should(same.label).equal('ALICE');
     should(view.memberId).equal(memberId(1));
     should(back.label).equal('alice');
     should(memberOf(r.members.document, 1).keys).have.length(2);
@@ -328,16 +353,72 @@ describe('a name is a user ID: the one-time upgrade', () => {
     should(r.renamed).eql([[]]);
   });
 
-  it('should carry on, and still tell the owner, when the disk will not take the write', async () => {
+  it('should refuse to load, audit nothing and tell nobody when the disk will not take the upgrade', async () => {
     const committed = { count: 0 };
     const r = await rig({
       members: membersDoc(alice(), storedMember(2, { label: 'Alice (2)' })),
       upgrade: upgrade(committed, { failing: true }),
+      unloaded: true,
     });
 
+    const error = await refusal(() => r.service.ready());
+
+    should(error.refusal).equal('store_damaged');
+    should(error.message).containEql('disk full');
     should(committed.count).equal(1);
+    should(r.audit.entries).have.length(0);
+    should(r.renamed).eql([]);
+    should(r.shares.writes).equal(0);
+  });
+
+  it('should audit and announce once, after the retry that commits, not once per failed try', async () => {
+    const committed = { count: 0 };
+    const r = await rig({
+      members: membersDoc(alice(), storedMember(2, { label: 'Alice (2)' })),
+      upgrade: upgrade(committed, { failing: true }),
+      unloaded: true,
+    });
+    await refusal(() => r.service.ready());
+    r.members.upgrade = upgrade(committed, { failing: true });
+    await refusal(() => r.service.ready());
+    r.members.upgrade = upgrade(committed);
+
+    await r.service.ready();
+    await r.service.ready();
+
+    should(committed.count).equal(3);
+    should(r.audit.entries).have.length(1);
     should(r.renamed).have.length(1);
-    should((await r.service.listMembers()).members.map(member => member.label)).eql(['Alice', 'Alice (2)']);
+  });
+
+  it('should run the upgrade inside the write queue, so a mint made meanwhile waits and is kept', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const r = await rig({
+      members: membersDoc(alice(), storedMember(2, { label: 'Alice (2)' })),
+      shares: sharesDoc(storedShare(1, { memberId: memberId(2), memberLabel: 'Alice', memberKind: 'existing' })),
+      upgrade: {
+        renames: [{ memberId: memberId(2), from: 'Alice', to: 'Alice (2)' }],
+        commit: async () => {
+          await gate;
+        },
+      },
+      unloaded: true,
+    });
+
+    const loading = r.service.ready();
+    const minting = r.service.mint(singleNamed('Bob'));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    should(r.shares.writes).equal(0);
+    release();
+    await loading;
+    const minted = await minting;
+
+    const onDisk = r.shares.document.shares;
+    should(onDisk.map(share => share.memberLabel)).eql(['Alice (2)', 'Bob']);
+    should(onDisk.map(share => share.shareId)).containEql(minted.share.shareId);
   });
 
   it('should carry on when the audit log is down', async () => {

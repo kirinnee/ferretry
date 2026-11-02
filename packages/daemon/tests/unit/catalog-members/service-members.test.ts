@@ -22,6 +22,15 @@ import {
 
 const seven = () => storedMember(7, { catalogIds: [catalogId(1), catalogId(2)], keys: [storedKey(71), storedKey(72)] });
 
+const fixture = () => ({
+  members: membersDoc(seven(), storedMember(8, { keys: [storedKey(81)] })),
+  shares: sharesDoc(
+    storedShare(1, { memberId: memberId(7), memberKind: 'existing' }),
+    storedShare(2, { memberId: memberId(7), memberKind: 'existing', state: 'spent' }),
+    storedShare(3, { memberId: memberId(8), memberKind: 'existing' }),
+  ),
+});
+
 describe('CatalogMemberService.listMembers', () => {
   it('should list nobody for nobody', async () => {
     // Arrange
@@ -133,15 +142,6 @@ describe('CatalogMemberService.renameMember', () => {
 });
 
 describe('CatalogMemberService.revokeMember', () => {
-  const fixture = () => ({
-    members: membersDoc(seven(), storedMember(8, { keys: [storedKey(81)] })),
-    shares: sharesDoc(
-      storedShare(1, { memberId: memberId(7), memberKind: 'existing' }),
-      storedShare(2, { memberId: memberId(7), memberKind: 'existing', state: 'spent' }),
-      storedShare(3, { memberId: memberId(8), memberKind: 'existing' }),
-    ),
-  });
-
   it('should write the members file, then the shares file, then close what is open, and count what went', async () => {
     // Arrange
     const r = await rig(fixture());
@@ -282,6 +282,58 @@ describe('CatalogMemberService.revokeMember', () => {
     should(revoked).eql({ memberId: memberId(7), keysRemoved: 0, sharesEnded: 1 });
     should(restarted.members.writes).equal(0);
     should(shareOf(restarted.shares.document, 1).state).equal('ended');
+  });
+});
+
+describe('CatalogMemberService.revokeMember: removal is final', () => {
+  it('should keep the person gone, and the invites ended, when the shares file fails and the same process asks again', async () => {
+    // Arrange
+    const r = await rig(fixture());
+    r.shares.failing = true;
+    await failure(() => r.service.revokeMember(memberId(7)));
+    r.shares.failing = false;
+
+    // Act
+    const revoked = await r.service.revokeMember(memberId(7));
+
+    // Assert
+    should(revoked.sharesEnded).equal(0);
+    should(r.members.document.members.map(member => member.memberId)).eql([memberId(8)]);
+    should(shareOf(r.shares.document, 1).state).equal('ended');
+    should(
+      (await r.service.listShares()).shares.find(share => share.shareId === shareOf(r.shares.document, 1).shareId)
+        ?.state,
+    ).equal('ended');
+  });
+
+  it('should write the members file again on a retry after that write failed', async () => {
+    // Arrange
+    const r = await rig(fixture());
+    r.members.failing = true;
+    await failure(() => r.service.revokeMember(memberId(7)));
+    r.members.failing = false;
+
+    // Act
+    await r.service.revokeMember(memberId(7));
+
+    // Assert
+    should(r.members.document.members.map(member => member.memberId)).eql([memberId(8)]);
+    should(shareOf(r.shares.document, 1).state).equal('ended');
+  });
+
+  it('should refuse a third ask once the retry finished the job', async () => {
+    // Arrange
+    const r = await rig(fixture());
+    r.shares.failing = true;
+    await failure(() => r.service.revokeMember(memberId(7)));
+    r.shares.failing = false;
+    await r.service.revokeMember(memberId(7));
+
+    // Act
+    const error = await refusal(() => r.service.revokeMember(memberId(7)));
+
+    // Assert
+    should(error.refusal).equal('member_unknown');
   });
 });
 

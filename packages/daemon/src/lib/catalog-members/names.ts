@@ -33,7 +33,7 @@ export function freeMemberName(name: string, taken: ReadonlySet<string>): string
 
 /**
  * Every member with a name of their own. The OLDEST member keeps the plain name; each later one becomes
- * `name (2)`, `name (3)`, … Nobody is merged and nobody loses a browser, a catalog or a passkey: only the name
+ * `name (2)`, `name (3)`, … whose key nobody holds, original or new. Nobody is merged and nobody loses a browser, a catalog or a passkey: only the name
  * changes. Answers the same document when no two members shared a name.
  */
 export function uniqueMemberNames(members: readonly StoredMember[]): {
@@ -44,12 +44,20 @@ export function uniqueMemberNames(members: readonly StoredMember[]): {
   const order = members
     .map((member, index) => ({ member, index }))
     .sort((a, b) => Date.parse(a.member.createdAt) - Date.parse(b.member.createdAt) || a.index - b.index);
-  const taken = new Set<string>();
+  // Every name somebody already has is taken before anyone is renamed: a person whose name was unique never changes,
+  // and a new name is never an ID that already means someone else.
+  const taken = new Set(members.map(member => memberNameKey(member.label)));
+  const seen = new Set<string>();
   const renamed = new Map<string, string>();
   for (const { member } of order) {
+    const key = memberNameKey(member.label);
+    if (!seen.has(key)) {
+      seen.add(key);
+      continue;
+    }
     const name = freeMemberName(member.label, taken);
     taken.add(memberNameKey(name));
-    if (name !== member.label) renamed.set(member.memberId, name);
+    renamed.set(member.memberId, name);
   }
   if (renamed.size === 0) return { members, renames: [] };
   return {
