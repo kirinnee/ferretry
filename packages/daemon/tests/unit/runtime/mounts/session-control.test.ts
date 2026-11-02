@@ -472,22 +472,27 @@ describe("a start on a ferret's own credential", () => {
     should(control.parents).deepEqual([undefined, 'someone-else']);
   });
 
-  it('should keep the honest-client admin token plus session header on the body parent, as before', async () => {
-    // Arrange — an older fy, or a pane with no credential of its own: the daemon has only the header's word.
+  it('should make the honest-client admin token plus session header a child of that session, as a credential does', async () => {
+    // Arrange
     const control = new FakeSessionControl();
-
-    // Act
-    await dispatcher(control).dispatch(
+    const subject = dispatcher(control);
+    const headed = (body: ReturnType<typeof startBody>, id: string) =>
       request({
         method: 'POST',
         path: '/v1/sessions',
-        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: REQUEST_ID },
-        body: startBody(),
-      }),
-    );
+        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: id },
+        body,
+      });
 
-    // Assert
-    should(control.parents).deepEqual([undefined]);
+    // Act
+    const orphan = await subject.dispatch(headed(startBody(), 'req-1'));
+    const itself = await subject.dispatch(headed(startBody({ parent: FERRET_SESSION }), 'req-2'));
+    const foreign = await subject.dispatch(headed(startBody({ parent: 'someone-else' }), 'req-3'));
+
+    // Assert — a claimed parent outside the caller's own lineage is refused, so the Inbox root cannot be borrowed.
+    should([orphan.status, itself.status]).deepEqual([201, 201]);
+    should([foreign.status, jsonBody(foreign).code]).deepEqual([403, 'parent_mismatch']);
+    should(control.parents).deepEqual([FERRET_SESSION, FERRET_SESSION]);
   });
 });
 

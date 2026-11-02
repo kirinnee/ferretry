@@ -191,7 +191,7 @@ call and no extra request:
 conversation). Inside a ferret's pane the asking ferret becomes the parent. On its own credential (what its
 `fy` presents) the **daemon** reads the parent from the credential — a `--parent` naming another session is
 `403 parent_mismatch` — so nothing the agent's shell does can change it. With an older `fy` on the admin token,
-`FY_SESSION_ID` names it, and when the shell dropped that (a subshell, a sandbox) the CLI reads the pane's tmux
+`FY_SESSION_ID` names it (the `x-ferretry-session-id` header), and the daemon applies the same rule to that session, and when the shell dropped that (a subshell, a sandbox) the CLI reads the pane's tmux
 session's own copy (`tmux show-environment FY_SESSION_ID`), so the parent is recorded either way.
 
 **Where it runs.** A sub-ferret runs in its **parent's folder** — the parent session's recorded working

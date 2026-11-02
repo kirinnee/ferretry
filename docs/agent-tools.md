@@ -574,7 +574,7 @@ its own).
   the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
   A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.
-- **Every session a ferret starts is its own child.** On its own credential, `POST /v1/sessions` (`fy start`,
+- **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/sessions` (`fy start`,
   interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
   naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
   top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
