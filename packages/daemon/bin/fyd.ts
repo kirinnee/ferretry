@@ -13541,6 +13541,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
           skillTree: new NodeSkillFolder(),
+          fleetDirectory: paths.fleet,
           projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
           skillFiles: new FileProjectSkillFiles(),
           runtimeSkills: new FileRuntimeSkillAssets(join(paths.fleet, 'assets', 'skills')),

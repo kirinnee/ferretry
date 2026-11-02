@@ -13,6 +13,9 @@ export class CatalogInstallRefusalError extends Error {
 }
 
 /** A folder's files as they are now: path relative to the folder → SHA-256 (hex) of the bytes. */
+/** The most files a skill folder at a destination holds: a longer one is refused there, so it could never be removed or updated. */
+export const MAX_SKILL_FOLDER_FILES = 64;
+
 export interface SkillFolderReading {
   readonly exists: boolean;
   readonly files: ReadonlyMap<string, string>;

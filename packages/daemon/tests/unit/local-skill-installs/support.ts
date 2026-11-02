@@ -17,7 +17,47 @@ import {
 } from '../../../src/lib/local-skill-installs/store.ts';
 import { FakeFleet, FakeFolders } from '../catalog-installs/service-support.ts';
 import { crypto } from '../../support/catalog-fixtures.ts';
+import type { SkillFileRead, SkillTreeListing } from '../../../src/lib/shared-catalogs/skill-source.ts';
 import { MemoryTree, SKILL_MD } from '../shared-catalogs/support.ts';
+
+export const FLEET_DIRECTORY = '/fleet';
+
+/**
+ * A tree that behaves like the real port when it is given a boundary: a folder whose RESOLVED place (set with
+ * `resolveTo`) is outside it is neither listed nor read. A folder with no resolved place resolves inside.
+ * `swapAfterList` moves the folder outside once it has been listed, as a link put there in between would.
+ */
+class ConfinedTree extends MemoryTree {
+  readonly boundaries: { readonly act: 'list' | 'read'; readonly manifest: string; readonly confinedTo?: string }[] =
+    [];
+  readonly #resolved = new Map<string, string>();
+  swapAfterList: string | undefined;
+
+  resolveTo(manifest: string, place: string): void {
+    this.#resolved.set(manifest, place);
+  }
+
+  #outside(manifest: string, confinedTo: string | undefined): boolean {
+    const place = this.#resolved.get(manifest);
+    return (
+      confinedTo !== undefined && place !== undefined && place !== confinedTo && !place.startsWith(`${confinedTo}/`)
+    );
+  }
+
+  override async list(manifest: string, _limits?: unknown, confinedTo?: string): Promise<SkillTreeListing | undefined> {
+    this.boundaries.push({ act: 'list', manifest, ...(confinedTo === undefined ? {} : { confinedTo }) });
+    if (this.#outside(manifest, confinedTo)) return undefined;
+    const listing = await super.list(manifest);
+    if (this.swapAfterList !== undefined) this.#resolved.set(manifest, this.swapAfterList);
+    return listing;
+  }
+
+  override async read(manifest: string, path: string, maxBytes: number, confinedTo?: string): Promise<SkillFileRead> {
+    this.boundaries.push({ act: 'read', manifest, ...(confinedTo === undefined ? {} : { confinedTo }) });
+    if (this.#outside(manifest, confinedTo)) return { ok: false, reason: 'unreadable' };
+    return await super.read(manifest, path, maxBytes);
+  }
+}
 
 export const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
 export const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined, agent: false };
@@ -88,7 +128,7 @@ class FakeRuntimeSkills implements RuntimeSkillAssets {
 export interface Rig {
   readonly service: LocalSkillInstallService;
   readonly store: MemoryStore;
-  readonly tree: MemoryTree;
+  readonly tree: ConfinedTree;
   readonly folders: FakeFolders;
   readonly fleet: FakeFleet;
   readonly runtimeSkills: FakeRuntimeSkills;
@@ -100,7 +140,7 @@ export interface Rig {
 
 export function rig(options: { maxKept?: number } = {}): Rig {
   const store = new MemoryStore();
-  const tree = new MemoryTree();
+  const tree = new ConfinedTree();
   tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'notes.txt': 'notes', link: 'symlink' });
   tree.set(PROJECT_SKILL, { 'SKILL.md': SKILL_MD });
   const folders = new FakeFolders();
@@ -129,6 +169,7 @@ export function rig(options: { maxKept?: number } = {}): Rig {
       store,
       skills: { list: async () => state.skills },
       skillTree: tree,
+      fleetDirectory: FLEET_DIRECTORY,
       projectRoots: async () => state.roots,
       skillFiles: new FakeProjectSkills(folders),
       runtimeSkills,

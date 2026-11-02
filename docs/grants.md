@@ -868,8 +868,14 @@ grants say.
 ## Copying a skill from this machine
 
 The same split as a catalog install, with its own seven routes
-([catalogs.md](catalogs.md#copying-a-skill-from-this-machine)): `filesystem` governs a write into a project
-and `fleet` a runtime write, each with a preview (`use`) and an apply (`configure`). Every route is
+([catalogs.md](catalogs.md#copying-a-skill-from-this-machine)), except for one difference: **both previews
+are `filesystem.use`, the runtime one included**, because a preview reads files off this machine and answers their
+whole text and their hashes, whatever the destination. A governed caller with `filesystem` off and `fleet` on is
+refused on a runtime preview and sees no project copies in the list (the list answers only the runtime
+copies unless `filesystem.use` is also granted). The applies and removes stay on the capability that owns the
+place they write: a project apply or remove is `filesystem.configure`, a runtime apply or remove is
+`fleet.configure`, which carries `fleet.use`, so a runtime copy needs both axes (`filesystem.use` to preview,
+`fleet.configure` to apply). Every route is
 `caller: 'person'`, so **a ferret is refused on all of them** whatever its grants say. An apply from a
 governed caller demands a fresh step-up for the existing act `catalog-install`, claimed at admission and
 not given back: copying a skill is the same decision (instructions that will run), so no second act exists

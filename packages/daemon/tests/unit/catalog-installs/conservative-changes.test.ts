@@ -5,7 +5,11 @@ import {
   conservativeChanges,
   HIDDEN_WARNING,
   MAX_SCANNED,
+  foldedForScan,
+  joinedLines,
   mayHoldSecret,
+  namesSecret,
+  withoutInvisible,
 } from '../../../src/lib/catalog-installs/conservative-changes.ts';
 
 const base = { format: 'ferretry-catalog-item', version: 1, publisher: 'p', catalogId: 'c', itemId: 'i', name: 'x' };
@@ -146,5 +150,23 @@ describe('conservativeChanges', () => {
     const budget = { remaining: 0 };
     const changes = conservativeChanges(skill(['a.md', 'x\n1\n']), skill(['a.md', 'x\n2\n']), budget);
     should(changes.truncated).equal(true);
+  });
+});
+
+describe('mayHoldSecret over look-alike forms', () => {
+  it('reads full-width letters as the plain ones they stand for', () => {
+    should(mayHoldSecret('ｐａｓｓｗｏｒｄ is here')).equal(true);
+    should(mayHoldSecret(`${'Ａ'.repeat(30)}`)).equal(true);
+    should(mayHoldSecret('ｈｅｌｌｏ ｗｏｒｌｄ')).equal(false);
+  });
+});
+
+describe('the helpers the copy refusal shares', () => {
+  it('strips invisible characters, joins lines, folds, and names secrets', () => {
+    should(withoutInvisible('a​b⟨U+00AD⟩c')).equal('abc');
+    should(joinedLines('a\r\nb\nc')).equal('abc');
+    should(foldedForScan('Ａ​Ｂ')).equal('AB');
+    should(namesSecret('X-Auth')).equal(true);
+    should(namesSecret('colour')).equal(false);
   });
 });

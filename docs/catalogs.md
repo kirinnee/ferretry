@@ -874,15 +874,15 @@ another account's home (`~/.claude/skills`, a runtime's skills folder) or a regi
 (`packages/daemon/src/lib/local-skill-installs/`, wire in `packages/protocol/src/lib/local-skill-install.ts`).
 **Skills only**: an MCP server is never copied this way.
 
-| Route                                                | Capability             | What it does                                                           |
-| ---------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------- |
-| `POST /v1/skill-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing |
-| `POST /v1/skill-installs/local/project`              | `filesystem.configure` | copies exactly that preview into a project folder                      |
-| `POST /v1/skill-installs/local/runtime/preview`      | `fleet.use`            | the same, for a runtime and profile                                    |
-| `POST /v1/skill-installs/local/runtime`              | `fleet.configure`      | copies it as one fleet change                                          |
-| `GET /v1/skill-installs/local`                       | `fleet.use`            | what was copied, and where                                             |
-| `DELETE /v1/skill-installs/local/project/:installId` | `filesystem.configure` | removes exactly the files that copy wrote                              |
-| `DELETE /v1/skill-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                           |
+| Route                                                | Capability             | What it does                                                                |
+| ---------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| `POST /v1/skill-installs/local/project/preview`      | `filesystem.use`       | reads the source, answers the review and a `previewId`; writes nothing      |
+| `POST /v1/skill-installs/local/project`              | `filesystem.configure` | copies exactly that preview into a project folder                           |
+| `POST /v1/skill-installs/local/runtime/preview`      | `filesystem.use`       | the same, for a runtime and profile (it still reads files off this machine) |
+| `POST /v1/skill-installs/local/runtime`              | `fleet.configure`      | copies it as one fleet change                                               |
+| `GET /v1/skill-installs/local`                       | `fleet.use`            | what was copied, and where (project copies need `filesystem.use` too)       |
+| `DELETE /v1/skill-installs/local/project/:installId` | `filesystem.configure` | removes exactly the files that copy wrote                                   |
+| `DELETE /v1/skill-installs/local/runtime/:installId` | `fleet.configure`      | the same, for a runtime copy                                                |
 
 - **Person only.** Every route is `caller: 'person'`: **a ferret is refused on all seven**, previews and
   list included (`403 forbidden`), because a copied skill is instructions a ferret will follow.
@@ -891,25 +891,34 @@ another account's home (`~/.claude/skills`, a runtime's skills folder) or a regi
   inventory does not list (or no longer lists) is `local_skill_source_unknown`. Its folder is then read
   without ever following a link, with the catalog's file-count and size caps. Links, binaries, oversized
   and credential-named files, hard links and case collisions are **not copied and are said**
-  (`skipped`, with the reason); a folder that cannot be carried whole, or whose name is not a catalog
-  name, is `local_skill_source_invalid`.
+  (`skipped`, with the reason, and the copy carries on without them); the executable bit is **not**
+  kept. A folder with no `SKILL.md` among the files it can carry, a name that is not a catalog name, or **more
+  files than a destination holds (64)** is `local_skill_source_invalid`, said at the **preview** so a copy that
+  could never be removed or updated is never made. The folder is read under the boundary the inventory listed it
+  under (the project root, or the fleet directory for an account home) and the real path of its folder is
+  checked against that boundary again when it is read, so a link swapped in since the listing is refused.
 - **The review is a catalog review.** Every file in full, hidden characters marked, the same warnings, and
   the secret redaction the catalog review has. Where it is from is `origin` (account or project, and the
   `SKILL.md` path), as this machine found it, never as the caller reported it.
 - **Your own files are shown whole, and a password is never copied.** The source is the person's own file on
   this machine, shown to them and only to them (the routes are person-only), so the review draws every file
-  in full. Two shapes are certain enough to **refuse** the preview, naming the file and never showing the text
-  (`local_skill_source_invalid`: "<file> holds what looks like a password. Remove it, then copy the skill."): an
-  address with a password in it (`scheme://user:pass@host`) and an environment-style assignment whose name
-  looks like a secret and whose value is 16 or more characters (`API_KEY=…`; `$VAR`, `${VAR}` and `<…>` references
-  are not values). A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
+  in full. A few shapes are certain enough to **refuse** the preview, naming the file and the line and never
+  showing the text (`local_skill_source_invalid`: "<file> line <n> holds what looks like a password or key. Remove
+  it, then copy the skill."): an address with a password in it (`scheme://user:pass@host`), a name that looks
+  like a secret given a value of 16 or more characters (`API_KEY=…`, `api_key = "…"`, YAML or JSON `token: …` /
+  `"token": "…"`; `$VAR`, `${VAR}` and `<…>` references are not values, and after `:` neither is a path or an
+  address), an `Authorization: Bearer <16+ characters>` header, and `curl -u user:pass`. The text is read as "See
+  changes" reads it (invisible characters out, look-alike letters folded, and a name or value a line break split
+  put back together), by the same helpers (`catalog-installs/conservative-changes.ts`), so the two cannot drift. A broader test (`mayHoldSecret`, the one the "See changes" view uses) only **warns**, one
   warning per file: "<file> mentions keys, tokens or passwords. Check it holds no secret value before you copy
   it to <target>." Files are never rewritten.
 - **A preview writes nothing.** Previews live in memory for 600 seconds, up to 8 per caller, and are bound
   to the caller that reviewed them. An apply writes **exactly** the bytes that were previewed (the preview
   holds them; the source is not read a second time, so it cannot change between review and write). The
   destination is judged again at apply, so a conflict that appeared since is still refused.
-- **A copy, never a link.** The files are written into the target and the two stay separate.
+- **A copy, never a link.** The files are written into the target and the two stay separate. A runtime copy is a
+  layer of a **profile**, so every runtime on that profile gets it (the preview's destination says so, and that it
+  replaces an earlier copy).
 - **It writes only through existing paths**: the project skill-folder port the catalog installer uses, and
   for a runtime the fleet catalogue's `installCatalogItem` with a **synthetic provenance** (publisher
   "This machine", catalog "Skills on this machine"; no signature exists because nobody published anything).
@@ -921,7 +930,9 @@ another account's home (`~/.claude/skills`, a runtime's skills folder) or a regi
 - **The record.** `<FY_HOME>/state/local-skill-installs.json`, mode `0600`, written by temp file and rename,
   a sibling of the catalog install record with the same shape: each copy with the SHA-256 of every file it
   wrote. Remove and update touch **only recorded files**, and a recorded file edited since is
-  `local_skill_conflict`. Anything at the destination that no record of ours wrote is a conflict, so a skill
+  `local_skill_conflict`. The record is a file on disk, so it is not trusted for where to act: a project copy is
+  removed or replaced only if its root is a project this machine knows and its folder is `.claude/skills/<name>`
+  or `.agents/skills/<name>` (and both agree with its key), otherwise `local_skill_target_unknown`. Anything at the destination that no record of ours wrote is a conflict, so a skill
   you wrote by hand is never overwritten.
 - **Refusals** (`LOCAL_SKILL_REFUSALS`): `local_skill_source_unknown` (404), `local_skill_source_invalid`
   (422), `local_skill_target_unknown` (404), `local_skill_preview_unknown` (404),

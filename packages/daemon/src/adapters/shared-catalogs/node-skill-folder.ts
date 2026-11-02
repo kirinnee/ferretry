@@ -25,15 +25,30 @@ const isInside = (root: string, candidate: string): boolean => {
  * `O_NOFOLLOW`, checks the parent still resolves inside the folder, and checks the opened file is a regular
  * file with one link, because a folder can change between the listing and the read. One gap stays (a
  * folder swapped for a link between the parent check and the open) and is declared in docs/catalogs.md.
+ *
+ * WHEN A BOUNDARY IS GIVEN (`confinedTo`) the folder's own resolved path must lie inside it, on the listing and
+ * on every read: the inventory vouched for the folder when it listed it, and a link put there since must not
+ * carry the copy anywhere else.
  */
 export class NodeSkillFolder implements SkillTreePort {
-  async list(manifestPath: string, limits: SkillWalkLimits): Promise<SkillTreeListing | undefined> {
-    let root: string;
+  /** The folder's resolved path, or `undefined` when it is gone or lies outside the boundary. */
+  async #rootWithin(manifestPath: string, confinedTo: string | undefined): Promise<string | undefined> {
     try {
-      root = await realpath(dirname(manifestPath));
+      const root = await realpath(dirname(manifestPath));
+      if (confinedTo === undefined) return root;
+      return isInside(await realpath(confinedTo), root) ? root : undefined;
     } catch {
       return undefined;
     }
+  }
+
+  async list(
+    manifestPath: string,
+    limits: SkillWalkLimits,
+    confinedTo?: string,
+  ): Promise<SkillTreeListing | undefined> {
+    const root = await this.#rootWithin(manifestPath, confinedTo);
+    if (root === undefined) return undefined;
     const entries: SkillTreeEntry[] = [];
     let truncated = false;
     let seen = 0;
@@ -81,9 +96,15 @@ export class NodeSkillFolder implements SkillTreePort {
     return { entries, truncated };
   }
 
-  async read(manifestPath: string, relativePath: string, maxBytes: number): Promise<SkillFileRead> {
+  async read(
+    manifestPath: string,
+    relativePath: string,
+    maxBytes: number,
+    confinedTo?: string,
+  ): Promise<SkillFileRead> {
     try {
-      const root = await realpath(dirname(manifestPath));
+      const root = await this.#rootWithin(manifestPath, confinedTo);
+      if (root === undefined) return { ok: false, reason: 'unreadable' };
       const target = join(root, ...relativePath.split('/'));
       if (!isInside(root, target) || relativePath.split('/').includes('..')) return { ok: false, reason: 'unreadable' };
       const parent = await realpath(dirname(target));

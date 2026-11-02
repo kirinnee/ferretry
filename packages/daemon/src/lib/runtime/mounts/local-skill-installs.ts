@@ -2,9 +2,12 @@
  * Copying a skill from another account or project on this machine: `/v1/skill-installs/local`. The domain is
  * `local-skill-installs/service.ts`; the wire is `@ferretry/protocol` local-skill-install.
  *
- * ONE ROUTE PER SCOPE, because a route declares exactly one capability and the scopes are governed by
- * different ones: a project is the person's repository (`filesystem`), a runtime is the fleet (`fleet`).
- * A preview is a read with a body (`use`); an apply or a removal changes something (`configure`).
+ * ONE ROUTE PER SCOPE, because a route declares exactly one capability. An apply or a removal is governed
+ * by what it changes: a project is the person's repository (`filesystem.configure`), a runtime is the fleet
+ * (`fleet.configure`, which implies `fleet.use`). BOTH PREVIEWS ARE `filesystem.use`, whatever the target: the
+ * act that matters is reading files off this machine, and a device with the filesystem switched off must not
+ * be able to read them by naming a runtime. The list answers the project rows only to a caller whose
+ * `filesystem.use` is allowed, for the same reason.
  *
  * PERSON-ONLY, EVERY ROUTE. A preview shows another account's files in full, and an apply puts
  * instructions a ferret will follow (and scripts it may run) where it will find them, so a ferret that could
@@ -186,7 +189,7 @@ export function localSkillInstallRoutes(subsystem: LocalSkillInstallSubsystem): 
       path: '/v1/skill-installs/local/runtime/preview',
       minimum: 'operator',
       caller: 'person',
-      capability: FLEET_USE,
+      capability: FILESYSTEM_USE,
       noStore: true,
       handle: previewHandler('runtime', subsystem),
     },
@@ -217,7 +220,13 @@ export function localSkillInstallRoutes(subsystem: LocalSkillInstallSubsystem): 
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'list copied skills');
-        return await answer(() => subsystem.list());
+        const mayReadProjects = context.governance?.decide(FILESYSTEM_USE).allowed !== false;
+        return await answer(async () => {
+          const listed = await subsystem.list();
+          return mayReadProjects
+            ? listed
+            : { ...listed, installs: listed.installs.filter(install => install.target.scope !== 'project') };
+        });
       },
     },
     {

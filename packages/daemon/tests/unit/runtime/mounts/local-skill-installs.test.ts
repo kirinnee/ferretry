@@ -9,6 +9,7 @@ import {
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import type { CallerGovernance, CapabilityDemand } from '../../../../src/lib/api/capability.ts';
+import { DEFAULT_CAPABILITY_GRANTS, decideCapability } from '../../../../src/lib/grants/policy.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -36,6 +37,8 @@ interface Caller {
   readonly credential: AuthenticatedCredential;
   readonly governed: boolean;
   readonly proofs?: number;
+  /** Capabilities whose `use` this caller's operator has switched off. */
+  readonly off?: readonly string[];
 }
 
 const HOST: Caller = {
@@ -66,10 +69,11 @@ interface Call {
 class FakeInstalls implements LocalSkillInstallSubsystem {
   readonly calls: Call[] = [];
   failure: unknown;
+  installs: readonly unknown[] = [];
 
   async list() {
     this.#record({ act: 'list' });
-    return { installs: [] };
+    return { installs: this.installs } as never;
   }
   async preview(scope: CatalogInstallScope, req: unknown, caller: LocalSkillCaller) {
     this.#record({ act: 'preview', scope, argument: req, caller });
@@ -134,7 +138,10 @@ async function drive(
     credential: caller.credential,
     governance: {
       governed: caller.governed,
-      decide: (_demand: CapabilityDemand) => ({ allowed: true, refusal: 'granted' }),
+      decide: (demand: CapabilityDemand) =>
+        caller.off?.includes(demand.capability) === true
+          ? { allowed: false, refusal: 'not-granted' }
+          : { allowed: true, refusal: 'granted' },
     } as CallerGovernance,
     presentation: {
       loopback: !caller.governed,
@@ -173,7 +180,7 @@ describe('the route table', () => {
 
   const table = [
     ['POST', '/v1/skill-installs/local/project/preview', 'filesystem', 'use'],
-    ['POST', '/v1/skill-installs/local/runtime/preview', 'fleet', 'use'],
+    ['POST', '/v1/skill-installs/local/runtime/preview', 'filesystem', 'use'],
     ['POST', '/v1/skill-installs/local/project', 'filesystem', 'configure'],
     ['POST', '/v1/skill-installs/local/runtime', 'fleet', 'configure'],
     ['GET', '/v1/skill-installs/local', 'fleet', 'use'],
@@ -195,6 +202,70 @@ describe('the route table', () => {
       should(found?.capability).deepEqual({ capability, axis });
     });
   }
+});
+
+describe('what a governed caller may do with the filesystem or the fleet switched off', () => {
+  const routes = localSkillInstallRoutes(new FakeInstalls());
+  const demandOf = (method: string, path: string): CapabilityDemand => {
+    const found = routes.find(route => route.method === method && route.path === path);
+    if (found?.capability === undefined) throw new Error(`no governed route ${method} ${path}`);
+    return found.capability;
+  };
+  const decide = (demand: CapabilityDemand, grants: Partial<Record<string, { use: boolean; configure: boolean }>>) =>
+    decideCapability(demand, {
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, ...grants },
+      governed: true,
+      hostLocal: false,
+      stepUp: true,
+    });
+
+  for (const scope of ['project', 'runtime'] as const)
+    it(`refuses the ${scope} preview when filesystem is off and fleet is on, because it reads files off this machine`, () => {
+      const demand = demandOf('POST', `/v1/skill-installs/local/${scope}/preview`);
+
+      const answer = decide(demand, {
+        filesystem: { use: false, configure: false },
+        fleet: { use: true, configure: true },
+      });
+
+      should(answer).deepEqual({ allowed: false, refusal: 'not-granted' });
+    });
+
+  it('serves the runtime preview with filesystem.use alone, since reading is what it does', () => {
+    const demand = demandOf('POST', '/v1/skill-installs/local/runtime/preview');
+
+    should(decide(demand, { fleet: { use: false, configure: false } }).allowed).equal(true);
+  });
+
+  it('asks a runtime apply for fleet.configure, which carries fleet.use with it, and refuses fleet.use alone', () => {
+    const demand = demandOf('POST', '/v1/skill-installs/local/runtime');
+
+    should(demand).deepEqual({ capability: 'fleet', axis: 'configure' });
+    should(decide(demand, { fleet: { use: true, configure: false } }).allowed).equal(false);
+    should(decide(demand, { fleet: { use: false, configure: true } }).allowed).equal(false);
+    should(decide(demand, { fleet: { use: true, configure: true } }).allowed).equal(true);
+  });
+
+  it('lists only the runtime copies for a caller whose filesystem is off, since a project row names files and their hashes', async () => {
+    const installs = new FakeInstalls();
+    installs.installs = [
+      { installId: INSTALL, target: { scope: 'project' } },
+      { installId: 'runtime-one', target: { scope: 'runtime' } },
+    ];
+
+    const narrowed = await drive(installs, 'GET', '/v1/skill-installs/local', undefined, {
+      ...DEVICE,
+      off: ['filesystem'],
+    });
+    const whole = await drive(installs, 'GET', '/v1/skill-installs/local', undefined, DEVICE);
+    const host = await drive(installs, 'GET', '/v1/skill-installs/local', undefined, HOST);
+
+    should((narrowed.body.installs as { installId: string }[]).map(install => install.installId)).deepEqual([
+      'runtime-one',
+    ]);
+    should((whole.body.installs as unknown[]).length).equal(2);
+    should((host.body.installs as unknown[]).length).equal(2);
+  });
 });
 
 describe('previewing and listing', () => {

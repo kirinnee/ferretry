@@ -7,9 +7,12 @@ import {
   applySkillFolder,
   inspectSkillFolder,
   MAX_SKILL_FOLDER_BYTES,
-  MAX_SKILL_FOLDER_FILES,
 } from '../../../src/adapters/catalog-installs/skill-folder.ts';
-import { SkillFolderChanged, SkillFolderRefused } from '../../../src/lib/catalog-installs/ports.ts';
+import {
+  MAX_SKILL_FOLDER_FILES,
+  SkillFolderChanged,
+  SkillFolderRefused,
+} from '../../../src/lib/catalog-installs/ports.ts';
 
 /**
  * The shared skill-folder rules over real directories: never through a link, only plain files, bounded,

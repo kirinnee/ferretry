@@ -50,10 +50,17 @@ export type SkillFileRead =
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly reason: 'too_big' | 'unreadable' };
 
-/** The folder of a skill, by the SKILL.md path the skills inventory lists. */
+/**
+ * The folder of a skill, by the SKILL.md path the skills inventory lists.
+ *
+ * `confinedTo` is the boundary the inventory listed it under (a project root, the fleet directory): when given,
+ * the folder must still RESOLVE inside it, on the listing and again on every read, so a folder swapped for a link
+ * to somewhere else after the inventory looked is neither listed nor read. A caller that names none is a catalog
+ * share, which reads a folder it already trusts.
+ */
 export interface SkillTreePort {
-  list(manifestPath: string, limits: SkillWalkLimits): Promise<SkillTreeListing | undefined>;
-  read(manifestPath: string, relativePath: string, maxBytes: number): Promise<SkillFileRead>;
+  list(manifestPath: string, limits: SkillWalkLimits, confinedTo?: string): Promise<SkillTreeListing | undefined>;
+  read(manifestPath: string, relativePath: string, maxBytes: number, confinedTo?: string): Promise<SkillFileRead>;
 }
 
 export interface FrozenSkillFiles {
@@ -91,8 +98,12 @@ function pathProblem(path: string): string | null {
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? 'its path is not one a skill carries');
 }
 
-export async function readSkillFolder(port: SkillTreePort, manifestPath: string): Promise<FrozenSkillFiles> {
-  const listing = await port.list(manifestPath, SKILL_WALK_LIMITS);
+export async function readSkillFolder(
+  port: SkillTreePort,
+  manifestPath: string,
+  confinedTo?: string,
+): Promise<FrozenSkillFiles> {
+  const listing = await port.list(manifestPath, SKILL_WALK_LIMITS, confinedTo);
   if (listing === undefined)
     return {
       files: [],
@@ -154,7 +165,7 @@ export async function readSkillFolder(port: SkillTreePort, manifestPath: string)
       skip(entry.path, `it would take the skill past ${CATALOG_SKILL_MAX_BYTES / 1024 / 1024} MiB in total`);
       continue;
     }
-    const read = await port.read(manifestPath, entry.path, CATALOG_SKILL_FILE_MAX_BYTES);
+    const read = await port.read(manifestPath, entry.path, CATALOG_SKILL_FILE_MAX_BYTES, confinedTo);
     if (!read.ok) {
       skip(
         entry.path,

@@ -7,8 +7,10 @@
  * THE SOURCE IS THE INVENTORY'S. The caller names a SKILL.md path; this service looks it up in the machine
  * skills inventory and opens nothing the inventory does not list. The folder is then read the way a catalog
  * share reads one (`readSkillFolder`): links never followed, credential-named files, hard links, binaries and
- * oversized files skipped and SAID, and the same file/size caps. A folder that cannot be carried whole is
- * refused, not trimmed quietly.
+ * oversized files and files past a cap are skipped and SAID, and the copy carries on without them. What is
+ * REFUSED instead: a folder with no SKILL.md among the files it can carry, one with more files than a
+ * destination holds (so the copy could never be removed or updated), and a file holding what looks like a
+ * password or key. A copy keeps the bytes and the paths; the executable bit is not kept.
  *
  * A COPY, NEVER A LINK, and ONLY THROUGH THE EXISTING WRITE PATHS: a project folder through the folder port
  * (no link followed, compare-and-swap, temp + rename), a runtime through one fleet `catalog.install` change,
@@ -48,6 +50,7 @@ import {
 import type { RelayCrypto } from '@ferretry/relay';
 import type { CallerGovernance } from '../api/capability.ts';
 import {
+  MAX_SKILL_FOLDER_FILES,
   type ProjectSkillFiles,
   type RuntimeSkillAssets,
   SkillFolderChanged,
@@ -60,7 +63,7 @@ import { skillOf } from '../shared-catalogs/freeze.ts';
 import { readSkillFolder, type SkillTreePort } from '../shared-catalogs/skill-source.ts';
 import { LocalSkillRefusalError } from './ports.ts';
 import { mayHoldSecret } from '../catalog-installs/conservative-changes.ts';
-import { holdsCredential } from './credentials.ts';
+import { firstCredentialLine } from './credentials.ts';
 import { type HeldLocalSkill, LocalSkillPreviews } from './previews.ts';
 import { type LocalSkillInstalledFile, type LocalSkillInstallRecord, type LocalSkillInstallStore } from './store.ts';
 
@@ -70,6 +73,8 @@ export interface LocalSkillInstallServiceDeps {
   /** Every skill the machine inventory lists: the only sources there are. */
   readonly skills: { list(): Promise<readonly SkillEntry[]> };
   readonly skillTree: SkillTreePort;
+  /** `<FY_HOME>/fleet`: the only place the inventory lets a link inside an account home point. */
+  readonly fleetDirectory: string;
   /** Every folder a project write may land in: registered projects and live managed worktrees. */
   projectRoots(): Promise<readonly string[]>;
   readonly skillFiles: ProjectSkillFiles;
@@ -311,16 +316,26 @@ export class LocalSkillInstallService {
         'local_skill_source_invalid',
         `${JSON.stringify(name)} is not a name a skill can be copied under: use letters, digits, - and _.`,
       );
-    const folder = await readSkillFolder(this.deps.skillTree, entry.path);
+    // The boundary the inventory listed the folder under: the project root, or the fleet directory for a home.
+    const boundary =
+      entry.scope === 'project' && entry.project !== undefined ? entry.project.root : this.deps.fleetDirectory;
+    const folder = await readSkillFolder(this.deps.skillTree, entry.path, boundary);
     if (folder.refusal !== undefined) return refuse('local_skill_source_invalid', folder.refusal);
     const skill = skillOf(folder.files);
     if (typeof skill === 'string') return refuse('local_skill_source_invalid', `${name} cannot be copied: ${skill}.`);
-    const holder = skill.files.find(file => holdsCredential(file.content));
-    if (holder !== undefined)
+    if (skill.files.length > MAX_SKILL_FOLDER_FILES)
       return refuse(
         'local_skill_source_invalid',
-        `${holder.path} holds what looks like a password. Remove it, then copy the skill.`,
+        `${name} has ${skill.files.length} files and a skill folder here holds at most ${MAX_SKILL_FOLDER_FILES}, so a copy could never be removed or updated. Take some files out, then copy the skill.`,
       );
+    for (const file of skill.files) {
+      const line = firstCredentialLine(file.content);
+      if (line !== undefined)
+        return refuse(
+          'local_skill_source_invalid',
+          `${file.path} line ${line} holds what looks like a password or key. Remove it, then copy the skill.`,
+        );
+    }
     const origin: LocalSkillOrigin =
       entry.scope === 'project' && entry.project !== undefined
         ? { kind: 'project', owner: entry.project.root, harness: entry.harness, path: entry.path }
@@ -383,7 +398,7 @@ export class LocalSkillInstallService {
       );
     return {
       key: `fleet:skills/${name}`,
-      words: `the skill ${name} in runtime ${runtime.name}, profile ${profile.name}`,
+      words: `the skill ${name} in profile ${profile.name} (every runtime on that profile gets it, not only ${runtime.name}, and it replaces an earlier copy)`,
     };
   }
 
@@ -409,6 +424,7 @@ export class LocalSkillInstallService {
   ): Promise<SkillFolderReading> {
     if (target.scope === 'project') {
       const folder = resolved.folder as string;
+      if (replaces !== undefined) await this.#trustedPlace(replaces);
       const reading = await this.#inspectProject(resolved.root as string, folder);
       this.#checkFolder(reading, replaces, `${folder}/`, `${folder}/`);
       return reading;
@@ -493,9 +509,26 @@ export class LocalSkillInstallService {
     return [...this.#recorded(replaces, prefix).keys()].filter(path => !next.has(path) && reading.files.has(path));
   }
 
+  /**
+   * A record is a file on disk, so the place it names is not taken on trust: its root must be a project this
+   * machine knows and its folder the one a skill of that name is copied to (and both are the ones its key says),
+   * or nothing is removed or replaced.
+   */
+  async #trustedPlace(record: LocalSkillInstallRecord): Promise<{ root: string; folder: string }> {
+    const root = withoutTrailingSlash(record.root ?? '');
+    const folder = record.folder ?? '';
+    const known = (await this.deps.projectRoots()).map(withoutTrailingSlash).includes(root);
+    const named = [`.claude/skills/${record.name}`, `.agents/skills/${record.name}`].includes(folder);
+    if (!known || !named || record.key !== `project:${root}/${folder}`)
+      return refuse(
+        'local_skill_target_unknown',
+        `The record of the copy ${record.installId} names a place that is not a skill folder of a project this machine knows, so nothing was changed there.`,
+      );
+    return { root, folder };
+  }
+
   async #removeProject(record: LocalSkillInstallRecord): Promise<void> {
-    const root = record.root as string;
-    const folder = record.folder as string;
+    const { root, folder } = await this.#trustedPlace(record);
     const reading = await this.#inspectProject(root, folder);
     const { remove, expected } = this.#removal(record, reading, `${folder}/`, `${folder}/`);
     try {

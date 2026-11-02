@@ -8,6 +8,7 @@ import {
   ACCOUNT_SKILL,
   CALLER,
   copy,
+  FLEET_DIRECTORY,
   GOVERNANCE,
   PROJECT_SKILL,
   projectTarget,
@@ -87,7 +88,9 @@ describe('previewing a skill from this machine', () => {
     );
 
     should(preview.target).deepEqual(runtimeTarget('claude-work'));
-    should(preview.destination).equal('the skill demo in runtime claude-work, profile work');
+    should(preview.destination).equal(
+      'the skill demo in profile work (every runtime on that profile gets it, not only claude-work, and it replaces an earlier copy)',
+    );
   });
 
   it('refuses a scope that is not the target’s', async () => {
@@ -129,6 +132,59 @@ describe('previewing a skill from this machine', () => {
     );
   });
 
+  it('reads an account skill under the fleet directory and a project skill under its project root', async () => {
+    const r = rig();
+
+    await r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER);
+    await r.service.preview('project', { source: { path: PROJECT_SKILL }, target: projectTarget() }, CALLER);
+
+    const boundaryOf = (manifest: string) =>
+      new Set(r.tree.boundaries.filter(call => call.manifest === manifest).map(call => call.confinedTo));
+    should([...boundaryOf(ACCOUNT_SKILL)]).deepEqual([FLEET_DIRECTORY]);
+    should([...boundaryOf(PROJECT_SKILL)]).deepEqual(['/work/other']);
+    should(new Set(r.tree.boundaries.map(call => call.act))).deepEqual(new Set(['list', 'read']));
+  });
+
+  it('refuses a folder that now resolves outside the boundary it was listed under', async () => {
+    const r = rig();
+    r.tree.resolveTo(PROJECT_SKILL, '/etc/elsewhere');
+
+    const refusal = await refusedWith(
+      r.service.preview('project', { source: { path: PROJECT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+
+    should(refusal.message).match(/cannot be read any more/u);
+    should(r.previews.size).equal(0);
+  });
+
+  it('refuses a folder swapped for a link out of the project between the listing and the read', async () => {
+    const r = rig();
+    r.tree.resolveTo(PROJECT_SKILL, '/work/other/.claude/skills/tool');
+    r.tree.swapAfterList = '/etc/elsewhere';
+
+    const refusal = await refusedWith(
+      r.service.preview('project', { source: { path: PROJECT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+
+    should(refusal.message).match(/SKILL\.md cannot be carried/u);
+    should(r.previews.size).equal(0);
+  });
+
+  it('still copies a folder that resolves inside its boundary', async () => {
+    const r = rig();
+    r.tree.resolveTo(ACCOUNT_SKILL, `${FLEET_DIRECTORY}/assets/skills/demo`);
+
+    const preview = await r.service.preview(
+      'project',
+      { source: { path: ACCOUNT_SKILL }, target: projectTarget() },
+      CALLER,
+    );
+
+    should(preview.name).equal('demo');
+  });
+
   it('refuses a folder whose files cannot make a skill', async () => {
     const r = rig();
     r.tree.read = async () => ({ ok: true, bytes: new Uint8Array(300 * 1024).fill(97) });
@@ -150,7 +206,9 @@ describe('previewing a skill from this machine', () => {
       'local_skill_source_invalid',
     );
 
-    should(refusal.message).equal('setup.sh holds what looks like a password. Remove it, then copy the skill.');
+    should(refusal.message).equal(
+      'setup.sh line 1 holds what looks like a password or key. Remove it, then copy the skill.',
+    );
     should(refusal.message).not.match(/hunter2/u);
   });
 
@@ -162,6 +220,50 @@ describe('previewing a skill from this machine', () => {
       r.service.preview('runtime', { source: { path: ACCOUNT_SKILL }, target: runtimeTarget() }, CALLER),
       'local_skill_source_invalid',
     );
+  });
+
+  it('names the line of the password, even when a line break split it, and never the value', async () => {
+    const r = rig();
+    const preview = () =>
+      r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER);
+    r.tree.set(ACCOUNT_SKILL, {
+      'SKILL.md': SKILL_MD,
+      'a/run.sh': '# setup\r\n\r\napi_key = "sk-abcdef0123456789abcdef"\n',
+    });
+    const spaced = await refusedWith(preview(), 'local_skill_source_invalid');
+    r.tree.set(ACCOUNT_SKILL, { 'SKILL.md': SKILL_MD, 'conf.yaml': 'name: demo\ntoken:\n  abcdef0123456789abcdef\n' });
+    const split = await refusedWith(preview(), 'local_skill_source_invalid');
+
+    should(spaced.message).equal(
+      'a/run.sh line 3 holds what looks like a password or key. Remove it, then copy the skill.',
+    );
+    should(split.message).equal(
+      'conf.yaml line 2 holds what looks like a password or key. Remove it, then copy the skill.',
+    );
+    should(spaced.message + split.message).not.match(/abcdef/u);
+  });
+
+  it('refuses a skill with more files than a destination holds, and copes with exactly that many', async () => {
+    const r = rig();
+    const files = (count: number) =>
+      Object.fromEntries([['SKILL.md', SKILL_MD], ...Array.from({ length: count - 1 }, (_, n) => [`f${n}.txt`, 'x'])]);
+    r.tree.set(ACCOUNT_SKILL, files(65));
+
+    const refusal = await refusedWith(
+      r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_source_invalid',
+    );
+    r.tree.set(ACCOUNT_SKILL, files(64));
+    const fits = await r.service.preview(
+      'runtime',
+      { source: { path: ACCOUNT_SKILL }, target: runtimeTarget() },
+      CALLER,
+    );
+
+    should(refusal.message).equal(
+      'demo has 65 files and a skill folder here holds at most 64, so a copy could never be removed or updated. Take some files out, then copy the skill.',
+    );
+    should(fits.review.length).be.above(0);
   });
 
   it('warns, per file, where a file mentions keys, tokens or passwords, and still shows it whole', async () => {
@@ -511,6 +613,47 @@ describe('copying into a runtime', () => {
       (error: unknown) => should((error as Error).message).equal('fleet said no'),
     );
     should(r.store.state.installs).deepEqual([]);
+  });
+});
+
+describe('a record that names another place', () => {
+  const tampered = async (change: Record<string, unknown>) => {
+    const r = rig();
+    const { installed } = await copy(r, projectTarget());
+    const record = r.store.state.installs[0] as (typeof r.store.state.installs)[number];
+    r.store.state = { ...r.store.state, installs: [{ ...record, ...change } as typeof record] };
+    return { r, installed };
+  };
+
+  it.each([
+    ['a root no project of ours has', { root: '/etc' }],
+    ['a root that is missing', { root: undefined }],
+    ['another folder', { folder: '.ssh' }],
+    ['the folder of another skill', { folder: '.claude/skills/other' }],
+    ['a folder that is missing', { folder: undefined }],
+    ['a known root other than the one copied to', { root: '/work/other' }],
+  ])('refuses to remove a copy whose record names %s, and removes nothing', async (_, change) => {
+    const { r, installed } = await tampered(change);
+    r.roots = [ROOT, '/work/other'];
+    const before = structuredClone(r.folders.folders);
+
+    await refusedWith(
+      r.service.remove('project', installed.install.installId, GOVERNANCE, STEP_UP),
+      'local_skill_target_unknown',
+    );
+
+    should(r.folders.folders).deepEqual(before);
+    should((await r.service.list()).installs).have.length(1);
+  });
+
+  it('refuses to replace over a copy whose record names another place', async () => {
+    const { r } = await tampered({ root: '/work/other' });
+    r.roots = [ROOT, '/work/other'];
+
+    await refusedWith(
+      r.service.preview('project', { source: { path: ACCOUNT_SKILL }, target: projectTarget() }, CALLER),
+      'local_skill_target_unknown',
+    );
   });
 });
 
