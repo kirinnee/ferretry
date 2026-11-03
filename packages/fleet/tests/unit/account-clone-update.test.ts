@@ -1687,6 +1687,90 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
       should(plan.files.map(file => file.path)).eql(['components/hooks/c/run.sh']);
       should(plan.model.runtimes.r?.profile).equal('q');
     });
+
+    describe('a changed-on-both-sides item behind the blocked write', () => {
+      const keyed = (layers: string[]) => ({ layers, clonedFromKey: KEY_P });
+      const withP = (layers: string[]) =>
+        parseAccountModel({
+          version: 2,
+          components: { hooks: { b: hooksAt('.', KEY_B) } },
+          profiles: { p: keyed(layers) },
+        });
+      const sourceWith = (layers: string[]) =>
+        sourceBundle({
+          keys: { 'hooks/c': KEY_A, 'profile/p': KEY_P },
+          components: hookC,
+          files: fileC,
+          profiles: { p: { layers } },
+        });
+      const lastCopied = (bundle: ReturnType<typeof sourceWith>, model: ReturnType<typeof withP>) =>
+        applyCloneToBase(EMPTY_CLONE_BASE, {
+          source: SOURCE,
+          at: AT,
+          replace: true,
+          copied: cloneBaseEntries(bundle, bundle, new Map()),
+          sourceKeys: new Set(cloneOriginKeys(bundle).values()),
+          model,
+        }).sources[SOURCE.id];
+
+      it('should preset no choice for a both-changed profile that needs the blocked hook, and still refuse an undecided apply', () => {
+        // Arrange: p is changed here (no last copy to compare) and now layers the blocked hook c.
+        const analysis = analyseCloneUpdate(bareInput(sourceWith(['hooks/c']), withP([]), here));
+
+        // Act
+        const row = reviewCloneUpdate(analysis).items.find(item => item.ref === 'profile/p');
+
+        // Assert: nothing is chosen for the owner; they must decide, and keep is the one that can be written.
+        should(row?.outcome).equal('both');
+        should(row?.needs).eql(['hooks/c']);
+        should(row !== undefined && 'choice' in row).be.false();
+        should(analysis.defaults.has('profile/p')).be.false();
+        should(analysis.defaults.get('hooks/c')).equal('skip');
+        should(() => planCloneUpdate(analysis, { decisions: {} })).throw(CloneRefusal);
+        should(() => planCloneUpdate(analysis, { decisions: { 'profile/p': 'take' } })).throw(CloneRefusal, {
+          message: /profile\/p needs hooks\/c/u,
+        });
+        const kept = planCloneUpdate(analysis, { decisions: { 'profile/p': 'keep' } });
+        should(kept.files).eql([]);
+        should(kept.model.profiles.p?.layers).eql([]);
+      });
+
+      it('should preset no choice for a both-changed profile whose dependency is blocked only through another profile', () => {
+        // Arrange: p layers q, which layers the blocked hook c; q is new on the source side.
+        const bundle = sourceBundle({
+          keys: { 'hooks/c': KEY_A, 'profile/p': KEY_P, 'profile/q': KEY_Q },
+          components: hookC,
+          files: fileC,
+          profiles: { p: { layers: ['profile/q'] }, q: { layers: ['hooks/c'] } },
+        });
+        const analysis = analyseCloneUpdate(bareInput(bundle, withP([]), here));
+
+        // Act
+        const review = reviewCloneUpdate(analysis);
+
+        // Assert
+        should(analysis.defaults.has('profile/p')).be.false();
+        should(review.items.find(item => item.ref === 'profile/p')).not.have.property('choice');
+        should(analysis.defaults.get('profile/q')).equal('skip');
+        should(() => planCloneUpdate(analysis, { decisions: {} })).throw(CloneRefusal);
+        should(planCloneUpdate(analysis, { decisions: { 'profile/p': 'keep' } }).files).eql([]);
+      });
+
+      it('should still default a source-only change behind the blocked hook to keep', () => {
+        // Arrange: p was last copied with no layers and is unchanged here; only the source added hook c.
+        const target = withP([]);
+        const base = lastCopied(sourceWith([]), target);
+        const analysis = analyseCloneUpdate({
+          ...bareInput(sourceWith(['hooks/c']), target, here),
+          ...(base === undefined ? {} : { base }),
+        });
+
+        // Act + Assert
+        should(reviewCloneUpdate(analysis).items.find(item => item.ref === 'profile/p')?.outcome).equal('theirs');
+        should(analysis.defaults.get('profile/p')).equal('keep');
+        should(planCloneUpdate(analysis, { decisions: {} }).files).eql([]);
+      });
+    });
   });
 
   it('should refuse adding a new document while an item here owns the whole tree, and not tick it by default', () => {

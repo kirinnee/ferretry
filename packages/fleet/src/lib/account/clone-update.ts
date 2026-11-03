@@ -983,7 +983,9 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
       }
     }
   }
-  for (const ref of unwritable) defaults.set(ref, idle(ref));
+  for (const ref of unwritable) {
+    if (byRef.get(ref)?.outcome !== 'both') defaults.set(ref, idle(ref));
+  }
   // What is left only ever goes from left out to added, so it settles: at most one pass per item.
   for (let changed = true; changed; ) {
     changed = false;
