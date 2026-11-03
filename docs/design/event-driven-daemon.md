@@ -115,6 +115,10 @@ reaches the bound it last set. When the fleet shrinks and the bound falls below 
 oldest watches are closed — each with its cached document, which would otherwise be trusted as `heard` by a
 watch that is no longer listening — down to an eighth under the bound, so a new live session can still be watched.
 A document the cache evicts loses its watch too.
+A cached document remembers which watch it was read through (a generation that never repeats within a storage) as well as
+how many changes that watch had reported, and is quiet only to that very watch: a watch opened again for the same file
+starts a new generation, so a copy read through the old one — possibly while the file changed in the gap with nothing
+listening — is proved by a `stat` however many changes the old watch had counted.
 On the idle fixture (`bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`), compared with
 `origin/main` `9e456c0f0`:
 

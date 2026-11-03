@@ -10,7 +10,7 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -50,10 +50,23 @@ class CountingStateFileSystem extends StateFileSystem {
   writing: { readonly entered: () => void; readonly gate: Promise<void> } | undefined;
   /** While set, an atomic write renames and THEN throws — the chmod or directory fsync failing after the swap. */
   failAfterRename = false;
+  /** While set, a read of `path` waits for the gate AFTER it has read the file — holding what it found. */
+  holding: { readonly path: string; readonly entered: () => void; readonly gate: Promise<void> } | undefined;
 
   override async identity(path: string): Promise<string | undefined> {
     this.identities.push(path);
     return await super.identity(path);
+  }
+
+  override async readTextIdentified(path: string) {
+    const read = await super.readTextIdentified(path);
+    const holding = this.holding;
+    if (holding !== undefined && holding.path === path) {
+      this.holding = undefined;
+      holding.entered();
+      await holding.gate;
+    }
+    return read;
   }
 
   override async writeTextAtomic(path: string, text: string): Promise<void> {
@@ -98,6 +111,18 @@ const scriptedChanges = () => {
 
 const ID = parseSessionId('watched-1');
 
+/** Sessions written straight into the home, beside `watched-1`, ready to be read. */
+async function otherSessions(home: FoundationPaths, count: number) {
+  const ids = Array.from({ length: count }, (_, index) => parseSessionId(`other-${String(index).padStart(5, '0')}`));
+  for (const id of ids) {
+    const session = createSessionPaths(home, id);
+    await mkdir(session.directory, { recursive: true, mode: 0o700 });
+    await writeFile(session.marker, '2\n', { mode: 0o600 });
+    await writeFile(session.config, JSON.stringify({ id }), { mode: 0o600 });
+  }
+  return ids;
+}
+
 async function seeded(changes: DocumentChanges | undefined) {
   const home = await mkdtemp(join(tmpdir(), 'fy-document-watch-'));
   homes.push(home);
@@ -125,7 +150,7 @@ async function seeded(changes: DocumentChanges | undefined) {
   await opened.storage.append(ID, 'session.created', {});
   fileSystem.identities = [];
   const paths = createSessionPaths(opened.paths, ID);
-  return { storage: opened.storage as DaemonStorage, fileSystem, paths };
+  return { storage: opened.storage as DaemonStorage, fileSystem, paths, home: opened.paths };
 }
 
 const statsOf = (fileSystem: CountingStateFileSystem, path: string): number =>
@@ -392,6 +417,45 @@ describe('a watched session document', () => {
     should(during.turn).equal(1);
     should(after.turn).equal(2);
   });
+
+  it('should not let a reopened watch vouch for a copy read through an older one, however many changes that one heard', async () => {
+    // Arrange — the config is watched and quiet. Its watch then hears more changes than any count range
+    // given to a watch could hold, so a scheme of ranges would run into the range of the next watch.
+    const watch = scriptedChanges();
+    const { storage, fileSystem, paths, home } = await seeded(watch.changes);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
+    for (let change = 0; change < 2 ** 24; change += 1) watch.report(paths.config);
+    const edit = async (turn: number): Promise<void> => {
+      const staged = `${paths.config}.staged-${String(turn)}`;
+      await writeFile(staged, JSON.stringify({ id: 'watched-1', status: 'running', turn }));
+      await rename(staged, paths.config);
+    };
+
+    // Act — a person saves version 2, and a read finds it but is held before it caches it. Meanwhile
+    // other sessions fill the cache, so the oldest documents — this config, and its watch — are evicted,
+    // and version 3 lands while nothing is listening.
+    await edit(2);
+    let entered: () => void = () => undefined;
+    const holding = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    let release: () => void = () => undefined;
+    fileSystem.holding = { path: paths.config, entered, gate: new Promise<void>(resolve => (release = resolve)) };
+    const held = storage.readConfig(ID, 'heard');
+    await holding;
+    for (const other of await otherSessions(home, 2_100)) await storage.readConfig(other);
+    await edit(3);
+    release();
+    const found = (await held) as Record<string, unknown>;
+    const reopened = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
+
+    // Assert — the held read really saw version 2, the eviction really closed the watch it read through,
+    // and the reopened watch had heard nothing of version 3 and so could not vouch for version 2.
+    should(found.turn).equal(2);
+    should(watch.closed()).be.above(0);
+    should(reopened.turn).equal(3);
+  }, 60_000);
 
   it('should close every watch when the storage closes', async () => {
     // Arrange
