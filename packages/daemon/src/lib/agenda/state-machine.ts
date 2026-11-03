@@ -1927,9 +1927,6 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   ) {
     return failure('invalid', `nothing to edit: give at least one of stage, ${EDITABLE_FIELDS.join(', ')}`);
   }
-  if (!replaces && patch.questions !== undefined && questionShape(patch.questions) !== questionShape(item.questions)) {
-    return failure('invalid', 'questions may be reworded but not added, removed or given other options');
-  }
   const optionDetailProblem = agendaOptionDetailProblems({
     ...item,
     ...(patch.ask === undefined ? {} : { ask: patch.ask }),

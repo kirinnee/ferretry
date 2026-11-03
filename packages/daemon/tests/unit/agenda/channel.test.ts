@@ -298,6 +298,30 @@ describe('a replaced ask', () => {
     should(cleared.item?.askVersion).be.undefined();
   });
 
+  it('should refuse a new kind with no ask, and an ask on a card that has none to replace', () => {
+    // Arrange — a notice is read, not answered: it has no ask a ferret could replace
+    const notice = ok(
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor: AGENT,
+        request: { ...REGION, kind: 'info', ask: undefined, notice: true, premise: undefined, context: undefined },
+        at: T0,
+      }),
+    ).ledger;
+
+    // Act
+    const askless = refused(
+      apply(board(), { action: 'edit', actor: AGENT, id: 'A1', patch: { kind: 'reply' }, at: T3 }),
+    );
+    const onNotice = refused(
+      apply(notice, { action: 'edit', actor: AGENT, id: 'A1', patch: { kind: 'yesno' }, at: T3 }),
+    );
+
+    // Assert
+    should(askless.error.message).match(/a new reply needs its ask/u);
+    should(onNotice.error.message).match(/has no ask to replace/u);
+  });
+
   it('should refuse to replace the fixed ask of a configuration change', () => {
     // Arrange
     const confirms = ok(

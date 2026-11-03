@@ -879,3 +879,12 @@ describe('agenda brief answer shapes', () => {
     should(composeEditRequest('A3', { step: ['One'] }, todo)).containDeep({ steps: ['One'] });
   });
 });
+
+describe('clearing the answer to the owner’s question', () => {
+  it('should refuse to set and clear the answer in one edit', () => {
+    // Assert
+    should(() => composeEditRequest('A1', { questionAnswer: 'EU', clearQuestionAnswer: true }, undefined)).throw(
+      /--question-answer and --clear-question-answer contradict/u,
+    );
+  });
+});

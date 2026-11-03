@@ -4,6 +4,7 @@ import should from 'should';
 import {
   AGENDA_REST_NUDGE_MAX_MS,
   AgendaRestNudger,
+  REST_NUDGE_SWEEP_MS,
   restNudgeDueAt,
   restNudgeMessage,
   restNudgeSendId,
@@ -239,5 +240,55 @@ describe('the silence nudge sweep', () => {
     should(swept).equal(0);
     const board = await repository.read(SESSION);
     should(board?.entries.map(entry => entry.item.resting?.nudges)).deepEqual([undefined, undefined]);
+  });
+});
+
+describe('the silence nudge timer', () => {
+  it('should sweep at once, then every minute, and cancel its timer on stop', async () => {
+    // Arrange
+    const scheduled: Array<{ key: string; delayMs: number }> = [];
+    const callbacks: Array<() => void> = [];
+    const cancelled: string[] = [];
+    let sweeps = 0;
+    const nudger = new AgendaRestNudger(
+      new MemoryRepository(),
+      { nudged: async () => ({ ok: false, error: { code: 'invalid', message: 'unused' } }) },
+      {
+        enabled: async () => {
+          sweeps += 1;
+          return false;
+        },
+        send: async () => undefined,
+        record: async () => undefined,
+      },
+      () => [SESSION],
+      {
+        schedule: (key, delayMs, run) => {
+          scheduled.push({ key, delayMs });
+          callbacks.push(run);
+        },
+        cancel: key => {
+          cancelled.push(key);
+        },
+      },
+      () => REPLIED,
+      'fy',
+    );
+    const settle = async () => await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Act
+    nudger.start();
+    await settle();
+    callbacks[0]?.();
+    await settle();
+    nudger.stop();
+
+    // Assert
+    should(sweeps).equal(2);
+    should(scheduled).deepEqual([
+      { key: 'agenda-rest-nudge', delayMs: REST_NUDGE_SWEEP_MS },
+      { key: 'agenda-rest-nudge', delayMs: REST_NUDGE_SWEEP_MS },
+    ]);
+    should(cancelled).deepEqual(['agenda-rest-nudge']);
   });
 });
