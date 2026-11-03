@@ -9,15 +9,18 @@
 //
 // Three labellings of the same ferret mail:
 //   floor      every ferret message is an `action`     (nobody sends an FYI: only the 60 s window helps)
-//   heuristic  "No reply needed" -> fyi; "blocked / stuck / urgent …" -> blocker; the rest -> action
-//   ceiling    every ferret message is labelled `fyi`  (a question is still an action: it is never news)
+//   heuristic  "No reply needed." in the text -> fyi; "blocked / stuck / urgent …" -> blocker; the rest -> action
+//   ceiling    every ferret message is labelled `fyi`  (a question is a blocker: it is never held)
+//
+// A message is a QUESTION only when its banner says so (`[question from ferret …]`, read with the protocol's
+// own `parsePeerEnvelope`); a message with any other banner, or none the parser knows, is not one.
 //
 // CAVEATS. The turn timeline is the RECORDED one, not a counterfactual: fewer, bigger turns would change when
 // the receiver is idle. Delivery is instant (no typing time), the session is always `running`, and the labels
 // are guessed from the text, not chosen by a sender. Read the numbers as a size, not a forecast.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { QueuedMessage } from '../../packages/protocol/src/lib/index.ts';
+import { parsePeerEnvelope, type QueuedMessage } from '../../packages/protocol/src/lib/index.ts';
 import {
   defaultQueueCoalesceSettings,
   planDelivery,
@@ -34,6 +37,9 @@ interface Arrival {
   readonly at: number;
   readonly kind: 'ferret' | 'owner' | 'daemon';
   readonly text: string;
+  /** The banner says the sender is waiting for an answer. */
+  readonly question: boolean;
+  /** The text itself says no answer is wanted (the heuristic labelling's only FYI signal). */
   readonly noReplyNeeded: boolean;
 }
 
@@ -63,6 +69,7 @@ function readArrivals(dir: string): Arrival[] {
             ? ('daemon' as const)
             : ('owner' as const),
       text: row.message,
+      question: parsePeerEnvelope(row.message)?.envelope.replyExpected === true,
       noReplyNeeded: row.message.includes('No reply needed.'),
     }))
     .sort((left, right) => left.at - right.at);
@@ -204,7 +211,7 @@ async function run(
           from: 'peer',
           text: next.text,
           label,
-          replyExpected: !next.noReplyNeeded,
+          ...(next.question ? { replyExpected: true } : {}),
         });
         pending.push(message);
       } else {
