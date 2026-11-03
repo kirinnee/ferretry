@@ -809,10 +809,10 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`answer <id> "<text>"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`, `--where`=now.');
     should(text).not.containEql('--back');
-    should(text).containEql("Keep current (`edit`); only you `done` it, when nothing's left.");
+    should(text).containEql("Keep current (`edit`); only you mark it Done when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
-    should(text).containEql('Chat: their words verbatim + your reply; link it; unsure: closest.');
+    should(text).containEql('Chat: their words verbatim + reply; link it; unsure: closest.');
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
