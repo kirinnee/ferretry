@@ -5,10 +5,12 @@ import {
   AGENDA_READS_PER_DAEMON,
   applyAgendaAction,
   DaemonAgendaClient,
+  fetchAgendaConversation,
   fetchAgendaCount,
   fetchAgendaVersion,
   fetchAgendaVersions,
   fetchAgendaSnapshot,
+  MERGE_NEEDS_UPDATE,
   markAgendaVersionSeen,
   SNOOZE_NEEDS_UPDATE,
   sendAgendaReplies,
@@ -1005,5 +1007,70 @@ describe('item versions', () => {
       ['PUT', '/v1/sessions/same%2Fsession/agenda/A1/seen'],
     ]);
     should(asked[1]?.body).equal(JSON.stringify({ version: 2 }));
+  });
+});
+
+describe('merging agendas (agenda.conversation.1)', () => {
+  it('sends a merge to a machine that offers it, and refuses to send one to a machine that does not', async () => {
+    const wires = new AgendaWireDirectory();
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+
+    await should(client.merge(daemonA, scopeA, 'A2', 'A5')).be.rejectedWith(MERGE_NEEDS_UPDATE);
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire]),
+    });
+    await should(client.merge(daemonA, scopeA, 'A2', 'A5')).be.rejectedWith(MERGE_NEEDS_UPDATE);
+    should(actions).be.empty();
+
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
+    });
+    await client.merge(daemonA, scopeA, 'A2', 'A5');
+    should(actions).deepEqual([{ action: 'merge', id: 'A2', from: 'A5' }]);
+  });
+});
+
+describe('the whole stored conversation', () => {
+  const at = '2026-11-01T10:00:00.000Z';
+  const entry = (text: string) => ({ at, by: 'owner', text, via: 'reply' });
+
+  it('reads every fragment through the cursor and joins an entry that arrived in pieces', async () => {
+    const asked: string[] = [];
+    const pages: Record<string, unknown> = {
+      'index=0&offset=0': { total: 2, index: 0, offset: 0, entry: entry('Hello, '), next: { index: 0, offset: 7 } },
+      'index=0&offset=7': { total: 2, index: 0, offset: 7, entry: entry('world.'), next: { index: 1, offset: 0 } },
+      'index=1&offset=0': { total: 2, index: 1, offset: 0, entry: entry('Second.') },
+    };
+
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', undefined, async input => {
+      const url = String(input);
+      asked.push(url.replace('https://a.example.test', ''));
+      return response(pages[url.split('?')[1] ?? ''] ?? {});
+    });
+
+    should(got.map(each => each.text)).deepEqual(['Hello, world.', 'Second.']);
+    should(asked[0]).equal('/v1/sessions/same%2Fsession/agenda/A1/conversation?index=0&offset=0');
+  });
+
+  it('reads a frozen earlier thread by its version, and a thread with no entries as empty', async () => {
+    const asked: string[] = [];
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', 3, async input => {
+      asked.push(String(input));
+      return response({ total: 0, index: 0, offset: 0 });
+    });
+
+    should(got).deepEqual([]);
+    should(asked).have.length(1);
+    should(asked[0]).containEql('version=3');
   });
 });

@@ -113,7 +113,7 @@ export const itemStage = (item: AgendaItem): AgendaStage => {
 
 /**
  * One row of the terms and references table. A term says what it means; a link is named by its target (drawn by the one
- * reference renderer) and means its label, or nothing when it has none: a link carries no more than that.
+ * reference renderer) and means its own `meaning` (`agenda.link-meaning.1`), else its label, else nothing.
  */
 export type ReferenceRow =
   | { readonly kind: 'term'; readonly key: string; readonly term: string; readonly meaning: string }
@@ -121,7 +121,7 @@ export type ReferenceRow =
       readonly kind: 'link';
       readonly key: string;
       readonly link: NonNullable<AgendaItem['links']>[number];
-      /** The link's own label; empty when it has none. */
+      /** What the link means: its own `meaning` (`agenda.link-meaning.1`), else its label; empty when it has neither. */
       readonly meaning: string;
     };
 
@@ -132,7 +132,13 @@ export const referenceRows = (item: Pick<AgendaItem, 'terms' | 'links'>): readon
       ({ kind: 'term', key: `term:${String(index)}`, term: entry.term, meaning: entry.meaning }) as const,
   ),
   ...(item.links ?? []).map(
-    (link, index) => ({ kind: 'link', key: `link:${String(index)}`, link, meaning: link.label?.trim() ?? '' }) as const,
+    (link, index) =>
+      ({
+        kind: 'link',
+        key: `link:${String(index)}`,
+        link,
+        meaning: (link.meaning ?? link.label)?.trim() ?? '',
+      }) as const,
   ),
 ];
 

@@ -12,6 +12,9 @@ import type { ReactNode } from 'react';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { revisionStamp } from '../../lib/agenda-revisions.ts';
 
+/** What Ferretry itself is called where its own words (a closing note, a notice) are drawn. */
+const DAEMON_NAME = 'Ferretry';
+
 type SpokenEvent = Exclude<HistoryEvent, { readonly kind: 'revision' }>;
 
 /** What was SAID, of the item's history: the owner's and the ferret's words, never an edit. */
@@ -29,6 +32,15 @@ function When({ at, now }: { readonly at: number; readonly now: number }) {
   );
 }
 
+/** "from chat": words the ferret copied from the owner's chat onto the item (`fy agenda log`), not typed on it. */
+function FromChat() {
+  return (
+    <span className="fy-hist__tag" data-history-from-chat="">
+      from chat
+    </span>
+  );
+}
+
 function HistoryRow({ event, now, ferret, renderProse }: HistoryRowProps) {
   if (event.kind === 'owner') {
     const chosen = event.form === 'answer' || event.form === 'done';
@@ -39,14 +51,16 @@ function HistoryRow({ event, now, ferret, renderProse }: HistoryRowProps) {
           {event.text}
         </p>
         {event.note === undefined ? null : <p className="fy-hist__note m-0">{event.note}</p>}
+        {event.fromChat === true ? <FromChat /> : null}
         <When at={event.at} now={now} />
       </li>
     );
   }
   return (
-    <li className="fy-hist__ag" data-history="ferret">
+    <li className="fy-hist__ag" data-history={event.daemon === true ? 'daemon' : 'ferret'}>
       <p className="fy-hist__who m-0">
-        <span>{ferret}</span>
+        <span>{event.daemon === true ? DAEMON_NAME : ferret}</span>
+        {event.fromChat === true ? <FromChat /> : null}
         <When at={event.at} now={now} />
       </p>
       <div className="fy-hist__text">{renderProse(event.text)}</div>

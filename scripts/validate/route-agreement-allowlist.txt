@@ -136,4 +136,3 @@ unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalo
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 
-unreached GET /v1/sessions/:sessionId/agenda/:id/conversation # CORRECT: daemon-first conversation storage and bounded paging; the stored-thread reader ships in agenda PR 7 (docs/agenda.md), while the current app reads session transcripts

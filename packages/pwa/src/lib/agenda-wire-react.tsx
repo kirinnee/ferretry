@@ -36,6 +36,17 @@ export function useWorkSearchOffered(daemonId: DaemonId | undefined): boolean | 
   );
 }
 
+/**
+ * Whether this machine stores the conversation, keeps versions and takes merge (`agenda.conversation.1`), from the health
+ * the app already reads: `undefined` outside the app store and until health answered.
+ */
+export function useAgendaConversationOffered(daemonId: DaemonId | undefined): boolean | undefined {
+  const directory = useOptionalAppStore()?.agendaWire;
+  return useSyncExternalStore(directory?.subscribe ?? noWires.subscribe, () =>
+    daemonId === undefined ? undefined : directory?.conversationOf(daemonId),
+  );
+}
+
 const noWires = { subscribe: () => () => undefined } as const;
 
 /** The spelling this machine's daemon speaks: the older one outside the app store and until health is read. */

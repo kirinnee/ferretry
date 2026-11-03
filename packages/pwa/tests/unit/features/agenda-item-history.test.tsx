@@ -80,4 +80,25 @@ describe('the Conversation of an open agenda item', () => {
     const root = await draw([{ kind: 'ferret', key: 'f', at: 0, text: 'hi' }]);
     expect(root.querySelector('time')).toBeNull();
   });
+
+  test('tags words the ferret copied from chat, on either side', async () => {
+    const root = await draw([
+      { kind: 'owner', key: 'o', at: AT, text: 'use Postgres', fromChat: true },
+      { kind: 'ferret', key: 'f', at: AT + 1, text: 'noted', fromChat: true },
+      { kind: 'owner', key: 'p', at: AT + 2, text: 'typed here' },
+    ]);
+    const rows = [...root.querySelectorAll('[data-history]')];
+    expect(rows.map(row => row.querySelector('[data-history-from-chat]')?.textContent ?? null)).toEqual([
+      'from chat',
+      'from chat',
+      null,
+    ]);
+  });
+
+  test('draws Ferretry’s own words under its name', async () => {
+    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into !A2.', daemon: true }]);
+    const row = must(root.querySelector('[data-history="daemon"]'), 'daemon row');
+    expect(row.querySelector('.fy-hist__who')?.textContent).toContain('Ferretry');
+    expect(row.textContent).not.toContain('Lizzette');
+  });
 });

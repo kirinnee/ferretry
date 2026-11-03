@@ -3,6 +3,8 @@ import {
   AGENDA_CHANNEL_VERSION,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
+  type AgendaConversationEntry,
+  AgendaConversationPageSchema,
   type AgendaCountResponse,
   type AgendaId,
   type AgendaResponse,
@@ -94,6 +96,9 @@ export const fetchAgendaCount = async (
 /** What snoozing says on a machine whose daemon predates `agenda.snooze.1`. */
 export const SNOOZE_NEEDS_UPDATE = `This machine needs an update to snooze: ${UPDATE_MACHINE_WHERE}.`;
 
+/** What merging says on a machine whose daemon predates `agenda.conversation.1`. */
+export const MERGE_NEEDS_UPDATE = `This machine needs an update to merge agendas: ${UPDATE_MACHINE_WHERE}.`;
+
 /** A request the daemon's schema refused: from a machine not yet read, an unknown action reads this way. */
 const isInvalidRequest = (error: unknown): boolean =>
   error instanceof DaemonResponseError && error.status === 400 && error.code === 'invalid_request';
@@ -167,6 +172,39 @@ export const fetchAgendaVersion = async (
   AgendaVersionSchema.parse(
     await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
   );
+
+/** The most fragment reads one full thread takes: a runaway cursor ends the read instead of looping. */
+const MAX_CONVERSATION_FRAGMENTS = 2_000;
+
+/**
+ * The item's WHOLE stored conversation, oldest first (`agenda.conversation.1`): every entry read through
+ * `GET …/conversation` in its bounded fragments, each entry's fragments joined verbatim. The item itself carries only a
+ * recent tail. `version` reads a frozen earlier thread instead of the current one.
+ */
+export const fetchAgendaConversation = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version?: number,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<readonly AgendaConversationEntry[]> => {
+  const base = `/v1/sessions/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/conversation`;
+  const entries: AgendaConversationEntry[] = [];
+  let cursor: { readonly index: number; readonly offset: number } | undefined = { index: 0, offset: 0 };
+  for (let reads = 0; cursor !== undefined && reads < MAX_CONVERSATION_FRAGMENTS; reads += 1) {
+    const query = new URLSearchParams({ index: String(cursor.index), offset: String(cursor.offset) });
+    if (version !== undefined) query.set('version', String(version));
+    const page = AgendaConversationPageSchema.parse(
+      await fetchAgenda(daemon, scope, `${base}?${query.toString()}`, { method: 'GET' }, fetcher),
+    );
+    if (page.entry !== undefined) {
+      const earlier = entries[page.index];
+      entries[page.index] = earlier === undefined ? page.entry : { ...earlier, text: earlier.text + page.entry.text };
+    }
+    cursor = page.next;
+  }
+  return entries;
+};
 
 /** Tells the daemon this device opened `version` of an item; answers the mark that stands. */
 export const markAgendaVersionSeen = async (
@@ -428,6 +466,15 @@ export class DaemonAgendaClient {
   /** Puts a parked item (snoozed or replied) back on the owner's list now. */
   unsnooze(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<void> {
     return this.#mutate(daemon, scope, { action: 'unsnooze', id });
+  }
+
+  /**
+   * Merges `from` into `id` (`agenda.conversation.1`): both conversations and every card are kept, `id` survives and
+   * `from` closes as "merged into !id". Never sent to a machine that has not said it merges.
+   */
+  merge(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, from: string): Promise<void> {
+    if (this.wires.conversationOf(daemon.daemonId) !== true) return Promise.reject(new Error(MERGE_NEEDS_UPDATE));
+    return this.#mutate(daemon, scope, { action: 'merge', id, from });
   }
 
   /** Unpair one daemon without perturbing any other daemon's cache or work. */

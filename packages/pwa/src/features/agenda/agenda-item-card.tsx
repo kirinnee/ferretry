@@ -31,7 +31,7 @@ import {
   singleAgendaQuestion,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
@@ -59,12 +59,15 @@ import { AgendaDelivery } from './agenda-delivery.tsx';
 import { AgendaFold } from './agenda-fold.tsx';
 import { AgendaFormFields } from './agenda-form-fields.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
+import { AgendaLineage } from './agenda-merge-control.tsx';
 import { AgendaNeed, WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
+import { DiffToggle, VersionDiffPanel } from './agenda-version-diff.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
+import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 import { useDownSwipe } from './use-down-swipe.ts';
 
 type Prose = (text: string) => ReactNode;
@@ -115,6 +118,10 @@ export interface AgendaItemCardProps {
   readonly itemKey?: string | undefined;
   /** A card's How to test, read from the board the app holds: what a card ask shows under its heading. Absent: none. */
   readonly howToTestFor?: ((cardId: string) => string | null | undefined) | undefined;
+  /** The versions the machine keeps for the item: with them the head draws "Changes" (the diff). Absent: no diff control. */
+  readonly versions?: AgendaVersionsView | undefined;
+  /** "Merge with…" on an open plain conversation. Absent: no merge control, though lineage lines still show. */
+  readonly merge?: AgendaMergeView | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -400,7 +407,11 @@ export function AgendaItemCard({
   history = [],
   itemKey,
   howToTestFor,
+  versions,
+  merge,
 }: AgendaItemCardProps) {
+  const diffId = useId();
+  const [diffOpen, setDiffOpen] = useState(false);
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
   const [picked, setPicked] = useState<number | null>(null);
@@ -543,6 +554,9 @@ export function AgendaItemCard({
         </span>
         <span className="fy-card__tools">
           <span className="fy-card__version-slot" data-agenda-version-slot="">
+            {versions === undefined ? null : (
+              <DiffToggle controls={diffId} onToggle={() => setDiffOpen(open => !open)} open={diffOpen} />
+            )}
             {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
           </span>
           {canDismiss ? (
@@ -559,6 +573,8 @@ export function AgendaItemCard({
           ) : null}
         </span>
       </div>
+      {versions !== undefined && diffOpen ? <VersionDiffPanel id={diffId} now={now} versions={versions} /> : null}
+      {latest ? <AgendaLineage item={current} merge={merge} renderProse={renderProse} /> : null}
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}

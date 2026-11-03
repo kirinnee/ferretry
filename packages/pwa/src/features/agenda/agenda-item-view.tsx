@@ -46,6 +46,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
+import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 
 export interface AgendaItemViewProps {
   readonly item: AgendaItem;
@@ -107,6 +108,10 @@ export interface AgendaItemViewProps {
   readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
+  /** The versions the machine keeps for the item (`useItemLifecycle`): the head's "Changes" control. Absent: none. */
+  readonly versions?: AgendaVersionsView;
+  /** "Merge with…" (`useItemLifecycle`). Absent: not offered. */
+  readonly merge?: AgendaMergeView;
 }
 
 /** The urgent tones the head row says; where else the item stands is the card's state chip. */
@@ -175,6 +180,8 @@ export function AgendaItemView({
   startTap,
   howToTestFor,
   itemKey,
+  versions,
+  merge,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -305,6 +312,8 @@ export function AgendaItemView({
             answerDock={dock}
             history={history}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(versions === undefined ? {} : { versions })}
+            {...(merge === undefined ? {} : { merge })}
             {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}

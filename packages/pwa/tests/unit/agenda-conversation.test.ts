@@ -1,0 +1,73 @@
+import { describe, expect, test } from 'bun:test';
+import type { AgendaConversationEntry } from '@ferretry/protocol';
+import {
+  conversationEvent,
+  hasStoredConversation,
+  storedCount,
+  storedHistory,
+  tailIsWhole,
+} from '../../src/lib/agenda-conversation.ts';
+import { agendaItem } from '../support/agenda-inbox.tsx';
+
+const entry = (overrides: Partial<AgendaConversationEntry> = {}): AgendaConversationEntry => ({
+  at: '2026-11-01T10:00:00.000Z',
+  by: 'owner',
+  text: 'Use Postgres.',
+  via: 'reply',
+  ...overrides,
+});
+
+describe('how much of the thread is stored', () => {
+  test('counts by the item’s own count, else by the tail it carries, else none', () => {
+    expect(storedCount({ conversationCount: 9, conversation: [entry()] })).toBe(9);
+    expect(storedCount({ conversation: [entry(), entry()] })).toBe(2);
+    expect(storedCount({})).toBe(0);
+  });
+
+  test('has a stored thread only when it holds words, and knows when the tail is the whole thread', () => {
+    expect(hasStoredConversation({})).toBe(false);
+    expect(hasStoredConversation({ conversationCount: 1, conversation: [entry()] })).toBe(true);
+    expect(tailIsWhole({ conversationCount: 1, conversation: [entry()] })).toBe(true);
+    expect(tailIsWhole({ conversationCount: 40, conversation: [entry()] })).toBe(false);
+    expect(tailIsWhole({})).toBe(true);
+  });
+});
+
+describe('one stored entry as an event', () => {
+  test('draws the owner’s plain words and the forms they were sent as', () => {
+    expect(conversationEvent(entry(), 0)).toEqual({
+      kind: 'owner',
+      key: 'stored:0:2026-11-01T10:00:00.000Z',
+      at: Date.parse('2026-11-01T10:00:00.000Z'),
+      text: 'Use Postgres.',
+    });
+    expect(conversationEvent(entry({ via: 'answer' }), 1)).toMatchObject({ kind: 'owner', form: 'answer' });
+    expect(conversationEvent(entry({ via: 'needs-info' }), 2)).toMatchObject({ form: 'needs-info' });
+    expect(conversationEvent(entry({ via: 'discuss' }), 3)).toMatchObject({ form: 'discuss' });
+    expect(conversationEvent(entry({ via: 'chat-log' }), 4)).not.toHaveProperty('form');
+  });
+
+  test('draws the ferret’s words, and Ferretry’s own as a daemon row', () => {
+    expect(conversationEvent(entry({ by: 'ferret', via: 'surface' }), 0)).toMatchObject({ kind: 'ferret' });
+    expect(conversationEvent(entry({ by: 'ferret', via: 'surface' }), 0)).not.toHaveProperty('daemon');
+    expect(conversationEvent(entry({ by: 'daemon', via: 'close' }), 0)).toMatchObject({ kind: 'ferret', daemon: true });
+  });
+
+  test('keeps the from-chat mark on either side, and reads a bad date as the start of time', () => {
+    const fromChat = { messageId: 'm1', at: '2026-11-01T09:59:00.000Z' };
+    expect(conversationEvent(entry({ fromChat }), 0)).toMatchObject({ fromChat: true });
+    expect(conversationEvent(entry({ by: 'ferret', via: 'chat-log', fromChat }), 0)).toMatchObject({ fromChat: true });
+    expect(conversationEvent(entry({ at: 'not a date' }), 0).at).toBe(0);
+  });
+});
+
+describe('the item’s history from its stored thread', () => {
+  test('is one event per stored entry, in stored order', () => {
+    const events = storedHistory(agendaItem('A5'), [
+      entry({ text: 'one' }),
+      entry({ by: 'ferret', via: 'reply', text: 'two' }),
+    ]);
+    const said = events.filter(event => event.kind === 'owner' || event.kind === 'ferret');
+    expect(said.map(event => (event as { text: string }).text)).toEqual(['one', 'two']);
+  });
+});

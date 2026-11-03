@@ -13,7 +13,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -127,6 +127,10 @@ export interface AgendaInbox {
   readonly howToTestFor?: (daemonId: DaemonId, cardId: string) => string | null;
   /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
   readonly canSnooze?: (daemonId: DaemonId) => boolean;
+  /** The agenda client: what an open card's merge is sent through. Absent: no merge from the Inbox. */
+  readonly agendaClient?: DaemonAgendaClient;
+  /** The items one conversation's board holds (or its roll-up): what a merge can join. */
+  readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -426,6 +430,10 @@ export function useAgendaInboxModel(
       },
     [boards, rollup],
   );
+  const boardOf = useCallback(
+    (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] => itemsOf(daemonId, sessionId)?.items ?? [],
+    [itemsOf],
+  );
   const holders = useMemo(() => gateHolders(unread, sources, itemsOf), [unread, sources, itemsOf]);
   const offersGates = useCallback(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
@@ -571,6 +579,8 @@ export function useAgendaInboxModel(
       connectionFor,
       howToTestFor,
       canSnooze,
+      agendaClient: client,
+      boardOf,
     }),
     [
       unread,
@@ -593,6 +603,8 @@ export function useAgendaInboxModel(
       connectionFor,
       howToTestFor,
       canSnooze,
+      client,
+      boardOf,
     ],
   );
 }

@@ -45,9 +45,18 @@ export type HistoryEvent =
       /** The answer form it was sent as; absent for a plain reply. */
       readonly form?: AgendaMessagePart['kind'];
       readonly note?: string;
+      /** Copied from the owner's chat by the ferret (`fy agenda log`): drawn with a "from chat" tag. */
+      readonly fromChat?: true;
     }
-  /** What the ferret said to the item. */
-  | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
+  /** What the ferret said to the item; Ferretry's own words (`daemon`) are drawn under its name. */
+  | {
+      readonly kind: 'ferret';
+      readonly key: string;
+      readonly at: number;
+      readonly text: string;
+      readonly daemon?: true;
+      readonly fromChat?: true;
+    };
 
 const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
 

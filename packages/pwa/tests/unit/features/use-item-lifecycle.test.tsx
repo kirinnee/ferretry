@@ -1,0 +1,213 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { type AgendaConversationEntry, type AgendaItem, DAEMON_FEATURES } from '@ferretry/protocol';
+import {
+  type ItemLifecycle,
+  type UseItemLifecycleInput,
+  useItemLifecycle,
+} from '../../../src/features/agenda/use-item-lifecycle.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { agendaItem } from '../../support/agenda-inbox.tsx';
+import { interact, type Mounted, mount } from '../../support/dom.ts';
+import { healthOf } from '../../support/health.ts';
+import { settleUntil } from '../../support/settle.ts';
+
+const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const scope = daemonSessionScope(connection, 'sess');
+
+let view: Mounted | null = null;
+const realFetch = globalThis.fetch;
+let calls: Array<{ method: string; path: string; body?: string }> = [];
+let versions: { latest: number; seen?: number } = { latest: 3, seen: 1 };
+let fail = false;
+
+const json = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+const at = '2026-11-01T10:00:00.000Z';
+const summary = (version: number) => ({ version, at, by: 'ferret', change: 'edited', lifecycle: 'active' });
+const entry = (text: string): AgendaConversationEntry => ({ at, by: 'owner', text, via: 'reply' });
+
+beforeEach(() => {
+  calls = [];
+  versions = { latest: 3, seen: 1 };
+  fail = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(String(input));
+    const path = url.pathname.replace('/v1/sessions/sess/agenda/A5', '') + url.search;
+    calls.push({
+      method: init?.method ?? 'GET',
+      path,
+      ...(init?.body === undefined ? {} : { body: String(init.body) }),
+    });
+    if (fail) return json({ error: 'gone', code: 'not-found' }, 404);
+    if (path === '/versions') {
+      return json({ sessionId: 'sess', id: 'A5', ...versions, versions: [summary(1), summary(2), summary(3)] });
+    }
+    if (path === '/seen') return json({ seen: versions.latest });
+    if (path.startsWith('/versions/')) {
+      const version = Number(path.split('/')[2]);
+      return json({ ...summary(version), item: agendaItem('A5', { subject: `v${String(version)}` }) });
+    }
+    if (path.startsWith('/conversation')) {
+      const index = Number(url.searchParams.get('index'));
+      const all = ['one', 'two', 'three'];
+      return json({
+        total: 3,
+        index,
+        offset: 0,
+        entry: entry(all[index] ?? ''),
+        ...(index < 2 ? { next: { index: index + 1, offset: 0 } } : {}),
+      });
+    }
+    return json({}, 404);
+  }) as typeof fetch;
+});
+
+afterEach(async () => {
+  globalThis.fetch = realFetch;
+  await view?.unmount();
+  view = null;
+});
+
+const STORES = {
+  kind: 'read',
+  health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
+} as const;
+const OLD = { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) } as const;
+
+let latest: ItemLifecycle | null = null;
+const Probe = ({ input }: { readonly input: UseItemLifecycleInput }) => {
+  latest = useItemLifecycle(input);
+  return null;
+};
+
+const draw = async (
+  machine: typeof STORES | typeof OLD,
+  item: AgendaItem | undefined,
+  extra: Partial<UseItemLifecycleInput> = {},
+): Promise<void> => {
+  const wires = new AgendaWireDirectory();
+  wires.note(connection.daemonId, machine);
+  const store = { agendaWire: wires } as unknown as AppStore;
+  const input: UseItemLifecycleInput = {
+    connection,
+    scope,
+    client: { merge: async () => undefined },
+    item,
+    board: [],
+    ...extra,
+  };
+  view = await mount(
+    <StoreProvider store={store}>
+      <Probe input={input} />
+    </StoreProvider>,
+  );
+  await interact(() => Promise.resolve());
+};
+
+const base = (overrides: Partial<AgendaItem> = {}): AgendaItem =>
+  agendaItem('A5', { revisions: [{}, {}] as never, ...overrides });
+
+describe('what an open item knows about its own life', () => {
+  test('offers nothing on a machine that does not keep versions, and reads nothing from it', async () => {
+    await draw(OLD, base());
+    expect(latest).toEqual({ conversation: null });
+    expect(calls).toEqual([]);
+  });
+
+  test('offers nothing for a machine agenda or with nothing open', async () => {
+    await draw(STORES, base(), { scope: daemonSessionScope(connection, 'machine-agenda') });
+    expect(latest).toEqual({ conversation: null });
+    await view?.unmount();
+    await draw(STORES, undefined);
+    expect(latest).toEqual({ conversation: null });
+    expect(calls).toEqual([]);
+  });
+
+  test('keeps the mark from BEFORE this opening as the baseline, then marks the newest version seen', async () => {
+    await draw(STORES, base());
+    await settleUntil(() => latest?.versions !== undefined, 'the versions', interact);
+    expect(latest?.versions?.list.seen).toBe(1);
+    expect(latest?.versions?.list.latest).toBe(3);
+    await settleUntil(() => calls.some(call => call.method === 'PUT'), 'the seen mark', interact);
+    expect(calls.find(call => call.method === 'PUT')).toEqual({
+      method: 'PUT',
+      path: '/seen',
+      body: JSON.stringify({ version: 3 }),
+    });
+    expect(calls.filter(call => call.method === 'PUT')).toHaveLength(1);
+  });
+
+  test('offers no diff for an item with one version, but still marks it seen', async () => {
+    versions = { latest: 1 };
+    await draw(STORES, agendaItem('A5'));
+    await settleUntil(() => calls.some(call => call.method === 'PUT'), 'the seen mark', interact);
+    expect(latest?.versions).toBeUndefined();
+  });
+
+  test('reads one version once however often it is asked for', async () => {
+    await draw(STORES, base());
+    await settleUntil(() => latest?.versions !== undefined, 'the versions', interact);
+    const first = await latest?.versions?.load(2);
+    await latest?.versions?.load(2);
+    expect(first?.subject).toBe('v2');
+    expect(calls.filter(call => call.path === '/versions/2')).toHaveLength(1);
+  });
+
+  test('keeps drawing the item the older way when the machine does not answer', async () => {
+    fail = true;
+    await draw(STORES, base());
+    await interact(() => Promise.resolve());
+    expect(latest?.versions).toBeUndefined();
+    expect(latest?.conversation).toBeNull();
+  });
+
+  test('uses the item’s own tail when it is the whole thread, and reads the rest when it is not', async () => {
+    await draw(STORES, base({ conversationCount: 1, conversation: [entry('whole')] }));
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['whole']);
+    expect(calls.some(call => call.path.startsWith('/conversation'))).toBe(false);
+    await view?.unmount();
+
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversation?.length === 3, 'the whole thread', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  test('draws the rebuilt thread when the item stores no words', async () => {
+    await draw(STORES, base());
+    expect(latest?.conversation).toBeNull();
+  });
+
+  test('offers a merge with the other open agendas, and sends it through the client', async () => {
+    const sent: unknown[][] = [];
+    const client = {
+      merge: async (...args: unknown[]) => {
+        sent.push(args);
+      },
+    };
+    await draw(STORES, base(), {
+      client: client as never,
+      board: [agendaItem('A2'), agendaItem('A5'), agendaItem('A9', { notice: true })],
+    });
+    expect(latest?.merge?.candidates.map(each => each.id)).toEqual(['A2']);
+    await latest?.merge?.merge('A5', 'A2');
+    expect(sent).toEqual([[connection, scope, 'A5', 'A2']]);
+  });
+
+  test('offers no merge without a client that merges, or for an item that cannot merge', async () => {
+    await draw(STORES, base(), { client: undefined });
+    expect(latest?.merge).toBeUndefined();
+    await view?.unmount();
+    await draw(STORES, base(), { client: {} });
+    expect(latest?.merge).toBeUndefined();
+    await view?.unmount();
+    await draw(STORES, base({ notice: true }));
+    expect(latest?.merge).toBeUndefined();
+    await view?.unmount();
+    await draw(OLD, base());
+    expect(latest?.merge).toBeUndefined();
+  });
+});

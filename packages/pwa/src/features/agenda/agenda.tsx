@@ -36,6 +36,7 @@ import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
+import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
@@ -63,12 +64,14 @@ import { AgendaDrawer, AgendaLine } from './agenda-line.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { AgendaSettled, isResolved } from './agenda-settled.tsx';
 import { AgendaTab } from './agenda-tab.tsx';
+import { useItemLifecycle } from './use-item-lifecycle.ts';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
   DaemonAgendaClient,
   'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress' | 'snooze' | 'unsnooze'
->;
+> &
+  Partial<Pick<DaemonAgendaClient, 'merge'>>;
 
 /** A request to show one item. `seq` makes a repeated request a new one. */
 export interface AgendaFocus {
@@ -502,7 +505,16 @@ export const useAgenda = ({
   const paged = cardItem !== undefined && !isResolved(cardItem) ? openItems.indexOf(cardItem) : -1;
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
-  const history = useMemo(() => (cardItem === undefined ? [] : itemHistory(cardItem, entries)), [cardItem, entries]);
+  const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems });
+  const history = useMemo(
+    () =>
+      cardItem === undefined
+        ? []
+        : lifecycle.conversation === null
+          ? itemHistory(cardItem, entries)
+          : storedHistory(cardItem, lifecycle.conversation),
+    [cardItem, entries, lifecycle.conversation],
+  );
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
   // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
   const questionKept =
@@ -554,6 +566,8 @@ export const useAgenda = ({
           item={cardItem}
           itemKey={inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id)}
           key={cardItem.id}
+          {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
+          {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
           {...(askAt?.id === cardItem.id ? { startAt: 'ask' as const, startTap: askAt.tap } : {})}
           howToTestFor={howToTestFor}
           onAct={action => act(cardItem, action, composerDraft(scope))}
