@@ -4,7 +4,6 @@ import {
   callDuration,
   callTime,
   DICTATION_DEBUG_EMPTY,
-  DICTATION_DEBUG_OFF_HINT,
   DictationDebugSettings,
 } from '../../../../src/features/settings/dictation-debug-settings.tsx';
 import { DictationDebugLog, type DictationDebugStorage } from '../../../../src/lib/stt/dictation-debug.ts';
@@ -60,6 +59,7 @@ const buttonWith = (root: ParentNode, text: string): HTMLButtonElement =>
   );
 const theSwitch = (root: ParentNode): HTMLButtonElement =>
   must(root.querySelector('button[role="switch"]'), 'the switch');
+const DEBUG_OFF_HINT = 'Off: nothing is kept';
 const click = async (element: HTMLElement): Promise<void> => {
   await interact(() => element.click());
 };
@@ -74,8 +74,11 @@ describe('DictationDebugSettings', () => {
 
     // Assert
     expect(theSwitch(view).getAttribute('aria-checked')).toBe('false');
-    expect(view.textContent).toContain(DICTATION_DEBUG_OFF_HINT);
-    expect(buttonWith(view, 'Clear calls').disabled).toBe(true);
+    expect(view.textContent).toContain(DEBUG_OFF_HINT);
+    expect(buttons(view).some(button => (button.textContent ?? '').includes('Clear calls'))).toBe(false);
+    expect(view.querySelector('[data-testid="dictation-debug-settings"]')).toBeNull();
+    expect(view.textContent).not.toContain('last 10 calls in memory only');
+    await click(must(view.querySelector<HTMLElement>('button[aria-label="More about Dictation debug"]'), 'the (i)'));
     expect(view.textContent).toContain('last 10 calls in memory only');
   });
 
@@ -98,7 +101,8 @@ describe('DictationDebugSettings', () => {
     expect(listed).toContain('420 ms');
     expect(listed).toContain('this browser → api.groq.com');
     expect(log.snapshot().records).toHaveLength(0);
-    expect(view.textContent).toContain(DICTATION_DEBUG_OFF_HINT);
+    expect(view.textContent).toContain(DEBUG_OFF_HINT);
+    expect(view.querySelector('[data-testid="dictation-debug-settings"]')).toBeNull();
   });
 
   it('should name each outcome, the path and a slow call, newest first', async () => {
@@ -151,7 +155,7 @@ describe('DictationDebugSettings', () => {
     // Assert
     expect(theSwitch(injected).getAttribute('aria-checked')).toBe('false');
     expect(theSwitch(ambient).getAttribute('aria-checked')).toBe('false');
-    expect(ambient.textContent).toContain(DICTATION_DEBUG_OFF_HINT);
+    expect(ambient.textContent).toContain(DEBUG_OFF_HINT);
   });
 });
 

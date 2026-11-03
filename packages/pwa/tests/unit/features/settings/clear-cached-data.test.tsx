@@ -8,6 +8,9 @@ const button = (container: HTMLElement, label: string): HTMLButtonElement =>
     `the "${label}" button`,
   );
 
+const buttons = (container: HTMLElement, label: string): HTMLButtonElement[] =>
+  Array.from(container.querySelectorAll('button')).filter(candidate => candidate.textContent?.trim() === label);
+
 const phase = (container: HTMLElement): string | null =>
   must(container.querySelector('[data-clear-cached-data]'), 'the setting').getAttribute('data-clear-cached-data');
 
@@ -21,7 +24,7 @@ describe('ClearCachedDataSetting', () => {
 
     // Assert
     try {
-      expect(actual).toBe('This copy of Ferretry keeps no cached data.');
+      expect(actual).toBe('Cached dataThis copy of Ferretry keeps no cached data.');
       expect(subject.container.querySelectorAll('button')).toHaveLength(0);
     } finally {
       await subject.unmount();
@@ -40,7 +43,7 @@ describe('ClearCachedDataSetting', () => {
     );
     try {
       // Act
-      await interact(() => button(subject.container, 'Clear cached data').click());
+      await interact(() => button(subject.container, 'Clear').click());
       const asking = phase(subject.container);
       await interact(() => button(subject.container, 'Keep it').click());
 
@@ -62,8 +65,8 @@ describe('ClearCachedDataSetting', () => {
     const subject = await mount(<ClearCachedDataSetting onClear={() => pending} />);
     try {
       // Act
-      await interact(() => button(subject.container, 'Clear cached data').click());
       await interact(() => button(subject.container, 'Clear').click());
+      await interact(() => must(buttons(subject.container, 'Clear')[1], 'the confirming Clear').click());
       const during = phase(subject.container);
       const duringDisabled = button(subject.container, 'Clearing…').disabled;
       await interact(() => settle());
@@ -83,13 +86,13 @@ describe('ClearCachedDataSetting', () => {
     const subject = await mount(<ClearCachedDataSetting onClear={() => Promise.reject(new Error('quota'))} />);
     try {
       // Act
-      await interact(() => button(subject.container, 'Clear cached data').click());
       await interact(() => button(subject.container, 'Clear').click());
+      await interact(() => must(buttons(subject.container, 'Clear')[1], 'the confirming Clear').click());
 
       // Assert
       expect(phase(subject.container)).toBe('failed');
       expect(subject.container.textContent).toContain('This browser would not clear it. Try again.');
-      expect(button(subject.container, 'Clear cached data').disabled).toBe(false);
+      expect(button(subject.container, 'Clear').disabled).toBe(false);
     } finally {
       await subject.unmount();
     }

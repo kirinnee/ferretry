@@ -121,13 +121,13 @@ describe('readViewport', () => {
 });
 
 describe('ViewportDetails', () => {
-  const open = async (container: HTMLElement): Promise<HTMLDetailsElement> => {
-    const details = must(container.querySelector<HTMLDetailsElement>('[data-viewport-details]'), 'the disclosure');
-    await interact(() => {
-      details.open = true;
-      details.dispatchEvent(new Event('toggle'));
-    });
-    return details;
+  const open = async (container: HTMLElement): Promise<HTMLButtonElement> => {
+    const disclosure = must(
+      container.querySelector<HTMLButtonElement>('[data-setting-row] > button[aria-expanded]'),
+      'the disclosure',
+    );
+    await interact(() => disclosure.click());
+    return disclosure;
   };
 
   test('reads nothing while closed, then reads live while open and stops when closed again', async () => {
@@ -139,11 +139,12 @@ describe('ViewportDetails', () => {
       expect(fake.listening()).toBe(0);
 
       // Act
-      const details = await open(subject.container);
+      const disclosure = await open(subject.container);
 
       // Assert
       expect(subject.container.querySelector('[data-viewport-readout]')).not.toBeNull();
       expect(subject.container.textContent).toContain('393px × 852px');
+      expect(disclosure.getAttribute('aria-expanded')).toBe('true');
       expect(fake.listening()).toBe(4);
       fake.setInnerHeight(793);
       await interact(() => fake.emit('visual:resize'));
@@ -152,10 +153,7 @@ describe('ViewportDetails', () => {
         '59px shorter than the screen',
       );
 
-      await interact(() => {
-        details.open = false;
-        details.dispatchEvent(new Event('toggle'));
-      });
+      await interact(() => disclosure.click());
       expect(subject.container.querySelector('[data-viewport-readout]')).toBeNull();
       expect(fake.listening()).toBe(0);
     } finally {

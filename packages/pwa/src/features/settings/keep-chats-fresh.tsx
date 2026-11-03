@@ -1,5 +1,5 @@
 /**
- * Settings › This device › KEEP RECENT CHATS FRESH.
+ * Settings › This device › KEEP RECENT CHATS FRESH, and its "Not on cellular" companion — two compact rows.
  *
  * The interactive chats and the 40 most recently opened ones are read in the background (`lib/background-fresh.ts`),
  * so switching to one draws the current conversation at once. It spends this device's data and battery, which is why
@@ -8,7 +8,8 @@
  */
 
 import type { DeviceControls } from '../../lib/controls.ts';
-import { PanelSwitch } from './dictation-debug-settings.tsx';
+import { SettingRow, SettingSwitch } from './setting-row.tsx';
+import { settingDefinition } from './settings-catalog.ts';
 
 export interface KeepChatsFreshSettingProps {
   readonly device: Pick<DeviceControls, 'keepChatsFresh' | 'keepChatsFreshNotOnCellular'>;
@@ -17,21 +18,34 @@ export interface KeepChatsFreshSettingProps {
 
 export function KeepChatsFreshSetting({ device, onChange }: KeepChatsFreshSettingProps) {
   return (
-    <div className="grid gap-2" data-keep-chats-fresh={device.keepChatsFresh ? 'on' : 'off'}>
-      <PanelSwitch
-        checked={device.keepChatsFresh}
-        label="Keep recent chats fresh in the background"
-        detail="Interactive chats and the 40 you opened last stay up to date, so switching to one is instant. Paused while this tab is hidden or your browser asks to save data."
-        onChange={keepChatsFresh => onChange({ keepChatsFresh })}
+    <>
+      <SettingRow
+        settingId="keep-chats-fresh"
+        name="Keep recent chats fresh"
+        hint="The 40 you opened last stay up to date"
+        explanation={`${settingDefinition('keep-chats-fresh').description} Interactive chats and the 40 you opened last stay up to date, so switching to one is instant.`}
+        control={labelId => (
+          <SettingSwitch
+            checked={device.keepChatsFresh}
+            labelledBy={labelId}
+            onChange={keepChatsFresh => onChange({ keepChatsFresh })}
+          />
+        )}
       />
       {device.keepChatsFresh ? (
-        <PanelSwitch
-          checked={device.keepChatsFreshNotOnCellular}
-          label="Not on cellular"
-          detail="Hold off while the browser says this device is on mobile data. Not every browser can tell."
-          onChange={keepChatsFreshNotOnCellular => onChange({ keepChatsFreshNotOnCellular })}
+        <SettingRow
+          name="Not on cellular"
+          hint="Hold off on mobile data"
+          explanation="Hold off while the browser says this device is on mobile data. Not every browser can tell."
+          control={labelId => (
+            <SettingSwitch
+              checked={device.keepChatsFreshNotOnCellular}
+              labelledBy={labelId}
+              onChange={keepChatsFreshNotOnCellular => onChange({ keepChatsFreshNotOnCellular })}
+            />
+          )}
         />
       ) : null}
-    </div>
+    </>
   );
 }

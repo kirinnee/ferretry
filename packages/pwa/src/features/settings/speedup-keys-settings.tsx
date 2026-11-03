@@ -20,6 +20,7 @@ import { cn } from '../../lib/class-names.ts';
 import { useSpeedupKeys } from '../../lib/store.tsx';
 import { type DeviceKeyTest, testDeviceKey } from '../../lib/stt/device-cleanup.ts';
 import type { DeviceSpeedupKeys, SpeedupKeyProvider, SpeedupKeyStatus } from '../../lib/stt/speedup-keys.ts';
+import { SettingRow } from './setting-row.tsx';
 
 export const SPEEDUP_KEYS_INTRO =
   'Paste a Groq or Cerebras key and dictation clean-up calls that provider straight from this browser — no round trip through a machine, so it is faster.';
@@ -215,6 +216,7 @@ export interface SpeedupKeysSettingsProps {
 export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps) {
   const ambient = useSpeedupKeys();
   const keys = injected === undefined ? ambient : injected;
+  const panelId = useId();
   const [cards, setCards] = useState<Readonly<Record<SpeedupKeyProvider, CardState>>>({ groq: IDLE, cerebras: IDLE });
 
   const patch = useCallback((provider: SpeedupKeyProvider, next: Partial<CardState>) => {
@@ -252,37 +254,62 @@ export function SpeedupKeysSettings({ keys: injected }: SpeedupKeysSettingsProps
     [keys, patch, refresh],
   );
 
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="speedup-keys-settings">
-      <div className="flex min-w-0 flex-col gap-1">
-        <p className="m-0 text-cell leading-base text-fg">{SPEEDUP_KEYS_INTRO}</p>
-        <p className="m-0 text-meta leading-base text-muted">{SPEEDUP_KEYS_STORAGE}</p>
-        <p className="m-0 text-meta leading-base text-faint">{SPEEDUP_KEYS_FALLBACK}</p>
-      </div>
-      {keys === null ? (
-        <p role="status" className="m-0 text-cell leading-base text-muted">
-          This page was opened without its key store, so no key can be saved here.
-        </p>
-      ) : (
-        SPEEDUP_KEY_PROVIDERS.map(provider => {
-          const card = cards[provider];
-          return (
-            <DeviceKeyCard
-              key={provider}
-              provider={provider}
-              status={card.status}
-              busy={card.busy}
-              test={card.test}
-              error={card.error}
-              onSave={value => act(provider, 'saving', async vault => await vault.save(provider, value))}
-              onRemove={() => act(provider, 'removing', async vault => await vault.remove(provider))}
-              onTest={() =>
-                act(provider, 'testing', async vault => patch(provider, { test: await testDeviceKey(vault, provider) }))
-              }
-            />
-          );
-        })
+    <SettingRow
+      settingId="speedup-keys"
+      name="Speed-up key"
+      hint="Groq or Cerebras, kept encrypted in this browser"
+      explanation={
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="m-0">{SPEEDUP_KEYS_INTRO}</p>
+          <p className="m-0">{SPEEDUP_KEYS_STORAGE}</p>
+          <p className="m-0 text-faint">{SPEEDUP_KEYS_FALLBACK}</p>
+        </div>
+      }
+      control={() => (
+        <button
+          type="button"
+          className="kt-btn kt-btn--sm min-h-[44px]"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen(value => !value)}
+        >
+          {open ? 'Done' : 'Add key'}
+        </button>
       )}
-    </div>
+    >
+      {open ? (
+        <div id={panelId} className="flex min-w-0 flex-col gap-3 px-panel pb-3" data-testid="speedup-keys-settings">
+          {keys === null ? (
+            <p role="status" className="m-0 text-cell leading-base text-muted">
+              This page was opened without its key store, so no key can be saved here.
+            </p>
+          ) : (
+            SPEEDUP_KEY_PROVIDERS.map(provider => {
+              const card = cards[provider];
+              return (
+                <DeviceKeyCard
+                  key={provider}
+                  provider={provider}
+                  status={card.status}
+                  busy={card.busy}
+                  test={card.test}
+                  error={card.error}
+                  onSave={value => act(provider, 'saving', async vault => await vault.save(provider, value))}
+                  onRemove={() => act(provider, 'removing', async vault => await vault.remove(provider))}
+                  onTest={() =>
+                    act(provider, 'testing', async vault =>
+                      patch(provider, { test: await testDeviceKey(vault, provider) }),
+                    )
+                  }
+                />
+              );
+            })
+          )}
+        </div>
+      ) : null}
+    </SettingRow>
   );
 }

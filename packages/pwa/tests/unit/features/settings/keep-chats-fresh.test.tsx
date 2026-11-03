@@ -33,7 +33,8 @@ describe('KeepChatsFreshSetting', () => {
       />,
     );
     expect(view.root.findAllByProps({ role: 'switch' })).toHaveLength(1);
-    expect(view.root.findByProps({ 'data-keep-chats-fresh': 'off' })).toBeDefined();
+    expect(view.root.findAllByProps({ 'data-setting-row': 'Keep recent chats fresh' })).not.toHaveLength(0);
+    expect(view.root.findAllByProps({ 'data-setting-row': 'Not on cellular' })).toHaveLength(0);
     run(() => view.unmount());
   });
 });

@@ -11,6 +11,8 @@
 import { Check, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingRow } from './setting-row.tsx';
+import { settingDefinition } from './settings-catalog.ts';
 
 export interface ClearCachedDataSettingProps {
   /** Empties the cache; settles when storage has. Absent where the host keeps none. */
@@ -22,7 +24,9 @@ type Phase = 'idle' | 'confirming' | 'clearing' | 'cleared' | 'failed';
 export function ClearCachedDataSetting({ onClear }: ClearCachedDataSettingProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   if (onClear === undefined)
-    return <p className="m-0 text-cell leading-base text-muted">This copy of Ferretry keeps no cached data.</p>;
+    return (
+      <SettingRow settingId="clear-cached-data" name="Cached data" hint="This copy of Ferretry keeps no cached data." />
+    );
 
   const clear = (): void => {
     setPhase('clearing');
@@ -33,46 +37,51 @@ export function ClearCachedDataSetting({ onClear }: ClearCachedDataSettingProps)
   };
 
   return (
-    <div className="grid gap-2" data-clear-cached-data={phase}>
-      <p className="m-0 text-cell leading-base text-muted">
-        Nothing on your machines is removed and no pairing is forgotten; the next open reads everything afresh.
-      </p>
-      {phase === 'confirming' ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-meta text-fg">Clear this device’s cached sessions and messages?</span>
-          <Button type="button" variant="danger" size="sm" className="min-h-[44px]" onClick={clear}>
-            <Trash2 size={14} aria-hidden="true" />
-            <span className="ml-1">Clear</span>
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setPhase('idle')}>
-            Keep it
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="min-h-[44px]"
-            disabled={phase === 'clearing'}
-            onClick={() => setPhase('confirming')}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            <span className="ml-1">{phase === 'clearing' ? 'Clearing…' : 'Clear cached data'}</span>
-          </Button>
-          <span aria-live="polite" className="text-meta text-muted" role="status">
-            {phase === 'cleared' ? (
-              <>
-                <Check size={14} aria-hidden="true" className="mr-1 inline align-[-2px] text-ok" />
-                Cleared
-              </>
-            ) : phase === 'failed' ? (
-              'This browser would not clear it. Try again.'
-            ) : null}
+    <SettingRow
+      settingId="clear-cached-data"
+      name="Cached data"
+      hint={
+        phase === 'cleared' ? (
+          <span aria-live="polite" role="status">
+            <Check size={14} aria-hidden="true" className="mr-1 inline align-[-2px] text-ok" />
+            Cleared
           </span>
-        </div>
+        ) : phase === 'failed' ? (
+          <span aria-live="polite" role="status">
+            This browser would not clear it. Try again.
+          </span>
+        ) : (
+          'Sessions and recent messages kept for a fast open'
+        )
+      }
+      explanation={`${settingDefinition('clear-cached-data').description} Nothing on your machines is removed and no pairing is forgotten; the next open reads everything afresh.`}
+      control={() => (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-[44px]"
+          disabled={phase === 'clearing' || phase === 'confirming'}
+          onClick={() => setPhase('confirming')}
+        >
+          {phase === 'clearing' ? 'Clearing…' : 'Clear'}
+        </Button>
       )}
-    </div>
+    >
+      <div data-clear-cached-data={phase}>
+        {phase === 'confirming' ? (
+          <div className="flex flex-wrap items-center gap-2 px-panel pb-3">
+            <span className="text-meta text-fg">Clear this device’s cached sessions and messages?</span>
+            <Button type="button" variant="danger" size="sm" className="min-h-[44px]" onClick={clear}>
+              <Trash2 size={14} aria-hidden="true" />
+              <span className="ml-1">Clear</span>
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className="min-h-[44px]" onClick={() => setPhase('idle')}>
+              Keep it
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </SettingRow>
   );
 }

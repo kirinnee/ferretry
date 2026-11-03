@@ -22,6 +22,7 @@ import {
   viewportRows,
 } from '../../lib/viewport-diagnostics.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingDisclosureRow } from './setting-row.tsx';
 
 /** Something that announces resizes: the window, and the visual viewport where there is one. */
 interface Announcer {
@@ -195,13 +196,13 @@ export function ViewportDetails({ environment = browserEnvironment }: ViewportDe
   const overlay = useSyncExternalStore(viewportOverlay.subscribe, viewportOverlay.shown);
   const reading = useViewportReading(open, environment);
   return (
-    <details
-      className="text-ui leading-base"
-      data-viewport-details=""
-      onToggle={event => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    <SettingDisclosureRow
+      settingId="about-device"
+      name="About this device"
+      hint="Screen size, safe areas, edges"
+      onOpenChange={setOpen}
     >
-      <summary className="cursor-pointer text-fg">Viewport details</summary>
-      <div className="mt-2 flex flex-col gap-3">
+      <div className="flex flex-col gap-3 text-ui leading-base" data-viewport-details="">
         <p className="m-0 text-meta text-muted">
           How this screen measures itself, for a screenshot when something at its edges looks out of place. Nothing here
           is stored or sent.
@@ -213,7 +214,7 @@ export function ViewportDetails({ environment = browserEnvironment }: ViewportDe
           </Button>
         </div>
       </div>
-    </details>
+    </SettingDisclosureRow>
   );
 }
 

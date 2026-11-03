@@ -51,6 +51,7 @@ import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
+import { AppearanceGroups } from './appearance-groups.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
@@ -67,6 +68,7 @@ import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { Toggle } from './notification-settings.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
+import { SettingGroup, SettingRow } from './setting-row.tsx';
 import {
   isSettingId,
   isSettingsSectionId,
@@ -782,14 +784,51 @@ export function SettingsPage({
             )}
 
             <div className="flex min-w-0 flex-col gap-3">
-              {section.settingIds.map(id => {
-                const definition = settingDefinition(id);
-                return (
-                  <SettingsSection key={definition.id} definition={definition}>
-                    {controlsById[definition.id]}
-                  </SettingsSection>
-                );
-              })}
+              {section.id === 'appearance' ? (
+                <AppearanceGroups
+                  theme={theme}
+                  densityState={densityState}
+                  device={device}
+                  computerAvailable={computerAvailable}
+                  controls={controls}
+                />
+              ) : section.id === 'device' ? (
+                <>
+                  <SettingGroup label="App">
+                    <InstallAppSetting />
+                    <DevicePermissionsSetting />
+                  </SettingGroup>
+                  <SettingGroup label="Connection" settingId="connection-preference">
+                    {connectionPreferences ?? (
+                      <SettingRow
+                        name="Connection"
+                        hint="Unavailable until this page is composed with this device’s preferences"
+                      />
+                    )}
+                  </SettingGroup>
+                  <SettingGroup label="Dictation">
+                    <SpeedupKeysSettings />
+                    <TranscriptionLogSettings />
+                    <DictationDebugSettings />
+                  </SettingGroup>
+                  <SettingGroup label="Data on this device">
+                    <KeepChatsFreshSetting device={device} onChange={patch => controls.setDeviceControls(patch)} />
+                    <ClearCachedDataSetting
+                      {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })}
+                    />
+                    <ViewportDetails />
+                  </SettingGroup>
+                </>
+              ) : (
+                section.settingIds.map(id => {
+                  const definition = settingDefinition(id);
+                  return (
+                    <SettingsSection key={definition.id} definition={definition}>
+                      {controlsById[definition.id]}
+                    </SettingsSection>
+                  );
+                })
+              )}
 
               {section.id === 'machines' ? (
                 createMachineClient === undefined ? (

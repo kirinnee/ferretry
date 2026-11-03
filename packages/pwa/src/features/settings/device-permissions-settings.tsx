@@ -25,6 +25,8 @@ import {
   unsupportedNote,
 } from '../../lib/device-permissions.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingDisclosureRow, SettingRow } from './setting-row.tsx';
+import { settingDefinition } from './settings-catalog.ts';
 
 const STATE_COPY: Readonly<Record<DevicePermissionState, string>> = {
   granted: 'Allowed',
@@ -118,27 +120,38 @@ export function DevicePermissionsSetting() {
   const controller = useDevicePermissions(typeof document === 'undefined' ? null : document);
   if (controller === null) {
     return (
-      <p role="status" className="m-0 text-ui leading-base text-muted">
-        This page was opened without a way to read device permissions.
-      </p>
+      <SettingRow
+        settingId="device-permissions"
+        name="Permissions"
+        hint="This page was opened without a way to read device permissions."
+      />
     );
   }
+  const allowed = DEVICE_PERMISSIONS.filter(info => controller.states[info.id] === 'granted').length;
+  const known = DEVICE_PERMISSIONS.every(info => controller.states[info.id] !== undefined);
   return (
-    <div className="flex flex-col gap-3">
-      <p className="m-0 text-meta leading-base text-faint">
-        Nothing here is asked for until you press its button. Ferretry never uses a permission in the background.
-      </p>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Device permissions">
-        {DEVICE_PERMISSIONS.map(info => (
-          <PermissionRow
-            key={info.id}
-            info={info}
-            state={controller.states[info.id]}
-            facts={controller.facts}
-            onRequest={() => void controller.request(info.id)}
-          />
-        ))}
-      </ul>
-    </div>
+    <SettingDisclosureRow
+      settingId="device-permissions"
+      name="Permissions"
+      hint="Camera, microphone, notifications, location, clipboard, storage"
+      value={known ? `${allowed} of ${DEVICE_PERMISSIONS.length} allowed` : 'Checking…'}
+    >
+      <div className="flex flex-col gap-3">
+        <p className="m-0 text-meta leading-base text-faint">
+          {settingDefinition('device-permissions').description} Ferretry never uses a permission in the background.
+        </p>
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Device permissions">
+          {DEVICE_PERMISSIONS.map(info => (
+            <PermissionRow
+              key={info.id}
+              info={info}
+              state={controller.states[info.id]}
+              facts={controller.facts}
+              onRequest={() => void controller.request(info.id)}
+            />
+          ))}
+        </ul>
+      </div>
+    </SettingDisclosureRow>
   );
 }
