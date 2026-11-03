@@ -3,6 +3,7 @@ import {
   type AgendaId,
   type AgendaItem,
   type AgendaSnapshot,
+  DAEMON_FEATURES,
   LANE_PROPOSAL_ANSWERS,
   laneProposalReference,
 } from '@ferretry/protocol';
@@ -24,7 +25,9 @@ import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
@@ -99,6 +102,8 @@ interface HostProps {
   readonly projectId?: string;
   /** The board's How to test for a card, as the shell's Inbox model gives it. */
   readonly boardSteps?: (daemonId: string, cardId: string) => string | null;
+  /** A store that says what the machine speaks, for the item view's lifecycle reads. */
+  readonly store?: AppStore;
 }
 
 let current: Agenda | undefined;
@@ -153,7 +158,8 @@ afterEach(() => {
   }
 });
 const mount = (props: HostProps) => {
-  const host = <Host {...props} />;
+  const hosted = <Host {...props} />;
+  const host = props.store === undefined ? hosted : <StoreProvider store={props.store}>{hosted}</StoreProvider>;
   const view = render(
     props.boardSteps === undefined ? (
       host
@@ -356,6 +362,26 @@ describe('the full card', () => {
   const cardId = (view: ReturnType<typeof render>): string | undefined =>
     view.root.findAllByType(AgendaItemView)[0]?.props.item.id;
   const withDrawer = (view: ReturnType<typeof render>) => run(() => toggle(view.root)[0]?.props.onClick());
+
+  test('draws the item’s own stored words when the machine keeps the conversation', () => {
+    const wires = new AgendaWireDirectory();
+    wires.note(connection.daemonId, {
+      kind: 'read',
+      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
+    } as never);
+    const stored = item('A3', {
+      conversationCount: 1,
+      conversation: [{ at: '2026-07-31T11:40:00.000Z', by: 'owner', via: 'reply', text: 'Stored words' }],
+    });
+    const view = mount({
+      snapshot: board([stored]),
+      store: { agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore,
+    });
+    withDrawer(view);
+    open(view, 'A3');
+    const history = view.root.findByType(AgendaItemView).props.history as readonly { readonly text?: string }[];
+    expect(history.some(event => event.text === 'Stored words')).toBe(true);
+  });
 
   test('pages through the agenda with ‹ ›, and stops at its ends', () => {
     const view = mount({ snapshot: board(MIXED) });

@@ -176,6 +176,14 @@ describe('what an open item knows about its own life', () => {
     expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
   });
 
+  test('falls back to the rebuilt thread when the rest of the thread cannot be read', async () => {
+    fail = true;
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => calls.some(call => call.path.startsWith('/conversation')), 'the read', interact);
+    await interact(() => Promise.resolve());
+    expect(latest?.conversation).toBeNull();
+  });
+
   test('draws the rebuilt thread when the item stores no words', async () => {
     await draw(STORES, base());
     expect(latest?.conversation).toBeNull();
