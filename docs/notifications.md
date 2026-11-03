@@ -308,6 +308,31 @@ waiting in your Inbox." line instead. The hosted app ships before a daemon relea
 next time the app opens, so the window is small; a device that has not opened the app since may see that line once
 per clear.
 
+### Known limits
+
+Each is a declared GAP: an alert may stay up longer than it should; none takes a wanted alert down or puts item words
+in a clear.
+
+- **A clear the push service delivers before the push it clears** is not caught: nothing on the wire tells that push
+  from a newer one, and the clear carries only its five fields.
+- **The opening device itself**: a push already reaching it while the owner opens its item (its worker still showing
+  it), or reaching it after the page's last close, stays on that device.
+- **A browser that gives notifications no `timestamp`** (Safari): the stop's or approval's line the machine's answer
+  names stays on the opening device; the item's own line still comes down.
+- **The tapped phone may get the quiet note** when another device's push service holds that push up (10 s at most), so
+  the push is still on its way when the owner opens it.
+- **Pushes from before this release** are cleared only by their own ferret's next change or open, and only while under
+  two days old; a finished ferret's old lines stay up.
+- **Chrome's own "This site has been updated in the background" line** may show once Chrome's budget for pushes that
+  show nothing is spent.
+- **A desktop notification clicked into a visible, idle window** is not counted as an open until the next press, key
+  or tap there (a window focus is not an input yet), so that item's line stays on the other devices until then.
+- **An open made while its push is on its way** is remembered in memory only: a restart before the push lands leaves
+  that one line up.
+- **The ledger is never rotated**, and the clearer reads it whole on every change.
+- **A service worker older than this release** shows its plain "Something is waiting in your Inbox." line for a clear,
+  and **a daemon rolled back** past this release skips the new ledger records (above).
+
 ## Where a tap goes
 
 The push's `url` is relative to the machine's own pages: `/session/<id>?attention=A3`

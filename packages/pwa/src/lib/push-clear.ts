@@ -70,6 +70,14 @@ export const handledNotification = (
   },
 });
 
+/** The fixed tag one machine's quiet line goes under when nothing of the item's was showing. */
+const handledTag = (machine: PushMachine | null): string =>
+  `${HANDLED_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`;
+
+/** Whether a shown tag is one this machine's lines go under: its namespace, or its fixed quiet-line tag. */
+const ownTag = (tag: string | undefined, machine: PushMachine | null): boolean =>
+  tag !== undefined && (tag.startsWith(shownTag('', machine)) || tag === handledTag(machine));
+
 /** What one clear does on this device: the shown tags to close, and the quiet line to show, if any. */
 export interface ClearPlan {
   readonly close: readonly string[];
@@ -89,7 +97,7 @@ export const planClear = (
   if (!mustShow) return { close: showing };
   const [first, ...rest] = showing;
   if (first === undefined) {
-    const fixed = `${HANDLED_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`;
+    const fixed = handledTag(machine);
     return { close: [], show: handledNotification(machine, origin, fixed) };
   }
   // Shown under the first match's own tag, it REPLACES that notification; the rest are closed.
@@ -128,11 +136,13 @@ const mustShowSomething = async (registration: ClearRegistration): Promise<boole
 const showHandled = async (
   registration: ClearRegistration,
   note: ReturnType<typeof handledNotification>,
+  machine: PushMachine | null,
 ): Promise<void> => {
   await registration.showNotification(note.title, note.options);
   for (const shown of await registration.getNotifications()) {
     const handled = (shown.data as { readonly handled?: unknown } | null | undefined)?.handled === true;
-    if (handled && shown.tag !== note.options.tag) shown.close();
+    // Only this machine's own: the browser lists one registration's lines, but the guarantee is kept here too.
+    if (handled && shown.tag !== note.options.tag && ownTag(shown.tag, machine)) shown.close();
   }
 };
 
@@ -151,7 +161,7 @@ export const applyClear = async (
   const showing = found.filter(([, notifications]) => notifications.length > 0).map(([tag]) => tag);
   const plan = planClear(showing, await mustShowSomething(registration), machine, origin);
   // The line is shown first: where a push must show something, the replacement is that something.
-  if (plan.show !== undefined) await showHandled(registration, plan.show);
+  if (plan.show !== undefined) await showHandled(registration, plan.show, machine);
   for (const [tag, notifications] of found) {
     if (!plan.close.includes(tag)) continue;
     for (const notification of notifications) notification.close();
@@ -262,7 +272,7 @@ export const settleIfCleared = async (
   // Only the clear's own quiet line can be under a cleared tag here; a newer push's line is never touched.
   const showing = verdict === 'cleared' ? await registration.getNotifications({ tag }) : [];
   const plan = planClear(showing.length > 0 ? [tag] : [], await mustShowSomething(registration), machine, origin);
-  if (plan.show !== undefined) await showHandled(registration, plan.show);
+  if (plan.show !== undefined) await showHandled(registration, plan.show, machine);
   return true;
 };
 

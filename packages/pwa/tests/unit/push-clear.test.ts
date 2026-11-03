@@ -689,6 +689,21 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
     expect([...registration.notes]).toEqual([other]);
   });
 
+  it('should never close another machine’s quiet line, whatever the browser lists (review round 10)', async () => {
+    // Arrange — a quiet line under another machine's fixed tag, as a browser listing the whole origin would show it.
+    const registration = new LiveRegistration(APPLE);
+    const elsewhere = `fy-handled:${encodeURIComponent('sha256:home/two')}`;
+    registration.lines.set(elsewhere, 1);
+    registration.notes.add(elsewhere);
+    registration.lines.set(tag, 1);
+
+    // Act
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN);
+
+    // Assert
+    expect([...registration.notes].sort()).toEqual([elsewhere, tag].sort());
+  });
+
   for (const [service, endpoint] of [
     ['Android', FCM],
     ['an iPhone', APPLE],
