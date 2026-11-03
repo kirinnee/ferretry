@@ -34,7 +34,7 @@ interface CardHeadClose {
 }
 
 export interface CardHeadProps {
-  /** The title, already one line (`MarqueeTitle`). */
+  /** The title (`MarqueeTitle`): one line, or at most two in the open agenda item. */
   readonly title: ReactNode;
   /** Drawn between the title and the controls: where the card stands (the status dot). */
   readonly status?: ReactNode;
@@ -51,7 +51,7 @@ const TIGHT = 'fy-item-view__step fy-item-view__step--tight';
 
 /**
  * THE ONE-ROW HEAD every card shares — an agenda item and a card to test, in the Inbox, the quick-answer run and the
- * chat: the title (one line; a marquee when too long), then `status · meta · ‹ n/N › · ⓘ · clock · ✕`. Every part but
+ * chat: the title (one line, a marquee when too long; the open agenda item's wraps onto two), then `status · meta · ‹ n/N › · ⓘ · clock · ✕`. Every part but
  * the title is optional, so the controls are the same, in the same order and at the same size, wherever a card is
  * drawn; snoozing lives here and nowhere else on the card.
  */

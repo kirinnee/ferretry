@@ -1137,10 +1137,13 @@ as bold text at the segment's own size, never an h1–h6: the card's own labels 
 you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
 (`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
 
-**A card's title is one line, and never ends mid-word.** The open card's head stays ONE row: a title too wide for it
-scrolls to its end and back (the marquee), as before. Where motion is reduced it does not move: it ends at the last
-whole WORD that fits, then "…" (`wordCut`, drawn in `data-cut`; the whole title stays in the DOM for a screen reader
-and a tap shows all of it). Only a gate item or a machine notice folds onto two lines. A card's who/where line
+**The open item's title is always readable.** The open item's head stays ONE row, and its title wraps onto **at most
+two lines** (which fit beside the row's controls — ‹ n/N ›, ⓘ, the clock, ✕ — on a 390px phone): it never scrolls and
+is never cut at either side, with or without reduced motion. A title longer than two lines is drawn **whole at the top
+of the body** as well, straight under the head (`data-agenda-full-title`), so the owner can always read the question.
+Every item wraps this way — ordinary, gate or machine notice. Other card heads (a card to test in the Inbox) keep one
+line: a title too wide scrolls to its end and back (the marquee), and where motion is reduced it ends at the last whole
+WORD that fits, then "…" (`wordCut`; a tap shows all of it). List rows keep their own clamps. A card's who/where line
 ("ferret · task · card · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
 leading, trailing or doubled dot.
 
@@ -1200,7 +1203,8 @@ and a part the item does not carry is not drawn:
 - **Folded parts remember.** The detailed context and the activity log start closed; opening one is remembered per
   item on that device (browser storage, read and written defensively — a private window simply starts closed again).
 - **No cut-offs.** Nothing in the open item is clamped or truncated: a long report, every reply and every line an
-  edit changed are drawn whole. Rows in a list may still be one line.
+  edit changed are drawn whole. The title wraps onto two lines in the head, and one longer than that is drawn whole at
+  the top of the body too. Rows in a list may still be one line.
 - **The conversation** is read from the chat today (`itemHistory`: the owner's words that name the item and the
   parts of the ferret's replies about it). A machine with the stored conversation (`agenda.conversation.1`) feeds the
   same part from the item itself.
@@ -1229,7 +1233,7 @@ and the card stays the card:
 | Kind (`--kind`)                     | The segment shows                                   | The buttons                                            |
 | ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------ |
 | `choice`                            | ONE question, then each option with what it means   | the options (three on the row), recommended tagged     |
-| `yesno`                             | one yes-or-no question                              | Yes · No                                               |
+| `yesno`                             | one yes-or-no question                              | No · Yes (always: No ←, Yes →)                         |
 | `permission`                        | what is being approved, and its effect (`--impact`) | Approve · Deny                                         |
 | `review`                            | what to review (`--link`)                           | Approve · Request changes                              |
 | `reply`, one question               | the question                                        | none: "Type your answer below."                        |
@@ -1266,7 +1270,7 @@ A **form** (`--kind form`) is several structured answers at once. Its `fields` a
 | -------------------------------------- | -------------------------------------- | ---------------------------- |
 | `one` (options `Label: meaning`, 2–12) | radio buttons, each with what it means | the chosen label             |
 | `many` (options as above)              | checkboxes                             | the chosen labels            |
-| `yesno`                                | a Yes \| No segment                    | `Yes` or `No`                |
+| `yesno`                                | a No \| Yes segment                    | `Yes` or `No`                |
 | `text`                                 | "Type it below."                       | whatever the reply box holds |
 
 Write a field as `--field "id|type|Question|option|option…"`, one flag per field, in order: `--field "1|one|Which region?|EU: data
@@ -1363,7 +1367,11 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   cards, Answer quickly, the side-panel cards — and stays the reader selecting text; a mouse uses the buttons and keys:
   - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
     CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
-    (two options: ← and →) — wherever the recommendation sits;
+    (two options: ← and →) — wherever the recommendation sits. **Yes and No have one fixed place: No ←, Yes →**,
+    whichever order the ferret listed them in and whatever its kind (`yesno`, or a two-way `choice` of Yes and No),
+    as a gate is Not good ← · Done →: the forward answer on the right. The row, the docked row, a card ask's own answer,
+    the deck's swipes and keys, a form's yes/no field and the CLI's `answers: ← No · → Yes` all read it from one rule
+    in `@ferretry/protocol` (`yesNoOrder`);
   - **↓ is Skip**, everywhere a card swipes (the deck, the chat dock, the card's top bar and answer row, the ↓ key,
     and the to-test and task-panel cards): it moves on to the next one; nothing is sent, nothing is dismissed and
     the item stays open. A single mis-swipe can therefore never close a card.

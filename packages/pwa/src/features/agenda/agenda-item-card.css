@@ -164,9 +164,10 @@
   opacity: 0.35;
   cursor: default;
 }
-/* ONE line, however long: a title too wide for its box scrolls to its end and back (`MarqueeTitle` measures it and sets
-   --fy-marquee-distance / --fy-marquee-seconds). Where motion is reduced it stays still and ends in an ellipsis, and a
-   tap shows the whole title. */
+/* A card head's title. ONE line by default, however long: a title too wide for its box scrolls to its end and back
+   (`MarqueeTitle` measures it and sets --fy-marquee-distance / --fy-marquee-seconds). Where motion is reduced it stays
+   still and ends in an ellipsis, and a tap shows the whole title. The open agenda item's head wraps instead
+   ([data-wrap], below). */
 .fy-item-view__title {
   min-width: 0;
   flex: 1 1 0;
@@ -1275,12 +1276,25 @@
   line-height: inherit;
 }
 
-/* A GATE ITEM's title wraps instead of scrolling (the head row's chevrons already take the width), and is drawn whole:
-   nothing on the open item is clamped. */
+/* THE OPEN ITEM'S TITLE WRAPS onto at most two lines, and never scrolls or is cut at a side: the owner must be able to
+   read the question on a phone. Two lines fit the row's 44px controls, so the head stays one row tall. A title longer
+   than two lines is drawn whole at the top of the body as well (`.fy-item-view__full-title`). */
 .fy-item-view__title[data-wrap] {
-  overflow: visible;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   text-overflow: clip;
+}
+/* The whole title, when the head's two lines could not hold it: first thing in the body, as the head draws it. */
+.fy-item-view__full-title {
+  margin: var(--gap-xs) 0 var(--gap-sm);
+  font-size: var(--text-md, 16px);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight, 1.25);
+  overflow-wrap: break-word;
 }
 /* The card's summary, one line under the gate item's title. */

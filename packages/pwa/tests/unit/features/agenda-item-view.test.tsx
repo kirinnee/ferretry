@@ -663,6 +663,22 @@ describe('the keys', () => {
     ]);
   });
 
+  test('Yes and No are ← No · → Yes on the row and the keys, whichever order the ferret listed them in', async () => {
+    for (const listed of [choices('Yes', 'No'), choices('No', 'Yes')]) {
+      const spy = await draw(agendaItem('A70', { title: 'Restart tonight', kind: 'yesno', ask: listed } as never));
+      const row = [...root().querySelectorAll('[data-agenda-option]')];
+      expect(row.map(button => button.getAttribute('data-agenda-option'))).toEqual(['No', 'Yes']);
+      await press('ArrowLeft');
+      await press('ArrowRight');
+      expect(spy.acted.map(action => (action as { response?: { choice?: string } }).response?.choice)).toEqual([
+        'No',
+        'Yes',
+      ]);
+      await view?.unmount();
+      view = null;
+    }
+  });
+
   test('do nothing while the item is busy, with a modifier, or for a key it does not own', async () => {
     const busy = await draw(richItem, { busy: true });
     await press('ArrowRight');
@@ -1105,7 +1121,8 @@ describe('a form card', () => {
     expect(radios.map(radio => radio.value)).toEqual(['EU', 'US']);
     expect(radios.map(radio => radio.checked)).toEqual([true, false]);
     expect(root().querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
-    expect(root().querySelectorAll('[data-agenda-form-yesno] button')).toHaveLength(2);
+    const yesNo = [...root().querySelectorAll('[data-agenda-form-yesno] button')];
+    expect(yesNo.map(button => button.textContent?.trim())).toEqual(['No', 'Yes']);
     expect(one('[data-agenda-form-text]').textContent).toBe('Type it below.');
     expect(root().textContent).toContain('data stays in Europe');
     expect(root().textContent).toContain('Recommended');
@@ -1180,20 +1197,67 @@ describe('a form card', () => {
   });
 });
 
-describe('which titles wrap', () => {
-  test('an ordinary item keeps its title on ONE line (it scrolls); only a gate or machine item folds', async () => {
-    await draw(
-      agendaItem('A60', { title: 'Three answers for the board’s catalog, one per catalog the skills come from' }),
-    );
-    expect(one('[data-agenda-title]').hasAttribute('data-wrap')).toBe(false);
+describe('the title in the head', () => {
+  const LONG = 'Should the badge count snoozed items, and should a blocker that wakes one count it again right away?';
+  const proto = HTMLElement.prototype;
+  const real = {
+    scrollHeight: Object.getOwnPropertyDescriptor(proto, 'scrollHeight'),
+    clientHeight: Object.getOwnPropertyDescriptor(proto, 'clientHeight'),
+  };
+  /** Lays the head's title out as `lines` lines of a two-line box (happy-dom lays nothing out). */
+  const titleLines = (lines: number): void => {
+    Object.defineProperty(proto, 'scrollHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-agenda-title') ? lines * 20 : 0;
+      },
+    });
+    Object.defineProperty(proto, 'clientHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-agenda-title') ? Math.min(lines, 2) * 20 : 0;
+      },
+    });
+  };
+  afterEach(() => {
+    for (const [name, descriptor] of Object.entries(real)) {
+      if (descriptor === undefined) Reflect.deleteProperty(proto, name);
+      else Object.defineProperty(proto, name, descriptor);
+    }
   });
 
-  test('a wrapping title is drawn whole — never clamped — and breaks at words', () => {
+  test('wraps onto at most two lines on every item — never a marquee — ordinary, gate or machine alike', async () => {
+    await draw(agendaItem('A60', { title: LONG }));
+    const title = one('[data-agenda-title]');
+    expect(title.hasAttribute('data-wrap')).toBe(true);
+    expect(title.hasAttribute('data-marquee')).toBe(false);
+    expect(title.textContent).toBe(LONG);
+  });
+
+  test('the rule wraps at words onto two lines, and never scrolls or cuts at a side', () => {
     const css = readFileSync(join(import.meta.dir, '../../../src/features/agenda/agenda-item-card.css'), 'utf8');
     const rule = css.slice(css.indexOf('.fy-item-view__title[data-wrap] {'));
     const body = rule.slice(0, rule.indexOf('}'));
-    expect(body).not.toContain('line-clamp');
+    expect(body).toContain('-webkit-line-clamp: 2');
+    expect(body).toContain('line-clamp: 2');
     expect(body).toContain('white-space: normal');
+    expect(body).not.toContain('nowrap');
     expect(body).not.toContain('word-break: break-all');
+  });
+
+  test('a title longer than its two lines is drawn whole at the top of the body as well', async () => {
+    titleLines(3);
+    await draw(agendaItem('A61', { title: LONG }));
+    const whole = one('[data-agenda-full-title]');
+    expect(whole.textContent).toBe(LONG);
+    expect(whole.getAttribute('aria-hidden')).toBe('true');
+    // First in the body: straight under the sticky head, before the card's own parts.
+    expect(whole.previousElementSibling?.matches('[data-agenda-top]')).toBe(true);
+  });
+
+  test('a title its two lines hold is drawn once, in the head', async () => {
+    titleLines(2);
+    await draw(agendaItem('A62', { title: 'Database for the board' }));
+    expect(root().querySelector('[data-agenda-full-title]')).toBeNull();
   });
 });

@@ -429,7 +429,6 @@ function OpenItem({
           {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
           howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
-          wrapTitle={isMachineAgendaId(card.view.config.id)}
           item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
           onAct={act}
           onClose={place.onClose}

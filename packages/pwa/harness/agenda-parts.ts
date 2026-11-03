@@ -180,6 +180,20 @@ const TEST = item('A124', 5, {
   ],
 } as unknown as Partial<AgendaItem>);
 
+/** 6. A TITLE LONGER THAN THE HEAD'S TWO LINES on a phone (a title's full 60 characters), its Yes listed before No. */
+const LONG_TITLE = item('A125', 8, {
+  title: 'Should a snoozed item still push you when a blocker wakes it?',
+  subject: 'Should a snoozed item still push you when a blocker wakes it up again?',
+  kind: 'yesno',
+  stage: 'question',
+  stages: [{ stage: 'question', at: ago(8) }],
+  premise: BRIEF.premise,
+  context: BRIEF.context,
+  whereWeAre:
+    'A blocker already wakes a snoozed item. Today it then pushes once, like any item that starts needing you.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+} as Partial<AgendaItem>);
+
 /** The card's How to test, as the board holds it: the card ask above its Done / Not good carries these steps. */
 export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   F559: [
@@ -190,7 +204,7 @@ export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   ].join('\n'),
 };
 
-export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST] as const;
+export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST, LONG_TITLE] as const;
 
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });

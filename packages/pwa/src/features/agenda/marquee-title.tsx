@@ -17,21 +17,31 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
+/** Within this much of its box a two-line title is called whole: rounding is not overflow. */
+const CLAMP_SLACK_PX = 1;
+
 /**
- * The open item's title on ONE line. One that fits is plain text; one that does not scrolls to its end and back
- * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends at a WORD with "…"
- * (never half a word), and a tap shows the whole title (and a second tap folds it again).
+ * A card head's title. On ONE line by default: one that fits is plain text; one that does not scrolls to its end and
+ * back (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends at a WORD with
+ * "…" (never half a word), and a tap shows the whole title (and a second tap folds it again).
+ *
+ * `twoLines` (the open agenda item's head) never moves and is never cut at a side: it wraps onto at most two lines
+ * (`fy-item-view__title[data-wrap]`), and `onClamped` says whether even two lines could not hold it, so the host
+ * can draw it whole as well.
  */
 export function MarqueeTitle({
   title,
   wrap,
   twoLines = false,
+  onClamped,
 }: {
   readonly title: string;
   /** Draws the words as something else (a link). A tap then belongs to that, so the title cannot be tapped open. */
   readonly wrap?: (text: string) => ReactNode;
-  /** Lets a long title fold onto a second line instead of scrolling or being cut. */
+  /** Wraps the title onto at most two lines: it never scrolls, and it is never cut at a side. */
   readonly twoLines?: boolean;
+  /** With `twoLines`: told, whenever the box is measured, whether the title is longer than its two lines. */
+  readonly onClamped?: (clamped: boolean) => void;
 }) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
@@ -46,6 +56,12 @@ export function MarqueeTitle({
     const inner = text.current;
     if (outer === null || inner === null) return undefined;
     const measure = (): void => {
+      if (twoLines) {
+        setCut(null);
+        setMarquee(null);
+        onClamped?.(outer.scrollHeight > outer.clientHeight + CLAMP_SLACK_PX);
+        return;
+      }
       // An expanded title wraps, so its width says nothing about the one-line row: keep what was measured.
       if (outer.dataset.expanded !== undefined) return;
       const next = marqueeOf(inner.getBoundingClientRect().width, outer.clientWidth);
@@ -67,7 +83,7 @@ export function MarqueeTitle({
     const watch = new ResizeObserver(measure);
     watch.observe(outer);
     return () => watch.disconnect();
-  }, [title, reduced]);
+  }, [title, reduced, twoLines, onClamped]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
   useEffect(() => setExpanded(false), [title]);
@@ -96,7 +112,7 @@ export function MarqueeTitle({
       <span className="fy-item-view__title-text" ref={text}>
         {wrap === undefined ? title : wrap(title)}
       </span>
-      {reduced ? <span aria-hidden="true" className="fy-item-view__title-probe" ref={probe} /> : null}
+      {reduced && !twoLines ? <span aria-hidden="true" className="fy-item-view__title-probe" ref={probe} /> : null}
       {cut === null ? null : (
         <span aria-hidden="true" className="fy-item-view__title-cut">
           {cut}

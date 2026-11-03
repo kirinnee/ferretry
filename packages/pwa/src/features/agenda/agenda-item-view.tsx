@@ -94,8 +94,6 @@ export interface AgendaItemViewProps {
   readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
-  /** Lets a long title fold onto a second line instead of scrolling (a machine notice: its title is the whole message). */
-  readonly wrapTitle?: boolean;
   /** Quiet buttons kept under ⓘ (the Inbox's Skip and Not needed), so the card body keeps the room. */
   readonly tools?: ReactNode;
   /**
@@ -173,7 +171,6 @@ export function AgendaItemView({
   formKey,
   daemonId,
   tools,
-  wrapTitle = false,
   startAt,
   startTap,
   howToTestFor,
@@ -185,6 +182,8 @@ export function AgendaItemView({
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
   const infoId = useId();
   const [infoFor, setInfoFor] = useState<string | null>(null);
+  // Whether the head's two lines cut the title short: then it is drawn whole at the top of the body as well.
+  const [titleClamped, setTitleClamped] = useState(false);
   const infoOpen = infoFor === item.id;
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
@@ -266,7 +265,7 @@ export function AgendaItemView({
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} twoLines={wrapTitle || item.gate !== undefined} />}
+              title={<MarqueeTitle onClamped={setTitleClamped} title={head.title} twoLines />}
               {...(hasInfo
                 ? { info: { controls: infoId, open: infoOpen, onToggle: () => setInfoFor(infoOpen ? null : item.id) } }
                 : {})}
@@ -287,6 +286,12 @@ export function AgendaItemView({
               </div>
             ) : null}
           </header>
+          {titleClamped ? (
+            // The head's h2 already holds every word for a screen reader: this copy is for the eye only.
+            <p aria-hidden="true" className="fy-item-view__full-title" data-agenda-full-title="">
+              {head.title}
+            </p>
+          ) : null}
           <AgendaItemCard
             busy={busy}
             error={error}
