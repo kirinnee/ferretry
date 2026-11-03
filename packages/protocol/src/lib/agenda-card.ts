@@ -47,6 +47,7 @@ import {
   recommendedAgendaOption,
   singleAgendaQuestion,
 } from './agenda.ts';
+import { plainLabel } from './plain-label.ts';
 
 /** The words a yes-or-no card's two options are. */
 export const YES_LABEL = 'Yes';
@@ -461,13 +462,15 @@ export const AGENDA_ANSWER_TEXT_CHARS_OF_THREE = 20;
 
 /**
  * WHAT AN ANSWER'S BUTTON SAYS — on the item view's row, the docked row, a card ask, the deck's arrow keys and the
- * CLI's answers line alike: the option's own short label ("No", "Only blockers"), cut at a word only when it is very
- * long — past 24 characters, or 20 on a row of three (`slots`, the answers on the row). Never its description, never a
- * bare letter, never empty. The answer it sends is its label, untouched.
+ * CLI's answers line alike: the option's own short label ("No", "Only blockers") as plain words (`plainLabel`, so
+ * "**Ship** it" says "Ship it"), cut at a word only when it is very long — past 24 characters, or 20 on a row of three
+ * (`slots`, the buttons drawn on the row). Never its description, never a bare letter, never empty. The answer it sends
+ * is its label, untouched.
  */
 export const agendaAnswerText = (label: string, slots = 1): string => {
-  const text = clipAtWord(label, slots >= 3 ? AGENDA_ANSWER_TEXT_CHARS_OF_THREE : AGENDA_ANSWER_TEXT_CHARS);
-  return text.replaceAll('…', '').trim() === '' ? label : text;
+  const plain = plainLabel(label);
+  const text = clipAtWord(plain, slots >= 3 ? AGENDA_ANSWER_TEXT_CHARS_OF_THREE : AGENDA_ANSWER_TEXT_CHARS);
+  return text.replaceAll('…', '').trim() === '' ? plain : text;
 };
 
 /**

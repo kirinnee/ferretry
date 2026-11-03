@@ -413,6 +413,21 @@ describe('options with descriptions', () => {
     expect(said()).toEqual(['Lock the whole session…', 'Wait']);
   });
 
+  test('two answers and "Done · closes" in the row are a row of three: each answer says a row of three’s words', async () => {
+    const long = 'Lock the whole session row';
+    const doneClose = {
+      label: 'Done · closes &F12',
+      shortLabel: 'Close &F12',
+      busy: false,
+      error: null,
+      confirm: null,
+      onTap: () => undefined,
+    };
+    await draw(agendaItem('A52', { ask: choices(long, 'Wait') }), { doneClose });
+    expect(root().querySelectorAll('.fy-qr__row .fy-qr__chip')).toHaveLength(3);
+    expect(said()).toEqual(['Lock the whole…', 'Wait']);
+  });
+
   test('the arrow and the words sit together in one face, so a long label can wrap with its arrow on its first line', async () => {
     await draw(described);
     const faces = [...root().querySelectorAll('[data-agenda-option] .fy-qr__face')];

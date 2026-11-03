@@ -208,6 +208,9 @@ const THREE_WAY_STRESS = [
   ['Lock the whole session row', 'Retry it with exponential backoff', 'Do absolutely nothing at all'],
   ['Rebuild every cached index', 'Ask the owner again tomorrow', 'Move it to the next release'],
   ['Release it to everyone', 'Keep the old behaviour', 'Reauthenticate everyone'],
+  // Long single words: a word wider than its whole third is split where it overflows, and the row stays on screen.
+  ['Reauthenticate everyone', 'Deprovision', 'Rollback'],
+  ['Internationalization', 'Decommissioning', 'Reauthentication'],
 ] as const;
 
 const STAGES = [
@@ -223,10 +226,25 @@ const readRow = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.fy-qr__row [data-agenda-option]')].map(button => {
       const text = button.querySelector<HTMLElement>('.fy-qr__label');
+      const face = button.querySelector<HTMLElement>('.fy-qr__face') ?? button;
       const box = button.getBoundingClientRect();
-      // Each line, read from where each character is drawn: a line that starts inside a word is a split word.
+      const row = button.closest('.fy-qr__row')?.getBoundingClientRect() ?? box;
+      /** Whether `word`, drawn on one line in the label's font, fits the width the label wraps in. */
+      const fitsWhole = (word: string): boolean => {
+        const probe = document.createElement('span');
+        probe.textContent = word;
+        probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+        face.append(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width <= face.clientWidth + 1;
+      };
+      // Each line, read from where each character is drawn: a line that starts inside a word is a split word, which is
+      // a fault unless that word alone is wider than the label's whole width.
       const lines: string[] = [];
       let midWord = false;
+      let splitWide = false;
+      let firstTop = Number.NaN;
       if (text?.firstChild instanceof Text) {
         const node = text.firstChild;
         const range = document.createRange();
@@ -238,18 +256,28 @@ const readRow = (page: Page) =>
           if (rect === undefined) continue;
           const char = node.data[at] ?? '';
           if (Number.isNaN(top) || rect.top > top + 2) {
-            if (!Number.isNaN(top) && /\S/u.test(char) && /\S/u.test(node.data[at - 1] ?? '')) midWord = true;
+            if (!Number.isNaN(top) && /\S/u.test(char) && /\S/u.test(node.data[at - 1] ?? '')) {
+              const start = node.data.lastIndexOf(' ', at) + 1;
+              const end = node.data.indexOf(' ', at);
+              if (fitsWhole(node.data.slice(start, end === -1 ? undefined : end))) midWord = true;
+              else splitWide = true;
+            }
+            if (Number.isNaN(top)) firstTop = rect.top;
             top = rect.top;
             lines.push('');
           }
           lines[lines.length - 1] += char;
         }
       }
+      // The arrow on a line of its own (a line may break after it) is a line of the button too.
+      const arrow = button.querySelector('.fy-qr__arrow')?.getBoundingClientRect();
+      const arrowAlone = arrow !== undefined && !Number.isNaN(firstTop) && arrow.bottom <= firstTop + 2;
       return {
         option: button.dataset.agendaOption ?? '',
         said: text?.textContent ?? '',
-        lines: lines.map(line => line.trim()),
+        lines: [...(arrowAlone ? ['(arrow)'] : []), ...lines.map(line => line.trim())],
         midWord,
+        splitWide,
         clipped:
           text === null ||
           text.scrollWidth > text.clientWidth + 1 ||
@@ -257,20 +285,27 @@ const readRow = (page: Page) =>
           button.scrollWidth > button.clientWidth + 1 ||
           button.scrollHeight > button.clientHeight + 1,
         offWidth: box.left < 0 || box.right > window.innerWidth,
+        outsideRow: box.left < row.left - 1 || box.right > row.right + 1,
       };
     }),
   );
 
 type Row = Awaited<ReturnType<typeof readRow>>;
 
-/** Each label is at most two lines, breaks only between words, is not clipped, and sits within the screen. */
+/**
+ * Each label is at most two lines (its arrow's line counted), breaks only between words, is not clipped, and sits
+ * within its row and the screen. Only a word wider than its whole button is split, and may take a third line.
+ */
 const checkLines = (row: Row, label: string): void => {
   for (const each of row) {
     const drawn = each.lines.join(' / ');
     check(!each.clipped, `${label}: "${each.said}" is clipped (${drawn})`);
-    check(!each.midWord, `${label}: "${each.said}" breaks inside a word (${drawn})`);
-    check(each.lines.length <= 2, `${label}: "${each.said}" takes ${each.lines.length} lines (${drawn})`);
+    check(!each.midWord, `${label}: "${each.said}" breaks inside a word that fits its button (${drawn})`);
+    // A word wider than its whole button may take one more line, its arrow above it.
+    const most = each.splitWide ? 3 : 2;
+    check(each.lines.length <= most, `${label}: "${each.said}" takes ${each.lines.length} lines (${drawn})`);
     check(!each.offWidth, `${label}: "${each.said}" is off the screen's width`);
+    check(!each.outsideRow, `${label}: "${each.said}" sticks out of its row`);
   }
 };
 
@@ -315,6 +350,8 @@ const checkRow = async (
     checkLines(stressed, `${label} (as long as a row of three says)`);
     process.stdout.write(`   ${label} stressed: ${stressed.map(each => each.lines.join(' / ')).join(' | ')}\n`);
   }
+  // The last stress row is the hardest, long single words: drawn so its wrapping can be looked at.
+  if (stress.length > 0) await shot(page, `${name}-long-words`, form, theme);
   await page.close();
 };
 

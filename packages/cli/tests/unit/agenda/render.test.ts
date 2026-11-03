@@ -728,6 +728,26 @@ describe('attention cards', () => {
     should(printed(['Lock the whole session row', 'Wait'])).containEql('answers: ← Lock the whole session… · → Wait');
   });
 
+  it('should say a Markdown label in its button’s plain words, cut where the button cuts it', () => {
+    // Act
+    const actual = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'Which fix?', {
+          title: 'Fix',
+          kind: 'choice',
+          ask: {
+            kind: 'multiple-choice',
+            options: [{ label: '**Ship** it' }, { label: '**Lock** the whole session row' }, { label: '`Wait`' }],
+          },
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('answers: ← Ship it · ↑ Lock the whole… · → Wait');
+    should(actual).not.containEql('**');
+  });
+
   it('should keep an old item headed by its ask and still show derived answers', () => {
     // Act
     const actual = renderAgendaList(snapshot([humanItem('A1', 'approve the deploy', { ask: { kind: 'permission' } })]));

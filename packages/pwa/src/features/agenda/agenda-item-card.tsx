@@ -27,6 +27,7 @@ import {
   type AgendaCardAnswer,
   type AgendaItem,
   inputContextLines,
+  plainLabel,
   singleAgendaQuestion,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
@@ -50,7 +51,6 @@ import {
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';

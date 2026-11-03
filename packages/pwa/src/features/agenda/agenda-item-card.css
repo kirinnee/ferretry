@@ -894,10 +894,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* An answer too long for its third of a phone's row wraps onto a second line, only between words, and its button grows
-   to hold it: never "Retry wit…". The arrow rides the first line, so the words have the button's whole width
-   (`agendaAnswerText` keeps a label short enough for two lines), and every column is at least its longest word wide,
-   so no word is ever split. */
+/* An answer too long for its third of a phone's row wraps onto a second line between words, and its button grows to
+   hold it: never "Retry wit…". The arrow rides the first line, so the words have the button's whole width
+   (`agendaAnswerText` keeps a label short enough for two lines). The columns stay equal thirds of the row (the
+   `.fy-qr__row` default), so the row never grows past the screen; only a single word wider than its whole third is
+   split, where it overflows. */
 :is(.fy-card, .fy-item-view__dock) .fy-qr__chip {
   height: auto;
   max-height: none;
@@ -910,10 +911,8 @@
 }
 :is(.fy-card, .fy-item-view__dock) .fy-qr__face .fy-qr__label {
   overflow: visible;
+  overflow-wrap: break-word;
   white-space: normal;
-}
-:is(.fy-card, .fy-item-view__dock) .fy-qr__row {
-  grid-auto-columns: minmax(min-content, 1fr);
 }
 :is(.fy-card, .fy-item-view__dock) .fy-qr__error,
 :is(.fy-card, .fy-item-view__dock) .fy-qr__note {

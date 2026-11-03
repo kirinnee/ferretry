@@ -36,7 +36,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import { type AgendaId, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -67,7 +67,9 @@ import {
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
+import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -121,7 +123,6 @@ import {
 } from '../../lib/gate-items.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
-import { answerWords } from '../../lib/plain-label.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
@@ -1384,17 +1385,27 @@ const RUN_MOVES: readonly RunKey[] = [
   { key: 'Esc', word: 'Close' },
 ];
 
-/** The arrows an agenda card answers by, in its buttons' own words (`answerWords`), then Skip. */
-const agendaRunKeys = (card: InboxCard): readonly RunKey[] => {
+/**
+ * The arrows an agenda card answers by, in its buttons' own words (`agendaAnswerText`), then Skip. Each is cut for the
+ * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
+ * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
+ */
+export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
   const targets = swipeTargets(card.item);
-  const slots = [targets.left, targets.up, targets.right].filter(target => target !== undefined).length;
+  const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: answerWords(targets.left.label, slots) }]),
-    ...(targets.up === undefined ? [] : [{ key: '↑', word: answerWords(targets.up.label, slots) }]),
-    ...(targets.right === undefined ? [] : [{ key: '→', word: answerWords(targets.right.label, slots) }]),
+    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
+    ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label, slots) }]),
+    ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label, slots) }]),
     ...RUN_MOVES,
   ];
 };
+
+/** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
+function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
+  const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
+  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+}
 
 /** A task card's two answers by arrow, then Skip. */
 const toTestRunKeys = (row: ToTestCard): readonly RunKey[] => {
@@ -2060,7 +2071,7 @@ export function AgendaInboxPage({
                   )}
                 </div>
               )}
-              {phone || deck[0] === undefined ? null : <RunKeysHint keys={agendaRunKeys(deck[0])} />}
+              {phone || deck[0] === undefined ? null : <AgendaRunKeysHint card={deck[0]} />}
             </div>
           </div>
         )}

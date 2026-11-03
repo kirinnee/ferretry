@@ -1,7 +1,7 @@
 /**
  * THE ANSWER ROW OF AN OPEN AGENDA CARD — ONE ROW, at most THREE buttons, in DIRECTION order: the ← answer, the ↑
  * (recommended) one, the → one, each the swipe that sends it. A direction with no answer draws NOTHING: the buttons
- * there share the width, never a hole. Each says its option's own short label (`answerWords`: "No", "Only
+ * there share the width, never a hole. Each says its option's own short label (`agendaAnswerText`: "No", "Only
  * blockers"), never its description and never a bare letter, cut at a word only when very long; in an open card a label
  * too long for its third of a phone's row wraps onto a second line between words. The full label is its accessible
  * name and its title. The recommended one is in the
@@ -18,13 +18,12 @@
  */
 
 import type { AgendaCardAnswer } from '@ferretry/protocol';
-import { GOT_IT_LABEL } from '@ferretry/protocol';
+import { agendaAnswerText, GOT_IT_LABEL, plainLabel } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';
-import type { CardModel } from '../../lib/agenda-card-model.ts';
+import { answerRowLayout, type CardModel } from '../../lib/agenda-card-model.ts';
 import { type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
-import { answerWords, plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import { isTouch } from './agenda-swipe-gesture.ts';
 import { useDeckReadsDown } from './deck-down-context.ts';
@@ -115,11 +114,13 @@ function Chip({ label, recommended, busy, arrow, swipeable, primary = false, slo
     >
       <span className="fy-qr__face">
         {arrow === undefined ? null : (
+          // A line may break after the arrow, so a long word that fits its button whole moves under it, never split.
           <span aria-hidden="true" className="fy-qr__arrow">
             {ARROW[arrow]}
+            <wbr />
           </span>
         )}
-        <span className="fy-qr__label">{answerWords(label, slots)}</span>
+        <span className="fy-qr__label">{agendaAnswerText(label, slots)}</span>
       </span>
     </button>
   );
@@ -220,8 +221,11 @@ export function AgendaQuickReplies({
   const recommended = model.recommended;
   const replies = repliesOf(model, requestChanges);
   const slotted = replies.length > 0 && !model.notice;
-  // "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them.
-  const closeInRow = doneClose !== undefined && replies.length < 3;
+  // "Done · closes &F12" takes the → slot when the card gave fewer than three answers, and counts as a button there.
+  const { closeInRow, slots } = answerRowLayout(model, {
+    requestChanges: requestChanges !== undefined,
+    doneClose: doneClose !== undefined,
+  });
   if (!hasReplies(model, requestChanges) && doneClose === undefined && error === null && waitingOn === undefined)
     return null;
   return (
@@ -278,13 +282,13 @@ export function AgendaQuickReplies({
             give={give}
             key={reply.label}
             recommended={recommended}
-            slots={replies.length}
+            slots={slots}
             swipeable={swipeable}
             tapOnly={tapOnly}
             {...(reply.onTap === undefined ? {} : { onTap: reply.onTap })}
           />
         ))}
-        {closeInRow ? <DoneCloseChip disabled={busy} view={doneClose} /> : null}
+        {closeInRow && doneClose !== undefined ? <DoneCloseChip disabled={busy} view={doneClose} /> : null}
       </fieldset>
       {doneClose === undefined || closeInRow ? null : (
         <div className="fy-qr__under" data-agenda-more-row="">

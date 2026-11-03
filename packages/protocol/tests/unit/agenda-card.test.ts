@@ -375,6 +375,15 @@ describe('attention card', () => {
       );
       should(agendaAnswerText('Supercalifragilisticexpialidocious', 3)).equal('Supercalifragilisti…');
     });
+
+    it('reads Markdown in a label as plain words, before it is cut, so every surface says the same words', () => {
+      should(agendaAnswerText('**Ship** it')).equal('Ship it');
+      should(agendaAnswerText('`Wait`', 3)).equal('Wait');
+      should(agendaAnswerText('[Spec](https://example.test/spec)')).equal('Spec');
+      should(agendaAnswerText('**Lock** the whole session row')).equal('Lock the whole session…');
+      should(agendaAnswerText('**Lock** the whole session row', 3)).equal('Lock the whole…');
+      should(agendaAnswerText('****')).equal('****');
+    });
   });
 });
 

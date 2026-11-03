@@ -14,12 +14,11 @@
  * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
  */
 
-import { type AgendaFormField, formFieldRequired, YES_NO_ORDER } from '@ferretry/protocol';
+import { type AgendaFormField, formFieldRequired, plainLabel, YES_NO_ORDER } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { formProgress } from '../../lib/agenda-form-send.ts';
 import { agendaForms, type FormPicks, toggled } from '../../lib/agenda-form-state.ts';
-import { plainLabel } from '../../lib/plain-label.ts';
 
 type Prose = (text: string) => ReactNode;
 

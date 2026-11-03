@@ -1244,10 +1244,12 @@ and the card stays the card:
 
 - **A button says its option's short label** ("No", "Only blockers"): never its description, never a bare letter.
   Markdown in a label is read as plain words. A label longer than 24 characters (20 on a row of three) is cut at a
-  word, and the answer sent is still the whole label. On a phone, a row of three gives each button a third of the
-  width: a label that does not fit wraps onto a second line, between words, and the buttons grow to hold it; a word is
-  never split. The arrow keys' hints and `fy agenda list` say the same words. The options list may name long options
-  by letter; the buttons never do.
+  word, and the answer sent is still the whole label. A row of three counts every button drawn on it, so two answers
+  beside "Done · closes" are a row of three. On a phone, a row of three gives each button a third of the width: a
+  label that does not fit wraps onto a second line, between words, and the buttons grow taller to hold it; the row
+  never grows wider than the screen, so only a single word wider than its whole button is split. The arrow keys'
+  hints and `fy agenda list` say the same words, through one function. The options list may name long options by
+  letter; the buttons never do.
 - **Options are only for a choice; steps only for a to-do.** Several questions, or a question mixed with anything
   else, are `--kind reply` with one `--question` each: never option buttons. The owner answers them all in one
   reply, by number.
