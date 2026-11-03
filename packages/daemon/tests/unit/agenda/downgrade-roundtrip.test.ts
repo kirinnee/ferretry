@@ -273,3 +273,60 @@ describe('A recorded version that predates the words an old item kept', () => {
     should(texts(back.conversations?.A1)).deepEqual(['first old reply', 'second old reply']);
   });
 });
+
+describe("The ferret's answer given on 2a", () => {
+  /** What 2a leaves of an edit to the answer: the new text on the item and the revision that wrote it. */
+  const answeredOn2a = (document: Document, answer: string, minute: number, history?: unknown[]): void => {
+    const item = document.entries[0]?.item as { questionAnswer?: string; revisions?: unknown[]; history?: unknown[] };
+    item.questionAnswer = answer;
+    item.revisions = [
+      ...(item.revisions ?? []),
+      { at: T(minute), by: 'agent', changed: ['questionAnswer'], previous: {} },
+    ];
+    if (history !== undefined) item.history = [...(item.history ?? []), ...history];
+  };
+
+  it('should come back after the owner words it answers when the version held only the owner', () => {
+    // Arrange: the owner replied on 4.x, so the version's thread has owner words and no ferret words.
+    const before = run(raised(), { action: 'reply', actor: HUMAN, id: 'A1', note: 'q1', at: T(1) });
+    should((before.conversations?.A1 ?? []).map(entry => entry.by)).deepEqual(['owner']);
+    const document = strippedBy2a(before, each => answeredOn2a(each, 'ans', 5));
+
+    // Act
+    const back = upgraded(document, recordedOf(before));
+
+    // Assert
+    const thread = back.conversations?.A1 ?? [];
+    should(texts(thread)).deepEqual(['q1', 'ans']);
+    should(thread.at(-1)).match({ at: T(5), by: 'ferret', via: 'question-answer' });
+  });
+
+  it('should come back after the owner words said on 2a before it, not at the version it replaces', () => {
+    // Arrange: the version holds the ferret's first answer (T2); on 2a the owner wrote q2 (T5), then the ferret a2 (T6).
+    const before = log(raised(), 'A1', 'm1', 1, 'q1', 'a1');
+    const document = strippedBy2a(before, each =>
+      answeredOn2a(each, 'a2', 6, [{ at: T(5), kind: 'replied', note: 'q2' }]),
+    );
+
+    // Act
+    const back = upgraded(document, recordedOf(before));
+
+    // Assert
+    const thread = back.conversations?.A1 ?? [];
+    should(texts(thread)).deepEqual(['q1', 'a1', 'q2', 'a2']);
+    should(thread.at(-1)).match({ at: T(6), by: 'ferret', via: 'question-answer' });
+    should(upgraded(JSON.parse(agendaLedgerDocument(back)), recordedOf(back)).conversations?.A1).deepEqual(thread);
+  });
+
+  it('should not move an answer the version already holds, whatever its revision says', () => {
+    // Arrange: nothing was said on 2a; the answer's text and its revision are the ones the version has.
+    const before = log(raised(), 'A1', 'm1', 1, 'q1', 'a1');
+    const document = strippedBy2a(before);
+
+    // Act
+    const back = upgraded(document, recordedOf(before));
+
+    // Assert
+    should(back.conversations?.A1).deepEqual(before.conversations?.A1);
+  });
+});

@@ -101,7 +101,8 @@ const WORKING = /^working: ([\s\S]+)$/u;
  * the notes of its history (the owner's requests and replies, the ferret's `surface` why and `rest` line), the owner's
  * answer note, the ferret's answer to their question, and the note it was closed with. Nothing that was kept is dropped.
  * A history entry past the history bound is gone already, and cannot come back; an answer to the owner's question has
- * no time of its own, so it takes the ferret's last update (or when the item began waiting).
+ * no time of its own, so it takes the time of the latest edit that changed it, else the ferret's last update (or when
+ * the item began waiting).
  *
  * Pure and total: an item with no words seeds nothing.
  */
@@ -146,7 +147,15 @@ export function seedConversation(item: AgendaItem | ResolvedAgendaItem): AgendaC
       seeded.push(wordsOf(owner.at, 'owner', 'answer', text));
     }
   }
-  seeded.push(wordsOf(lastUpdate ?? answeredAt ?? item.waitingSince, 'ferret', 'question-answer', item.questionAnswer));
+  const answeredBy = item.revisions?.findLast(revision => revision.changed.includes('questionAnswer'))?.at;
+  seeded.push(
+    wordsOf(
+      answeredBy ?? lastUpdate ?? answeredAt ?? item.waitingSince,
+      'ferret',
+      'question-answer',
+      item.questionAnswer,
+    ),
+  );
   if ('resolvedAt' in item && typeof item.resolvedAt === 'string') {
     for (const text of responseWords(item.response, item.response === undefined ? undefined : item.resolutionNote)) {
       if (!seeded.some(entry => entry?.at === item.resolvedAt && entry.text === text)) {
