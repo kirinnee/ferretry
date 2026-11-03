@@ -39,8 +39,11 @@ import {
   type TaskRef,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
+import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
+import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
+import type { SessionRoster } from './activity.ts';
 import {
   type BoardCaller,
   type BoardStanding,
@@ -52,50 +55,48 @@ import {
 } from './authority.ts';
 import {
   applyAction,
-  closeAsDaemon,
   type CardContext,
   type CardOutcome,
+  closeAsDaemon,
   newCard,
   requireLocalCard,
   requireStanding,
   triggerMove,
   withEvent,
 } from './card-actions.ts';
-import type { SessionRoster } from './activity.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
+import { gateEntry } from './gate-policy.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
-import { gateEntry } from './gate-policy.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
-import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
-import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
+  BoardAttachmentSource,
   BoardChangeSink,
   BoardClock,
   BoardDiagnostics,
   BoardOptIn,
   BoardSnapshot,
-  BoardThreads,
   BoardStore,
+  BoardThreads,
+  DoneNotice,
+  DoneNotifier,
   LaneSetSource,
   OwnerWords,
   ProjectAdopter,
-  BoardAttachmentSource,
-  DoneNotifier,
   ReopenNotifier,
   SessionFocus,
   SessionParents,
-  DoneNotice,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
-import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
+import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
+import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 export interface BoardServiceDependencies {
   readonly store: BoardStore;
@@ -249,6 +250,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   reparent: 'move cards under another card',
   refile: 'refile cards',
   snooze: 'snooze cards',
+  visibility: 'make cards public or private',
   trigger: 'report events on cards',
 };
 
@@ -409,12 +411,52 @@ export class BoardService {
           if (current === undefined || current.askedBy === 'person') return { task: null, result: false };
           const decided = await this.askedByOf(current, false);
           if (decided === current.askedBy) return { task: null, result: false };
-          return { task: requireValidCard({ ...current, askedBy: decided }), result: true };
+          // A default visibility stored while the asker was unsettled follows the answer; none stored is left to
+          // backfillVisibility, and a chosen one is never touched.
+          const asked = { ...current, askedBy: decided };
+          return {
+            task: requireValidCard(current.visibility === undefined ? asked : withDefaultVisibility(asked)),
+            result: true,
+          };
         });
         if (done) stored += 1;
       } catch (error) {
         this.ports.diagnostics.warn(
           `board: could not store who asked for ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return stored;
+  }
+
+  /**
+   * Stores the visibility every card still without one reads as ({@link defaultVisibility}), and settles the ones
+   * stored as a default again, from who asked and where the card sits now. A card whose asker is not settled yet
+   * (`backfillAskedBy` could not decide it) is left without one, because a default stored then would be a guess;
+   * it reads by the same rule meanwhile and is settled by a later boot. A chosen visibility is never touched, so it
+   * is idempotent and cannot undo a choice; it writes no history and does not touch the card's last-touched time. A
+   * card that cannot be written is reported and left for the next boot. Answers how many cards it stored.
+   */
+  async backfillVisibility(): Promise<number> {
+    const { cards } = await this.ports.store.read();
+    let stored = 0;
+    for (const card of cards) {
+      const { id } = card;
+      if (visibilityChosen(card) || card.askedBy === undefined) continue;
+      try {
+        const done = await this.ports.store.write(id, async current => {
+          if (current === undefined || visibilityChosen(current) || current.askedBy === undefined) {
+            return { task: null, result: false };
+          }
+          const settled = withDefaultVisibility(current);
+          return settled === current
+            ? { task: null, result: false }
+            : { task: requireValidCard(settled), result: true };
+        });
+        if (done) stored += 1;
+      } catch (error) {
+        this.ports.diagnostics.warn(
+          `board: could not store the visibility of ${id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -821,13 +863,22 @@ export class BoardService {
   // -------------------------------------------------------------------------------------------------
 
   /** Writes a brand-new card under a counter id; the id already holding a card is the counter's fault. */
-  /** A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot. */
-  private async askedByOf(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean, lenient = false) {
+  /**
+   * A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot.
+   * A caller that needs the answer settled (a ferret's choice to hide a card) asks for it strictly: not knowing is
+   * an unavailable board, never a guess that a later boot would have to take back.
+   */
+  private async askedByOf(
+    card: Pick<BoardTask, 'createdBy' | 'ask'>,
+    ownerApp: boolean,
+    options: { readonly lenient?: boolean; readonly strict?: boolean } = {},
+  ) {
     return await decideAskedBy(card, ownerApp, async sessionId => {
       try {
-        return (await this.ports.ownerWords?.said(sessionId)) ?? [];
+        if (options.strict && this.ports.ownerWords === undefined) throw new Error('owner words are unavailable');
+        return (await this.ports.ownerWords?.said(sessionId, { strict: options.strict })) ?? [];
       } catch (error) {
-        if (!lenient) throw error;
+        if (!options.lenient) throw error;
         this.ports.diagnostics.warn(
           `board: could not read what the owner said to ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -862,9 +913,25 @@ export class BoardService {
       laneSet: facts.laneSet,
       index: facts.index,
     });
+    // A ferret's explicit private is only as good as the asker it rests on: an owner's ask it cannot yet tell from
+    // an agent's must not be hidden for good, so that lookup may not fail softly here.
+    const hides = request.visibility === 'private' && facts.caller.kind !== 'owner';
+    const ownerApp = facts.caller.kind === 'owner' && facts.caller.via === undefined;
+    const askedBy = hides
+      ? await this.settledAskedBy(made, ownerApp)
+      : await this.askedByOf(made, ownerApp, { lenient: true });
+    const visibility = request.visibility ?? defaultVisibility({ ...made, askedBy });
+    const visibilitySource = request.visibility === undefined ? 'default' : 'chosen';
+    if (request.visibility !== undefined) {
+      const standing = facts.caller.kind === 'owner' ? 'owner-human' : 'owner';
+      const refusal = visibilityVerdict({ ...made, askedBy }, request.visibility, standing);
+      if (refusal !== null) throw new BoardError('forbidden', refusal.message, refusal.allowed);
+    }
     const card = requireValidCard({
       ...made,
-      askedBy: await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true),
+      askedBy,
+      visibility,
+      visibilitySource,
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
     await this.ports.store.write(id, async current => {
@@ -894,13 +961,35 @@ export class BoardService {
       (request.action === 'move' || request.action === 'reopen') && request.attachments !== undefined
         ? await this.attachmentsFor(card, request.attachments, context.standing)
         : undefined;
+    const hidden = await this.settledForHiding(card, request, context.standing);
     return applyAction(
-      card,
+      hidden,
       request,
       attachments === undefined ? context : { ...context, attachments },
       target,
       parentStanding,
     );
+  }
+
+  /**
+   * The card as a ferret's choice to make it private must judge it: with who asked for it settled, because an
+   * unsettled agent-asked card may be the owner's. Any other request, and the owner, judge the card as stored.
+   */
+  private async settledForHiding(card: BoardTask, request: BoardTaskActionRequest, standing: BoardStanding) {
+    const hides = (request.action === 'edit' || request.action === 'visibility') && request.visibility === 'private';
+    if (!hides || standing === 'owner-human' || card.askedBy === 'person') return card;
+    return { ...card, askedBy: await this.settledAskedBy(card, false) };
+  }
+
+  /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
+  private async settledAskedBy(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean) {
+    try {
+      return await this.askedByOf(card, ownerApp, { strict: true });
+    } catch (error) {
+      throw new BoardUnavailableError(
+        `who asked for this card cannot be settled right now: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**

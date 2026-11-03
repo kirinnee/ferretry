@@ -10,7 +10,7 @@
  */
 
 import { formatTaskRef, type LaneCategory, type SessionView, type TaskRef } from '@ferretry/protocol';
-import { groupUnderHuman, humanScope, isAgentTask } from './board-human.ts';
+import { groupUnderHuman, humanScope, isPrivateCard } from './board-human.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardLoadStatus } from './board-store.ts';
 import {
@@ -49,7 +49,7 @@ export interface ChatWho {
   readonly focus: TaskRef | null;
   /** Its sub-ferrets, any depth (`descendantSessionIds`). */
   readonly relatives: ReadonlySet<string>;
-  /** "Ferret cards": cards ferrets made for other ferrets are drawn. Off, only the owner's own cards are. */
+  /** "Show private": the private cards are drawn. Off, only the owner's own cards are. */
   readonly agents: boolean;
 }
 
@@ -75,7 +75,7 @@ export interface ChatCards {
   readonly under: ReadonlySet<string>;
   /** Every card drawn, once. */
   readonly total: number;
-  /** How many of this ferret's cards "Ferret cards" is keeping out of sight. */
+  /** How many of this ferret's cards "Show private" is keeping out of sight. */
   readonly hiddenAgents: number;
 }
 
@@ -128,7 +128,7 @@ export const chatCards = (model: BoardModel, who: ChatWho): ChatCards => {
   const here = model.cards.filter(card => isOn(card, who.daemonId));
   const focusId = who.focus?.id ?? null;
   const focus = focusId === null ? null : (here.find(card => card.task.id === focusId) ?? null);
-  const visible = (card: BoardCardOf): boolean => who.agents || !isAgentTask(card.task);
+  const visible = (card: BoardCardOf): boolean => who.agents || !isPrivateCard(card.task);
   const { owned, children, taken } = gather(here, who, focus, visible);
   const hiddenAgents = who.agents ? 0 : gather(here, who, focus, () => true).taken.size - taken.size;
   const scope = humanScope(model.cards);
@@ -248,7 +248,7 @@ export interface BoardChat {
   readonly cards: ChatCards;
   readonly status: BoardLoadStatus;
   readonly refresh: () => void;
-  /** "Ferret cards" is on. */
+  /** "Show private" is on. */
   readonly agents: boolean;
   /** The daemons say who asked for a card: the toggle is offered only then. */
   readonly splitsAgents: boolean;

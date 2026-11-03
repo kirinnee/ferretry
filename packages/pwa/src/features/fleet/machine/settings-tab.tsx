@@ -130,7 +130,7 @@ function NavRow({
         data-settings-action={name}
         title={detail}
         onClick={onClick}
-        className="kt-grouprow min-h-11 items-center"
+        className="kt-grouprow items-center"
       >
         <RowIcon>{icon}</RowIcon>
         <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{title}</span>
@@ -515,7 +515,7 @@ const MACHINE_COLUMNS = 'grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-5 lg
 function toolRows(machine: FleetMachineView, online: boolean, open: (flow: SettingsFlow) => void): ReactNode {
   return machine.tools.map(tool => (
     <li key={tool.harness} data-setup-row={`tool-${tool.harness}`}>
-      <div className="kt-grouprow min-h-11 items-center">
+      <div className="kt-grouprow items-center">
         <RowIcon>{TOOL_ICONS[tool.harness]}</RowIcon>
         <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{tool.label}</span>
         <span className="shrink-0 text-meta text-muted">{tool.installed ? 'Installed' : 'Not installed'}</span>

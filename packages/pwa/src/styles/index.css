@@ -1796,8 +1796,9 @@ body {
   align-items: center;
   gap: var(--gap-md);
   width: 100%;
-  min-height: 52px;
-  padding: var(--gap-md) var(--pad-panel);
+  /* The row floor, not a fixed 52px: 34px on a desktop and the 44px touch floor on a phone. */
+  min-height: var(--row-min-h);
+  padding: var(--gap-sm) var(--pad-panel);
   color: var(--fg);
   font-family: var(--font-ui);
   font-size: var(--text-md);

@@ -309,7 +309,8 @@ export type BoardVerb =
   | 'reparent'
   | 'file'
   | 'edit'
-  | 'refile';
+  | 'refile'
+  | 'visibility';
 
 const PAST: Readonly<Record<BoardVerb, string>> = {
   create: 'created',
@@ -331,6 +332,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   file: 'file recorded',
   edit: 'edited',
   refile: 'refiled',
+  visibility: 'visibility changed',
 };
 
 /** One line that says what the verb did and where the card stands now. */

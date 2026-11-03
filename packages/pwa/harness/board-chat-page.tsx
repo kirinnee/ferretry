@@ -6,7 +6,8 @@
  * not given), `?totest=1` adds two cards waiting for a try (the moves the page is asked for are kept in `window.__moves`), `?cards=few`
  * the six-card fixture (the default is 70 cards), `?agents=1` turns "Internal" on, `?expanded=1` opens the
  * Tasks tab over the whole chat area (the desktop Info panel steps out of the way). `?origin=0` serves cards
- * the way an older daemon does, with no `origin`. `?long=1` gives the first card to test sixteen steps (the box scrolls).
+ * the way an older daemon does, with no `origin`. `?filed=1` stores every other human card `askedBy: agent`, as a
+ * lead's card filed in its own words is. `?long=1` gives the first card to test sixteen steps (the box scrolls).
  */
 
 import { type BoardTaskView, boardOk, type SessionView } from '@ferretry/protocol';
@@ -208,17 +209,30 @@ const MANY = Array.from({ length: 64 }, (_, index) =>
 );
 const FEW = params.get('cards') === 'few';
 const ORIGIN = params.get('origin') !== '0';
+const FILED = params.get('filed') === '1';
 const originOf = (task: BoardTaskView, index: number): BoardTaskView => {
   if (!ORIGIN) return task;
   const human = task.owner === LEAD && task.id !== 'F22' && index % 3 !== 2;
-  return originCard(
+  const made = originCard(
     task.id,
     human ? 'human' : 'agent',
     human ? undefined : task.owner === LEAD ? { id: 'F18' } : null,
     task,
   );
+  // `?filed=1`: every other human card was filed by the lead in words of its own, so the daemon stored it
+  // `askedBy: agent` though its `origin` is still `human`.
+  return { ...made, askedBy: human && !(FILED && index % 2 === 1) ? 'person' : 'agent' };
 };
 const CARDS = [...(FEW ? OPEN : [...OPEN, ...MANY]), ...TO_TEST].map(originOf);
+// The lead's own open cards the daemon stored `askedBy: agent` though they are the owner's: the shots check each is drawn.
+(window as unknown as { __filed: string[] }).__filed = CARDS.filter(
+  task =>
+    task.owner === LEAD &&
+    task.parent === null &&
+    task.laneId !== 'closed' &&
+    task.origin === 'human' &&
+    task.askedBy === 'agent',
+).map(task => task.id);
 
 const store = new DaemonBoardStore(
   fakePort({

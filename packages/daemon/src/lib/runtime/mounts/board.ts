@@ -102,7 +102,17 @@ export const reraiseBoardError = (error: unknown): never => {
   throw error;
 };
 
-const QUERY_FIELDS = ['project', 'ferret', 'kind', 'prState', 'activity', 'state', 'query', 'cursor'] as const;
+const QUERY_FIELDS = [
+  'project',
+  'ferret',
+  'kind',
+  'prState',
+  'activity',
+  'state',
+  'query',
+  'visibility',
+  'cursor',
+] as const;
 
 /** The board query, from the URL's query string. A field given empty is a field not given. */
 const boardQueryOf = (context: RouteContext): BoardQuery => {

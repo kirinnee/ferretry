@@ -28,8 +28,9 @@ const NODE_TURN_FILES: TurnFiles = {
   modified: async path => {
     try {
       return (await stat(path)).mtimeMs;
-    } catch {
-      return undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
     }
   },
   list: async directory => await readdir(directory),
@@ -118,10 +119,11 @@ interface ReadTurns {
  * COST IS BOUNDED. A lead's session holds thousands of turn documents, and this is asked on every card a ferret
  * makes and for every card at boot. What was read is kept per session and read again only when the turns
  * directory changed, and then only the documents whose time changed; at most {@link OWNER_TURNS_KEPT} sessions
- * are kept, and a document plainly someone else's keeps no words. The ledger keeps its own incremental read.
+ * are kept, and a document plainly someone else's keeps no words. Strict reads reread every turn document.
+ * The ledger keeps its own incremental read.
  *
- * Total: a session it cannot read, an id it does not know and a missing record are an empty list, because
- * "unknown" must read as "the agent's" and never stop a card from being made.
+ * Best effort by default, so an ordinary create and boot backfills can use whatever is readable. A strict read
+ * rejects any failed lookup and rereads the turn files, never trusting a cache that may contain a partial read.
  */
 export class SessionOwnerWords implements OwnerWords {
   private readonly read = new Map<SessionId, ReadTurns>();
@@ -134,16 +136,20 @@ export class SessionOwnerWords implements OwnerWords {
     private readonly files: TurnFiles = NODE_TURN_FILES,
   ) {}
 
-  async said(sessionId: string): Promise<readonly string[]> {
+  async said(sessionId: string, { strict = false }: { readonly strict?: boolean } = {}): Promise<readonly string[]> {
     const id = tryParseSessionId(sessionId);
-    if (id === undefined) return [];
+    if (id === undefined) {
+      if (strict) throw new Error('invalid session id');
+      return [];
+    }
     const words: string[] = [];
     try {
       for (const message of await this.queue.list(id)) {
         const part = queuedByOwner(message);
         if (part !== null) words.push(part);
       }
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // an unreadable queue says nothing; the ledger and the turns below may still
     }
     /** The turns a send started: the ledger says who sent those, so their documents are not read for it. */
@@ -154,72 +160,85 @@ export class SessionOwnerWords implements OwnerWords {
         const part = sentByOwner(record);
         if (part !== null) words.push(part);
       }
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // an unreadable ledger says nothing; every turn document below is then read on its own
     }
     try {
-      const fromFerret = await this.startedByFerret(sessionId);
-      for (const [turn, { text }] of [...(await this.turns(id))].sort(([a], [b]) => a - b)) {
+      const fromFerret = await this.startedByFerret(sessionId, strict);
+      for (const [turn, { text }] of [...(await this.turns(id, strict))].sort(([a], [b]) => a - b)) {
         if (text === null || accounted.has(turn) || (turn === 1 && fromFerret)) continue;
         words.push(text);
       }
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // no turns on disk
     }
     return [...new Set(words)];
   }
 
   /** Whether a ferret started the session; a lineage that cannot be read cannot prove the owner wrote the first turn. */
-  private async startedByFerret(sessionId: string): Promise<boolean> {
+  private async startedByFerret(sessionId: string, strict: boolean): Promise<boolean> {
     try {
       return (await this.parents.parentOf(sessionId)) !== undefined;
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       return true;
     }
   }
 
-  private async turns(id: SessionId): Promise<ReadonlyMap<number, ReadTurn>> {
+  private async turns(id: SessionId, strict: boolean): Promise<ReadonlyMap<number, ReadTurn>> {
     const directory = this.turnsDirectory(id);
     const directoryMs = await this.files.modified(directory);
     if (directoryMs === undefined) return new Map();
-    const kept = this.read.get(id);
+    const kept = strict ? undefined : this.read.get(id);
     if (kept !== undefined && kept.directoryMs === directoryMs) {
       this.keep(id, kept);
       return kept.turns;
     }
     const names = new Set(await this.files.list(directory));
     const turns = new Map<number, ReadTurn>();
+    let complete = true;
     for (const name of names) {
       const number = TURN_FILE.exec(name)?.[1];
       if (number === undefined) continue;
       const turn = Number(number);
       const file = join(directory, name);
       const modifiedMs = await this.files.modified(file);
-      if (modifiedMs === undefined) continue;
+      if (modifiedMs === undefined) {
+        if (strict) throw new Error(`turn disappeared during read: ${name}`);
+        complete = false;
+        continue;
+      }
       const before = kept?.turns.get(turn);
       if (before !== undefined && before.modifiedMs === modifiedMs) {
         turns.set(turn, before);
         continue;
       }
       const authorName = name.replace(/\.md$/u, '.by.json');
-      const by = names.has(authorName) ? await this.author(join(directory, authorName)) : undefined;
+      const by = names.has(authorName) ? await this.author(join(directory, authorName), strict) : undefined;
       try {
         const text = (await this.files.read(file)).trimEnd();
         turns.set(turn, { modifiedMs, text: ownerPart(by, text) });
-      } catch {
-        // gone between the listing and the read; the next change of the directory reads it again
+      } catch (error) {
+        if (strict) throw error;
+        complete = false;
+        // Do not cache a partial read: a retry may succeed without the directory time changing.
       }
     }
-    this.keep(id, { directoryMs, turns });
+    if (complete) this.keep(id, { directoryMs, turns });
+    else this.read.delete(id);
     return turns;
   }
 
   /** Who a turn document is from, by the file Ferretry wrote beside it; one it cannot read names nobody. */
-  private async author(file: string): Promise<QueueAuthor | undefined> {
+  private async author(file: string, strict: boolean): Promise<QueueAuthor | undefined> {
     try {
       const parsed = QueueAuthorSchema.safeParse(JSON.parse(await this.files.read(file)));
+      if (strict && !parsed.success) throw new Error('unreadable turn author');
       return parsed.success ? parsed.data : undefined;
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       return undefined;
     }
   }
