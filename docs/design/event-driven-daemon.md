@@ -108,8 +108,13 @@ an edit from outside the daemon is seen once the hub hears it, within its 25 ms 
 still proved by a `stat`, because a request acts on what a person may just have written. The `stat` also
 stays whenever the watch cannot vouch: the directory is polled, or no hub is wired, as in the CLI. The
 daemon's own writes invalidate at once, before and after the rename, so a read that ran alongside a write
-cannot keep the old file. At most 4,096 documents are watched (two per session, so 2,048 sessions; it was 1,024,
-which a ~600-session fleet outgrew, leaving every document past the bound `stat`ed on every pass).
+cannot keep the old file. At most `max(4,096, 4 × indexed sessions)` documents are watched, the same bound the document cache keeps
+(three documents per session, so a fixed 4,096 stopped holding a fleet at ~1,365 sessions and every walk
+became a walk of reads; it was 1,024 before that, outgrown by ~600). The fleet is counted only when the cache
+reaches the bound it last set. When the fleet shrinks and the bound falls below the watches already open, the
+oldest watches are closed — each with its cached document, which would otherwise be trusted as `heard` by a
+watch that is no longer listening — down to an eighth under the bound, so a new live session can still be watched.
+A document the cache evicts loses its watch too.
 On the idle fixture (`bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`), compared with
 `origin/main` `9e456c0f0`:
 
