@@ -163,21 +163,48 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
   return left.device === right.device && left.inode === right.inode;
 }
 
-/** How many session documents the identity cache holds before it starts again from empty. */
-const DOCUMENT_CACHE_LIMIT = 4_096;
+/**
+ * The fewest session documents the identity cache holds, and the room it keeps per indexed session above it.
+ *
+ * A FIXED BOUND WAS A CLIFF, NOT A CEILING. Each session puts three documents in the cache — its marker, its
+ * config and its state — and the background readers walk every session, so once a fleet passed
+ * 4,096 / 3 ≈ 1,365 sessions every walk overflowed the bound: the cache emptied part-way through, and every
+ * read after that was a walked open, read and JSON parse instead of one `stat`. A real host at 1,385
+ * sessions, nearly all of them finished, read 135 MB/s of its own unchanged documents and stalled its loop
+ * for seconds. So the bound follows the fleet the index holds, with a spare slot per session, and never
+ * drops below the floor.
+ */
+const DOCUMENT_CACHE_FLOOR = 4_096;
+const DOCUMENTS_PER_SESSION = 4;
 
 /**
- * How many session documents are watched for changes, at most; a document past it is `stat`ed per read.
+ * How much of a full cache is let go at once: the oldest eighth.
  *
- * A background reader watches two documents per session — its marker and its config — so this is room for
- * 2,048 sessions. It was 1,024: a fleet of ~600 sessions ran past it, and every document past the bound was
- * `stat`ed on every pass of every reader that asks about all of them. A watched document costs an entry in
- * the hub, and the hub's OS watch is per session DIRECTORY (inotify on Linux, FSEvents elsewhere), shared
- * by both; where the OS refuses another watch the hub polls that directory and says so, so a large bound
- * degrades to the old `stat`, never to a missed change. It matches the identity cache's bound: a document
- * worth watching is one the cache holds.
+ * A cache still full once its bound has followed the fleet holds documents of sessions that are gone. It
+ * lets the oldest go rather than starting again from empty — emptying it is what made a walk over a
+ * large fleet a walk of misses — and lets enough go that the fleet is not counted again on the next read.
  */
-const WATCHED_DOCUMENT_LIMIT = DOCUMENT_CACHE_LIMIT;
+const DOCUMENT_EVICTION_SHARE = 8;
+
+/**
+ * What a document's watch had heard when its identity was taken: WHICH watch, and how many changes it had
+ * reported.
+ *
+ * The count alone cannot vouch. A watch that was closed and opened again starts counting again, so a copy
+ * read through the old watch could look quiet to the new one — across the very gap in which nothing was
+ * listening. Giving each watch its own range of counts does not hold either: a watch that has heard enough
+ * changes counts into the next watch's range. So the watch is named by a generation that never repeats
+ * within a storage and is kept apart from the count, which may run as high as it likes. A copy is quiet
+ * only to the very watch it was read through; to any other it is a mismatch, and a mismatch is a `stat`.
+ */
+interface Hearing {
+  readonly watch: number;
+  readonly changes: number;
+}
+
+function sameHearing(a: Hearing | undefined, b: Hearing | undefined): boolean {
+  return a !== undefined && b !== undefined && a.watch === b.watch && a.changes === b.changes;
+}
 
 /** A document as last read: the identity of the file it came from, its text, and its parsed value. */
 interface CachedDocument {
@@ -185,10 +212,10 @@ interface CachedDocument {
   readonly text: string;
   readonly value?: FrozenJsonValue;
   /**
-   * How many changes the document's watch had reported when its identity was last taken — counted BEFORE
-   * the `stat` or the read, so a change that lands during either is still unseen. Absent while unwatched.
+   * What the document's watch had reported when its identity was last taken — counted BEFORE the `stat`
+   * or the read, so a change that lands during either is still unseen. Absent while unwatched.
    */
-  readonly heard?: number;
+  readonly heard?: Hearing;
 }
 
 /**
@@ -217,8 +244,9 @@ export interface DocumentChanges {
   subscribe(path: string, listener: () => void): DocumentSubscription;
 }
 
-/** A document's watch, and how many changes it has reported. */
+/** A document's watch, the generation that names it, and how many changes it has reported. */
 interface WatchedDocument {
+  readonly generation: number;
   readonly subscription: DocumentSubscription;
   changes: number;
 }
@@ -259,6 +287,18 @@ export class DaemonStorage {
    * written, and must see it.
    */
   private readonly watched = new Map<string, WatchedDocument>();
+  /**
+   * How many documents {@link documents} and {@link watched} may each hold: see {@link DOCUMENT_CACHE_FLOOR}.
+   *
+   * The watches share the bound because a document worth watching is one the cache holds. A fixed 1,024 was
+   * outgrown by a fleet of ~600 sessions, and every document past it was `stat`ed on every pass of every
+   * reader that asks about all of them. A watch costs an entry in the hub, whose OS watch is per session
+   * DIRECTORY; where the OS refuses another the hub polls that directory, so a large bound degrades to the
+   * old `stat`, never to a missed change.
+   */
+  private documentLimit = DOCUMENT_CACHE_FLOOR;
+  /** The generation of the last watch opened: every watch of this storage has one of its own ({@link Hearing}). */
+  private watchGeneration = 0;
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
   /**
@@ -1015,11 +1055,12 @@ export class DaemonStorage {
     // A document a background reader asks for again is watched from now on — before its `stat`, so a change
     // between the two is caught by the `stat`, and any change after it is heard.
     const watch = cached !== undefined && freshness === 'heard' ? this.watch(path) : this.watched.get(path);
-    const heard = watch?.changes;
-    const quiet = cached !== undefined && heard !== undefined && cached.heard === heard;
+    const heard: Hearing | undefined =
+      watch === undefined ? undefined : { watch: watch.generation, changes: watch.changes };
+    const quiet = cached !== undefined && sameHearing(cached.heard, heard);
     if (quiet && freshness === 'heard' && watch?.subscription.live() === true) return cached;
     if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) {
-      if (heard === undefined || cached.heard === heard) return cached;
+      if (heard === undefined || sameHearing(cached.heard, heard)) return cached;
       const proved: CachedDocument = { ...cached, heard };
       this.documents.set(path, proved);
       return proved;
@@ -1029,7 +1070,7 @@ export class DaemonStorage {
       this.documents.delete(path);
       return undefined;
     }
-    if (this.documents.size >= DOCUMENT_CACHE_LIMIT) this.documents.clear();
+    if (this.documents.size >= this.documentBound(this.documents.size)) this.evictOldestDocuments();
     const fresh: CachedDocument = {
       identity: read.identity,
       text: read.text,
@@ -1039,11 +1080,73 @@ export class DaemonStorage {
     return fresh;
   }
 
+  /**
+   * The bound for a cache now holding `size` documents. The fleet is counted only when `size` has reached the
+   * bound it last set, so a walk counts it once per growth of the fleet, never once per read.
+   */
+  private documentBound(size: number): number {
+    if (size >= this.documentLimit) {
+      this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
+      this.trimWatches();
+    }
+    return this.documentLimit;
+  }
+
+  /**
+   * Lets the oldest of the cached documents go — a map iterates in the order its keys were first set — and
+   * their watches with them, since a watch only exists to vouch for a cached document. A fleet that shrank
+   * leaves the bound below the cache, so it lets go of enough to get back under it, not just an eighth.
+   */
+  private evictOldestDocuments(): void {
+    let surplus = Math.max(
+      Math.ceil(this.documents.size / DOCUMENT_EVICTION_SHARE),
+      this.documents.size - this.documentLimit + 1,
+    );
+    for (const path of this.documents.keys()) {
+      if (surplus === 0) return;
+      this.documents.delete(path);
+      this.dropWatch(path);
+      surplus -= 1;
+    }
+  }
+
+  /**
+   * Closes the oldest watches until the bound has room for another eighth, once a shrinking fleet has left
+   * it below the watches already open.
+   *
+   * WHY. Nothing but the documents' eviction ever closed a watch, and a cache that stays under a lowered bound
+   * never evicts: the old watches stayed open for good, the bound counted them as full, and a new live session
+   * could not be watched until restart. A watch is dropped together with its cached document: the document
+   * remembers what its watch had heard, and without the watch nothing is hearing any.
+   */
+  private trimWatches(): void {
+    if (this.watched.size <= this.documentLimit) return;
+    let surplus = this.watched.size - this.documentLimit + Math.ceil(this.documentLimit / DOCUMENT_EVICTION_SHARE);
+    for (const path of this.watched.keys()) {
+      if (surplus === 0) return;
+      this.documents.delete(path);
+      this.dropWatch(path);
+      surplus -= 1;
+    }
+  }
+
+  /** Stops watching `path`. */
+  private dropWatch(path: string): void {
+    const watched = this.watched.get(path);
+    if (watched === undefined) return;
+    watched.subscription.close();
+    this.watched.delete(path);
+  }
+
   /** This document's watch, opened now if there is room for it. */
   private watch(path: string): WatchedDocument | undefined {
     const known = this.watched.get(path);
-    if (known !== undefined || this.changes === undefined || this.watched.size >= WATCHED_DOCUMENT_LIMIT) return known;
+    // The bound the cache last set, not a fresh count: a document is watched only once it is cached, so the
+    // cache reaches the bound — and grows it with the fleet — first.
+    if (known !== undefined || this.changes === undefined || this.watched.size >= this.documentLimit) return known;
+    this.watchGeneration += 1;
     const watched: WatchedDocument = {
+      generation: this.watchGeneration,
       changes: 0,
       subscription: this.changes.subscribe(path, () => {
         watched.changes += 1;
