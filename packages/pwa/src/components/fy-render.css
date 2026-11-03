@@ -881,7 +881,6 @@
   margin: var(--gap-xs) 0;
 }
 
-.md .fy-card-embed .fy-card-embed-list,
 .fy-card-embed-list {
   display: flex;
   min-width: 0;
@@ -910,8 +909,25 @@
   max-width: none;
   flex: none;
 }
-.md .fy-card-embed .fy-board-lane__head {
+/* The agenda body (`.fy-attn-sec--open .md ul`, 0,3,1) and chat prose (`.md ul/li/h3`) restyle every list and heading
+   inside them; each rule below is written to out-rank the strongest of those so the Board's own lane and card look wins. */
+.md .fy-card-embed ul.fy-board-lane__cards,
+.md .fy-card-embed ul.fy-card-embed-list,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-board-lane__cards,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-card-embed-list {
   margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.md .fy-card-embed li.fy-board-card,
+.fy-attn-sec--open .md .fy-card-embed li.fy-board-card {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.md .fy-card-embed h3.fy-board-lane__head {
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
 }
 
 /* A link inside Markdown turns accent and underlined; a card on the Board is not that, and nor is one here. */

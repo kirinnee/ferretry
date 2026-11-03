@@ -274,6 +274,7 @@ function ChildrenBoard({
         href={daemonBoardCardPath(connection.daemonId, parent)}
         onClick={event => {
           if (onTaskOpen === undefined) return;
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
           event.preventDefault();
           onTaskOpen(parent, event.currentTarget);
         }}

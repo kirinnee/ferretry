@@ -11,6 +11,9 @@ import { agendaProse } from '../src/features/agenda/agenda-prose.tsx';
 import { ChatProse } from '../src/components/chat-prose.tsx';
 import { ReferenceSurfaceProvider } from '../src/components/reference-surface.tsx';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
+import { DaemonFleetStore } from '../src/lib/fleet-store.ts';
+import { type AppStore, StoreProvider } from '../src/lib/store.tsx';
+import { sessionView } from '../tests/support/sessions.ts';
 import { boardAnswer, card, laneSetFor, laptop, PROJECT } from '../tests/unit/board-support.ts';
 
 const PR = {
@@ -30,10 +33,15 @@ const MINUTE = 60_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 const NIMBUS = 'mvuc7tsf-0c3d50df';
 const EMBER = 'mvudnuly-ec442385';
-const callsigns = new Map([
-  [NIMBUS, 'nimbus'],
-  [EMBER, 'ember'],
-]);
+
+// The ferret names come the way production gets them: the app's fleet, through `useFerretCallsigns`.
+const fleet = new DaemonFleetStore({ list: async () => [], get: async () => sessionView(NIMBUS) });
+fleet.seed(
+  laptop,
+  [sessionView(NIMBUS, { config: { teammate: 'nimbus' } }), sessionView(EMBER, { config: { teammate: 'ember' } })],
+  Date.now(),
+);
+const appStore = { fleet } as unknown as AppStore;
 
 const CATEGORY: Record<string, 'backlog' | 'active' | 'review' | 'shipped'> = {
   todo: 'backlog',
@@ -102,7 +110,7 @@ const store = new DaemonBoardStore({
   },
 });
 
-const surface = { cardEmbed: { store, connection: laptop, callsigns }, onTaskOpen: () => undefined };
+const surface = { cardEmbed: { store, connection: laptop }, onTaskOpen: () => undefined };
 const block = (type: string, alt: string, payload: string) =>
   ['```fy-render', `type: ${type}`, `alt: ${alt}`, '---', payload, '```'].join('\n');
 
@@ -115,6 +123,8 @@ const CHAT = [
 ].join('\n');
 const AGENDA = [
   'The sub-cards of &F412 by lane. Nothing needs you; this is where each piece stands.',
+  '',
+  block('card', 'F412, the parent', '&F412'),
   '',
   block('board', 'Pieces of F412 by lane', 'parent: &F412'),
 ].join('\n');
@@ -146,17 +156,22 @@ window.__moveCard = () => {
 };
 
 createRoot(document.getElementById('root') as HTMLElement).render(
-  <ReferenceSurfaceProvider surface={surface}>
-    <main data-fixture style={{ maxWidth: 640, margin: '0 auto', padding: 16 }}>
-      {scene === 'agenda' ? (
-        <section className="rounded-lg border border-border bg-surface p-4" data-scene="agenda">
-          {prose(AGENDA)}
-        </section>
-      ) : (
-        <div data-scene={scene}>
-          <ChatProse text={scene === 'error' ? ERROR : CHAT} />
-        </div>
-      )}
-    </main>
-  </ReferenceSurfaceProvider>,
+  <StoreProvider store={appStore}>
+    <ReferenceSurfaceProvider surface={surface}>
+      <main data-fixture style={{ maxWidth: 640, margin: '0 auto', padding: 16 }}>
+        {scene === 'agenda' ? (
+          <section
+            className="fy-attn-sec fy-attn-sec--open rounded-lg border border-border bg-surface p-4"
+            data-scene="agenda"
+          >
+            <div className="fy-attn-sec__body">{prose(AGENDA)}</div>
+          </section>
+        ) : (
+          <div data-scene={scene}>
+            <ChatProse text={scene === 'error' ? ERROR : CHAT} />
+          </div>
+        )}
+      </main>
+    </ReferenceSurfaceProvider>
+  </StoreProvider>,
 );

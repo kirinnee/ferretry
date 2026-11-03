@@ -108,7 +108,7 @@ A block renders by itself once it is near the screen — there is no Render butt
 | `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
 | `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
 | `card`    | one card reference, `&F12`                        | the board's own card, live: its lane, progress and PRs; a quiet note if it cannot be read        |
-| `board`   | card references, or `parent: &F12`                | a mini board of those cards, or of a card's children grouped by lane, live                       |
+| `board`   | card references, or `parent: &F12`                | a mini board of those cards, or of a card's children, either way grouped by lane, live           |
 | `image`   | `src:` — or `mime:` + base64 inline               | a picture; an https image needs CORS from its host, else a link row                              |
 | `video`   | `src:`                                            | the browser's native player (https plays directly)                                               |
 | `audio`   | `src:`                                            | the browser's native player (https plays directly)                                               |

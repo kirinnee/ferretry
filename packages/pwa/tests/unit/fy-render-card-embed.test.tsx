@@ -3,6 +3,9 @@ import type { BoardTaskView } from '@ferretry/protocol';
 
 import { FyRenderCardEmbed } from '../../src/components/fy-render-card-embed.tsx';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
+import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { sessionView } from '../support/sessions.ts';
 import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '../../src/lib/fy-render.ts';
 import { FY_RENDER_LIMITS } from '../../src/lib/fy-render-bounds.ts';
 import '../support/dom.ts';
@@ -17,6 +20,7 @@ import {
   flush,
   laneSetFor,
   laptop,
+  OTHER_PROJECT,
   PROJECT,
 } from './board-support.ts';
 
@@ -167,6 +171,54 @@ describe('FyRenderCardEmbed: how a card reads', () => {
     expect(text(mounted)).toContain('mvuc7tsf');
   });
 
+  it("names the ferret from the app's fleet when the surface lends no list", async () => {
+    const fleet = new DaemonFleetStore({ list: async () => [], get: async () => sessionView(LEAD) });
+    fleet.seed(laptop, [sessionView(LEAD, { config: { teammate: 'nimbus' } })], 1);
+    const store = { fleet } as unknown as AppStore;
+    const { store: board } = serving(new Map([['F1', card('F1', { owner: LEAD })]]));
+    view = await mount(
+      <StoreProvider store={store}>
+        <FyRenderCardEmbed block={blockOf('card', '&F1')} host={{ store: board, connection: laptop }} />
+      </StoreProvider>,
+    );
+    await interact(() => flush());
+    expect(text(view)).toContain('Nimbus');
+    expect(text(view)).not.toContain('mvuc7tsf');
+  });
+
+  it('watches the fleet once, not again on every clock tick', async () => {
+    const clock = installManualClock();
+    try {
+      const settle = async () => {
+        for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+      };
+      const fleet = new DaemonFleetStore({ list: async () => [], get: async () => sessionView(LEAD) });
+      const subscribe = fleet.subscribe.bind(fleet);
+      let subscriptions = 0;
+      fleet.subscribe = listener => {
+        subscriptions += 1;
+        return subscribe(listener);
+      };
+      const store = { fleet } as unknown as AppStore;
+      const { store: board } = serving(new Map([['F1', card('F1')]]));
+      view = await mount(
+        <StoreProvider store={store}>
+          <FyRenderCardEmbed block={blockOf('card', '&F1')} host={{ store: board, connection: laptop }} />
+        </StoreProvider>,
+      );
+      await interact(settle);
+      const before = subscriptions;
+      expect(before).toBeGreaterThan(0);
+      await interact(async () => {
+        clock.advance(2 * 30_000);
+        await settle();
+      });
+      expect(subscriptions).toBe(before);
+    } finally {
+      clock.restore();
+    }
+  });
+
   it('ticks its ages on a local clock, without reading the daemon again', async () => {
     const clock = installManualClock();
     try {
@@ -301,6 +353,49 @@ describe('FyRenderCardEmbed: a board', () => {
     expect(link).not.toBeNull();
     await interact(() => link?.click());
     expect(opened).toEqual(['F10']);
+  });
+
+  it('leaves a modified click on the truncation link to the browser', async () => {
+    const opened: string[] = [];
+    const environment = fakeEnvironment();
+    const port = fakePort({
+      task: async () => ({ task: card('F10'), laneSet: lanes }),
+      board: async () =>
+        boardAnswer([card('F101', { parent: { id: 'F10' } })], {
+          projectId: PROJECT,
+          laneSet: lanes,
+          nextCursor: 'more',
+        }),
+    });
+    const mounted = await show(new DaemonBoardStore(port, environment), blockOf('board', 'parent: &F10'), id =>
+      opened.push(id),
+    );
+    const link = mounted.container.querySelector('[data-fy-card-embed-truncated="F10"] a');
+    expect(link).not.toBeNull();
+    const press = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    await interact(() => link?.dispatchEvent(press));
+    expect(press.defaultPrevented).toBe(false);
+    expect(opened).toEqual([]);
+  });
+
+  it('keeps each project together, in the order its first card was listed, when a list spans projects', async () => {
+    const other = laneSetFor(OTHER_PROJECT);
+    const cards = new Map<string, BoardTaskView>([
+      ['F1', card('F1', { laneId: 'review' })],
+      ['F2', card('F2', { laneId: 'todo', projectId: OTHER_PROJECT })],
+      ['F3', card('F3', { laneId: 'todo' })],
+    ]);
+    const environment = fakeEnvironment();
+    const port = fakePort({
+      task: async (_daemon, id) => {
+        const task = cards.get(id);
+        return task === undefined ? null : { task, laneSet: task.projectId === OTHER_PROJECT ? other : lanes };
+      },
+      board: async () => boardAnswer([], { projectId: PROJECT, laneSet: lanes }),
+    });
+    const mounted = await show(new DaemonBoardStore(port, environment), blockOf('board', '&F1\n&F2\n&F3'));
+    const heads = [...mounted.container.querySelectorAll('.fy-board-lane__name')].map(el => el.textContent);
+    expect(heads).toEqual(['Todo', 'Review/CI', 'Todo']);
   });
 
   it('says when the children cannot be read', async () => {

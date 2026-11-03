@@ -120,6 +120,60 @@ const layout = async (page: Page, label: string): Promise<void> => {
   check(found.fallbackRows === 0, `${label}: a block is drawn as a code fence`);
 };
 
+/** The mini board and the lone card sit as the Board's own: no list indent, no paragraph margins, the Board's lane head. */
+const unindented = async (page: Page, label: string): Promise<void> => {
+  const found = await page.evaluate(() => {
+    const px = (value: string) => Number.parseFloat(value);
+    const lists = [...document.querySelectorAll<HTMLElement>('.fy-board-lane__cards, .fy-card-embed-list')].map(
+      list => {
+        const style = getComputedStyle(list);
+        const parent = list.parentElement as HTMLElement;
+        return {
+          indent: Math.round(
+            list.getBoundingClientRect().left -
+              parent.getBoundingClientRect().left -
+              px(getComputedStyle(parent).paddingLeft) -
+              px(getComputedStyle(parent).borderLeftWidth),
+          ),
+          padding: px(style.paddingLeft),
+          marker: style.listStyleType,
+        };
+      },
+    );
+    const cards = [...document.querySelectorAll<HTMLElement>('.fy-card-embed .fy-board-card')].map(item => ({
+      top: px(getComputedStyle(item).marginTop),
+      bottom: px(getComputedStyle(item).marginBottom),
+    }));
+    const head = document.querySelector<HTMLElement>('.fy-card-embed .fy-board-lane__head');
+    const title = document.querySelector<HTMLElement>('.fy-card-embed .fy-board-card__title');
+    return {
+      lists,
+      cards,
+      headFamily: head === null ? null : getComputedStyle(head).fontFamily,
+      titleFamily: title === null ? null : getComputedStyle(title).fontFamily,
+      headTracking: head === null ? null : getComputedStyle(head).letterSpacing,
+    };
+  });
+  check(found.lists.length > 0, `${label}: no card list found`);
+  check(
+    found.lists.every(list => list.indent === 0 && list.padding === 0 && list.marker === 'none'),
+    `${label}: a card list is indented or bulleted (${JSON.stringify(found.lists)})`,
+  );
+  check(
+    found.cards.every(card => card.top === 0 && card.bottom === 0),
+    `${label}: a card carries list-item margins (${JSON.stringify(found.cards)})`,
+  );
+  if (found.headFamily !== null)
+    check(
+      found.headFamily === found.titleFamily,
+      `${label}: the lane head is in ${found.headFamily}, not the body font`,
+    );
+  check(
+    found.headTracking === null || found.headTracking === 'normal',
+    `${label}: lane head tracking is ${found.headTracking}`,
+  );
+};
+
 const embeds = (page: Page) => page.locator('[data-fy-card-embed]');
 const laneNames = (page: Page, scope = '') => page.locator(`${scope} .fy-board-lane__name`.trim()).allTextContents();
 const cardIn = (page: Page, id: string) => page.locator(`[data-task="${id}"]`).first();
@@ -167,6 +221,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const before = (await cardIn(chat, 'F412').textContent()) ?? '';
   check(before.includes('Implement'), `${label('chat')}: F412 does not start in Implement`);
   await layout(chat, label('chat'));
+  await unindented(chat, label('chat'));
   await shot(chat, 'chat-before', form, theme);
   await chat.evaluate(() => window.__moveCard());
   await chat.waitForTimeout(400);
@@ -183,6 +238,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const lanesBefore = await laneNames(agenda);
   check(lanesBefore.length === 3, `${label('agenda')}: wanted three lanes, got ${lanesBefore.join('|')}`);
   await layout(agenda, label('agenda'));
+  await unindented(agenda, label('agenda'));
   await shot(agenda, 'agenda-before', form, theme);
   await agenda.evaluate(() => window.__moveCard());
   await agenda.waitForTimeout(400);
