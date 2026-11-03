@@ -101,6 +101,20 @@ const VALID_HEAD = /^(?:ref: refs\/[^\0\r\n]+|[0-9a-f]{40}|[0-9a-f]{64})\n?$/iu;
 const isMissing = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 
+/**
+ * The text of an OPTIONAL config file: empty when it is genuinely not there, `undefined` when it cannot be read
+ * for any other reason. A file that is there but unreadable (`EACCES`) says nothing about what it holds, so the
+ * caller must treat the repository as unrecognised rather than as one without that file — its `stat` identity
+ * would still match a kept answer.
+ */
+async function optionalText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    return isMissing(error) ? '' : undefined;
+  }
+}
+
 /** What looking at a path found: its `Stats`, `missing` when it is not there, `unreadable` for any other failure. */
 async function look(path: string, followLinks: boolean): Promise<Stats | 'missing' | 'unreadable'> {
   try {
@@ -239,9 +253,12 @@ const FILES_STORAGE = /^\s*=\s*files\s*(?:[#;].*)?$/u;
  */
 async function refsAreFiles({ gitDirectory, common }: Repository): Promise<boolean> {
   if ((await exists(join(gitDirectory, 'reftable'))) || (await exists(join(common, 'reftable')))) return false;
-  if ((await readFile(join(gitDirectory, 'HEAD'), 'utf8').catch(() => '')).includes(PLACEHOLDER_BRANCH)) return false;
+  // `HEAD` was there a moment ago (see {@link asRepository}); one that cannot be read now is not vouched for.
+  const headText = await readFile(join(gitDirectory, 'HEAD'), 'utf8').catch(() => undefined);
+  if (headText === undefined || headText.includes(PLACEHOLDER_BRANCH)) return false;
   for (const config of [join(common, 'config'), join(gitDirectory, 'config.worktree')]) {
-    const contents = await readFile(config, 'utf8').catch(() => '');
+    const contents = await optionalText(config);
+    if (contents === undefined) return false;
     // Git honours the LAST `extensions.refStorage` and may find one in an included file, so neither the first
     // occurrence nor this file alone can vouch for the backend.
     if (INCLUDES.test(contents)) return false;
@@ -357,7 +374,10 @@ export class GitWorkingCopies implements WorkingCopies {
     // `includeIf "onbranch:…"` makes the remote depend on `HEAD`; an `include` makes it depend on files that
     // change without either config changing. Which files an `includeIf` reaches is git's to decide, so a
     // config with one is asked every time rather than guessed at.
-    for (const config of configs) if (INCLUDES.test(await readFile(config, 'utf8').catch(() => ''))) return undefined;
+    for (const config of configs) {
+      const contents = await optionalText(config);
+      if (contents === undefined || INCLUDES.test(contents)) return undefined;
+    }
     return `${gitDirectory}\n${(await Promise.all([head, ...configs].map(fileIdentity))).join('\n')}`;
   }
 

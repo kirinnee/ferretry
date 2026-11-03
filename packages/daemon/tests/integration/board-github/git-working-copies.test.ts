@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { chmod, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitWorkingCopies } from '../../../src/adapters/board-github/git-working-copies.ts';
@@ -932,6 +932,75 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
 
             // Assert
             should((await asked()).length).equal(2);
+          });
+        });
+      });
+
+      describe('a config git cannot read', () => {
+        /** Primes both answers, breaks the shared config with `break`, and returns what the next two answers do. */
+        const afterBreaking = async (
+          root: string,
+          breakConfig: (config: string) => Promise<void>,
+          restore: (config: string) => Promise<void>,
+        ): Promise<void> => {
+          // Arrange
+          const repo = await repository(root);
+          await git(repo, 'remote', 'add', 'origin', 'git@github.com:owner/five.git');
+          await git(repo, 'checkout', '--quiet', '-b', 'feat/sub');
+          const { binary, asked } = await countingGit(root);
+          const copies = new GitWorkingCopies(binary);
+          const config = join(repo, '.git', 'config');
+          const primed = [await copies.repositoryOf(repo), await copies.branchOf(repo)];
+          should(primed).deepEqual(['owner/five', 'feat/sub']);
+          const asksWhilePrimed = (await asked()).length;
+
+          // Act
+          await breakConfig(config);
+          try {
+            const broken = [await copies.repositoryOf(repo), await copies.branchOf(repo)];
+            const asksWhileBroken = (await asked()).length;
+            const fresh = [
+              await new GitWorkingCopies(binary).repositoryOf(repo),
+              await new GitWorkingCopies(binary).branchOf(repo),
+            ];
+
+            // Assert — a config that cannot be read is no reason to serve what it said before: git is asked.
+            should(asksWhileBroken - asksWhilePrimed).equal(2);
+            should(broken).deepEqual(fresh);
+          } finally {
+            await restore(config);
+          }
+          should([await copies.repositoryOf(repo), await copies.branchOf(repo)]).deepEqual(primed);
+        };
+
+        it('should ask git, not serve a kept answer, while the config has no read permission', async () => {
+          await withTempRoot(async root => {
+            let mode = 0o644;
+            await afterBreaking(
+              root,
+              async config => {
+                mode = (await stat(config)).mode & 0o777;
+                await chmod(config, 0o000);
+              },
+              async config => await chmod(config, mode),
+            );
+          });
+        });
+
+        it('should ask git, not serve a kept answer, when the config is a directory', async () => {
+          await withTempRoot(async root => {
+            const moved = join(root, 'config-moved');
+            await afterBreaking(
+              root,
+              async config => {
+                await rename(config, moved);
+                await mkdir(config);
+              },
+              async config => {
+                await rm(config, { recursive: true, force: true });
+                await rename(moved, config);
+              },
+            );
           });
         });
       });
