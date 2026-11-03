@@ -46,6 +46,8 @@ async function commonDirectory(gitDirectory: string): Promise<string> {
  * Deliberately loose — a comment that mentions one is a false positive, which only costs a kept answer.
  */
 const INCLUDES = /\[\s*include(?:if)?[\s"\]]/iu;
+/** What follows the key of an `extensions.refStorage` that names the files backend (git matches the value exactly). */
+const FILES_STORAGE = /^\s*=\s*files\s*(?:[#;].*)?$/u;
 
 /**
  * Whether the refs live in plain files under the git dir — the one place `HEAD` can vouch for the branch.
@@ -53,8 +55,9 @@ const INCLUDES = /\[\s*include(?:if)?[\s"\]]/iu;
  * A `reftable` repository keeps `HEAD` as a constant placeholder (`ref: refs/heads/.invalid`) and the real
  * branch in a table: a checkout rewrites the table and leaves `HEAD` byte-identical, so a kept answer would
  * outlive it. Only the files backend is POSITIVELY recognised — no `reftable` directory, a `HEAD` that is not
- * the placeholder, and no `extensions.refStorage` other than `files` — so a ref storage this does not know is
- * asked every time rather than trusted.
+ * the placeholder, and EVERY `extensions.refStorage` in the config says `files` (git takes the last, so a
+ * later unknown one must not hide behind an earlier `files`; an `include` could add one unseen) — so a ref
+ * storage this does not know is asked every time rather than trusted.
  */
 async function refsAreFiles(gitDirectory: string, head: string): Promise<boolean> {
   const common = await commonDirectory(gitDirectory);
@@ -65,8 +68,15 @@ async function refsAreFiles(gitDirectory: string, head: string): Promise<boolean
     );
   if ((await present(join(gitDirectory, 'reftable'))) || (await present(join(common, 'reftable')))) return false;
   if ((await readFile(head, 'utf8').catch(() => '')).includes(PLACEHOLDER_BRANCH)) return false;
-  const storage = /^\s*refstorage\s*=\s*(\S+)/imu.exec(await readFile(join(common, 'config'), 'utf8').catch(() => ''));
-  return storage === null || storage[1]?.toLowerCase() === 'files';
+  for (const config of [join(common, 'config'), join(gitDirectory, 'config.worktree')]) {
+    const contents = await readFile(config, 'utf8').catch(() => '');
+    // Git honours the LAST `extensions.refStorage` and may find one in an included file, so neither the first
+    // occurrence nor this file alone can vouch for the backend.
+    if (INCLUDES.test(contents)) return false;
+    for (const occurrence of contents.matchAll(/refstorage\b([^\n]*)/giu))
+      if (!FILES_STORAGE.test(occurrence[1] ?? '')) return false;
+  }
+  return true;
 }
 
 /**

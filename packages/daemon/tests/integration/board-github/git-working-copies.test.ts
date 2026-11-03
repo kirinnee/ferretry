@@ -448,6 +448,78 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
             should((await asked()).length).equal(1);
           });
         });
+
+        it('should follow the LAST ref storage git honours, not the first, once a branch is already kept', async () => {
+          await withTempRoot(async root => {
+            // Arrange — primed under `files`, then a later unknown storage appears with HEAD untouched.
+            const repo = join(root, 'repo');
+            await mkdir(repo);
+            await git(repo, 'init', '--quiet', '-b', 'feat/one');
+            await git(repo, 'config', 'core.repositoryformatversion', '1');
+            await git(repo, 'config', 'extensions.refStorage', 'files');
+            const copies = new GitWorkingCopies();
+            const primed = await copies.branchOf(repo);
+            await git(repo, 'config', '--add', 'extensions.refStorage', 'future');
+
+            // Act
+            const kept = await copies.branchOf(repo);
+            const fresh = await new GitWorkingCopies().branchOf(repo);
+
+            // Assert — git rejects the unknown storage, and so must the answer.
+            should(primed).equal('feat/one');
+            should(fresh).equal(null);
+            should(kept).equal(fresh);
+          });
+        });
+
+        it('should keep a branch for every spelling of files, and ask every time for any other occurrence', async () => {
+          await withTempRoot(async root => {
+            // Arrange — each config rewritten by hand: `files` spelled the ways git reads it, then ways it cannot be trusted.
+            const spelled: readonly [string, boolean][] = [
+              ['[extensions]\n\tREFSTORAGE = files # the default\n', true],
+              ['[extensions] refStorage = files\n', true],
+              ['[extensions]\n\trefStorage = Files\n', false],
+              ['[extensions]\n\trefStorage = files\n\trefStorage = reftable\n', false],
+              ['[extensions]\n\trefStorage\n', false],
+              ['[include]\n\tpath = ../elsewhere\n[extensions]\n\trefStorage = files\n', false],
+            ];
+            const { binary, asked } = await countingGit(root);
+            const counts: boolean[] = [];
+
+            // Act
+            for (const [index, [config, kept]] of spelled.entries()) {
+              const repo = join(root, `repo-${String(index)}`);
+              await mkdir(repo);
+              await git(repo, 'init', '--quiet', '-b', 'main');
+              await writeFile(join(repo, '.git', 'config'), `[core]\n\trepositoryformatversion = 1\n${config}`);
+              const before = (await asked()).length;
+              const copies = new GitWorkingCopies(binary);
+              await copies.branchOf(repo);
+              await copies.branchOf(repo);
+              counts.push(((await asked()).length - before === 1) === kept);
+            }
+
+            // Assert
+            should(counts).deepEqual(spelled.map(() => true));
+          });
+        });
+
+        it('should look for a ref storage in the worktree config too', async () => {
+          await withTempRoot(async root => {
+            // Arrange
+            const repo = await repository(root);
+            await writeFile(join(repo, '.git', 'config.worktree'), '[extensions]\n\trefStorage = future\n');
+            const { binary, asked } = await countingGit(root);
+            const copies = new GitWorkingCopies(binary);
+
+            // Act
+            await copies.branchOf(repo);
+            await copies.branchOf(repo);
+
+            // Assert
+            should((await asked()).length).equal(2);
+          });
+        });
       });
     });
   });
