@@ -15,6 +15,7 @@ export * from './owner-asks.ts';
 export * from './reply-batch.ts';
 export * from './resurfacer.ts';
 export * from './rollup.ts';
+export * from './rest-nudge.ts';
 export * from './service.ts';
 export * from './state-machine.ts';
 export * from './stopped.ts';

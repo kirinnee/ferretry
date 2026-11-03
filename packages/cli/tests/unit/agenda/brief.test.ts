@@ -794,7 +794,9 @@ describe('agenda option details', () => {
         { label: 'Wait', detail: 'Later.' },
       ],
     });
-    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(/cannot change the options/u);
+    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(
+      /keeps the options unless it replaces the ask/u,
+    );
   });
 });
 

@@ -98,6 +98,13 @@ export const DAEMON_FEATURES = {
    */
   agendaChannel: 'agenda.channel.1',
   /**
+   * EDITABLE ASKS (docs/agenda.md § Editable asks): an edit may REPLACE the ask (`ask`, `kind`, `answers`, questions
+   * with other options) and clear `questionAnswer`, and an answer may name the `askVersion` it was given to and is
+   * refused `409 ask_changed` past it. A daemon without this name refuses all three as malformed, so a client sends
+   * them only to one that reports it.
+   */
+  agendaAsks: 'agenda.asks.1',
+  /**
    * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
    * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
    * machine that reports it, because there the gate item is the card's one ask.

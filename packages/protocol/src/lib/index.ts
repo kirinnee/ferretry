@@ -10,6 +10,7 @@ export * from './agenda-message.ts';
 export * from './agenda-mode.ts';
 export * from './agenda-shape.ts';
 export * from './agenda-state.ts';
+export * from './agenda-queue.ts';
 export * from './agenda-stage.ts';
 export * from './agenda-source-refs.ts';
 export * from './agent-address.ts';

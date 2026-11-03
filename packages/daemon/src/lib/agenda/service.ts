@@ -311,11 +311,22 @@ export class AgendaService {
     note?: string | null,
     via: AgendaVia = 'board',
     receipt?: string,
+    /** The ask the answer was given to: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
     const at = this.clock.now();
     return this.apply(
       sessionId,
-      { action: 'answer', actor, id, response, note, at, ...(receipt === undefined ? {} : { receipt }) },
+      {
+        action: 'answer',
+        actor,
+        id,
+        response,
+        note,
+        at,
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
       via,
     );
   }
@@ -386,6 +397,16 @@ export class AgendaService {
   /** The ferret takes an item on without asking anything yet: it rests as `working`, quiet (docs/agenda.md § States). */
   async rest(sessionId: string, id: AgendaId, why: string, actor: AgendaActor): Promise<AgendaMutation> {
     return this.apply(sessionId, { action: 'rest', actor, id, why, at: this.clock.now() });
+  }
+
+  /** The Warden nudged the ferret about a resting item: the item records it (`rest-nudge.ts`). */
+  async nudged(sessionId: string, id: AgendaId): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'nudged',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      id,
+      at: this.clock.now(),
+    });
   }
 
   /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */

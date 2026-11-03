@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AgendaItem, AGENDA_URGENT_WAKE_MS, agendaState } from '@ferretry/protocol';
+import { type AgendaItem, AGENDA_URGENT_WAKE_MS, agendaState, needsYouQueue, restingQueue } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_LEDGER_VERSION,
@@ -84,11 +84,7 @@ const item = (ledger: AgendaLedger, id = 'A1'): AgendaItem => {
   return found;
 };
 
-/** What needs the owner, in the board's order (by when each started needing them). */
-const queue = (ledger: AgendaLedger): string[] =>
-  agendaSnapshot(ledger)
-    .items.filter(each => agendaState(each).state === 'needs-you')
-    .map(each => each.id);
+const queue = (ledger: AgendaLedger): string[] => needsYouQueue(agendaSnapshot(ledger).items).map(each => each.id);
 
 const reply = (ledger: AgendaLedger, at = T2) =>
   ok(apply(ledger, { action: 'reply', actor: HUMAN, id: 'A1', note: 'what is EU?', at })).ledger;
@@ -200,6 +196,18 @@ describe('the agenda as a channel', () => {
     should(throughSnooze.error.message).match(/snoozed by the owner/u);
   });
 
+  it('should list a resting item waiting on its ferret before one it works on, in the Resting list', () => {
+    // Arrange
+    const working = ok(apply(board(), { action: 'rest', actor: AGENT, id: 'A1', why: 'checking', at: T1 })).ledger;
+    const both = ok(apply(working, { action: 'reply', actor: HUMAN, id: 'A2', note: 'hm', at: T2 })).ledger;
+
+    // Act
+    const resting = restingQueue(agendaSnapshot(both).items).map(each => each.id);
+
+    // Assert
+    should(resting).deepEqual(['A2', 'A1']);
+  });
+
   it('should keep a plain rewrite of a resting item resting: nothing reaches the owner', () => {
     // Act
     const edited = ok(
@@ -211,19 +219,122 @@ describe('the agenda as a channel', () => {
   });
 });
 
+describe('a replaced ask', () => {
+  const replace = (ledger: AgendaLedger, at = T3) =>
+    apply(ledger, {
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch: { kind: 'yesno', ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] } },
+      at,
+    });
+
+  it('should re-enter fresh as its one queue entry, under the next ask version, with the old answers gone', () => {
+    // Arrange — the owner answered, the ferret answered their question, and the ask moves on
+    const answered = ok(answerOwner(board())).ledger;
+    const withAnswer = ok(
+      apply(answered, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { questionAnswer: 'EU is Frankfurt.' },
+        at: T2,
+      }),
+    ).ledger;
+
+    // Act
+    const replaced = ok(replace(withAnswer));
+
+    // Assert
+    should(replaced.item).containDeep({ askVersion: 2, waitingSince: T3, kind: 'yesno', stage: 'question' });
+    should(replaced.item?.ownerAnswer).be.undefined();
+    should(replaced.item?.questionAnswer).be.undefined();
+    should(replaced.item?.revisions?.at(-1)?.changed).containDeep(['ask', 'kind', 'questionAnswer']);
+    should(queue(replaced.ledger)).deepEqual(['A2', 'A1']);
+  });
+
+  it('should refuse an answer to the old ask 409 ask_changed, and take one to the new ask', () => {
+    // Arrange
+    const replaced = ok(replace(board())).ledger;
+
+    // Act
+    const stale = refused(answerOwner(replaced, 'EU', T4, 1));
+    const current = ok(answerOwner(replaced, 'Yes', T4, 2));
+
+    // Assert
+    should(stale.error.code).equal('ask_changed');
+    should(current.item?.ownerAnswer?.response).deepEqual({ kind: 'multiple-choice', choice: 'Yes' });
+  });
+
+  it('should keep a new answer the replacing edit gives, and move the stage with the kind', () => {
+    // Act
+    const replaced = ok(
+      apply(board(), {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { kind: 'info', questionAnswer: 'We went with EU.' },
+        at: T3,
+      }),
+    );
+
+    // Assert
+    should(replaced.item?.questionAnswer).equal('We went with EU.');
+    should(replaced.item?.stage).equal('explainer');
+    should(replaced.item?.stages?.map(each => each.stage)).deepEqual(['question', 'explainer']);
+  });
+
+  it('should clear a stale answer to the owner’s question on --clear-question-answer, and keep the ask', () => {
+    // Arrange
+    const withAnswer = answerFerret(board(), T2).ledger;
+
+    // Act
+    const cleared = ok(
+      apply(withAnswer, { action: 'edit', actor: AGENT, id: 'A1', patch: { clear: ['questionAnswer'] }, at: T3 }),
+    );
+
+    // Assert
+    should(cleared.item?.questionAnswer).be.undefined();
+    should(cleared.item?.askVersion).be.undefined();
+  });
+
+  it('should refuse to replace the fixed ask of a configuration change', () => {
+    // Arrange
+    const confirms = ok(
+      applyAgendaCommandToSession(null, SESSION_ID, {
+        action: 'raise',
+        actor: AGENT,
+        request: {
+          ...REGION,
+          kind: undefined,
+          ask: { kind: 'multiple-choice', options: [{ label: 'Allow' }, { label: 'Deny' }] },
+          confirms: { path: 'machine.yaml', etag: 'e1', changes: ['loosens a limit'] },
+        },
+        at: T0,
+      }),
+    ).ledger;
+
+    // Act
+    const refusal = refused(replace(confirms));
+
+    // Assert
+    should(refusal.error.message).match(/answers are fixed/u);
+  });
+});
+
 describe('a blocker and a snooze', () => {
   const snoozed = () => ok(apply(board(), { action: 'snooze', actor: HUMAN, id: 'A1', until: T4, at: T1 })).ledger;
   const block = (ledger: AgendaLedger, at = T2) =>
     ok(apply(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch: { blockingNow: true }, at }));
 
-  it('should wake a snoozed item the ferret newly marks blocking, fresh, back in front of the owner', () => {
+  it('should wake a snoozed item the ferret newly marks blocking, fresh, at the head of the queue', () => {
     // Act
     const woken = block(snoozed());
 
     // Assert
     should(woken.item?.parked).be.undefined();
     should(woken.item).containDeep({ blockingNow: true, waitingSince: T2, urgentAt: T2 });
-    should(queue(woken.ledger)).deepEqual(['A2', 'A1']);
+    should(queue(woken.ledger)).deepEqual(['A1', 'A2']);
   });
 
   it('should wake it for a new blocker even when it already woke as urgent within the hour', () => {

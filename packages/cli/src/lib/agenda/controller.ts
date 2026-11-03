@@ -424,7 +424,7 @@ export class AgendaController {
     const id = parseAgendaReference(reference);
     if (options.back === true) {
       throw new Error(
-        `--back is retired. To answer the owner on ${id}: \`agenda answer ${id} "<text>"\` (it goes back to their list in its old place). To ask them something new, raise it: \`agenda add\``,
+        `--back is retired. To answer the owner on ${id}: \`agenda answer ${id} "<text>"\` (it goes back to their list in its old place). To ask them something new: \`agenda edit ${id} --kind <kind> --option …\` replaces the ask, and it asks again, fresh`,
       );
     }
     const channel =
@@ -433,6 +433,9 @@ export class AgendaController {
       (typeof options.where === 'string' ? options.where : (options.where ?? []).join('')).trim() !== '' ||
       options.detail !== undefined;
     if (channel) await this.#requireChannel('--stage, --where and --detail on edit');
+    if (options.clearQuestionAnswer === true || options.kind !== undefined) {
+      await this.#requireChannel('--kind and --clear-question-answer on edit', DAEMON_FEATURES.agendaAsks);
+    }
     const sessionId = this.#target(options);
     const wording = (options.question ?? []).some(question => question.trim() !== '');
     const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
@@ -474,9 +477,9 @@ export class AgendaController {
     this.#report(snapshot, options, () => renderAgendaMutation('resting (working)', agendaReference(id), snapshot, id));
   }
 
-  /** Refuses, in words, before sending what a daemon older than `agenda.channel.1` would refuse as malformed. */
-  async #requireChannel(what: string): Promise<void> {
-    if (!(await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaChannel)) {
+  /** Refuses, in words, before sending what a daemon without `feature` (the channel's, by default) would refuse. */
+  async #requireChannel(what: string, feature: string = DAEMON_FEATURES.agendaChannel): Promise<void> {
+    if (!(await featuresOrNone(this.gateway)).includes(feature)) {
       throw new Error(`this daemon is older than ${what}; update the daemon first (fy daemon update)`);
     }
   }

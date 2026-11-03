@@ -83,10 +83,11 @@ Each push opens the ferret's chat at the item that triggered it (`?attention=<id
 for a stop, else the oldest.
 
 **What counts as a stop.** The ferret's session state says its turn ended on the owner (`turnState` is
-`your-turn` or `needs-input`, with `turnStateAt`), and at least one non-notice item is on the owner's turn
-(unresolved, and not resting or snoozed: [agenda.md](agenda.md#states)); a push's count is the Needs-you items
-(`agendaBadgeCount`). A stop is named by that `turnStateAt` instant, so the same stop never pushes twice — across a
-daemon restart too — and the next idle period is a new stop.
+`your-turn` or `needs-input`, with `turnStateAt`), and its Needs-you queue is not empty (`needsYouQueue`,
+[agenda.md](agenda.md#the-needs-you-queue): no notice, nothing resting on the ferret or snoozed, unresolved). The
+push opens at the queue's first item — a blocker first — and its count is the queue's length (`agendaBadgeCount`). A
+stop is named by that `turnStateAt` instant, so the same stop never pushes twice — across a daemon restart too — and
+the next idle period is a new stop.
 
 **What never buzzes.**
 
@@ -95,7 +96,7 @@ daemon restart too — and the next idle period is a new stop.
 - A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
   a stop is something the daemon sees happen.
 - A RESTING item: the owner replied to or answered it, asked for more or to discuss it, or the ferret took it on
-  (`fy agenda rest`). The ferret has the ball.
+  (`fy agenda rest`). The ferret has the ball; the Warden's silence nudge goes to the ferret, never to the phone.
 - A parked item: one the owner replied to, or snoozed and not yet woken.
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is

@@ -16,6 +16,7 @@ const STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   full: 409,
   corrupt: 500,
   use_input_form: 400,
+  ask_changed: 409,
 };
 
 const OWNER_ONLY = 'only the owner answers the machine agenda';

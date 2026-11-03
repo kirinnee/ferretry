@@ -399,6 +399,33 @@ describe('attention routes', () => {
     should(items[0]?.resting?.sub).equal('waiting-on-ferret');
   });
 
+  it('should refuse an answer to an ask the ferret has since replaced, 409 ask_changed', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const replaced = await dispatch(
+      post(
+        { action: 'edit', id, ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'dev' }] } },
+        agentIn('s1'),
+      ),
+    );
+
+    // Act
+    const stale = await dispatch(
+      post({ action: 'resolve', id, askVersion: 1, response: { kind: 'multiple-choice', choice: 'main' } }),
+    );
+    const current = await dispatch(
+      post({ action: 'resolve', id, askVersion: 2, response: { kind: 'multiple-choice', choice: 'dev' } }),
+    );
+
+    // Assert
+    should(replaced.status).equal(200);
+    should(stale.status).equal(409);
+    should(jsonBody(stale)).have.property('code', 'ask_changed');
+    should(current.status).equal(200);
+  });
+
   it('should refuse an agent raise that declares no structured ask', async () => {
     // An open-ended "look at this" gives the human nothing to answer, so the domain refuses it.
     // Arrange

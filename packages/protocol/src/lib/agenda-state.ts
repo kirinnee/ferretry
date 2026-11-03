@@ -3,9 +3,10 @@
  *
  * An item's STATE is who it waits on, as the owner sees it:
  *
- * - `needs-you`: it waits on the owner, and it notifies.
+ * - `needs-you`: it waits on the owner. It notifies, and it is in the Needs-you queue (`needsYouQueue`).
  * - `resting`: it waits on work, and it is quiet. `waiting-on-ferret`: the owner replied or answered, and it is
- *   the ferret's turn. `working`: the ferret took it on (`fy agenda rest --why`) and asks nothing yet.
+ *   the ferret's turn; the Warden nudges a ferret that stays silent (`AGENDA_REST_NUDGE_MS`). `working`: the
+ *   ferret took it on (`fy agenda rest --why`) and asks nothing yet; nobody nudges it.
  * - `snoozed`: the owner put it away until a time.
  * - `done`: closed — by the ferret, or by the owner's explicit done or dismiss. An answer never closes an item.
  *
@@ -29,6 +30,9 @@ export type AgendaRestSubState = z.infer<typeof AgendaRestSubStateSchema>;
 
 /** The longest line a ferret says it is working on (`fy agenda rest --why`). */
 export const MAX_AGENDA_REST_WHY_LENGTH = 1_024;
+
+/** How long a `waiting-on-ferret` item may sit silent before the Warden nudges its ferret, the first time. */
+export const AGENDA_REST_NUDGE_MS = 30 * 60_000;
 
 /**
  * WHAT A RESTING ITEM WAITS ON, beside the `parked: replied` (or `waitingOn: ferret`) an older app reads. `at` is
