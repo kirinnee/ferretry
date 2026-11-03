@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
+import { LoginRecipeProposalIdSchema } from './login-recipes.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
 import { PasteRuleStageIdSchema } from './secure-copy.ts';
 import { STEP_UP_DEFAULT_WINDOW_MINUTES } from './security.ts';
@@ -127,6 +128,21 @@ export const STEP_UP_SUBJECTS = {
 export type StepUpSubjectOf<Act extends EveryCallerStepUpAct> = z.infer<(typeof STEP_UP_SUBJECTS)[Act]>;
 
 /**
+ * THE MACHINE-SKIPPABLE ACTS WHOSE PROOF IS STILL BOUND TO ONE THING: approving a sign-in recipe is bound to the one
+ * proposal (`rp_…`) the owner is looking at, so a passkey proved for proposal A can never approve proposal B, and a
+ * spent proof is gone. Unlike {@link STEP_UP_ACTS_EVERY_CALLER} the machine itself is not asked (docs/grants.md); only a
+ * governed caller proves, and it proves for exactly this subject. The subject is sent exactly with such an act.
+ */
+export const STEP_UP_SUBJECTS_SKIPPABLE = {
+  'approve-recipe': LoginRecipeProposalIdSchema,
+} as const satisfies Partial<Record<MachineSkippableStepUpAct, z.ZodType<string>>>;
+/** An act the machine may skip whose proof is nevertheless bound to one subject ({@link STEP_UP_SUBJECTS_SKIPPABLE}). */
+export type SubjectBoundSkippableStepUpAct = keyof typeof STEP_UP_SUBJECTS_SKIPPABLE;
+/** Whether `act` is machine-skippable yet bound to one subject. */
+export const stepUpBindsSubject = (act: StepUpAct): act is SubjectBoundSkippableStepUpAct =>
+  Object.hasOwn(STEP_UP_SUBJECTS_SKIPPABLE, act);
+
+/**
  * THE ACTS WHOSE PROOF IS KEPT (docs/design/zero-trust.md, "Stored passkey proofs"): the daemon derives the challenge
  * from what is being approved (never at random), and keeps the assertion itself so it can check it again later,
  * offline, against the passkey registry. Today only a standing sign-in rule, whose record carries the owner's
@@ -150,18 +166,28 @@ export const stepUpKeepsProof = (act: StepUpAct): act is StoredProofStepUpAct =>
  * `subject` is the one thing a {@link STEP_UP_ACTS_EVERY_CALLER} act is for (the staged seed, `st_…`; the staged task-plan
  * selection, `tps_…`; the staged standing rule, `srs_…`; the staged paste rule, `prs_…`): the daemon binds the
  * challenge, and so the proof, to it, and the commit takes only a proof for that act AND that subject. Sent exactly with
- * such an act, of that act's own kind ({@link STEP_UP_SUBJECTS}), and never with another.
+ * such an act, of that act's own kind ({@link STEP_UP_SUBJECTS}), and never with another. An act the machine may skip but
+ * whose proof is bound to a subject too (`approve-recipe`, the proposal `rp_…`; {@link STEP_UP_SUBJECTS_SKIPPABLE}) takes
+ * its subject exactly the same way.
  */
+const StepUpSubjectSchema = z.union([
+  TwoFactorStageIdSchema,
+  TaskPlanStageIdSchema,
+  SignInRuleStageIdSchema,
+  PasteRuleStageIdSchema,
+  LoginRecipeProposalIdSchema,
+]);
+
 export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
   act: StepUpActSchema.optional(),
-  subject: z
-    .union([TwoFactorStageIdSchema, TaskPlanStageIdSchema, SignInRuleStageIdSchema, PasteRuleStageIdSchema])
-    .optional(),
+  subject: StepUpSubjectSchema.optional(),
 }).refine(
-  request =>
-    request.act === undefined || stepUpSkippableAtMachine(request.act)
-      ? request.subject === undefined
-      : STEP_UP_SUBJECTS[request.act].safeParse(request.subject).success,
+  request => {
+    if (request.act === undefined) return request.subject === undefined;
+    if (stepUpBindsSubject(request.act)) return STEP_UP_SUBJECTS_SKIPPABLE[request.act].safeParse(request.subject).success;
+    if (stepUpSkippableAtMachine(request.act)) return request.subject === undefined;
+    return STEP_UP_SUBJECTS[request.act].safeParse(request.subject).success;
+  },
   { path: ['subject'], message: "name the act's own staged subject exactly when the act is bound to one" },
 );
 export type StepUpOptionsRequest = z.infer<typeof StepUpOptionsRequestSchema>;
@@ -368,6 +394,11 @@ export const StepUpDemandSchema = z.strictObject({
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
   act: StepUpActSchema.optional(),
+  /**
+   * The one thing the proof is bound to, for an act that binds one the machine may skip ({@link STEP_UP_SUBJECTS_SKIPPABLE}):
+   * the app sends it back with the options request so the ceremony is for exactly this. Absent for every other demand.
+   */
+  subject: LoginRecipeProposalIdSchema.optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 
