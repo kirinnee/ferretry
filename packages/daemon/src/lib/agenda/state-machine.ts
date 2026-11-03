@@ -3441,7 +3441,7 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
   const outcome = applyCardAsk(target.item, command.operation, command.at, {
     stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),
     history: (item, kind, note) => ({ ...item, history: withHistory(item.history, { at: command.at, kind, note }) }),
-    tidy: tidied,
+    tidy: item => fitAgendaItem(tidied(item)),
   });
   if (outcome.kind === 'unchanged') return unchanged(ledger);
   if (outcome.kind === 'refused') return failure(outcome.code, outcome.message);

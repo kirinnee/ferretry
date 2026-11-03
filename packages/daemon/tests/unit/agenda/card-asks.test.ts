@@ -247,6 +247,41 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
   });
 });
 
+describe('a thread whose asks name no turn to go back to (from before they were kept)', () => {
+  const old = (extra: Partial<AgendaItem> = {}): AgendaItem =>
+    thread({
+      cardAsks: [
+        { gate: gate('F2'), at: at(1), answer },
+        { gate: gate('F3'), at: at(2) },
+      ],
+      ...extra,
+    });
+
+  it('stays in Needs you when it is not sealed, since nothing says the daemon left it so', () => {
+    // Arrange
+    const { apply } = world();
+
+    // Act
+    const after = changed(apply(old(), withdraw('F3'), 5));
+
+    // Assert
+    should(agendaState(after).state).equal('needs-you');
+    should(after.resting).be.undefined();
+  });
+
+  it('rests on the answer it holds when it is sealed and still as the daemon left it', () => {
+    // Arrange
+    const { apply } = world();
+
+    // Act
+    const after = changed(apply(sealCardAsks(old()), withdraw('F3'), 5));
+
+    // Assert
+    should(agendaState(after).state).equal('resting');
+    should(after.resting?.sub).equal('waiting-on-ferret');
+  });
+});
+
 describe('a card’s own agenda, when its only ask is withdrawn', () => {
   const talk = { at: at(2), kind: 'replied' as const, note: 'hm' };
 

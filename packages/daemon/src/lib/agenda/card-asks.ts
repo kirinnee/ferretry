@@ -257,8 +257,8 @@ const operate = (
       asks.filter(ask => ask !== target),
       at,
     );
-    // Only a thread nobody has written on since the daemon left it, still waiting on this ask, is moved.
-    const asLeft = untouched(item) && item.waitingSince === target.at;
+    // Only a thread nobody has written on since the daemon left it is moved.
+    const asLeft = untouched(item);
     const waiting = openCardAsks(left).filter(ask => ask.notYet === undefined);
     if (waiting.length > 0) {
       // The newest ask goes: the thread has waited on the owner since the one before, not since the one that went.
@@ -278,7 +278,10 @@ const operate = (
           : backTo(told, target.woke);
       return { kind: 'changed', item: settled, change: 'refreshed' };
     }
-    if ((left.cardAsks ?? []).length > 0 || (isCardAgenda(left) && talkedOn(item))) {
+    // An ask from before `woke` was kept has no turn to go back to; on a ferret's thread it rests the thread only when
+    // the thread is still as the daemon left it.
+    const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isCardAgenda(left) || asLeft);
+    if (holdsAnswers || (isCardAgenda(left) && talkedOn(item))) {
       return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };
     }
     return isCardAgenda(left)
@@ -333,9 +336,10 @@ export const restRefusal = (item: AgendaItem): string | undefined => {
  * One operation on one open item's card asks. `stage` moves the item to the stage an ask puts it in, as the state
  * machine records a stage change; `history` adds one activity line; `tidy` is the form the item is stored in.
  *
- * The thread is sealed with every change the writer makes to it, as long as it was untouched before (or an ask
- * begins a turn of its own, with no unanswered ask on it): a thread somebody else wrote on keeps the seal it had,
- * which no longer matches it, so it never again reads as the way the daemon left it.
+ * The thread is sealed with every change the writer makes to it, as long as it matched its seal before the write, or
+ * the write is the first ask on a thread with none open (a new turn of its own): a thread somebody else wrote on keeps
+ * the seal it had, which no longer matches it, so it never again reads as the way the daemon left it — no restate,
+ * second ask or answer renews it. `tidy` is the stored form: the seal is of the thread as it will be read back.
  */
 export const applyCardAsk = (
   item: AgendaItem,
@@ -345,7 +349,6 @@ export const applyCardAsk = (
 ): CardAskOutcome => {
   const outcome = operate(item, operation, at, effects);
   if (outcome.kind !== 'changed') return outcome;
-  const begins =
-    operation.kind === 'attach' && !isCardAgenda(item) && openCardAsks(item).every(ask => ask.notYet !== undefined);
+  const begins = outcome.change === 'woke' && !isCardAgenda(item) && openCardAsks(item).length === 0;
   return untouched(item) || begins ? { ...outcome, item: sealCardAsks(effects.tidy(outcome.item)) } : outcome;
 };
