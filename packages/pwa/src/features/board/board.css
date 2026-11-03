@@ -20,6 +20,13 @@
   flex-shrink: 0;
 }
 
+/* The card's padding and the gap between cards in a list: one value each, so an inline card (`fy-render.css`) takes
+   the Board's own instead of a copy. */
+:root {
+  --fy-board-card-padding: 4px var(--gap-xs) 4px var(--gap-sm);
+  --fy-board-list-gap: 4px;
+}
+
 /* ---- Header --------------------------------------------------------------------------------------- */
 .fy-board__head {
   display: flex;
@@ -461,7 +468,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--fy-board-list-gap);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -480,7 +487,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   margin-left: calc(var(--fy-board-depth, 0) * 20px);
-  padding: 4px var(--gap-xs) 4px var(--gap-sm);
+  padding: var(--fy-board-card-padding);
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);

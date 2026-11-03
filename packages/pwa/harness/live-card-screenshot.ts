@@ -120,7 +120,7 @@ const layout = async (page: Page, label: string): Promise<void> => {
   check(found.fallbackRows === 0, `${label}: a block is drawn as a code fence`);
 };
 
-/** The mini board and the lone card sit as the Board's own: no list indent, no paragraph margins, the Board's lane head. */
+/** The mini board and the lone card sit as the Board's own: no list indent, no paragraph margins, the Board's card padding and list gap, the Board's lane head. */
 const unindented = async (page: Page, label: string): Promise<void> => {
   const found = await page.evaluate(() => {
     const px = (value: string) => Number.parseFloat(value);
@@ -140,15 +140,35 @@ const unindented = async (page: Page, label: string): Promise<void> => {
         };
       },
     );
+    const sides = (style: CSSStyleDeclaration) =>
+      [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].join(' ');
     const cards = [...document.querySelectorAll<HTMLElement>('.fy-card-embed .fy-board-card')].map(item => ({
       top: px(getComputedStyle(item).marginTop),
       bottom: px(getComputedStyle(item).marginBottom),
+      padding: sides(getComputedStyle(item)),
     }));
+    // The Board's own card and list, drawn outside any prose, are the reference an inline one is measured against.
+    const reference = document.createElement('div');
+    reference.innerHTML =
+      '<ul class="fy-board-lane__cards"><li class="fy-board-card"></li><li class="fy-board-card"></li></ul>';
+    document.body.append(reference);
+    const referenceList = reference.querySelector<HTMLElement>('ul') as HTMLElement;
+    const referenceCard = reference.querySelector<HTMLElement>('li') as HTMLElement;
+    const board = {
+      padding: sides(getComputedStyle(referenceCard)),
+      gap: getComputedStyle(referenceList).rowGap,
+    };
+    reference.remove();
+    const gaps = [...document.querySelectorAll<HTMLElement>('.fy-board-lane__cards, .fy-card-embed-list')].map(
+      list => getComputedStyle(list).rowGap,
+    );
     const head = document.querySelector<HTMLElement>('.fy-card-embed .fy-board-lane__head');
     const title = document.querySelector<HTMLElement>('.fy-card-embed .fy-board-card__title');
     return {
       lists,
       cards,
+      board,
+      gaps,
       headFamily: head === null ? null : getComputedStyle(head).fontFamily,
       titleFamily: title === null ? null : getComputedStyle(title).fontFamily,
       headTracking: head === null ? null : getComputedStyle(head).letterSpacing,
@@ -162,6 +182,14 @@ const unindented = async (page: Page, label: string): Promise<void> => {
   check(
     found.cards.every(card => card.top === 0 && card.bottom === 0),
     `${label}: a card carries list-item margins (${JSON.stringify(found.cards)})`,
+  );
+  check(
+    found.cards.every(card => card.padding === found.board.padding),
+    `${label}: a card is padded ${JSON.stringify(found.cards.map(card => card.padding))}, the Board's is ${found.board.padding}`,
+  );
+  check(
+    found.gaps.every(gap => gap === found.board.gap),
+    `${label}: cards sit ${JSON.stringify(found.gaps)} apart, the Board's list gap is ${found.board.gap}`,
   );
   if (found.headFamily !== null)
     check(

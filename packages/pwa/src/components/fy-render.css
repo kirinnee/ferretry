@@ -917,12 +917,14 @@
 .fy-attn-sec--open .md .fy-card-embed ul.fy-card-embed-list {
   margin: 0;
   padding: 0;
+  gap: var(--fy-board-list-gap);
   list-style: none;
 }
 .md .fy-card-embed li.fy-board-card,
 .fy-attn-sec--open .md .fy-card-embed li.fy-board-card {
   margin-top: 0;
   margin-bottom: 0;
+  padding: var(--fy-board-card-padding);
 }
 .md .fy-card-embed h3.fy-board-lane__head {
   margin: 0;

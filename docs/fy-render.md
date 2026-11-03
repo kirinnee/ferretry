@@ -214,7 +214,7 @@ block is drawn, so a block can never say something the board does not.
   "N more on the board."; cards that could not be shown (missing, unreadable) follow as notes, last.
 
 Each card is the real `BoardCard` the Board page draws, read-only: its title, lane, progress and the
-PRs it links. It reads as it does on the Board, and the whole card opens it. The ferret is
+PRs it links. It reads as it does on the Board (the card's padding and the gap between cards are the Board's own tokens, in chat and in the agenda alike), and the whole card opens it. The ferret is
 named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
 clock every 30 seconds — a clock, not a daemon read. Clicking it opens the card exactly as a written `&F12` does (`onTaskOpen`), because
 the daemon's answer is the proof the reference standard asks for
