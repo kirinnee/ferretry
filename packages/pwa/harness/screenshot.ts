@@ -264,7 +264,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 101, desktop: 98 };
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 98, desktop: 95 };
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per

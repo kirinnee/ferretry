@@ -466,6 +466,14 @@ describe('OnboardingDefaultsStep', () => {
     expect(finished.count).toBe(1);
   });
 
+  it('leaves both rows out, and says so, when the machine cannot be reached at all', async () => {
+    const made = defaults();
+    const unreachable = { ...made.tab, createClient: () => Promise.reject(new Error('offline')) };
+    await show(<OnboardingDefaultsStep tab={unreachable} voice={null} onFinished={() => made.finished.count++} />);
+    expect(q('[data-default-unread="voice"]')).not.toBeNull();
+    expect(q('[data-default-unread="learning"]')).not.toBeNull();
+  });
+
   it('says the controls show once the machine answers when it has not', async () => {
     const { element } = defaults(READS, { machine: null, checking: true });
     await show(element);
