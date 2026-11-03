@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { firstCredentialLine } from '../../../src/lib/local-skill-installs/credentials.ts';
+import { firstArgumentCredential, firstCredentialLine } from '../../../src/lib/local-skill-installs/credentials.ts';
 
 const LONG = 'abcdef0123456789abcdef';
 
@@ -178,6 +178,40 @@ describe('the credential test that refuses a copy', () => {
   it('should take the earliest of a name, an address, a key block and a token on one line', () => {
     should(firstCredentialLine(`-----BEGIN PRIVATE KEY----- API_KEY=${LONG}`)).equal(1);
     should(firstCredentialLine(`a\nAPI_KEY=${LONG}\n-----BEGIN PRIVATE KEY-----`)).equal(2);
+  });
+});
+
+describe('the credential test on a command line', () => {
+  it('should treat only a whole %NAME% as a reference, not a password that begins with a percent sign', () => {
+    should(firstCredentialLine(`https://me:%64${LONG}@example.com/`)).equal(1);
+    should(firstCredentialLine(`curl -u me:%64${LONG} https://example.com`)).equal(1);
+    should(firstCredentialLine('https://me:%PASSWORD%@example.com/')).be.undefined();
+    should(firstCredentialLine('curl -u me:%PASSWORD% https://example.com')).be.undefined();
+    should(firstCredentialLine(`API_KEY=%${LONG}`)).equal(1);
+    should(firstCredentialLine('API_KEY=%PASSWORD_FROM_THE_ENVIRONMENT%')).be.undefined();
+  });
+
+  it('should read the value after an authorization scheme as a reference or a credential', () => {
+    should(firstArgumentCredential(['--header', 'Authorization: Bearer $TOKEN'])).be.undefined();
+    should(firstArgumentCredential(['--header', 'Authorization: Bearer dummy1'])).equal(2);
+    should(firstArgumentCredential(['x', `api_key=${LONG}`, 'Authorization: Bearer dummy1'])).equal(2);
+    should(firstArgumentCredential(['Authorization: Bearer dummy1', `api_key=${LONG}`])).equal(1);
+    should(firstArgumentCredential(['Authorization: Bearer dummy1'])).equal(1);
+  });
+
+  it('should read an authorization header in a piece in one pass, however many are in it', () => {
+    const size = 32_768;
+    for (const piece of [
+      `${'authorization:$ '.repeat(size)}${'"'.repeat(size)}`,
+      'authorization:'.repeat(size),
+      'authorization: "'.repeat(size),
+      `authorization:${' "'.repeat(size)}`,
+      `authorization: Bearer ${'Bearer '.repeat(size)}`,
+    ]) {
+      const started = performance.now();
+      firstArgumentCredential([piece]);
+      should(performance.now() - started).be.below(500);
+    }
   });
 });
 

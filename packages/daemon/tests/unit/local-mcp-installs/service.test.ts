@@ -12,8 +12,8 @@ import {
   PROJECT_ID,
   projectTarget,
   type Rig,
-  rig,
   ROOT,
+  rig,
   runtimeTarget,
   STEP_UP,
   stdioServer,
@@ -668,12 +668,28 @@ describe('what a copy never carries out of the source', () => {
     }
   });
 
+  it('should leave a plus-escaped credential out of the review and everything written', async () => {
+    for (const target of [projectTarget(), runtimeTarget()]) {
+      const rigged = rig();
+      rigged.servers = [remote(`https://mcp.example.com/mcp?x=Bearer+${OPAQUE}&keep=hello+world`)];
+
+      const { preview } = await copy(rigged, target, { id: URL_ID });
+
+      const everything = JSON.stringify([preview, rigged.mcp.text, rigged.fleet.proposed, rigged.store.state]);
+      should(everything).not.match(/Bearer|dummy-credential/u);
+      should(everything).match(/keep=hello\+world/u);
+    }
+  });
+
   it('should refuse a command whose arguments hold a credential, writing nothing and echoing nothing', async () => {
     const shapes: [string, string[]][] = [
       ['curl', ['--user', `dummy:${OPAQUE}`]],
       ['curl', [`--user=dummy:${OPAQUE}`]],
       ['node', ['server.js', `https://dummy:${OPAQUE}@mcp.example.com`]],
       ['npx', ['mcp-remote', '--header', `Authorization: Bearer ${OPAQUE}`]],
+      ['node', ['server.js', `https://mcp.example.com/?api%5Fkey=${OPAQUE}`]],
+      ['node', ['server.js', `https://dummy:%64${OPAQUE}@mcp.example.com`]],
+      ['curl', ['--user', `dummy:%64${OPAQUE}`]],
     ];
     for (const target of [projectTarget(), runtimeTarget()])
       for (const [command, args] of shapes) {

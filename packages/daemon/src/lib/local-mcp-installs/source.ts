@@ -14,6 +14,10 @@
  */
 import {
   announcesKey,
+  CATALOG_MCP_MAX_ARGS,
+  CATALOG_MCP_MAX_COMMAND_CHARS,
+  CATALOG_MCP_MAX_ENV,
+  CATALOG_MCP_MAX_TEXT_CHARS,
   type CatalogMcpSetup,
   CatalogMcpSetupSchema,
   type CatalogSourceProblem,
@@ -21,10 +25,9 @@ import {
   type LocalMcpOrigin,
   SecretNameSchema,
   SessionMcpEnvNameSchema,
-  CATALOG_MCP_MAX_ENV,
 } from '@ferretry/protocol';
 import { firstArgumentCredential } from '../local-skill-installs/credentials.ts';
-import { type McpComponentRecord, mcpSetupOf, type McpSourceServer } from '../shared-catalogs/mcp-source.ts';
+import { type McpComponentRecord, type McpSourceServer, mcpSetupOf } from '../shared-catalogs/mcp-source.ts';
 
 /** A server the inventory lists, with where it was found. */
 export interface LocalMcpInventoryServer extends McpSourceServer {
@@ -63,6 +66,7 @@ const MAX_DECODE_ROUNDS = 3;
 function decodedForms(piece: string): readonly string[] | null {
   const forms = [piece];
   let current = piece.replaceAll('+', ' ');
+  if (current !== piece) forms.push(current);
   for (let round = 0; round < MAX_DECODE_ROUNDS; round += 1) {
     let next: string;
     try {
@@ -92,9 +96,14 @@ function pairLooksLikeKey(pair: string): boolean | null {
 }
 
 /** The address without its credentials, and what was left out. A query piece that announces or holds a key goes. */
-function cleanAddress(url: string): { readonly url: string; readonly problems: readonly CatalogSourceProblem[] } {
+function cleanAddress(url: string): {
+  readonly url: string;
+  readonly problems: readonly CatalogSourceProblem[];
+  /** Whether a query piece or the fragment was left out as a key: the credential kinds, not a user name. */
+  readonly holdsKey: boolean;
+} {
   const match = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/u.exec(url);
-  if (match === null) return { url, problems: [] };
+  if (match === null) return { url, problems: [], holdsKey: false };
   const [, scheme = '', authority = '', rest = ''] = match;
   const problems: CatalogSourceProblem[] = [];
   const at = authority.lastIndexOf('@');
@@ -137,6 +146,7 @@ function cleanAddress(url: string): { readonly url: string; readonly problems: r
   return {
     url: `${scheme}${host}${path}${kept.length === 0 ? '' : `?${kept.join('&')}`}${keptFragment}`,
     problems,
+    holdsKey: keyLike > 0 || unreadable > 0 || keptFragment !== fragment,
   };
 }
 
@@ -197,9 +207,39 @@ function commandLine(server: LocalMcpInventoryServer): readonly string[] {
   return [];
 }
 
+const ADDRESS_IN_TEXT = /https?:\/\/\S*/giu;
+
+/** The 1-based place of the first piece with an address in it whose query or fragment holds a key, read as a direct address is. */
+function firstAddressKey(pieces: readonly string[]): number | undefined {
+  const at = pieces.findIndex(piece =>
+    [...piece.matchAll(ADDRESS_IN_TEXT)].some(address => cleanAddress(address[0]).holdsKey),
+  );
+  return at === -1 ? undefined : at + 1;
+}
+
+/** The place of the first command piece that holds a credential: in the text, or in the query of an address. */
+function firstCommandCredential(pieces: readonly string[]): number | undefined {
+  const places = [firstArgumentCredential(pieces), firstAddressKey(pieces)].filter(place => place !== undefined);
+  return places.length === 0 ? undefined : Math.min(...places);
+}
+
+/** Whether the command or an argument is longer, or there are more arguments, than the contract holds: said before any is read. */
+const exceedsContract = (pieces: readonly string[]): boolean =>
+  pieces.length > CATALOG_MCP_MAX_ARGS + 1 ||
+  pieces.some(
+    (piece, index) => piece.length > (index === 0 ? CATALOG_MCP_MAX_COMMAND_CHARS : CATALOG_MCP_MAX_TEXT_CHARS),
+  );
+
 /** What can be copied of `server`, or the sentence for why none of it can. */
 export function copiableMcp(server: LocalMcpInventoryServer): CopiableMcp {
-  const credential = firstArgumentCredential(commandLine(server));
+  const line = commandLine(server);
+  if (exceedsContract(line))
+    return {
+      ok: false,
+      reason:
+        'Its command or an argument is longer, or it has more arguments, than a server here holds. Shorten that server, then copy it.',
+    };
+  const credential = firstCommandCredential(line);
   if (credential !== undefined)
     return {
       ok: false,

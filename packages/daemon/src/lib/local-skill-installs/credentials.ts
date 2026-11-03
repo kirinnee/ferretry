@@ -20,6 +20,7 @@ const ASSIGNED_NAME = /^-{0,2}[A-Za-z_][A-Za-z0-9_.-]{0,127}$/u;
 const MIN_VALUE_LENGTH = 16;
 const ADDRESS_STOPS = new Set(['/', '?', '#', '"', "'", '<', '>', '`']);
 const SCHEMES = new Set(['bearer', 'basic', 'token', 'digest']);
+const LONGEST_SCHEME = Math.max(...[...SCHEMES].map(scheme => scheme.length));
 const LINE_END = /\r\n|[\r\n]/u;
 const WORD = /\S+/gu;
 const VALUE_START = new Set(['"', "'", '`']);
@@ -29,8 +30,13 @@ const NAME_END = new Set(['"', "'", '`']);
 const TOKEN_SPLIT = /[=:"'`,;(){}[\]<>@/&?.]/u;
 const PEM_HEADER = /-----BEGIN (?:[A-Z0-9]{1,16} ){0,4}PRIVATE KEY(?: BLOCK)?-----/iu;
 
+/** `%NAME%`, whole: a percent sign that starts a URL escape (`%64…`) or a password is not a reference to anything. */
+const WHOLE_PERCENT_REFERENCE = /^%[A-Za-z_][A-Za-z0-9_]{0,127}%$/u;
+/** The longest reference {@link WHOLE_PERCENT_REFERENCE} accepts, so a caller can look at no more than that. */
+const REFERENCE_LENGTH = 130;
+
 /** A value that points at a secret rather than holding one: `$VAR`, `${VAR}`, `<your key>`, `%VAR%`, `[…]`. */
-const isReference = (value: string): boolean => /^[$<{[%]/u.test(value);
+const isReference = (value: string): boolean => /^[$<{[]/u.test(value) || WHOLE_PERCENT_REFERENCE.test(value);
 
 const isSpace = (character: string): boolean => character.trim() === '';
 
@@ -244,19 +250,61 @@ export function firstCredentialLine(text: string): number | undefined {
 
 const HEADER_NAME = 'authorization';
 
-/** Whether `part` gives an HTTP authorization header (or `--authorization=`) a value that is not a reference. */
+const AUTHORIZATION = /authorization/giu;
+
+/** Where each word (a run with no space) ends, from every offset: `ends[i]` is the first space at or after `i`. */
+function wordEnds(text: string): Int32Array {
+  const ends = new Int32Array(text.length + 1);
+  ends[text.length] = text.length;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    ends[index] = isSpace(text.charAt(index)) ? index : (ends[index + 1] ?? text.length);
+  }
+  return ends;
+}
+
+/** Where a word ending at `end` stops once its trailing value-end marks are trimmed: `kept[end]`, never before the word's start. */
+function trimmedEnds(text: string): Int32Array {
+  const kept = new Int32Array(text.length + 1);
+  for (let index = 1; index <= text.length; index += 1) {
+    kept[index] = VALUE_END.has(text.charAt(index - 1)) ? (kept[index - 1] ?? 0) : index;
+  }
+  return kept;
+}
+
+/**
+ * Whether `part` gives an HTTP authorization header (or `--authorization=`) a value that is not a reference. The
+ * scheme word (`Bearer`, `Basic`…) is skipped, and what follows it is judged like any value. One pass over the
+ * text with offsets and no slicing of the tail, so a part made of nothing but `authorization:` stays linear.
+ */
 function givesAuthorization(part: string): boolean {
   const folded = foldedForScan(part);
-  const lower = folded.toLowerCase();
-  let from = lower.indexOf(HEADER_NAME);
-  while (from !== -1) {
-    let index = from + HEADER_NAME.length;
-    while (index < folded.length && isSpace(folded.charAt(index))) index += 1;
-    if (folded.charAt(index) === ':' || folded.charAt(index) === '=') {
-      const value = bare(folded.slice(index + 1).trim());
-      if (value !== '' && !isReference(value)) return true;
+  const ends = wordEnds(folded);
+  const kept = trimmedEnds(folded);
+  const size = folded.length;
+  const skipSpaces = (from: number): number => {
+    let at = from;
+    while (at < size && isSpace(folded.charAt(at))) at += 1;
+    return at;
+  };
+  for (const found of folded.matchAll(AUTHORIZATION)) {
+    const separator = skipSpaces(found.index + HEADER_NAME.length);
+    if (folded.charAt(separator) !== ':' && folded.charAt(separator) !== '=') continue;
+    let at = skipSpaces(separator + 1);
+    let afterScheme = false;
+    while (at < size) {
+      const wordEnd = ends[at] ?? size;
+      let from = at;
+      while (from < wordEnd && VALUE_START.has(folded.charAt(from))) from += 1;
+      const to = Math.max(kept[wordEnd] ?? 0, from);
+      at = skipSpaces(wordEnd);
+      if (to === from) continue;
+      if (!afterScheme && to - from <= LONGEST_SCHEME && SCHEMES.has(folded.slice(from, to).toLowerCase())) {
+        afterScheme = true;
+        continue;
+      }
+      if (!isReference(folded.slice(from, Math.min(to, from + REFERENCE_LENGTH + 1)))) return true;
+      break;
     }
-    from = lower.indexOf(HEADER_NAME, from + HEADER_NAME.length);
   }
   return false;
 }

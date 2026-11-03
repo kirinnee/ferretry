@@ -102,6 +102,18 @@ describe('what of an MCP server on this machine can be copied', () => {
     should(JSON.stringify(copied)).not.match(/api%5Fkey|sk%2Dlive|zzz|dbl%255F/u);
   });
 
+  it('should read a plus as a space, so a credential written with plus signs alone is still left out', () => {
+    const copied = copiableMcp(
+      http(`https://mcp.example.com/mcp?x=Bearer+${FAKE_VALUE}&keep=hello+world&other=a+b+c#frag`),
+    );
+
+    should(copied.ok && copied.setup).deepEqual({
+      transport: 'url',
+      url: 'https://mcp.example.com/mcp?keep=hello+world&other=a+b+c#frag',
+    });
+    should(JSON.stringify(copied)).not.match(new RegExp(`Bearer|${FAKE_VALUE}`, 'u'));
+  });
+
   it('should read a name encoded as many times as the reader will decode it', () => {
     const copied = copiableMcp(http('https://mcp.example.com/mcp?keep=1&deep%25255Fkey=zzz'));
 
@@ -240,6 +252,104 @@ describe('a command whose arguments hold a credential is refused, never copied',
       }
     });
   }
+
+  const OPAQUE = 'dummy0123456789abcdefghij';
+  const encoded: [string, string, string[], string][] = [
+    [
+      'an encoded key name in an address argument',
+      'node',
+      ['s.js', `https://mcp.example.com/?api%5Fkey=${OPAQUE}`],
+      'Its argument 2',
+    ],
+    [
+      'a plus-escaped credential in an address argument',
+      'node',
+      [`--url=https://mcp.example.com/?x=Bearer+${OPAQUE}`],
+      'Its argument 1',
+    ],
+    ['a malformed escape in an address argument', 'node', ['https://mcp.example.com/?a=%ZZ'], 'Its argument 1'],
+    [
+      'a key in the fragment of an address argument',
+      'node',
+      [`x`, `https://mcp.example.com/#sk-live-${OPAQUE}`],
+      'Its argument 2',
+    ],
+    [
+      'a password that begins with a URL escape',
+      'node',
+      ['s.js', `https://u:%64${OPAQUE}@mcp.example.com`],
+      'Its argument 2',
+    ],
+    ['a curl login whose password begins with a percent sign', 'curl', ['--user', `u:%64${OPAQUE}`], 'Its argument 1'],
+    ['a curl login with a percent sign that closes no name', 'curl', ['-u', `u:%${OPAQUE}`], 'Its argument 1'],
+    [
+      'a password that looks like a reference but is too long to be one',
+      'curl',
+      [`--user=u:%${'A'.repeat(200)}%`],
+      'Its argument 1',
+    ],
+  ];
+  for (const [title, command, args, where] of encoded) {
+    it(`should refuse ${title}, naming the place and not the value`, () => {
+      for (const result of [refused(command, args), refused(command, args, true)]) {
+        should(result.ok).be.false();
+        if (result.ok) return;
+        should(result.reason).startWith(where);
+        should(result.reason).not.match(/dummy0123|api%5Fkey|Bearer/u);
+      }
+    });
+  }
+
+  it('should copy addresses in arguments that hold no key, and a whole %NAME% reference as a password', () => {
+    for (const args of [
+      ['--url=https://mcp.example.com/mcp?q=hello+world&page=2#top', 'http://localhost:3000/'],
+      ['https://user@mcp.example.com/path'],
+      [`https://u:%PASSWORD%@mcp.example.com`],
+      ['--user=u:%PASSWORD%'],
+    ])
+      should(refused('curl', args).ok).be.true();
+  });
+
+  it('should refuse a command or arguments larger than a server here holds before reading any of them', () => {
+    const tooLong = 'a'.repeat(5_000);
+    for (const [command, args] of [
+      ['n'.repeat(1_025), []],
+      ['node', [tooLong]],
+      ['node', Array.from({ length: 65 }, () => 'x')],
+    ] as const) {
+      const result = refused(command, [...args]);
+
+      should(result.ok).be.false();
+      if (!result.ok) should(result.reason).startWith('Its command or an argument is longer');
+    }
+    should(
+      refused(
+        'node',
+        Array.from({ length: 64 }, () => 'x'),
+      ).ok,
+    ).be.true();
+  });
+
+  it('should copy an Authorization header whose value is a reference, with or without its scheme', () => {
+    for (const header of [
+      'Authorization: Bearer $TOKEN',
+      'Authorization: Basic $CREDENTIALS',
+      'authorization=Bearer %TOKEN%',
+      'Authorization : <your token>',
+      'Authorization: "" $TOKEN',
+      'Authorization: Bearer',
+      'Authorization: Bearer ""',
+      'Authorization: Bearer $TOKEN, Authorization: $OTHER',
+    ])
+      should(refused('npx', ['mcp-remote', '--header', header]).ok).be.true();
+    for (const header of [
+      'Authorization: Bearer $TOKEN Authorization: Bearer dummy1',
+      'Authorization: Bearer %64dummy1',
+      'Authorization: "" dummy1',
+      'Authorization: Bearer Basic dummy1',
+    ])
+      should(refused('npx', ['mcp-remote', '--header', header]).ok).be.false();
+  });
 
   it('should copy ordinary arguments, references to a secret, and an Authorization header with no value', () => {
     for (const args of [
