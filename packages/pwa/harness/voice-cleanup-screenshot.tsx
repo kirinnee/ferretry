@@ -31,6 +31,7 @@ const run = (command: string, args: readonly string[]): void => {
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { DictationSettings } from '../../src/features/settings/dictation-settings.tsx';
+import { SettingGroup } from '../../src/features/settings/setting-row.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 const state = new URLSearchParams(location.search).get('state');
 const cleanup = state === 'edited'
@@ -45,14 +46,16 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <div className="kt-shell flex flex-col bg-bg p-4" style={{ maxWidth: 720, margin: '0 auto' }}>
-    <DictationSettings
-      settings={{ ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq', engine: 'browser' }}
-      update={() => undefined}
-      persisted
-      recognitionSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-      voice={null}
-      voiceCleanup={{ cleanup, loaded: true, save: async () => ({ kind: 'applied' }) }}
-    />
+    <SettingGroup label="Dictation">
+      <DictationSettings
+        settings={{ ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq', engine: 'browser' }}
+        update={() => undefined}
+        persisted
+        recognitionSupport={{ available: true, availability: 'available', implementation: 'standard' }}
+        voice={null}
+        voiceCleanup={{ cleanup, loaded: true, save: async () => ({ kind: 'applied' }) }}
+      />
+    </SettingGroup>
   </div>,
 );
 `;

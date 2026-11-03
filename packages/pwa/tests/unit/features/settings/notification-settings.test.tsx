@@ -10,6 +10,7 @@ import {
   type NotificationSettingsViewProps,
 } from '../../../../src/features/settings/notification-settings.tsx';
 import { render, run } from '../../../support/react.ts';
+import { openAllInfo } from '../../../support/setting-rows.ts';
 
 const device: PushDeviceView = {
   id: 'push-5b2b54ad-e4a3-4f96-923f-95bd960ef61b',
@@ -40,6 +41,7 @@ describe('NotificationSettingsView', () => {
   it('carries no enrol switch of its own: every machine is switched in the machine list', () => {
     const { renderer } = view({ permission: 'default' });
     expect(renderer.root.findAllByProps({ role: 'switch' })).toHaveLength(0);
+    openAllInfo(renderer);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_SCOPE_NOTE);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_IOS_NOTE);
   });

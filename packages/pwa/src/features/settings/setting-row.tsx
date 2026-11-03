@@ -60,9 +60,20 @@ export interface SettingRowProps {
   readonly wide?: boolean;
   /** Content under the row that is always shown, for example a list the control reveals. */
   readonly children?: ReactNode;
+  /** Extra `data-*` hooks on the row, for a test or a script that names the row by what it is. */
+  readonly dataAttributes?: Readonly<Record<`data-${string}`, string>>;
 }
 
-export function SettingRow({ settingId, name, hint, explanation, control, wide = false, children }: SettingRowProps) {
+export function SettingRow({
+  settingId,
+  name,
+  hint,
+  explanation,
+  control,
+  wide = false,
+  children,
+  dataAttributes,
+}: SettingRowProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const labelId = `${id}-label`;
@@ -89,6 +100,7 @@ export function SettingRow({ settingId, name, hint, explanation, control, wide =
         ? {}
         : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 as const })}
       data-setting-row={name}
+      {...dataAttributes}
       className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[var(--row-min-h)] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
@@ -137,16 +149,18 @@ export interface SettingSwitchProps {
   readonly checked: boolean;
   readonly onChange: (next: boolean) => void;
   readonly labelledBy: string;
+  /** Names the switch by this text instead of by `labelledBy`, for a row whose visible name is not the action. */
+  readonly ariaLabel?: string;
   readonly disabled?: boolean;
 }
 
-export function SettingSwitch({ checked, onChange, labelledBy, disabled = false }: SettingSwitchProps) {
+export function SettingSwitch({ checked, onChange, labelledBy, ariaLabel, disabled = false }: SettingSwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-labelledby={labelledBy}
+      {...(ariaLabel === undefined ? { 'aria-labelledby': labelledBy } : { 'aria-label': ariaLabel })}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-60"
@@ -251,6 +265,23 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
         );
       })}
     </div>
+  );
+}
+
+/** What each choice of a segmented row means, for behind its (i): the choices' own sentences, none dropped. */
+export function OptionNotes({
+  notes,
+}: {
+  readonly notes: readonly { readonly label: string; readonly detail: string }[];
+}) {
+  return (
+    <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0" data-option-notes="">
+      {notes.map(note => (
+        <li key={note.label}>
+          <span className="font-semibold text-fg">{note.label}</span> — {note.detail}
+        </li>
+      ))}
+    </ul>
   );
 }
 

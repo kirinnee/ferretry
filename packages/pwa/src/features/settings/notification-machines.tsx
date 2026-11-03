@@ -14,6 +14,7 @@ import {
   turnOnAllTargets,
 } from '../../lib/machine-notifications.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { SettingRow, SettingSwitch } from './setting-row.tsx';
 
 export interface MachineNotificationListProps {
   readonly rows: readonly MachineNotificationRow[];
@@ -51,63 +52,41 @@ function MachineRow({
   // A machine that is on can always be turned off; one that is off needs permission and an answering machine.
   const disabled = busy || (on ? false : row.status !== 'off' || !canEnrol);
   return (
-    <li
-      className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2"
-      data-machine-notification={row.daemonId}
-      data-machine-status={row.status}
-    >
-      <div className="flex min-h-[36px] items-center gap-2">
-        <span className="min-w-0 truncate text-ui font-semibold text-fg">{row.label}</span>
-        <span
-          className={cn('shrink-0 text-meta leading-base', STATUS_TONE[row.status])}
-          data-machine-status-text=""
-          role="status"
-        >
+    <SettingRow
+      name={row.label}
+      dataAttributes={{ 'data-machine-notification': row.daemonId, 'data-machine-status': row.status }}
+      hint={
+        <span className={cn(STATUS_TONE[row.status])} data-machine-status-text="" role="status">
           {busy ? 'Working…' : row.statusText}
         </span>
-        <button
-          type="button"
-          className="min-h-0 shrink-0 text-meta text-muted underline"
-          data-machine-mute=""
-          aria-pressed={!row.shown}
-          onClick={() => onToggleShown(row.daemonId, !row.shown)}
-        >
-          {row.shown ? 'Mute' : 'Unmute'}
-        </button>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label={`Notifications from ${row.label}`}
-          disabled={disabled}
-          onClick={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
-          className={cn(
-            'ml-auto flex shrink-0 items-center justify-center',
-            disabled && 'cursor-not-allowed opacity-60',
-          )}
-        >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'relative block h-6 w-11 shrink-0 rounded-full border transition-colors',
-              on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-            )}
+      }
+      control={() => (
+        <>
+          <button
+            type="button"
+            className="min-h-[44px] shrink-0 px-2 text-meta text-muted underline"
+            data-machine-mute=""
+            aria-pressed={!row.shown}
+            onClick={() => onToggleShown(row.daemonId, !row.shown)}
           >
-            <span
-              className={cn(
-                'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
-                on ? 'translate-x-[22px]' : 'translate-x-[2px]',
-              )}
-            />
-          </span>
-        </button>
-      </div>
+            {row.shown ? 'Mute' : 'Unmute'}
+          </button>
+          <SettingSwitch
+            checked={on}
+            labelledBy=""
+            ariaLabel={`Notifications from ${row.label}`}
+            disabled={disabled}
+            onChange={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
+          />
+        </>
+      )}
+    >
       {failure === undefined ? null : (
-        <p className="m-0 text-meta leading-base text-warn" role="alert">
+        <p className="m-0 px-panel pb-3 text-meta leading-base text-warn" role="alert">
           {failure}
         </p>
       )}
-    </li>
+    </SettingRow>
   );
 }
 
@@ -124,32 +103,31 @@ export function MachineNotificationList({
   if (rows.length === 0) return null;
   const turnOnable = turnOnAllTargets(rows).length > 0 && canEnrol;
   return (
-    <section className="flex flex-col gap-2" aria-label="Notifications per machine">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-meta font-semibold text-muted">Machines</span>
-        <Button variant="primary" data-notification-turn-on-all="" disabled={!turnOnable} onClick={onTurnOnAll}>
-          Turn on for all machines
-        </Button>
-      </div>
-      <p className="m-0 text-meta leading-base text-muted">
-        Turn a machine on to be notified from it on this browser, even when the app is closed. Mute silences one here
-        only.
-      </p>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {rows.map(row => (
-          <MachineRow
-            key={row.daemonId}
-            row={row}
-            canEnrol={canEnrol}
-            busy={busy.has(row.daemonId)}
-            failure={failures[row.daemonId]}
-            onEnable={onEnable}
-            onDisable={onDisable}
-            onToggleShown={onToggleShown}
-          />
-        ))}
-      </ul>
-    </section>
+    <>
+      <SettingRow
+        name="Machines"
+        hint="Turn on, or mute, one machine at a time"
+        explanation="Turn a machine on to be notified from it on this browser, even when the app is closed. Mute silences one here only."
+        wide
+        control={() => (
+          <Button variant="primary" data-notification-turn-on-all="" disabled={!turnOnable} onClick={onTurnOnAll}>
+            Turn on for all machines
+          </Button>
+        )}
+      />
+      {rows.map(row => (
+        <MachineRow
+          key={row.daemonId}
+          row={row}
+          canEnrol={canEnrol}
+          busy={busy.has(row.daemonId)}
+          failure={failures[row.daemonId]}
+          onEnable={onEnable}
+          onDisable={onDisable}
+          onToggleShown={onToggleShown}
+        />
+      ))}
+    </>
   );
 }
 
@@ -160,16 +138,17 @@ export interface NotificationsOffBannerProps {
   readonly onEnable: (daemonId: string) => void;
 }
 
-/** One line per machine that has no enrolled device anywhere, each with a one-tap enable. Nothing when none. */
+/** One row per machine that has no enrolled device anywhere, each with a one-tap enable. Nothing when none. */
 export function NotificationsOffBanner({ rows, canEnrol, busy, onEnable }: NotificationsOffBannerProps) {
   const off = machinesOffEverywhere(rows);
   if (off.length === 0) return null;
   return (
-    <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Notifications are off" data-notifications-off="">
+    <>
       {off.map(row => (
         <li
           key={row.daemonId}
-          className="flex flex-wrap items-center gap-2 rounded-control border border-warn bg-warn-bg px-control-x py-2"
+          className="flex flex-wrap items-center gap-2 bg-warn-bg px-panel py-2"
+          data-notifications-off=""
           data-notifications-off-machine={row.daemonId}
           role="status"
         >
@@ -185,6 +164,6 @@ export function NotificationsOffBanner({ rows, canEnrol, busy, onEnable }: Notif
           </Button>
         </li>
       ))}
-    </ul>
+    </>
   );
 }

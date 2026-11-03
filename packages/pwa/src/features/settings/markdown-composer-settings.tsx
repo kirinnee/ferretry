@@ -1,41 +1,52 @@
 /**
- * Settings controls for how the composer EDITS text: the Markdown
- * syntax-highlight overlay, and optional Vim-style modal keys — and how the
- * phone composer lays out its buttons (`lib/composer-dock-layout.ts`).
+ * Settings controls for how the composer EDITS text, as three compact rows: the editor style (Markdown,
+ * Rich text, Plain), how the phone composer lays out its buttons (`lib/composer-dock-layout.ts`), and
+ * optional Vim-style modal keys.
  *
- * Ported from kteam `ui/src/components/MarkdownComposerSettings.tsx`. The
- * original deliberately keeps this separate from the contended settings page;
- * the PWA likewise exports a composable settings surface rather than coupling
- * it to a particular route host.
+ * Ported from kteam `ui/src/components/MarkdownComposerSettings.tsx`. The original deliberately keeps this
+ * separate from the contended settings page; the PWA likewise exports a composable settings surface rather
+ * than coupling it to a particular route host.
  *
- * Both switches share one promise, which is why they share one surface: the
- * native textarea remains the input owner. Highlighting paints behind it and
- * Vim keys reinterpret keystrokes inside it — neither swaps in an editor
- * component, and neither takes over the draft, the selection, dictation or
- * autocomplete. Their storage owners differ (the display preference has its own
- * key; the Vim preference is a device control) and that is deliberate: this
- * surface reads both and owns neither.
+ * Every row shares one promise, which is why they share one surface: the native textarea remains the input
+ * owner. Highlighting paints behind it and Vim keys reinterpret keystrokes inside it — neither swaps in an
+ * editor component, and neither takes over the draft, the selection, dictation or autocomplete. Their storage
+ * owners differ (the display preference has its own key; the Vim preference is a device control) and that is
+ * deliberate: this surface reads both and owns neither.
+ *
+ * The long paragraphs live behind each row's (i); the row's hint says what the CHOSEN option does.
  */
-import { cn } from '../../lib/class-names.ts';
 import {
   type ComposerDockLayout,
   useComposerDockLayout,
   writeComposerDockLayout,
 } from '../../lib/composer-dock-layout.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
+import { OptionNotes, Segmented, SettingRow, SettingSwitch } from './setting-row.tsx';
+import { settingDefinition } from './settings-catalog.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
   'Whichever style, what you send is markdown, and the @ / : suggestions and Vim keys work in all three. In Markdown style the text formats as you type — # headings at their real size, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold** bold and *italic* slanted — and the markers kept faintly visible. Rich text formats the same way, hides the markers except on the line you are editing, and adds a formatting toolbar. ⌘B, ⌘I and ⌘E wrap the selection; ⌘⇧8 and ⌘⇧7 make lists.';
 
-/** The editor styles this build offers, and what each is called on screen. */
-const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: string; readonly detail: string }[] = [
-  { pref: 'on', label: 'Markdown, Notion-style', detail: 'Formats as you type, markers kept faintly visible' },
+/** The editor styles this build offers: the short name on the control, the full name and sentence behind (i). */
+const EDITOR_STYLES: readonly {
+  readonly pref: MdComposePref;
+  readonly label: string;
+  readonly fullName: string;
+  readonly detail: string;
+}[] = [
+  {
+    pref: 'on',
+    label: 'Markdown',
+    fullName: 'Markdown, Notion-style',
+    detail: 'Formats as you type, markers kept faintly visible',
+  },
   {
     pref: 'rich',
     label: 'Rich text',
+    fullName: 'Rich text',
     detail: 'Formats as you type, markers hidden, with a toolbar; still sends markdown',
   },
-  { pref: 'off', label: 'Plain text box', detail: 'No formatting and no list continuation' },
+  { pref: 'off', label: 'Plain', fullName: 'Plain text box', detail: 'No formatting and no list continuation' },
 ];
 
 /** How the phone composer lays out attach and the mic, Interrupt & send and Send. */
@@ -56,49 +67,6 @@ export const DOCK_LAYOUT_EXPLANATION =
 export const VIM_COMPOSER_EXPLANATION =
   'Modal Vim keys — normal and insert — in every editor style, with the mode shown under the message box. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard (the mode indicator also switches modes).';
 
-function ComposerSwitch({
-  checked,
-  label,
-  detail,
-  onChange,
-}: {
-  readonly checked: boolean;
-  readonly label: string;
-  readonly detail: string;
-  readonly onChange: (next: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      className={cn(
-        'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left hover:border-accent',
-      )}
-      onClick={() => onChange(!checked)}
-    >
-      <span className="min-w-0">
-        <span className="block text-ui font-semibold text-fg">{label}</span>
-        <span className="mt-0.5 block text-meta leading-base text-muted">{detail}</span>
-      </span>
-      <span
-        aria-hidden="true"
-        className={cn(
-          'relative h-6 w-11 shrink-0 rounded-full border transition-colors',
-          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-        )}
-      >
-        <span
-          className={cn(
-            'absolute top-0.5 h-[18px] w-[18px] rounded-full bg-fg transition-transform',
-            checked ? 'translate-x-[20px]' : 'translate-x-0.5',
-          )}
-        />
-      </span>
-    </button>
-  );
-}
-
 export function MarkdownComposerSettings({
   vimEnabled,
   onChangeVim,
@@ -109,78 +77,57 @@ export function MarkdownComposerSettings({
 }) {
   const pref = useMdComposePref();
   const dockLayout = useComposerDockLayout();
+  const style = EDITOR_STYLES.find(entry => entry.pref === pref);
+  const layout = DOCK_LAYOUTS.find(entry => entry.value === dockLayout);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-1 text-ui font-semibold text-fg">Editor style</legend>
-          {EDITOR_STYLES.map(style => (
-            <label
-              className={cn(
-                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                pref === style.pref ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-              )}
-              data-editor-style={style.pref}
-              key={style.pref}
-            >
-              <input
-                checked={pref === style.pref}
-                className="mt-1"
-                name="composer-editor-style"
-                onChange={() => writeMdComposePref(style.pref)}
-                type="radio"
-                value={style.pref}
-              />
-              <span className="min-w-0">
-                <span className="block text-ui font-semibold text-fg">{style.label}</span>
-                <span className="mt-0.5 block text-meta leading-base text-muted">{style.detail}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        <p className="m-0 text-cell leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-1 text-ui font-semibold text-fg">Button layout</legend>
-          {DOCK_LAYOUTS.map(layout => (
-            <label
-              className={cn(
-                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                dockLayout === layout.value
-                  ? 'border-accent bg-accent-soft'
-                  : 'border-border bg-surface-2 hover:border-accent',
-              )}
-              data-dock-layout={layout.value}
-              key={layout.value}
-            >
-              <input
-                checked={dockLayout === layout.value}
-                className="mt-1"
-                name="composer-dock-layout"
-                onChange={() => writeComposerDockLayout(layout.value)}
-                type="radio"
-                value={layout.value}
-              />
-              <span className="min-w-0">
-                <span className="block text-ui font-semibold text-fg">{layout.label}</span>
-                <span className="mt-0.5 block text-meta leading-base text-muted">{layout.detail}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        <p className="m-0 text-cell leading-base text-muted">{DOCK_LAYOUT_EXPLANATION}</p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <ComposerSwitch
-          checked={vimEnabled}
-          label="Vim-style editing"
-          detail="Physical keyboard · NORMAL and INSERT shown under the box"
-          onChange={onChangeVim}
-        />
-        <p className="m-0 text-cell leading-base text-muted">{VIM_COMPOSER_EXPLANATION}</p>
-      </div>
-    </div>
+    <>
+      <SettingRow
+        settingId="composer-markdown"
+        name="Editor style"
+        hint={style?.detail}
+        explanation={
+          <>
+            <p className="m-0">{settingDefinition('composer-markdown').description}</p>
+            <OptionNotes notes={EDITOR_STYLES.map(entry => ({ label: entry.fullName, detail: entry.detail }))} />
+            <p className="m-0 mt-2">{MARKDOWN_COMPOSER_EXPLANATION}</p>
+          </>
+        }
+        wide
+        control={() => (
+          <Segmented
+            label="Editor style"
+            value={pref}
+            options={EDITOR_STYLES.map(entry => ({ id: entry.pref, label: entry.label, title: entry.detail }))}
+            onChange={writeMdComposePref}
+          />
+        )}
+      />
+      <SettingRow
+        name="Button layout"
+        hint={layout?.detail}
+        explanation={
+          <>
+            <OptionNotes notes={DOCK_LAYOUTS.map(entry => ({ label: entry.label, detail: entry.detail }))} />
+            <p className="m-0 mt-2">{DOCK_LAYOUT_EXPLANATION}</p>
+          </>
+        }
+        wide
+        control={() => (
+          <Segmented
+            label="Button layout"
+            value={dockLayout}
+            options={DOCK_LAYOUTS.map(entry => ({ id: entry.value, label: entry.label, title: entry.detail }))}
+            onChange={writeComposerDockLayout}
+          />
+        )}
+      />
+      <SettingRow
+        name="Vim-style editing"
+        hint="Physical keyboard · NORMAL and INSERT shown under the box"
+        explanation={VIM_COMPOSER_EXPLANATION}
+        control={labelId => <SettingSwitch checked={vimEnabled} labelledBy={labelId} onChange={onChangeVim} />}
+      />
+    </>
   );
 }

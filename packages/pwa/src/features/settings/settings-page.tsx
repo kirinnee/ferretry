@@ -15,7 +15,7 @@ import type { ConnectionChoice } from '@ferretry/relay';
 import { ChevronLeft } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
+import { useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { machineDisplayOrder } from '../../lib/all-machines.ts';
@@ -25,9 +25,9 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
-import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
+import { CHAT_WIDTH_OPTIONS } from '../../shell/chat-width-control.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
-import { PageThemeSwitch, ThemeSettings } from '../../shell/theme-toggle.tsx';
+import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { useLocalComputer } from '../browser/use-local-computer.ts';
 import type { CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
@@ -55,7 +55,7 @@ import { AppearanceGroups, TEXT_SCALE_OPTIONS } from './appearance-groups.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
-import { MotionSetting, OpenLinksInSetting, SessionsListSetting } from './conversation-settings.tsx';
+import { SessionsListSetting } from './conversation-settings.tsx';
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
@@ -65,8 +65,6 @@ import type { GrantClientFactory } from './grants-settings.tsx';
 import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
-import { MessageMarksLegend } from './message-marks-legend.tsx';
-import { Toggle } from './notification-settings.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
 import { SettingGroup, SettingRow } from './setting-row.tsx';
 import {
@@ -75,7 +73,6 @@ import {
   type SettingDefinition,
   type SettingId,
   type SettingsSectionId,
-  settingDefinition,
   settingsSectionDefinition,
   settingsSectionForSetting,
 } from './settings-catalog.ts';
@@ -436,144 +433,6 @@ export function SettingsPage({
   const activeSection: SettingsSectionId = openedSection ?? 'appearance';
   const section = settingsSectionDefinition(activeSection);
 
-  const controlsById = useMemo<Record<SettingId, ReactNode>>(
-    () => ({
-      'text-size': (
-        <>
-          <TextScaleControl theme={theme} />
-          <p className="mt-2 text-meta leading-base text-faint">
-            Sizes never go below Default, so existing 44px touch targets are not reduced.
-          </p>
-        </>
-      ),
-      density: (
-        <>
-          <fieldset className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <legend className="sr-only">Dashboard density</legend>
-            {DENSITY_OPTIONS.map(option => {
-              const checked = density === option.id;
-              return (
-                <label
-                  key={option.id}
-                  className={cn(
-                    'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-                    'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-                    checked
-                      ? 'border-accent bg-accent-soft text-accent'
-                      : 'border-border bg-surface-2 text-fg hover:border-accent',
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="dashboard-density"
-                    value={option.id}
-                    checked={checked}
-                    onChange={() => densityState.setDensity(option.id)}
-                    className="sr-only"
-                  />
-                  <span className="text-ui font-semibold">{option.label}</span>
-                  <span className="text-meta leading-tight text-muted">{option.description}</span>
-                </label>
-              );
-            })}
-          </fieldset>
-          {densityState.explicit === null && (
-            <p className="mt-2 text-meta leading-base text-faint">
-              Using the device default. Picking a level saves an explicit choice.
-            </p>
-          )}
-        </>
-      ),
-      'chat-width': (
-        <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
-      ),
-      motion: <MotionSetting motion={device.motion} onChange={motion => controls.setDeviceControls({ motion })} />,
-      'open-links-in': (
-        <OpenLinksInSetting
-          openLinksIn={device.openLinksIn}
-          computerAvailable={computerAvailable}
-          onChange={openLinksIn => controls.setDeviceControls({ openLinksIn })}
-        />
-      ),
-      'sessions-list': (
-        <SessionsListSetting
-          scope={device.sessionsList}
-          onChange={sessionsList => controls.setDeviceControls({ sessionsList })}
-        />
-      ),
-      'group-needs-you': (
-        <Toggle
-          checked={device.groupNeedsYou}
-          onChange={groupNeedsYou => controls.setDeviceControls({ groupNeedsYou })}
-          label="Group Needs you at the top"
-          description="Off keeps those sessions in their project group, with just the Inbox badge."
-        />
-      ),
-      'message-marks': <MessageMarksLegend />,
-      'composer-markdown': (
-        <MarkdownComposerSettings
-          vimEnabled={device.composerVimMode}
-          onChangeVim={composerVimMode => controls.setDeviceControls({ composerVimMode })}
-        />
-      ),
-      'composer-enter-key': (
-        <ComposerEnterKeySettings
-          preference={device.composerEnterKey}
-          phonePreference={device.composerPhoneEnterKey}
-          onChange={patch => controls.setDeviceControls(patch)}
-        />
-      ),
-      'composer-suggestions': (
-        <ComposerSuggestionsSettings preferences={device} onChange={patch => controls.setDeviceControls(patch)} />
-      ),
-      theme: <ThemeSettings theme={theme} />,
-      'install-app': <InstallAppSetting />,
-      'device-permissions': <DevicePermissionsSetting />,
-      'connection-preference': connectionPreferences ?? (
-        <p role="status" className="m-0 text-cell leading-base text-muted">
-          The connection choice is unavailable until this page is composed with this device’s preferences.
-        </p>
-      ),
-      'keep-chats-fresh': (
-        <KeepChatsFreshSetting device={device} onChange={patch => controls.setDeviceControls(patch)} />
-      ),
-      'clear-cached-data': (
-        <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
-      ),
-      'speedup-keys': <SpeedupKeysSettings />,
-      'transcription-log': <TranscriptionLogSettings />,
-      'dictation-debug': <DictationDebugSettings />,
-      'about-device': <ViewportDetails />,
-      dictation: (
-        <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
-      ),
-      notifications: notifications ?? (
-        <p role="status" className="m-0 text-cell leading-base text-muted">
-          Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription
-          host.
-        </p>
-      ),
-    }),
-    // `device` rather than its individual fields: the controls store reuses the
-    // very same device object for a patch that changed nothing, so depending on
-    // the whole record is as cheap as listing four of its fields and cannot fall
-    // behind the next one that is added.
-    [
-      connectionPreferences,
-      computerAvailable,
-      controls,
-      density,
-      densityState.explicit,
-      densityState.setDensity,
-      device,
-      dictation,
-      notifications,
-      onClearCachedData,
-      selectedRecord,
-      theme,
-    ],
-  );
-
   /**
    * A Machines link names a machine by the name this browser shows for it. The PATH decides which
    * daemon answers, so a link naming another paired machine is a request to go there — never a way
@@ -813,16 +672,45 @@ export function SettingsPage({
                     <ViewportDetails />
                   </SettingGroup>
                 </>
-              ) : (
-                section.settingIds.map(id => {
-                  const definition = settingDefinition(id);
-                  return (
-                    <SettingsSection key={definition.id} definition={definition}>
-                      {controlsById[definition.id]}
-                    </SettingsSection>
-                  );
-                })
-              )}
+              ) : section.id === 'behaviour' ? (
+                <>
+                  <SettingGroup label="Sessions">
+                    <SessionsListSetting
+                      scope={device.sessionsList}
+                      onChange={sessionsList => controls.setDeviceControls({ sessionsList })}
+                    />
+                  </SettingGroup>
+                  <SettingGroup label="Composer">
+                    <MarkdownComposerSettings
+                      vimEnabled={device.composerVimMode}
+                      onChangeVim={composerVimMode => controls.setDeviceControls({ composerVimMode })}
+                    />
+                    <ComposerEnterKeySettings
+                      preference={device.composerEnterKey}
+                      phonePreference={device.composerPhoneEnterKey}
+                      onChange={patch => controls.setDeviceControls(patch)}
+                    />
+                    <ComposerSuggestionsSettings
+                      preferences={device}
+                      onChange={patch => controls.setDeviceControls(patch)}
+                    />
+                  </SettingGroup>
+                  <SettingGroup label="Dictation">
+                    <DictationSettings
+                      {...dictation}
+                      {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })}
+                    />
+                  </SettingGroup>
+                  <SettingGroup label="Notifications" settingId="notifications">
+                    {notifications ?? (
+                      <SettingRow
+                        name="Notifications"
+                        hint="Unavailable until this page is composed with the paired daemon’s push-subscription host"
+                      />
+                    )}
+                  </SettingGroup>
+                </>
+              ) : null}
 
               {section.id === 'machines' ? (
                 createMachineClient === undefined ? (

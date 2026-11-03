@@ -42,6 +42,7 @@ const focus = (process.env.ENGINE_LIST_FOCUS ?? process.env.ENGINE_LIST_TRY ?? '
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { DictationSettings } from '../../src/features/settings/dictation-settings.tsx';
+import { SettingGroup } from '../../src/features/settings/setting-row.tsx';
 import { ON_DEVICE_MODELS, modelDownloadBytes } from '../../src/lib/stt/model-catalog.ts';
 import type { ModelStoreStatus } from '../../src/lib/stt/model-store.ts';
 import { OnDeviceVoice } from '../../src/lib/stt/on-device-voice.ts';
@@ -95,20 +96,22 @@ const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <div style={{ margin: '0 auto', maxWidth: 760, padding: 16 }}>
-    <DictationSettings
-      settings={{ ...DEFAULT_STT_SETTINGS, engine: ON_DEVICE_MODELS.find(model => model.id === FOCUS)?.id ?? ON_DEVICE_MODELS[0]?.id ?? 'browser' }}
-      update={() => undefined}
-      persisted
-      recognitionSupport={AVAILABLE_RECOGNITION}
-      recognitionProvider={fakeRecognitionProvider()}
-      voices={voices}
-      trialClock={{
-        now: () => performance.now(),
-        setTimeout: (callback, ms) => setTimeout(callback, ms),
-        clearTimeout: handle => clearTimeout(handle as number),
-        recordMs: 200,
-      }}
-    />
+    <SettingGroup label="Dictation">
+      <DictationSettings
+        settings={{ ...DEFAULT_STT_SETTINGS, engine: ON_DEVICE_MODELS.find(model => model.id === FOCUS)?.id ?? ON_DEVICE_MODELS[0]?.id ?? 'browser' }}
+        update={() => undefined}
+        persisted
+        recognitionSupport={AVAILABLE_RECOGNITION}
+        recognitionProvider={fakeRecognitionProvider()}
+        voices={voices}
+        trialClock={{
+          now: () => performance.now(),
+          setTimeout: (callback, ms) => setTimeout(callback, ms),
+          clearTimeout: handle => clearTimeout(handle as number),
+          recordMs: 200,
+        }}
+      />
+    </SettingGroup>
   </div>,
 );
 `;
@@ -176,6 +179,7 @@ try {
         });
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
+        await page.locator('[data-setting-row="Voice engine"] button[aria-expanded]').first().click();
         const section = page.locator('section[aria-label="Voice engine"]');
         await section.waitFor({ state: 'visible' });
         const installed = page.locator('[data-model-phase="installed"]').first();

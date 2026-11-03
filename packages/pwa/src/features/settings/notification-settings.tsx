@@ -14,6 +14,8 @@
 import type { PushDeviceView } from '@ferretry/protocol';
 
 import { cn } from '../../lib/class-names.ts';
+import { Badge } from '../../shell/primitives.tsx';
+import { SettingRow } from './setting-row.tsx';
 
 export type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
 
@@ -84,7 +86,7 @@ export interface NotificationSettingsViewProps {
 }
 
 /**
- * Render-only browser-level view: what this browser may do, and the selected machine's registered devices.
+ * Render-only browser-level view, as rows for a group card: what this browser may do, and the selected machine's registered devices.
  * The host binds its callbacks to one runtime DaemonConnection, preventing a device id from daemon A being
  * revoked on B. Turning a machine on is `notification-machines.tsx`.
  */
@@ -96,9 +98,11 @@ export function NotificationSettingsView({
 }: NotificationSettingsViewProps) {
   if (permission === 'unsupported') {
     return (
-      <p role="status" className="m-0 text-ui leading-base text-warn">
-        {NOTIFICATION_UNSUPPORTED_NOTE}
-      </p>
+      <li className="px-panel py-3">
+        <p role="status" className="m-0 text-ui leading-base text-warn">
+          {NOTIFICATION_UNSUPPORTED_NOTE}
+        </p>
+      </li>
     );
   }
 
@@ -111,41 +115,46 @@ export function NotificationSettingsView({
         : 'Not asked yet — turning a machine on asks for it.';
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Notification controls">
-      <p className="m-0 text-ui leading-base text-muted" data-notification-permission={permission}>
-        Permission: {status}
-      </p>
+    <>
+      <SettingRow
+        name="Permission"
+        hint={<span data-notification-permission={permission}>Permission: {status}</span>}
+        explanation={
+          <>
+            <p className="m-0">{NOTIFICATION_SCOPE_NOTE}</p>
+            <p className="m-0 mt-2">{NOTIFICATION_IOS_NOTE}</p>
+          </>
+        }
+        control={() => (
+          <Badge tone={permission === 'granted' ? 'ok' : denied ? 'warn' : 'pend'}>
+            {permission === 'granted' ? 'Allowed' : denied ? 'Blocked' : 'Not asked'}
+          </Badge>
+        )}
+      />
       {denied && (
-        <p role="status" className="m-0 text-ui leading-base text-warn">
-          {NOTIFICATION_DENIED_NOTE}
-        </p>
+        <li className="px-panel py-3">
+          <p role="status" className="m-0 text-ui leading-base text-warn">
+            {NOTIFICATION_DENIED_NOTE}
+          </p>
+        </li>
       )}
-      <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_SCOPE_NOTE}</p>
-      <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_IOS_NOTE}</p>
-      {devices.length > 0 && (
-        <section className="flex flex-col gap-1" aria-label="Push devices">
-          <span className="text-meta font-semibold text-muted">Registered devices</span>
-          {devices.map(device => (
-            <div
-              key={device.id}
-              className="flex min-h-[44px] items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-1"
+      {devices.map(device => (
+        <SettingRow
+          key={device.id}
+          name={device.deviceName}
+          hint={device.id === currentDeviceId ? 'Registered device · this device' : 'Registered device'}
+          control={() => (
+            <button
+              type="button"
+              className="min-h-[44px] shrink-0 rounded-control px-2 text-ui font-semibold text-warn hover:bg-warn-bg"
+              onClick={() => onRevokeDevice(device.id)}
+              aria-label={`Revoke push notifications for ${device.deviceName}`}
             >
-              <span className="min-w-0 text-ui text-fg">
-                {device.deviceName}
-                {device.id === currentDeviceId ? <span className="text-faint"> · this device</span> : null}
-              </span>
-              <button
-                type="button"
-                className="min-h-[44px] shrink-0 rounded-control px-2 text-ui font-semibold text-warn hover:bg-warn-bg"
-                onClick={() => onRevokeDevice(device.id)}
-                aria-label={`Revoke push notifications for ${device.deviceName}`}
-              >
-                Revoke
-              </button>
-            </div>
-          ))}
-        </section>
-      )}
-    </section>
+              Revoke
+            </button>
+          )}
+        />
+      ))}
+    </>
   );
 }

@@ -177,6 +177,7 @@ import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
+import { SettingGroup } from '../src/features/settings/setting-row.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
@@ -751,13 +752,15 @@ function HarnessLiveWordsSetting() {
   return (
     <Card aria-label="Dictation live words setting" className="min-w-0" id="harness-dictation-live-words">
       <PanelBody>
-        <DictationSettings
-          settings={settings}
-          update={patch => setSettings(current => ({ ...current, ...patch }))}
-          persisted
-          recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
-          voice={null}
-        />
+        <SettingGroup label="Dictation">
+          <DictationSettings
+            settings={settings}
+            update={patch => setSettings(current => ({ ...current, ...patch }))}
+            persisted
+            recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
+            voice={null}
+          />
+        </SettingGroup>
       </PanelBody>
     </Card>
   );
@@ -6454,7 +6457,9 @@ function Shell() {
             <Label>Dictation</Label>
           </PanelHeader>
           <PanelBody>
-            <DictationShortcutPicker binding={DEFAULT_DICTATION_SHORTCUT} onChange={() => {}} />
+            <SettingGroup label="Dictation">
+              <DictationShortcutPicker binding={DEFAULT_DICTATION_SHORTCUT} onChange={() => {}} />
+            </SettingGroup>
           </PanelBody>
         </Card>
       ),
@@ -6669,12 +6674,14 @@ function Shell() {
       render: () => (
         <Card aria-label="Dictation settings" className="min-w-0" id="harness-dictation-settings">
           <PanelBody>
-            <DictationSettings
-              settings={sttSettings}
-              update={patch => setSttSettings(current => ({ ...current, ...patch }))}
-              persisted
-              recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
-            />
+            <SettingGroup label="Dictation">
+              <DictationSettings
+                settings={sttSettings}
+                update={patch => setSttSettings(current => ({ ...current, ...patch }))}
+                persisted
+                recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
+              />
+            </SettingGroup>
           </PanelBody>
         </Card>
       ),
@@ -6687,7 +6694,9 @@ function Shell() {
             <Label>Notifications</Label>
           </PanelHeader>
           <PanelBody>
-            <NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />
+            <SettingGroup label="Notifications">
+              <NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />
+            </SettingGroup>
           </PanelBody>
         </Card>
       ),

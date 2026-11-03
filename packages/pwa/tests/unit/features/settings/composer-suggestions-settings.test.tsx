@@ -7,6 +7,7 @@ import {
 } from '../../../../src/features/settings/composer-suggestions-settings.tsx';
 import { DEFAULT_DEVICE_CONTROLS, type DeviceControls } from '../../../../src/lib/controls.ts';
 import { render, run } from '../../../support/react.ts';
+import { openAllInfo, segmentedRadios } from '../../../support/setting-rows.ts';
 
 type Preferences = Pick<DeviceControls, 'suggestionKeys' | 'skillSuggestions'>;
 
@@ -22,7 +23,7 @@ describe('ComposerSuggestionsSettings', () => {
     const view = render(
       <ComposerSuggestionsSettings preferences={preferences()} onChange={patch => patches.push(patch)} />,
     );
-    const radios = view.root.findAll(node => node.type === 'input' && node.props.type === 'radio');
+    const radios = segmentedRadios(view, 'Open suggestions with');
     expect(radios.map(radio => [radio.props.value, radio.props.checked])).toEqual([
       ['ladder', true],
       ['symbols', false],
@@ -61,6 +62,7 @@ describe('ComposerSuggestionsSettings', () => {
 
   test('names every key it governs and says out loud that authored references still work', () => {
     const view = render(<ComposerSuggestionsSettings preferences={preferences()} onChange={() => {}} />);
+    openAllInfo(view);
     const tree = JSON.stringify(view.toJSON());
 
     expect(tree).toContain('Open suggestions with');

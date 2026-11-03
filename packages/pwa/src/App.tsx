@@ -2110,7 +2110,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         />
       }
       notifications={
-        <div className="flex flex-col gap-4">
+        <>
           <NotificationsOffBanner
             rows={machineNotifications.rows}
             canEnrol={machineNotifications.canEnrol}
@@ -2138,7 +2138,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
             onCategoryChange={onNotificationCategoryChange}
             onQuietHoursChange={onNotificationQuietHoursChange}
           />
-        </div>
+        </>
       }
       onNavigate={navigate}
     />

@@ -53,26 +53,46 @@ const type = async (element: HTMLInputElement | HTMLTextAreaElement, text: strin
   });
 };
 
+/** A switch row: the switch is named by its row's name, and its state is `aria-checked`. */
 const switchNamed = (container: HTMLElement, label: string): HTMLButtonElement =>
   must(
-    [...container.querySelectorAll<HTMLButtonElement>('button[role="switch"]')].find(button =>
-      (button.textContent ?? '').includes(label),
-    ) ?? null,
+    [...container.querySelectorAll<HTMLButtonElement>('button[role="switch"]')].find(button => {
+      const labelId = button.getAttribute('aria-labelledby');
+      return labelId !== null && container.querySelector(`[id="${labelId}"]`)?.textContent === label;
+    }) ?? null,
     `the ${label} switch`,
   );
 
-const engineSection = (container: HTMLElement): HTMLElement =>
-  must(container.querySelector('section[aria-label="Voice engine"]'), 'the voice engine section');
+const row = (container: HTMLElement, name: string): HTMLElement =>
+  must(container.querySelector<HTMLElement>(`li[data-setting-row="${name}"]`), `the ${name} row`);
+
+/** Opens every (i) on the page, so the long text behind them is in the DOM. */
+const openAllInfo = async (container: HTMLElement): Promise<void> => {
+  await interact(() => {
+    for (const info of container.querySelectorAll<HTMLButtonElement>('[data-setting-info][aria-expanded="false"]'))
+      info.click();
+  });
+};
+
+/** The voice engine is one row; the comparison mounts only once it is opened. */
+const openEngineSection = async (container: HTMLElement): Promise<HTMLElement> => {
+  const open = must(
+    container.querySelector<HTMLButtonElement>('li[data-setting-row="Voice engine"] > button[aria-expanded]'),
+    'the voice engine row',
+  );
+  if (open.getAttribute('aria-expanded') === 'false') await interact(() => open.click());
+  return must(container.querySelector('section[aria-label="Voice engine"]'), 'the voice engine section');
+};
 
 const radio = (container: HTMLElement, value: string): HTMLInputElement =>
   must(container.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`), `the ${value} radio`);
 
 describe('<DictationSettings> after dictating', () => {
-  const afterSection = (container: HTMLElement): HTMLElement =>
-    must(container.querySelector('section[aria-label="After dictating"]'), 'the after-dictating section');
+  const afterSection = (container: HTMLElement): HTMLElement => row(container, 'After dictating');
 
   it('offers the two choices, labelled for this device, with Review first selected by default', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
+    await openAllInfo(view.container);
     const section = afterSection(view.container);
     expect(section.textContent).toContain('This device');
     expect(section.textContent).toContain('Review first');
@@ -105,7 +125,7 @@ describe('<DictationSettings> after dictating', () => {
     const view = await mount(
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enabled: false } })} />,
     );
-    expect(view.container.querySelector('section[aria-label="After dictating"]')).toBeNull();
+    expect(view.container.querySelector('li[data-setting-row="After dictating"]')).toBeNull();
     await view.unmount();
   });
 });
@@ -113,7 +133,7 @@ describe('<DictationSettings> after dictating', () => {
 describe('<DictationSettings>', () => {
   it('offers every catalog model and browser voice side by side, the browser one labelled with where its audio goes', async () => {
     const view = await mount(<DictationSettings {...settingsProps({ deviceClass: 'computer' })} />);
-    const section = engineSection(view.container);
+    const section = await openEngineSection(view.container);
     for (const model of ON_DEVICE_MODELS) {
       expect(section.textContent).toContain(model.label);
       expect(radio(view.container, model.id).checked).toBe(false);
@@ -128,7 +148,7 @@ describe('<DictationSettings>', () => {
 
   it('fails the browser engine closed with its own reason instead of an empty option', async () => {
     const view = await mount(<DictationSettings {...settingsProps({ recognitionSupport: UNSUPPORTED_RECOGNITION })} />);
-    expect(engineSection(view.container).textContent).toContain('does not support dictation for web apps');
+    expect((await openEngineSection(view.container)).textContent).toContain('does not support dictation for web apps');
     await view.unmount();
   });
 
@@ -137,20 +157,25 @@ describe('<DictationSettings>', () => {
     // than throw on a constructor that is not there.
     const view = await mount(<DictationSettings {...{ ...settingsProps(), recognitionSupport: undefined }} />);
     // happy-dom is not a secure context either, and that is the first refusal detection names.
-    expect(engineSection(view.container).textContent).toContain('Dictation needs a secure HTTPS page in this browser.');
+    expect((await openEngineSection(view.container)).textContent).toContain(
+      'Dictation needs a secure HTTPS page in this browser.',
+    );
     await view.unmount();
   });
 
   it('reads Parakeet from the app store, and says so when there is none', async () => {
     // Outside a store (this suite) the on-device engine is honestly unavailable, never a crash.
     const view = await mount(<DictationSettings {...settingsProps()} />);
-    expect(engineSection(view.container).textContent).toContain('Parakeet is not available in this copy of Ferretry.');
+    expect((await openEngineSection(view.container)).textContent).toContain(
+      'Parakeet is not available in this copy of Ferretry.',
+    );
     await view.unmount();
   });
 
   it('records the chosen engine through the one update port', async () => {
     const patches: SttSettingsPatch[] = [];
     const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    await openEngineSection(view.container);
     await interact(() => radio(view.container, 'parakeet').click());
     await interact(() => radio(view.container, 'browser').click());
     expect(patches).toEqual([{ engine: 'parakeet' }, { engine: 'browser' }]);
@@ -179,6 +204,7 @@ describe('<DictationSettings>', () => {
    */
   it('renders every disclosure it declares, with none left as an unused constant', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
+    await openAllInfo(view.container);
     for (const copy of [
       DICTATION_SAFETY_NOTE,
       DICTATION_DISABLED_EXPLANATION,
@@ -195,6 +221,7 @@ describe('<DictationSettings>', () => {
     await view.render(
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' } })} />,
     );
+    await openAllInfo(view.container);
     expect(view.container.textContent).toContain(GROQ_ENHANCEMENT_EXPLANATION);
     await view.unmount();
   });
@@ -207,6 +234,7 @@ describe('<DictationSettings>', () => {
    */
   it('discloses the history read instead of promising the local provider sends nothing', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
+    await openAllInfo(view.container);
     const text = view.container.textContent ?? '';
 
     expect(text).not.toContain('nothing sent anywhere');
@@ -223,6 +251,7 @@ describe('<DictationSettings>', () => {
     await view.render(
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' } })} />,
     );
+    await openAllInfo(view.container);
     expect(view.container.textContent).not.toContain(LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE);
     expect(view.container.textContent).toContain('sends Groq the raw transcript');
     await view.unmount();
@@ -233,7 +262,7 @@ describe('<DictationSettings>', () => {
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enabled: false } })} />,
     );
     expect(view.container.textContent).toContain('Dictation is disabled.');
-    expect(view.container.querySelector('section[aria-label="Voice engine"]')).toBeNull();
+    expect(view.container.querySelector('li[data-setting-row="Voice engine"]')).toBeNull();
     expect(view.container.querySelector('#stt-dictionary')).toBeNull();
     await view.unmount();
   });
@@ -254,7 +283,7 @@ describe('<DictationSettings>', () => {
         {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'browser' }, voice: null })}
       />,
     );
-    expect(view.container.querySelector('section[aria-label="Live words (experimental)"]')).toBeNull();
+    expect(view.container.querySelector('li[data-setting-row="Live words (experimental)"]')).toBeNull();
     await view.render(
       <DictationSettings
         {...settingsProps({
@@ -266,7 +295,7 @@ describe('<DictationSettings>', () => {
     );
     const live = switchNamed(view.container, 'Live words (experimental)');
     expect(live.getAttribute('aria-checked')).toBe('false');
-    expect(live.textContent).toContain('Off');
+    await openAllInfo(view.container);
     expect(view.container.textContent).toContain(LIVE_WORDS_EXPLANATION);
     expect(LIVE_WORDS_EXPLANATION).toContain('Off by default');
     await interact(() => live.click());
@@ -280,7 +309,6 @@ describe('<DictationSettings>', () => {
       />,
     );
     expect(switchNamed(view.container, 'Live words (experimental)').getAttribute('aria-checked')).toBe('true');
-    expect(switchNamed(view.container, 'Live words (experimental)').textContent).toContain('On');
     await view.unmount();
   });
 
@@ -288,7 +316,7 @@ describe('<DictationSettings>', () => {
     const view = await mount(
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enhancement: false } })} />,
     );
-    expect(switchNamed(view.container, 'Fix names and jargon').textContent).toContain('Off');
+    expect(switchNamed(view.container, 'Fix names and jargon').getAttribute('aria-checked')).toBe('false');
     expect(view.container.querySelector('#stt-enhancement-provider')).toBeNull();
     // The dictionary is still editable: it is what an enhancer would use later.
     expect(view.container.querySelector('#stt-dictionary')).not.toBeNull();
@@ -298,6 +326,7 @@ describe('<DictationSettings>', () => {
   it('swaps the correction explanations when the provider changes', async () => {
     const patches: SttSettingsPatch[] = [];
     const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    await openAllInfo(view.container);
     expect(view.container.textContent).toContain('WORDS ONLY.');
     expect(view.container.querySelector('#stt-enhancement-model')).toBeNull();
 
@@ -311,6 +340,7 @@ describe('<DictationSettings>', () => {
     const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' };
     await view.render(<DictationSettings {...settingsProps({ settings: groq })} />);
     expect(view.container.querySelector('#stt-enhancement-model')).not.toBeNull();
+    await openAllInfo(view.container);
     expect(view.container.textContent).toContain('The daemon holds the Groq API key');
     await view.unmount();
   });
@@ -359,6 +389,7 @@ describe('<DictationSettings>', () => {
       enhancementModel: 'gpt-oss-120b',
     };
     const view = await mount(<DictationSettings {...settingsProps({ settings: cerebras })} />);
+    await openAllInfo(view.container);
     const text = view.container.textContent ?? '';
     expect(text).toContain('Cerebras model');
     expect(text).toContain(CEREBRAS_ENHANCEMENT_EXPLANATION);
@@ -444,7 +475,7 @@ describe('<DictationSettings>', () => {
 
   it('saves the reader-s chosen push-to-talk chord', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
-    expect(view.container.textContent).toContain('Push to talk');
+    expect(row(view.container, 'Push to talk')).not.toBeNull();
     await view.unmount();
   });
 
@@ -452,5 +483,37 @@ describe('<DictationSettings>', () => {
     const view = await mount(<DictationSettings {...settingsProps({ persisted: false })} />);
     expect(view.container.textContent).toContain('could not be saved');
     await view.unmount();
+  });
+});
+
+describe('<DictationSettings> voice engine row', () => {
+  it('shows the chosen engine as ONE row with its place, and keeps the comparison off the page until it is opened', async () => {
+    const view = await mount(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet' } })} />,
+    );
+    const engineRow = row(view.container, 'Voice engine');
+    expect(engineRow.textContent).toContain('Parakeet TDT 0.6B v3 · on this device');
+    expect(engineRow.textContent).toContain(PARAKEET_ACTIVE_NOTE);
+    // Closed: no engine card, benchmark or radio is mounted.
+    expect(view.container.querySelector('section[aria-label="Voice engine"]')).toBeNull();
+    expect(view.container.querySelectorAll('input[type="radio"][value="parakeet"]')).toHaveLength(0);
+
+    const section = await openEngineSection(view.container);
+    expect(radio(view.container, 'parakeet').checked).toBe(true);
+    for (const model of ON_DEVICE_MODELS) expect(section.textContent).toContain(model.label);
+    await view.unmount();
+  });
+
+  it('names the browser engine by where its audio goes, and says Not chosen yet before a choice', async () => {
+    const browser = await mount(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'browser' } })} />,
+    );
+    expect(row(browser.container, 'Voice engine').textContent).toContain(BROWSER_ENGINE_LABEL);
+    expect(row(browser.container, 'Voice engine').textContent).toContain(BROWSER_ACTIVE_NOTE);
+    await browser.unmount();
+
+    const none = await mount(<DictationSettings {...settingsProps()} />);
+    expect(row(none.container, 'Voice engine').textContent).toContain('Not chosen yet');
+    await none.unmount();
   });
 });

@@ -34,6 +34,7 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../src/components/composer.tsx';
 import { DictationSettings } from '../../src/features/settings/dictation-settings.tsx';
+import { SettingGroup } from '../../src/features/settings/setting-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore } from '../../src/lib/drafts.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
@@ -50,13 +51,15 @@ function SettingsView() {
   const [settings, setSettings] = useState<SttSettings>({ ...DEFAULT_STT_SETTINGS, engine: 'browser', afterDictation: choice });
   return (
     <div className="flex flex-col bg-bg p-4" style={{ maxWidth: 720, margin: '0 auto' }}>
-      <DictationSettings
-        settings={settings}
-        update={patch => setSettings(current => ({ ...current, ...patch }))}
-        persisted
-        recognitionSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-        voice={null}
-      />
+      <SettingGroup label="Dictation">
+        <DictationSettings
+          settings={settings}
+          update={patch => setSettings(current => ({ ...current, ...patch }))}
+          persisted
+          recognitionSupport={{ available: true, availability: 'available', implementation: 'standard' }}
+          voice={null}
+        />
+      </SettingGroup>
     </div>
   );
 }

@@ -15,10 +15,12 @@ import {
 import { DictationShortcutPicker } from '../../../../src/features/settings/dictation-shortcut-picker.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
+import { openAllInfo } from '../../../support/setting-rows.ts';
 
 describe('DictationShortcutPicker', () => {
   it('renders the original hybrid gesture, phone fallback, 44px target, and bare-Alt warning', () => {
     const page = render(<DictationShortcutPicker binding={DEFAULT_DICTATION_SHORTCUT} onChange={() => undefined} />);
+    openAllInfo(page);
     const tree = JSON.stringify(page.toJSON());
 
     expect(tree).toContain('Alt (either side)');
