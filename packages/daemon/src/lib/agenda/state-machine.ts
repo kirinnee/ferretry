@@ -810,7 +810,7 @@ export function parseAgendaLedger(
     ...(archivePending.length === 0 ? {} : { archivePending }),
     ...(unreadable.length === 0 ? {} : { unreadable }),
   });
-  return liftGateItems(toChannel(parked, legacy, archived, recorded));
+  return liftedOnRead(toChannel(parked, legacy, archived, recorded));
 }
 
 /**
@@ -1278,7 +1278,17 @@ function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMuta
     return failure('invalid', `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`);
   }
   // Transitions see the full thread; only the fitted, validated item can leave this boundary.
-  const expanded: AgendaLedger = {
+  const transitioned = transition(withWholeThreads(ledger), command);
+  if (!transitioned.ok) return transitioned;
+  if (!transitioned.changed) return unchanged(ledger);
+  const mutation = fitted(ledger, transitioned);
+  const problem = unreadableWrite(ledger, mutation.ledger);
+  return problem === undefined ? mutation : failure('invalid', problem);
+}
+
+/** The ledger with every item holding its whole thread from the conversations map, as a transition reads it. */
+function withWholeThreads(ledger: AgendaLedger): AgendaLedger {
+  return {
     ...ledger,
     entries: ledger.entries.map(entry => {
       const conversation = ledger.conversations?.[entry.item.id];
@@ -1287,12 +1297,25 @@ function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMuta
         : ({ ...entry, item: { ...entry.item, conversation: [...conversation] } } as AgendaEntry);
     }),
   };
-  const transitioned = transition(expanded, command);
-  if (!transitioned.ok) return transitioned;
-  if (!transitioned.changed) return unchanged(ledger);
-  const mutation = fitted(ledger, transitioned);
-  const problem = unreadableWrite(ledger, mutation.ledger);
-  return problem === undefined ? mutation : failure('invalid', problem);
+}
+
+/**
+ * {@link liftGateItems} as a read runs it: on the whole threads, as a transition, and what it changed stored as every
+ * write is ({@link fitted}: the thread in the conversations map, a bounded tail on the item), so the words it says
+ * when it closes a gate item read back. The same ledger when there is nothing to lift.
+ */
+function liftedOnRead(channel: AgendaLedger): AgendaLedger {
+  const expanded = withWholeThreads(channel);
+  const lifted = liftGateItems(expanded);
+  if (lifted === expanded) return channel;
+  // An entry the lift left alone is the stored one again, so only what it changed is fitted.
+  const stored = new Map(expanded.entries.map((entry, index) => [entry, channel.entries[index] ?? entry]));
+  const mutation = success(
+    { ...lifted, entries: lifted.entries.map(entry => stored.get(entry) ?? entry) },
+    true,
+    'refreshed',
+  );
+  return mutation.ok ? fitted(channel, mutation).ledger : channel;
 }
 
 /** Old apps post the clipped Retry view. Match it exactly and replay the stored words inside the ledger transition. */

@@ -134,8 +134,8 @@ const backTo = (item: AgendaItem, turn: AgendaCardAskWoke): AgendaItem => ({
 
 /**
  * The digest of everything on the thread but what the card-ask writer owns (the asks, their mirror and the seal
- * itself) and the Warden's nudge clock (a nudge writes it on a rest nobody has touched): its words, turn, park,
- * stage and edits. `undefined` when it has no canonical spelling.
+ * itself) and the Warden's nudge clock (a nudge writes it on a rest nobody has touched): its words (the conversation by
+ * its count of them), turn, park, stage and edits. `undefined` when it has no canonical spelling.
  */
 const fingerprint = (item: AgendaItem): string | undefined => {
   const {
@@ -144,10 +144,16 @@ const fingerprint = (item: AgendaItem): string | undefined => {
     gateAttached: _shown,
     gateAttachedChangedAt: _stamp,
     resting,
+    conversation,
+    conversationCount,
+    conversationLastAt: _lastAt,
     ...rest
   } = item;
   const { nudgeSend: _send, nudgedAt: _nudgedAt, nudges: _nudges, ...stable } = resting ?? {};
-  const spelled = canonicalJson(resting === undefined ? rest : { ...rest, resting: stable });
+  // The conversation is read by how many words it holds (docs/agenda.md § The conversation): a write sees the whole
+  // thread, the stored item a bounded tail and its count, and words are only ever added.
+  const said = Math.max(conversationCount ?? 0, conversation?.length ?? 0);
+  const spelled = canonicalJson({ ...(resting === undefined ? rest : { ...rest, resting: stable }), said });
   return spelled.ok ? createHash('sha256').update(spelled.text, 'utf8').digest('hex').slice(0, 32) : undefined;
 };
 
