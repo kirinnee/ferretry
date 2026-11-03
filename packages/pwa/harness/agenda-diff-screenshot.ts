@@ -147,6 +147,8 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     ...(form === 'phone' ? PHONE : DESKTOP),
     ...LOCALE,
     colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
+    // The header title is a marquee that scrolls; reduced motion draws it cut at a word with "…", the same frame each time.
+    reducedMotion: 'reduce',
   });
   const open = async (id: string, extra = ''): Promise<Page> => {
     const page = await browserContext.newPage();
@@ -199,6 +201,22 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     for (const key of ['whereWeAre', 'terms', 'ask'])
       check(keys.includes(key), `${label('diff')}: "${key}" is not shown as changed (${keys.join(', ')})`);
     check(marks.folded === false, `${label('diff')}: the unchanged sections are not folded`);
+    // A rewrite is one block out and one block in; a one-word edit stays a word diff inside its line.
+    const rewrite = await page.evaluate(() => ({
+      del: document.querySelectorAll('[data-agenda-diff-section="whereWeAre"] del').length,
+      ins: document.querySelectorAll('[data-agenda-diff-section="whereWeAre"] ins').length,
+    }));
+    check(
+      rewrite.del === 1 && rewrite.ins === 1,
+      `${label('diff')}: "Where we are now" is ${rewrite.del} removed and ${rewrite.ins} added runs, not one block out and one in`,
+    );
+    const small = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-agenda-diff-section="terms"] ins')].map(node => node.textContent?.trim()),
+    );
+    check(
+      small.includes('open'),
+      `${label('diff')}: the one-word edit to a term is not a word diff (${small.join(' | ')})`,
+    );
     await scrollToSelector(page, '[data-agenda-diff]');
     await shot(page, 'changes', form, theme);
 
@@ -256,7 +274,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await page.locator('[data-agenda-merge-confirm]').waitFor({ state: 'visible' });
     const words = (await page.locator('[data-agenda-merge-confirm]').textContent()) ?? '';
     check(
-      /closes as merged into/.test(words) && /Both conversations and all cards are kept/.test(words),
+      /closes as merged into/.test(words) &&
+        /Both conversations and all cards are kept/.test(words) &&
+        words.includes('"Does push repeat for a woken item?"') &&
+        words.includes('"Where do snoozed items go?" (this one)'),
       `${label('merge')}: the confirm does not say what closes and what is kept ("${words}")`,
     );
     await scrollToSelector(page, '[data-agenda-lineage]');
@@ -289,7 +310,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await from.close();
     const into = await open('A146');
     const text = (await into.locator('[data-agenda-lineage-line="split-into"]').textContent()) ?? '';
-    check(/A144/.test(text) && /A145/.test(text), `${label('split')}: A146 does not list both children ("${text}")`);
+    check(
+      /A144 \(Split off: the snooze copy\)/.test(text) && /A145 \(Split off: the badge count\)/.test(text),
+      `${label('split')}: A146 does not list both children with their titles ("${text}")`,
+    );
     await shot(into, 'split-into', form, theme);
     await into.close();
   }

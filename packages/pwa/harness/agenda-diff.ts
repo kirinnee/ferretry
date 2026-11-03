@@ -1,6 +1,7 @@
 /**
  * THE DIFF, MERGE AND SPLIT FIXTURES (`agenda-diff-page.tsx`, driven by `agenda-diff-screenshot.ts`): A140 is an item
- * kept as three versions (where we are now updated, a term added, the ask replaced) with a stored conversation that
+ * kept as three versions (where we are now REWRITTEN, so it draws as a block out and a block in; one word added to a term, so it draws as a word
+ * diff; a term added; the ask replaced) with a stored conversation that
  * holds words copied from the owner's chat; A141 and A142 are two open conversations a merge can join; A143 is a closed
  * item that was merged into A141; A144 and A145 are a split pair. The "daemon" is `agenda-diff-page.tsx`'s fetch stub.
  */
@@ -25,6 +26,9 @@ const item = (id: string, minutes: number, patch: Partial<AgendaItem>): AgendaIt
     ...patch,
   }) as AgendaItem;
 
+const BADGE_V1 = 'The number on the Inbox tab: how many items wait on you.';
+const BADGE_V3 = 'The number on the Inbox tab: how many open items wait on you.';
+
 const BASE = {
   title: 'Should the badge count snoozed items?',
   subject: 'Should the badge count snoozed items?',
@@ -33,7 +37,7 @@ const BASE = {
   premise: '- The Inbox badge counts what needs you\n- Today it counts resting items too',
   context: '- Owners asked why the count never reaches zero\n- The fix is one selector, shared by every count',
   terms: [
-    { term: 'badge', meaning: 'The number on the Inbox tab: how many items wait on you.' },
+    { term: 'badge', meaning: BADGE_V1 },
     { term: 'Resting', meaning: 'An item waiting on its ferret, not on you.' },
   ],
   decided: '- Resting items never count',
@@ -68,7 +72,8 @@ export const DIFF_VERSIONS: readonly AgendaItem[] = [
   item('A140', 180, {
     ...BASE,
     terms: [
-      ...BASE.terms,
+      { term: 'badge', meaning: BADGE_V3 },
+      ...BASE.terms.slice(1),
       { term: 'needsYouQueue', meaning: 'The one function that lists what needs you, blockers first.' },
     ],
     whereWeAre:
@@ -118,7 +123,8 @@ export const DIFF_CONVERSATION: readonly AgendaConversationEntry[] = [
 
 export const A140 = {
   ...DIFF_VERSIONS[2],
-  conversation: DIFF_CONVERSATION,
+  // The item carries only its newest entries; the earlier two are read through the conversation route.
+  conversation: DIFF_CONVERSATION.slice(2),
   conversationCount: DIFF_CONVERSATION.length,
   revisions: [
     { at: at(95), by: 'agent', changed: ['whereWeAre'], previous: { whereWeAre: DIFF_VERSIONS[0]?.whereWeAre ?? '' } },

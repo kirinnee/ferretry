@@ -24,8 +24,13 @@ import {
   fetchAgendaVersions,
   markAgendaVersionSeen,
 } from '../../lib/agenda-client.ts';
-import { hasStoredConversation, tailIsWhole } from '../../lib/agenda-conversation.ts';
-import { mergeCandidates, mergeOffered } from '../../lib/agenda-merge.ts';
+import {
+  type ConversationGap,
+  hasStoredConversation,
+  storedCount,
+  tailIsWhole,
+} from '../../lib/agenda-conversation.ts';
+import { type LineageTitles, lineageTitles, mergeCandidates, mergeOffered } from '../../lib/agenda-merge.ts';
 import { useAgendaConversationOffered } from '../../lib/agenda-wire-react.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -46,8 +51,16 @@ export interface AgendaMergeView {
 }
 
 export interface ItemLifecycle {
-  /** The item's whole stored thread; `null` until read, or when the item keeps none (the rebuilt thread is drawn). */
+  /**
+   * The stored entries in hand, oldest first: the whole thread, or (while the earlier part is read, or when it cannot be)
+   * the entries read so far and the item's own recent tail, with `gap` saying where the rest belongs. `null` when the
+   * item keeps none (the rebuilt thread is drawn).
+   */
   readonly conversation: readonly AgendaConversationEntry[] | null;
+  /** Entries of the stored thread not in hand; absent when `conversation` is the whole thread. */
+  readonly conversationGap?: ConversationGap;
+  /** The titles of the agendas this item was merged into or split from, where the board holds them. */
+  readonly lineageTitles?: LineageTitles;
   /** The diff control's data; absent where the machine keeps no versions or the item has fewer than two. */
   readonly versions?: AgendaVersionsView;
   /** The merge control's data; absent where a merge is not offered. */
@@ -66,7 +79,9 @@ export interface UseItemLifecycleInput {
   readonly board: readonly AgendaItem[];
 }
 
-const NONE: ItemLifecycle = { conversation: null };
+const NONE = { conversation: null } as const;
+const NO_TITLES: LineageTitles = {};
+const NO_ENTRIES: readonly AgendaConversationEntry[] = [];
 
 export const useItemLifecycle = ({ connection, scope, client, item, board }: UseItemLifecycleInput): ItemLifecycle => {
   const machineKeeps = useAgendaConversationOffered(connection?.daemonId) === true;
@@ -137,36 +152,50 @@ export const useItemLifecycle = ({ connection, scope, client, item, board }: Use
     return { list, load };
   }, [mine?.list, baseline, load]);
 
-  // THE STORED THREAD: the item's own tail when it is whole, else every entry read through the conversation route.
+  // THE STORED THREAD: the item's own tail when it is whole. Else the tail is drawn AT ONCE, and the entries before it are
+  // read through the conversation route: only the ones not already in hand, and only those the tail does not hold.
   const stored = item !== undefined && open && hasStoredConversation(item);
   const whole = item !== undefined && tailIsWhole(item);
-  const [thread, setThread] = useState<{
+  const tail = item?.conversation ?? NO_ENTRIES;
+  const count = item === undefined ? 0 : storedCount(item);
+  const earlierCount = Math.max(0, count - tail.length);
+  const earlier = useRef(new Map<string, AgendaConversationEntry[]>());
+  const [reading, setReading] = useState<{
     readonly key: string;
-    readonly entries: readonly AgendaConversationEntry[];
+    readonly count: number;
+    readonly state: 'loading' | 'failed' | 'capped' | 'done';
   } | null>(null);
-  const count = item?.conversationCount ?? item?.conversation?.length ?? 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new entry (the count) is the trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the entries before the tail (their count) are the trigger
   useEffect(() => {
     if (!stored || whole || connection === undefined || id === undefined) return undefined;
+    const have = earlier.current.get(key) ?? [];
+    if (have.length >= earlierCount) {
+      setReading({ key, count: earlierCount, state: 'done' });
+      return undefined;
+    }
     let live = true;
-    fetchAgendaConversation(connection, scope, id)
-      .then(entries => {
-        if (live) setThread({ key, entries });
+    setReading({ key, count: earlierCount, state: 'loading' });
+    fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount })
+      .then(read => {
+        if (!live) return;
+        earlier.current.set(key, [...have, ...read.entries]);
+        setReading({ key, count: earlierCount, state: read.capped ? 'capped' : 'done' });
       })
       .catch(() => {
-        if (live) setThread(null);
+        if (live) setReading({ key, count: earlierCount, state: 'failed' });
       });
     return () => {
       live = false;
     };
-  }, [stored, whole, key, count]);
-  const conversation = !stored
-    ? null
-    : whole
-      ? (item?.conversation ?? [])
-      : thread?.key === key
-        ? thread.entries
-        : null;
+  }, [stored, whole, key, earlierCount]);
+  const inHand = whole ? [] : (earlier.current.get(key) ?? []).slice(0, earlierCount);
+  const missing = earlierCount - inHand.length;
+  const state = reading?.key === key ? reading.state : 'loading';
+  const conversation = !stored ? null : [...inHand, ...tail];
+  const conversationGap: ConversationGap | undefined =
+    !stored || whole || missing <= 0
+      ? undefined
+      : { at: inHand.length, count: missing, state: state === 'done' ? 'failed' : state };
 
   const merge = useMemo<AgendaMergeView | undefined>(() => {
     const merger = client?.merge;
@@ -179,9 +208,13 @@ export const useItemLifecycle = ({ connection, scope, client, item, board }: Use
     };
   }, [item, client, offered, board, connection, scope]);
 
-  if (!open) return NONE;
+  const titles = useMemo(() => (item === undefined ? NO_TITLES : lineageTitles(item, board)), [item, board]);
+  const named = Object.keys(titles).length === 0 ? {} : { lineageTitles: titles };
+  if (!open) return { ...NONE, ...named };
   return {
     conversation,
+    ...named,
+    ...(conversationGap === undefined ? {} : { conversationGap }),
     ...(versions === undefined ? {} : { versions }),
     ...(merge === undefined ? {} : { merge }),
   };

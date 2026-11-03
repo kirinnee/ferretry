@@ -30,16 +30,16 @@
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
-import { sendForm } from '../../lib/agenda-form-send.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
+import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
-import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
@@ -512,8 +512,8 @@ export const useAgenda = ({
         ? []
         : lifecycle.conversation === null
           ? itemHistory(cardItem, entries)
-          : storedHistory(cardItem, lifecycle.conversation),
-    [cardItem, entries, lifecycle.conversation],
+          : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap),
+    [cardItem, entries, lifecycle.conversation, lifecycle.conversationGap],
   );
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
   // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
@@ -568,6 +568,7 @@ export const useAgenda = ({
           key={cardItem.id}
           {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
           {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
           {...(askAt?.id === cardItem.id ? { startAt: 'ask' as const, startTap: askAt.tap } : {})}
           howToTestFor={howToTestFor}
           onAct={action => act(cardItem, action, composerDraft(scope))}

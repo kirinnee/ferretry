@@ -2,12 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/protocol';
 import {
   candidateLine,
+  flipLabel,
   isPlainThread,
   lineageLines,
+  lineageTitles,
   mergeCandidates,
   mergeChoice,
   mergeOffered,
   mergeWords,
+  pickerLead,
 } from '../../src/lib/agenda-merge.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
@@ -61,13 +64,46 @@ describe('what a merge can join', () => {
   });
 
   test('keeps the viewed item unless the other is picked, and says what happens in words', () => {
-    expect(mergeChoice('A5', 'A2', false)).toEqual({ survivor: 'A5', absorbed: 'A2' });
-    expect(mergeChoice('A5', 'A2', true)).toEqual({ survivor: 'A2', absorbed: 'A5' });
-    const words = mergeWords({ survivor: 'A2', absorbed: 'A5' });
-    expect(words.question).toBe('Merge !A5 into !A2?');
-    expect(words.outcome).toContain('!A5 closes as merged into !A2');
+    const viewed = item('A5', { subject: 'Does push repeat?' });
+    const other = item('A2', { subject: 'Where do snoozed items go?' });
+    expect(mergeChoice(viewed, other, false)).toEqual({ survivor: viewed, absorbed: other });
+    expect(mergeChoice(viewed, other, true)).toEqual({ survivor: other, absorbed: viewed });
+
+    const words = mergeWords(mergeChoice(viewed, other, false), 'A5');
+    expect(words.question).toBe('Merge !A2 "Where do snoozed items go?" into !A5 "Does push repeat?" (this one)?');
+    expect(words.outcome).toContain(
+      '!A2 "Where do snoozed items go?" closes as merged into !A5 "Does push repeat?" (this one)',
+    );
     expect(words.kept).toContain('Both conversations and all cards are kept');
-    expect(words.button).toBe('Merge into !A2');
+    expect(words.button).toBe('Merge into !A5 "Does push repeat?" (this one)');
+  });
+
+  test('marks the open agenda "this one" when it is the one that closes, and names the survivor by title', () => {
+    const viewed = item('A5', { subject: 'Does push repeat?' });
+    const other = item('A2', { subject: 'Where do snoozed items go?' });
+    const words = mergeWords(mergeChoice(viewed, other, true), 'A5');
+    expect(words.question).toBe('Merge !A5 "Does push repeat?" (this one) into !A2 "Where do snoozed items go?"?');
+    expect(words.outcome).toContain(
+      '!A5 "Does push repeat?" (this one) closes as merged into !A2 "Where do snoozed items go?"',
+    );
+    expect(words.button).toBe('Merge into !A2 "Where do snoozed items go?"');
+  });
+
+  test('cuts a long title at a word with an ellipsis, so the words stay readable', () => {
+    const long = item('A9', {
+      subject: 'Should a reply to a snoozed agenda wake it up again straight away or wait for the owner',
+    });
+    const words = mergeWords(mergeChoice(item('A5'), long, false), 'A5');
+    expect(words.question).toContain('!A9 "Should a reply to a snoozed agenda…"');
+  });
+
+  test('names the open agenda by title in the picker lead, and the other by title in the flip label', () => {
+    expect(pickerLead(item('A5', { subject: 'Does push repeat?' }))).toBe(
+      'Merge !A5 "Does push repeat?" (this one) with which open agenda?',
+    );
+    expect(flipLabel(item('A2', { subject: 'Where do snoozed items go?' }))).toBe(
+      'Keep !A2 "Where do snoozed items go?" instead of this one',
+    );
   });
 
   test('names a candidate by its reference and its title', () => {
@@ -90,5 +126,21 @@ describe('where an item came from', () => {
 
   test('says nothing for an item with no lineage', () => {
     expect(lineageLines({})).toEqual([]);
+  });
+
+  test('names each target by its title where the board holds it, and by its id alone where it does not', () => {
+    const titles = { A7: 'the snooze copy', A2: 'Where do snoozed items go?' };
+    expect(lineageLines({ splitInto: ['A7', 'A8'] }, titles)).toEqual([
+      { key: 'split-into', text: 'Split into !A7 (the snooze copy), !A8' },
+    ]);
+    expect(lineageLines({ mergedInto: 'A2' }, titles)).toEqual([
+      { key: 'merged-into', text: 'Merged into !A2 (Where do snoozed items go?)' },
+    ]);
+  });
+
+  test('collects the titles of the agendas an item names from the board, leaving out what the board lacks', () => {
+    const board = [item('A7', { subject: 'Badge count' }), item('A9', { subject: 'Unrelated' })];
+    expect(lineageTitles({ splitInto: ['A7', 'A8'], splitFrom: 'A3' }, board)).toEqual({ A7: 'Badge count' });
+    expect(lineageTitles({}, board)).toEqual({});
   });
 });

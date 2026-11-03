@@ -716,13 +716,17 @@ only items in the same agenda home (one lineage) can be merged. Refused: an item
 a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
 address.
 
-In the app, an open plain conversation shows **Merge with…** beside its lineage lines. It lists the other open plain
-conversations on the same board, and a confirm step says what will happen before anything is sent: "!A5 closes as merged
-into !A2. Both conversations and all cards are kept, and nothing is cut." The viewed item survives by default, and
-"Keep !A5 instead" flips it. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+In the app, an open plain conversation shows **Merge with…** beside its lineage lines. The picker is headed with the open
+agenda by id and title and marked "this one" ("Merge !A5 "Queue choice" (this one) with which open agenda?"), and lists
+the other open plain conversations on the same board by id and title. A confirm step says what will happen before
+anything is sent, naming BOTH agendas by id and title and marking the open one "this one", because an id alone does not
+say which agenda it is: "Merge !A2 "Pick the queue" into !A5 "Queue choice" (this one)?", then "!A2 "Pick the queue"
+closes as merged into !A5 "Queue choice" (this one). Both conversations and all cards are kept, and nothing is cut."
+The viewed item survives by default, and "Keep !A2 "Pick the queue" instead of this one" flips it (the button then
+reads "Merge into !A2 "Pick the queue""). A long title is cut at a word with "…". There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
-**Merged into !A2** as a link, and the survivor shows **Merged in from !A5**. A machine with no merge never shows the
+**Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A machine with no merge never shows the
 button, and the machine's own agenda (`machine-agenda`) offers none.
 
 ### Split
@@ -744,8 +748,10 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
   on the new item.
 
-The app shows both links as references through the one reference renderer: **Split from !A3** on the new item and
-**Split into !A7, !A8** on the original, each `!A…` opening as it does in a message. The app has no split button: a
+The app shows both links as references through the one reference renderer: **Split from !A3 (its title)** on the new
+item and **Split into !A7 (its title), !A8 (its title)** on the original, each `!A…` opening as it does in a message.
+Each target carries its title when the board holds it, so a link never points outside the agenda without saying what it
+points at; a target the board does not hold is the bare id. The app has no split button: a
 split is a ferret's act, and a plain "Split off…" can follow once the owner may split by route.
 
 ## Parked items
@@ -1221,8 +1227,12 @@ and a part the item does not carry is not drawn:
 - **The conversation** is read from the chat for an item that has no stored thread (`itemHistory`: the owner's words
   that name the item and the parts of the ferret's replies about it). A machine with the stored conversation
   (`agenda.conversation.1`) feeds the same part from the item itself: the item's own tail when it is whole, else every
-  entry read through `GET …/conversation`, in stored order, falling back to the rebuilt thread while it loads or if it
-  cannot be read. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
+  entry read through `GET …/conversation`, in stored order. The item carries a bounded tail, so only the
+  entries BEFORE the tail are read, once each, and the tail is drawn at once under one line, "Loading N earlier
+  entries…". A reply that arrives reads only the entries the app does not hold yet, never the thread from the start.
+  A read that fails says "N earlier entries could not be read" and tries again when the thread changes; a thread
+  longer than one read takes says "N earlier entries are not shown: this conversation is longer than one read takes".
+  A partial thread is never drawn as a whole one, and the rebuilt thread is never swapped in for it. An owner entry is the owner's bubble (an `answer`, `needs-info` or `discuss` keeps its form), a ferret
   entry is the ferret's, a daemon entry is drawn under "Ferretry", and an entry the ferret copied from the owner's chat
   (`fromChat`) carries a **from chat** tag.
 - **Card asks live inside the item.** A card ready to test or approve is answered in part 7, with its own buttons,
@@ -1236,12 +1246,23 @@ and a part the item does not carry is not drawn:
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 7 with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
-- **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control.
+- **The head keeps a slot** (`data-agenda-version-slot`) for the version picker and the diff control. Beside the diff
+  control the picker counts the item's EDITS ("Edit 2 of 3"), because the diff's own numbers (v1, v2…) are the stored
+  versions, which count more than the edits do; a machine with no stored versions keeps "v2 of 3".
 - **Changes (the diff).** With two or more versions on a machine that keeps them, the slot gains a **Changes** button.
   It opens a panel under the head that compares "since you last looked" by default (this device's last-seen mark
   against the newest version) and lets the owner pick any two versions from **From** and **To**. Each changed section
-  shows its words per word: additions are underlined, removals struck through, with a status word (New, Changed,
-  Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. Sections that did not change fold
+  shows what changed, coarse to fine: equal lines stay; the lines between them are paired in order by how alike they
+  are; inside a pair the same is done sentence by sentence, then word by word, with a short kept word between two
+  changes ("the", "of") folded into them so one edit is not confetti. A pair that shares fewer than half of its words
+  (`REWRITE_SIMILARITY`) is a REWRITE: the old block is struck through whole and the new block added whole, never
+  woven word by word, while a small edit stays a word diff. Additions are underlined, removals struck through, with a
+  status word (New, Changed, Removed) and +N/−N counts and a legend, so the diff is never read by colour alone. The
+  sections compared are the title, the type, the question, the premise, the context, the detail, the terms, the
+  references, where we are now, what is decided and still open, the ask, a multi-decision ask's questions, each
+  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards, the body
+  and the answer to a question, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
+  changed". Sections that did not change fold
   under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
   read, so "since you last looked" is the previous visit. A machine without the version routes shows no control.
 - **The terms table** shows a link's own `meaning` (`agenda.link-meaning.1`), else its label.

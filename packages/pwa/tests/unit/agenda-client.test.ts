@@ -7,9 +7,10 @@ import {
   DaemonAgendaClient,
   fetchAgendaConversation,
   fetchAgendaCount,
+  fetchAgendaSnapshot,
   fetchAgendaVersion,
   fetchAgendaVersions,
-  fetchAgendaSnapshot,
+  MAX_CONVERSATION_FRAGMENTS,
   MERGE_NEEDS_UPDATE,
   markAgendaVersionSeen,
   SNOOZE_NEEDS_UPDATE,
@@ -1058,19 +1059,55 @@ describe('the whole stored conversation', () => {
       return response(pages[url.split('?')[1] ?? ''] ?? {});
     });
 
-    should(got.map(each => each.text)).deepEqual(['Hello, world.', 'Second.']);
+    should(got.entries.map(each => each.text)).deepEqual(['Hello, world.', 'Second.']);
+    should(got.capped).equal(false);
     should(asked[0]).equal('/v1/sessions/same%2Fsession/agenda/A1/conversation?index=0&offset=0');
   });
 
   it('reads a frozen earlier thread by its version, and a thread with no entries as empty', async () => {
     const asked: string[] = [];
-    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', 3, async input => {
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', { version: 3 }, async input => {
       asked.push(String(input));
       return response({ total: 0, index: 0, offset: 0 });
     });
 
-    should(got).deepEqual([]);
+    should(got).deepEqual({ entries: [], capped: false });
     should(asked).have.length(1);
     should(asked[0]).containEql('version=3');
+  });
+
+  it('reads only the entries from where it starts to where it stops', async () => {
+    const asked: string[] = [];
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', { from: 2, until: 4 }, async input => {
+      const url = new URL(String(input));
+      asked.push(`${url.searchParams.get('index')}.${url.searchParams.get('offset')}`);
+      const index = Number(url.searchParams.get('index'));
+      return response({
+        total: 6,
+        index,
+        offset: 0,
+        entry: entry(`e${index}`),
+        next: { index: index + 1, offset: 0 },
+      });
+    });
+
+    should(asked).deepEqual(['2.0', '3.0']);
+    should(got.entries.map(each => each.text)).deepEqual(['e2', 'e3']);
+    should(got.capped).equal(false);
+  });
+
+  it('says it was capped, and gives only whole entries, when the thread is longer than one read takes', async () => {
+    let calls = 0;
+    const got = await fetchAgendaConversation(daemonA, scopeA, 'A1', undefined, async input => {
+      calls += 1;
+      const url = new URL(String(input));
+      const index = Number(url.searchParams.get('index'));
+      const offset = Number(url.searchParams.get('offset'));
+      return response({ total: 3, index, offset, entry: entry('x'), next: { index, offset: offset + 1 } });
+    });
+
+    should(calls).equal(MAX_CONVERSATION_FRAGMENTS);
+    should(got.capped).equal(true);
+    should(got.entries).deepEqual([]);
   });
 });

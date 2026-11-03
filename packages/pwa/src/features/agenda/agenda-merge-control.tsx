@@ -6,9 +6,18 @@
  * There is no split button: a split is made by the ferret, and the item only shows where it came from.
  */
 
-import type { AgendaId, AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
-import { candidateLine, type LineageLine, lineageLines, mergeChoice, mergeWords } from '../../lib/agenda-merge.ts';
+import {
+  candidateLine,
+  flipLabel,
+  type LineageLine,
+  type LineageTitles,
+  lineageLines,
+  mergeChoice,
+  mergeWords,
+  pickerLead,
+} from '../../lib/agenda-merge.ts';
 import type { AgendaMergeView } from './use-item-lifecycle.ts';
 
 type Prose = (text: string) => ReactNode;
@@ -16,7 +25,7 @@ type Prose = (text: string) => ReactNode;
 type Step =
   | { readonly step: 'closed' }
   | { readonly step: 'pick' }
-  | { readonly step: 'confirm'; readonly picked: AgendaId; readonly keepPicked: boolean };
+  | { readonly step: 'confirm'; readonly picked: AgendaItem; readonly keepPicked: boolean };
 
 function MergePanel({
   item,
@@ -40,7 +49,7 @@ function MergePanel({
     return (
       <div className="fy-merge__panel" data-agenda-merge-picker="">
         <p className="fy-merge__lead m-0" id={groupId}>
-          Merge !{item.id} with which open agenda?
+          {pickerLead(item)}
         </p>
         {merge.candidates.length === 0 ? (
           <p className="fy-merge__note m-0" data-agenda-merge-none="">
@@ -53,7 +62,7 @@ function MergePanel({
                 <button
                   className="fy-merge__choice"
                   data-agenda-merge-candidate={candidate.id}
-                  onClick={() => setState({ step: 'confirm', picked: candidate.id, keepPicked: false })}
+                  onClick={() => setState({ step: 'confirm', picked: candidate, keepPicked: false })}
                   type="button"
                 >
                   {candidateLine(candidate)}
@@ -69,13 +78,13 @@ function MergePanel({
     );
   }
 
-  const choice = mergeChoice(item.id, state.picked, state.keepPicked);
-  const words = mergeWords(choice);
+  const choice = mergeChoice(item, state.picked, state.keepPicked);
+  const words = mergeWords(choice, item.id);
   const send = (): void => {
     setSending(true);
     setError(null);
     merge
-      .merge(choice.survivor, choice.absorbed)
+      .merge(choice.survivor.id, choice.absorbed.id)
       .then(onDone)
       .catch((failure: unknown) => {
         setSending(false);
@@ -95,7 +104,7 @@ function MergePanel({
           onChange={event => setState({ ...state, keepPicked: event.currentTarget.checked })}
           type="checkbox"
         />
-        <span>{`Keep !${state.picked} instead`}</span>
+        <span>{flipLabel(state.picked)}</span>
       </label>
       {error === null ? null : (
         <p className="fy-merge__error m-0" role="alert">
@@ -121,14 +130,17 @@ function MergePanel({
 export function AgendaLineage({
   item,
   merge,
+  titles,
   renderProse,
 }: {
   readonly item: AgendaItem;
   readonly merge: AgendaMergeView | undefined;
+  /** The titles of the agendas this one names, where the board holds them. */
+  readonly titles?: LineageTitles | undefined;
   readonly renderProse: Prose;
 }) {
   const [open, setOpen] = useState(false);
-  const lines: readonly LineageLine[] = lineageLines(item);
+  const lines: readonly LineageLine[] = lineageLines(item, titles);
   if (lines.length === 0 && merge === undefined) return null;
   return (
     <div className="fy-merge" data-agenda-lineage="">

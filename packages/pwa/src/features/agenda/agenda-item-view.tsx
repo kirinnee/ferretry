@@ -36,6 +36,7 @@ import { answerAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -112,6 +113,8 @@ export interface AgendaItemViewProps {
   readonly versions?: AgendaVersionsView;
   /** "Merge with…" (`useItemLifecycle`). Absent: not offered. */
   readonly merge?: AgendaMergeView;
+  /** The titles of the agendas the item was merged into or split from (`useItemLifecycle`). */
+  readonly lineageTitles?: LineageTitles;
 }
 
 /** The urgent tones the head row says; where else the item stands is the card's state chip. */
@@ -182,6 +185,7 @@ export function AgendaItemView({
   itemKey,
   versions,
   merge,
+  lineageTitles,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -314,6 +318,7 @@ export function AgendaItemView({
             {...(itemKey === undefined ? {} : { itemKey })}
             {...(versions === undefined ? {} : { versions })}
             {...(merge === undefined ? {} : { merge })}
+            {...(lineageTitles === undefined ? {} : { lineageTitles })}
             {...(howToTestFor === undefined ? {} : { howToTestFor })}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}

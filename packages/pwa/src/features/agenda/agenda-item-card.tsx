@@ -48,6 +48,7 @@ import {
   STAGE_WORDS,
   stateChip,
 } from '../../lib/agenda-item-sections.ts';
+import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
@@ -67,8 +68,8 @@ import { markTerms, TermLayer } from './agenda-terms.tsx';
 import { agendaTypeMeta } from './agenda-type.tsx';
 import { DiffToggle, VersionDiffPanel } from './agenda-version-diff.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
-import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 import { useDownSwipe } from './use-down-swipe.ts';
+import type { AgendaMergeView, AgendaVersionsView } from './use-item-lifecycle.ts';
 
 type Prose = (text: string) => ReactNode;
 
@@ -122,6 +123,8 @@ export interface AgendaItemCardProps {
   readonly versions?: AgendaVersionsView | undefined;
   /** "Merge with…" on an open plain conversation. Absent: no merge control, though lineage lines still show. */
   readonly merge?: AgendaMergeView | undefined;
+  /** The titles of the agendas this one was merged into or split from, where the board holds them. */
+  readonly lineageTitles?: LineageTitles | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -353,7 +356,10 @@ function VersionPicker({
   shown,
   now,
   onShow,
+  asEdits,
 }: {
+  /** Beside the diff control's stored versions (v1, v2…) these are the item's edits, so they are called edits. */
+  readonly asEdits: boolean;
   readonly item: AgendaItem;
   readonly shown: number;
   readonly now: number;
@@ -366,7 +372,7 @@ function VersionPicker({
     version === count ? shortAgo(atOf(version), now) : revisionStamp(atOf(version), now);
   return (
     <select
-      aria-label="Version"
+      aria-label={asEdits ? 'Edit' : 'Version'}
       className="fy-card__version"
       data-agenda-version-picker=""
       onChange={event => onShow(Number(event.currentTarget.value))}
@@ -374,7 +380,7 @@ function VersionPicker({
     >
       {Array.from({ length: count }, (_, at) => count - at).map(version => (
         <option key={version} value={version}>
-          {`v${String(version)} of ${String(count)}${when(version) === '' ? '' : ` · ${when(version)}`}`}
+          {`${asEdits ? 'Edit ' : 'v'}${String(version)} of ${String(count)}${when(version) === '' ? '' : ` · ${when(version)}`}`}
         </option>
       ))}
     </select>
@@ -409,6 +415,7 @@ export function AgendaItemCard({
   howToTestFor,
   versions,
   merge,
+  lineageTitles,
 }: AgendaItemCardProps) {
   const diffId = useId();
   const [diffOpen, setDiffOpen] = useState(false);
@@ -557,7 +564,15 @@ export function AgendaItemCard({
             {versions === undefined ? null : (
               <DiffToggle controls={diffId} onToggle={() => setDiffOpen(open => !open)} open={diffOpen} />
             )}
-            {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
+            {count > 1 ? (
+              <VersionPicker
+                asEdits={versions !== undefined}
+                item={current}
+                now={now}
+                onShow={setShown}
+                shown={shown}
+              />
+            ) : null}
           </span>
           {canDismiss ? (
             <button
@@ -574,7 +589,7 @@ export function AgendaItemCard({
         </span>
       </div>
       {versions !== undefined && diffOpen ? <VersionDiffPanel id={diffId} now={now} versions={versions} /> : null}
-      {latest ? <AgendaLineage item={current} merge={merge} renderProse={renderProse} /> : null}
+      {latest ? <AgendaLineage item={current} merge={merge} renderProse={renderProse} titles={lineageTitles} /> : null}
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}

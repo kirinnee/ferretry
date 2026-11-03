@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { type AgendaConversationEntry, type AgendaItem, DAEMON_FEATURES } from '@ferretry/protocol';
+import { useState } from 'react';
 import {
   type ItemLifecycle,
   type UseItemLifecycleInput,
@@ -22,6 +23,9 @@ const realFetch = globalThis.fetch;
 let calls: Array<{ method: string; path: string; body?: string }> = [];
 let versions: { latest: number; seen?: number } = { latest: 3, seen: 1 };
 let fail = false;
+let hold: Promise<void> | null = null;
+let endless = false;
+let thread = ['one', 'two', 'three'];
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -34,6 +38,9 @@ beforeEach(() => {
   calls = [];
   versions = { latest: 3, seen: 1 };
   fail = false;
+  hold = null;
+  endless = false;
+  thread = ['one', 'two', 'three'];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
     const path = url.pathname.replace('/v1/sessions/sess/agenda/A5', '') + url.search;
@@ -52,14 +59,16 @@ beforeEach(() => {
       return json({ ...summary(version), item: agendaItem('A5', { subject: `v${String(version)}` }) });
     }
     if (path.startsWith('/conversation')) {
+      await hold;
       const index = Number(url.searchParams.get('index'));
-      const all = ['one', 'two', 'three'];
+      const offset = Number(url.searchParams.get('offset'));
+      if (endless) return json({ total: 3, index, offset, entry: entry('x'), next: { index, offset: offset + 1 } });
       return json({
-        total: 3,
+        total: thread.length,
         index,
         offset: 0,
-        entry: entry(all[index] ?? ''),
-        ...(index < 2 ? { next: { index: index + 1, offset: 0 } } : {}),
+        entry: entry(thread[index] ?? ''),
+        ...(index < thread.length - 1 ? { next: { index: index + 1, offset: 0 } } : {}),
       });
     }
     return json({}, 404);
@@ -79,7 +88,10 @@ const STORES = {
 const OLD = { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) } as const;
 
 let latest: ItemLifecycle | null = null;
-const Probe = ({ input }: { readonly input: UseItemLifecycleInput }) => {
+let update: ((input: UseItemLifecycleInput) => void) | null = null;
+const Probe = ({ initial }: { readonly initial: UseItemLifecycleInput }) => {
+  const [input, setInput] = useState(initial);
+  update = setInput;
   latest = useItemLifecycle(input);
   return null;
 };
@@ -102,11 +114,19 @@ const draw = async (
   };
   view = await mount(
     <StoreProvider store={store}>
-      <Probe input={input} />
+      <Probe initial={input} />
     </StoreProvider>,
   );
   await interact(() => Promise.resolve());
 };
+
+const inputOf = (item: AgendaItem): UseItemLifecycleInput => ({
+  connection,
+  scope,
+  client: { merge: async () => undefined },
+  item,
+  board: [],
+});
 
 const base = (overrides: Partial<AgendaItem> = {}): AgendaItem =>
   agendaItem('A5', { revisions: [{}, {}] as never, ...overrides });
@@ -116,6 +136,19 @@ describe('what an open item knows about its own life', () => {
     await draw(OLD, base());
     expect(latest).toEqual({ conversation: null });
     expect(calls).toEqual([]);
+  });
+
+  test('names the agendas an item was merged into or split from by title, even where no versions are kept', async () => {
+    await draw(OLD, base({ mergedInto: 'A2', splitInto: ['A7', 'A8'] } as never), {
+      board: [
+        agendaItem('A2', { subject: 'Where do snoozed items go?' }),
+        agendaItem('A7', { subject: 'Badge count' }),
+      ],
+    });
+    expect(latest?.lineageTitles).toEqual({ A2: 'Where do snoozed items go?', A7: 'Badge count' });
+    await view?.unmount();
+    await draw(STORES, base());
+    expect(latest?.lineageTitles).toBeUndefined();
   });
 
   test('offers nothing for a machine agenda or with nothing open', async () => {
@@ -176,12 +209,53 @@ describe('what an open item knows about its own life', () => {
     expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
   });
 
-  test('falls back to the rebuilt thread when the rest of the thread cannot be read', async () => {
+  test('draws the item’s own tail at once and says how many earlier entries are still being read', async () => {
+    let release: () => void = () => undefined;
+    hold = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
+    expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'loading' });
+    release();
+    await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  test('reads only the entries it does not have yet when a reply arrives, and only those the tail lacks', async () => {
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
+    expect(calls.filter(call => call.path.startsWith('/conversation')).map(call => call.path)).toEqual([
+      '/conversation?index=0&offset=0',
+      '/conversation?index=1&offset=0',
+    ]);
+
+    thread = ['one', 'two', 'three', 'four', 'five'];
+    calls = [];
+    await interact(() =>
+      update?.({ ...inputOf(base({ conversationCount: 5, conversation: [entry('four'), entry('five')] })) }),
+    );
+    await settleUntil(() => latest?.conversation?.length === 5, 'the new entries', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three', 'four', 'five']);
+    expect(calls.filter(call => call.path.startsWith('/conversation')).map(call => call.path)).toEqual([
+      '/conversation?index=2&offset=0',
+    ]);
+  });
+
+  test('says so, and draws only what it has, when a thread is longer than one read takes', async () => {
+    endless = true;
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversationGap?.state === 'capped', 'the read limit', interact);
+    expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'capped' });
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
+  });
+
+  test('says the earlier entries could not be read, and keeps the tail, when the machine does not answer', async () => {
     fail = true;
     await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
-    await settleUntil(() => calls.some(call => call.path.startsWith('/conversation')), 'the read', interact);
-    await interact(() => Promise.resolve());
-    expect(latest?.conversation).toBeNull();
+    await settleUntil(() => latest?.conversationGap?.state === 'failed', 'the failure', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
+    expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'failed' });
   });
 
   test('draws the rebuilt thread when the item stores no words', async () => {

@@ -1,11 +1,28 @@
 /**
  * WHAT CHANGED BETWEEN TWO VERSIONS OF AN AGENDA ITEM (docs/agenda.md § The item view, "Changes"): pure functions over
  * two whole items (the daemon keeps every version in full) that say, section by section, what was added, removed or
- * reworded, down to the word. Nothing here draws anything or reads a clock: the view draws each mark with a sign and
- * a line style as well as a colour, so a change never depends on colour alone.
+ * reworded. Nothing here draws anything or reads a clock: the view draws each mark with a sign and a line style as well
+ * as a colour, so a change never depends on colour alone.
+ *
+ * HOW A TEXT IS COMPARED, coarse to fine, so a rewrite reads as a rewrite and a small edit as a small edit:
+ *
+ * 1. LINES. Terms, steps, ask options and bullets are one entry a line. Equal lines are kept; the lines between them are
+ *    paired in order by how alike they are, and a line with no partner is removed or added whole.
+ * 2. SENTENCES. Inside a paired line, the same again, sentence by sentence.
+ * 3. WORDS. Inside a paired sentence, a word diff, tidied so a stray "the" never splits one change into confetti.
+ *
+ * A pair that shares fewer than {@link REWRITE_SIMILARITY} of its words is a REWRITE: the old block is shown removed and
+ * the new block added, never woven together word by word.
  */
 
-import type { AgendaItem, AgendaVersionList, AgendaVersionSummary } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type AgendaVersionList,
+  type AgendaVersionSummary,
+  agendaStage,
+  formatTaskRef,
+} from '@ferretry/protocol';
+import { STAGE_WORDS } from './agenda-item-sections.ts';
 import { revisionStamp } from './agenda-revisions.ts';
 
 /** One run of words: kept as it was, added, or removed. */
@@ -14,17 +31,31 @@ export interface WordRun {
   readonly text: string;
 }
 
-/** The most token pairs the word diff compares; a longer edit is shown as the old text out and the new text in. */
+/** The share of words (2·common ÷ both lengths) two texts must keep for the diff to weave them word by word. */
+export const REWRITE_SIMILARITY = 0.5;
+
+/** The most token pairs one word comparison reads; a longer edit is shown as the old text out and the new text in. */
 const MAX_CELLS = 4_000_000;
+
+/** The most line pairs one block of lines is paired over; more are shown as the old lines out and the new lines in. */
+const MAX_LINE_PAIRS = 2_500;
+
+/** A kept word this short (or two of them) between two changes is folded into the change: "the", "of", "a". */
+const SHORT_WORD = 3;
 
 const TOKEN = /\s+|[^\s]+/gu;
 
+const wordCount = (text: string): number => text.split(/\s+/u).filter(word => word !== '').length;
+
 const tokens = (text: string): readonly string[] => text.match(TOKEN) ?? [];
+
+const spaces = (token: string): boolean => /^\s/u.test(token);
 
 /** Adjacent runs of the same kind, joined: "a b" removed is one run, not three. */
 const merged = (runs: readonly WordRun[]): readonly WordRun[] => {
   const out: WordRun[] = [];
   for (const run of runs) {
+    if (run.text === '') continue;
     const last = out.at(-1);
     if (last?.kind === run.kind) out[out.length - 1] = { kind: run.kind, text: last.text + run.text };
     else out.push(run);
@@ -32,40 +63,109 @@ const merged = (runs: readonly WordRun[]): readonly WordRun[] => {
   return out;
 };
 
-/** The words of `before` and `after` as runs, in reading order: removed words come before the words that replace them. */
-export const diffWords = (before: string, after: string): readonly WordRun[] => {
-  const a = tokens(before);
-  const b = tokens(after);
+/** The longest common run of two token lists, as a table read from the end (null: too large to compare). */
+const lcsTable = (a: readonly string[], b: readonly string[]): Uint32Array | null => {
+  if (a.length * b.length > MAX_CELLS) return null;
+  const width = b.length + 1;
+  const table = new Uint32Array((a.length + 1) * width);
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      table[i * width + j] =
+        a[i] === b[j]
+          ? (table[(i + 1) * width + j + 1] as number) + 1
+          : Math.max(table[(i + 1) * width + j] as number, table[i * width + j + 1] as number);
+    }
+  }
+  return table;
+};
+
+/** How many tokens two lists share at their start, and then at their end. */
+const sharedEnds = (a: readonly string[], b: readonly string[]): { readonly head: number; readonly tail: number } => {
   let head = 0;
   while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
   let tail = 0;
   while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail])
     tail += 1;
+  return { head, tail };
+};
+
+/**
+ * How alike two texts are, 0 to 1: twice the words they share, in order, over the words they have. Spaces never count,
+ * so two texts are not alike for sharing "the". Two empty texts are the same; a text too large to compare reads as the
+ * words it shares at its two ends.
+ */
+export const similarity = (before: string, after: string): number => {
+  const a = tokens(before).filter(token => !spaces(token));
+  const b = tokens(after).filter(token => !spaces(token));
+  if (a.length === 0 && b.length === 0) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  const { head, tail } = sharedEnds(a, b);
   const middleA = a.slice(head, a.length - tail);
   const middleB = b.slice(head, b.length - tail);
-  const keep = (list: readonly string[]): WordRun[] =>
-    list.length === 0 ? [] : [{ kind: 'same', text: list.join('') }];
-  const front = keep(a.slice(0, head));
-  const back = keep(a.slice(a.length - tail));
-  if (middleA.length === 0 || middleB.length === 0 || middleA.length * middleB.length > MAX_CELLS) {
-    const out: WordRun[] = [
+  const table = middleA.length === 0 || middleB.length === 0 ? null : lcsTable(middleA, middleB);
+  const common = head + tail + (table === null ? 0 : (table[0] as number));
+  return (2 * common) / (a.length + b.length);
+};
+
+/** A kept run small enough, between two changes, to be folded into them. */
+const foldable = (run: WordRun): boolean => {
+  const words = run.text.split(/\s+/u).filter(word => word !== '');
+  return words.length <= 2 && words.every(word => word.length <= SHORT_WORD);
+};
+
+/**
+ * A SEMANTIC CLEANUP of a word diff: a kept run of spaces or of one or two short words between two changes joins the
+ * change, so "removed · the · added · of · removed" reads as one old block and one new block, not alternating scraps.
+ */
+const tidy = (runs: readonly WordRun[]): readonly WordRun[] => {
+  const out: WordRun[] = [];
+  let removed = '';
+  let added = '';
+  const flush = (): void => {
+    if (removed !== '') out.push({ kind: 'removed', text: removed });
+    if (added !== '') out.push({ kind: 'added', text: added });
+    removed = '';
+    added = '';
+  };
+  runs.forEach((run, index) => {
+    const between =
+      run.kind === 'same' &&
+      index > 0 &&
+      index < runs.length - 1 &&
+      runs[index - 1]?.kind !== 'same' &&
+      runs[index + 1]?.kind !== 'same' &&
+      foldable(run);
+    if (run.kind === 'same' && !between) {
+      flush();
+      out.push(run);
+      return;
+    }
+    if (run.kind !== 'added') removed += run.text;
+    if (run.kind !== 'removed') added += run.text;
+  });
+  flush();
+  return merged(out);
+};
+
+/** The words of `before` and `after` as runs, in reading order: removed words come before the words that replace them. */
+export const diffWords = (before: string, after: string): readonly WordRun[] => {
+  const a = tokens(before);
+  const b = tokens(after);
+  const { head, tail } = sharedEnds(a, b);
+  const middleA = a.slice(head, a.length - tail);
+  const middleB = b.slice(head, b.length - tail);
+  const front: WordRun[] = [{ kind: 'same', text: a.slice(0, head).join('') }];
+  const back: WordRun[] = [{ kind: 'same', text: a.slice(a.length - tail).join('') }];
+  const table = middleA.length === 0 || middleB.length === 0 ? null : lcsTable(middleA, middleB);
+  if (table === null) {
+    return merged([
       ...front,
-      ...(middleA.length === 0 ? [] : [{ kind: 'removed', text: middleA.join('') } as const]),
-      ...(middleB.length === 0 ? [] : [{ kind: 'added', text: middleB.join('') } as const]),
+      { kind: 'removed', text: middleA.join('') },
+      { kind: 'added', text: middleB.join('') },
       ...back,
-    ];
-    return merged(out);
+    ]);
   }
   const width = middleB.length + 1;
-  const table = new Uint32Array((middleA.length + 1) * width);
-  for (let i = middleA.length - 1; i >= 0; i -= 1) {
-    for (let j = middleB.length - 1; j >= 0; j -= 1) {
-      table[i * width + j] =
-        middleA[i] === middleB[j]
-          ? (table[(i + 1) * width + j + 1] as number) + 1
-          : Math.max(table[(i + 1) * width + j] as number, table[i * width + j + 1] as number);
-    }
-  }
   const walk: WordRun[] = [];
   let i = 0;
   let j = 0;
@@ -84,8 +184,117 @@ export const diffWords = (before: string, after: string): readonly WordRun[] => 
   }
   for (; i < middleA.length; i += 1) walk.push({ kind: 'removed', text: middleA[i] as string });
   for (; j < middleB.length; j += 1) walk.push({ kind: 'added', text: middleB[j] as string });
-  return merged([...front, ...walk, ...back]);
+  return merged([...front, ...tidy(merged(walk)), ...back]);
 };
+
+/** Two texts that are alike enough get a word diff; two that are not are one block out and one block in. */
+const diffPair = (before: string, after: string): readonly WordRun[] =>
+  similarity(before, after) >= REWRITE_SIMILARITY
+    ? diffWords(before, after)
+    : merged([
+        { kind: 'removed', text: before },
+        { kind: 'added', text: after },
+      ]);
+
+/** The pieces of a text that end where a sentence or a line does, spaces kept, so they join back into the text. */
+const LINES = /(?<=\n)/u;
+const SENTENCES = /(?<=[.!?]\s+)(?=\S)/u;
+const piecesOf = (text: string, splitter: RegExp): readonly string[] => text.split(splitter).filter(p => p !== '');
+
+/**
+ * Pairs the pieces of two texts in order and says what became of each: kept (equal), paired with one alike enough to
+ * be compared inside, or removed or added whole. The pairing is the order-keeping one that keeps the most likeness.
+ */
+const align = (
+  before: readonly string[],
+  after: readonly string[],
+  inner: (a: string, b: string) => readonly WordRun[],
+  alike: (a: string, b: string) => number = similarity,
+): readonly WordRun[] => {
+  const n = before.length;
+  const m = after.length;
+  if (n * m > MAX_LINE_PAIRS) {
+    return merged([
+      { kind: 'removed', text: before.join('') },
+      { kind: 'added', text: after.join('') },
+    ]);
+  }
+  const width = m + 1;
+  const likeness = new Float64Array(n * m);
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j < m; j += 1) {
+      const a = before[i] as string;
+      const b = after[j] as string;
+      const like = a === b ? 2 : alike(a, b);
+      likeness[i * m + j] = like >= REWRITE_SIMILARITY ? like : 0;
+    }
+  }
+  const best = new Float64Array((n + 1) * width);
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      const like = likeness[i * m + j] as number;
+      best[i * width + j] = Math.max(
+        best[(i + 1) * width + j] as number,
+        best[i * width + j + 1] as number,
+        like > 0 ? like + (best[(i + 1) * width + j + 1] as number) : 0,
+      );
+    }
+  }
+  const runs: WordRun[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    const like = likeness[i * m + j] as number;
+    if (like > 0 && (best[i * width + j] as number) === like + (best[(i + 1) * width + j + 1] as number)) {
+      const a = before[i] as string;
+      const b = after[j] as string;
+      if (a === b) runs.push({ kind: 'same', text: a });
+      else runs.push(...inner(a, b));
+      i += 1;
+      j += 1;
+    } else if ((best[(i + 1) * width + j] as number) >= (best[i * width + j + 1] as number)) {
+      runs.push({ kind: 'removed', text: before[i] as string });
+      i += 1;
+    } else {
+      runs.push({ kind: 'added', text: after[j] as string });
+      j += 1;
+    }
+  }
+  for (; i < n; i += 1) runs.push({ kind: 'removed', text: before[i] as string });
+  for (; j < m; j += 1) runs.push({ kind: 'added', text: after[j] as string });
+  return merged(runs);
+};
+
+const bySentence = (a: string, b: string): readonly WordRun[] =>
+  align(piecesOf(a, SENTENCES), piecesOf(b, SENTENCES), diffPair);
+
+/** The fewest words a sentence has for keeping it word for word to make two lines a pair. */
+const KEPT_SENTENCE_WORDS = 3;
+
+/**
+ * How alike two lines are for pairing: by their words, or, when they share a whole sentence, at least as alike as a
+ * rewrite is allowed to be, so a paragraph that kept one sentence and rewrote another shows the one kept.
+ */
+const lineLikeness = (a: string, b: string): number => {
+  const words = similarity(a, b);
+  if (words >= REWRITE_SIMILARITY) return words;
+  const kept = new Set(
+    piecesOf(a, SENTENCES)
+      .map(sentence => sentence.trim())
+      .filter(sentence => wordCount(sentence) >= KEPT_SENTENCE_WORDS),
+  );
+  return piecesOf(b, SENTENCES).some(sentence => kept.has(sentence.trim())) ? REWRITE_SIMILARITY : words;
+};
+
+/**
+ * What changed between two texts, as runs in reading order. Equal lines stay; alike lines are compared sentence by
+ * sentence and word by word; a line with no like partner, and a pair that is a rewrite, are a whole block out and a
+ * whole block in. Joining the runs that are not added gives `before` exactly; those not removed give `after`.
+ */
+export const diffText = (before: string, after: string): readonly WordRun[] =>
+  before === after
+    ? merged([{ kind: 'same', text: after }])
+    : align(piecesOf(before, LINES), piecesOf(after, LINES), bySentence, lineLikeness);
 
 // ---------------------------------------------------------------------------------------------------
 // Sections
@@ -94,6 +303,7 @@ export const diffWords = (before: string, after: string): readonly WordRun[] => 
 /** The sections compared, in the order the item view reads them. */
 const DIFF_SECTIONS = [
   { key: 'title', label: 'Title' },
+  { key: 'stage', label: 'Type' },
   { key: 'subject', label: 'Question' },
   { key: 'premise', label: 'Premise' },
   { key: 'context', label: 'Context' },
@@ -104,10 +314,14 @@ const DIFF_SECTIONS = [
   { key: 'decided', label: 'Decided so far' },
   { key: 'stillOpen', label: 'Still open' },
   { key: 'ask', label: 'What I need from you' },
+  { key: 'questions', label: 'Questions' },
+  { key: 'optionDetails', label: 'About each option' },
+  { key: 'fields', label: 'Form' },
   { key: 'recommendation', label: 'Recommendation' },
   { key: 'impact', label: 'Impact' },
   { key: 'urgency', label: 'Urgency' },
   { key: 'steps', label: 'Steps' },
+  { key: 'cards', label: 'Cards' },
   { key: 'body', label: 'More detail' },
   { key: 'questionAnswer', label: 'Answer to your question' },
   { key: 'why', label: 'Why it matters' },
@@ -143,6 +357,51 @@ const askText = (ask: AgendaItem['ask']): string => {
   ].join('\n');
 };
 
+const choiceNames = (options: readonly { readonly label: string }[] | undefined): string =>
+  options === undefined ? '' : options.map(option => option.label).join(' / ');
+
+/** The questions of a multi-decision ask, one line each with the options it offers and the pick it recommends. */
+const questionsText = (questions: AgendaItem['questions']): string =>
+  (questions ?? [])
+    .map((question, index) =>
+      [
+        `${String(index + 1)}. ${question.question}`,
+        question.options === undefined ? '' : `Options: ${choiceNames(question.options)}`,
+        question.recommended === undefined ? '' : `Recommended: ${question.recommended}`,
+      ]
+        .filter(part => part !== '')
+        .join(' · '),
+    )
+    .join('\n');
+
+/** The longer explanation of each option, one line each. */
+const optionDetailsText = (details: AgendaItem['optionDetails']): string =>
+  (details ?? []).map(entry => `${entry.label}: ${entry.detail.replaceAll(/\s+/gu, ' ').trim()}`).join('\n');
+
+const FIELD_WORDS: Readonly<Record<string, string>> = {
+  one: 'pick one',
+  many: 'pick any',
+  yesno: 'yes or no',
+  text: 'in words',
+};
+
+/** The fields of a form, one line each: its label, how it is answered, and the options it offers. */
+const fieldsText = (fields: AgendaItem['fields']): string =>
+  (fields ?? [])
+    .map(field =>
+      [
+        `${field.label} (${FIELD_WORDS[field.type] ?? field.type}${field.required === false ? ', optional' : ''})`,
+        field.options === undefined ? '' : `Options: ${choiceNames(field.options)}`,
+      ]
+        .filter(part => part !== '')
+        .join(' · '),
+    )
+    .join('\n');
+
+/** The cards a notice lists, one line each: its reference, then what the line says. */
+const cardsText = (cards: AgendaItem['cards']): string =>
+  (cards ?? []).map(card => `${formatTaskRef(card.task)} ${card.line}`).join('\n');
+
 /** Any other structured value, as its text fields on lines: a recommendation's decision, then its reason. */
 const objectText = (value: unknown): string => {
   if (typeof value !== 'object' || value === null) return scalar(value);
@@ -157,6 +416,16 @@ export const sectionText = (item: AgendaItem, key: DiffSectionKey): string => {
   switch (key) {
     case 'ask':
       return askText(item.ask);
+    case 'stage':
+      return STAGE_WORDS[agendaStage(item)];
+    case 'questions':
+      return questionsText(item.questions);
+    case 'optionDetails':
+      return optionDetailsText(item.optionDetails);
+    case 'fields':
+      return fieldsText(item.fields);
+    case 'cards':
+      return cardsText(item.cards);
     case 'terms':
       return (item.terms ?? []).map(entry => `${entry.term}: ${entry.meaning}`).join('\n');
     case 'links':
@@ -191,8 +460,6 @@ export interface SectionDiff {
   readonly removedWords: number;
 }
 
-const wordCount = (text: string): number => text.split(/\s+/u).filter(word => word !== '').length;
-
 const countOf = (runs: readonly WordRun[], kind: WordRun['kind']): number =>
   runs.filter(run => run.kind === kind).reduce((sum, run) => sum + wordCount(run.text), 0);
 
@@ -202,7 +469,7 @@ export const diffItems = (from: AgendaItem, to: AgendaItem): readonly SectionDif
     const before = sectionText(from, key);
     const after = sectionText(to, key);
     if (before === '' && after === '') return [];
-    const runs = before === after ? ([{ kind: 'same', text: after }] as const) : diffWords(before, after);
+    const runs = diffText(before, after);
     const status: SectionStatus =
       before === after ? 'unchanged' : before === '' ? 'added' : after === '' ? 'removed' : 'changed';
     return [{ key, label, status, runs, addedWords: countOf(runs, 'added'), removedWords: countOf(runs, 'removed') }];

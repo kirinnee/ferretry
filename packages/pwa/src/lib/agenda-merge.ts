@@ -48,15 +48,40 @@ export const mergeCandidates = (item: AgendaItem, board: readonly AgendaItem[]):
     .filter(other => other.id !== item.id && !closed(other) && isPlainThread(other))
     .sort((a, b) => numberOf(a.id) - numberOf(b.id));
 
-/** Which agenda survives and which closes. */
+/** Which agenda survives and which closes, each whole, so the words about them can name them by title. */
 export interface MergeChoice {
-  readonly survivor: AgendaId;
-  readonly absorbed: AgendaId;
+  readonly survivor: AgendaItem;
+  readonly absorbed: AgendaItem;
 }
 
 /** The choice that keeps the item being viewed, or, flipped, the one picked from the list. */
-export const mergeChoice = (viewed: AgendaId, picked: AgendaId, keepPicked: boolean): MergeChoice =>
+export const mergeChoice = (viewed: AgendaItem, picked: AgendaItem, keepPicked: boolean): MergeChoice =>
   keepPicked ? { survivor: picked, absorbed: viewed } : { survivor: viewed, absorbed: picked };
+
+/** The longest title the merge words quote before they cut it at a word with "…". */
+const QUOTED_TITLE = 60;
+
+const clipped = (title: string): string => {
+  if (title.length <= QUOTED_TITLE) return title;
+  const cut = title.slice(0, QUOTED_TITLE);
+  const word = cut.lastIndexOf(' ');
+  return `${(word > QUOTED_TITLE / 2 ? cut.slice(0, word) : cut).trimEnd()}…`;
+};
+
+/** The marker the viewed agenda carries wherever the merge words name it. */
+const THIS_ONE = 'this one';
+
+/** An agenda as the merge words name it: its reference and its title, and "this one" when it is the one open. */
+const agendaName = (item: AgendaItem, viewed: AgendaId): string =>
+  `!${item.id} "${clipped(agendaTitle(item))}"${item.id === viewed ? ` (${THIS_ONE})` : ''}`;
+
+/** What the picker asks, naming the open agenda so its id is never alone. */
+export const pickerLead = (item: AgendaItem): string =>
+  `Merge !${item.id} "${clipped(agendaTitle(item))}" (${THIS_ONE}) with which open agenda?`;
+
+/** The checkbox that makes the other agenda the survivor. */
+export const flipLabel = (picked: AgendaItem): string =>
+  `Keep !${picked.id} "${clipped(agendaTitle(picked))}" instead of ${THIS_ONE}`;
 
 /** The words of the confirm step: what is asked, what happens, and what is kept. */
 export interface MergeWords {
@@ -66,13 +91,20 @@ export interface MergeWords {
   readonly button: string;
 }
 
-/** What the confirm step says, so "Merge" is never pressed without knowing what it does. */
-export const mergeWords = (choice: MergeChoice): MergeWords => ({
-  question: `Merge !${choice.absorbed} into !${choice.survivor}?`,
-  outcome: `!${choice.absorbed} closes as merged into !${choice.survivor}. !${choice.survivor} keeps its ask and its place.`,
-  kept: 'Both conversations and all cards are kept, and nothing is cut.',
-  button: `Merge into !${choice.survivor}`,
-});
+/**
+ * What the confirm step says, so "Merge" is never pressed without knowing what it does. Each agenda is named by its id
+ * AND its title, and the one open is marked "this one", because an id alone says nothing about which agenda it is.
+ */
+export const mergeWords = (choice: MergeChoice, viewed: AgendaId): MergeWords => {
+  const absorbed = agendaName(choice.absorbed, viewed);
+  const survivor = agendaName(choice.survivor, viewed);
+  return {
+    question: `Merge ${absorbed} into ${survivor}?`,
+    outcome: `${absorbed} closes as merged into ${survivor}. ${survivor} keeps its ask and its place.`,
+    kept: 'Both conversations and all cards are kept, and nothing is cut.',
+    button: `Merge into ${survivor}`,
+  };
+};
 
 /** A candidate in the picker: its reference and its title, so the owner picks by what it says. */
 export const candidateLine = (item: AgendaItem): string => `!${item.id} ${agendaTitle(item)}`;
@@ -83,19 +115,50 @@ export interface LineageLine {
   readonly text: string;
 }
 
-const list = (ids: readonly AgendaId[]): string => ids.map(id => `!${id}`).join(', ');
+/** Where the board holds an agenda, its title: the lineage lines say what a reference is, not only its number. */
+export type LineageTitles = Readonly<Partial<Record<AgendaId, string>>>;
+
+/** The titles of the agendas an item's lineage names, from the agendas on the board; the ones it does not hold are left out. */
+export const lineageTitles = (
+  item: Pick<AgendaItem, 'mergedInto' | 'mergedFrom' | 'splitFrom' | 'splitInto'>,
+  board: readonly AgendaItem[],
+): LineageTitles => {
+  const named = new Set<AgendaId>([
+    ...(item.mergedInto === undefined ? [] : [item.mergedInto]),
+    ...(item.mergedFrom ?? []),
+    ...(item.splitFrom === undefined ? [] : [item.splitFrom]),
+    ...(item.splitInto ?? []),
+  ]);
+  return Object.fromEntries(board.filter(other => named.has(other.id)).map(other => [other.id, agendaTitle(other)]));
+};
+
+/** `!A5 (the title)`, or `!A5` where the board does not hold it. */
+const named = (id: AgendaId, titles: LineageTitles): string => {
+  const title = titles[id];
+  return title === undefined ? `!${id}` : `!${id} (${clipped(title)})`;
+};
+
+const list = (ids: readonly AgendaId[], titles: LineageTitles): string => ids.map(id => named(id, titles)).join(', ');
 
 /**
  * The lines about an item's lineage, in the order they matter: a merged item says where it went first, and the
  * survivor, the original and the split-off item say what joined or left them. Nothing when the item has no lineage.
+ * Each target carries its title when `titles` holds it.
  */
 export const lineageLines = (
   item: Pick<AgendaItem, 'mergedInto' | 'mergedFrom' | 'splitFrom' | 'splitInto'>,
+  titles: LineageTitles = {},
 ): readonly LineageLine[] => [
-  ...(item.mergedInto === undefined ? [] : [{ key: 'merged-into', text: `Merged into !${item.mergedInto}` } as const]),
+  ...(item.mergedInto === undefined
+    ? []
+    : [{ key: 'merged-into', text: `Merged into ${named(item.mergedInto, titles)}` } as const]),
   ...(item.mergedFrom === undefined
     ? []
-    : [{ key: 'merged-from', text: `Merged in from ${list(item.mergedFrom)}` } as const]),
-  ...(item.splitFrom === undefined ? [] : [{ key: 'split-from', text: `Split from !${item.splitFrom}` } as const]),
-  ...(item.splitInto === undefined ? [] : [{ key: 'split-into', text: `Split into ${list(item.splitInto)}` } as const]),
+    : [{ key: 'merged-from', text: `Merged in from ${list(item.mergedFrom, titles)}` } as const]),
+  ...(item.splitFrom === undefined
+    ? []
+    : [{ key: 'split-from', text: `Split from ${named(item.splitFrom, titles)}` } as const]),
+  ...(item.splitInto === undefined
+    ? []
+    : [{ key: 'split-into', text: `Split into ${list(item.splitInto, titles)}` } as const]),
 ];

@@ -71,8 +71,8 @@ import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
 import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
-import { sendForm } from '../../lib/agenda-form-send.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
+import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -417,8 +417,8 @@ function OpenItem({
     () =>
       lifecycle.conversation === null
         ? itemHistory(card.item, entries)
-        : storedHistory(card.item, lifecycle.conversation),
-    [card.item, entries, lifecycle.conversation],
+        : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
+    [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
   );
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
@@ -446,6 +446,7 @@ function OpenItem({
           itemKey={card.key}
           {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
           {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
           {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
           howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
           tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}

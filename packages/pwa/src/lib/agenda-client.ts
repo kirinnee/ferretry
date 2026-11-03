@@ -19,9 +19,9 @@ import {
   FY_REQUEST_ID_HEADER,
   isMachineAgendaId,
 } from '@ferretry/protocol';
-import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
+import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
@@ -173,37 +173,59 @@ export const fetchAgendaVersion = async (
     await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
   );
 
-/** The most fragment reads one full thread takes: a runaway cursor ends the read instead of looping. */
-const MAX_CONVERSATION_FRAGMENTS = 2_000;
+/** The most fragment reads one call takes: a runaway cursor ends the read instead of looping. */
+export const MAX_CONVERSATION_FRAGMENTS = 2_000;
+
+/** Which entries of the stored conversation to read: `from` up to (not including) `until`, of the current thread or a frozen `version`. */
+export interface AgendaConversationRange {
+  readonly version?: number;
+  readonly from?: number;
+  readonly until?: number;
+}
+
+/** What a conversation read got: the entries read whole, and whether it stopped at its read limit before the end. */
+export interface AgendaConversationRead {
+  /** The entries from `from`, each read WHOLE and in order; an entry the read stopped inside is not among them. */
+  readonly entries: readonly AgendaConversationEntry[];
+  /** The read hit {@link MAX_CONVERSATION_FRAGMENTS} before it reached `until` or the end: more is still unread. */
+  readonly capped: boolean;
+}
 
 /**
- * The item's WHOLE stored conversation, oldest first (`agenda.conversation.1`): every entry read through
- * `GET …/conversation` in its bounded fragments, each entry's fragments joined verbatim. The item itself carries only a
- * recent tail. `version` reads a frozen earlier thread instead of the current one.
+ * The item's stored conversation (`agenda.conversation.1`), oldest first, read through `GET …/conversation` in its
+ * bounded fragments, each entry's fragments joined verbatim. The item itself carries only a recent tail, so a reader
+ * asks for the entries before it (`until`) and, on a later read, only the entries it does not have yet (`from`).
+ * A read that stops at its limit SAYS so (`capped`) and never hands back a partial entry as a whole one.
  */
 export const fetchAgendaConversation = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   id: AgendaId,
-  version?: number,
+  range: AgendaConversationRange = {},
   fetcher: DaemonFetch = browserFetch,
-): Promise<readonly AgendaConversationEntry[]> => {
+): Promise<AgendaConversationRead> => {
   const base = `/v1/sessions/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/conversation`;
+  const from = range.from ?? 0;
+  const until = range.until ?? Number.POSITIVE_INFINITY;
   const entries: AgendaConversationEntry[] = [];
-  let cursor: { readonly index: number; readonly offset: number } | undefined = { index: 0, offset: 0 };
-  for (let reads = 0; cursor !== undefined && reads < MAX_CONVERSATION_FRAGMENTS; reads += 1) {
+  let cursor: { readonly index: number; readonly offset: number } | undefined = { index: from, offset: 0 };
+  let reads = 0;
+  while (cursor !== undefined && cursor.index < until && reads < MAX_CONVERSATION_FRAGMENTS) {
     const query = new URLSearchParams({ index: String(cursor.index), offset: String(cursor.offset) });
-    if (version !== undefined) query.set('version', String(version));
+    if (range.version !== undefined) query.set('version', String(range.version));
     const page = AgendaConversationPageSchema.parse(
       await fetchAgenda(daemon, scope, `${base}?${query.toString()}`, { method: 'GET' }, fetcher),
     );
+    reads += 1;
     if (page.entry !== undefined) {
-      const earlier = entries[page.index];
-      entries[page.index] = earlier === undefined ? page.entry : { ...earlier, text: earlier.text + page.entry.text };
+      const at = page.index - from;
+      const earlier = entries[at];
+      entries[at] = earlier === undefined ? page.entry : { ...earlier, text: earlier.text + page.entry.text };
     }
     cursor = page.next;
   }
-  return entries;
+  const capped = cursor !== undefined && cursor.index < until;
+  return { entries: capped ? entries.slice(0, (cursor?.index ?? from) - from) : entries, capped };
 };
 
 /** Tells the daemon this device opened `version` of an item; answers the mark that stands. */

@@ -41,7 +41,27 @@ function FromChat() {
   );
 }
 
+const GAP_WORDS = (earlier: number, state: 'loading' | 'failed' | 'capped'): string => {
+  const entries = `${String(earlier)} earlier ${earlier === 1 ? 'entry' : 'entries'}`;
+  if (state === 'loading') return `Loading ${entries}…`;
+  if (state === 'failed')
+    return `${entries} could not be read. ${earlier === 1 ? 'It' : 'They'} will be tried again when the conversation changes.`;
+  return `${entries} ${earlier === 1 ? 'is' : 'are'} not shown: this conversation is longer than one read takes.`;
+};
+
 function HistoryRow({ event, now, ferret, renderProse }: HistoryRowProps) {
+  if (event.kind === 'gap') {
+    return (
+      <li
+        className="fy-hist__gap"
+        data-history="gap"
+        data-history-gap={event.state}
+        role={event.state === 'loading' ? 'status' : 'note'}
+      >
+        {GAP_WORDS(event.earlier, event.state)}
+      </li>
+    );
+  }
   if (event.kind === 'owner') {
     const chosen = event.form === 'answer' || event.form === 'done';
     return (

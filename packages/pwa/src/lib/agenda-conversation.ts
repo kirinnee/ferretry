@@ -55,11 +55,26 @@ export const conversationEvent = (entry: AgendaConversationEntry, index: number)
   };
 };
 
+/** Entries of the thread that are not in hand: where they sit in what is drawn, how many, and why. */
+export interface ConversationGap {
+  /** How many entries of the drawn list come before the gap. */
+  readonly at: number;
+  readonly count: number;
+  readonly state: 'loading' | 'failed' | 'capped';
+}
+
 /**
  * The item's history when its words come from the item itself: one event per stored entry, in stored order, and the
  * item's edits for the activity log. The edits are not words anyone said, so the conversation part never draws them.
+ * A `gap` puts a line where entries are not in hand, so what is drawn is never passed off as the whole thread.
  */
 export const storedHistory = (
   item: AgendaItem,
   conversation: readonly AgendaConversationEntry[],
-): readonly HistoryEvent[] => [...revisionEvents(item), ...conversation.map(conversationEvent)];
+  gap?: ConversationGap,
+): readonly HistoryEvent[] => {
+  const events = conversation.map(conversationEvent);
+  if (gap === undefined || gap.count <= 0) return [...revisionEvents(item), ...events];
+  const line: HistoryEvent = { kind: 'gap', key: 'stored:gap', at: 0, earlier: gap.count, state: gap.state };
+  return [...revisionEvents(item), ...events.slice(0, gap.at), line, ...events.slice(gap.at)];
+};
