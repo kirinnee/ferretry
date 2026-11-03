@@ -106,7 +106,7 @@ import {
   type SessionDeviceClaim,
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
-import type { PromptOrigin } from './step-up-gate.ts';
+import type { PromptOrigin, StepUpSubject } from './step-up-gate.ts';
 import { noTunnelReason, TUNNEL_SWITCHED_OFF, type TunnelServiceState } from './tunnel-service.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
@@ -1041,6 +1041,7 @@ export interface DaemonCarrierRouterOptions {
     act?: string,
     origin?: PromptOrigin,
     actId?: StepUpAct,
+    subject?: StepUpSubject,
   ) => Promise<boolean>;
   /**
    * Asked when the daemon answers `401 unlock_required`: this machine wants a passkey on opening and
@@ -1761,7 +1762,7 @@ export class DaemonCarrierRouter {
     if (demand === undefined) return response;
     // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
     const act = demand === null ? undefined : stepUpAct(demand);
-    if (!(await ask(daemon, act, origin, demand?.act))) return response;
+    if (!(await ask(daemon, act, origin, demand?.act, demand?.subject))) return response;
     return await once();
   }
 

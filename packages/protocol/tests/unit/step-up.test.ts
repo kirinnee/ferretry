@@ -437,6 +437,68 @@ describe('the passkey step-up wire', () => {
     ]);
   });
 
+  it('should bind an approve-recipe step-up to the one proposal, yet leave the act skippable at the machine', () => {
+    // Arrange
+    const proposal = `rp_${'a'.repeat(16)}`;
+    const ruleStage = `srs_${'c'.repeat(24)}`;
+
+    // Act / Assert — the machine may skip it; a paired device proves it for exactly one rp_ proposal
+    should(stepUp.STEP_UP_ACTS.approveRecipe).equal('approve-recipe');
+    should(stepUp.stepUpSkippableAtMachine('approve-recipe')).be.true();
+    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).not.containEql('approve-recipe');
+    should(stepUp.stepUpBindsSubject('approve-recipe')).be.true();
+    should(stepUp.stepUpBindsSubject('loosen-config')).be.false();
+    should(stepUp.stepUpBindsSubject('approve-sign-in-rule')).be.false();
+    should(
+      stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'approve-recipe', subject: proposal }).success,
+    ).be.true();
+    should(
+      stepUp.StepUpDemandSchema.safeParse({
+        capability: 'secrets',
+        axis: 'configure',
+        act: 'approve-recipe',
+        subject: proposal,
+      }).success,
+    ).be.true();
+    assertRejects([
+      {
+        name: 'approving a recipe with no proposal',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-recipe' },
+      },
+      {
+        name: 'a proposal id that is not one',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-recipe', subject: `rp_${'a'.repeat(15)}` },
+      },
+      {
+        name: "a rule's stage on a recipe approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-recipe', subject: ruleStage },
+      },
+      {
+        name: "a proposal's id on a rule approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule', subject: proposal },
+      },
+      {
+        name: "a proposal's id on an act the machine may skip and that binds nothing",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'loosen-config', subject: proposal },
+      },
+      {
+        name: "a proposal's id with no act",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, subject: proposal },
+      },
+      {
+        name: 'a demand whose subject is not a proposal id',
+        schema: stepUp.StepUpDemandSchema,
+        value: { capability: 'secrets', axis: 'configure', act: 'approve-recipe', subject: 'rp_nope' },
+      },
+    ]);
+  });
+
   it('should keep the proof of a standing rule only, and only for an act every caller is asked', () => {
     // Act / Assert — the daemon derives these acts' challenges and stores their assertions; no other act is kept
     should(stepUp.STEP_UP_ACTS_STORED_PROOF).deepEqual(['approve-sign-in-rule']);

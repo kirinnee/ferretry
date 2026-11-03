@@ -23,6 +23,9 @@ import {
   type StepUpRefusal,
   type StepUpSubjectOf,
   STEP_UP_SUBJECTS,
+  STEP_UP_SUBJECTS_SKIPPABLE,
+  stepUpBindsSubject,
+  type SubjectBoundSkippableStepUpAct,
   type StoredProofStepUpAct,
   type StoredStepUpProof,
   StoredStepUpProofSchema,
@@ -286,6 +289,8 @@ export class StepUpService {
 
   /** Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. */
   claimFresh(subject: StepUpSubject, act?: MachineSkippableStepUpAct): boolean;
+  /** An act the machine may skip but whose proof is bound to one subject (`approve-recipe`, the proposal) names it. */
+  claimFresh(subject: StepUpSubject, act: SubjectBoundSkippableStepUpAct, bound: string): boolean;
   /**
    * An act every caller must prove takes only a proof proved for it AND bound to `bound` (the staged save it is for):
    * there is no way to ask for one without naming what it is bound to.
@@ -295,6 +300,13 @@ export class StepUpService {
     const now = this.deps.clock.nowMs();
     if (act !== undefined && !stepUpSkippableAtMachine(act))
       return bound !== undefined && !stepUpKeepsProof(act) && this.deps.registry.claimFresh(subject, now, act, bound);
+    if (act !== undefined && stepUpBindsSubject(act))
+      return (
+        bound !== undefined &&
+        STEP_UP_SUBJECTS_SKIPPABLE[act].safeParse(bound).success &&
+        this.deps.registry.claimFresh(subject, now, act, bound)
+      );
+    if (bound !== undefined) return false;
     return this.deps.registry.claimFresh(subject, now, act as MachineSkippableStepUpAct | undefined);
   }
 
@@ -493,7 +505,14 @@ export class StepUpService {
   async stepUpOptions(
     caller: StepUpCaller,
     origin: string,
-    act?: MachineSkippableStepUpAct,
+    act?: Exclude<MachineSkippableStepUpAct, SubjectBoundSkippableStepUpAct>,
+  ): Promise<StepUpOutcome<StepUpOptions>>;
+  /** Options for an act the machine may skip whose proof is bound to one subject (`approve-recipe`, the proposal). */
+  async stepUpOptions(
+    caller: StepUpCaller,
+    origin: string,
+    act: SubjectBoundSkippableStepUpAct,
+    bound: string,
   ): Promise<StepUpOutcome<StepUpOptions>>;
   /**
    * Options for an act every caller must prove: the challenge, and so the proof it buys, is bound to `bound` (the one
@@ -614,7 +633,7 @@ export class StepUpService {
         ? this.deps.registry.grantBound(device, now, proved.act, proved.stage, proved.kept)
         : proved?.kind === 'bound'
           ? this.deps.registry.grantBound(device, now, proved.act, proved.bound)
-          : this.deps.registry.grant(device, now, true, proved?.act);
+          : this.deps.registry.grant(device, now, true, proved?.act, proved?.kind === 'act' ? proved.bound : undefined);
     const expiresAt = instant(until);
     return { ok: true, value: done.rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
   }
@@ -844,6 +863,12 @@ function challengeStampOf(
   bound: string | undefined,
   challenge: Uint8Array | undefined,
 ): { readonly ok: true; readonly stamp?: ChallengeStamp } | { readonly ok: false } {
+  if (act !== undefined && stepUpBindsSubject(act)) {
+    // Machine-skippable, yet its proof is for ONE subject: no challenge is minted without a well-formed one of its kind.
+    if (bound === undefined || challenge !== undefined || !STEP_UP_SUBJECTS_SKIPPABLE[act].safeParse(bound).success)
+      return { ok: false };
+    return { ok: true, stamp: { kind: 'act', act, bound } };
+  }
   if (act === undefined || stepUpSkippableAtMachine(act)) {
     if ((bound !== undefined && bound !== '') || challenge !== undefined) return { ok: false };
     return act === undefined ? { ok: true } : { ok: true, stamp: { kind: 'act', act } };

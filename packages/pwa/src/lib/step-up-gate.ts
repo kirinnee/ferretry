@@ -20,7 +20,12 @@
  * the app; the browser holds nothing it could lose, replay or leak.
  */
 
-import { type StepUpAct, type StepUpOptionsRequest, stepUpSkippableAtMachine } from '@ferretry/protocol';
+import {
+  type StepUpAct,
+  type StepUpOptionsRequest,
+  stepUpBindsSubject,
+  stepUpSkippableAtMachine,
+} from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT } from './grants.ts';
 
@@ -238,7 +243,7 @@ export class StepUpGate {
     if (waiting === undefined || waiting.unnamed || waiting.actIds.size !== 1) return undefined;
     const act = [...waiting.actIds][0];
     if (act === undefined) return undefined;
-    if (stepUpSkippableAtMachine(act)) return { act };
+    if (stepUpSkippableAtMachine(act) && !stepUpBindsSubject(act)) return { act };
     const subject = waiting.subjects.size === 1 ? [...waiting.subjects][0] : undefined;
     return subject === undefined ? undefined : { act, subject };
   }

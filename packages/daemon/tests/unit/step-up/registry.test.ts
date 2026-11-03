@@ -421,6 +421,58 @@ describe('ChallengeLedger', () => {
   });
 });
 
+describe('StepUpRegistry bound proof for an act the machine may skip (approve-recipe)', () => {
+  const PROPOSAL_A = 'rp_000000000000000a';
+  const PROPOSAL_B = 'rp_000000000000000b';
+
+  it('should take the proof only for its act and its exact proposal, once', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'approve-recipe', PROPOSAL_A);
+
+    // Act + Assert — another proposal, another copy of the app, and a spent proof all count for nothing
+    should(registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_B)).be.false();
+    should(registry.claimFresh(phoneOtherTab, NOW, 'approve-recipe', PROPOSAL_A)).be.false();
+    should(registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A)).be.true();
+    should(registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A)).be.false();
+  });
+
+  it('should never let a proposal-bound proof satisfy an act-less or another act’s claim', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'approve-recipe', PROPOSAL_A);
+
+    // Act + Assert
+    should(registry.claimFresh(phone, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW, 'catalog-install')).be.false();
+    should(registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A)).be.true();
+  });
+
+  it('should never let an unbound proof for the act stand in for a proposal', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'approve-recipe');
+
+    // Act + Assert
+    should(registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A)).be.false();
+  });
+
+  it('should let one claimant win when two race for the same proof', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grant(phone, NOW, true, 'approve-recipe', PROPOSAL_A);
+
+    // Act
+    const claims = [
+      registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A),
+      registry.claimFresh(phone, NOW, 'approve-recipe', PROPOSAL_A),
+    ];
+
+    // Assert
+    should(claims).deepEqual([true, false]);
+  });
+});
+
 describe('StepUpRegistry bound proof (an act every caller must prove)', () => {
   const STAGE_A = 'a'.repeat(64);
   const STAGE_B = 'b'.repeat(64);

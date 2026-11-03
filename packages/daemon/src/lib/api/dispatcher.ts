@@ -6,6 +6,8 @@ import {
   type StepUpAct,
   type StepUpRequiredBody,
   STEP_UP_SUBJECTS,
+  STEP_UP_SUBJECTS_SKIPPABLE,
+  stepUpBindsSubject,
   stepUpKeepsProof,
   stepUpSkippableAtMachine,
   type StoredProofStepUpAct,
@@ -422,7 +424,11 @@ function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: St
     if (device === undefined || claim === undefined) return false;
     if (act !== undefined && !stepUpSkippableAtMachine(act))
       return subject !== undefined && subject !== '' && !stepUpKeepsProof(act) && claim(device, act, subject);
-    return claim(device, act);
+    if (act !== undefined && stepUpBindsSubject(act)) {
+      const bound = STEP_UP_SUBJECTS_SKIPPABLE[act].safeParse(subject);
+      return bound.success && claim(device, act, bound.data);
+    }
+    return subject === undefined && claim(device, act);
   }) as ClaimFreshStepUp;
 }
 

@@ -5,6 +5,7 @@ import type {
   EveryCallerStepUpAct,
   GrantRefusal,
   MachineSkippableStepUpAct,
+  SubjectBoundSkippableStepUpAct,
   StepUpSubjectOf,
   StoredProofStepUpAct,
   StoredStepUpProof,
@@ -263,7 +264,8 @@ export interface StepUpWitness {
 
 /** {@link StepUpWitness.claimFresh}, overloaded so an act every caller must prove cannot be asked the short way. */
 export interface ClaimFreshWitness {
-  (subject: SessionDevice, act?: MachineSkippableStepUpAct): boolean;
+  (subject: SessionDevice, act?: Exclude<MachineSkippableStepUpAct, SubjectBoundSkippableStepUpAct>): boolean;
+  (subject: SessionDevice, act: SubjectBoundSkippableStepUpAct, bound: string): boolean;
   (subject: SessionDevice, act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound: string): boolean;
 }
 
