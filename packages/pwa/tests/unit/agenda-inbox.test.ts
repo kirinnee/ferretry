@@ -42,6 +42,7 @@ import {
   withFerretCards,
   withFerretSessions,
 } from '../../src/lib/agenda-inbox.ts';
+import { answerAction, type InboxAction, withAskVersion } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -486,6 +487,47 @@ describe('the undo window', () => {
     deferred.schedule(card('A2'), DONE_ACTION);
     deferred.flush();
     expect(sent).toEqual(['A1', 'A2']);
+  });
+
+  test('stamps the ask version the card showed, so an answer held through the undo window still names it', async () => {
+    // Arrange — the card shows EU/US as ask version 1; the ferret replaces it with EU/Asia while the answer is held
+    const { timers, advance } = fakeTimers();
+    const posted: InboxAction[] = [];
+    const deferred = new DeferredAgendaActions(async (_target, action) => {
+      posted.push(action);
+    }, timers);
+    const shown = card('A1');
+    const eu = answerAction({ direction: 'left', does: 'choose', label: 'EU' }, '');
+    if (eu === null) throw new Error('a choice is always an action');
+
+    // Act
+    deferred.schedule(shown, eu);
+    deferred.schedule({ ...card('A2'), item: { ...item('A2', 1), askVersion: 3 } }, eu);
+    deferred.schedule(card('A3'), DONE_ACTION);
+    advance(UNDO_WINDOW_MS);
+
+    // Assert — an unreplaced ask is version 1, a replaced one names its own, and only an answer to the ask carries it
+    expect(posted).toMatchObject([
+      { kind: 'respond', askVersion: 1 },
+      { kind: 'respond', askVersion: 3 },
+      { kind: 'resolve' },
+    ]);
+    expect(posted[2]).not.toHaveProperty('askVersion');
+  });
+
+  test('keeps the version an action already names, and leaves a gate answer unstamped', () => {
+    // Arrange
+    const named: InboxAction = {
+      kind: 'respond',
+      label: 'EU',
+      response: { kind: 'multiple-choice', choice: 'EU' },
+      askVersion: 2,
+    };
+    const gate: InboxAction = { ...named, gate: true, askVersion: undefined };
+
+    // Assert
+    expect(withAskVersion(named, { askVersion: 5 })).toBe(named);
+    expect(withAskVersion(gate, { askVersion: 5 })).toBe(gate);
   });
 
   test('a refused answer brings the card back with the reason', async () => {

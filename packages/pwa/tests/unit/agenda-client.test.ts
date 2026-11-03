@@ -240,6 +240,39 @@ describe('DaemonAgendaClient', () => {
     should(actions).deepEqual([{ action: 'resolve', id: 'A2', response: choice, note: 'ok', gate: true }]);
   });
 
+  it('names the ask version an answer was given to only where the machine checks it, or the ask was replaced', async () => {
+    const actions: unknown[] = [];
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAgendaClient(
+      undefined,
+      async (_input, init) => {
+        actions.push(JSON.parse(String(init?.body)));
+        return response(snapshot('same/session'));
+      },
+      wires,
+    );
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'EU' };
+
+    // An older machine refuses the field as malformed, and has never replaced an ask: version 1 is left out
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 1);
+    // A machine that reports `agenda.asks.1` checks it
+    wires.note(daemonA.daemonId, {
+      kind: 'read',
+      health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaAsks]),
+    });
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 1);
+    // A replaced ask proves the machine replaces asks, whatever its health has said so far
+    wires.clearDaemon(daemonA.daemonId);
+    await client.respond(daemonA, scopeA, 'A1', choice, undefined, undefined, undefined, 2);
+
+    should(actions).deepEqual([
+      { action: 'resolve', id: 'A1', response: choice },
+      { action: 'resolve', id: 'A1', response: choice, askVersion: 1 },
+      { action: 'resolve', id: 'A1', response: choice, askVersion: 2 },
+    ]);
+  });
+
   it('sends the files of a Not good with its answer, and none when there are none', async () => {
     const actions: unknown[] = [];
     const client = new DaemonAgendaClient(undefined, async (_input, init) => {

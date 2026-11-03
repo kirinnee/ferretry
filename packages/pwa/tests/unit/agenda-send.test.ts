@@ -38,7 +38,7 @@ describe('sendAgendaAction', () => {
 
   it('sends each kind of action as exactly one request', async () => {
     expect(await sent({ kind: 'respond', label: 'Allow', response, note: 'n' })).toEqual([
-      ['respond', 'A1', response, 'n', undefined, undefined],
+      ['respond', 'A1', response, 'n', undefined, undefined, undefined],
     ]);
     expect(await sent({ kind: 'dismiss', label: 'Dismiss', note: 'n' })).toEqual([['dismiss', 'A1', 'n']]);
     expect(await sent({ kind: 'needs-info', label: 'More', note: 'n' })).toEqual([['needsInfo', 'A1', 'n']]);
@@ -49,7 +49,14 @@ describe('sendAgendaAction', () => {
   it('marks an answer to the gate attached to a thread', async () => {
     const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Done' };
     expect(await sent({ kind: 'respond', label: 'Done', response: choice, gate: true })).toEqual([
-      ['respond', 'A1', choice, undefined, true, undefined],
+      ['respond', 'A1', choice, undefined, true, undefined, undefined],
+    ]);
+  });
+
+  it('carries the ask version an answer was given to, to the one client call', async () => {
+    const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'EU' };
+    expect(await sent({ kind: 'respond', label: 'EU', response: choice, askVersion: 2 })).toEqual([
+      ['respond', 'A1', choice, undefined, undefined, undefined, 2],
     ]);
   });
 
@@ -57,7 +64,7 @@ describe('sendAgendaAction', () => {
     const choice: AgendaResponse = { kind: 'multiple-choice', choice: 'Not good' };
     const attachments = { from: 'fr', ids: [`att_${'a'.repeat(64)}`] };
     expect(await sent({ kind: 'respond', label: 'Not good', response: choice, attachments })).toEqual([
-      ['respond', 'A1', choice, undefined, undefined, attachments],
+      ['respond', 'A1', choice, undefined, undefined, attachments, undefined],
     ]);
   });
 

@@ -456,7 +456,7 @@ describe('useAgendaInboxModel', () => {
     await interact(() => fire());
     await settle();
     expect(calls.filter(call => call.method !== 'revalidate').map(call => [call.method, call.detail])).toEqual([
-      ['respond', ['A1', { kind: 'permission', decision: 'approve' }]],
+      ['respond', ['A1', { kind: 'permission', decision: 'approve' }, undefined, undefined, undefined, 1]],
       ['dismiss', ['A2', undefined]],
       ['resolve', ['A3', 'shipped']],
       ['discuss', ['A4', 'why?']],

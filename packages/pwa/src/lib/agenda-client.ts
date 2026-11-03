@@ -293,7 +293,11 @@ export class DaemonAgendaClient {
     note?: string,
     gate?: true,
     attachments?: BoardReopenAttachments,
+    askVersion?: number,
   ): Promise<void> {
+    // A machine that has not said it checks the version (`agenda.asks.1`) refuses the field as malformed, and can never
+    // have replaced an ask: the version rides only where it is understood, or where an ask was replaced (so it is).
+    const checked = askVersion !== undefined && (this.wires.asksOf(daemon.daemonId) === true || askVersion > 1);
     return this.#mutate(daemon, scope, {
       action: 'resolve',
       id,
@@ -301,6 +305,7 @@ export class DaemonAgendaClient {
       ...(note === undefined ? {} : { note }),
       ...(gate === undefined ? {} : { gate }),
       ...(attachments === undefined ? {} : { attachments }),
+      ...(checked ? { askVersion } : {}),
     });
   }
 
