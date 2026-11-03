@@ -240,7 +240,8 @@ export function BrowserProxySection({
         </label>
         <textarea
           id={`${ids}-bypass`}
-          className="kt-input min-h-16 min-w-0 font-mono"
+          className="kt-input min-h-0 min-w-0 font-mono"
+          rows={2}
           autoComplete="off"
           autoCapitalize="off"
           autoCorrect="off"
@@ -251,21 +252,32 @@ export function BrowserProxySection({
           onChange={event => edit({ bypass: event.target.value })}
         />
       </div>
-      <BrowserProxyCredential
-        what="Username"
-        stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
-        value={pending.username}
-        problem={problems.username}
-        onChange={value => typedInto('username', value)}
-        onRemove={() => removeCredential('username')}
-      />
-      <BrowserProxyCredential
-        what="Password"
-        stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
-        value={pending.password}
-        problem={problems.password}
-        onChange={value => typedInto('password', value)}
-        onRemove={() => removeCredential('password')}
+      <BrowserProxyTestBlock
+        disabled={(testBody === null && !(typed && !wanted.ok)) || !online}
+        testing={testing}
+        hint={testHint}
+        shown={shown}
+        onTest={test}
+        fields={
+          <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2" data-browser-proxy-credentials="">
+            <BrowserProxyCredential
+              what="Username"
+              stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
+              value={pending.username}
+              problem={problems.username}
+              onChange={value => typedInto('username', value)}
+              onRemove={() => removeCredential('username')}
+            />
+            <BrowserProxyCredential
+              what="Password"
+              stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
+              value={pending.password}
+              problem={problems.password}
+              onChange={value => typedInto('password', value)}
+              onRemove={() => removeCredential('password')}
+            />
+          </div>
+        }
       />
       <div className="flex min-w-0 flex-col gap-2">
         <button
@@ -321,13 +333,6 @@ export function BrowserProxySection({
           {wanted.problem}
         </SetupNote>
       )}
-      <BrowserProxyTestBlock
-        disabled={(testBody === null && !(typed && !wanted.ok)) || !online}
-        testing={testing}
-        hint={testHint}
-        shown={shown}
-        onTest={test}
-      />
       {wanted.ok && dirty ? (
         <ChangeApplyPanel
           machineName={machineName}

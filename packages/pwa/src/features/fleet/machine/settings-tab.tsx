@@ -45,7 +45,7 @@ import { type PanelGroupId, panelGroup } from '../shell/machine-panels.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
 import { machineSettings } from './machine-settings.ts';
-import { SwitchList, SwitchRow } from './switch-row.tsx';
+import { SwitchRow } from './switch-row.tsx';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
 type AgentControlKind = keyof FleetAgentControl;
@@ -172,20 +172,23 @@ export function AgentPermissionsSection({
   };
   return (
     <SetupSection title="Agent permissions" name="agent-permissions">
-      <Segmented
-        label="Agent permissions"
-        name="agent-permissions"
-        value={draft}
-        onChoose={value => {
-          setDraft(value);
-          changes.clear();
-        }}
-        options={(['auto', 'skip'] as const).map(id => ({
-          id,
-          label: AGENT_PERMISSION_SEGMENTS[id],
-          title: AGENT_PERMISSION_WORDS[id],
-        }))}
-      />
+      <div className="w-fit max-w-full" data-agent-permissions-pick="">
+        <Segmented
+          label="Agent permissions"
+          name="agent-permissions"
+          fit
+          value={draft}
+          onChoose={value => {
+            setDraft(value);
+            changes.clear();
+          }}
+          options={(['auto', 'skip'] as const).map(id => ({
+            id,
+            label: AGENT_PERMISSION_SEGMENTS[id],
+            title: AGENT_PERMISSION_WORDS[id],
+          }))}
+        />
+      </div>
       <p className="m-0 text-cell leading-base text-muted" data-agent-permissions-detail="">
         {draft === 'auto'
           ? 'Agents work on their own and stop to ask before anything that looks risky.'
@@ -287,8 +290,8 @@ export function AgentControlSection({
 
 type KeepInSyncSave = 'applied' | 'broken' | 'held';
 
-/** Settings › Machine › Conversations: whether Continue lists this computer's own CLI conversations. */
-export function ConversationsSection({
+/** Settings › Machine › Agents › More › Conversations: whether Continue lists this computer's own CLI conversations. */
+export function ConversationsRows({
   daemonId,
   access,
 }: {
@@ -335,26 +338,26 @@ export function ConversationsSection({
   };
 
   return (
-    <SetupSection title="Conversations" name="conversations">
-      <SwitchList label="Conversations">
-        <SwitchRow
-          checked={on}
-          label="Keep in sync"
-          explanation={KEEP_IN_SYNC_EXPLANATION}
-          disabled={busy}
-          onChange={toggle}
-        />
-      </SwitchList>
+    <>
+      <SwitchRow
+        checked={on}
+        label="Keep in sync"
+        explanation={KEEP_IN_SYNC_EXPLANATION}
+        disabled={busy}
+        onChange={toggle}
+      />
       {note === null ? null : (
-        <p
-          role="status"
-          className={cn('m-0 text-meta leading-base', note.tone === 'err' ? 'text-err' : 'text-warn')}
-          data-keep-in-sync-note=""
-        >
-          {note.text}
-        </p>
+        <li className="px-panel py-2">
+          <p
+            role="status"
+            className={cn('m-0 text-meta leading-base', note.tone === 'err' ? 'text-err' : 'text-warn')}
+            data-keep-in-sync-note=""
+          >
+            {note.text}
+          </p>
+        </li>
       )}
-    </SetupSection>
+    </>
   );
 }
 
@@ -375,7 +378,7 @@ export const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: 
 export const autoResumeSentence = (resumed: number): string =>
   `Resumed ${resumed} ${resumed === 1 ? 'ferret' : 'ferrets'} after restart`;
 
-export function AutoResumeSection({
+export function AutoResumeRows({
   machine,
   machineName,
   access,
@@ -400,43 +403,43 @@ export function AutoResumeSection({
   // A daemon that predates the setting does not resume anything and cannot be asked to.
   if (machine.autoResume === undefined) return null;
   return (
-    <SetupSection title="Auto-resume after restart" name="auto-resume">
-      <SwitchList label="Auto-resume after restart">
-        <SwitchRow
-          checked={draft === 'on'}
-          label="Resume ferrets after a restart"
-          explanation={AUTO_RESUME_WORDS[draft].detail}
-          onChange={on => {
-            setDraft(on ? 'on' : 'off');
-            changes.clear();
-          }}
-        />
-      </SwitchList>
+    <>
+      <SwitchRow
+        checked={draft === 'on'}
+        label="Resume ferrets after a restart"
+        explanation={AUTO_RESUME_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
+          changes.clear();
+        }}
+      />
       {last === null ? null : (
-        <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
+        <li className="flex min-w-0 flex-col gap-1 px-panel py-2" data-auto-resume-summary="">
           <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
           {last.skipped.map(item => (
             <p key={item.sessionId} className="m-0 text-meta leading-base text-warn" data-auto-resume-skipped="">
               Couldn’t auto-resume {item.sessionId}: {item.reason}
             </p>
           ))}
-        </div>
+        </li>
       )}
       {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save auto-resume"
-          onSubmit={save}
-        >
-          <Button type="button" data-auto-resume-undo="" onClick={() => setDraft(current)}>
-            Keep {AUTO_RESUME_WORDS[current].title}
-          </Button>
-        </ChangeApplyPanel>
+        <li className="px-panel py-2">
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={changes.authority}
+            busy={changes.busy}
+            refusal={changes.refusal}
+            submitLabel="Save auto-resume"
+            onSubmit={save}
+          >
+            <Button type="button" data-auto-resume-undo="" onClick={() => setDraft(current)}>
+              Keep {AUTO_RESUME_WORDS[current].title}
+            </Button>
+          </ChangeApplyPanel>
+        </li>
       ) : null}
-    </SetupSection>
+    </>
   );
 }
 
@@ -454,7 +457,7 @@ export const AGENDA_MODE_WORDS: Readonly<Record<'on' | 'off', { readonly title: 
   },
 };
 
-export function AgendaModeSection({
+export function AgendaModeRows({
   machine,
   machineName,
   access,
@@ -478,33 +481,33 @@ export function AgendaModeSection({
   // A daemon that predates the default starts every ferret off and cannot be asked to do otherwise.
   if (machine.agendaMode === undefined) return null;
   return (
-    <SetupSection title="Agenda mode" name="agenda-mode">
-      <SwitchList label="Agenda mode">
-        <SwitchRow
-          checked={draft === 'on'}
-          label="Agenda mode for new ferrets"
-          explanation={AGENDA_MODE_WORDS[draft].detail}
-          onChange={on => {
-            setDraft(on ? 'on' : 'off');
-            changes.clear();
-          }}
-        />
-      </SwitchList>
+    <>
+      <SwitchRow
+        checked={draft === 'on'}
+        label="Agenda mode for new ferrets"
+        explanation={AGENDA_MODE_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
+          changes.clear();
+        }}
+      />
       {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save agenda mode"
-          onSubmit={save}
-        >
-          <Button type="button" data-agenda-mode-undo="" onClick={() => setDraft(current)}>
-            Keep {AGENDA_MODE_WORDS[current].title}
-          </Button>
-        </ChangeApplyPanel>
+        <li className="px-panel py-2">
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={changes.authority}
+            busy={changes.busy}
+            refusal={changes.refusal}
+            submitLabel="Save agenda mode"
+            onSubmit={save}
+          >
+            <Button type="button" data-agenda-mode-undo="" onClick={() => setDraft(current)}>
+              Keep {AGENDA_MODE_WORDS[current].title}
+            </Button>
+          </ChangeApplyPanel>
+        </li>
       ) : null}
-    </SetupSection>
+    </>
   );
 }
 

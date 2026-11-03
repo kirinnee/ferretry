@@ -259,7 +259,7 @@ describe('The Default badge and Make default on the runtimes list', () => {
     ).not.toBeNull();
   });
 
-  it('puts the Default and Not agent badges after the name, wrapping under it instead of cutting it, and badges no switched-off runtime', async () => {
+  it('puts the Default and Not agent badges after the name on its one line, and badges no switched-off runtime', async () => {
     const view = await open();
     const card = (name: string) =>
       must(view.container.querySelector<HTMLElement>(`[data-runtime-card="${name}"]`), name);
@@ -267,10 +267,12 @@ describe('The Default badge and Make default on the runtimes list', () => {
       const element = must(card(name).querySelector<HTMLElement>(`[${badge}]`), badge);
       const nameRow = must(card(name).querySelector<HTMLElement>('[data-runtime-name]'), 'name').parentElement;
       // The badge shares the name's own row, and follows it.
-      expect(element.parentElement).toBe(nameRow);
+      expect(element.parentElement?.parentElement).toBe(nameRow);
+      expect(element.parentElement?.className).toContain('md:contents');
       expect(nameRow?.firstElementChild?.hasAttribute('data-runtime-name')).toBe(true);
       expect(nameRow?.hasAttribute('data-runtime-name-row')).toBe(true);
-      expect(nameRow?.className).toContain('flex-wrap');
+      expect(nameRow?.className).toContain('flex-nowrap');
+      expect(nameRow?.className).not.toContain('flex-wrap');
       return element;
     };
     expect(badgesOn('claude-default', 'data-runtime-default-badge').textContent).toBe('Default');
@@ -278,23 +280,60 @@ describe('The Default badge and Make default on the runtimes list', () => {
     // A switched-off runtime carries no badge: the off switch and the off note already say it.
     expect(card('claude-atomi').querySelector('[data-runtime-disabled-badge]')).toBeNull();
     expect(card('claude-atomi').textContent).not.toMatch(/disabled/i);
-    // The badge wraps under the name before the name is ever cut: the name never shrinks or truncates.
+    // A row is two lines on a phone: the badges stay beside the name, and it is the NAME that gives way
+    // (cut with an ellipsis, whole in its tooltip) so a badge never drops to a line of its own.
     for (const runtime of ['claude-default', 'claude-atomi', 'claude-plain']) {
       const name = must(card(runtime).querySelector('[data-runtime-name]'), 'name');
-      expect(name.className).toContain('shrink-0');
-      expect(name.className).toContain('max-w-full');
-      expect(name.className).toContain('break-words');
-      expect(name.className).not.toContain('truncate');
-      expect(name.className).not.toContain('ellipsis');
+      expect(name.className).toContain('truncate');
+      expect(name.className).toContain('min-w-0');
+      expect(name.className).not.toContain('shrink-0');
+      expect(name.getAttribute('title')).toBe(runtime);
     }
     expect(card('claude-default').querySelector('[data-runtime-default-badge]')?.className).toContain('shrink-0');
+    expect(card('claude-plain').querySelector('[data-runtime-kind-badge]')?.className).toContain('shrink-0');
     // The details are one truncated line, whole in its tooltip.
     const details = must(card('claude-default').querySelector<HTMLElement>('[data-runtime-details]'), 'details');
-    expect(details.className).toContain('truncate');
-    expect(details.getAttribute('title')).toBe(details.textContent ?? '');
+    const line = must(details.lastElementChild as HTMLElement | null, 'details text');
+    expect(line.className).toContain('truncate');
+    expect(details.getAttribute('title')).toBe(line.textContent ?? '');
     // The off note appears only for a switched-off runtime.
     expect(card('claude-work').querySelector('[data-disable-note]')).toBeNull();
     expect(card('claude-atomi').querySelector('[data-disable-note]')).not.toBeNull();
+  });
+
+  it('repeats the badges ahead of the details line on a phone, where the name row has no room for them', async () => {
+    const view = await open();
+    const card = must(view.container.querySelector<HTMLElement>('[data-runtime-card="claude-default"]'), 'card');
+    const details = must(card.querySelector<HTMLElement>('[data-runtime-details]'), 'details');
+    const phone = must(details.firstElementChild as HTMLElement | null, 'phone badges');
+    expect(phone.className).toContain('md:hidden');
+    const desktop = [...card.querySelectorAll('[data-runtime-name-row] .kt-badge')].map(badge => badge.textContent);
+    expect(desktop).toContain('Default');
+    expect([...phone.querySelectorAll('.kt-badge')].map(badge => badge.textContent)).toEqual(desktop);
+    // Only the desktop copy carries the hooks, so nothing finds a badge twice.
+    expect(phone.querySelector('[data-runtime-default-badge]')).toBeNull();
+    expect(card.querySelectorAll('[data-runtime-default-badge]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('lists every runtime as one row of a single grouped card', async () => {
+    const view = await open();
+    const lists = view.container.querySelectorAll('[data-runtimes-list]');
+    expect(lists).toHaveLength(1);
+    const list = must(lists[0], 'the list');
+    expect(list.tagName).toBe('UL');
+    expect(list.className).toContain('kt-groupcard');
+    const rows = [...list.children];
+    expect(rows.map(row => row.getAttribute('data-runtime-card'))).toEqual(
+      [...view.container.querySelectorAll('[data-runtime-card]')].map(card => card.getAttribute('data-runtime-card')),
+    );
+    for (const row of rows) {
+      expect(row.tagName).toBe('LI');
+      // The runtime's own panel is gone: the group card is the only box.
+      expect(row.className).not.toContain('kt-panel');
+      expect(row.querySelector('[data-runtime-details]')).not.toBeNull();
+    }
+    await view.unmount();
   });
 
   it('offers Make default in the ⋯ menu of each non-default agent runtime, not on the default, a plain runtime or a switched-off one', async () => {

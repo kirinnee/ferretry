@@ -103,26 +103,50 @@ const staged = (calls: readonly Call[]): Call =>
 const SAVES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME };
 
 describe('AgentsTab', () => {
-  it('holds what agents may do, who supervises them and how they come back, in that order', async () => {
+  it('holds what agents may do and what they may control, then one More list of everything else', async () => {
     const asked: string[] = [];
-    const daemonPanels: NonNullable<MachineTabProps['daemonPanels']> = (panel, _onOpen, group) => {
+    const daemonPanels: NonNullable<MachineTabProps['daemonPanels']> = (panel, _onOpen, group, lead) => {
       asked.push(group ?? String(panel));
-      return <section data-panel-group={group} />;
+      return (
+        <section data-panel-group={group}>
+          <ul data-panel-group-list="">{lead}</ul>
+        </section>
+      );
     };
     await withTab({ machine: machineView({ autoResume: true, agendaMode: true }), daemonPanels }, async ({ q }) => {
       const names = [...(q('[data-agents-tab]')?.children ?? [])].map(
         node => node.getAttribute('data-setup-section') ?? node.getAttribute('data-panel-group') ?? 'unknown',
       );
-      expect(names).toEqual([
-        'agent-permissions',
-        'agent-control',
-        'supervision',
-        'auto-resume',
-        'agenda-mode',
-        'conversations',
-        'agent-settings',
-      ]);
-      expect([...new Set(asked)]).toEqual(['supervision', 'agent-settings']);
+      expect(names).toEqual(['agent-permissions', 'agent-control', 'more']);
+      expect([...new Set(asked)]).toEqual(['more']);
+      // The auto-resume, agenda and conversations switches are rows of that one list, in that order.
+      const rows = [...(q('[data-panel-group-list]')?.querySelectorAll('[data-switch-row]') ?? [])].map(row =>
+        row.getAttribute('data-switch-row'),
+      );
+      expect(rows).toEqual(['Resume ferrets after a restart', 'Agenda mode for new ferrets', 'Keep in sync']);
+    });
+  });
+
+  it('draws the same More list itself when no panel frame is given', async () => {
+    await withTab({ machine: machineView({ autoResume: true, agendaMode: true }) }, async ({ q }) => {
+      const more = must(q('[data-setup-section="more"]'), 'the More section');
+      expect(more.querySelector('h4')?.textContent).toBe('More');
+      const lists = more.querySelectorAll('ul.kt-groupcard');
+      expect(lists).toHaveLength(1);
+      expect(lists[0]?.querySelectorAll('[data-switch-row]')).toHaveLength(3);
+      // Nothing else on the tab is a one-row card of its own any more.
+      expect(q('[data-setup-section="auto-resume"]')).toBeNull();
+      expect(q('[data-setup-section="agenda-mode"]')).toBeNull();
+      expect(q('[data-setup-section="conversations"]')).toBeNull();
+    });
+  });
+
+  it('sizes the permissions pick to its words instead of the full row', async () => {
+    await withTab({}, async ({ q }) => {
+      const pick = must(q('[data-agent-permissions-pick]'), 'the pick');
+      expect(pick.className).toContain('w-fit');
+      expect(pick.querySelector('[data-segmented="agent-permissions"]')).not.toBeNull();
+      expect(pick.querySelector('[data-segment="auto"]')?.className).toContain('flex-auto');
     });
   });
 
@@ -139,7 +163,7 @@ describe('AgentsTab', () => {
     );
     await withTab({ machine: null, checking: true, daemonPanels }, async ({ q }) => {
       expect(q('[data-agents-waiting]')?.textContent).toBe('Checking studio-mac…');
-      expect(q('[data-panel-group="supervision"]')).not.toBeNull();
+      expect(q('[data-panel-group="more"]')).not.toBeNull();
       expect(q('[data-agents-tab]')).toBeNull();
     });
     await withTab({ machine: null }, async ({ q }) => {

@@ -6,7 +6,7 @@
  */
 
 import { Info } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 
 interface SwitchRowProps {
@@ -81,14 +81,5 @@ export function SwitchRow({ checked, onChange, label, hint, explanation, disable
         </p>
       ) : null}
     </li>
-  );
-}
-
-/** A titled run of switch rows in one card, as the Machine tab's other lists are. */
-export function SwitchList({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <ul className="kt-groupcard m-0 list-none p-0" aria-label={label} data-switch-list="">
-      {children}
-    </ul>
   );
 }
