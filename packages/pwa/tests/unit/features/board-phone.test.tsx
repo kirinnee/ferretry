@@ -1,3 +1,4 @@
+import { boardPrivate } from '../../../src/lib/board-private-preference.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { boardOk } from '@ferretry/protocol';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
@@ -33,6 +34,7 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  boardPrivate.set(false);
 });
 
 const OPEN = [
@@ -278,7 +280,7 @@ describe('Board on a phone — counts and filters', () => {
     expect(written.get('view')).toBe('list');
   });
 
-  it('keeps "Ferret cards" in the Filters sheet, not the header, so the header gains no row', async () => {
+  it('keeps "Show private" in the Filters sheet, not the header, so the header gains no row', async () => {
     const split = [
       originCard('F1', 'human', null, { laneId: 'implement' }),
       originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
@@ -290,12 +292,12 @@ describe('Board on a phone — counts and filters', () => {
       document.querySelector<HTMLInputElement>('.fy-board-filter-sheet [data-filter="agents"]'),
       'the agents toggle',
     );
-    expect(toggle.closest('label')?.textContent).toBe('Ferret cards');
+    expect(toggle.closest('label')?.textContent).toBe('Show private');
     await click(document.body, '.fy-board-filter-sheet [data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
   });
 
-  it('offers no "Ferret cards" in the sheet when the daemon does not say who asked', async () => {
+  it('offers no "Show private" in the sheet when the daemon does not say who asked', async () => {
     const { root } = await open('', {}, unasked(OPEN));
     await click(root, '.fy-board-filters__toggle');
     expect(document.querySelector('.fy-board-filter-sheet')).not.toBeNull();

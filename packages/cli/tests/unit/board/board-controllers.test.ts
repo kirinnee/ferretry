@@ -243,6 +243,20 @@ describe('fy board', () => {
     should(log[0]).startWith('ok: all projects — 0 cards');
   });
 
+  it('should say so when the daemon is too old to filter by visibility', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+    gateway.boardResponse = response({ cards: [card({ id: 'F1', title: 'Old card' })] });
+
+    // Act
+    await controller.board({});
+
+    // Assert
+    should(log.join('\n'))
+      .containEql('this daemon predates public and private cards')
+      .and.not.containEql('public cards only');
+  });
+
   it('should show public cards and say so, and show the rest with --private or --all', async () => {
     // Arrange
     const { controller, gateway, log } = harness();

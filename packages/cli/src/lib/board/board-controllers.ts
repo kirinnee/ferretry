@@ -183,8 +183,12 @@ export class BoardController {
     const render = options.md === true ? renderBoardMarkdown : renderBoard;
     this.deps.output.success(render(response, listing.projects, names, label));
     if (query.visibility === 'public') {
+      const older = response.cards.length > 0 && response.cards.every(card => card.visibility === undefined);
       this.deps.output.success(
-        `public cards only: ${this.deps.binary} board --private shows the ferrets' own cards, --all shows both`,
+        older
+          ? 'this daemon predates public and private cards, so every card is shown; update it with: ' +
+              `${this.deps.binary} daemon update`
+          : `public cards only: ${this.deps.binary} board --private shows the ferrets' own cards, --all shows both`,
       );
     }
   }
