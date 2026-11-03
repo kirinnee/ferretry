@@ -1,7 +1,7 @@
 import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { CredentialedSession } from '../../lib/agent-tools/policy.ts';
 import { readSessionFleet } from '../../lib/agent-tools/fleet-read.ts';
+import type { CredentialedSession, CredentialedSessions } from '../../lib/agent-tools/policy.ts';
 import { isTerminalStatus, type WardenSessionStatus } from '../../lib/warden/types.ts';
 
 /**
@@ -37,7 +37,7 @@ export interface CredentialedSessionSource {
  * The walk goes through {@link readSessionFleet}, which limits SESSIONS in flight; this adapter
  * starts TWO document reads per session, so the peak is 64 sessions and 128 open documents.
  */
-export class StorageCredentialedSessions {
+export class StorageCredentialedSessions implements CredentialedSessions {
   constructor(private readonly source: CredentialedSessionSource) {}
 
   async snapshot(): Promise<readonly CredentialedSession[]> {
@@ -45,7 +45,8 @@ export class StorageCredentialedSessions {
     return sessions.filter((session): session is CredentialedSession => session !== undefined);
   }
 
-  private async session(id: string): Promise<CredentialedSession | undefined> {
+  /** Re-read both documents: a cached digest is a location hint, never proof of a live identity. */
+  async session(id: string): Promise<CredentialedSession | undefined> {
     const [rawConfig, rawState] = await Promise.all([this.source.readConfig(id), this.source.readState(id)]);
     const config = SessionConfigSchema.safeParse(rawConfig);
     const credential = CapabilityHashDocumentSchema.safeParse(rawConfig);

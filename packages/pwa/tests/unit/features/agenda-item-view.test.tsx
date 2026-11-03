@@ -541,6 +541,83 @@ describe('an input request', () => {
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
   });
+
+  // #B147: the card showed the ferret's prompt three times and "Type the value below." over a form that says it.
+  test('says the ferret’s prompt once, in the form, and draws no ask segment over it', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      subject: 'Type it into the terminal',
+      why: 'Type it into the terminal',
+      context: 'This follows !A7 in the same login.\nThe agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(one('[data-agenda-section="context"]').textContent).toContain('This follows !A7 in the same login.');
+    expect(one('[data-agenda-section="context"]').textContent).not.toContain('The agent says');
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+  });
+
+  test('draws no context at all when it held only the ferret’s prompt', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+  });
+
+  test('keeps the prompt and the ask when the form it was given is not drawn: a settled item', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: why the deploy password is wanted',
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" />, settled: <p data-settled="">Delivered.</p> });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('why the deploy password is wanted');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+  });
+
+  test('keeps each version’s prompt and the ask when an older version is selected, form given', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: the new prompt',
+      revisions: [
+        {
+          at: '2026-08-01T11:57:00.000Z',
+          by: 'daemon',
+          changed: ['context'],
+          previous: { context: 'The agent says: the first prompt' },
+        },
+      ],
+    } as Partial<AgendaItem>);
+    await draw(input, { inputForm: <form data-fake-input="" /> });
+    expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
+    const picker = one<HTMLSelectElement>('.fy-card__top [data-agenda-version-picker]');
+    await interact(() => {
+      picker.value = '1';
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(root().querySelector('[data-fake-input]')).toBeNull();
+    expect(one('[data-agenda-section="context"]').textContent).toContain('the first prompt');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-latest]').click());
+    expect(one('[data-fake-input]')).toBeDefined();
+    expect(root().querySelector('[data-agenda-need]')).toBeNull();
+  });
+
+  test('without its form (an app that cannot draw it) keeps the context and the ask as they were', async () => {
+    const input = agendaItem('A8', {
+      kind: 'input',
+      input: { requestId: '0'.repeat(32) },
+      context: 'The agent says: [sudo] password for kirin:',
+    } as Partial<AgendaItem>);
+    await draw(input);
+    expect(one('[data-agenda-section="context"]').textContent).toContain('The agent says');
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+  });
 });
 
 describe('moving through the items', () => {

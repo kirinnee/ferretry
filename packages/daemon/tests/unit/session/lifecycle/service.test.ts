@@ -2,8 +2,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
-import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
-import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
+import { CredentialAgentIdentities, CredentialDigestLocations } from '../../../../src/lib/agent-tools/policy.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
   SessionEffectAdmission,
@@ -32,12 +31,13 @@ import {
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from '../../../../src/lib/session/lifecycle/index.ts';
-import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
 import {
   dropFerretIdentity,
   FERRET_IDENTITY_VARIABLES,
   sessionPaneEnvironment,
 } from '../../../../src/lib/session/lifecycle/policy.ts';
+import { SessionCredentialRevokedError } from '../../../../src/lib/session/lifecycle/types.ts';
+import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const LAUNCHED: SessionLaunchInstructions = {
@@ -1539,18 +1539,25 @@ describe('SessionLifecycleService credential per launch', () => {
     });
     const built = harness({ credentials, environment, rotation });
     hashes = new RepositoryHashStore(built.repository, built.order);
+    const session = async () => {
+      const record = built.repository.current();
+      const hash = record.config.sessionCapabilityHash;
+      return hash === undefined
+        ? undefined
+        : { id: record.config.id, name: null, active: true, sessionCapabilityHash: hash };
+    };
     const identities = new CredentialAgentIdentities(
       {
         snapshot: async () => {
-          const record = built.repository.current();
-          const hash = record.config.sessionCapabilityHash;
-          return hash === undefined
-            ? []
-            : [{ id: record.config.id, name: null, active: true, sessionCapabilityHash: hash }];
+          const current = await session();
+          return current === undefined ? [] : [current];
         },
+        session,
       },
       capability => credential(capability).hash,
       (left, right) => left === right,
+      new CredentialDigestLocations(),
+      () => '',
     );
     return {
       ...built,
@@ -1632,18 +1639,25 @@ describe('SessionLifecycleService credential per launch', () => {
       built.launcher.livenessFromLaunch = true;
       await built.subject.create(input());
       await built.subject.start(ID);
+      const session = async () => {
+        const record = built.repository.current();
+        const hash = record.config.sessionCapabilityHash;
+        return hash === undefined
+          ? undefined
+          : { id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash };
+      };
       const live = new CredentialAgentIdentities(
         {
           snapshot: async () => {
-            const record = built.repository.current();
-            const hash = record.config.sessionCapabilityHash;
-            return hash === undefined
-              ? []
-              : [{ id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash }];
+            const current = await session();
+            return current === undefined ? [] : [current];
           },
+          session,
         },
         capability => credential(capability).hash,
         (left, right) => left === right,
+        new CredentialDigestLocations(),
+        () => '',
       );
       const current = built.repository.current();
       built.repository.documents.set(ID, JSON.stringify({ ...current, state: { ...current.state, status } }));

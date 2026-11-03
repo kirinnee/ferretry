@@ -1,4 +1,4 @@
-import type { AgendaId } from '@ferretry/protocol';
+import { type AgendaId, INPUT_PROMPT_MARKER } from '@ferretry/protocol';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
 import type { PhoneApprovalAgendaPort, PhoneApprovalCard } from './phone-approval.ts';
@@ -7,18 +7,15 @@ import type { InputAgendaPort, InputAgentNotifier, InputCard, InputCardResult } 
 const INPUT_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'input-request' };
 const PHONE_APPROVAL_ACTOR: AgendaActor = { kind: 'daemon', cause: 'phone-approval' };
 
-/** Where the agent's own sentence starts in a card's context; everything after it is the prompt. */
-const PROMPT_MARKER = 'The agent says: ';
-
 /**
  * A card's context: the daemon's own line first when it has one (why a task plan did not fill it), then the login it
- * follows, then the agent's prompt, always last, after {@link PROMPT_MARKER}, where a restart reads it back.
+ * follows, then the agent's prompt, always last, after {@link INPUT_PROMPT_MARKER}, where a restart reads it back.
  */
 const contextOf = (card: Pick<InputCard, 'prompt' | 'chain'>, line?: string): string =>
   [
     ...(line === undefined ? [] : [line]),
     ...(card.chain === undefined ? [] : [`This follows ${card.chain} in the same login.`]),
-    `${PROMPT_MARKER}${card.prompt}`,
+    `${INPUT_PROMPT_MARKER}${card.prompt}`,
   ].join('\n');
 
 /**
@@ -70,8 +67,8 @@ export class InputAgendaAdapter implements InputAgendaPort {
     const listed = await this.agenda.list(sessionId);
     if (!listed.ok) return undefined;
     const context = listed.value.items.find(item => item.id === id)?.context;
-    const at = context?.indexOf(PROMPT_MARKER) ?? -1;
-    return context == null || at < 0 ? undefined : context.slice(at + PROMPT_MARKER.length);
+    const at = context?.indexOf(INPUT_PROMPT_MARKER) ?? -1;
+    return context == null || at < 0 ? undefined : context.slice(at + INPUT_PROMPT_MARKER.length);
   }
 }
 

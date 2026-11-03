@@ -849,6 +849,7 @@ import {
   type ConversionSummary as ConvertedConversationSummary,
   type CopyPageHost,
   CredentialAgentIdentities,
+  CredentialDigestLocations,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -6815,6 +6816,9 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
     }),
     capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
     secretsMatch,
+    new CredentialDigestLocations(),
+    // Every config this daemon writes (a rotation or a new session included) moves it; see CredentialAgentIdentities.
+    () => String(storage.configWrites()),
   );
 }
 
