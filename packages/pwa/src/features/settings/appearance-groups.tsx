@@ -21,7 +21,7 @@ import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { Segmented, SettingDisclosureRow, SettingGroup, SettingRow, SettingSwitch } from './setting-row.tsx';
 import { settingDefinition } from './settings-catalog.ts';
 
-export const TEXT_SCALE_OPTIONS = [
+const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
   { id: 'large', label: 'Large', description: '112% of default.' },
   { id: 'larger', label: 'Larger', description: '125% of default.' },

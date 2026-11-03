@@ -16,7 +16,7 @@ import { ChevronLeft } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
-import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
+import { useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { machineDisplayOrder } from '../../lib/all-machines.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -51,7 +51,7 @@ import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
-import { AppearanceGroups, TEXT_SCALE_OPTIONS } from './appearance-groups.tsx';
+import { AppearanceGroups } from './appearance-groups.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
@@ -219,39 +219,6 @@ export function SettingsScope({
           : 'Stored in this browser only, and never copied to another machine.'}
       </span>
     </p>
-  );
-}
-
-export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
-  return (
-    <div role="radiogroup" aria-label="Text size" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {TEXT_SCALE_OPTIONS.map(option => {
-        const checked = theme.textScale === option.id;
-        return (
-          <label
-            key={option.id}
-            className={cn(
-              'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-              checked
-                ? 'border-accent bg-accent-soft text-accent'
-                : 'border-border bg-surface-2 text-fg hover:border-accent',
-            )}
-          >
-            <input
-              type="radio"
-              name="text-scale"
-              value={option.id}
-              checked={checked}
-              onChange={() => theme.setTextScale(option.id)}
-              className="sr-only"
-            />
-            <span className="text-ui font-semibold">{option.label}</span>
-            <span className="text-meta leading-tight text-muted">{option.description}</span>
-          </label>
-        );
-      })}
-    </div>
   );
 }
 
@@ -436,16 +403,8 @@ export function SettingsPage({
   const activeSection: SettingsSectionId = openedSection ?? 'appearance';
   const section = settingsSectionDefinition(activeSection);
 
-  const controlsById = useMemo<Record<SettingId, ReactNode>>(
+  const controlsById = useMemo<Partial<Record<SettingId, ReactNode>>>(
     () => ({
-      'text-size': (
-        <>
-          <TextScaleControl theme={theme} />
-          <p className="mt-2 text-meta leading-base text-faint">
-            Sizes never go below Default, so existing 44px touch targets are not reduced.
-          </p>
-        </>
-      ),
       density: (
         <>
           <fieldset className="grid grid-cols-1 gap-2 sm:grid-cols-3">
