@@ -18,13 +18,15 @@
  *   5. the session's CURRENT model and reasoning effort;
  *   6. fast mode, when the session has a decided state (Codex `-c service_tier=…`; Claude a `--settings`
  *      overlay, see {@link fastLaunchArguments});
- *   7. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
+ *   7. where the conversation is compacted (Codex `-c model_auto_compact_token_limit=…`; Claude the same
+ *      `--settings` overlay as fast mode, see {@link overlayLaunchArguments});
+ *   8. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
  *
  * Pure: strings in, strings out. Which values go in is the relaunch service's decision.
  */
 
 import type { HarnessKind } from '@ferretry/fleet';
-import type { TranscriptProvenance } from '@ferretry/protocol';
+import type { CompactAt, TranscriptProvenance } from '@ferretry/protocol';
 import { handoffReadArguments } from '../send/handoff.ts';
 import { claudeSessionArguments } from '../transcript/claude-path.ts';
 import { codexCorrelationArguments, isCodexCorrelationPair } from '../transcript/codex-rollout.ts';
@@ -51,9 +53,14 @@ export interface LaunchArgvParts {
    */
   readonly fast?: boolean;
   /**
-   * The text of the login's fixed `--settings` file, for a Claude launch that names fast mode. Claude
-   * honours ONE `--settings`, the last, so naming fast mode replaces the wrapper's own overlay and has
-   * to carry it along. Empty when the login has no such file.
+   * Where to compact the conversation, in tokens. Absent leaves the harness's own trigger in charge, which
+   * is what `auto` means, so `auto` never reaches here.
+   */
+  readonly compactAt?: number;
+  /**
+   * The text of the login's fixed `--settings` file, for a Claude launch that names fast mode or a compaction
+   * trigger. Claude honours ONE `--settings`, the last, so naming either replaces the wrapper's own overlay
+   * and has to carry it along. Empty when the login has no such file.
    */
   readonly fixedSettings?: string;
   readonly harnessFlags: readonly string[];
@@ -86,10 +93,18 @@ const CODEX_TIER_KEY = 'service_tier';
 /** The service tier ids Codex's `/fast` moves between: `priority` is the fast one. */
 const CODEX_TIER = { fast: 'priority', standard: 'default' } as const;
 
+/** The Codex config key its automatic compaction trigger is read from. */
+const CODEX_COMPACT_KEY = 'model_auto_compact_token_limit';
+
+/** The Claude settings key its automatic compaction trigger is read from. */
+const CLAUDE_COMPACT_KEY = 'autoCompactWindow';
+
 /** A fixed settings file that is not a JSON object cannot be carried into a replacement overlay. */
 export class FixedSettingsUnreadableError extends Error {
   constructor() {
-    super('the login’s fixed settings file is not a JSON object, so fast mode cannot be added to its launch');
+    super(
+      'the login’s fixed settings file is not a JSON object, so fast mode or a compaction trigger cannot be added to its launch',
+    );
     this.name = 'FixedSettingsUnreadableError';
   }
 }
@@ -114,9 +129,27 @@ export function fastLaunchArguments(
   fast: boolean | undefined,
   fixedSettings: string | undefined,
 ): readonly string[] {
-  if (fast === undefined) return [];
+  return overlayLaunchArguments(harness, { fast }, fixedSettings);
+}
+
+/**
+ * Everything the launch says through Claude's one `--settings` (or Codex's `-c` pairs): fast mode and the
+ * compaction trigger. Asking for both yields ONE overlay carrying both.
+ */
+function overlayLaunchArguments(
+  harness: HarnessKind,
+  wanted: { readonly fast?: boolean | undefined; readonly compactAt?: number | undefined },
+  fixedSettings: string | undefined,
+): readonly string[] {
+  const { fast, compactAt } = wanted;
+  if (fast === undefined && compactAt === undefined) return [];
   if (harness === 'codex')
-    return ['-c', `${CODEX_TIER_KEY}=${tomlBasicString(fast ? CODEX_TIER.fast : CODEX_TIER.standard)}`];
+    return [
+      ...(fast === undefined
+        ? []
+        : ['-c', `${CODEX_TIER_KEY}=${tomlBasicString(fast ? CODEX_TIER.fast : CODEX_TIER.standard)}`]),
+      ...(compactAt === undefined ? [] : ['-c', `${CODEX_COMPACT_KEY}=${compactAt}`]),
+    ];
   const text = fixedSettings?.trim() ?? '';
   let base: Record<string, unknown> = {};
   if (text !== '') {
@@ -130,7 +163,14 @@ export function fastLaunchArguments(
       throw new FixedSettingsUnreadableError();
     base = parsed as Record<string, unknown>;
   }
-  return ['--settings', JSON.stringify({ ...base, fastMode: fast })];
+  return [
+    '--settings',
+    JSON.stringify({
+      ...base,
+      ...(fast === undefined ? {} : { fastMode: fast }),
+      ...(compactAt === undefined ? {} : { [CLAUDE_COMPACT_KEY]: compactAt }),
+    }),
+  ];
 }
 
 /** The whole argv, in the order the file comment states. */
@@ -142,7 +182,7 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
     ...handoffReadArguments(parts.harness, parts.readableFolders),
     ...modelArguments(parts.model),
     ...effortLaunchArguments(parts.harness, parts.effort),
-    ...fastLaunchArguments(parts.harness, parts.fast, parts.fixedSettings),
+    ...overlayLaunchArguments(parts.harness, { fast: parts.fast, compactAt: parts.compactAt }, parts.fixedSettings),
     ...parts.harnessFlags,
   ];
 }
@@ -190,14 +230,71 @@ const RUN_FLAGS: ReadonlySet<string> = new Set([HARNESS_SESSION_FLAG, HARNESS_RE
 const RUN_OVERRIDE = /^(?:model|model_reasoning_effort|service_tier)=/u;
 
 /**
- * Claude's inline `--settings` overlay that carries fast mode. It is a run fact like the model: a
- * `/fast` typed into the pane changes it without anything having gone stale.
+ * Claude's inline `--settings` overlay that carries fast mode and/or the compaction trigger. Fast mode is a
+ * run fact like the model: a `/fast` typed into the pane changes it without anything having gone stale. The
+ * compaction trigger is a setting, so the overlay is replaced by a `--compact-at=<n>` marker that keeps it
+ * visible to the stale-settings comparison.
  */
-const INLINE_SETTINGS = /^\{.*"fastMode":(?:true|false).*\}$/su;
+const INLINE_SETTINGS = /^\{.*"(?:fastMode":(?:true|false)|autoCompactWindow":\d+).*\}$/su;
+
+/** An inline overlay as an object, or nothing when it is not one. */
+function inlineOverlay(overlay: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(overlay);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What an inline overlay says that a Restart would change: the compaction trigger as a `--compact-at=<n>` marker,
+ * when it has one, then every OTHER setting in it as an overlay of its own. Only fast mode, a run fact, is left
+ * out, whether or not the trigger rides beside it.
+ */
+function overlaySettings(overlay: string): readonly string[] {
+  const parsed = inlineOverlay(overlay);
+  const { fastMode: _fast, [CLAUDE_COMPACT_KEY]: compactAt, ...others } = parsed ?? {};
+  return [
+    ...(typeof compactAt === 'number' ? [`--compact-at=${compactAt}`] : []),
+    ...(Object.keys(others).length === 0
+      ? []
+      : [
+          '--settings',
+          JSON.stringify(Object.fromEntries(Object.entries(others).sort(([a], [b]) => a.localeCompare(b)))),
+        ]),
+  ];
+}
+
+/**
+ * The compaction trigger a recorded launch command carries, in tokens, or `auto` when it carries none — what the
+ * RUNNING process was started with. The LAST word wins, as it does for the process: Claude honours one
+ * `--settings`, the last, so a later one (an owner's own flag) replaces the whole overlay and its trigger with
+ * it; for Codex the last `-c` pair wins.
+ */
+export function launchedCompactAt(command: readonly string[]): CompactAt {
+  let launched: CompactAt = 'auto';
+  for (let index = 0; index < command.length; index += 1) {
+    const next = command[index + 1];
+    if (next === undefined) break;
+    if (command[index] === '--settings') {
+      const value = inlineOverlay(next)?.[CLAUDE_COMPACT_KEY];
+      launched = typeof value === 'number' ? value : 'auto';
+    }
+    if (command[index] === '-c' && next.startsWith(`${CODEX_COMPACT_KEY}=`)) {
+      const value = Number(next.slice(CODEX_COMPACT_KEY.length + 1));
+      if (Number.isSafeInteger(value)) launched = value;
+    }
+  }
+  return launched;
+}
 
 /**
  * The argv with what describes THIS RUN removed: the harness session, its Codex correlation root,
- * the model, the effort and fast mode.
+ * the model, the effort and fast mode. The compaction trigger stays (Codex's `-c` pair as it is, Claude's
+ * overlay as a `--compact-at=<n>` marker), because changing it is a change a Restart applies.
  *
  * What is left is the part a relaunch would change if a setting changed — the wrapper, the
  * remote-control surface, the `Read(...)` rules, the owner's flags — which is what a stale-settings
@@ -210,10 +307,14 @@ export function settingsArguments(argv: readonly string[]): readonly string[] {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] as string;
     const next = argv[index + 1];
+    if (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) {
+      kept.push(...overlaySettings(next));
+      index += 1;
+      continue;
+    }
     if (
       RUN_FLAGS.has(token) ||
       (token === '-c' && next !== undefined && RUN_OVERRIDE.test(next)) ||
-      (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) ||
       isCodexCorrelationPair(token, next)
     ) {
       index += 1;

@@ -95,6 +95,10 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       "launch in the harness's fast mode (faster output; the model must offer it, and it can cost more)",
     )
     .option('--no-fast', 'launch with fast mode off, even where the login would otherwise turn it on')
+    .option(
+      '--compact-at <tokens|auto>',
+      "squeeze this ferret's conversation at this many tokens (e.g. 250k); auto leaves the harness's own trigger",
+    )
     .option('--rc', 'launch with remote control so the session is steerable from the web surface')
     .option('--no-rc', 'launch without remote control')
     .option('--harness-flag <flag>', 'extra flag passed straight to the agent binary; repeatable', collect, [])
@@ -130,6 +134,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
           // applies its mode-dependent default.
           // Same tri-state as remote control: only a typed `--fast`/`--no-fast` is a decision.
           ...(command.getOptionValueSource('fast') === 'cli' ? { fast: options.fast === true } : {}),
+          ...(text(options, 'compactAt') === undefined ? {} : { compactAt: text(options, 'compactAt') }),
           ...(command.getOptionValueSource('rc') === 'cli' ? { remoteControl: options.rc === true } : {}),
           harnessFlags: list(options, 'harnessFlag'),
           ...(text(options, 'cwd') === undefined ? {} : { cwd: text(options, 'cwd') }),

@@ -6,6 +6,7 @@ import {
   type PackNewRequest,
   PackNewRequestSchema,
   type PackRecommendRequest,
+  parseCompactAt,
 } from '@ferretry/protocol';
 import { requireCardRef } from '../board/board-request.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
@@ -64,6 +65,8 @@ export interface PackNewOptions {
   readonly runtime?: string;
   readonly model?: string;
   readonly effort?: string;
+  /** What was typed after `--compact-at` (`auto`, `250k`); parsed in `newChild`. */
+  readonly compactAt?: string;
   readonly auto?: boolean;
   readonly cwd?: string;
   readonly name?: string;
@@ -245,6 +248,8 @@ export class PackController {
     const task = options.promptFile === undefined ? typed : (await this.deps.readFile(options.promptFile)).trim();
     if (task === '')
       throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
+    const compactAt = options.compactAt === undefined ? undefined : parseCompactAt(options.compactAt);
+    if (compactAt?.ok === false) throw new Error(`--compact-at: ${compactAt.reason}`);
     const parent = await this.deps.parent();
     const name =
       options.name ?? (await titleFromReferencedBrief(task, path => this.deps.readFile(this.deps.absolute(path))));
@@ -255,6 +260,7 @@ export class PackController {
       ...(options.model === undefined ? {} : { model: options.model }),
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.auto === true ? { auto: true } : {}),
+      ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
       // A sub-ferret runs in its PARENT'S folder — never where the agent's shell happens to be — unless told
       // otherwise; a person's start runs here. The daemon refuses a named temporary folder (`--allow-scratch`).
       ...(options.cwd !== undefined

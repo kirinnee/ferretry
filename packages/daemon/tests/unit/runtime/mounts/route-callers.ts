@@ -201,6 +201,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'PATCH /v1/sessions/:sessionId/hypermedia operator any',
   'GET /v1/sessions/:sessionId/agenda-mode operator any',
   'PATCH /v1/sessions/:sessionId/agenda-mode operator any',
+  'GET /v1/sessions/:sessionId/compact-at operator any',
+  'PATCH /v1/sessions/:sessionId/compact-at operator any',
   'GET /v1/pack operator any',
   'GET /v1/pack/inventory operator any',
   'POST /v1/pack/routing/clean-up operator person',

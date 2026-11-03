@@ -28,6 +28,7 @@ export * from './mounts/session-attach.ts';
 export * from './mounts/session-control.ts';
 export * from './mounts/session-filesystem.ts';
 export * from './mounts/session-agenda-mode.ts';
+export * from './mounts/session-compact-at.ts';
 export * from './mounts/session-hypermedia.ts';
 export * from './mounts/session-migrate.ts';
 export * from './mounts/session-restart.ts';

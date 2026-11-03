@@ -45,6 +45,7 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
+import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
@@ -1301,6 +1302,8 @@ function SessionRoute({
   const packActions = usePackSessionActions({ connection, fetcher: useDaemonFetch() });
   // Agenda mode's Actions-menu toggle: also read at the next launch.
   const agendaActions = useAgendaSessionActions({ connection, fetcher: useDaemonFetch() });
+  // Compact memory at: a form in the Actions menu, read at the next launch.
+  const compactAtActions = useCompactAtSessionActions({ connection, fetcher: useDaemonFetch() });
   /*
    * DRAWN FROM THIS DEVICE'S CACHE FIRST. Back into a chat, or a reload, used to open on an empty
    * transcript that refilled a round trip later; the last copy this device saw is drawn in the first
@@ -1704,6 +1707,7 @@ function SessionRoute({
       ...hypermediaActions.contributions,
       ...packActions.contributions,
       ...agendaActions.contributions,
+      ...compactAtActions.contributions,
       ...stuckActions.contributions,
       queueLink,
     ],
@@ -1713,6 +1717,7 @@ function SessionRoute({
       hypermediaActions.contributions,
       packActions.contributions,
       agendaActions.contributions,
+      compactAtActions.contributions,
       stuckActions.contributions,
       queueLink,
     ],

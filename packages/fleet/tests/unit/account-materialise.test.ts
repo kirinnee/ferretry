@@ -547,6 +547,33 @@ describe('materialiseFleet', () => {
     should(result.manifestPath).equal('/fy/fleet/manifest.json');
   });
 
+  it('should publish a runtime’s compaction default: its own, else its profile’s, else nothing', () => {
+    // Arrange
+    const model = modelOf({
+      profiles: {
+        default: { layers: DEFAULT_LAYERS },
+        lead: { layers: DEFAULT_LAYERS, compactAt: 250_000 },
+      },
+      runtimes: {
+        'claude-plain': { credential: 'claude-you', profile: 'default' },
+        'claude-lead': { credential: 'claude-you', profile: 'lead' },
+        'claude-own': { credential: 'claude-you', profile: 'lead', compactAt: 400_000 },
+        'codex-auto': { credential: 'codex-work', profile: 'lead', compactAt: 'auto' },
+      },
+    });
+
+    // Act
+    const result = plan(model, { mint: minter(ID_A, ID_B, ID_C, '00000000-0000-4000-8000-00000000000d') });
+
+    // Assert
+    const byName = (name: string) => result.manifest.runtimes?.find(runtime => runtime.name === name);
+    should(byName('claude-plain')?.compactAt).be.undefined();
+    should(byName('claude-lead')?.compactAt).equal(250_000);
+    should(byName('claude-own')?.compactAt).equal(400_000);
+    should(byName('codex-auto')?.compactAt).equal('auto');
+    should(result.manifest.accounts?.find(account => account.displayName === 'claude-lead')?.compactAt).equal(250_000);
+  });
+
   it('should strike out a model the credential cannot use and fall back to one it can (E23)', () => {
     // Act
     const result = plan(modelOf(), { availableModels: { 'claude-you': ['claude-sonnet-5-5'] } });

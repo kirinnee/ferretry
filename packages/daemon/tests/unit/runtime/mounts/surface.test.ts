@@ -486,6 +486,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  sessionCompactAt: {
+    get: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    set: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionHypermedia: {
     set: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -975,6 +983,7 @@ describe('the mounted daemon surface', () => {
       2 + // pinning an agent to the top of the sidebar, and unpinning it (docs/grants.md)
       1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
       2 + // a ferret's agenda mode: its read and its switch, from its next launch (docs/notifications.md)
+      2 + // a ferret's compaction trigger: its read and its change, from its next launch (docs/compact-at.md)
       5 + // Pack mode: its view, recommend, a sub-ferret start, a result and a ferret's switch (docs/pack-mode.md)
       5 + // the routing prompt's Clean up: the inventory, a clean-up start and its run, accept and undo
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
@@ -1287,6 +1296,8 @@ describe('the mounted daemon surface', () => {
       'PATCH /v1/sessions/:sessionId/hypermedia',
       'GET /v1/sessions/:sessionId/agenda-mode',
       'PATCH /v1/sessions/:sessionId/agenda-mode',
+      'GET /v1/sessions/:sessionId/compact-at',
+      'PATCH /v1/sessions/:sessionId/compact-at',
       'GET /v1/pack',
       'GET /v1/pack/inventory',
       'POST /v1/pack/routing/clean-up',

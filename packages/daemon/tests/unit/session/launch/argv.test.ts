@@ -325,8 +325,16 @@ describe('settingsArguments', () => {
     // Act
     const kept = settingsArguments(argv);
 
-    // Assert — only the inline overlay that names fast mode is dropped; an owner's own --settings stays.
-    should(kept).eql([WRAPPER, '--settings', '/fleet/own-overlay.json', '--settings', '{"theme":"dark"}']);
+    // Assert — fast mode alone leaves the overlay; the settings beside it stay, and so does an owner's own --settings.
+    should(kept).eql([
+      WRAPPER,
+      '--settings',
+      '{"permissions":{"defaultMode":"auto"}}',
+      '--settings',
+      '/fleet/own-overlay.json',
+      '--settings',
+      '{"theme":"dark"}',
+    ]);
   });
 
   it('should drop the Codex correlation root, in both spellings, and keep an owner’s own --add-dir', () => {

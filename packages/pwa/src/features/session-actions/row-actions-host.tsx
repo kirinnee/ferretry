@@ -25,6 +25,7 @@ import { useAppStore, useConnectionSnapshot, useDaemonClient, useDaemonFetch } f
 import type { MenuAnchor } from '../../shell/context-menu.tsx';
 import type { SessionMenuState } from '../../shell/session-menu-context.ts';
 import { useAgendaSessionActions } from '../agenda/agenda-session-actions.tsx';
+import { useCompactAtSessionActions } from './compact-at-session-actions.tsx';
 import { useHypermediaSessionActions } from '../hypermedia/hypermedia-session-actions.tsx';
 import { useLearningSessionActions } from '../learning/learning-session-actions.tsx';
 import { usePackSessionActions } from '../pack/pack-session-actions.tsx';
@@ -116,6 +117,7 @@ function RowActions({
   const hypermedia = useHypermediaSessionActions({ connection, fetcher });
   const pack = usePackSessionActions({ connection, fetcher });
   const agenda = useAgendaSessionActions({ connection, fetcher });
+  const compactAt = useCompactAtSessionActions({ connection, fetcher });
   const [notice, setNotice] = useState<string | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const dismissNotice = useCallback(() => setNotice(null), []);
@@ -238,6 +240,7 @@ function RowActions({
       ...hypermedia.contributions,
       ...pack.contributions,
       ...agenda.contributions,
+      ...compactAt.contributions,
     ],
     context,
   );

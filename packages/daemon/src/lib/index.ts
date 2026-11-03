@@ -94,6 +94,7 @@ export * from './sign-in-grants/index.ts';
 export * from './task-plans/index.ts';
 export * from './security/index.ts';
 export * from './session/agenda-mode/index.ts';
+export * from './session/compact-at/index.ts';
 export * from './session/attach/index.ts';
 export * from './session/auto-resume/index.ts';
 export * from './session/console/index.ts';
