@@ -144,6 +144,24 @@ describe('FileAgendaLedgerRepository', () => {
     await writeFile(join(directory, AGENDA_ARCHIVE_FILE), 'partial');
     await should(repository.readArchive('session-1')).be.rejectedWith('incomplete agenda history');
   });
+  it('should adopt the sidecar history of a ledger an older daemon rewrote without its cursor or version', async () => {
+    const { repository } = await createRepository();
+    const file = repository.file('session-1');
+    const directory = dirname(file);
+    await mkdir(directory, { recursive: true });
+    const record = {
+      kind: 'owner-history',
+      id: 'A1',
+      entry: { at: '2026-11-03T08:00:00Z', kind: 'replied', note: '雪 owner words' },
+    };
+    const text = `${JSON.stringify(record)}\n`;
+    await writeFile(join(directory, AGENDA_ARCHIVE_FILE), `${text}{"torn":`);
+    const { version: _version, ...older } = emptyAgendaLedger('session-1', '2026-11-03T08:00:00Z');
+    await writeFile(file, JSON.stringify(older));
+    should(await repository.readArchive('session-1')).deepEqual([record]);
+    should((await repository.read('session-1'))?.archive).deepEqual({ bytes: Buffer.byteLength(text), count: 1 });
+  });
+
   it('should keep serving correct agendas past its cache limit, dropping only the copy read longest ago', async () => {
     // Arrange
     const { repository } = await createRepository();
