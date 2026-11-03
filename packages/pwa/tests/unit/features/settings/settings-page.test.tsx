@@ -581,12 +581,15 @@ describe('SettingsPage scope lines', () => {
     }
   });
 
-  it('marks the Machines section as the routed machine’s, by name, above its surface', async () => {
+  it('marks the Machines section as the routed machine’s, under its name and above its surface', async () => {
     window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}`);
     const view = await mount(panelsPage());
     await settle();
     const line = must(view.container.querySelector<HTMLElement>('[data-settings-scope="machine"]'), 'the machine line');
-    expect(line.textContent).toContain('Alpha workstation’s daemon settings, shared by every device paired to it.');
+    expect(line.textContent).toContain('Daemon settings, shared by every device paired to it.');
+    const header = must(view.container.querySelector<HTMLElement>('[data-machine-header]'), 'the machine header');
+    expect(header.contains(line)).toBe(true);
+    expect(header.querySelector('h2')?.textContent).toBe('Alpha workstation');
     expect(view.container.querySelector('[data-settings-scope="device"]')).toBeNull();
     const surface = must(view.container.querySelector('[data-daemon-panel="warden"]'), 'the panels');
     expect(line.compareDocumentPosition(surface) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
@@ -775,12 +778,13 @@ describe('SettingsPage controls', () => {
     run(() => view.unmount());
   });
 
-  it('says on the Text size card itself that the choice is this device only', () => {
+  it('says "This device" once, in the section header, and not again on each card under it', () => {
     const view = render(page());
     const card = view.root.find(node => node.props['data-setting-id'] === 'text-size');
-    const scopes = card.findAll(node => node.props['data-setting-scope'] === 'device');
+    const header = view.root.findAll(node => node.props['data-settings-scope'] === 'device');
 
-    expect(scopes).not.toHaveLength(0);
+    expect(header).toHaveLength(1);
+    expect(card.findAll(node => node.props['data-setting-scope'] !== undefined)).toHaveLength(0);
     run(() => view.unmount());
   });
 
@@ -1386,16 +1390,8 @@ describe('SettingsPage Machines section', () => {
 });
 
 describe('SettingsSection', () => {
-  it('names a setting as this device’s only when the caller says it is, and says nothing otherwise', async () => {
+  it('draws its name, explanation and control, and leaves where it is stored to the section header', async () => {
     const definition = settingDefinition('density');
-    const device = await mount(
-      <SettingsSection definition={definition} deviceOnly>
-        <span>body</span>
-      </SettingsSection>,
-    );
-    expect(device.container.querySelector('[data-setting-scope="device"]')?.textContent).toBe('This device');
-    await device.unmount();
-
     const shared = await mount(
       <SettingsSection definition={definition}>
         <span>body</span>

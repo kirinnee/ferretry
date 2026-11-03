@@ -42,7 +42,7 @@ const PANEL_GROUPS = [
     id: 'advanced',
     label: 'Advanced',
     tab: 'machine',
-    panels: ['files', 'terminal-slots', 'speedups', 'model-pricing'],
+    panels: ['files', 'terminals', 'speedups', 'model-pricing'],
   },
   { id: 'about', label: 'About', tab: 'machine', panels: ['about'] },
 ] as const satisfies readonly PanelGroup[];
@@ -59,6 +59,10 @@ const PANEL_TABS: ReadonlyMap<string, MachineTabId> = new Map(
   PANEL_GROUPS.flatMap(group => group.panels.map(panel => [panel, group.tab] as const)),
 );
 
+/** Every panel id listed on a tab, in the order the tab draws them. */
+export const panelsOnTab = (tab: MachineTabId): readonly string[] =>
+  PANEL_GROUPS.filter(group => group.tab === tab).flatMap(group => group.panels);
+
 /** The tab a panel is opened from, or `undefined` for a word that names no panel. */
 export const panelTab = (panel: string): MachineTabId | undefined => PANEL_TABS.get(panel);
 
@@ -72,7 +76,7 @@ export const PANEL_NAMES: Readonly<Record<string, string>> = {
   'resource-limits': 'Resource limits',
   'agent-clis': 'Agent tools',
   'security-log': 'Security log',
-  'terminal-slots': 'Terminal slots',
+  terminals: 'Terminal slots',
   'model-pricing': 'Model pricing',
   files: 'Settings files',
   about: 'Version and updates',

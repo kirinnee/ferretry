@@ -313,7 +313,9 @@ describe('daemon settings panel group', () => {
       ).toEqual(['secrets', 'accounts']);
       expect(section.textContent).not.toContain('shared by every device');
       const secrets = must(section.querySelector<HTMLButtonElement>('[data-daemon-panel="secrets"]'), 'Secrets row');
-      expect(secrets.className).toContain('min-h-11');
+      // The row's height is the theme's row floor (`.kt-grouprow`), not a fixed 44px on every screen.
+      expect(secrets.className.split(' ')).toContain('kt-grouprow');
+      expect(secrets.className).not.toMatch(/\bmin-h-/u);
       // The description rides as the row's tooltip, not as a second line.
       expect(secrets.getAttribute('title')).not.toBeNull();
       await interact(() => secrets.click());
