@@ -29,6 +29,10 @@ export interface RecipeProposalCardProps {
   readonly busy: boolean;
   /** The recipe changed under the proposal: shown above the buttons. */
   readonly stale?: string;
+  /** The recipe the proposal was made from is gone for good: no approval is offered, Settings is. */
+  readonly blocked?: boolean;
+  /** Where the owner edits the recipe themselves; shown with `stale` when approving cannot work. */
+  readonly settings?: string;
   /** Any other refusal, in words. */
   readonly error?: string;
   /** The proposal is gone (it was decided elsewhere or went stale): the words stay, the answers do not. */
@@ -107,6 +111,8 @@ export function RecipeProposalCard({
   editing,
   busy,
   stale,
+  blocked = false,
+  settings,
   error,
   closed = false,
   onApprove,
@@ -146,6 +152,7 @@ export function RecipeProposalCard({
             id={textId}
             maxLength={LOGIN_RECIPE_MAX_LENGTH}
             onChange={event => onText(event.target.value)}
+            readOnly={busy}
             rows={7}
             spellCheck={false}
             value={editing}
@@ -172,6 +179,11 @@ export function RecipeProposalCard({
         <p className="m-0 text-ui text-warn" data-recipe-stale="" role="alert">
           {stale}
         </p>
+      )}
+      {settings === undefined ? null : (
+        <a className="text-ui text-fg" data-recipe-settings="" href={settings}>
+          Edit the recipe in Settings
+        </a>
       )}
       {error === undefined ? null : (
         <p className="m-0 text-ui text-err" data-recipe-error="" role="alert">
@@ -210,7 +222,7 @@ export function RecipeProposalCard({
                 className="kt-btn min-h-[44px]"
                 data-recipe-approve=""
                 data-variant="primary"
-                disabled={busy}
+                disabled={busy || blocked}
                 onClick={onApprove}
                 type="button"
               >
@@ -232,7 +244,7 @@ export function RecipeProposalCard({
                 className="kt-btn min-h-[44px]"
                 data-recipe-approve-mine=""
                 data-variant="primary"
-                disabled={busy || problem !== undefined}
+                disabled={busy || blocked || problem !== undefined}
                 onClick={onApproveMine}
                 type="button"
               >

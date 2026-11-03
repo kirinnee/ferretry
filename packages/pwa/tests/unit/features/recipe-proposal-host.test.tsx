@@ -4,7 +4,8 @@ import { describe, expect, it } from 'bun:test';
 import { LOGIN_RECIPE_MAX_LENGTH } from '@ferretry/protocol';
 import { RecipeProposalHost } from '../../../src/features/secrets/recipe-proposal-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { RECIPE_STALE_WORDS } from '../../../src/lib/recipe-proposal.ts';
+import { RECIPE_OBSOLETE_WORDS, RECIPE_STALE_WORDS } from '../../../src/lib/recipe-proposal.ts';
+import { daemonSettingsPath } from '../../../src/lib/pages/routes.ts';
 import { list, PROPOSAL, SI_GITHUB } from '../../support/accounts-fixtures.ts';
 import { mount, must } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
@@ -17,6 +18,25 @@ const DECISION_PATH = `/v1/accounts/sign-ins/${SI_GITHUB}/recipe/proposals/${PRO
 const q = <T extends Element>(root: ParentNode, selector: string): T => must(root.querySelector<T>(selector), selector);
 const text = (root: ParentNode, selector: string): string => q(root, selector).textContent ?? '';
 const decisions = (calls: readonly Call[]): Call[] => calls.filter(call => call.method === 'POST');
+const disabled = (root: ParentNode, selector: string): boolean => q<HTMLButtonElement>(root, selector).disabled;
+
+/** A promise the test settles by hand, to hold a read or a decision in flight. */
+const deferred = <T,>() => {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>(resolve => {
+    release = resolve;
+  });
+  return { promise, release };
+};
+
+/** The listing as the daemon holds it after someone changed the sign-in's recipe under the proposal. */
+const recipeChangedTo = (recipe: string, version: number) => {
+  const accounts = list();
+  return {
+    ...accounts,
+    signIns: accounts.signIns.map(each => (each.id === SI_GITHUB ? { ...each, recipe, recipeVersion: version } : each)),
+  };
+};
 
 interface World {
   /** What reading the accounts does; a function is asked on every read. */
@@ -146,7 +166,7 @@ describe('the recipe card', () => {
     const { element, fake } = host({
       accounts: () => {
         reads += 1;
-        return list();
+        return reads === 1 ? list() : recipeChangedTo('# Sign in', 3);
       },
       decide: () => {
         throw refused('refused', { status: 409, code: 'stale_proposal' });
@@ -159,8 +179,102 @@ describe('the recipe card', () => {
       expect(text(root, '[data-recipe-stale]')).toBe(RECIPE_STALE_WORDS);
       expect(reads).toBe(2);
       expect(decisions(fake.calls)).toHaveLength(1);
-      // The owner can decide again on what they now see.
-      expect(q<HTMLButtonElement>(root, '[data-recipe-approve]').disabled).toBe(false);
+      // The recipe is back at what the proposal was made from, so the owner can decide again on what they now see.
+      expect(disabled(root, '[data-recipe-approve]')).toBe(false);
+      expect(root.querySelector('[data-recipe-settings]')).toBeNull();
+    });
+  });
+
+  it('keeps every answer off while the steps are read again, then shows the current recipe and blocks an obsolete base', async () => {
+    const reread = deferred<unknown>();
+    let reads = 0;
+    const holding: boolean[] = [];
+    const { element, fake } = host(
+      {
+        accounts: () => {
+          reads += 1;
+          return reads === 1 ? list() : reread.promise;
+        },
+        decide: () => {
+          throw refused('refused', { status: 409, code: 'stale_proposal' });
+        },
+      },
+      { onHold: isHolding => void holding.push(isHolding) },
+    );
+    await withMounted(element, async root => {
+      await click(q(root, '[data-recipe-approve]'));
+      await settle();
+
+      // The re-read is in flight: nothing can be answered, and the owner is told why.
+      expect(text(root, '[data-recipe-stale]')).toBe(RECIPE_STALE_WORDS);
+      expect(disabled(root, '[data-recipe-approve]')).toBe(true);
+      expect(disabled(root, '[data-recipe-decline]')).toBe(true);
+      expect(disabled(root, '[data-recipe-edit]')).toBe(true);
+      expect(holding.at(-1)).toBe(true);
+
+      reread.release(recipeChangedTo('Open the page and wait.', 3));
+      await settle();
+
+      // The card now diffs against what the daemon holds, labelled with its version.
+      expect(text(root, '[data-recipe-change]')).toBe('v3 → proposed · 1 added, 1 removed');
+      const steps = [...root.querySelectorAll('[data-recipe-step]')].map(step => step.textContent);
+      expect(steps).toEqual([
+        '−Removed: Open the page and wait.',
+        '+1Added: Open the page, press Sign in, type the code.',
+      ]);
+      // The proposal was made from a recipe that is gone: no approval can succeed, and the card says where to go.
+      expect(text(root, '[data-recipe-stale]')).toBe(RECIPE_OBSOLETE_WORDS);
+      expect(disabled(root, '[data-recipe-approve]')).toBe(true);
+      expect(disabled(root, '[data-recipe-decline]')).toBe(false);
+      expect(q<HTMLAnchorElement>(root, '[data-recipe-settings]').getAttribute('href')).toBe(
+        `${daemonSettingsPath(connection.daemonId)}#accounts`,
+      );
+      expect(holding.at(-1)).toBe(false);
+      expect(decisions(fake.calls)).toHaveLength(1);
+    });
+  });
+
+  it('keeps the owner’s own text, and blocks sending it, when the base it was written on is obsolete', async () => {
+    let reads = 0;
+    const { element } = host({
+      accounts: () => {
+        reads += 1;
+        return reads === 1 ? list() : recipeChangedTo('Open the page and wait.', 3);
+      },
+      decide: () => {
+        throw refused('refused', { status: 409, code: 'stale_proposal' });
+      },
+    });
+    await withMounted(element, async root => {
+      await click(q(root, '[data-recipe-edit]'));
+      await typeInto(q(root, '[data-recipe-text]'), 'My own steps', 'textarea');
+      await click(q(root, '[data-recipe-approve-mine]'));
+      await settle();
+
+      expect(q<HTMLTextAreaElement>(root, '[data-recipe-text]').value).toBe('My own steps');
+      expect(text(root, '[data-recipe-stale]')).toBe(RECIPE_OBSOLETE_WORDS);
+      expect(disabled(root, '[data-recipe-approve-mine]')).toBe(true);
+      expect(disabled(root, '[data-recipe-cancel]')).toBe(false);
+      expect(root.querySelector('[data-recipe-settings]')).not.toBeNull();
+    });
+  });
+
+  it('leaves the textarea read-only while the owner’s version is on its way', async () => {
+    const answer = deferred<unknown>();
+    const { element } = host({ decide: () => answer.promise });
+    await withMounted(element, async root => {
+      await click(q(root, '[data-recipe-edit]'));
+      const area = q<HTMLTextAreaElement>(root, '[data-recipe-text]');
+      expect(area.readOnly).toBe(false);
+      await click(q(root, '[data-recipe-approve-mine]'));
+
+      expect(area.readOnly).toBe(true);
+      expect(disabled(root, '[data-recipe-approve-mine]')).toBe(true);
+
+      answer.release(list().signIns[0]);
+      await settle();
+
+      expect(text(root, '[data-recipe-done]')).toBe('Recipe for github.com approved.');
     });
   });
 
@@ -288,6 +402,35 @@ describe('holding the view it is drawn in', () => {
       await settle();
 
       expect(told.at(-1)).toEqual({ holding: false, settled: 'Declined.' });
+    });
+  });
+
+  it('lets go, and drops the owner’s edit, when the proposal turns out to be gone after a stale refusal', async () => {
+    const { told, onHold } = holds();
+    let reads = 0;
+    const { element } = host(
+      {
+        accounts: () => {
+          reads += 1;
+          const accounts = list();
+          return reads === 1
+            ? accounts
+            : { ...accounts, signIns: accounts.signIns.map(each => ({ ...each, proposals: [] })) };
+        },
+        decide: () => {
+          throw refused('refused', { status: 409, code: 'stale_proposal' });
+        },
+      },
+      { onHold },
+    );
+    await withMounted(element, async root => {
+      await click(q(root, '[data-recipe-edit]'));
+      await click(q(root, '[data-recipe-approve-mine]'));
+      await settle();
+
+      expect(told.at(-1)).toEqual({ holding: false, settled: undefined });
+      expect(root.querySelector('[data-recipe-text]')).toBeNull();
+      expect(root.querySelector('[data-recipe-actions]')).toBeNull();
     });
   });
 

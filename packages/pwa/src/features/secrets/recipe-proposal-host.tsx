@@ -7,20 +7,24 @@
  *
  * The answer is the same route Settings uses, so approving from a paired device asks for a passkey (the carrier does
  * it) and a stale proposal is refused. The daemon closes the agenda card itself once the answer lands; this host holds
- * the chat view while the owner edits or an answer is on its way (`onHold`), then closes it with its own words.
+ * the chat view while the owner edits, an answer is on its way or the steps are being read again (`onHold`), then
+ * closes it with its own words.
  */
 
 import type { AccountList, AgendaItem, LoginRecipeDecision } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClaimPlanForm } from '../agenda/plan-form-claim.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { decideRecipeProposal, type InputClient, readAccounts } from '../../lib/input-api.ts';
 import {
+  baseIsObsolete,
   decisionFailureWords,
   doneWords,
   type FoundRecipeProposal,
   findRecipeProposal,
   isStaleProposal,
+  RECIPE_OBSOLETE_WORDS,
   RECIPE_STALE_WORDS,
   recipeChange,
 } from '../../lib/recipe-proposal.ts';
@@ -34,8 +38,8 @@ export interface RecipeProposalHostProps {
   /** Hands in a client in place of the app store's (the harness and tests). */
   readonly createClient?: (connection: DaemonConnection) => Promise<InputClient>;
   /**
-   * Whether this form holds the view it is drawn in (#B147): `true` while the owner edits and while an answer is on its
-   * way; `false` with the words it settled in once there is nothing more to show. Called only when it changes.
+   * Whether this form holds the view it is drawn in (#B147): `true` while the owner edits, while an answer is on its
+   * way and while the steps are read again; `false` with the words it settled in once there is nothing more to show. Called only when it changes.
    */
   readonly onHold?: (holding: boolean, settled?: string) => void;
 }
@@ -59,6 +63,7 @@ export function RecipeProposalHost({
   const [editing, setEditing] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [stale, setStale] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [done, setDone] = useState<string | null>(null);
@@ -99,7 +104,7 @@ export function RecipeProposalHost({
 
   useClaimPlanForm(read.kind === 'plain' ? 'fallback' : 'owns');
 
-  const holding = editing !== null || sending || stale;
+  const holding = editing !== null || sending || refreshing;
   const told = useRef<string | null>(null);
   const hold = useRef(onHold);
   hold.current = onHold;
@@ -121,8 +126,10 @@ export function RecipeProposalHost({
       }
       if (!alive.current) return;
       const found = accounts === undefined ? undefined : findRecipeProposal(accounts, { signIn, id: proposalId });
-      if (found === undefined) setGone(true);
-      else setRead({ kind: 'open', client, found });
+      if (found === undefined) {
+        setGone(true);
+        setEditing(null);
+      } else setRead({ kind: 'open', client, found });
     },
     [signIn, proposalId],
   );
@@ -142,7 +149,9 @@ export function RecipeProposalHost({
     );
 
   const { client, found } = read;
-  const change = recipeChange(found.proposal.base, found.proposal.recipe);
+  // Once the daemon has refused the suggestion as stale, the steps are weighed against what it holds now.
+  const change = recipeChange(stale ? found.signIn.recipe : found.proposal.base, found.proposal.recipe);
+  const obsolete = stale && !refreshing && !gone && baseIsObsolete(found);
 
   const decide = async (decision: LoginRecipeDecision): Promise<void> => {
     if (sending) return;
@@ -155,7 +164,9 @@ export function RecipeProposalHost({
       setSending(false);
       if (isStaleProposal(cause)) {
         setStale(true);
+        setRefreshing(true);
         await readAgain(client);
+        if (alive.current) setRefreshing(false);
       } else setError(decisionFailureWords(cause));
       return;
     }
@@ -168,7 +179,8 @@ export function RecipeProposalHost({
 
   return (
     <RecipeProposalCard
-      busy={sending}
+      blocked={obsolete}
+      busy={sending || refreshing}
       change={change}
       closed={gone}
       editing={editing}
@@ -189,7 +201,8 @@ export function RecipeProposalHost({
       place={found.place}
       version={found.signIn.recipeVersion}
       why={found.proposal.why}
-      {...(stale ? { stale: RECIPE_STALE_WORDS } : {})}
+      {...(stale ? { stale: obsolete ? RECIPE_OBSOLETE_WORDS : RECIPE_STALE_WORDS } : {})}
+      {...(obsolete ? { settings: `${daemonSettingsPath(connection.daemonId)}#accounts` } : {})}
       {...(error === undefined ? {} : { error })}
     />
   );

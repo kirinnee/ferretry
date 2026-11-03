@@ -19,6 +19,8 @@ import {
 
 export const RECIPE_STALE_WORDS =
   'The recipe changed after this was suggested, so nothing was saved. Read the current steps again before you decide.';
+export const RECIPE_OBSOLETE_WORDS =
+  'The recipe changed after this was suggested, so these steps can no longer be approved. Decline them and ask the ferret to suggest again, or edit the recipe in Settings.';
 export const RECIPE_APPROVES_WORDS =
   'A recipe never holds a password or a code. Approving only changes the steps Ferretry follows.';
 export const RECIPE_SAW_NOTE = 'Its own checks while signing in, not the ferret’s words.';
@@ -117,3 +119,6 @@ export function recipeEditProblem(text: string): string | undefined {
     return `That is too long for a recipe (${String(LOGIN_RECIPE_MAX_LENGTH)} characters at most).`;
   return undefined;
 }
+
+/** The daemon now holds a different recipe from the one the proposal was made from: no approval of it can be saved. */
+export const baseIsObsolete = (found: FoundRecipeProposal): boolean => found.proposal.base !== found.signIn.recipe;
