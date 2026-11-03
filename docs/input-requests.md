@@ -48,6 +48,12 @@ request. The card lives until it is answered, cancelled or expired, and **surviv
 the facts are RAM-only, so after a restart the card reads "re-observing" and the daemon observes the
 target again before Send is allowed.
 
+The daemon closes the card the moment its request ends, and an app showing it open closes its view
+with it, saying how it ended. The view stays only while a Send from it is on its way or a follow-up
+offer ("Always use…", "Don't ask again…") is on screen. The card says the agent's prompt once, under
+the daemon's facts: the context's last line (after `INPUT_PROMPT_MARKER`, "The agent says: ") is
+for a restarted daemon and an app that cannot draw the form.
+
 The generic agenda answer **refuses** `kind: 'input'` (400 `use_input_form`), so a value can never be
 typed into the agent's pane as `[answer to !A7] hunter2`. The agent adds `kind: 'input'` items only
 through the input tool; the generic add refuses it.
