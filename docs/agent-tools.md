@@ -460,7 +460,10 @@ call.
 
 1. **An agent reaches only its own session.** `POST /v1/agent/tools` names no session anywhere: the
    daemon hashes the credential presented as `Authorization: Bearer fys_…` or on `x-fy-session-capability`
-   and finds the one LIVE session whose stored hash matches (constant-time). The call schema is strict, so
+   and finds the one LIVE session whose stored hash matches (constant-time). A digest it has seen before
+   locates that session without a fleet scan, but the session is re-read and re-proved on every request, and
+   a digest more than one session holds, or any request after a session configuration was written, scans
+   the fleet — so the answer is always the first live match a full scan would give. The call schema is strict, so
    a body `sessionId` is refused; `x-ferretry-session-id` may only agree with the credential, and one
    naming another session is `401 session_mismatch`, audited. Surfaces are looked up in that session's
    listing only.

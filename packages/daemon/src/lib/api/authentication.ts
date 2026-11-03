@@ -50,9 +50,12 @@ export interface PairedDeviceDirectory {
  * (`CredentialAgentIdentities`), so the bearer and the `x-fy-session-capability` header can never
  * disagree about which session a value names.
  *
- * It hashes the presented value and compares it, in constant time, with the stored hash of every ACTIVE
- * session — a stopped, ended or deleted session's hash is not consulted, which is what revokes it. Only a
- * hash is ever held, so nothing here can hand a credential back.
+ * It hashes the presented value and locates the session holding that digest, then re-reads THAT session
+ * and accepts only if it is still active and its stored hash matches in constant time — a stopped, ended
+ * or deleted session never authenticates, which is what revokes it. A digest it cannot place, or that
+ * more than one session holds, falls back to scanning the fleet in snapshot order for the first ACTIVE
+ * match, so the answer is the same as comparing against every active session. Only a hash is ever held,
+ * so nothing here can hand a credential back.
  */
 export interface SessionCredentialDirectory {
   resolve(capability: string): Promise<{ readonly sessionId: string } | undefined>;

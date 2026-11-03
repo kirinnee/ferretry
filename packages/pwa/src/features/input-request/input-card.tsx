@@ -199,6 +199,16 @@ export function InputCard({
     told.current = said;
     hold.current?.(holding, holding || settled === null ? undefined : settled);
   }, [holding, settled]);
+  // A card that goes while it holds the view (a version picked in the agenda swaps it out) lets go, with no words: the
+  // replacement starts idle and would never say so. Re-running under StrictMode is balanced: nothing is held then.
+  useEffect(
+    () => () => {
+      if (!told.current?.startsWith('true')) return;
+      told.current = null;
+      hold.current?.(false);
+    },
+    [],
+  );
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
   // Why the task plan (or a standing rule) did not fill this card: the owner's view only, one fixed sentence by source,
