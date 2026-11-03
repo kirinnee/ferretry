@@ -1,3 +1,9 @@
+## [4.265.0](https://github.com/kirinnee/ferretry/compare/v4.264.0...v4.265.0) (2026-11-03)
+
+### Features
+
+* **agenda:** a plain meaning for every agenda link ([#1440](https://github.com/kirinnee/ferretry/issues/1440)) ([d346e43](https://github.com/kirinnee/ferretry/commit/d346e4386cce4b3dd605b6823434b57d271af1fe))
+
 ## [4.264.0](https://github.com/kirinnee/ferretry/compare/v4.263.0...v4.264.0) (2026-11-03)
 
 ### Features

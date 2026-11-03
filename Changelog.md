@@ -1,3 +1,9 @@
+## [4.266.0](https://github.com/kirinnee/ferretry/compare/v4.265.0...v4.266.0) (2026-11-03)
+
+### Features
+
+* **board:** a card's ask rides its agenda; cards stop waiting on the owner ([#1436](https://github.com/kirinnee/ferretry/issues/1436)) ([8a01838](https://github.com/kirinnee/ferretry/commit/8a0183821604e4f107b1bc6b38a3b8b9b790b751))
+
 ## [4.265.0](https://github.com/kirinnee/ferretry/compare/v4.264.0...v4.265.0) (2026-11-03)
 
 ### Features
