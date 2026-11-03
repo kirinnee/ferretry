@@ -119,26 +119,54 @@ export interface CredentialedSession {
   readonly sessionCapabilityHash: string;
 }
 
+/** The same credential projection, for a fleet scan or a fresh proof of one cached session. */
+export interface CredentialedSessions {
+  snapshot(): Promise<readonly CredentialedSession[]>;
+  session(id: string): Promise<CredentialedSession | undefined>;
+}
+
 /**
  * Finds the live session a presented credential was minted for.
  *
- * The credential is hashed and compared with every live session's stored hash in constant time, so
- * the daemon never holds a plaintext credential and leaks no prefix to a caller who can time it. A
- * stopped session's credential proves nothing: the session it named is not there to act for.
+ * Only digests are retained. A digest locates a candidate; its freshly read hash still has to match
+ * in constant time, and its current state must be active. A stopped session's credential proves
+ * nothing: the session it named is not there to act for. A miss scans the fleet as before.
  */
 export class CredentialAgentIdentities implements AgentIdentityResolver {
   constructor(
-    private readonly sessions: { snapshot(): Promise<readonly CredentialedSession[]> },
+    private readonly sessions: CredentialedSessions,
     private readonly hash: (capability: string) => string,
     private readonly matches: (left: string, right: string) => boolean,
+    /** Injected lookup state: a null id marks a digest shared by multiple sessions. */
+    private readonly byDigest: Map<string, string | null>,
   ) {}
 
   async resolve(capability: string): Promise<AgentIdentity | undefined> {
     const digest = this.hash(capability);
-    const sessions = await this.sessions.snapshot();
-    const session = sessions.find(
-      candidate => candidate.active && this.matches(candidate.sessionCapabilityHash, digest),
-    );
+    const id = this.byDigest.get(digest);
+    let session: CredentialedSession | undefined;
+    if (id !== undefined && id !== null) {
+      const candidate = await this.sessions.session(id);
+      if (candidate?.id === id && candidate.active && this.matches(candidate.sessionCapabilityHash, digest)) {
+        session = candidate;
+      } else {
+        // Rotation, termination and removal invalidate the hint immediately; none can authenticate
+        // from a remembered identity. A scan may still find another session holding this digest.
+        this.byDigest.delete(digest);
+      }
+    }
+    if (session === undefined) {
+      const sessions = await this.sessions.snapshot();
+      // Replace rather than accumulate: at most one digest per fleet member is retained, and a
+      // stream of bogus credentials adds no entries. Ambiguous digests always keep snapshot order
+      // (the first ACTIVE match), including when a previously inactive holder is revived.
+      this.byDigest.clear();
+      for (const candidate of sessions) {
+        const stored = candidate.sessionCapabilityHash;
+        this.byDigest.set(stored, this.byDigest.has(stored) ? null : candidate.id);
+      }
+      session = sessions.find(candidate => candidate.active && this.matches(candidate.sessionCapabilityHash, digest));
+    }
     if (session === undefined) return undefined;
     if (session.name === null) return { sessionId: session.id };
     const teammate = session.teammate ?? undefined;

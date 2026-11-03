@@ -6807,6 +6807,7 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
     }),
     capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
     secretsMatch,
+    new Map(),
   );
 }
 

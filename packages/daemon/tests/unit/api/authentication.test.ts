@@ -172,10 +172,15 @@ const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').dig
 function directoryOver(sessions: readonly CredentialedSession[]) {
   const asked: string[] = [];
   const compared: (readonly [string, string])[] = [];
-  const identities = new CredentialAgentIdentities({ snapshot: async () => sessions }, sha256, (left, right) => {
-    compared.push([left, right]);
-    return secretsMatch(left, right);
-  });
+  const identities = new CredentialAgentIdentities(
+    { snapshot: async () => sessions, session: async id => sessions.find(session => session.id === id) },
+    sha256,
+    (left, right) => {
+      compared.push([left, right]);
+      return secretsMatch(left, right);
+    },
+    new Map(),
+  );
   const directory: SessionCredentialDirectory = {
     resolve: async capability => {
       asked.push(capability);

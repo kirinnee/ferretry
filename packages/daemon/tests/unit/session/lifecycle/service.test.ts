@@ -1539,18 +1539,24 @@ describe('SessionLifecycleService credential per launch', () => {
     });
     const built = harness({ credentials, environment, rotation });
     hashes = new RepositoryHashStore(built.repository, built.order);
+    const session = async () => {
+      const record = built.repository.current();
+      const hash = record.config.sessionCapabilityHash;
+      return hash === undefined
+        ? undefined
+        : { id: record.config.id, name: null, active: true, sessionCapabilityHash: hash };
+    };
     const identities = new CredentialAgentIdentities(
       {
         snapshot: async () => {
-          const record = built.repository.current();
-          const hash = record.config.sessionCapabilityHash;
-          return hash === undefined
-            ? []
-            : [{ id: record.config.id, name: null, active: true, sessionCapabilityHash: hash }];
+          const current = await session();
+          return current === undefined ? [] : [current];
         },
+        session,
       },
       capability => credential(capability).hash,
       (left, right) => left === right,
+      new Map(),
     );
     return {
       ...built,
@@ -1632,18 +1638,24 @@ describe('SessionLifecycleService credential per launch', () => {
       built.launcher.livenessFromLaunch = true;
       await built.subject.create(input());
       await built.subject.start(ID);
+      const session = async () => {
+        const record = built.repository.current();
+        const hash = record.config.sessionCapabilityHash;
+        return hash === undefined
+          ? undefined
+          : { id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash };
+      };
       const live = new CredentialAgentIdentities(
         {
           snapshot: async () => {
-            const record = built.repository.current();
-            const hash = record.config.sessionCapabilityHash;
-            return hash === undefined
-              ? []
-              : [{ id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash }];
+            const current = await session();
+            return current === undefined ? [] : [current];
           },
+          session,
         },
         capability => credential(capability).hash,
         (left, right) => left === right,
+        new Map(),
       );
       const current = built.repository.current();
       built.repository.documents.set(ID, JSON.stringify({ ...current, state: { ...current.state, status } }));
