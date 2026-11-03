@@ -805,7 +805,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
   proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record):
   the card, Settings › Accounts › the account › the place › Recipe, and `fy account site recipe approve|decline
-  <sign-in> <proposal>`. **Approving from a paired device wants a passkey** proved for that act (`approve-recipe`,
+<sign-in> <proposal>`. **Approving from a paired device wants a passkey** proved for that act (`approve-recipe`,
   claimed once at admission, [grants.md](grants.md)); the machine itself is ungoverned, and a decline never asks. An
   approval may carry the owner's own `recipe`: it becomes the recipe instead of the ferret's text, in the same act,
   checked for values like any recipe, and it is the owner's (no `recipeBy`).

@@ -328,7 +328,10 @@ const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' }
 export class RecipeAgendaAdapter implements RecipeAgendaPort {
   constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}
 
-  async raise(sessionId: string, card: Parameters<RecipeAgendaPort['raise']>[1]): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  async raise(
+    sessionId: string,
+    card: Parameters<RecipeAgendaPort['raise']>[1],
+  ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     const outcome = await this.agenda.raise(
       sessionId,
       {

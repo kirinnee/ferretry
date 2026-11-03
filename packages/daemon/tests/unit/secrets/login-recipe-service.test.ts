@@ -299,7 +299,9 @@ describe('a recipe is masked when it is served', () => {
       sessionId: 's1',
       proposedAt: NOW,
     });
-    await should(w.service.decide('VERCEL', 'rp_00000000000000aa', { decision: 'approve' })).be.rejectedWith(RecipeValueError);
+    await should(w.service.decide('VERCEL', 'rp_00000000000000aa', { decision: 'approve' })).be.rejectedWith(
+      RecipeValueError,
+    );
     should((await w.service.decide('VERCEL', 'rp_00000000000000aa', { decision: 'decline' })).recipe).be.undefined();
   });
 });

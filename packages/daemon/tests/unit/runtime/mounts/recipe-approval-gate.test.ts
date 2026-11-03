@@ -49,8 +49,17 @@ async function call(subsystem: SecretSubsystem, caller: Caller, path: string, bo
     credential: caller.governed
       ? { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' }
       : { kind: 'authenticated', tokenClass: 'admin' },
-    governance: { governed: caller.governed, decide: () => ({ allowed: true, refusal: 'granted' }) } as CallerGovernance,
-    presentation: { loopback: !caller.governed, adminToken: !caller.governed, actor: 'x', stepUp: false, freshStepUp: false },
+    governance: {
+      governed: caller.governed,
+      decide: () => ({ allowed: true, refusal: 'granted' }),
+    } as CallerGovernance,
+    presentation: {
+      loopback: !caller.governed,
+      adminToken: !caller.governed,
+      actor: 'x',
+      stepUp: false,
+      freshStepUp: false,
+    },
     claimFreshStepUp: act => {
       claimed.push(String(act));
       const held = proof === act;
@@ -91,7 +100,12 @@ async function world() {
     place: { kind: 'site', domains: ['site.example'], match: [] },
     recipe: 'Open site.example and sign in',
   });
-  const proposed = await recipes.propose('ferret-1', { signIn: signIn.id }, 'Open site.example, then the 2FA page', 'it asks for a code now');
+  const proposed = await recipes.propose(
+    'ferret-1',
+    { signIn: signIn.id },
+    'Open site.example, then the 2FA page',
+    'it asks for a code now',
+  );
   const proposalPath = `/v1/accounts/sign-ins/${signIn.id}/recipe/proposals/${proposed.id}`;
   const recipeOf = async (): Promise<string | undefined> =>
     (await accounts.list()).signIns.find(each => each.id === signIn.id)?.recipe;
@@ -161,7 +175,10 @@ describe('approving the owner’s own version (#F640)', () => {
   it('refuses a version that holds a saved value, and keeps the proposal waiting', async () => {
     const w = await world();
     const accounts = w.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>;
-    const refused = await call(w.subsystem, MACHINE, w.proposalPath, { decision: 'approve', recipe: `type ${PASSWORD}` });
+    const refused = await call(w.subsystem, MACHINE, w.proposalPath, {
+      decision: 'approve',
+      recipe: `type ${PASSWORD}`,
+    });
 
     should(refused.status).be.within(400, 499);
     should(await w.recipeOf()).equal('Open site.example and sign in');

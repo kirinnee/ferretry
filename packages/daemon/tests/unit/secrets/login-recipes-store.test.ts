@@ -179,7 +179,9 @@ describe('a ferret proposes a recipe', () => {
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'old' }));
     await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
     await proposalCard(w, 'VERCEL', 'rp_0000000000000001', 'A7');
-    const { entry, proposal: answered } = await w.directory.decide('VERCEL', 'rp_0000000000000001', { decision: 'approve' });
+    const { entry, proposal: answered } = await w.directory.decide('VERCEL', 'rp_0000000000000001', {
+      decision: 'approve',
+    });
     should(entry.recipe).equal('new');
     should(entry).not.have.property('proposals');
     should(answered.agendaItemId).equal('A7');

@@ -257,7 +257,8 @@ describe('a recipe proposal on one sign-in', () => {
       clock: CLOCK,
     });
     should(
-      (await failure(recipes.decideSignIn('si_0000000000000001', 'rp_0000000000000001', { decision: 'approve' }))).refusal,
+      (await failure(recipes.decideSignIn('si_0000000000000001', 'rp_0000000000000001', { decision: 'approve' })))
+        .refusal,
     ).equal('unknown_sign_in');
   });
 });

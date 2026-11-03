@@ -824,10 +824,18 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
       because: 'no-history',
       history: 1,
     });
-    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({ signIn: SUDO, eligible: false, because: 'no-history' });
+    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({
+      signIn: SUDO,
+      eligible: false,
+      because: 'no-history',
+    });
     should(await fresh.service.eligibility(deviceOwner(), SUDO, true)).containEql({ history: 0 });
     // An eligible sign-in answers as it always did.
-    should(await (await once(2)).service.eligibility(deviceOwner(), SUDO, true)).eql({ signIn: SUDO, eligible: true, history: 2 });
+    should(await (await once(2)).service.eligibility(deviceOwner(), SUDO, true)).eql({
+      signIn: SUDO,
+      eligible: true,
+      history: 2,
+    });
   });
 
   it('should suspend it when its tool or host drifts, or it stops being a terminal sign-in, and stay suspended', async () => {
