@@ -101,7 +101,7 @@ describe('the authority matrix', () => {
 
   it.each<{ operation: BoardOperation; expected: BoardStanding[] }>([
     { operation: 'move', expected: ['owner-human', 'owner', 'ancestor', 'assignee'] },
-    { operation: 'note', expected: ['owner-human', 'owner', 'ancestor', 'assignee'] },
+    { operation: 'note', expected: ['owner-human', 'owner', 'ancestor', 'assignee', 'daemon'] },
     { operation: 'block', expected: ['owner-human', 'owner', 'ancestor', 'assignee'] },
     { operation: 'file', expected: ['owner-human', 'owner', 'ancestor', 'assignee'] },
     { operation: 'depend', expected: ['owner-human', 'owner', 'ancestor', 'assignee'] },

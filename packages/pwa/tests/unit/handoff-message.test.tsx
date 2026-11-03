@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { type SessionHandoff, turnFileInstruction } from '@ferretry/protocol';
+import { combinedDelivery, type SessionHandoff, turnFileInstruction } from '@ferretry/protocol';
 import { AttachmentGalleryProvider } from '../../src/components/attachment-gallery.tsx';
 import {
   type HandoffSource,
@@ -280,6 +280,55 @@ describe('a ferret’s message handed over through a file', () => {
     const plain = must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the unnamed peer row');
     expect(plain.dataset['peer']).toBe('mveq0r0r-ddd75d7b');
     expect(plain.dataset['peerKind']).toBe('message');
+    await view.unmount();
+  });
+});
+
+describe('several ferret messages handed over through one file', () => {
+  const combined: SessionHandoff = {
+    name: 'turn-008',
+    message: combinedDelivery(
+      [
+        {
+          sender: { name: 'rhett', sessionId: 's-rhett', kind: 'message', label: 'action' },
+          body: 'the first message',
+        },
+        { sender: { name: 'sada', sessionId: 's-sada', kind: 'question', label: 'blocker' }, body: 'second' },
+      ],
+      'fy',
+    ),
+    attachments: [{ filename: 'log.txt', mime: 'text/plain' }],
+  };
+
+  it("draws one peer row per message, in order, each with its sender and label, and never a bubble of the reader's own", async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() => handoffs.pending[0]?.resolve(combined));
+
+    const rows = [...view.container.querySelectorAll<HTMLElement>('.fy-message-peer')];
+    expect(rows.map(row => [row.dataset['peer'], row.dataset['peerKind']])).toEqual([
+      ['rhett', 'message'],
+      ['sada', 'question'],
+    ]);
+    expect(rows.map(row => row.querySelector('[data-peer-label]')?.getAttribute('data-peer-label'))).toEqual([
+      'action',
+      'blocker',
+    ]);
+    expect(rows[0]?.textContent).toContain('the first message');
+    expect(rows[1]?.textContent).toContain('second');
+    expect(view.container.querySelector('.fy-message-user')).toBeNull();
+    expect(view.container.textContent).not.toContain('messages from ferrets');
+    await view.unmount();
+  });
+
+  it("puts the turn's files under the last message only", async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() => handoffs.pending[0]?.resolve(combined));
+
+    const rows = [...view.container.querySelectorAll<HTMLElement>('.fy-message-peer')];
+    expect(rows[0]?.textContent).not.toContain('log.txt');
+    expect(rows[1]?.textContent).toContain('log.txt');
     await view.unmount();
   });
 });

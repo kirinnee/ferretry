@@ -6,6 +6,8 @@ import {
   AgendaQuestionSchema,
   agendaBriefOf,
   MAX_AGENDA_BODY_LENGTH,
+  MAX_AGENDA_FOLDED_DETAIL_LENGTH,
+  MAX_AGENDA_WHERE_LENGTH,
   MAX_AGENDA_QUESTIONS,
   MAX_AGENDA_STEP_LENGTH,
   MAX_AGENDA_STEPS,
@@ -40,6 +42,35 @@ const plan = {
 };
 
 describe('attention brief', () => {
+  it('should refuse an over-long body, question answer or step with a message that names the count and the remedy', () => {
+    // Arrange / Act
+    const body = AgendaItemSchema.safeParse({ ...minimal, body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
+    const answer = AgendaItemSchema.safeParse({ ...minimal, questionAnswer: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
+    const step = AgendaItemSchema.safeParse({ ...minimal, steps: ['x'.repeat(MAX_AGENDA_STEP_LENGTH + 1)] });
+    const where = AgendaItemSchema.safeParse({ ...minimal, whereWeAre: 'x'.repeat(MAX_AGENDA_WHERE_LENGTH + 1) });
+    const detail = AgendaItemSchema.safeParse({
+      ...minimal,
+      detail: 'x'.repeat(MAX_AGENDA_FOLDED_DETAIL_LENGTH + 1),
+    });
+    const fits = AgendaItemSchema.safeParse({
+      ...minimal,
+      body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH),
+      questionAnswer: 'x'.repeat(MAX_AGENDA_BODY_LENGTH),
+    });
+
+    // Assert
+    should(fits.success).be.true();
+    should(body.error?.issues[0]?.message).equal(
+      'the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice.',
+    );
+    should(answer.error?.issues[0]?.message).match(
+      /^the question answer is 200,001 characters; the most is 200,000\./u,
+    );
+    should(step.error?.issues[0]?.message).match(/^a step is 16,001 characters; the most is 16,000\./u);
+    should(where.error?.issues[0]?.message).match(/^where we are is 200,001 characters; the most is 200,000\./u);
+    should(detail.error?.issues[0]?.message).match(/^the detail is 200,001 characters; the most is 200,000\./u);
+  });
+
   it('should read an item raised before the brief existed, with nothing structured on it', () => {
     // Arrange / Act
     const item = AgendaItemSchema.parse(minimal);

@@ -1,8 +1,9 @@
-import type { QueueAuthor, QueuedMessage, SendSenderKind } from '@ferretry/protocol';
+import type { PeerMessageLabel, QueueAuthor, QueuedMessage, SendSenderKind } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import { foldQueue } from './model.ts';
 import type { SessionQueueStore } from './ports.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './settings.ts';
 
 /** A message as its sender hands it over, before the queue gives it a state. */
 export interface QueueRequest {
@@ -18,6 +19,8 @@ export interface QueueRequest {
   readonly replyExpected?: boolean | undefined;
   /** Stop the running turn first, when this message's turn comes. */
   readonly interrupt?: boolean | undefined;
+  /** A ferret's own label (`fy send --kind`); absent is `action`. Ignored for a person and the daemon. */
+  readonly label?: PeerMessageLabel | undefined;
 }
 
 /** What an enqueue did: made the message, or found the one a first request already made. */
@@ -57,7 +60,10 @@ export interface SessionQueuePorts {
  * are the agent's to read, and taking them back is no longer the queue's to promise.
  */
 export class SessionQueueService {
-  constructor(private readonly ports: SessionQueuePorts) {}
+  constructor(
+    private readonly ports: SessionQueuePorts,
+    private readonly coalescing: QueueCoalesceSettings = defaultQueueCoalesceSettings,
+  ) {}
 
   /** Every message the session's queue holds, oldest first. */
   async list(id: SessionId): Promise<readonly QueuedMessage[]> {
@@ -70,6 +76,13 @@ export class SessionQueueService {
       const existing = (await this.list(id)).find(message => message.id === request.id);
       if (existing !== undefined) return { message: existing, created: false };
       const at = this.ports.clock.now();
+      const label =
+        request.sender === 'agent'
+          ? request.replyExpected === true
+            ? 'blocker'
+            : (request.label ?? 'action')
+          : undefined;
+      const holdUntil = this.holdUntil(request, label, at);
       const message: QueuedMessage = {
         v: 1,
         id: request.id,
@@ -81,6 +94,8 @@ export class SessionQueueService {
         attachmentIds: [...(request.attachmentIds ?? [])],
         ...(request.replyExpected === true ? { replyExpected: true } : {}),
         ...(request.interrupt === true ? { interrupt: true } : {}),
+        ...(label === undefined ? {} : { label }),
+        ...(holdUntil === undefined ? {} : { holdUntil }),
         enqueuedAt: at,
         state: 'queued',
         stateAt: at,
@@ -89,6 +104,18 @@ export class SessionQueueService {
       await this.ports.store.append(id, { v: 1, kind: 'enqueued', at, message });
       return { message, created: true };
     });
+  }
+
+  /**
+   * How long a ferret's message is held to ride with others, fixed NOW so a later settings change never
+   * moves a hold already promised. Never for a person, the daemon, a blocker, an interrupt or with the
+   * kill switch off. A question is a blocker whatever it was labelled, so it is never held.
+   */
+  private holdUntil(request: QueueRequest, label: PeerMessageLabel | undefined, at: string): string | undefined {
+    if (!this.coalescing.coalesce || label === undefined || label === 'blocker' || request.interrupt === true)
+      return undefined;
+    const windowMs = label === 'fyi' ? this.coalescing.fyiMaxHoldMs : this.coalescing.actionWindowMs;
+    return new Date(Date.parse(at) + windowMs).toISOString();
   }
 
   /** Replaces the text of a message that is still waiting. */

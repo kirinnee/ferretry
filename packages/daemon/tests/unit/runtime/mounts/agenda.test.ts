@@ -247,6 +247,41 @@ describe('attention routes', () => {
     });
   });
 
+  it('should take a body of exactly 200,000 characters and refuse 200,001 with the count and the remedy', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const exact = await dispatch(post({ ...raise, body: 'x'.repeat(200_000) }, agentIn('s1')));
+    const over = await dispatch(post({ ...raise, body: 'x'.repeat(200_001) }, agentIn('s1')));
+
+    // Assert
+    should(exact.status).equal(200);
+    should(over.status).equal(400);
+    should(JSON.stringify(jsonBody(over)))
+      .match(/the body is 200,001 characters; the most is 200,000\. Do not trim it/u)
+      .match(/add it with --link/u);
+  });
+
+  it('should hold an edit’s body and question answer to the same 200,000 characters', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+    const edit = (fields: object) => post({ action: 'edit', id: 'A1', ...fields }, agentIn('s1'));
+
+    // Act
+    const body = await dispatch(edit({ body: 'x'.repeat(200_001) }));
+    const answer = await dispatch(edit({ questionAnswer: 'x'.repeat(200_001) }));
+    const fits = await dispatch(edit({ questionAnswer: 'x'.repeat(200_000) }));
+
+    // Assert
+    should(body.status).equal(400);
+    should(JSON.stringify(jsonBody(body))).match(/the body is 200,001 characters; the most is 200,000/u);
+    should(answer.status).equal(400);
+    should(JSON.stringify(jsonBody(answer))).match(/the question answer is 200,001 characters; the most is 200,000/u);
+    should(fits.status).equal(200);
+  });
+
   it('should refuse a ferret’s new item with no premise or no context, naming what is missing', async () => {
     // Arrange
     const dispatch = fixture();

@@ -713,6 +713,7 @@ describe('Pack mode teaching', () => {
       '`zz new --auto',
       '--name "<short task title>"',
       '`zz wait <id>`',
+      'Label sends: `--kind blocker|action|fyi` (fyi rarely)',
       '`zz stop children',
     ])
       should(teaching).containEql(step);
@@ -772,7 +773,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Share if same place, same context, same pace;');
     // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
     should(text).containEql('dependent things always share.');
-    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest (unsure: closest).');
+    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest.');
     should(text).containEql('Split parts that stop fitting.');
   });
 
@@ -782,9 +783,9 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // Assert — premise and context are part of the one command: every item is read cold.
     should(text).containEql(
-      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`.',
+      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`.',
     );
-    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`).');
+    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`).');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
       'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
@@ -806,12 +807,10 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`answer <id> "<text>"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`, `--where`=now.');
     should(text).not.containEql('--back');
-    should(text).containEql(
-      'Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected.',
-    );
+    should(text).containEql("Keep current (`edit`); only you mark it Done (`done`) when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
-    should(text).containEql('Chat: their words verbatim + your reply on it; link in chat; unsure: closest, say so.');
+    should(text).containEql('Chat: their words verbatim + your reply; link it; unsure: closest, say so.');
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -840,8 +839,8 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,276 with both owner rules restored; the total keeps its headroom below.
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_290);
+    // Assert — measured 1,252: the body rule (one-screen summary, full report via `--link`) added 43 to the 1,276 of the agenda-first model, and tightening the section's own wording (the repeated "unsure: closest", `done <id>`, "<the ask>", the form's "text in the reply" that the help already says) paid for it and for main's send-label rule; the total keeps at least 100 of headroom.
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
@@ -1129,6 +1128,12 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text.split('\n')).have.length(2);
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('Never raise agenda items or notify the owner;');
+    should(text).containEql(
+      'Label every send: `--kind blocker` only when you are stuck until answered, `--kind action` (default) when it needs doing, `--kind fyi` rarely, for news that needs nothing.',
+    );
+    should(text).containEql(
+      "Blockers go at once, actions are combined for a minute, FYIs wait for the receiver's turn to end.",
+    );
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
     should(text).containEql('With a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
@@ -1144,7 +1149,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(460);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

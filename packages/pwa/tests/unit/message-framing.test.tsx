@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { combinedDelivery } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SystemNoticeRow } from '../../src/components/agent-message-rows.tsx';
 import { LedgerMessage } from '../../src/components/ledger-message.tsx';
@@ -69,6 +70,24 @@ describe('no bubble shows framing', () => {
 
   test('the owner’s own words get no chip', () => {
     expect(bubble('hello there').chip).toBeUndefined();
+  });
+});
+
+describe("a delivery of several ferrets' messages", () => {
+  const combined = combinedDelivery(
+    [
+      { sender: { name: 'sada', sessionId: 's-sada', kind: 'message', label: 'action' }, body: 'the build is green' },
+      { sender: { name: 'rhett', sessionId: 's-rhett', kind: 'message', label: 'fyi' }, body: 'also, lint is clean' },
+    ],
+    'fy',
+  );
+
+  test("is never framed as the owner's own words: the first sender is the chip and no banner shows", () => {
+    const shown = bubble(combined);
+    expect(shown.chip?.toLowerCase()).toContain('sada');
+    expect(shown.text).toContain('the build is green');
+    expect(shown.text).not.toMatch(/\[(\d+\/\d+|\d+ messages)/u);
+    expect(shown.text).not.toContain('not from the owner');
   });
 });
 

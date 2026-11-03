@@ -623,10 +623,13 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
+import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
   alertFallback,
+  AlertSurface,
+  BoardAlerts,
   BOARD_SWEEP_INTERVAL_MS,
   BoardGateCheck,
   BoardService,
@@ -1128,6 +1131,7 @@ import {
   publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
   QuarantineRegistry,
+  defaultQueueDeliverySettings,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -1313,6 +1317,7 @@ import {
   searchTranscriptRecords,
   secretsMatch,
   selectBrowserWorker,
+  sendRecordFor,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -3685,15 +3690,19 @@ function createSessionSendSubsystem(
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
             ...(request.now === true ? { interrupt: true } : {}),
+            ...(person || request.label === undefined ? {} : { label: request.label }),
           })
           .catch((error: unknown) => sendRefusal(error));
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
+        const queued = (await queue.list(id)).find(message => message.id === enqueued.message.id);
         const answer = answerOf(
           (await ledger.list(id)).find(record => record.sendId === enqueued.message.id),
-          (await queue.list(id)).find(message => message.id === enqueued.message.id),
+          queued,
         );
+        // Still held to be combined with others: say so, so the sender does not read "queued" as stuck.
+        const held = queued?.state === 'queued' && queued.label !== undefined && queued.holdUntil !== undefined;
         if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
         if (person) await instructions.queueIfStale(id);
         return {
@@ -3703,6 +3712,7 @@ function createSessionSendSubsystem(
           fate: answer.fate,
           ...(answer.waitReason === undefined ? {} : { waitReason: answer.waitReason }),
           ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
+          ...(held ? { label: queued.label, heldUntil: queued.holdUntil } : {}),
         };
       }
       const outcome = await service
@@ -3749,9 +3759,9 @@ function createSessionSendSubsystem(
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
-      const record = (await ledger.list(id)).find(entry => entry.sendId === sendId);
-      if (record === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
-      return sendRecordView(record);
+      const found = sendRecordFor(await ledger.list(id), await queue.list(id), sendId);
+      if (found === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
+      return found;
     },
     retry: async (reference, sendId, force) => {
       const id = require(reference);
@@ -10176,18 +10186,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        */
       const queueSerial = new KeyedSerialExecutor();
       const queueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
-      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial });
+      const coalescing = {
+        coalesce: delivery.coalesce,
+        actionWindowMs: delivery.actionWindowMs,
+        fyiMaxHoldMs: delivery.fyiMaxHoldMs,
+        batchMax: delivery.batchMax,
+      };
+      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial }, coalescing);
       const deliveryView = new SendPathDeliveryView(sendRepository, sendTerminal, launchGate);
-      const queueDeliverer = new QueueDeliverer({
-        store: queueStore,
-        serial: queueSerial,
-        clock,
-        scheduler: new TimerSendScheduler(),
-        view: async id => await deliveryView.view(id),
-        transport: new SendPathQueueTransport(sends, sendLedger),
-        sessions: () => storage.listSessions().map(session => session.id),
-        sleep: async milliseconds => await Bun.sleep(milliseconds),
-      });
+      const queueDeliverer = new QueueDeliverer(
+        {
+          store: queueStore,
+          serial: queueSerial,
+          clock,
+          scheduler: new TimerSendScheduler(),
+          view: async id => await deliveryView.view(id),
+          transport: new SendPathQueueTransport(sends, sendLedger),
+          sessions: () => storage.listSessions().map(session => session.id),
+          sleep: async milliseconds => await Bun.sleep(milliseconds),
+        },
+        { ...defaultQueueDeliverySettings, ...coalescing },
+      );
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
       /**
        * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
@@ -10355,6 +10374,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
       const boardSubFerrets = new StorageSubFerretDirectory(storage);
+      // Every board alert — stale, red CI, closed unmerged — passes here, whoever it was routed to: one for the owner's
+      // own interactive chat is journalled on it instead of typed (lib/board/alert-sends.ts).
+      const boardAlertJournal = new JournalBoardChecks(storage);
+      const alertSurface = new AlertSurface({
+        snapshot: async () => await boardWorld.board.snapshot(),
+        note: async (card, text) => {
+          await boardWorld.board.act(card, { action: 'note', text }, { kind: 'daemon' });
+        },
+        machineId: () => attachmentDaemonId,
+      });
+      const boardAlerts = new BoardAlerts({
+        mode: async sessionId => {
+          const id = tryParseSessionId(sessionId);
+          return id === undefined ? undefined : (await sendRepository.read(id))?.mode;
+        },
+        send: async (sessionId, message) => {
+          await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+        },
+        withheld: async (sessionId, message) => await boardAlertJournal.recordWithheldAlert(sessionId, message),
+        surface: async (card, message) => {
+          await alertSurface.surface(card, message).catch((error: unknown) => {
+            boardDiagnostics.warn(`could not surface a withheld alert on ${card}'s board: ${String(error)}`);
+          });
+        },
+      });
       const boardCopies = new GitWorkingCopies();
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
@@ -10396,7 +10440,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           send: async (card, message, reason) => {
             const recipient = noticeRecipient(await boardSessions.roster(), card);
             const sessionId = recipient?.sessionId ?? (await nudgeTarget(boardSubFerrets, alertFallback(card, reason)));
-            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await boardAlerts.send(sessionId, message, card.id);
           },
         },
         timers: {
@@ -11435,8 +11479,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A stale nudge was routed by the plan (assignee, else nearest live lead, else owner); a go-ahead still
           // goes to the assignee's lead when the assignee is a sub-ferret.
           send: async (sessionId, message, kind) => {
+            if (kind === 'stale') {
+              await boardAlerts.send(sessionId, message);
+              return;
+            }
             await boardSends.send({
-              id: parseSessionId(kind === 'stale' ? sessionId : await nudgeTarget(boardSubFerrets, sessionId)),
+              id: parseSessionId(await nudgeTarget(boardSubFerrets, sessionId)),
               sendId: crypto.randomUUID(),
               message,
             });
@@ -13549,7 +13597,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
           sends: producerSends('Warden'),
-          exchanges: { sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)) },
+          exchanges: {
+            sends: async sessionId => {
+              const id = parseSessionId(sessionId);
+              return withBatchMembers(await sendLedger.list(id), await sessionQueue.list(id));
+            },
+          },
           // B144: the send path's own verified Enter, and the health a stuck ferret is marked with.
           stuckInput: {
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),

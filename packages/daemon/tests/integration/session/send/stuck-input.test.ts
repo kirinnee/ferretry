@@ -176,7 +176,8 @@ class World {
 
   /** A ferret's message, sent the way the queue sends every message: enqueued, then handed over. */
   async enqueue(id: string, text: string): Promise<void> {
-    await this.queue.enqueue(ID, { id, sender: 'agent', from: 'mvzcf6iu-351e2c8e', text });
+    // A blocker: this harness is about the pane, and an unlabelled ferret message would wait out its action window first.
+    await this.queue.enqueue(ID, { id, sender: 'agent', from: 'mvzcf6iu-351e2c8e', text, label: 'blocker' });
     await this.deliverer.enqueued(ID);
   }
 

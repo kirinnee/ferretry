@@ -113,6 +113,9 @@ export const BOARD_CHECKED_EVENT = 'board.unfiled-work';
 /** The journal entry the gate check leaves: the ferret items it asked to drop and the gate cards they sat on. */
 export const BOARD_GATE_NUDGED_EVENT = 'board.gate-nudged';
 
+/** The journal entry a board alert leaves on the interactive session it was held back from, with its words. */
+export const BOARD_ALERT_WITHHELD_EVENT = 'board.alert-withheld';
+
 /** Journals a turn-end nudge on the nudged session (`board-design.md` §3.4). */
 export class JournalBoardChecks {
   constructor(private readonly storage: SessionDocuments) {}
@@ -126,6 +129,12 @@ export class JournalBoardChecks {
     const id = known(this.storage, sessionId);
     if (id !== undefined)
       await this.storage.append(id, BOARD_GATE_NUDGED_EVENT, { items: [...items], cards: [...cards] });
+  }
+
+  /** Journals a board alert held back from an interactive session (`lib/board/alert-sends.ts`). */
+  async recordWithheldAlert(sessionId: string, message: string): Promise<void> {
+    const id = known(this.storage, sessionId);
+    if (id !== undefined) await this.storage.append(id, BOARD_ALERT_WITHHELD_EVENT, { message });
   }
 }
 

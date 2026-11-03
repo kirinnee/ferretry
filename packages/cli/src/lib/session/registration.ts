@@ -181,6 +181,8 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       }),
     );
 
+  const KIND_HELP =
+    "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends";
   const sendAction = guard(async (id: string, parts: string[], options: CommanderOptions) => {
     await deps.send.execute(id, {
       ...(joined(parts) === undefined ? {} : { message: joined(parts) }),
@@ -190,6 +192,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       ...(flag(options, 'ask') === undefined ? {} : { ask: true }),
       ...(flag(options, 'expectReply') === undefined ? {} : { expectReply: true }),
       ...(text(options, 'until') === undefined ? {} : { until: text(options, 'until') }),
+      ...(text(options, 'kind') === undefined ? {} : { kind: text(options, 'kind') }),
       ...(flag(options, 'wait') === undefined ? {} : { wait: true }),
       ...(flag(options, 'json') === undefined ? {} : { json: true }),
     });
@@ -207,6 +210,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--expect-reply', 'label this as needing a reply, without parking this session')
     .option('--until <when>', 'with --ask: give up waiting after this long (45m, 2h, or an ISO timestamp)')
     .option('--wait', 'wait until the message is proven delivered, timed out, or unconfirmed')
+    .option('--kind <kind>', KIND_HELP)
     .option('--json', 'print the session as JSON')
     .action(sendAction);
 
@@ -215,6 +219,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .description('the peer-reply spelling of send: answers a peer that is parked on this session')
     .argument('<id>', 'session id or callsign')
     .argument('<message...>', 'the reply text')
+    .option('--kind <kind>', KIND_HELP)
     .option('--json', 'print the session as JSON')
     .action(sendAction);
 

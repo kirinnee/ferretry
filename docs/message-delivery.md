@@ -23,10 +23,14 @@ this page, which is still how a message reaches the pane.
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
-  one message typing at a time (`nextToDeliver`). A daemon notice to an interactive session is never in the
-  delivery order (`boardOnly`): that session is the owner's own chat, so it takes the direct path. The board's
-  alerts therefore avoid it: they go to the card's working ferret and its leads first, and reach an interactive
-  session only when none is alive ([board.md](board.md#who-a-board-alert-is-for)).
+  one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
+  (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —
+  a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive
+  session is never in the delivery order (`boardOnly`): that session is the owner's own chat. Being out of the order
+  does NOT keep it out of the pane — the queue hands it to the direct path, which types it — so a producer that must
+  not type into that chat holds it back itself. The board's alerts do: they go to the card's working ferret and its
+  leads first, and one whose recipient is interactive is journalled on it, never typed
+  ([board.md](board.md#who-a-board-alert-is-for)).
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
   included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
   permission form on screen, a session still launching, or a pane it cannot read, and says which as the
@@ -35,15 +39,15 @@ this page, which is still how a message reaches the pane.
   the send path finish it (`clearOwnDraft`) and goes on, or — when the Enter does not take — names it as the
   message's `waitBehind` ([below](#b144-a-ferret-idle-behind-its-own-unsent-message)).
 - **Deliverer** — `QueueDeliverer` (`lib/session/queue/deliverer.ts`) is the one owner of WHEN and IN WHAT
-  ORDER. It marks a message `typing` on disk, then hands it to the tracked send path under the message's
-  own id (`SendPathQueueTransport.handOver` → `SessionSendService.send`, the ONE function that delivers a
-  message — a later change that folds several waiting messages into one payload hands that payload to it as
-  a single message), which does the HOW: the turn file, the turn record, the busy-pane
+  ORDER. It asks `planDelivery` what is next, marks it `typing` on disk, then hands it to the tracked send
+  path under one id (`SendPathQueueTransport.handOver` → `SessionSendService.send`, the ONE function that
+  delivers a turn; a combined delivery is handed to it as one payload with its `parts`), which does the HOW: the turn file, the turn record, the busy-pane
   queue, a revive. The send ledger, keyed by that id, is where every later tick comes from
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
-  message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
-  in it is still waiting or unproven. It is armed after the bind, like the send tracker, and stopped FIRST
+  message is enqueued, when its state document changes, at boot, every `lookMs` (5 s) while something
+  in it is still waiting or unproven, and at the moment the earliest HOLD ends (a hold is not a wait reason:
+  nothing is wrong, the message is simply not due). It is armed after the bind, like the send tracker, and stopped FIRST
   on the way down: a send answers once its message is on disk, so one sent just before a stop is still
   being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
@@ -57,16 +61,24 @@ this page, which is still how a message reaches the pane.
   hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
   answered it; one held for a draft or a question is answered `queued` at once, with the message id as
   `sendId`. `--now` (stop the running turn first) is a flag on the queued message (`interrupt`), not a separate path: it keeps its place, and when its turn comes AND the input box is empty the deliverer hands it over with the send path's own stop-then-type.
-- **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
-  for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
+- **No board news and no board alert is typed into the owner's own chat** (an interactive session): board news
+  is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)), and a board
+  alert is journalled instead (below). The other daemon notices still are typed there; see **Every producer**.
 - **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
-  the card's assignee, else its nearest live lead, and to an interactive session only as the last resort
-  ([board.md](board.md#who-a-board-alert-is-for)); that last resort still takes the direct path above.
+  the card's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
+  NOT sent: `BoardAlerts` (`lib/board/alert-sends.ts`) journals it on that session as `board.alert-withheld`
+  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
+  journalled only), so the board shows it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
+  the owner chats with had 177 alerts typed into it as turns in three days (2026-10-31 to 2026-11-03) — 158 "CI is red",
+  17 stale, 2 closed unmerged — 134 on the `direct` path and 43 on `native-inline`, every one `senderKind: daemon`.
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
-  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path:
-  the queue never types into the owner's own chat, and those producers do not post to its board yet. The
+  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path, and so is
+  still typed, for every producer but the board's alerts above: the Warden, the declared-wait watcher, the learning
+  re-instruction, the agenda's attention check, and the board's go-ahead, turn-end and gate checks and reopen
+  words. Holding those back too is a declared GAP — each tells the session something about its own turn or the
+  owner's own words, so it needs its own home before it can stop being typed. The
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
   does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.
@@ -127,6 +139,70 @@ this page, which is still how a message reaches the pane.
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
 <ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
   the agent's, and either answers `409`.
+
+## Labels and combined delivery
+
+A ferret labels every message it sends: `fy send --kind blocker|action|fyi` (default `action`; `--ask`,
+`--expect-reply` and `--now` are blockers). The label is the sender's own word about how soon the receiver needs the message, and
+it decides how long the queue may hold it so that several can ride in one turn instead of waking the receiver
+once each (owner-approved 2026-11-03).
+
+| Label     | Delivered                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| `blocker` | At once, with every ferret message already waiting in front of it.                                            |
+| `action`  | After `actionWindowMs` (60 s) from its arrival, with every ferret message that arrived in that time.          |
+| `fyi`     | When the receiver ends a turn that began after it arrived, or after `fyiMaxHoldMs` (10 min), whichever first. |
+
+These are never held, whatever label they carry or lack: **the owner's messages, the daemon's (Warden,
+Board, Agenda) and a ferret's `--now`**. A **question** (`--ask`, `--expect-reply`) is never held at all, as
+news or to be combined: the CLI makes it a blocker and refuses `--kind fyi` beside it, and the daemon treats
+any message that expects a reply as a blocker whatever label it arrives with (a raw or older client included).
+**The reply to a ferret the receiver is parked on is a blocker** too. A message with no label is delivered at
+once only when it was queued before this existed. One that arrives with no label from an older CLI is an
+`action`: the queue stamps it with the 60 s window and combines it, unless it expects a reply or is an
+interrupt, which go at once.
+
+- **One decision** — `planDelivery` (`lib/session/queue/policy.ts`) is pure: it takes the queue, the
+  receiver's turn state, the clock and the settings, and answers `single`, `batch` or `hold`. A person's
+  message goes alone and first. If ANY ferret message is due, EVERY pending ferret message goes with it, in
+  acceptance order, up to `batchMax` (20; the rest follow as their own delivery).
+- **Hold** — `enqueue` stamps `holdUntil` on a held message; the answer to `fy send` says so
+  (`heldUntil`) and the CLI prints "held until …; do not resend". An FYI-only batch is never delivered to a
+  STOPPED session (an FYI must not revive a ferret); it waits as `stopped` until a blocker or action
+  arrives or the session runs. That is judged on the WHOLE pending queue: once a blocker or action is
+  waiting behind any number of FYIs, they drain in order (a capped batch of FYIs included) so its turn
+  comes. FYIs alone never hold back a daemon message.
+- **One turn, one record** — the members are all moved to `typing` on disk, each carrying the batch id, BEFORE
+  anything is typed; the send ledger gets ONE record, under the oldest member's id. `deliveredAs` on every
+  member names that id, so a member's ticks and `GET …/sends/:id` come from the batch's record
+  (`sendRecordFor`). A crash before the hand-over leaves them `typing` with no ledger record: all go back to
+  `queued`, none is typed twice.
+- **What the receiver reads** — one turn that lists each message with its place, kind, label and sender, in
+  order ([format](ferret-messages.md#combined-deliveries)). Each part keeps its own kind, so the one that
+  answers a wait still ends it. If the turn cannot be proven delivered, EVERY sender in it is told, each
+  under its own message id (the ledger row keeps the members in `batch`).
+- **A failure notice survives a crash** — the senders still to be told are written on the ledger row
+  (`noticesOwed`, daemon-internal, never on the wire) in the SAME line as the `unaccounted` / `timed_out` fate,
+  and each member is crossed off only after its notice was sent. A crash after the fate, or mid-loop, leaves
+  the row owing exactly the members not yet crossed off; the next look — the boot walk included — pays them
+  under the existing per-member key `send-failed:<recipient>:<sendId>`, so a notice sent but not yet crossed
+  off is attempted again and lands once. A notice that throws stays owed. A send later proven `delivered`
+  drops its debt, and a final row owing nothing stays quiet.
+- **A debt that could not be paid schedules its own retry** — a look that leaves any notice unsent (the notifier
+  threw, or the crossing-off would not write) schedules another look for that session after 60 s, then 2×, 4× …
+  the wait before it, at most 6 in a row; the earlier of that and the sends' own next look wins, since one look
+  is kept per session. Past the cap nothing is scheduled but the debt stays on the row, and `watching` counts it
+  **whatever the age of its send** (the proof-age ceilings end a wait for proof, not for a notice), so the next
+  reader's look or the next boot pays it. A paid debt resets the backoff and schedules nothing.
+- **Settings** — `delivery` in `config/daemon.json`: `coalesce` (default `true`; `false` is the kill switch —
+  every ferret message is a blocker and goes alone, as before), `actionWindowMs` (60 000),
+  `fyiMaxHoldMs` (600 000), `batchMax` (20). Read at start.
+- **Not a digest of anything else** — the only digest Ferretry allows is this one, of FERRET messages the
+  sender chose to label `fyi`. Board news, Warden alerts and every other daemon message are never batched
+  ([board.md](board.md)).
+- **Downgrade** — a daemon that does not know `label` answers 400; the CLI retries once without it and says
+  so, and the message is then unlabelled. A combined turn already written is only text: an older app shows it
+  as one message.
 
 ## The composer is read, never searched for
 
@@ -534,6 +610,21 @@ typed.
   lands and submits in Codex's composer (its paste-burst window swallows Enter — see
   [Measured Codex behaviour](#measured-codex-behaviour)), so multi-line messages to Codex, and to any harness
   that is not Claude Code, still go by turn file until one is measured.
+
+**Where "is this Claude?" comes from.** The policy never looks at the pane for it; it reads
+`SendTarget.harness`, which the repository fills from the session's own `config.harness`
+(`StorageSendRepository.target()`, `adapters/session/send/storage-send-repository.ts`). Two decisions hang on
+that one field:
+
+- **Whole paste.** `isDirectSend` types a short multi-line message whole only when the target's harness is
+  `claude`.
+- **The idle stop key.** `shouldPressStopKey` presses the stop key at an idle prompt only for an interactive
+  `claude` session; at an idle Codex prompt that key can quit the TUI, so it stays suppressed there.
+
+A target built WITHOUT `harness` reads as "not Claude": every multi-line send quietly falls back to a turn
+file and the idle stop key is never pressed. Policy tests that build targets by hand cannot catch this, so
+`tests/unit/session/send/storage-send-repository.test.ts` exercises the real repository and asserts both
+outcomes.
 
 ### The peer banner is one line
 

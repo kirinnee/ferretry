@@ -369,8 +369,10 @@ describe('the gate policy', () => {
       howToTest: `1. ${'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1000)}`,
       summary: '',
     });
-    should(long.body?.length).equal(MAX_AGENDA_BODY_LENGTH);
-    should(long.body?.endsWith('…')).be.true();
+    should(long.body).match(
+      /^How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
+    );
+    should(long.body).not.match(/x{10}/u);
     should(long).not.have.property('premise');
     should(gateRaise(gate, { ...task, howToTest: '' })).not.have.property('body');
     should(raise.ask.options.map(option => option.label)).eql(['Not good', 'Done']);

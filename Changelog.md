@@ -1,3 +1,42 @@
+## [4.257.3](https://github.com/kirinnee/ferretry/compare/v4.257.2...v4.257.3) (2026-11-03)
+
+### Fixes
+
+* **board:** never type a board alert into an interactive session ([#1430](https://github.com/kirinnee/ferretry/issues/1430)) ([536f3a6](https://github.com/kirinnee/ferretry/commit/536f3a63c63759ee27a7e0ec3ca2ed74be785880))
+
+## [4.257.2](https://github.com/kirinnee/ferretry/compare/v4.257.1...v4.257.2) (2026-11-03)
+
+### Fixes
+
+* **agenda:** refuse an over-long body with the count and the remedy ([#1429](https://github.com/kirinnee/ferretry/issues/1429)) ([2b138b4](https://github.com/kirinnee/ferretry/commit/2b138b4d95757cdf2fbf2cb764872e82ee16c0dd)), closes [#1404](https://github.com/kirinnee/ferretry/issues/1404)
+* **fleet:** accept compactAt in profile files ([#1432](https://github.com/kirinnee/ferretry/issues/1432)) ([03aa19d](https://github.com/kirinnee/ferretry/commit/03aa19d3cc577a951d317b51688df4027d0f63cb))
+
+## [4.257.1](https://github.com/kirinnee/ferretry/compare/v4.257.0...v4.257.1) (2026-11-03)
+
+### Fixes
+
+* **send:** carry the session's harness into the send target ([#1431](https://github.com/kirinnee/ferretry/issues/1431)) ([c5bea75](https://github.com/kirinnee/ferretry/commit/c5bea75be224b2d16fa89fc00510a8a9ed0fea49)), closes [#1398](https://github.com/kirinnee/ferretry/issues/1398)
+
+## [4.257.0](https://github.com/kirinnee/ferretry/compare/v4.256.1...v4.257.0) (2026-11-03)
+
+### Features
+
+* **queue:** message labels, action batching and the ferret FYI digest ([#1400](https://github.com/kirinnee/ferretry/issues/1400)) ([7a8082a](https://github.com/kirinnee/ferretry/commit/7a8082afee04122b45a83d8b34933ea0f5a9646d))
+
+## [4.256.1](https://github.com/kirinnee/ferretry/compare/v4.256.0...v4.256.1) (2026-11-03)
+
+### Fixes
+
+* **daemon:** keep the board watch's git answers while the checkout is unchanged ([#1422](https://github.com/kirinnee/ferretry/issues/1422)) ([ea49938](https://github.com/kirinnee/ferretry/commit/ea4993887d5b4b1998a3368606e0a18a12de389b))
+* **daemon:** size the session document cache to the fleet instead of 4,096 ([#1416](https://github.com/kirinnee/ferretry/issues/1416)) ([7d22107](https://github.com/kirinnee/ferretry/commit/7d22107c76af5661800e50e471c6962403d7f5b9))
+* **daemon:** stop re-parsing and re-serialising an unchanged session list ([#1424](https://github.com/kirinnee/ferretry/issues/1424)) ([d0c3754](https://github.com/kirinnee/ferretry/commit/d0c3754a6528485a056684fdb821dcd55bf9751f))
+
+## [4.256.0](https://github.com/kirinnee/ferretry/compare/v4.255.1...v4.256.0) (2026-11-03)
+
+### Features
+
+* **agenda:** teach the agenda-first model; search, check, then open ([#1404](https://github.com/kirinnee/ferretry/issues/1404)) ([fe23c54](https://github.com/kirinnee/ferretry/commit/fe23c54360c471871a2fd1b7437d8a01842cc89e))
+
 ## [4.255.1](https://github.com/kirinnee/ferretry/compare/v4.255.0...v4.255.1) (2026-11-03)
 
 ### Fixes

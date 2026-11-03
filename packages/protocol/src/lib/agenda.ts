@@ -324,6 +324,26 @@ export const MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH = 16_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
+const characters = (count: number): string => count.toLocaleString('en-US');
+
+/**
+ * Why a long document is refused, in words that name the count and the remedy: the body is where a ferret
+ * is tempted to trim the end off, and a trimmed report loses its sections. The full report belongs behind a link.
+ */
+export const agendaTooLongMessage = (field: string, length: number, maximum: number): string =>
+  `${field} is ${characters(length)} characters; the most is ${characters(maximum)}. Do not trim it: put the full report in a file or artifact, add it with --link, and keep ${field} to a one-screen summary and the choice.`;
+
+/** Prose that, over `maximum`, is refused with `agendaTooLongMessage` rather than a bare "too big". */
+const longProse = (field: string, maximum: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .superRefine((value, ctx) => {
+      if (value.length > maximum)
+        ctx.addIssue({ code: 'custom', message: agendaTooLongMessage(field, value.length, maximum) });
+    });
+
 const LIST_MARKER = /^\s*(?:[-*•]|\d+[.)])\s+/u;
 const NESTED_MARKER = /^(\s*(?:[-*•]|\d+[.)])\s+)(?:(?:[-*•]|\d+[.)])\s+)+/u;
 
@@ -499,21 +519,21 @@ export const AgendaBriefShape = {
   /** PRs, files and references worth opening. */
   links: z.array(AgendaLinkSchema).min(1).max(MAX_AGENDA_LINKS).optional(),
   /** Ordered Markdown steps the owner follows, one thing to do each: complete instructions, never a secret. */
-  steps: z.array(prose(MAX_AGENDA_STEP_LENGTH)).min(1).max(MAX_AGENDA_STEPS).optional(),
+  steps: z.array(longProse('a step', MAX_AGENDA_STEP_LENGTH)).min(1).max(MAX_AGENDA_STEPS).optional(),
   /** Instructions that are not a list, as one Markdown document. */
-  body: prose(MAX_AGENDA_BODY_LENGTH).optional(),
+  body: longProse('the body', MAX_AGENDA_BODY_LENGTH).optional(),
   /**
    * The ferret's answer to the owner's QUESTION about the item, shown above the item's own options, which stay live:
    * the ask is still waiting for the owner's own answer, and this block never closes it.
    */
-  questionAnswer: prose(MAX_AGENDA_BODY_LENGTH).optional(),
+  questionAnswer: longProse('the question answer', MAX_AGENDA_BODY_LENGTH).optional(),
   /**
    * WHERE WE ARE NOW, as Markdown: the current situation, in the reader's terms. Anything the owner asked for to
    * complete the item lives here — an explainer, a report — so it is read where the item is.
    */
-  whereWeAre: prose(MAX_AGENDA_WHERE_LENGTH).optional(),
+  whereWeAre: longProse('where we are', MAX_AGENDA_WHERE_LENGTH).optional(),
   /** The context explained from zero, as Markdown, for a reader who knows nothing of the topic: drawn folded away. */
-  detail: prose(MAX_AGENDA_FOLDED_DETAIL_LENGTH).optional(),
+  detail: longProse('the detail', MAX_AGENDA_FOLDED_DETAIL_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */

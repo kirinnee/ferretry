@@ -162,9 +162,11 @@ const openPullRequests = (task: Pick<BoardTask, 'links'>): string | null => {
   return open.length === 0 ? null : open.map(pr => `A new PR is open for this card: ${pr.url}`).join('\n');
 };
 
-/** Markdown cut to `limit` characters with its lines kept, marked … when it was cut. */
-const clipProse = (text: string, limit: number): string =>
-  text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
+/** The card's How to test as written, or — never a cut-off copy — a pointer to the card when it is too long for a body. */
+const howToTestBody = (task: Pick<BoardTask, 'id'>, howToTest: string): string =>
+  howToTest.length <= MAX_AGENDA_BODY_LENGTH
+    ? howToTest
+    : `How to test is ${howToTest.length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
 
 /** What the gate item is raised with (`RaiseAgendaRequest`, minus who raises it). */
 export interface GateRaise {
@@ -208,7 +210,7 @@ export const gateRaise = (
     context: openPullRequests(task),
     ...(summary === '' ? {} : { premise: clipAtWord(summary, MAX_AGENDA_REASON_LENGTH) }),
     // The card's How to test, as written: Markdown keeps its lines. Never `steps`, which make a choice a mix.
-    ...(howToTest === '' ? {} : { body: clipProse(howToTest, MAX_AGENDA_BODY_LENGTH) }),
+    ...(howToTest === '' ? {} : { body: howToTestBody(task, howToTest) }),
     ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
     answers: gateAnswers(gate),
     task: { id: task.id },

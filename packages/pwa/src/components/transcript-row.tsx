@@ -1,9 +1,9 @@
-import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
+import { type HandoffPointer, parseCombinedDelivery, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
-import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { isBoardNudge } from '../lib/board-nudge.ts';
 import { ferretryFeatureOf } from '../lib/ferretry-sender.ts';
 import { parseInstructionsUpdate } from '../lib/instructions-update.ts';
+import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
@@ -11,8 +11,8 @@ import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
 import {
   BoardNudgeRow,
-  HandoffNoticeRow,
   FerretryMessageRow,
+  HandoffNoticeRow,
   InstructionsUpdateRow,
   PeerMessageRow,
   SystemNoticeRow,
@@ -301,6 +301,32 @@ function HandoffRow({
   if (ferretryFeature !== undefined && reading.state === 'read')
     return (
       <FerretryMessageRow entry={entry} feature={ferretryFeature} rhythm={rhythm} text={reading.handoff.message} />
+    );
+  const combined = reading.state === 'read' ? parseCombinedDelivery(reading.handoff.message) : null;
+  if (combined !== null && source !== null && reading.state === 'read')
+    return (
+      <>
+        {combined.parts.map((part, position) => (
+          <PeerMessageRow
+            body={
+              <HandoffBody
+                handoff={{
+                  ...reading.handoff,
+                  message: part.body,
+                  // The turn's files belong to the turn, not to a sender: they sit under the last message.
+                  ...(position === combined.parts.length - 1 ? {} : { attachments: [] }),
+                }}
+                source={source}
+              />
+            }
+            entry={entry}
+            key={`${part.envelope.name}:${part.envelope.part?.index ?? position}`}
+            peer={part.envelope}
+            rhythm={rhythm}
+            text={part.body}
+          />
+        ))}
+      </>
     );
   const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
   if (parsed !== null && source !== null && reading.state === 'read')

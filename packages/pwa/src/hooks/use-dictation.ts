@@ -199,6 +199,7 @@ export async function withinContextFetchBudget<T>(
 const spokenWords = (raw: string): string => {
   const message = readUserMessage(raw);
   if (message.kind === 'human') return message.text;
+  if (message.kind === 'combined') return message.parts.map(part => part.body).join('\n\n');
   return message.kind === 'peer' ? message.body : '';
 };
 

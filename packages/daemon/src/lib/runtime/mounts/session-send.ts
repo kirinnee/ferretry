@@ -5,19 +5,20 @@ import {
   type ComposerDraftResult,
   FY_REQUEST_ID_HEADER,
   InterruptSessionRequestSchema,
+  type PeerMessageLabel,
+  type QueuedMessage,
+  QueueEditRequestSchema,
   SEND_UNCONFIRMED_CODE,
   SendCancelRequestSchema,
   type SendRecord,
   SendRequestSchema,
-  type SharedDraftSent,
   type SendResult,
   SendRetryRequestSchema,
   SendSubmitRequestSchema,
-  type QueuedMessage,
-  QueueEditRequestSchema,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
+  type SharedDraftSent,
 } from '@ferretry/protocol';
 import { PEER_ACTOR_PREFIX } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -123,6 +124,8 @@ export interface SendInput {
   readonly attachmentIds?: readonly string[] | undefined;
   readonly now?: boolean | undefined;
   readonly replyExpected?: boolean | undefined;
+  /** A ferret's label for the message (`fy send --kind`); set only when a ferret made the call. */
+  readonly label?: PeerMessageLabel | undefined;
   /** The caller's own idempotency key, from the request-id header. */
   readonly sendId: string;
   /** The SESSION that made this call, derived from the credential — never from the body. */
@@ -226,6 +229,8 @@ async function send(
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.now === undefined ? {} : { now: request.now }),
       ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+      // A label is a ferret's: the owner's and the daemon's messages are never held, so one is not honoured.
+      ...(sender === undefined || request.label === undefined ? {} : { label: request.label }),
       ...(sender === undefined ? {} : { senderSessionId: sender }),
     })
     .catch(refuse);

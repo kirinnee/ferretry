@@ -1,5 +1,6 @@
 import { DORMANT_AGENT_STATUSES, type LaunchInstructionSectionId, type SessionView } from '@ferretry/protocol';
 import type { SessionDirectorySubsystem } from '../../runtime/mounts/sessions.ts';
+import { createViewMemo } from '../directory/view-memo.ts';
 
 /**
  * Puts `outdated: { sections }` on the session views that are out of date, and leaves every other view as it is.
@@ -29,10 +30,16 @@ export function withOutdated(reader: SessionDirectorySubsystem, ports: OutdatedV
     answers.set(id, { at: ports.now(), sections });
     return sections;
   };
+  // The answer is re-asked each `ttlMs`, so the sections are compared by content: an unchanged answer is not a changed view.
+  const memo = createViewMemo<readonly LaunchInstructionSectionId[]>(
+    (left, right) => left.length === right.length && left.every((section, at) => section === right[at]),
+  );
   const mark = async (view: SessionView): Promise<SessionView> => {
     if (DORMANT_AGENT_STATUSES.has(view.state.status)) return view;
     const sections = await sectionsOf(view.config.id);
-    return sections.length === 0 ? view : { ...view, outdated: { sections: [...sections] } };
+    return sections.length === 0
+      ? view
+      : memo(view, sections, () => ({ ...view, outdated: { sections: [...sections] } }));
   };
   return {
     list: async () => await Promise.all((await reader.list()).map(mark)),

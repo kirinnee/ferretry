@@ -1,5 +1,6 @@
 import type { SessionView } from '@ferretry/protocol';
 import type { SessionDirectorySubsystem } from '../runtime/mounts/sessions.ts';
+import { createViewMemo } from '../session/directory/view-memo.ts';
 import type { AgentPinService } from './service.ts';
 
 /**
@@ -14,9 +15,10 @@ export function withPinned(
   reader: SessionDirectorySubsystem,
   pins: Pick<AgentPinService, 'pinnedAt'>,
 ): SessionDirectorySubsystem {
+  const memo = createViewMemo<string>();
   const mark = (view: SessionView, pinned: ReadonlyMap<string, string>): SessionView => {
     const pinnedAt = pinned.get(view.config.id);
-    return pinnedAt === undefined ? view : { ...view, pinnedAt };
+    return pinnedAt === undefined ? view : memo(view, pinnedAt, () => ({ ...view, pinnedAt }));
   };
   const pinned = async (): Promise<ReadonlyMap<string, string>> =>
     await pins.pinnedAt().catch((): ReadonlyMap<string, string> => new Map());

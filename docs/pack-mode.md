@@ -44,7 +44,7 @@ Pack mode: you may hand self-contained parts of your task to sub-ferrets — oth
 1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.
-4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself.
+4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself. Message a sub-ferret with `fy send <id> --kind blocker|action|fyi` (default action; fyi rarely).
 Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 ```
 
@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,276      | 319      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,252      | 313      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -94,7 +94,13 @@ example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,
 "Bug batch: ONE agenda, line each + where tracked." and "Owner Q: answer ON it, options stay; no item: ONE `-k info`." —
 paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276, the measured total 7,725 → 7,716
 (7,730 counting the 14 section-separator characters), leaving 134 characters under the 7,850 cap (120 counting the
-separators). The cap is unchanged.
+separators). The agenda body rule (keep the body a one-screen summary; link the full report) then took the agenda
+section 1,276 → 1,319 (cap 1,290 → 1,330). With the send-label rule that took Pack to 1,026, the measured total is 7,814
+(7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The merge
+of that with the agenda model tightened the Agenda section's own wording (the repeated "unsure: closest", `done <id>` →
+`done`, `"<the ask>"` → `"<ask>"`, the form's "text in the reply", which the help already says, and "on it" in the chat
+line): agenda 1,319 → 1,252, the measured total 7,747 (7,761 counting the separators), leaving 103 characters under the
+7,850 cap (89 counting the separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 
@@ -338,8 +344,8 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  never raise agenda items or notify the owner, report to your lead with `fy send`; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2250**.
+  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2520**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

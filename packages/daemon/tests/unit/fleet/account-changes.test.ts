@@ -487,6 +487,38 @@ describe('deriveAccountChange: runtime.rename', () => {
   });
 });
 
+describe('deriveAccountChange: compactAt survives an edit', () => {
+  const tuned = () =>
+    modelOf({
+      profiles: { base: { layers: ['instructions/main'], compactAt: 250_000 } },
+      runtimes: { beta: { credential: 'home', profile: 'base', agent: true, compactAt: 300_000 } },
+      advanced: { commands: [] },
+    });
+
+  it('should keep a profile’s compactAt when its layers are changed', () => {
+    // Act
+    const edit = derive(
+      profilePut({ name: 'base', layers: ['instructions/main', 'skills/review'], create: false }),
+      tuned(),
+    );
+
+    // Assert
+    should(edit.model.profiles.base?.compactAt).equal(250_000);
+    should(edit.model.profiles.base?.layers).deepEqual(['instructions/main', 'skills/review']);
+  });
+
+  it('should keep a runtime’s compactAt when it is changed', () => {
+    // Act
+    const edit = derive(
+      runtimePut({ name: 'beta', credential: 'home', profile: 'base', agent: false, create: false }),
+      tuned(),
+    );
+
+    // Assert
+    should(edit.model.runtimes.beta?.compactAt).equal(300_000);
+  });
+});
+
 describe('deriveAccountChange: profile.put', () => {
   it('should add a profile', () => {
     // Act

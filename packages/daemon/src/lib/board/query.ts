@@ -84,8 +84,11 @@ export const passesFilters = (query: BoardQuery, scoped: ScopedView): boolean =>
   (query.activity === undefined || matchesActivity(query.activity, scoped)) &&
   (query.prState === undefined || matchesPrState(query.prState, scoped.view.links.prs));
 
-const isOpen = (scoped: ScopedView): boolean =>
-  isInBoardState('open', scoped.category ?? 'backlog', scoped.view.dropped !== null);
+/** Whether a card is on the default board (state `open`): neither dropped nor in a closed lane; no known lanes reads open. */
+export const isOpenOnBoard = (category: LaneCategory | undefined, dropped: boolean): boolean =>
+  isInBoardState('open', category ?? 'backlog', dropped);
+
+const isOpen = (scoped: ScopedView): boolean => isOpenOnBoard(scoped.category, scoped.view.dropped !== null);
 
 /** The header's counts over the scoped board. Closed cards are "hidden" only while the page hides them. */
 export const countsOf = (query: BoardQuery, scoped: readonly ScopedView[]): BoardCounts => {

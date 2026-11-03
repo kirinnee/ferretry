@@ -1,5 +1,7 @@
 import {
+  type PeerEnvelopeSender,
   type PeerMessageKind,
+  type PeerMessageLabel,
   peerEnvelopePreamble,
   queuedMessageInstruction,
   turnFileInstruction,
@@ -125,8 +127,23 @@ export function peerPreamble(
   sender: Pick<SendTarget, 'id' | 'teammate'>,
   kind: PeerMessageKind,
   clientName: string,
+  label?: PeerMessageLabel,
 ): string {
-  return peerEnvelopePreamble({ name: sender.teammate ?? sender.id, sessionId: sender.id, kind, clientName });
+  return peerEnvelopePreamble({ ...peerSender(sender, kind, label), clientName });
+}
+
+/** Who a ferret's message is from, as the banner writers take it. */
+export function peerSender(
+  sender: Pick<SendTarget, 'id' | 'teammate'>,
+  kind: PeerMessageKind,
+  label?: PeerMessageLabel,
+): Omit<PeerEnvelopeSender, 'clientName'> {
+  return {
+    name: sender.teammate ?? sender.id,
+    sessionId: sender.id,
+    kind,
+    ...(label === undefined ? {} : { label }),
+  };
 }
 
 /**

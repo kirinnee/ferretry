@@ -132,6 +132,20 @@ describe('shell redirections are not arguments', () => {
     });
   });
 
+  test('--kind and its value are options, not the message, spelled apart or joined', () => {
+    for (const script of [
+      'fy send tanna --kind blocker "please decide"',
+      'fy send tanna --kind=blocker "please decide"',
+      'fy send tanna "please decide" --kind fyi',
+      'fy send tanna --expect-reply --kind blocker please decide',
+    ])
+      expect(readSentMessage(bash(script), 'fy')).toMatchObject({ to: 'tanna', body: 'please decide' });
+    expect(readSentMessage(bash('fy reply tanna --kind blocker "yes, go"'), 'fy')).toMatchObject({
+      to: 'tanna',
+      body: 'yes, go',
+    });
+  });
+
   test('a redirected single read is still not the hand-off read', () => {
     expect(isHandoffRead(bash(`cat ${TURN} 2>&1`), TURN)).toBe(false);
   });

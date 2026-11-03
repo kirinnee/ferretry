@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SessionAgendaSummarySchema } from './agenda.ts';
+import { PEER_MESSAGE_LABELS } from './agent-messages.ts';
 import { BoardProjectIdSchema, BoardSkipSchema, TaskRefSchema } from './board-refs.ts';
 import {
   ApiErrorResponseSchema,
@@ -1160,11 +1161,19 @@ export type StartSessionRequest = z.infer<typeof StartSessionRequestShapeSchema>
 export type StartSessionRequestInput = z.input<typeof StartSessionRequestShapeSchema>;
 
 /** Client-authored fields only; actor identity and idempotency come from headers. */
+/** How soon a ferret's message is delivered: `blocker` at once, `action` combined, `fyi` held (`fy send --kind`). */
+export const PeerMessageLabelSchema = z.enum(PEER_MESSAGE_LABELS);
+
 export const SendRequestSchema = z.strictObject({
   message: z.string().min(1),
   attachmentIds: z.array(z.string()).optional(),
   now: z.boolean().optional(),
   replyExpected: z.boolean().optional(),
+  /**
+   * The sender's label for a ferret's message (`fy send --kind`). Absent means `action`; it is ignored
+   * for the owner and the daemon, whose messages are never held.
+   */
+  label: PeerMessageLabelSchema.optional(),
   /** What this send takes out of the owner's shared draft once it is accepted (`shared-draft.ts`). */
   sharedDraft: SharedDraftSentSchema.optional(),
 });
@@ -1499,6 +1508,13 @@ export const SendResultSchema = SessionViewSchema.extend({
    * agent's box. Ferretry pressed Enter on it (bounded) and it did not take; the Warden escalates it.
    */
   waitBehind: z.string().min(1).optional(),
+  /** The label the message was queued with, when it is a ferret's. */
+  label: PeerMessageLabelSchema.optional(),
+  /**
+   * Beside a label: the instant the queue stops holding the message to combine it with others. Not typed
+   * yet, and not a failure — it is delivered at this time at the latest, or sooner when something frees it.
+   */
+  heldUntil: InstantSchema.optional(),
 });
 export type SendResult = z.infer<typeof SendResultSchema>;
 
