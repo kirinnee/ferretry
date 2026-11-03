@@ -643,6 +643,69 @@ describe('a session started with a brief', () => {
     });
   });
 
+  describe('a fy start --card', () => {
+    it("should assign the lead's existing card to the new session and journal it, with no second card", async () => {
+      // Arrange
+      const { subject, ports, focus } = build({
+        cards: [card({ id: 'F9', owner: 'lead', title: 'Something else' })],
+      });
+
+      // Act
+      const { delegation, refusal } = await subject.startOn('lead', 'F9');
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
+
+      // Assert
+      should(refusal).be.undefined();
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child', title: 'Something else' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')).match({
+        from: null,
+        to: 'child',
+        actor: { kind: 'ferret', sessionId: 'lead' },
+      });
+      should([...ports.store.cards.keys()]).deepEqual(['F9']);
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+    });
+
+    it('should refuse a card its caller may not hand down, and write nothing', async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [
+          card({ id: 'F2', owner: 'stranger', assignee: 'stranger' }),
+          card({ id: 'F3', owner: 'sibling', assignee: 'sibling' }),
+        ],
+      });
+
+      // Act
+      const foreign = await subject.startOn('lead', 'F2');
+      const sideways = await subject.startOn('lead', 'F3');
+      const missing = await subject.startOn('lead', 'F99');
+
+      // Assert
+      should(foreign.delegation).be.undefined();
+      should(foreign.refusal).be.a.String();
+      should(sideways.delegation).be.undefined();
+      should(missing.refusal).match(/no card &F99/u);
+      should(ports.store.writes).be.empty();
+    });
+
+    it("should let the owner's start take any card that exists, as the owner's act", async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+
+      // Act
+      const { delegation, refusal } = await subject.startOn(undefined, 'F9');
+      const missing = await subject.startOn(undefined, 'F99');
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', delegation });
+
+      // Assert
+      should(refusal).be.undefined();
+      should(delegation).match({ id: 'F9', byOwner: true });
+      should(missing.refusal).match(/no card &F99/u);
+      should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child' });
+      should(stored(ports, 'F9').history.find(event => event.type === 'assigned')?.actor).match({ kind: 'owner' });
+    });
+  });
+
   it('should start without a card, and say why, when the card cannot be read', async () => {
     // Arrange
     const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);

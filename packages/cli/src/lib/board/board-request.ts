@@ -317,6 +317,9 @@ export function buildLinkAction(options: BoardLinkOptions): BoardTaskActionReque
 export const buildAssignAction = (assignee: string | null): BoardTaskActionRequest =>
   action({ action: 'assign', assignee }, 'cannot assign');
 
+/** `claim` names no one: the daemon takes the caller's own session from its credential. */
+export const buildClaimAction = (): BoardTaskActionRequest => action({ action: 'claim' }, 'cannot claim');
+
 export function buildReparentAction(
   parent: string | undefined,
   none: boolean | undefined,

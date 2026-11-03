@@ -33,7 +33,7 @@ alone did not hold, because a person's own instructions that say "record every t
 
 | Where the board is off                                    | What happens                                                                                                       |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `fy start`, the app's New session                         | no card is made                                                                                                    |
+| `fy start`, the app's New session                         | no card is made, unless `--card` hands over an existing one                                                        |
 | `fy new`                                                  | a card only under a live card the lead holds on the child's board (brief or focus), or the one `--card` hands over |
 | `fy task create`, `fy task refile` to another board       | a ferret's card is refused unless it rests on a live parent it holds there or on the owner's Yes                   |
 | the [turn-end check](#the-turn-end-check)                 | silent                                                                                                             |
@@ -207,7 +207,8 @@ session identity — in `BoardService` (`create`, `act`) and on the lane route �
 
 The refusal is `forbidden` and speaks to the caller, never of "sub-ferrets" at large: it says what it can't do, what it MAY do, and who can do the rest, e.g.
 `You are a sub-ferret, so you can't move cards. You may note on and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send <lead-callsign> "…"`.
-A drop or assign outside the caller's subtree reads "…you can't drop a card outside your own subtree…". A sub-ferret that leads a subtree of its own
+When the card is one the sub-ferret's lead holds, the last sentence is replaced by "Your lead holds this card: claim it first: fy task claim &F12" — the
+sub-ferret takes the card itself ([Claiming a card](#claiming-a-card-your-lead-holds)) instead of sending the lead a message to assign it. A drop or assign outside the caller's subtree reads "…you can't drop a card outside your own subtree…". A sub-ferret that leads a subtree of its own
 is therefore never told it can't manage that subtree ([Authority](#authority)); the agenda and the lanes route say what they allow the same way.
 The daemon still makes the sub-ferret's card when `fy new` starts it (that is the lead's act), enters its working lane
 for it when the session starts (`work.started`, below), and a PR or release still moves it. A directory that cannot place a caller refuses nothing: the limit narrows a ferret known to be a
@@ -866,6 +867,28 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 **A lead plans its whole subtree.** A card is in a ferret's subtree when the ferret asking owns it, or started, directly or through a chain of leads, the card's owner or its assignee (a returned card, owned and held by a middle lead, is still in that lead's subtree). So a lead may drop or assign a card owned by its grandchild, and one assigned to a descendant but owned by another party (a card its subtree was
 handed), as an `assignee-lead`. That reach stops at drop and reassign: the owner ferret's gates and its re-plan belong to the owner's own lineage (`ancestor`), so a lead that only reaches a card through its assignee cannot pass or close an internal card owned by somebody else. A card outside the subtree is a `reader`'s: a sideways sibling, a cousin or a stranger can plan nothing there. This holds for a sub-ferret that leads a
 subtree of its own too: the sub-ferret limit refuses its `drop` and `assign` only outside its subtree.
+
+### Claiming a card your lead holds
+
+`fy task claim <id>` is the reverse of handing down: a ferret takes the assignment of a card whose **current holder** (its
+assignee, else its owner) is one of the claimer's OWN ancestors. It exists because a lead that starts a helper on a
+card it holds, or hands it a card, otherwise gets "please assign &F121 to me, I can't move or link it (forbidden)" and spends
+a turn on each. It is a narrow lineage rule, not a standing: the daemon reads the claimer from the credential and the lineage from
+the session registry, the request carries no argument, and a refusal changes nothing.
+
+| The card is held by                                 | `claim`                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| the claimer's parent or any higher ancestor         | assigned to the claimer, journaled `claimed by <ferret> from <lead>`                                     |
+| a lead's assignee (a middle ferret, an ancestor)    | the same: whoever owns the card, the holder is what counts                                               |
+| a sibling, a cousin, any ferret outside the lineage | refused: "…held by <ferret>… ask your lead". A shared lead that OWNS the card does not make it claimable |
+| the claimer already                                 | refused: "already yours"                                                                                 |
+| the claimer's own card (it owns it)                 | refused: assign it to yourself with `fy task assign`                                                     |
+| the owner (a person) or the daemon                  | refused: they `assign`; a card the owner holds is not a ferret's to take                                 |
+
+Claiming moves nothing else: the claimer becomes the assignee, so it can `note`, `link`, `trigger`, `report`, `drop` and hand the card down. A
+sub-ferret still cannot `move` it (the daemon moves it on its triggers). `fy start --card <id>` does the same for a NEW session: it assigns an existing card
+to the session being started under the same checks as `fy new --card` (the caller must be allowed to hand that card down; the owner may
+take any existing card), makes no second card, and needs a prompt.
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
 or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates

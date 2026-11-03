@@ -292,6 +292,19 @@ export class SessionCards {
     }
   }
 
+  /**
+   * `fy start --card <id>`, before the session exists: the existing card the new session takes over, judged with the
+   * same authority as `fy new --card`. A ferret's start (`lead`) hands over only a card it may hand down; the owner's
+   * (no lead) needs the card to exist. `refusal` says why a card cannot be had; the start must not go on.
+   */
+  async startOn(lead: string | undefined, id: BoardTaskId): Promise<DelegationOutcome> {
+    if (lead !== undefined) return await this.existingCard(lead, id);
+    const { cards } = await this.ports.board.snapshot();
+    const card = cards.find(each => each.id === id);
+    if (card === undefined) return { refusal: `there is no card ${formatTaskRef({ id })} on this machine`, notes: [] };
+    return { delegation: ownerDelegation(card), notes: [] };
+  }
+
   /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */
   private async existingCard(lead: string, id: BoardTaskId): Promise<DelegationOutcome> {
     let card: BoardTask;

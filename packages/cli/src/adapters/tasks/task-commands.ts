@@ -240,6 +240,13 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       await board.assign(id, who, options);
     });
 
+  acting(group.command('claim'))
+    .description('take a card your lead holds, instead of asking the lead to assign it to you')
+    .argument('<id>', ID_HELP)
+    .action(async (id: string, options: SessionOptions) => {
+      await board.claim(id, options);
+    });
+
   acting(group.command('note'))
     .description('append a note to the history')
     .argument('<id>', ID_HELP)

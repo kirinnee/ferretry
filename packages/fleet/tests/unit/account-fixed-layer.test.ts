@@ -1145,7 +1145,9 @@ describe('SUB_FERRET_INSTRUCTION', () => {
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make; routine progress: `zz task note` on your card.',
     );
     should(text).containEql('Your final report says how the owner tests it.');
-    should(text).containEql('it moves itself (start, PR, merge, `zz signal done`). No card? Make none.');
+    should(text).containEql(
+      'it moves itself (start, PR, merge, `zz signal done`). A card your lead holds: claim it with `zz task claim <id>` instead of asking. No card? Make none.',
+    );
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });
@@ -1156,7 +1158,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = AGENT_INSTRUCTION('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(810);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {

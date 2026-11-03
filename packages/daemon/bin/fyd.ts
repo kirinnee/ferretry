@@ -2720,7 +2720,7 @@ function createSessionControlSubsystem(
    * The board card a start with a prompt gets (board-design.md §3.1), written after the record and before
    * the launch. Total: a board failure is said on stderr and never fails the start.
    */
-  cards: Pick<SessionCards, 'open'>,
+  cards: Pick<SessionCards, 'open' | 'startOn'>,
   /** The daemon's own directories: a start a session made is refused a folder inside them (`refuseStateHomeStart`). */
   stateHomes: StateHomeReach,
 ): SessionControlSubsystem {
@@ -2754,6 +2754,17 @@ function createSessionControlSubsystem(
       // which is never what a caller meant; the resolver refuses a relative one for the same reason.
       if (request.cwd === undefined)
         throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
+      // `fy start --card`: the existing card the new session takes over, judged BEFORE anything is written so a refusal
+      // leaves no session behind. A `fy new`'s delegation (already decided) takes precedence.
+      let startDelegation = delegation;
+      if (request.card !== undefined && delegation === undefined) {
+        if (request.prompt === undefined)
+          throw new SessionControlError('invalid', '--card needs a prompt: the card is the work that prompt describes');
+        const handed = await cards.startOn(request.parent, request.card);
+        if (handed.delegation === undefined)
+          throw new SessionControlError('card_refused', handed.refusal ?? `card ${request.card} cannot be handed over`);
+        startDelegation = handed.delegation;
+      }
       const { account, executable } = await resolveStartAccount(
         accounts,
         request.agent,
@@ -3027,7 +3038,7 @@ function createSessionControlSubsystem(
             name: request.name,
             brief: request.prompt,
             parent: request.parent,
-            delegation,
+            delegation: startDelegation,
           });
         await lifecycle.start(
           id,

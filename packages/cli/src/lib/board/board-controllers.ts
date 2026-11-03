@@ -28,6 +28,7 @@ import {
   type BoardLinkOptions,
   type BoardViewOptions,
   buildAssignAction,
+  buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
   buildBoardQuery,
@@ -434,6 +435,10 @@ export class BoardController {
     if (options.none !== true && who === undefined) refuse('assign needs a session (callsign or id), or --none');
     const assignee = options.none === true ? null : resolveSessionRef(who as string, await this.gateway.sessions());
     await this.perform('assign', ref, options, buildAssignAction(assignee));
+  }
+
+  async claim(idText: string, options: BoardCommonOptions) {
+    await this.perform('claim', requireCardRef(idText), options, buildClaimAction());
   }
 
   async note(idText: string, text: readonly string[], options: BoardCommonOptions) {

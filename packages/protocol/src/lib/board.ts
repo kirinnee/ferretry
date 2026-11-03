@@ -364,6 +364,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     handedDown: z.literal(true).optional(),
     /** Present when the daemon returned the card to a live lead because this ferret, its assignee, ended: the one that finished. */
     returnedFrom: SessionIdSchema.optional(),
+    /** Present when the card's assignee took it from a lead of its own (`fy task claim`): the lead that held it. The actor is the claimer. */
+    claimedFrom: SessionIdSchema.optional(),
   }),
   z.object({
     ...EventBase,
@@ -887,6 +889,8 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
       'a link names exactly one of pr, branch, commit or doc',
     ),
   z.strictObject({ action: z.literal('assign'), assignee: SessionIdSchema.nullable() }),
+  /** A ferret takes a card its own lead holds: the daemon reads who is asking, so the request names nobody. */
+  z.strictObject({ action: z.literal('claim') }),
   z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH) }),
   z
     .strictObject({
