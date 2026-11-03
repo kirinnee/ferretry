@@ -302,6 +302,31 @@ const answeredLast = (
   );
 };
 
+/**
+ * The answer, addressed to the item on this agenda that carries the ask it names now: one merged into another, or split
+ * off with its card, took its asks along (docs/agenda.md § Merge and split), so a screen still showing the old item
+ * answers the very same ask, under the same authority and receipt. Only for an ask named by its reference: an app that
+ * predates card asks names none, and the one the other item shows may be another card's. Unchanged when no item
+ * reached that way carries it.
+ */
+const followed = (answer: GateAnswer, items: readonly (AgendaItem | ResolvedAgendaItem)[]): GateAnswer => {
+  const reference = answer.cardAsk;
+  if (reference === undefined) return answer;
+  const carries = (id: AgendaId): boolean => {
+    const item = items.find(each => each.id === id);
+    return item !== undefined && cardAskOf(item, reference) !== undefined;
+  };
+  // Each hop is to another item, so a path longer than the agenda is a loop, and the answer stays where it was.
+  let id = answer.id;
+  for (let hop = 0; hop < items.length && !carries(id); hop += 1) {
+    const item = items.find(each => each.id === id);
+    const next = item?.mergedInto ?? item?.splitInto?.find(carries);
+    if (next === undefined) return answer;
+    id = next;
+  }
+  return id === answer.id || !carries(id) ? answer : { ...answer, id };
+};
+
 /** Whether the answer is to a card ask at all: it names one, or says it picks the shown one's option. */
 const toCardAsk = (answer: GateAnswer): boolean => answer.cardAsk !== undefined || answer.gate === true;
 
@@ -380,7 +405,7 @@ export class GateItems implements CardWriteObserver {
     const found = await this.find(answer);
     if (found === undefined) return refused('moved-on', `${answer.id} carries no card ask, so nothing was moved`);
     // Answers to one card take turns: the second reads the board the first one left.
-    return await serially(this.answers, found.gate.cardId, async () => await this.answerAlone(answer));
+    return await serially(this.answers, found.gate.cardId, async () => await this.answerAlone(found.answer));
   }
 
   /** A refusal when the answer is to an open gate item the migration left as it was; `undefined` for any other item. */
@@ -395,18 +420,27 @@ export class GateItems implements CardWriteObserver {
         );
   }
 
-  /** The item and the ask an answer is to, open or answered; a closed item from before card asks by its gate. */
-  private async find(
-    answer: GateAnswer,
-  ): Promise<{ readonly item: AgendaItem | ResolvedAgendaItem; readonly gate: AgendaGate } | undefined> {
+  /**
+   * The item and the ask an answer is to, open or answered; a closed item from before card asks by its gate. The
+   * answer comes back addressed to that item: one that names its ask may reach the item it was merged into or split
+   * off with ({@link followed}).
+   */
+  private async find(answer: GateAnswer): Promise<
+    | {
+        readonly item: AgendaItem | ResolvedAgendaItem;
+        readonly gate: AgendaGate;
+        readonly answer: GateAnswer;
+      }
+    | undefined
+  > {
     const listed = await this.ports.agenda.list(answer.sessionId);
     if (!listed.ok) return undefined;
+    const to = followed(answer, [...listed.value.items, ...listed.value.resolved]);
     const item =
-      listed.value.items.find(each => each.id === answer.id) ??
-      listed.value.resolved.find(each => each.id === answer.id);
+      listed.value.items.find(each => each.id === to.id) ?? listed.value.resolved.find(each => each.id === to.id);
     if (item === undefined) return undefined;
-    const gate = askOf(item, answer, this.now())?.gate ?? ('resolvedAt' in item ? item.gate : undefined);
-    return gate === undefined ? undefined : { item, gate };
+    const gate = askOf(item, to, this.now())?.gate ?? ('resolvedAt' in item ? item.gate : undefined);
+    return gate === undefined ? undefined : { item, gate, answer: to };
   }
 
   private async answerAlone(answer: GateAnswer): Promise<GateAnswerOutcome> {

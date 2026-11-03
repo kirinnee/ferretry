@@ -1955,3 +1955,141 @@ describe('what a card ask takes as an answer', () => {
     should(world.open()[0]?.cardAsks?.[0]?.answer).be.undefined();
   });
 });
+
+describe('card asks across merge and split (docs/agenda.md § Merge and split)', () => {
+  /** Two of the lead's threads, each about a card at its gate: A1 carries F1's ask, A2 carries F2's. */
+  const twoAsking = async () => {
+    const world = fixture([leads(), leads({ id: 'F2' })]);
+    const first = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    const second = await world.agenda.raise('lead', { ...threadAbout('F2'), subject: 'And the menu?' }, AGENT);
+    if (!first.ok || !second.ok || first.item === undefined || second.item === undefined) {
+      throw new Error('expected two threads');
+    }
+    await world.board.trigger('F1', 'release.running');
+    await world.board.trigger('F2', 'release.running');
+    return { world, kept: first.item.id, absorbed: second.item.id };
+  };
+
+  it('a merge keeps both cards’ asks on one agenda, and the gates ask neither again', async () => {
+    // Arrange
+    const { world, kept, absorbed } = await twoAsking();
+
+    // Act
+    const merged = await world.agenda.merge('lead', kept, absorbed, HUMAN);
+    await world.gates.backfill();
+    await world.gates.sweep();
+
+    // Assert — one open agenda carrying both asks; the absorbed item closed carrying none
+    should(merged.ok).be.true();
+    const items = world.open('lead');
+    should(items.map(item => item.id)).eql([kept]);
+    should(items[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:tested:2', 'gate:F2:tested:2']);
+    const [closed] = world.closed('lead');
+    should(closed).match({ id: absorbed, mergedInto: kept });
+    should(closed?.cardAsks).be.undefined();
+    should(await world.gates.asking('F2')).eql({ sessionId: 'lead', id: kept });
+  });
+
+  it('answering a merged ask moves its card, on the kept item or by the absorbed one’s id, with its receipt', async () => {
+    // Arrange
+    const { world, kept, absorbed } = await twoAsking();
+    await world.agenda.merge('lead', kept, absorbed, HUMAN);
+
+    // Act — F2 through the kept item; F1 from a screen still showing the absorbed one; then that answer again
+    const viaKept = await world.answer(kept, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F2:tested:2' });
+    const afterFirst = openOf(world, 'lead', kept);
+    const viaAbsorbed = await world.answer(absorbed, choose('Done'), {
+      sessionId: 'lead',
+      cardAsk: 'gate:F1:tested:2',
+    });
+    const again = await world.answer(absorbed, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F1:tested:2' });
+
+    // Assert — each card moved once, the agenda rests only once nothing is left to answer
+    should(viaKept).match({ handled: true, mutation: { ok: true } });
+    should(viaAbsorbed).match({ handled: true, mutation: { ok: true } });
+    should(again).match({ handled: true, mutation: { ok: true, changed: false } });
+    should(world.stored('F2').laneId).equal('closed');
+    should(world.stored('F1').laneId).equal('closed');
+    should(world.done.notices).have.length(2);
+    should(agendaState(afterFirst).state).equal('needs-you');
+    const after = openOf(world, 'lead', kept);
+    should(after.cardAsks?.map(ask => ask.answer?.receipt)).match([/^[0-9a-f]{64}$/u, /^[0-9a-f]{64}$/u]);
+    should(agendaState(after)).match({ state: 'resting', sub: 'waiting-on-ferret' });
+  });
+
+  it('refuses a ferret’s answer to a merged ask through either item, and an older app’s on the absorbed one', async () => {
+    // Arrange
+    const { world, kept, absorbed } = await twoAsking();
+    await world.agenda.merge('lead', kept, absorbed, HUMAN);
+    const ferret: AgendaActor = { kind: 'agent', sessionId: 'lead', name: null };
+
+    // Act
+    const outcomes = [
+      await world.answer(kept, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F2:tested:2', actor: ferret }),
+      await world.answer(absorbed, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F2:tested:2', actor: ferret }),
+    ];
+    // An app that predates card asks names none: the item it shows is closed, and nothing is guessed for it.
+    const older = await world.answer(absorbed, choose('Done'), { sessionId: 'lead', gate: true });
+
+    // Assert
+    for (const outcome of outcomes) should(outcome).match({ handled: true, refused: { code: 'forbidden' } });
+    should(older).match({ handled: true, refused: { code: 'moved-on' } });
+    should(world.stored('F1').laneId).equal('tested');
+    should(world.stored('F2').laneId).equal('tested');
+  });
+
+  /** The lead's thread about F1 carries F1's ask at To test and its sub-card F2's at Plan. */
+  const parentAndSub = async () => {
+    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    await world.board.act('F2', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    await world.board.trigger('F1', 'release.running');
+    const { task: _task, ...plain } = threadAbout('F2');
+    const split = await world.agenda.split(
+      'lead',
+      raised.item.id,
+      { ...plain, subject: 'Is the sub-card right on its own?' },
+      AGENT,
+      [{ id: 'F2' }],
+    );
+    if (!split.ok || split.item === undefined) throw new Error('expected a split');
+    return { world, parent: raised.item.id, child: split.item.id };
+  };
+
+  it('a split with the card takes its ask along, and the gates ask it nowhere else', async () => {
+    // Arrange
+    const { world, parent, child } = await parentAndSub();
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    const items = world.open('lead');
+    should(items.map(item => item.id).sort()).eql([parent, child].sort());
+    should(openOf(world, 'lead', parent).cardAsks?.map(ask => ask.gate.cardId)).eql(['F1']);
+    should(openOf(world, 'lead', child).cardAsks?.map(ask => ask.gate.cardId)).eql(['F2']);
+    should(openOf(world, 'lead', child).gateAttached?.cardId).equal('F2');
+    should(await world.gates.asking('F2')).eql({ sessionId: 'lead', id: child });
+  });
+
+  it('answering a split-off ask moves its card, on the new item or by the one it left', async () => {
+    // Arrange
+    const { world, parent, child } = await parentAndSub();
+
+    // Act — a screen still showing the original answers F2's ask; F1's is not on the new item
+    const viaParent = await world.answer(parent, choose('OK to build'), {
+      sessionId: 'lead',
+      cardAsk: 'gate:F2:plan:2',
+    });
+    const wrong = await world.answer(child, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F1:tested:2' });
+
+    // Assert
+    should(viaParent).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).equal('implement');
+    should(openOf(world, 'lead', child).cardAsks?.[0]?.answer).match({ response: choose('OK to build') });
+    should(agendaState(openOf(world, 'lead', child))).match({ state: 'resting', sub: 'waiting-on-ferret' });
+    should(wrong).match({ handled: true, refused: { code: 'moved-on' } });
+    should(world.stored('F1').laneId).equal('tested');
+  });
+});

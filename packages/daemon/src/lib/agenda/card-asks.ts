@@ -24,6 +24,9 @@ import {
   type AgendaCardAskAnswer,
   type AgendaCardAskWoke,
   type AgendaItem,
+  agendaState,
+  asksOnlyCardAsks,
+  canCarryCardAsk,
   cardAskReference,
   canonicalJson,
   cardAskStage,
@@ -354,6 +357,103 @@ export const restRefusal = (item: AgendaItem): string | undefined => {
   if (waiting.length === 0) return undefined;
   const cards = [...new Set(waiting.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ');
   return `${item.id} carries the ask of ${cards}, which waits on the owner: it stays in Needs you until they answer`;
+};
+
+/** How far the owner got with an ask: answered, then set aside with Not yet, then not looked at. */
+const progressOf = (ask: AgendaCardAsk): number => (ask.answer !== undefined ? 2 : ask.notYet !== undefined ? 1 : 0);
+
+/** One ask per card and entry of that card into its lane: the gate it asks about, wherever it rides. */
+const askKey = (ask: Pick<AgendaCardAsk, 'gate'>): string => `${ask.gate.cardId}:${String(ask.gate.entry)}`;
+
+/** What moving card asks between two items (a merge, a split) came to. */
+export type CardAsksMove =
+  | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
+  | { readonly kind: 'moved'; readonly into: AgendaItem };
+
+/** The item stripped of every card ask and its mirror: what is left of one whose asks went to another item. */
+export const withoutCardAsks = (item: AgendaItem): AgendaItem => {
+  const { cardAsks: _asks, gateAttached: _shown, gateAttachedChangedAt: _stamp, cardAsksSeal: _seal, ...rest } = item;
+  return rest;
+};
+
+/**
+ * The asks `incoming` brings to `item`, which keeps its own (docs/agenda.md § Merge and split): ONE per card and entry
+ * — of two for the same, the one the owner got further with (an answer, then Not yet), else `item`'s — in the order
+ * they were put. Nothing is trimmed to fit: more open asks than one agenda carries are refused, and so is an item that
+ * cannot carry a card's ask, since the gate engine would not find it there and would ask again.
+ *
+ * An ask still waiting on the owner that comes in does to `item` what putting it there does: an item not on the owner's
+ * turn wakes into Needs you, at the stage the ask puts it in, and the ask remembers the turn it ended (`woke`), or the
+ * one the asks already waiting on it ended. The seal is left as it was: whoever moved the asks wrote on the thread, so
+ * it never again reads as the way the card-ask writer left it.
+ */
+export const joinCardAsks = (
+  item: AgendaItem,
+  incoming: readonly AgendaCardAsk[],
+  at: string,
+  stage: CardAskEffects['stage'],
+): CardAsksMove => {
+  if (incoming.length === 0) return { kind: 'moved', into: item };
+  if (!canCarryCardAsk(item)) {
+    return {
+      kind: 'refused',
+      code: 'invalid',
+      message: `${item.id} cannot carry a card's ask (${[...new Set(incoming.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ')})`,
+    };
+  }
+  const own = item.cardAsks ?? [];
+  const chosen = new Map<string, AgendaCardAsk>();
+  for (const ask of [...own, ...incoming]) {
+    const held = chosen.get(askKey(ask));
+    if (held === undefined || progressOf(ask) > progressOf(held)) chosen.set(askKey(ask), ask);
+  }
+  const kept = [...chosen.values()].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+  if (kept.filter(isOpenCardAsk).length > MAX_AGENDA_CARD_ASKS) {
+    return {
+      kind: 'refused',
+      code: 'full',
+      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} open card asks: answer some first`,
+    };
+  }
+  const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>
+    asks.filter(ask => isOpenCardAsk(ask) && ask.notYet === undefined);
+  const arriving = new Set(waitingOn(kept).filter(ask => !own.includes(ask)));
+  if (arriving.size === 0) return { kind: 'moved', into: withCardAsks(item, kept, at) };
+  const first = waitingOn(own)[0];
+  const woke = isCardAgenda(item) ? undefined : first === undefined ? turnOf(item) : first.woke;
+  const retold = kept.map(ask => {
+    if (!arriving.has(ask)) return ask;
+    const { woke: _theirs, ...rest } = ask;
+    return woke === undefined ? rest : { ...rest, woke };
+  });
+  if (first !== undefined) return { kind: 'moved', into: withCardAsks(item, retold, at) };
+  const newest = new Date(Math.max(...[...arriving].map(ask => Date.parse(ask.at)))).toISOString();
+  const woken = agendaState(item).state === 'needs-you' ? item : awake(item, newest);
+  const staged = stage(woken, cardAskStage(([...arriving][0] as AgendaCardAsk).gate));
+  return { kind: 'moved', into: withCardAsks(staged, retold, at) };
+};
+
+/**
+ * `item` once the asks of the cards `moves` names went to another item (a split): it keeps the rest. An item that asked
+ * the owner NOTHING but those asks does not sit in Needs you with nothing to answer: a ferret's thread goes back to the
+ * turn the first of them ended, and any other rests on its ferret.
+ */
+export const leaveCardAsks = (
+  item: AgendaItem,
+  moves: (ask: AgendaCardAsk) => boolean,
+  at: string,
+): { readonly left: AgendaItem; readonly moved: readonly AgendaCardAsk[] } => {
+  const moved = (item.cardAsks ?? []).filter(moves);
+  if (moved.length === 0) return { left: item, moved };
+  const left = withCardAsks(
+    item,
+    (item.cardAsks ?? []).filter(ask => !moves(ask)),
+    at,
+  );
+  const stillWaiting = openCardAsks(left).some(ask => ask.notYet === undefined);
+  if (stillWaiting || !asksOnlyCardAsks(item) || agendaState(item).state !== 'needs-you') return { left, moved };
+  const turn = moved.find(ask => isOpenCardAsk(ask) && ask.notYet === undefined)?.woke;
+  return { left: turn === undefined || isCardAgenda(item) ? restedOnAnswer(left, at) : backTo(left, turn), moved };
 };
 
 /**

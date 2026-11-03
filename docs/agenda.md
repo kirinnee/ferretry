@@ -695,9 +695,22 @@ conversations are interleaved by time, and all cards, card asks and links of bot
 bound is refused, never trimmed). A2 keeps its state and its ask. A5 closes as `merged into !A2`, and the two point at
 each other (`mergedFrom` on A2, `mergedInto` on A5), A5's versions kept.
 
+[Card asks](#card-asks) move to A2, and A5 closes carrying none:
+
+- **One ask per card and entry.** When both carry the ask of the same card's same entry into its lane, A2 keeps one:
+  the one the owner got further with (an answer, then a Not yet), else A2's own. Every receipt is kept.
+- **Still asking.** An ask still waiting on the owner does to A2 what putting it there does: a resting or snoozed A2
+  wakes into Needs you, at stage `test` or `plan`.
+- **Refused.** More open asks than one agenda carries (16), or an A2 that cannot carry a card's ask (an input, a
+  confirmation, a task plan, …).
+- **Answering.** The owner answers the ask on A2 as before: owner only, the card moves first, the same receipt and
+  replay. An answer that names its ask (`cardAsk`) but reaches A5, from a screen that still shows it, is answered on
+  A2. An answer from an app that names no ask finds nothing on A5 and is refused.
+
 Who may: the owner, or a lead over its own items and its sub-ferrets'. A merge is within one board, so across sessions
 only items in the same agenda home (one lineage) can be merged. Refused: an item with itself, into or from a done item,
-a gate, a notice or a card the daemon acts on, and a caller the item is not theirs to address.
+a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
+address.
 
 ### Split
 
@@ -707,8 +720,16 @@ place in the owner's queue (one Needs-you entry per item); it and A5 point at ea
 and the cards named in `--move-cards` go along. A5 keeps its state, ask and conversation. Refused: a card A5 does not
 hold, a gate, a notice or a card the daemon acts on, and a request an open item of the ferret already makes.
 
-Card asks (cards waiting on the owner through an item) are not stored on the item yet; a merge and a split carry
-an item's cards, so they will carry its card asks when those move into agendas.
+A card A5 carries only through its [card ask](#card-asks) can be moved too. A moved card's asks go with it:
+
+- **The new item carries them,** answered or not, at stage `test` or `plan` when one still waits on the owner.
+- **A5 keeps the rest.** When A5 asked the owner nothing but the asks that moved, it does not sit in Needs you with
+  nothing to answer: a ferret's thread goes back to the turn the first of them woke it out of, and the card's own
+  agenda rests on its ferret.
+- **Refused:** a new item that cannot carry a card's ask. A split off the card's own agenda is the daemon's item, not
+  the card's agenda, so moving its card is refused; merge the two instead.
+- **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
+  on the new item.
 
 ## Parked items
 

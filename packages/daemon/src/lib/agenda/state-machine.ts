@@ -103,9 +103,12 @@ import {
   applyCardAsk,
   type CardAskOperation,
   closeRefusal,
+  joinCardAsks,
+  leaveCardAsks,
   restRefusal,
   sealCardAsks,
   withCardAsks,
+  withoutCardAsks,
 } from './card-asks.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
@@ -2845,12 +2848,15 @@ function distinctBy<Item>(items: readonly Item[], key: (item: Item) => string): 
   });
 }
 
-/** A thread the owner and a ferret talk through: not a gate, a notice, or a card the daemon acts on. */
+/**
+ * A thread the owner and a ferret talk through: not a gate item, a notice, or a card the daemon acts on. One carrying
+ * card asks is one (docs/agenda.md § Card asks): `gateAttached` is then only their mirror for an older app.
+ */
 function plainThread(item: AgendaItem): boolean {
   return (
     !isGateItem(item) &&
     item.notice !== true &&
-    item.gateAttached === undefined &&
+    (item.gateAttached === undefined || item.cardAsks !== undefined) &&
     item.confirms === undefined &&
     item.kind !== 'input' &&
     item.input === undefined &&
@@ -2865,7 +2871,8 @@ function plainThread(item: AgendaItem): boolean {
 /**
  * `from` is MERGED INTO `id` (docs/agenda.md § Merge and split): the two are one thread. Their conversations are one,
  * interleaved by time; every card, related card and link of both is kept, and nothing is trimmed to fit — a merge that
- * would pass a bound is refused. `id` keeps its state and its ask. `from` closes as "merged into !<id>", with both
+ * would pass a bound is refused. `id` keeps its state and its ask, and takes `from`'s card asks, once per card and
+ * entry ({@link joinCardAsks}). `from` closes as "merged into !<id>", carrying no card ask, with both
  * pointing at the other (`mergedFrom`, `mergedInto`) and its versions kept. The owner may merge, and a ferret over
  * its own board (or a lead over a sub-ferret's); never a gate, a notice or a card the daemon acts on, an item with
  * itself, or into a closed item.
@@ -2909,12 +2916,18 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
       `${command.id} and ${command.from} hold more cards or links together than one item keeps (${MAX_AGENDA_CARDS} cards, ${MAX_AGENDA_LINKS} links): close what is done first`,
     );
   }
+  // Every card ask of both rides the one item, once per card and entry; the absorbed item keeps none.
+  const asked = joinCardAsks(survivor, absorbed.cardAsks ?? [], command.at, (item, stage) => ({
+    ...item,
+    ...staged(item, stage, command.at),
+  }));
+  if (asked.kind === 'refused') return failure(asked.code, asked.message);
   const conversation = mergedThreads(survivor.conversation, absorbed.conversation);
   const mergedFrom = distinctBy(
     [...(survivor.mergedFrom ?? []), absorbed.id, ...(absorbed.mergedFrom ?? [])],
     id => id,
   );
-  const { cards: _cards, links: _links, task: _task, relatedTasks: _related, ...base } = survivor;
+  const { cards: _cards, links: _links, task: _task, relatedTasks: _related, ...base } = asked.into;
   const merged: AgendaItem = {
     ...base,
     ...(cards.length === 0 ? {} : { cards }),
@@ -2924,13 +2937,16 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
     ...(conversation.length === 0 ? {} : { conversation }),
     mergedFrom,
   };
+  const bare = { ...from, item: withoutCardAsks(absorbed) };
   const kept: AgendaLedger = {
     ...ledger,
-    entries: ledger.entries.map(entry => (entry === into ? { ...into, item: tidied(merged) } : entry)),
+    entries: ledger.entries.map(entry =>
+      entry === into ? { ...into, item: tidied(merged) } : entry === from ? bare : entry,
+    ),
   };
   const closed = addressed(
     kept,
-    from,
+    bare,
     command.actor,
     `merged into !${command.id}`,
     command.at,
@@ -2951,7 +2967,8 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
 /**
  * A new item is SPLIT OFF `id` (docs/agenda.md § Merge and split): part of it stopped passing the one-agenda test. The
  * new item is raised as a fresh item of the same ferret (its own ask, its own place in the owner's queue), linked both
- * ways (`splitFrom`, `splitInto`); the cards named in `moveCards` go along with it. `id` keeps its state, ask and
+ * ways (`splitFrom`, `splitInto`); the cards named in `moveCards` go along with it, and so do their card asks
+ * ({@link leaveCardAsks}, {@link joinCardAsks}). `id` keeps its state, ask and
  * conversation. Refused for a gate, a notice or a card the daemon acts on, a card `id` does not hold, and a request an
  * open item of the ferret already makes.
  */
@@ -2972,7 +2989,8 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
   const holds = (ref: TaskRef): boolean =>
     (original.task !== undefined && original.task !== null && sameCard(original.task, ref)) ||
     (original.cards ?? []).some(row => sameCard(row.task, ref)) ||
-    (original.relatedTasks ?? []).some(card => sameCard(card, ref));
+    (original.relatedTasks ?? []).some(card => sameCard(card, ref)) ||
+    (original.cardAsks ?? []).some(ask => ask.gate.cardId === ref.id);
   const missing = moving.find(ref => !holds(ref));
   if (missing !== undefined) return failure('invalid', `${formatTaskRef(missing)} is not a card of ${command.id}`);
   const made = raise(ledger, { action: 'raise', actor: target.origin, request: command.request, at: command.at });
@@ -2981,12 +2999,19 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
     return failure('invalid', 'an open item of this ferret already says the same: nothing was split off');
   }
   const moves = (ref: TaskRef): boolean => moving.some(card => sameCard(card, ref));
+  // A moved card's asks go with it (docs/agenda.md § Merge and split): the new item carries them, the original keeps the rest.
+  const { left, moved } = leaveCardAsks(original, ask => moves({ id: ask.gate.cardId }), command.at);
+  const carried = joinCardAsks(made.item, moved, command.at, (item, stage) => ({
+    ...item,
+    ...staged(item, stage, command.at),
+  }));
+  if (carried.kind === 'refused') return failure(carried.code, carried.message);
   const movedRows = (original.cards ?? []).filter(row => moves(row.task));
   const keptRows = (original.cards ?? []).filter(row => !moves(row.task));
   const movedRelated = (original.relatedTasks ?? []).filter(moves);
   const keptRelated = (original.relatedTasks ?? []).filter(ref => !moves(ref));
   const movesTask = original.task !== undefined && original.task !== null && moves(original.task);
-  const { cards: _cards, task: _task, relatedTasks: _related, ...base } = original;
+  const { cards: _cards, task: _task, relatedTasks: _related, ...base } = left;
   const parent: AgendaItem = {
     ...base,
     ...(keptRows.length === 0 ? {} : { cards: keptRows }),
@@ -2995,7 +3020,7 @@ function split(ledger: AgendaLedger, command: SplitCommand): AgendaMutation {
     splitInto: [...(original.splitInto ?? []), made.item.id],
   };
   const child: AgendaItem = {
-    ...made.item,
+    ...carried.into,
     ...(movedRows.length === 0 ? {} : { cards: movedRows }),
     ...(movesTask && original.task ? { task: original.task } : {}),
     ...(movedRelated.length === 0 ? {} : { relatedTasks: movedRelated }),
