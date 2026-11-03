@@ -788,6 +788,50 @@ describe('StepUpService', () => {
       should(service.claimFresh(phone, 'catalog-install')).be.false();
     });
 
+    it('should bind an approve-recipe proof to the proposal its options named, and to no other', async () => {
+      // Arrange
+      const RP_A = 'rp_000000000000000a';
+      const RP_B = 'rp_000000000000000b';
+      const { service, registry } = fixture();
+      const authenticator = await es256Authenticator();
+      await enrol(service, authenticator);
+      registry.forgetDevice(phone.deviceId);
+
+      // Act
+      await service.stepUpOptions(remote(), ORIGIN, 'approve-recipe', RP_A);
+      await service.stepUp(remote(), await assertionBody(authenticator));
+
+      // Assert
+      should(service.claimFresh(phone)).be.false();
+      should(service.claimFresh(phone, 'approve-recipe', 'not-a-proposal')).be.false();
+      should(service.claimFresh(phone, 'approve-recipe', RP_B)).be.false();
+      should(service.claimFresh(phone, 'approve-recipe', RP_A)).be.true();
+      should(service.claimFresh(phone, 'approve-recipe', RP_A)).be.false();
+    });
+
+    it('should refuse options for an approve-recipe that names no proposal or a malformed one', async () => {
+      // Arrange
+      const { service } = fixture();
+      await enrol(service, await es256Authenticator());
+      type Loose = (
+        caller: StepUpCaller,
+        origin: string,
+        act?: string,
+        bound?: string,
+      ) => ReturnType<StepUpService['stepUpOptions']>;
+      const ask = service.stepUpOptions.bind(service) as unknown as Loose;
+
+      // Act
+      const answers = [
+        await ask(remote(), ORIGIN, 'approve-recipe'),
+        await ask(remote(), ORIGIN, 'approve-recipe', 'rp_nope'),
+        await ask(remote(), ORIGIN, 'catalog-install', 'rp_000000000000000a'),
+      ];
+
+      // Assert
+      should(answers.map(answer => answer.ok)).deepEqual([false, false, false]);
+    });
+
     it('should leave a proof asked for no act unstamped, so no named act claims it', async () => {
       // Arrange
       const { service, registry } = fixture();

@@ -16,6 +16,7 @@ import {
   type LoginHintList,
   type LoginRecipeDecision,
   LoginRecipeDecisionSchema,
+  type LoginRecipeProposalId,
   LoginRecipeProposalIdSchema,
   loginHintSite,
   loginHintsFor,
@@ -287,6 +288,13 @@ async function putLogin(
 }
 
 /**
+ * A recipe decision is admitted as a NARROWING `secrets.configure` (`CapabilityDemand.narrowing`): the grant is still
+ * asked, but the boundary asks no ordinary passkey and spends no step-up of its own, because a decline only takes
+ * away and an approval proves its own `approve-recipe` passkey inside, bound to the proposal ({@link recipeProofRefusal}).
+ */
+const RECIPE_DECISION: CapabilityDemand = { capability: 'secrets', axis: 'configure', narrowing: true };
+
+/**
  * THE OWNER'S ANSWER TO A FERRET'S RECIPE PROPOSAL. Owner only, like every change to a saved login: an agent
  * answering its own proposal is refused before the body is read.
  */
@@ -296,7 +304,7 @@ async function decideRecipe(recipes: LoginRecipeService, context: RouteContext):
   const proposal = LoginRecipeProposalIdSchema.safeParse(decodeParameter(context.params.get('proposalId') ?? '') ?? '');
   if (!proposal.success) throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
   const answer = await parseBody(context.request, LoginRecipeDecisionSchema);
-  const unproved = recipeProofRefusal(context, answer);
+  const unproved = recipeProofRefusal(context, answer, proposal.data);
   if (unproved !== undefined) return unproved;
   try {
     return jsonResponse(await recipes.decide(id, proposal.data, answer));
@@ -311,14 +319,18 @@ async function decideRecipe(recipes: LoginRecipeService, context: RouteContext):
  * recipe. The machine itself is ungoverned (docs/grants.md), and a decline only takes away, so neither asks.
  * `undefined`: it may go on.
  */
-function recipeProofRefusal(context: RouteContext, answer: LoginRecipeDecision): ApiResponse | undefined {
+function recipeProofRefusal(
+  context: RouteContext,
+  answer: LoginRecipeDecision,
+  proposal: LoginRecipeProposalId,
+): ApiResponse | undefined {
   if (answer.decision !== 'approve' || context.governance?.governed !== true) return undefined;
-  if (context.claimFreshStepUp?.(STEP_UP_ACTS.approveRecipe) === true) return undefined;
+  if (context.claimFreshStepUp?.(STEP_UP_ACTS.approveRecipe, proposal) === true) return undefined;
   return jsonResponse(
     {
       error: 'approving a sign-in recipe needs a passkey confirmation for it, from this device',
       code: STEP_UP_REQUIRED_CODE,
-      demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.approveRecipe },
+      demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.approveRecipe, subject: proposal },
     } satisfies StepUpRequiredBody,
     403,
   );
@@ -385,7 +397,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
             path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
             minimum: 'operator',
             caller: 'person',
-            capability: SECRETS_CONFIGURE,
+            capability: RECIPE_DECISION,
             noStore: true,
             handle: async (context: RouteContext) => await decideRecipe(recipes, context),
           } satisfies ApiRoute,
@@ -595,6 +607,7 @@ function accountRoutes(
             method: 'POST',
             path: '/v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
             ...configure,
+            capability: RECIPE_DECISION,
             handle: async (context: RouteContext) => {
               const act = 'approve or decline a recipe proposal';
               ownerOnly(context, act);
@@ -606,7 +619,7 @@ function accountRoutes(
                 throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
               const answer = await parseBody(context.request, LoginRecipeDecisionSchema);
               // Answered as itself, never through `owned`, which would serve the refusal as a 200 body.
-              const unproved = recipeProofRefusal(context, answer);
+              const unproved = recipeProofRefusal(context, answer, proposal.data);
               if (unproved !== undefined) return unproved;
               return await owned(act, async () => await recipes.decideSignIn(signIn, proposal.data, answer))(context);
             },

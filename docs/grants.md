@@ -419,7 +419,10 @@ want a passkey proved for that one act, from any device, unlocked or not
 **installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)), and **approving a ferret's
 suggested sign-in recipe** from a paired device (act `approve-recipe`, owner decision !A320,
 [input-requests.md](input-requests.md#login-recipes-how-it-signs-in-and-what-the-daemon-saw)): every ferret then signs in by those steps; declining never
-asks. **An unlock is never a
+asks. `approve-recipe` is the one act the machine may skip whose proof is **bound to a subject**: the proposal id
+(`rp_…`, `STEP_UP_SUBJECTS_SKIPPABLE`) rides the options request and the 403 `demand`, the challenge is stamped with it,
+and the claim takes only a proof proved for exactly that proposal, once. Both decision routes are admitted as
+narrowing (the handler enforces the proof), so admission spends nothing even with a zero-minute window. **An unlock is never a
 fresh proof for any act**: it opens the machine and holds the step-up for ordinary acts, but minting a
 pairing code, widening a device, agent control, a daemon update and an install each ask for a passkey even
 right after an unlock. **A fresh proof is stamped with the act it was proved for** (the app names the act when

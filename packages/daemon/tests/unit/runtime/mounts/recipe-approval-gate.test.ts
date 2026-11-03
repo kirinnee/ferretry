@@ -60,8 +60,8 @@ async function call(subsystem: SecretSubsystem, caller: Caller, path: string, bo
       stepUp: false,
       freshStepUp: false,
     },
-    claimFreshStepUp: act => {
-      claimed.push(String(act));
+    claimFreshStepUp: (act?: string, subject?: string) => {
+      claimed.push(subject === undefined ? String(act) : `${act}:${subject}`);
       const held = proof === act;
       proof = undefined;
       return held;
@@ -120,7 +120,8 @@ describe('approving a recipe from a paired device (#F640)', () => {
     should(refused.status).equal(403);
     should(refused.body.code).equal(STEP_UP_REQUIRED_CODE);
     should((refused.body.demand as { act: string }).act).equal('approve-recipe');
-    should(refused.claimed).eql(['approve-recipe']);
+    should(refused.claimed).eql(['approve-recipe:rp_0000000000000001']);
+    should((refused.body.demand as { subject: string }).subject).equal('rp_0000000000000001');
     should(await w.recipeOf()).equal('Open site.example and sign in');
   });
 
