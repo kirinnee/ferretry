@@ -60,6 +60,8 @@ export interface WardenConfigCardProps {
   readonly error?: string | null;
   readonly saved?: boolean;
   readonly onSave: (patch: WardenConfigPatch) => void;
+  /** The page has its own one primary (setup's footer): Save is an ordinary button. */
+  readonly quiet?: boolean;
 }
 
 export function WardenConfigCard({
@@ -76,6 +78,7 @@ export function WardenConfigCard({
   error = null,
   saved = false,
   onSave,
+  quiet = false,
 }: WardenConfigCardProps) {
   const errors = wardenFormErrors(draft);
   const patch = wardenConfigPatchFrom(view.config, draft);
@@ -99,7 +102,7 @@ export function WardenConfigCard({
         <button
           type="button"
           className="kt-btn min-h-[44px]"
-          data-variant="primary"
+          {...(quiet ? {} : { 'data-variant': 'primary' })}
           disabled={!dirty || saving || hasWardenFormErrors(errors)}
           onClick={() => onSave(patch)}
         >

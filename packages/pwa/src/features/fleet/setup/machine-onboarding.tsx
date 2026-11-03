@@ -26,7 +26,8 @@ import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
 import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { OnboardingHarnessStep } from './harness-step.tsx';
+import { FooterSlotContext } from './footer-slot.tsx';
+import { type HarnessReport, OnboardingHarnessStep } from './harness-step.tsx';
 import {
   answerOnboardingHarness,
   backOnboardingStep,
@@ -52,13 +53,15 @@ import {
   OnboardingDoneStep,
   OnboardingLearningStep,
   OnboardingPairStep,
-  OnboardingSpeedupsStep,
   OnboardingStartStep,
   OnboardingVoiceStep,
   OnboardingWardenStep,
   type VoiceCleanupPort,
 } from './onboarding-steps.tsx';
 import type { MachineSetupProgressPort } from './setup-progress.ts';
+import { OnboardingSpeedupsStep } from './speedups-step.tsx';
+import { SetupNote } from './setup-ui.tsx';
+import { machineItemHash } from './settings-route.ts';
 
 export interface MachineOnboardingProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired, for Start from › Clone. */
@@ -81,6 +84,36 @@ export interface MachineOnboardingProps extends MachineTabProps {
   readonly createPairingClient?: PairingClientFactory;
   /** How often a waiting sign-in is re-read. Supplied in tests. */
   readonly pollMs?: number;
+}
+
+/** The steps whose own action is the page's one primary; the footer adds no Continue beside it. */
+const ownsPrimary = (step: MachineSetupStepId, start: MachineSetupProgress['start']): boolean =>
+  step === 'claude' || step === 'codex' || step === 'speedups' || (step === 'start' && start === 'clone');
+
+/** What the last import said, carried to the page it moved to. */
+function ImportCarryNote({ report, machineName }: { readonly report: HarnessReport; readonly machineName: string }) {
+  const name = report.harness === 'claude' ? 'Claude Code' : 'Codex';
+  return (
+    <SetupNote
+      live
+      tone="ok"
+      name="import-carry"
+      title={report.runtime === null ? `${name} imported` : `${report.runtime} is ready`}
+    >
+      <span>{report.summary}</span>
+      {report.conversations === null ? null : <span>{report.conversations}</span>}
+      {report.signIn.map(item => (
+        <a
+          key={item.credential}
+          href={machineItemHash(machineName, 'sign-ins', item.credential)}
+          className="font-semibold text-accent underline"
+          data-carry-sign-in={item.credential}
+        >
+          Sign in {item.runtime} later
+        </a>
+      ))}
+    </SetupNote>
+  );
 }
 
 /** What Done can say about each step, read from the machine when Done opens. */
@@ -144,6 +177,11 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
     return startAt === undefined ? kept : goToOnboardingStep(kept, startAt);
   });
   const [clonedFrom, setClonedFrom] = useState<string | undefined>(undefined);
+  const [reports, setReports] = useState<Readonly<Partial<Record<'claude' | 'codex', HarnessReport>>>>({});
+  const [carried, setCarried] = useState<{ readonly report: HarnessReport; readonly on: MachineSetupStepId } | null>(
+    null,
+  );
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const at = progress.at;
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -168,6 +206,11 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
   const move = useCallback((next: (current: MachineSetupProgress) => MachineSetupProgress) => setProgress(next), []);
   const facts = useDoneFacts(tab, at === 'done', clonedFrom);
   const rows = onboardingDoneRows(progress, facts, connection.daemonId, machineName);
+
+  const doneNotes = Object.values(reports).flatMap(report => [
+    ...(report.conversations === null ? [] : [report.conversations]),
+    ...report.signIn.map(item => `${item.runtime} still needs a sign-in (Settings › Sign-ins).`),
+  ]);
 
   const finish = (): void => {
     save?.(null);
@@ -205,11 +248,24 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             answers={progress.answers?.[step] ?? {}}
             onAnswers={answers => move(current => answerOnboardingHarness(current, step, answers))}
             onReady={() => move(current => markOnboardingStep(current, step))}
+            onFinished={report => {
+              if (report !== null) {
+                setReports(current => ({ ...current, [step]: report }));
+                setCarried({ report, on: continueOnboarding(markOnboardingStep(progress, step)).at });
+              }
+              move(current => continueOnboarding(markOnboardingStep(current, step)));
+            }}
             {...(pollMs === undefined ? {} : { pollMs })}
           />
         );
       case 'speedups':
-        return <OnboardingSpeedupsStep tab={tab} />;
+        return (
+          <OnboardingSpeedupsStep
+            tab={tab}
+            onSaved={() => move(current => markOnboardingStep(current, 'speedups'))}
+            onFinished={() => move(current => continueOnboarding(markOnboardingStep(current, 'speedups')))}
+          />
+        );
       case 'voice':
         return (
           <OnboardingVoiceStep
@@ -234,6 +290,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             rows={rows}
             machineName={machineName}
             onNavigate={onNavigate}
+            notes={doneNotes}
             {...(onboardingNeedsRuntime(facts)
               ? { createRuntimeHref: onboardingLaterHref(connection.daemonId, machineName, 'claude') }
               : {})}
@@ -310,14 +367,16 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-panel py-5 md:px-8 md:py-7">
           <div className="mx-auto flex w-full max-w-[52rem] min-w-0 flex-col gap-4">
             <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <p className="kt-label m-0">New machine setup · {machineName}</p>
-                <p className="m-0 text-meta text-muted">Any step can be skipped and revisited later in Settings.</p>
-              </div>
+              <p className="kt-label m-0">Set up {machineName}</p>
               {at === 'done' ? null : (
-                <Button type="button" variant="ghost" data-onboarding-later-all="" onClick={onLeave}>
+                <button
+                  type="button"
+                  className="shrink-0 text-meta text-muted underline"
+                  data-onboarding-later-all=""
+                  onClick={onLeave}
+                >
                   Finish later
-                </Button>
+                </button>
               )}
             </div>
             <h1
@@ -328,7 +387,12 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             >
               {at === 'done' ? `${machineName} is set up` : onboardingStepLabel(at)}
             </h1>
-            <div className="min-w-0">{body(at)}</div>
+            {carried !== null && carried.on === at ? (
+              <ImportCarryNote report={carried.report} machineName={machineName} />
+            ) : null}
+            <FooterSlotContext.Provider value={slot}>
+              <div className="min-w-0">{body(at)}</div>
+            </FooterSlotContext.Provider>
           </div>
         </div>
         <footer
@@ -345,34 +409,25 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
               )}
             </div>
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              {at === 'done' ? null : (
+                <Button type="button" variant="ghost" data-onboarding-skip="" onClick={() => move(skipOnboardingStep)}>
+                  Skip
+                </Button>
+              )}
+              <span className="contents" ref={setSlot} data-onboarding-slot="" />
               {at === 'done' ? (
-                <>
-                  <Button type="button" data-onboarding-restart="" onClick={() => move(() => ONBOARDING_START)}>
-                    Start again
-                  </Button>
-                  <Button type="button" variant="primary" data-onboarding-finish="" onClick={finish}>
-                    Finish setup
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    data-onboarding-skip=""
-                    onClick={() => move(skipOnboardingStep)}
-                  >
-                    Skip
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    data-onboarding-next=""
-                    onClick={() => move(continueOnboarding)}
-                  >
-                    Continue
-                  </Button>
-                </>
+                <Button type="button" variant="primary" data-onboarding-finish="" onClick={finish}>
+                  Finish setup
+                </Button>
+              ) : ownsPrimary(at, progress.start) ? null : (
+                <Button
+                  type="button"
+                  variant="primary"
+                  data-onboarding-next=""
+                  onClick={() => move(continueOnboarding)}
+                >
+                  Continue
+                </Button>
               )}
             </div>
           </div>

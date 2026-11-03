@@ -35,6 +35,19 @@ interface MachineState {
   runtimes: ReturnType<typeof harnessRuntime>[];
 }
 
+const DAY = 86_400_000;
+
+/** A few invented conversations the machine's CLIs hold, so the import's "bring my conversations" has something to count. */
+const conversationRows = (harness: string) =>
+  [0.3, 1, 2.5, 5, 40].map((days, index) => ({
+    id: `${harness}-c${String(index)}`,
+    harness,
+    project: '/work/shop',
+    preview: `Conversation ${String(index)}`,
+    lastActivityAt: new Date(Date.now() - days * DAY).toISOString(),
+    turns: 3,
+  }));
+
 const states = new Map<string, MachineState>();
 
 const stateOf = (machine: string): MachineState => {
@@ -124,8 +137,42 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
         );
       return undefined;
     }
+    case '/v1/imports/conversations/adopt': {
+      if (source || method !== 'POST') return undefined;
+      const wanted = (body(init).conversations ?? []) as { id: string }[];
+      return {
+        adopted: wanted.map(item => ({
+          id: item.id,
+          session: `s-${item.id}`,
+          name: `ferret-${item.id}`,
+          status: 'stopped',
+        })),
+        refused: [],
+      };
+    }
+    case '/v1/imports/conversations': {
+      if (source) return undefined;
+      const harness = url.searchParams.get('harness') ?? 'claude';
+      const conversations = conversationRows(harness);
+      return { conversations, matched: conversations.length, skipped: 0 };
+    }
     case '/v1/speedups':
       return speedups(state.secrets);
+    case '/v1/speedups/jev/test':
+    case '/v1/speedups/groq/test':
+    case '/v1/speedups/cerebras/test': {
+      if (source || method !== 'POST') return undefined;
+      const provider = url.pathname.split('/')[3] as 'jev' | 'groq' | 'cerebras';
+      return {
+        provider,
+        secretName: `${provider.toUpperCase()}_API_KEY`,
+        ok: true,
+        code: 'ok',
+        message: 'The key worked.',
+        latencyMs: 120,
+        at: NOW,
+      };
+    }
     case '/v1/secrets':
       if (method === 'POST') {
         const name = String(body(init).name);
@@ -183,4 +230,30 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
     default:
       return undefined;
   }
+};
+
+interface ScannedRuntime {
+  harness: string;
+  name: string;
+}
+
+/**
+ * The first-run scan, as the daemon answers it once the machine holds a runtime for a CLI: that CLI's
+ * planned runtime is no longer new, it is a duplicate the person could add again.
+ */
+export const scanAfterImports = <S extends { runtimes: ScannedRuntime[]; duplicates: unknown[] }>(
+  machine: string,
+  scan: S,
+): S => {
+  const held = stateOf(machine).runtimes;
+  const made = scan.runtimes.filter(planned => held.some(runtime => runtime.name === planned.name));
+  if (made.length === 0) return scan;
+  return {
+    ...scan,
+    runtimes: scan.runtimes.filter(planned => !made.includes(planned)),
+    duplicates: [
+      ...scan.duplicates,
+      ...made.map(planned => ({ harness: planned.harness, existing: planned.name, suggested: `${planned.name}-2` })),
+    ],
+  };
 };

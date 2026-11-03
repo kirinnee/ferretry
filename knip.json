@@ -216,6 +216,7 @@
         "harness/voice-cleanup-screenshot.tsx",
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
+        "harness/machine-setup-simple-screenshot.tsx",
         "harness/add-login-screenshot.tsx",
         "harness/login-recipe-screenshot.tsx",
         "harness/disable-switch-screenshot.tsx",

@@ -1,53 +1,49 @@
 /**
  * New machine setup's **Claude Code** and **Codex** steps (the flat-onboarding proposal; docs/design/
- * account-model.md §4.3, E1–E11). ONE SCREEN per CLI, top to bottom, and nothing on it is a page of its
- * own:
+ * account-model.md §4.3, E1–E11). ONE ACTION per page: the footer's primary IS this step's action —
+ * `Import`, `Install <CLI>` when the CLI is missing, `Continue` when it is already imported — and a good
+ * import moves on by itself. The body shows, top to bottom:
  *
- * 1. **Installed?** — and when it is not, the install in place (`tool-install.tsx`).
- * 2. **Found on <machine>** — the login, instructions, settings, MCP servers and skills the scan read.
- * 3. **Sign-in** — the person's own login, signed in right here (`first-run-sign-in.tsx`).
- * 4. **Runtime name** — prefilled with the daemon's own suggestion (`claude-default`), editable.
- * 5. **What changed** — Import again only: updates offered, none ticked (O6).
- * 6. **Import and create <name>** — ONE reviewed change, `setup.import` for this CLI alone. The import
- *    makes the runtime, so there is no Name step and no runtime wizard.
- * 7. **Use a provider key instead** — the provider grid (`environment-login.tsx`) for this CLI; the login
+ * 1. **What was found** — ticked lines, with the full list behind Details. A login that is not signed in
+ *    says so in one line and offers `Sign in first` (`first-run-sign-in.tsx`); it never blocks the import.
+ * 2. **Also bring my conversations** — a tick before Import; they follow the runtime, from the last 7 days.
+ * 3. **Runtime name** — shown as text with Change; the daemon's suggestion (`claude-default`) unless typed.
+ * 4. **What changed** — Import again only: updates offered, none ticked (O6).
+ * 5. **Use a provider key instead** — the provider grid (`environment-login.tsx`) for this CLI; the login
  *    it adds gets its runtime right there, on the profile this CLI's import made.
  *
- * More runtimes are Settings › Runtimes › Add runtime. A machine that is asleep or offline shows a
- * one-line pause instead of anything that would send.
+ * The import is ONE reviewed change, `setup.import` for this CLI alone, so its authority sentences (the
+ * passkey line, a refusal) stay in the body even though its button is in the footer. The page only moves
+ * on when the daemon did not refuse. More runtimes are Settings › Runtimes › Add runtime. A machine that
+ * is asleep or offline shows a one-line pause instead of anything that would send.
  */
 
 import type { FleetRuntimeView, FleetSetupScan } from '@ferretry/protocol';
-import {
-  adoptionBatches,
-  CONVERSATION_IMPORT_WINDOW_DAYS,
-  type ConversationAdoptResult,
-  conversationsToImport,
-  type ImportableConversation,
-} from '@ferretry/protocol';
-import { ChevronRight } from 'lucide-react';
+import { adoptionBatches, conversationsToImport } from '@ferretry/protocol';
+import { Check, ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { cn } from '../../../lib/class-names.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
-import { runtimeChoice } from '../conversations/conversation-picker-model.ts';
 import { adoptConversations, readImportableConversations } from '../conversations/conversations-api.ts';
 import { EnvironmentLogin } from '../credentials/environment-login.tsx';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { useMachineData } from '../runtimes/machine-data.ts';
 import { profileFit, runtimeNameProblem, suggestedRuntimeName } from '../runtimes/runtimes-model.ts';
 import { readFleetSetupScan } from '../setup-api.ts';
-import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
+import { type AccountChanges, ChangeApplyPanel, changeReady, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { FirstRunSignIn } from './first-run-sign-in.tsx';
+import { PrimaryAction } from './footer-slot.tsx';
 import {
   changeList,
   changeSummary,
+  foundLines,
   foundRows,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
   type ImportCounts,
-  importButtonLabel,
   importCounts,
   importNotes,
   importSummary,
@@ -57,14 +53,29 @@ import {
   runtimeName,
   runtimePlan,
   scanHasHarness,
-  scanSignedIn,
 } from './harness-import-model.ts';
 import type { InstallPhase } from './install-model.ts';
 import { machineItemHash } from './settings-route.ts';
-import { useSetupAccess } from './setup-access.ts';
-import { SetupBadges, SetupDisclosure, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { type SetupAccess, useSetupAccess } from './setup-access.ts';
+import { SetupBadges, SetupDisclosure, SetupNote, SetupRow } from './setup-ui.tsx';
 import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 import { ToolInstall } from './tool-install.tsx';
+
+/** How far back "Also bring my conversations" reaches. */
+const CONVERSATION_DAYS = 7;
+
+/** What a finished CLI page tells the next one and Done: what it brought in. */
+export interface HarnessReport {
+  readonly harness: SetupHarness;
+  /** The runtime the import made, when it made one. */
+  readonly runtime: string | null;
+  /** "Imported 1 login, 3 skills, 3 MCP servers". */
+  readonly summary: string;
+  /** What the conversations import said, when it was asked for. */
+  readonly conversations: string | null;
+  /** The runtimes that still need a sign-in, each with the sign-in to open. */
+  readonly signIn: readonly { readonly runtime: string; readonly credential: string }[];
+}
 
 export interface OnboardingHarnessStepProps {
   readonly tab: MachineTabProps;
@@ -74,6 +85,11 @@ export interface OnboardingHarnessStepProps {
   readonly onAnswers: (answers: HarnessAnswers) => void;
   /** This CLI has a runtime on the machine: the step is set. */
   readonly onReady: () => void;
+  /**
+   * The step's action is done and the page moves on: an import the daemon did not refuse (with what it
+   * brought in), or `Continue` on a CLI that is already imported (`null`).
+   */
+  readonly onFinished: (report: HarnessReport | null) => void;
   /** How often a waiting sign-in is re-read. Supplied in tests. */
   readonly pollMs?: number;
 }
@@ -88,6 +104,7 @@ export function OnboardingHarnessStep({
   answers,
   onAnswers,
   onReady,
+  onFinished,
   pollMs,
 }: OnboardingHarnessStepProps) {
   const { connection, createClient, machineName, online } = tab;
@@ -98,10 +115,10 @@ export function OnboardingHarnessStep({
   const [issue, setIssue] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
   const [install, setInstall] = useState<InstallPhase>({ kind: 'choose' });
-  const [installSkipped, setInstallSkipped] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [sending, setSending] = useState(false);
   /** The import this visit sent, and the notes it left: shown in place of the form. */
   const [imported, setImported] = useState<ImportedResult | null>(null);
-  const [conversationsKept, setConversationsKept] = useState(0);
   const name = SETUP_HARNESS_NAMES[harness];
 
   const latest = useRef({ access, onReady });
@@ -149,29 +166,60 @@ export function OnboardingHarnessStep({
       </div>
     );
 
-  const tool = scan.tools.find(candidate => candidate.harness === harness);
-  const missing = missingTools(tool === undefined ? [] : [tool]);
   const have = runtimesOf(runtimes, harness);
   const plan = runtimePlan(scan, harness);
   const makes = makesRuntime(plan, answers);
   const typed = runtimeName(plan, answers);
   const problem = makes ? runtimeNameProblem(typed, runtimes, machineName) : null;
   const set = (patch: Partial<HarnessAnswers>): void => onAnswers({ ...answers, ...patch });
+  const installed = scanHasHarness(scan, harness);
+  /** A first import, or an import again the person asked for: otherwise this page has nothing to send. */
+  const willImport =
+    imported === null &&
+    (have.length === 0 ||
+      (answers.accepted?.length ?? 0) > 0 ||
+      answers.addAnother === true ||
+      answers.conversations === true);
 
   const send = (): void => {
-    void changes.apply(harnessImportChange(harness, plan, answers)).then(async applied => {
-      if (applied.kind === 'refused') return;
-      setImported({ notes: importNotes(scan, [harness]), counts: importCounts(scan, harness, 0) });
-      onAnswers({});
-      await read();
-    });
+    if (sending) return;
+    setSending(true);
+    void (async () => {
+      try {
+        const applied = await changes.apply(harnessImportChange(harness, plan, answers));
+        if (applied.kind === 'refused') return;
+        const listed = await access.read(client => readFleetRuntimes(client));
+        const now = listed.kind === 'done' ? runtimesOf(listed.value.runtimes, harness) : [];
+        const kept = answers.conversations === true ? await bringConversations(access, harness, now, typed) : null;
+        const counts = importCounts(scan, harness, kept?.adopted ?? 0);
+        setImported({ notes: importNotes(scan, [harness]), counts });
+        onAnswers({});
+        await read();
+        onFinished({
+          harness,
+          runtime: makes ? typed : null,
+          summary: importSummary(counts),
+          conversations: kept === null ? null : kept.sentence,
+          signIn: now
+            .filter(runtime => runtime.credential.status === 'needs_sign_in')
+            .map(runtime => ({ runtime: runtime.name, credential: runtime.credential.id })),
+        });
+      } finally {
+        setSending(false);
+      }
+    })();
   };
 
   let body: ReactNode;
-  if (!scanHasHarness(scan, harness)) {
+  let primary: ReactNode = null;
+  if (!installed) {
+    const missing = missingTools(scan.tools.filter(candidate => candidate.harness === harness));
     body =
-      missing.length > 0 && !installSkipped ? (
-        <SetupSection title={`Install ${name}`} name="install">
+      missing.length > 0 ? (
+        <>
+          <p className="m-0 text-cell leading-base text-muted">
+            Ferretry can install {name} on {machineName} for you, then bring in its setup. Skip if you don’t use it.
+          </p>
           <ToolInstall
             machineName={machineName}
             tools={missing}
@@ -179,10 +227,10 @@ export function OnboardingHarnessStep({
             phase={install}
             onPhase={setInstall}
             onInstalled={() => void read()}
-            onSkip={() => setInstallSkipped(true)}
             doneHint={`Next, Ferretry looks for your ${name} setup.`}
+            inFooter
           />
-        </SetupSection>
+        </>
       ) : (
         <SetupNote name="not-installed">
           <span>
@@ -192,34 +240,32 @@ export function OnboardingHarnessStep({
       );
   } else {
     const claudeImported = runtimesOf(runtimes, 'claude').length > 0;
-    const signedIn = scanSignedIn(scan, harness);
+    const rows = foundRows(scan, harness, claudeImported);
+    const lines = foundLines(rows);
+    const canSignIn = offersSignIn(scan, harness);
+    const naming = makes && (renaming || problem !== null);
+    const ready = changeReady(changes.authority, problem !== null, changes.busy || sending);
+    primary = signingIn ? null : willImport ? (
+      <PrimaryAction
+        label={changes.busy || sending ? 'Importing…' : 'Import'}
+        disabled={!ready}
+        onClick={send}
+        name="import"
+      />
+    ) : (
+      <PrimaryAction label="Continue" onClick={() => onFinished(null)} name="continue" />
+    );
     body = (
       <>
-        <SetupSection title={`Found on ${machineName}`} name="found">
-          {foundRows(scan, harness, claudeImported).map(row => (
-            <SetupRow
-              key={row.key}
-              name={row.key}
-              label={row.label}
-              {...(row.status === undefined ? {} : { status: row.status })}
-              title={row.title}
-              detail={
-                row.detail === undefined && row.badges.length === 0 ? undefined : (
-                  <span className="flex min-w-0 flex-col gap-1">
-                    {row.detail === undefined ? null : <span className="[overflow-wrap:anywhere]">{row.detail}</span>}
-                    <SetupBadges badges={row.badges} />
-                  </span>
-                )
-              }
-            />
-          ))}
-        </SetupSection>
-        {harnessProblems(scan, harness).map(text => (
-          <SetupNote key={text} tone="warn" name="problem">
-            <span>{text}</span>
-          </SetupNote>
-        ))}
-        {!offersSignIn(scan, harness) ? null : signingIn ? (
+        {imported !== null ? null : (
+          <p className="m-0 text-cell leading-base text-muted">
+            Copies your {name} setup into Ferretry. {name} on {machineName} keeps working as before.
+            {harness === 'claude'
+              ? ' Ferretry and your own claude share this login: signing out in one signs out both.'
+              : ''}
+          </p>
+        )}
+        {signingIn ? (
           <FirstRunSignIn
             harness={harness}
             machineName={machineName}
@@ -234,23 +280,77 @@ export function OnboardingHarnessStep({
             }}
           />
         ) : (
-          <SetupNote tone="warn" name="sign-in-now" title={`${name} isn’t signed in`}>
-            <span>Sign in now, or import your setup and sign in later.</span>
-            <div className="mt-2">
-              <Button type="button" size="sm" data-harness-sign-in="" onClick={() => setSigningIn(true)}>
-                Sign in now
-              </Button>
-            </div>
-          </SetupNote>
+          <div className="kt-panel flex min-w-0 flex-col gap-2 p-panel" data-setup-section="found">
+            <h4 className="sr-only">Found on {machineName}</h4>
+            {lines.map(line => (
+              <span
+                key={line.text}
+                className="flex min-w-0 items-start gap-2 text-cell text-fg"
+                data-found-line={line.ok ? 'ok' : 'attention'}
+              >
+                <span aria-hidden="true" className={cn('shrink-0 pt-0.5', line.ok ? 'text-ok' : 'text-warn')}>
+                  {line.ok ? <Check size={14} /> : '!'}
+                </span>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{line.text}</span>
+              </span>
+            ))}
+            {!canSignIn ? null : (
+              <div>
+                <button
+                  type="button"
+                  className="font-semibold text-accent underline"
+                  data-harness-sign-in=""
+                  onClick={() => setSigningIn(true)}
+                >
+                  Sign in first
+                </button>
+              </div>
+            )}
+            <SetupDisclosure label="Details" name="found-details">
+              {rows.map(row => (
+                <SetupRow
+                  key={row.key}
+                  name={row.key}
+                  label={row.label}
+                  {...(row.status === undefined ? {} : { status: row.status })}
+                  title={row.title}
+                  detail={
+                    row.detail === undefined && row.badges.length === 0 ? undefined : (
+                      <span className="flex min-w-0 flex-col gap-1">
+                        {row.detail === undefined ? null : (
+                          <span className="[overflow-wrap:anywhere]">{row.detail}</span>
+                        )}
+                        <SetupBadges badges={row.badges} />
+                      </span>
+                    )
+                  }
+                />
+              ))}
+            </SetupDisclosure>
+          </div>
         )}
+        {harnessProblems(scan, harness).map(text => (
+          <SetupNote key={text} tone="warn" name="problem">
+            <span>{text}</span>
+          </SetupNote>
+        ))}
         {imported === null ? (
-          <SetupSection title="Runtime" name="runtime">
+          <div className="flex min-w-0 flex-col gap-3" data-setup-section="runtime">
             {have.length === 0 ? null : (
               <p className="m-0 text-cell leading-base text-muted" data-harness-has={harness}>
                 {listWords(have.map(runtime => runtime.name))} already {have.length === 1 ? 'runs' : 'run'} {name} on{' '}
                 {machineName}. Importing again adds only what is new.
               </p>
             )}
+            <label className="flex min-h-control items-center gap-2 text-cell text-fg">
+              <input
+                type="checkbox"
+                data-harness-conversations=""
+                checked={answers.conversations === true}
+                onChange={event => set({ conversations: event.target.checked })}
+              />
+              Also bring my conversations from the last {CONVERSATION_DAYS} days
+            </label>
             {plan.kind === 'duplicate' ? (
               <label className="flex min-h-control items-center gap-2 text-cell text-fg">
                 <input
@@ -262,7 +362,20 @@ export function OnboardingHarnessStep({
                 Also add another runtime on the same login and profile
               </label>
             ) : null}
-            {makes ? (
+            {makes && !naming ? (
+              <p className="m-0 text-meta text-muted" data-harness-runtime-line="">
+                Runtime name: <span className="font-mono text-fg">{typed}</span>{' '}
+                <button
+                  type="button"
+                  className="font-semibold text-accent underline"
+                  data-harness-name-change=""
+                  onClick={() => setRenaming(true)}
+                >
+                  Change
+                </button>
+              </p>
+            ) : null}
+            {makes && naming ? (
               <div className="flex min-w-0 flex-col gap-1">
                 <label htmlFor={`harness-name-${harness}`} className="text-ui font-semibold text-fg">
                   Runtime name
@@ -310,26 +423,14 @@ export function OnboardingHarnessStep({
               authority={changes.authority}
               busy={changes.busy}
               refusal={changes.refusal}
-              submitLabel={importButtonLabel(plan, answers, signedIn)}
-              busyLabel="Importing…"
+              submitLabel="Import"
               disabled={problem !== null}
+              hideSubmit
               onSubmit={send}
             />
-            <p className="m-0 text-meta leading-base text-muted">
-              Importing copies your setup into Ferretry. {name} on {machineName} keeps working as before.
-              {harness === 'claude'
-                ? ' Ferretry and your own claude share this login: signing out in one signs out both.'
-                : ''}
-            </p>
-          </SetupSection>
+          </div>
         ) : (
-          <ImportedNote
-            harness={harness}
-            have={have}
-            result={imported}
-            conversations={conversationsKept}
-            machineName={machineName}
-          />
+          <ImportedNote harness={harness} have={have} result={imported} machineName={machineName} />
         )}
       </>
     );
@@ -337,22 +438,59 @@ export function OnboardingHarnessStep({
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body={harness}>
-      <SetupRow
-        name={`tool-${harness}`}
-        status={tool?.installed === true ? 'ready' : 'needs_sign_in'}
-        statusLabel={tool?.installed === true ? 'Installed' : 'Not installed'}
-        title={name}
-        detail={tool?.installed === true ? `Installed on ${machineName}` : `Not installed on ${machineName}`}
-      />
       {body}
-      {have.length === 0 ? null : (
-        <HarnessConversations tab={tab} harness={harness} runtimes={runtimes} onKept={setConversationsKept} />
-      )}
-      {tool?.installed === true ? (
-        <ProviderRuntimeSection tab={tab} harness={harness} onMade={() => void read()} />
-      ) : null}
+      {primary}
+      {installed ? <ProviderRuntimeSection tab={tab} harness={harness} onMade={() => void read()} /> : null}
     </div>
   );
+}
+
+/** What bringing the conversations in did, for the report. */
+interface ConversationsOutcome {
+  readonly adopted: number;
+  readonly sentence: string;
+}
+
+/**
+ * Bring the last {@link CONVERSATION_DAYS} days of this CLI's conversations into the runtime just made,
+ * through the same adopt route "Import conversations" always used: stopped, linked, never copied. It
+ * says what happened in a sentence and never throws: the runtime import is already done by now.
+ */
+async function bringConversations(
+  access: SetupAccess,
+  harness: SetupHarness,
+  mine: readonly FleetRuntimeView[],
+  runtimeNamed: string,
+): Promise<ConversationsOutcome> {
+  const name = SETUP_HARNESS_NAMES[harness];
+  const target = mine.find(runtime => runtime.name === runtimeNamed) ?? mine[0];
+  if (target === undefined)
+    return { adopted: 0, sentence: `Couldn’t bring in your ${name} conversations: no runtime to put them in.` };
+  const found = await access.read(client => readImportableConversations(client, { harness, limit: 5_000 }));
+  if (found.kind === 'refused')
+    return { adopted: 0, sentence: `Couldn’t bring in your ${name} conversations: ${found.sentence}` };
+  const ids = conversationsToImport(found.value.conversations, CONVERSATION_DAYS, Date.now());
+  if (ids.length === 0)
+    return { adopted: 0, sentence: `No ${name} conversations from the last ${CONVERSATION_DAYS} days.` };
+  let adopted = 0;
+  let refused = 0;
+  for (const batch of adoptionBatches(ids)) {
+    const answer = await access.act(client =>
+      adoptConversations(client, {
+        harness,
+        runtime: target.wrapper,
+        conversations: batch.map(id => ({ id, start: false })),
+      }),
+    );
+    if (answer.kind === 'refused')
+      return { adopted, sentence: `Brought in ${countWords(adopted, 'conversation')}, then: ${answer.sentence}` };
+    adopted += answer.value.adopted.length;
+    refused += answer.value.refused.length;
+  }
+  return {
+    adopted,
+    sentence: `Brought in ${countWords(adopted, 'conversation')}${refused === 0 ? '' : `; ${countWords(refused, 'conversation')} couldn’t be imported`}.`,
+  };
 }
 
 /** What this visit's import brought in, for the one-line result. */
@@ -401,13 +539,11 @@ function ImportedNote({
   harness,
   have,
   result,
-  conversations,
   machineName,
 }: {
   readonly harness: SetupHarness;
   readonly have: readonly FleetRuntimeView[];
   readonly result: ImportedResult;
-  readonly conversations: number;
   readonly machineName: string;
 }) {
   const needsSignIn = have.filter(runtime => runtime.credential.status === 'needs_sign_in');
@@ -420,7 +556,7 @@ function ImportedNote({
         ];
   return (
     <div className="flex min-w-0 flex-col gap-2" data-harness-imported={harness}>
-      <SetupNote live tone="ok" name="import-ready" title={importSummary({ ...result.counts, conversations })}>
+      <SetupNote live tone="ok" name="import-ready" title={importSummary(result.counts)}>
         <SetupDisclosure label="Details" name="import-details">
           {ready.map(line => (
             <p key={line} className="m-0">
@@ -622,205 +758,5 @@ function ProviderRuntime({
         onSubmit={() => void create()}
       />
     </div>
-  );
-}
-
-const WINDOW_LABELS: Readonly<Record<number, string>> = { 1: 'Last 1 day' };
-
-/** The one choice: how far back to import conversations. `all` and `none` bracket the day windows. */
-type Window = 'none' | 'all' | `${number}`;
-
-const windowDays = (choice: Window): number | undefined | null =>
-  choice === 'none' ? null : choice === 'all' ? undefined : Number(choice);
-
-const windowLabel = (choice: Window): string =>
-  choice === 'none' ? 'None' : choice === 'all' ? 'All' : (WINDOW_LABELS[Number(choice)] ?? `Last ${choice} days`);
-
-type KeptListing =
-  | { readonly kind: 'reading' }
-  | { readonly kind: 'refused'; readonly sentence: string }
-  | { readonly kind: 'read'; readonly rows: readonly ImportableConversation[] };
-
-/**
- * "Import conversations": ONE choice (All, a day window, None) and one button — no per-conversation
- * picking. A kept conversation is a hard link to the CLI's own file, never a copy, and stays stopped.
- */
-function HarnessConversations({
-  tab,
-  harness,
-  runtimes,
-  onKept,
-}: {
-  readonly tab: MachineTabProps;
-  readonly harness: SetupHarness;
-  readonly runtimes: readonly FleetRuntimeView[];
-  readonly onKept: (count: number) => void;
-}) {
-  const access = useSetupAccess({ connection: tab.connection, createClient: tab.createClient });
-  const { read, act } = access;
-  const [listing, setListing] = useState<KeptListing>({ kind: 'reading' });
-  const [choice, setChoice] = useState<Window>('none');
-  const [picked, setPicked] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [issue, setIssue] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<ConversationAdoptResult | null>(null);
-  const kept = useRef(0);
-  const runtime = runtimeChoice(runtimes, harness);
-
-  const load = useCallback(async (): Promise<void> => {
-    const answer = await read(client => readImportableConversations(client, { harness, limit: 5_000 }));
-    setListing(
-      answer.kind === 'done'
-        ? { kind: 'read', rows: answer.value.conversations }
-        : { kind: 'refused', sentence: answer.sentence },
-    );
-  }, [read, harness]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const name = SETUP_HARNESS_NAMES[harness];
-  let body: ReactNode;
-  if (listing.kind === 'reading')
-    body = (
-      <p role="status" className="m-0 text-cell text-muted" data-conversations-reading="">
-        Looking for {name} conversations…
-      </p>
-    );
-  else if (listing.kind === 'refused')
-    body = (
-      <SetupNote live tone="warn" name="conversations-refused" title="Couldn’t read your conversations">
-        <span>{listing.sentence}</span>
-        <div className="mt-2">
-          <Button type="button" size="sm" data-conversations-retry="" onClick={() => void load()}>
-            Try again
-          </Button>
-        </div>
-      </SetupNote>
-    );
-  else if (listing.rows.length === 0)
-    body = (
-      <SetupNote name="conversations-empty">
-        <span>No {name} conversations on this machine.</span>
-      </SetupNote>
-    );
-  else {
-    const rows = listing.rows;
-    const now = Date.now();
-    const countFor = (option: Window): number => {
-      const days = windowDays(option);
-      return days === null ? 0 : conversationsToImport(rows, days, now).length;
-    };
-    const options: Window[] = ['all', ...CONVERSATION_IMPORT_WINDOW_DAYS.map(days => `${days}` as Window), 'none'];
-    const ids = (() => {
-      const days = windowDays(choice);
-      return days === null ? [] : conversationsToImport(rows, days, now);
-    })();
-    const wrapper = picked ?? (runtime.kind === 'one' ? runtime.runtime.wrapper : undefined) ?? undefined;
-    const send = async (target: string): Promise<void> => {
-      setBusy(true);
-      setIssue(null);
-      const adopted: ConversationAdoptResult['adopted'] = [];
-      const refused: ConversationAdoptResult['refused'] = [];
-      for (const batch of adoptionBatches(ids)) {
-        const answer = await act(client =>
-          adoptConversations(client, {
-            harness,
-            runtime: target,
-            conversations: batch.map(id => ({ id, start: false })),
-          }),
-        );
-        if (answer.kind === 'refused') {
-          setIssue(answer.sentence);
-          break;
-        }
-        adopted.push(...answer.value.adopted);
-        refused.push(...answer.value.refused);
-      }
-      setBusy(false);
-      kept.current += adopted.length;
-      setOutcome({ adopted, refused });
-      onKept(kept.current);
-      setChoice('none');
-      await load();
-    };
-    body = (
-      <div className="flex min-w-0 flex-col gap-2">
-        {outcome === null ? null : (
-          <p role="status" className="m-0 text-cell text-fg" data-conversations-result="">
-            Imported {countWords(outcome.adopted.length, 'conversation')}.
-            {outcome.refused.length === 0
-              ? ''
-              : ` ${countWords(outcome.refused.length, 'conversation')} couldn’t be imported.`}
-          </p>
-        )}
-        {outcome === null || outcome.refused.length === 0 ? null : (
-          <SetupNote tone="warn" name="conversations-refused-some">
-            {outcome.refused.slice(0, 3).map(item => (
-              <span key={item.id}>{item.reason}</span>
-            ))}
-          </SetupNote>
-        )}
-        {issue === null ? null : (
-          <SetupNote live tone="warn" name="conversations-issue">
-            <span>{issue}</span>
-          </SetupNote>
-        )}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <label htmlFor={`conversation-window-${harness}`} className="text-cell font-semibold text-fg">
-            Import conversations
-          </label>
-          <select
-            id={`conversation-window-${harness}`}
-            className="kt-input w-auto min-w-0"
-            data-conversation-window=""
-            value={choice}
-            disabled={busy}
-            onChange={event => setChoice(event.target.value as Window)}
-          >
-            {options.map(option => (
-              <option key={option} value={option}>
-                {option === 'none' ? windowLabel(option) : `${windowLabel(option)} · ${countFor(option)}`}
-              </option>
-            ))}
-          </select>
-          {runtime.kind === 'several' ? (
-            <select
-              className="kt-input w-auto min-w-0"
-              aria-label="Runtime for imported conversations"
-              data-conversation-runtime=""
-              value={picked ?? ''}
-              onChange={event => setPicked(event.target.value === '' ? null : event.target.value)}
-            >
-              <option value="">Runtime…</option>
-              {runtime.runtimes.map(candidate => (
-                <option key={candidate.wrapper} value={candidate.wrapper}>
-                  {candidate.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          {ids.length === 0 ? null : (
-            <Button
-              type="button"
-              data-conversations-import=""
-              disabled={busy || wrapper === undefined}
-              onClick={() => wrapper !== undefined && void send(wrapper)}
-            >
-              {busy ? 'Importing…' : `Import ${countWords(ids.length, 'conversation')}`}
-            </Button>
-          )}
-        </div>
-        <p className="m-0 text-meta leading-base text-muted">
-          Each one is linked to its original file, not copied, and stays stopped until you resume it.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <SetupSection title="Your conversations" name="conversations">
-      {body}
-    </SetupSection>
   );
 }

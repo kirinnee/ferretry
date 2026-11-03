@@ -8,7 +8,7 @@
  *   stepper of its own.
  * - **Claude Code**, **Codex** — one screen each that detects, imports, signs in and names the runtime
  *   (`harness-step.tsx`).
- * - **Speed-ups** — Settings › Speed-ups (`speedups-surface.tsx`): paste → Test → "set ✓".
+ * - **Speed-ups** — one `Save keys` (`speedups-step.tsx`): paste → stored → tested → "set ✓".
  * - **Voice** — Settings › Dictation's engine choice (Parakeet, with its download size and optional install,
  *   or phone/browser voice), saved as the MACHINE's default in `voice.yaml`; clean-up is this device's.
  * - **Warden** — Settings › Warden's card, with Jev switched on only when a Jev key was added.
@@ -39,7 +39,6 @@ import type { PairingClientFactory } from '../../settings/add-device-settings.ts
 import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
 import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { SpeedupsSurface } from '../../speedups/speedups-surface.tsx';
 import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
 import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
 import { AgentControlSection } from '../machine/settings-tab.tsx';
@@ -151,23 +150,6 @@ export function OnboardingStartStep({
   );
 }
 
-// ── Speed-ups ────────────────────────────────────────────────────────────────────────────────────
-
-export function OnboardingSpeedupsStep({ tab }: { readonly tab: MachineTabProps }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="speedups">
-      <Lead>
-        Recommended, and optional. Without these keys Ferretry takes the slower path and says so: the Warden
-        investigates every flag, and dictation clean-up stays on this device or off.
-      </Lead>
-      <SpeedupsSurface connection={tab.connection} createClient={tab.createClient} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Keys go to {tab.machineName}’s secret store: used, never read back. After storing you only see “set ✓”.
-      </p>
-    </div>
-  );
-}
-
 // ── Voice ────────────────────────────────────────────────────────────────────────────────────────
 
 /** This device's dictation settings, as much of them as the Voice step changes. */
@@ -247,7 +229,7 @@ export function OnboardingVoiceStep({
             Reading {machineName}’s voice settings…
           </p>
         ) : (
-          <VoiceEngineChoice value={engine} onChange={choose} voice={parakeet} browserSupport={support} />
+          <VoiceEngineChoice value={engine} onChange={choose} voice={parakeet} browserSupport={support} quiet />
         )}
         {problem === null ? null : (
           <p role="alert" className="m-0 text-ui text-err" data-onboarding-voice-problem="">
@@ -381,6 +363,7 @@ export function OnboardingWardenStep({
         error={error}
         saved={saved}
         onSave={patch => void save(loaded, patch)}
+        quiet
       />
       {dirty ? (
         <p className="m-0 text-meta text-muted" data-onboarding-warden-unsaved="">
@@ -529,12 +512,15 @@ export function OnboardingDoneStep({
   machineName,
   onNavigate,
   createRuntimeHref,
+  notes = [],
 }: {
   readonly rows: readonly OnboardingDoneRow[];
   readonly machineName: string;
   readonly onNavigate: (to: string) => void;
   /** Present only while the machine has no runtime: setup is not finished until one exists. */
   readonly createRuntimeHref?: string;
+  /** What the imports did, one line each (the conversations result, a sign-in left for later). */
+  readonly notes?: readonly string[];
 }) {
   const later = rows.filter(row => row.later !== undefined);
   return (
@@ -550,7 +536,6 @@ export function OnboardingDoneStep({
         <a
           href={createRuntimeHref}
           className="kt-btn self-start"
-          data-variant="primary"
           data-onboarding-create-runtime=""
           onClick={event => {
             event.preventDefault();
@@ -559,6 +544,13 @@ export function OnboardingDoneStep({
         >
           Create a runtime
         </a>
+      )}
+      {notes.length === 0 ? null : (
+        <ul className="m-0 flex min-w-0 list-none flex-col gap-1 p-0 text-cell text-muted" data-onboarding-notes="">
+          {notes.map(note => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
       )}
       <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-onboarding-summary="">
         {rows.map(row => (

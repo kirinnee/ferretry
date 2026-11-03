@@ -4,11 +4,11 @@ import {
   changedItems,
   changeList,
   changeSummary,
+  foundLines,
   foundRows,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
-  importButtonLabel,
   importCounts,
   importNotes,
   importSummary,
@@ -463,21 +463,24 @@ describe('runtimeName', () => {
   });
 });
 
-describe('importButtonLabel', () => {
-  it('names the runtime the import creates', () => {
-    expect(importButtonLabel(NEW, NO_ANSWERS, true)).toBe('Import and create claude-default');
-    expect(importButtonLabel(NEW, { name: 'work' }, true)).toBe('Import and create work');
-    expect(importButtonLabel(DUPLICATE, { addAnother: true }, true)).toBe('Import and create claude-default-2');
+describe('foundLines', () => {
+  it('ticks what the CLI has, a line each', () => {
+    const lines = foundLines(foundRows(scan(), 'claude', false));
+    expect(lines[0]).toEqual({ ok: true, text: 'Signed in as you@example.com' });
+    expect(lines.every(line => line.text.length > 0)).toBe(true);
   });
 
-  it('is a plain Import when no runtime is made', () => {
-    expect(importButtonLabel(DUPLICATE, NO_ANSWERS, true)).toBe('Import');
-    expect(importButtonLabel(NONE, NO_ANSWERS, true)).toBe('Import');
+  it('says a login that is not signed in can be signed in after importing (E4)', () => {
+    const [line] = foundLines(foundRows(scan(), 'codex', false));
+    expect(line).toEqual({ ok: false, text: 'Not signed in — you can sign in after importing' });
   });
 
-  it('offers to sign in later when the login is not signed in (E4)', () => {
-    expect(importButtonLabel(NEW, NO_ANSWERS, false)).toBe('Import and create claude-default, sign in later');
-    expect(importButtonLabel(NONE, NO_ANSWERS, false)).toBe('Import, sign in later');
+  it('says a due refresh renews itself', () => {
+    const [line] = foundLines(
+      foundRows(withCodex({ account: { state: 'refresh-due', email: 'a@b.test' } }), 'codex', false),
+    );
+    expect(line?.ok).toBe(true);
+    expect(line?.text).toContain('renews itself');
   });
 });
 

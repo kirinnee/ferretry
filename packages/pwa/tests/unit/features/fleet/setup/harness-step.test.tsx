@@ -10,7 +10,11 @@ import { useState } from 'react';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import type { MachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import type { HarnessAnswers } from '../../../../../src/features/fleet/setup/harness-import-model.ts';
-import { OnboardingHarnessStep, providerProfile } from '../../../../../src/features/fleet/setup/harness-step.tsx';
+import {
+  type HarnessReport,
+  OnboardingHarnessStep,
+  providerProfile,
+} from '../../../../../src/features/fleet/setup/harness-step.tsx';
 import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
 import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
@@ -111,6 +115,8 @@ interface Step {
   readonly text: (selector?: string) => string;
   readonly answers: HarnessAnswers[];
   readonly ready: number[];
+  /** Each time the step finished and asked the page to move on, with what it reports. */
+  readonly finished: (HarnessReport | null)[];
   readonly rerender: (overrides: Partial<Options>) => Promise<void>;
 }
 
@@ -120,12 +126,14 @@ function Host({
   initial,
   log,
   ready,
+  finished,
 }: {
   readonly tab: MachineTabProps;
   readonly harness: SetupHarness;
   readonly initial: HarnessAnswers;
   readonly log: HarnessAnswers[];
   readonly ready: number[];
+  readonly finished: (HarnessReport | null)[];
 }) {
   const [answers, setAnswers] = useState<HarnessAnswers>(initial);
   return (
@@ -138,6 +146,7 @@ function Host({
         setAnswers(next);
       }}
       onReady={() => ready.push(1)}
+      onFinished={report => finished.push(report)}
       pollMs={5}
     />
   );
@@ -146,6 +155,7 @@ function Host({
 const start = async (client: FleetClient, options: Partial<Options> = {}): Promise<Step> => {
   const log: HarnessAnswers[] = [];
   const ready: number[] = [];
+  const finished: (HarnessReport | null)[] = [];
   const createClient = async () => client;
   const machine: FleetMachineView = machineView();
   const element = (current: Options) => (
@@ -163,6 +173,7 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
       initial={current.answers}
       log={log}
       ready={ready}
+      finished={finished}
     />
   );
   let current: Options = { harness: 'claude', online: true, answers: {}, ...options };
@@ -175,6 +186,7 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
     text: (selector?: string) => (selector === undefined ? view.container.textContent : q(selector)?.textContent) ?? '',
     answers: log,
     ready,
+    finished,
     rerender: async overrides => {
       current = { ...current, ...overrides };
       await view.render(element(current));
@@ -211,6 +223,11 @@ const daemon = (routes: Record<string, unknown> = {}, calls: Call[] = []): Fleet
 
 const changeBodies = (calls: readonly Call[]) =>
   calls.filter(call => call.path === CHANGES_PATH).map(call => (call.body as { change: unknown }).change);
+
+/** Opens the runtime name field, which is a line of text until “Change” is pressed. */
+const rename = async (s: Step): Promise<void> => {
+  await clickOn(s.q('[data-harness-name-change]'), 'change the runtime name');
+};
 
 const submit = (s: Step) => s.q('[data-change-submit]') as HTMLButtonElement | null;
 
@@ -270,30 +287,40 @@ describe('OnboardingHarnessStep: reading the machine', () => {
 });
 
 describe('OnboardingHarnessStep: Claude Code on one screen', () => {
-  it('shows installed, what was found, the runtime name prefilled, and one Import button', async () => {
+  it('shows what was found as ticked lines, the runtime name as text, and one Import button', async () => {
     const s = await start(daemon());
     try {
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Installed');
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Installed on studio-mac');
-      expect(s.text('[data-setup-section="found"]')).toContain('Found on studio-mac');
-      const found = s.text('[data-setup-section="found"]');
-      expect(found).toContain('you@example.com');
-      expect(found).toContain('CLAUDE.md');
-      expect(found).toContain('2 secret values · go to the secret store, never shown');
-      expect(found).toContain('Command not found: uvx');
-      expect(s.q('[data-setup-note="sign-in-now"]')).toBeNull();
+      expect(s.q('[data-setup-row="tool-claude"]')).toBeNull();
+      const lines = [...s.view.container.querySelectorAll('[data-found-line]')].map(line => line.textContent);
+      expect(lines).toContain('Signed in as you@example.com');
+      expect(lines.some(line => line?.includes('MCP server'))).toBe(true);
+      expect(lines.some(line => line?.includes('skill'))).toBe(true);
+      expect(s.q('[data-setup-section="found"]')?.querySelector('h4')?.textContent).toBe('Found on studio-mac');
+      // The rest sits behind a closed Details, with the secret-value badge.
+      const details = must(s.q('[data-setup-disclosure="found-details"]'), 'the details');
+      expect(details.hasAttribute('open')).toBe(false);
+      expect(details.textContent).toContain('CLAUDE.md');
+      expect(details.textContent).toContain('2 secret values · go to the secret store, never shown');
+      expect(details.textContent).toContain('Command not found: uvx');
+      expect(s.q('[data-harness-sign-in]')).toBeNull();
       expect(s.q('[data-setup-note="problem"]')).toBeNull();
       expect(s.q('[data-harness-has]')).toBeNull();
+      // The name is text with Change; the input and its validation come with Change.
+      expect(s.text('[data-harness-runtime-line]')).toContain('claude-default');
+      expect(s.q('[data-harness-name]')).toBeNull();
+      await rename(s);
       expect((s.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-default');
       expect(s.q('[data-harness-name="claude"]')?.getAttribute('aria-invalid')).toBe('false');
       expect(s.text('[data-setup-section="runtime"]')).toContain('Letters, digits and dashes.');
       expect(s.q('[data-harness-add-another]')).toBeNull();
       expect(s.q('[data-setup-choice]')).toBeNull();
-      expect(s.text('[data-change-submit]')).toBe('Import and create claude-default');
-      expect(s.text('[data-setup-section="runtime"]')).toContain(
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
+      expect(s.view.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+      expect(s.text('[data-onboarding-step-body]')).toContain(
         'Ferretry and your own claude share this login: signing out in one signs out both.',
       );
       expect(s.ready).toHaveLength(0);
+      expect(s.finished).toHaveLength(0);
     } finally {
       await s.view.unmount();
     }
@@ -335,6 +362,16 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
       expect(s.text('[data-setup-note="import-note"]')).toBe(
         'notes needs uvx: install uv on studio-mac and it starts working.',
       );
+      // Success hands the page on, once, with what it did.
+      expect(s.finished).toEqual([
+        {
+          harness: 'claude',
+          runtime: 'claude-default',
+          summary: 'Imported 1 login, 2 skills, 3 MCP servers',
+          conversations: null,
+          signIn: [],
+        },
+      ]);
     } finally {
       await s.view.unmount();
     }
@@ -347,6 +384,7 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
       expect(s.text('[data-setup-note="import-ready"]')).toContain('Imported');
       expect(s.text('[data-harness-imported]')).toContain('Your Claude Code setup is in Ferretry.');
       expect(s.ready).toHaveLength(0);
+      expect(s.finished).toHaveLength(1);
     } finally {
       await s.view.unmount();
     }
@@ -384,8 +422,9 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
       ),
     );
     try {
-      expect(s.text('[data-change-submit]')).toBe('Import and create claude-default, sign in later');
-      await clickOn(s.q('[data-change-submit]'), 'import');
+      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — you can sign in after importing');
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(s.text('[data-setup-note="import-ready"]')).toContain(
         'claude-default, claude-work and claude-ok are ready',
       );
@@ -401,12 +440,16 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
         ['Sign in for claude-default', '#machines/studio-mac/sign-ins/claude-host'],
         ['Sign in for claude-work', '#machines/studio-mac/sign-ins/claude-work'],
       ]);
+      expect(s.finished[0]?.signIn).toEqual([
+        { runtime: 'claude-default', credential: 'claude-host' },
+        { runtime: 'claude-work', credential: 'claude-work' },
+      ]);
     } finally {
       await s.view.unmount();
     }
   });
 
-  it('a change the daemon refuses shows its sentence and stays on the form', async () => {
+  it('a change the daemon refuses shows its sentence, stays on the page and does not move on', async () => {
     const sentence = 'Import is not available while a migration is running.';
     const calls: Call[] = [];
     const s = await start(daemon({ [CHANGES_PATH]: new FyHttpError(sentence, 409, 'fleet_change_refused') }, calls));
@@ -414,8 +457,10 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
       await clickOn(s.q('[data-change-submit]'), 'import');
       expect(s.text('[data-change-refusal]')).toBe(sentence);
       expect(s.q('[data-harness-imported]')).toBeNull();
-      expect(s.q('[data-harness-name="claude"]')).not.toBeNull();
+      expect(s.q('[data-harness-runtime-line]')).not.toBeNull();
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
       expect(s.answers).toHaveLength(0);
+      expect(s.finished).toHaveLength(0);
       expect(calls.some(call => call.path === APPLY_PATH)).toBe(false);
     } finally {
       await s.view.unmount();
@@ -428,11 +473,11 @@ describe('OnboardingHarnessStep: the runtime name', () => {
     const calls: Call[] = [];
     const s = await start(daemon({}, calls));
     try {
+      await rename(s);
       await typeInto(s.q('[data-harness-name="claude"]'), ' claude-work ', 'name');
       expect(s.answers.at(-1)).toEqual({ name: 'claude-work' });
       expect((s.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-work');
-      expect(s.text('[data-change-submit]')).toBe('Import and create claude-work');
-      await clickOn(s.q('[data-change-submit]'), 'import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(changeBodies(calls)).toEqual([
         { kind: 'setup.import', include: ['claude'], names: { claude: 'claude-work' } },
       ]);
@@ -444,6 +489,8 @@ describe('OnboardingHarnessStep: the runtime name', () => {
   it('starts from the answers kept from an earlier visit', async () => {
     const s = await start(daemon(), { answers: { name: 'kept-name' } });
     try {
+      expect(s.text('[data-harness-runtime-line]')).toContain('kept-name');
+      await rename(s);
       expect((s.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('kept-name');
     } finally {
       await s.view.unmount();
@@ -451,7 +498,9 @@ describe('OnboardingHarnessStep: the runtime name', () => {
   });
 
   it('a clash with a runtime on the machine says why, offers the next free name and holds the button', async () => {
-    const s = await start(daemon({ [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]) }));
+    const s = await start(daemon({ [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]) }), {
+      answers: { addAnother: true, name: 'claude-default' },
+    });
     try {
       expect(s.q('[data-harness-name="claude"]')?.getAttribute('aria-invalid')).toBe('true');
       expect(s.text('[data-harness-name-problem="claude"]')).toContain(
@@ -460,7 +509,7 @@ describe('OnboardingHarnessStep: the runtime name', () => {
       expect(s.text('[data-harness-name-suggestion="claude"]')).toBe('Use claude-default-2');
       expect(submit(s)?.disabled).toBe(true);
       await clickOn(s.q('[data-harness-name-suggestion="claude"]'), 'use suggestion');
-      expect((s.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-default-2');
+      expect(s.text('[data-harness-runtime-line]')).toContain('claude-default-2');
       expect(s.q('[data-harness-name-problem]')).toBeNull();
       expect(submit(s)?.disabled).toBe(false);
       expect(s.text('[data-harness-has="claude"]')).toBe(
@@ -474,6 +523,7 @@ describe('OnboardingHarnessStep: the runtime name', () => {
   it('a bad name offers a slug, and an empty one only says to give a name', async () => {
     const s = await start(daemon());
     try {
+      await rename(s);
       await typeInto(s.q('[data-harness-name="claude"]'), 'My Runtime!', 'bad name');
       expect(s.text('[data-harness-name-problem="claude"]')).toContain('Use only letters, digits and dashes.');
       expect(s.text('[data-harness-name-suggestion="claude"]')).toBe('Use my-runtime');
@@ -516,13 +566,13 @@ describe('OnboardingHarnessStep: a duplicate and the updates', () => {
     try {
       const another = must(s.q('[data-harness-add-another]') as HTMLInputElement | null, 'add another');
       expect(another.checked).toBe(false);
-      expect(s.q('[data-harness-name]')).toBeNull();
-      expect(s.text('[data-change-submit]')).toBe('Import');
+      expect(s.q('[data-harness-runtime-line]')).toBeNull();
+      expect(s.text('[data-onboarding-primary]')).toBe('Continue');
       await clickOn(another, 'add another');
       expect(s.answers.at(-1)).toEqual({ addAnother: true });
-      expect((s.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-default-2');
-      expect(s.text('[data-change-submit]')).toBe('Import and create claude-default-2');
-      await clickOn(s.q('[data-change-submit]'), 'import');
+      expect(s.text('[data-harness-runtime-line]')).toContain('claude-default-2');
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(changeBodies(calls)).toEqual([
         { kind: 'setup.import', include: ['claude'], names: { claude: 'claude-default-2' }, addDuplicates: true },
       ]);
@@ -531,11 +581,11 @@ describe('OnboardingHarnessStep: a duplicate and the updates', () => {
     }
   });
 
-  it('an unticked duplicate imports without a runtime', async () => {
+  it('an unticked duplicate imports without a runtime when the CLI has no runtime yet', async () => {
     const calls: Call[] = [];
     const s = await start(daemon({ [SCAN_PATH]: duplicated }, calls));
     try {
-      await clickOn(s.q('[data-change-submit]'), 'import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(changeBodies(calls)).toEqual([{ kind: 'setup.import', include: ['claude'] }]);
     } finally {
       await s.view.unmount();
@@ -548,8 +598,9 @@ describe('OnboardingHarnessStep: a duplicate and the updates', () => {
     try {
       expect(s.q('[data-harness-name]')).toBeNull();
       expect(s.q('[data-harness-add-another]')).toBeNull();
-      expect(s.text('[data-change-submit]')).toBe('Import');
-      await clickOn(s.q('[data-change-submit]'), 'import');
+      expect(s.q('[data-harness-runtime-line]')).toBeNull();
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
       expect(changeBodies(calls)).toEqual([{ kind: 'setup.import', include: ['claude'] }]);
     } finally {
       await s.view.unmount();
@@ -631,11 +682,9 @@ describe('OnboardingHarnessStep: Codex', () => {
       expect(codex).toContain('Same as your CLAUDE.md · one shared copy');
       expect(codex).not.toContain('share this login');
       expect(s.text('[data-setup-note="problem"]')).toBe('Couldn’t read config.toml: it is not valid TOML.');
-      expect(s.text('[data-setup-note="sign-in-now"]')).toContain('Codex isn’t signed in');
-      expect(s.text('[data-setup-note="sign-in-now"]')).toContain(
-        'Sign in now, or import your setup and sign in later.',
-      );
-      expect(s.text('[data-change-submit]')).toBe('Import and create codex-default, sign in later');
+      expect(s.text('[data-found-line="attention"]')).toContain('Not signed in — you can sign in after importing');
+      expect(s.text('[data-harness-sign-in]')).toBe('Sign in first');
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
       // Claude's runtime does not make Codex's step set.
       expect(s.q('[data-harness-has]')).toBeNull();
       expect(s.ready).toHaveLength(0);
@@ -655,38 +704,47 @@ describe('OnboardingHarnessStep: Codex', () => {
 });
 
 describe('OnboardingHarnessStep: not installed', () => {
-  it('offers the install in place; a failed install can be skipped, leaving one quiet line', async () => {
+  it('offers the install as the page’s one primary, with no Skip of its own; a failed install offers Retry', async () => {
+    const calls: Call[] = [];
+    let attempts = 0;
     const s = await start(
-      daemon({
-        [SCAN_PATH]: NOTHING_INSTALLED,
-        [INSTALL_PATH]: {
-          outcomes: [
-            {
-              harness: 'claude',
-              outcome: 'failed',
-              cause: 'needs-admin',
-              reason: 'npm needs administrator rights on studio-mac.',
-              manualCommand: 'sudo npm install -g @anthropic-ai/claude-code',
-            },
-          ],
+      daemon(
+        {
+          [SCAN_PATH]: NOTHING_INSTALLED,
+          [INSTALL_PATH]: () => {
+            attempts += 1;
+            return {
+              outcomes: [
+                {
+                  harness: 'claude',
+                  outcome: 'failed',
+                  cause: 'needs-admin',
+                  reason: 'npm needs administrator rights on studio-mac.',
+                  manualCommand: 'sudo npm install -g @anthropic-ai/claude-code',
+                },
+              ],
+            };
+          },
         },
-      }),
+        calls,
+      ),
     );
     try {
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Not installed');
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Not installed on studio-mac');
-      expect(s.text('[data-setup-section="install"]')).toContain('Install Claude Code');
-      expect(s.text('[data-setup-section="install"]')).toContain('npm install -g @anthropic-ai/claude-code');
+      expect(s.q('[data-setup-row="tool-claude"]')).toBeNull();
+      expect(s.text('[data-tool-install]')).toContain('npm install -g @anthropic-ai/claude-code');
       expect(s.q('[data-setup-section="found"]')).toBeNull();
       expect(s.q('[data-harness-provider]')).toBeNull();
       expect(s.q('[data-install-skip]')).toBeNull();
-      await clickOn(s.q('[data-change-submit]'), 'install');
+      expect(s.text('[data-onboarding-primary]')).toBe('Install Claude Code');
+      expect(s.view.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+      await clickOn(s.q('[data-onboarding-primary]'), 'install');
       expect(s.text('[data-setup-note="install-failed"]')).toContain('npm needs administrator rights on studio-mac.');
-      await clickOn(s.q('[data-install-skip]'), 'skip');
-      expect(s.q('[data-setup-section="install"]')).toBeNull();
-      expect(s.text('[data-setup-note="not-installed"]')).toBe(
-        'Claude Code isn’t installed on studio-mac. Skip this step and install it later in Settings › Machine.',
-      );
+      expect(s.q('[data-install-skip]')).toBeNull();
+      expect(s.text('[data-onboarding-primary]')).toBe('Retry');
+      expect(s.view.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+      await clickOn(s.q('[data-onboarding-primary]'), 'retry');
+      expect(attempts).toBe(2);
+      expect(s.finished).toHaveLength(0);
     } finally {
       await s.view.unmount();
     }
@@ -695,9 +753,11 @@ describe('OnboardingHarnessStep: not installed', () => {
   it('a tool the scan does not list is not installed, and has nothing to install', async () => {
     const s = await start(daemon({ [SCAN_PATH]: scan({ tools: [], harnesses: [] }) }));
     try {
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Not installed');
-      expect(s.q('[data-setup-section="install"]')).toBeNull();
-      expect(s.q('[data-setup-note="not-installed"]')).not.toBeNull();
+      expect(s.q('[data-tool-install]')).toBeNull();
+      expect(s.q('[data-onboarding-primary]')).toBeNull();
+      expect(s.text('[data-setup-note="not-installed"]')).toBe(
+        'Claude Code isn’t installed on studio-mac. Skip this step and install it later in Settings › Machine.',
+      );
     } finally {
       await s.view.unmount();
     }
@@ -730,14 +790,13 @@ describe('OnboardingHarnessStep: not installed', () => {
       ),
     );
     try {
-      expect(s.text('[data-change-submit]')).toBe('Install 1 tool');
-      await clickOn(s.q('[data-change-submit]'), 'install');
+      expect(s.text('[data-onboarding-primary]')).toBe('Install Claude Code');
+      await clickOn(s.q('[data-onboarding-primary]'), 'install');
       expect(calls.find(call => call.path === INSTALL_PATH)?.body).toEqual({ harnesses: ['claude'] });
       expect(calls.filter(call => call.path === SCAN_PATH)).toHaveLength(2);
-      expect(s.text('[data-setup-row="tool-claude"]')).toContain('Installed');
-      expect(s.q('[data-setup-section="install"]')).toBeNull();
+      expect(s.q('[data-tool-install]')).toBeNull();
       expect(s.q('[data-setup-section="found"]')).not.toBeNull();
-      expect(s.text('[data-change-submit]')).toBe('Import and create claude-default');
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
       expect(s.q('[data-harness-provider]')).not.toBeNull();
     } finally {
       await s.view.unmount();
@@ -798,6 +857,8 @@ describe('OnboardingHarnessStep: Sign in now', () => {
       expect(s.text('[data-first-run-sign-in="codex"]')).toContain(
         'This is your own Codex login on studio-mac: codex in your terminal signs in too.',
       );
+      // The sign-in's own button is the only primary while it is open.
+      expect(s.q('[data-onboarding-primary]')).toBeNull();
       expect(s.text('[data-change-submit]')).toBe('Sign in to Codex');
       await clickOn(s.q('[data-change-submit]'), 'sign in to codex');
       expect(changeBodies(calls)).toEqual([
@@ -807,12 +868,10 @@ describe('OnboardingHarnessStep: Sign in now', () => {
       await until(() => s.q('[data-codex-login="awaiting-approval"]') !== null, 'the Codex login awaiting approval');
       approvedOnMachine = true;
       await until(
-        () =>
-          s.q('[data-first-run-sign-in]') === null &&
-          s.text('[data-change-submit]') === 'Import and create codex-default',
+        () => s.q('[data-first-run-sign-in]') === null && s.text('[data-onboarding-primary]') === 'Import',
         'the step again, signed in',
       );
-      expect(s.q('[data-setup-note="sign-in-now"]')).toBeNull();
+      expect(s.q('[data-harness-sign-in]')).toBeNull();
       expect(s.text('[data-setup-section="found"]')).toContain('Signed in');
     } finally {
       await s.view.unmount();
@@ -842,8 +901,8 @@ describe('OnboardingHarnessStep: Sign in now', () => {
       expect(calls.find(call => call.path === LOGIN_PATH)?.body).toEqual({ credentialId: 'codex-you' });
       await clickOn(s.q('[data-first-run-sign-in-close]'), 'not now');
       expect(s.q('[data-first-run-sign-in]')).toBeNull();
-      expect(s.q('[data-setup-note="sign-in-now"]')).not.toBeNull();
-      expect(s.text('[data-change-submit]')).toBe('Import and create codex-default, sign in later');
+      expect(s.q('[data-harness-sign-in]')).not.toBeNull();
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
     } finally {
       await s.view.unmount();
     }
@@ -907,7 +966,7 @@ describe('OnboardingHarnessStep: Sign in now', () => {
       expect(s.text('[data-first-run-sign-in="codex"] [role="alert"]')).toContain('the setup could not be read');
       expect(calls.some(call => call.path === LOGIN_PATH)).toBe(false);
       await clickOn(s.q('[data-first-run-sign-in-close]'), 'not now');
-      expect(s.q('[data-setup-note="sign-in-now"]')).not.toBeNull();
+      expect(s.q('[data-harness-sign-in]')).not.toBeNull();
     } finally {
       await s.view.unmount();
     }
@@ -1148,7 +1207,63 @@ describe('OnboardingHarnessStep: Use a provider key instead', () => {
   });
 });
 
-describe('OnboardingHarnessStep — import conversations', () => {
+describe('OnboardingHarnessStep — auto-advance', () => {
+  it('a revisit with a runtime already there and nothing ticked has a Continue that moves on without sending', async () => {
+    const calls: Call[] = [];
+    const s = await start(daemon({ [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]) }, calls));
+    try {
+      expect(s.text('[data-onboarding-primary]')).toBe('Continue');
+      expect(s.view.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+      await clickOn(s.q('[data-onboarding-primary]'), 'continue');
+      expect(s.finished).toEqual([null]);
+      expect(changeBodies(calls)).toEqual([]);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('ticking “import again” turns Continue into Import, and success then moves on', async () => {
+    const calls: Call[] = [];
+    const s = await start(daemon({ [RUNTIMES_PATH]: runtimes([runtimeView('claude-work')]) }, calls), {
+      answers: { accepted: ['mcp/slack'] },
+    });
+    try {
+      expect(s.text('[data-onboarding-primary]')).toBe('Import');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(changeBodies(calls)).toHaveLength(1);
+      expect(s.finished).toHaveLength(1);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('keeps the passkey line and the grant sentence in the body while the primary sits apart', async () => {
+    const s = await start(daemon());
+    try {
+      expect(s.q('[data-change-apply] button')).toBeNull();
+      expect(s.q('[data-change-apply]')).not.toBeNull();
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('does not move on, or import conversations, when the apply is refused', async () => {
+    const calls: Call[] = [];
+    const s = await start(daemon({ [CHANGES_PATH]: new FyHttpError('Not now.', 409, 'fleet_change_refused') }, calls), {
+      answers: { conversations: true },
+    });
+    try {
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(s.text('[data-change-refusal]')).toBe('Not now.');
+      expect(s.finished).toHaveLength(0);
+      expect(calls.some(call => call.path.startsWith('/v1/imports/conversations'))).toBe(false);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+});
+
+describe('OnboardingHarnessStep — also bring my conversations', () => {
   const DAY = 86_400_000;
   const row = (id: string, daysAgo: number, adoptedBy?: string) => ({
     id,
@@ -1166,74 +1281,64 @@ describe('OnboardingHarnessStep — import conversations', () => {
     adopted: ids.map(id => ({ id, session: `s-${id}`, name: `ferret-${id}`, status: 'stopped' })),
     refused: [],
   });
-  const choose = async (select: Element | null, value: string): Promise<void> => {
-    const target = must(select as HTMLSelectElement | null, 'the window');
-    await interact(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-      setter?.call(target, value);
-      target.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await settle();
+  const adoptCalls = (calls: readonly Call[]) => calls.filter(call => call.path === ADOPT_PATH);
+  /** The runtimes the machine lists once the import has made claude-default. */
+  const afterImport = () => {
+    let created = false;
+    return {
+      [RUNTIMES_PATH]: () => runtimes(created ? [runtimeView('claude-default')] : []),
+      [APPLY_PATH]: () => {
+        created = true;
+        return EXECUTED;
+      },
+    };
   };
-  const withRuntime = [runtimeView('claude-default')];
 
-  it('offers the section once the CLI has a runtime, and not before', async () => {
-    const none = await start(daemon());
+  it('is a checkbox before Import, unticked by default, that keeps its answer with the rail', async () => {
+    const s = await start(daemon());
     try {
-      expect(none.q('[data-setup-section="conversations"]')).toBeNull();
-    } finally {
-      await none.view.unmount();
-    }
-  });
-
-  it('is ONE choice with a count each, None by default, and no per-conversation picking', async () => {
-    const s = await start(
-      daemon({
-        [RUNTIMES_PATH]: runtimes(withRuntime),
-        [LISTING_PATH]: listing([row('a', 0.5), row('b', 2), row('c', 10), row('d', 40), row('e', 0.1, 'owned')]),
-      }),
-    );
-    try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      const labels = [...s.view.container.querySelectorAll('[data-conversation-window] option')].map(
-        option => option.textContent,
-      );
-      expect(labels).toEqual([
-        'All · 4',
-        'Last 1 day · 1',
-        'Last 3 days · 2',
-        'Last 7 days · 2',
-        'Last 14 days · 3',
-        'Last 30 days · 3',
-        'None',
-      ]);
-      expect((s.q('[data-conversation-window]') as HTMLSelectElement).value).toBe('none');
-      expect(s.q('[data-conversations-import]')).toBeNull();
-      expect(s.q('[data-conversation-row]')).toBeNull();
-      expect(s.q('[data-harness-conversations]')).toBeNull();
+      const box = must(s.q('[data-harness-conversations]') as HTMLInputElement | null, 'the checkbox');
+      expect(box.checked).toBe(false);
+      expect(box.closest('label')?.textContent).toBe('Also bring my conversations from the last 7 days');
+      expect(s.q('[data-conversation-window]')).toBeNull();
+      await clickOn(box, 'tick');
+      expect(s.answers.at(-1)).toEqual({ conversations: true });
+      expect((s.q('[data-harness-conversations]') as HTMLInputElement).checked).toBe(true);
     } finally {
       await s.view.unmount();
     }
   });
 
-  it('imports the chosen window stopped, in one request, and says so in the summary line', async () => {
+  it('unticked, imports no conversation and asks the machine for none', async () => {
+    const calls: Call[] = [];
+    const s = await start(daemon(afterImport(), calls));
+    try {
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(calls.some(call => call.path.startsWith('/v1/imports/conversations'))).toBe(false);
+      expect(s.finished[0]?.conversations).toBeNull();
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('ticked, brings the last 7 days in AFTER the runtime import, stopped, and reports it', async () => {
     const calls: Call[] = [];
     const s = await start(
       daemon(
         {
-          [RUNTIMES_PATH]: runtimes(withRuntime),
-          [LISTING_PATH]: listing([row('a', 0.5), row('b', 2), row('c', 10)]),
+          ...afterImport(),
+          [LISTING_PATH]: listing([row('a', 0.5), row('b', 2), row('c', 10), row('d', 40), row('e', 0.1, 'owned')]),
           [ADOPT_PATH]: adopted(['a', 'b']),
         },
         calls,
       ),
+      { answers: { conversations: true } },
     );
     try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), '3');
-      expect(s.text('[data-conversations-import]')).toBe('Import 2 conversations');
-      await clickOn(s.q('[data-conversations-import]'), 'import');
-      expect(calls.filter(call => call.path === ADOPT_PATH).map(call => call.body)).toEqual([
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      const order = calls.map(call => call.path);
+      expect(order.indexOf(APPLY_PATH)).toBeLessThan(order.indexOf(ADOPT_PATH));
+      expect(adoptCalls(calls).map(call => call.body)).toEqual([
         {
           harness: 'claude',
           runtime: 'claude-default',
@@ -1243,153 +1348,102 @@ describe('OnboardingHarnessStep — import conversations', () => {
           ],
         },
       ]);
-      expect(s.text('[data-conversations-result]')).toBe('Imported 2 conversations.');
-      expect((s.q('[data-conversation-window]') as HTMLSelectElement).value).toBe('none');
+      expect(s.finished[0]?.conversations).toBe('Brought in 2 conversations.');
+      expect(s.text('[data-setup-note="import-ready"] > p')).toBe(
+        'Imported 1 login, 2 skills, 3 MCP servers, 2 conversations',
+      );
+      expect(s.answers.at(-1)).toEqual({});
     } finally {
       await s.view.unmount();
     }
   });
 
-  it('imports All in batches no bigger than one adoption may name', async () => {
+  it('brings a big window in batches no bigger than one adoption may name', async () => {
     const rows = Array.from({ length: 201 }, (_, index) => row(`c${index}`, 1 + index / 1000));
     const calls: Call[] = [];
     const s = await start(
       daemon(
         {
-          [RUNTIMES_PATH]: runtimes(withRuntime),
+          ...afterImport(),
           [LISTING_PATH]: listing(rows),
           [ADOPT_PATH]: (call: Call) =>
             adopted((call.body as { conversations: { id: string }[] }).conversations.map(item => item.id)),
         },
         calls,
       ),
+      { answers: { conversations: true } },
     );
     try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), 'all');
-      await clickOn(s.q('[data-conversations-import]'), 'import all');
-      const sizes = calls
-        .filter(call => call.path === ADOPT_PATH)
-        .map(call => (call.body as { conversations: unknown[] }).conversations.length);
-      expect(sizes).toEqual([200, 1]);
-      expect(s.text('[data-conversations-result]')).toBe('Imported 201 conversations.');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(adoptCalls(calls).map(call => (call.body as { conversations: unknown[] }).conversations.length)).toEqual([
+        200, 1,
+      ]);
+      expect(s.finished[0]?.conversations).toBe('Brought in 201 conversations.');
     } finally {
       await s.view.unmount();
     }
   });
 
-  it('asks which runtime when the CLI has several, and keeps Import off until one is picked', async () => {
-    const calls: Call[] = [];
-    const s = await start(
-      daemon(
-        {
-          [RUNTIMES_PATH]: runtimes([runtimeView('claude-default'), runtimeView('claude-work')]),
-          [LISTING_PATH]: listing([row('a', 0.5)]),
-          [ADOPT_PATH]: adopted(['a']),
-        },
-        calls,
-      ),
-    );
-    try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), 'all');
-      expect((s.q('[data-conversations-import]') as HTMLButtonElement).disabled).toBe(true);
-      await choose(s.q('[data-conversation-runtime]'), 'claude-work');
-      await clickOn(s.q('[data-conversations-import]'), 'import');
-      const sent = calls.find(call => call.path === ADOPT_PATH)?.body as { runtime: string } | undefined;
-      expect(sent?.runtime).toBe('claude-work');
-      await choose(s.q('[data-conversation-runtime]'), '');
-      expect((s.q('[data-conversation-runtime]') as HTMLSelectElement).value).toBe('');
-    } finally {
-      await s.view.unmount();
-    }
-  });
-
-  it('keeps a refusal visible and stops at a refused batch', async () => {
+  it('says how many could not be brought in, and still moves on', async () => {
     const s = await start(
       daemon({
-        [RUNTIMES_PATH]: runtimes(withRuntime),
+        ...afterImport(),
         [LISTING_PATH]: listing([row('a', 0.5), row('b', 0.6)]),
         [ADOPT_PATH]: {
           adopted: adopted(['a']).adopted,
           refused: [{ id: 'b', code: 'conflict', reason: 'b already has a different file there' }],
         },
       }),
+      { answers: { conversations: true } },
     );
     try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), 'all');
-      await clickOn(s.q('[data-conversations-import]'), 'import');
-      expect(s.text('[data-conversations-result]')).toBe(
-        'Imported 1 conversation. 1 conversation couldn’t be imported.',
-      );
-      expect(s.text('[data-setup-note="conversations-refused-some"]')).toBe('b already has a different file there');
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(s.finished[0]?.conversations).toBe('Brought in 1 conversation; 1 conversation couldn’t be imported.');
     } finally {
       await s.view.unmount();
     }
   });
 
-  it('says why when the daemon refuses an import, and the section stays usable', async () => {
+  it('says so when there are none in the window', async () => {
+    const calls: Call[] = [];
+    const s = await start(daemon({ ...afterImport(), [LISTING_PATH]: listing([row('old', 40)]) }, calls), {
+      answers: { conversations: true },
+    });
+    try {
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(adoptCalls(calls)).toHaveLength(0);
+      expect(s.finished[0]?.conversations).toBe('No Claude Code conversations from the last 7 days.');
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('a conversations failure never undoes the import: it says why and the page still moves on', async () => {
+    const s = await start(daemon({ ...afterImport(), [LISTING_PATH]: new Error('offline') }), {
+      answers: { conversations: true },
+    });
+    try {
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(s.finished).toHaveLength(1);
+      expect(s.finished[0]?.conversations).toContain('Couldn’t bring in your Claude Code conversations');
+      expect(s.q('[data-harness-imported]')).not.toBeNull();
+    } finally {
+      await s.view.unmount();
+    }
+  });
+
+  it('a refused adoption stops at the refused batch and says what it did', async () => {
     const s = await start(
       daemon({
-        [RUNTIMES_PATH]: runtimes(withRuntime),
+        ...afterImport(),
         [LISTING_PATH]: listing([row('a', 0.5)]),
         [ADOPT_PATH]: new FyHttpError('nope', 403, 'forbidden'),
       }),
+      { answers: { conversations: true } },
     );
     try {
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), 'all');
-      await clickOn(s.q('[data-conversations-import]'), 'import');
-      expect(s.q('[data-setup-note="conversations-issue"]')).not.toBeNull();
-      expect(s.q('[data-conversation-window]')).not.toBeNull();
-    } finally {
-      await s.view.unmount();
-    }
-  });
-
-  it('says so when there are none, and can retry a listing that failed', async () => {
-    let fail = true;
-    const s = await start(
-      daemon({
-        [RUNTIMES_PATH]: runtimes(withRuntime),
-        [LISTING_PATH]: () => {
-          if (fail) return new Error('offline');
-          return listing([]);
-        },
-      }),
-    );
-    try {
-      await until(() => s.q('[data-conversations-retry]') !== null, 'the retry');
-      fail = false;
-      await clickOn(s.q('[data-conversations-retry]'), 'try again');
-      expect(s.text('[data-setup-note="conversations-empty"]')).toBe('No Claude Code conversations on this machine.');
-    } finally {
-      await s.view.unmount();
-    }
-  });
-
-  it('counts kept conversations into the import result line', async () => {
-    let created = false;
-    const s = await start(
-      daemon({
-        [RUNTIMES_PATH]: () => runtimes(created ? withRuntime : []),
-        [APPLY_PATH]: () => {
-          created = true;
-          return EXECUTED;
-        },
-        [LISTING_PATH]: listing([row('a', 0.5)]),
-        [ADOPT_PATH]: adopted(['a']),
-      }),
-    );
-    try {
-      await clickOn(s.q('[data-change-submit]'), 'import');
-      await until(() => s.q('[data-conversation-window]') !== null, 'the window choice');
-      await choose(s.q('[data-conversation-window]'), 'all');
-      await clickOn(s.q('[data-conversations-import]'), 'import conversations');
-      expect(s.text('[data-setup-note="import-ready"] > p')).toBe(
-        'Imported 1 login, 2 skills, 3 MCP servers, 1 conversation',
-      );
+      await clickOn(s.q('[data-onboarding-primary]'), 'import');
+      expect(s.finished[0]?.conversations).toContain('Brought in 0 conversations, then:');
     } finally {
       await s.view.unmount();
     }

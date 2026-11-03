@@ -322,7 +322,7 @@ import {
   LearningSettingsHarness,
   useHarnessLearningActions,
 } from './learning-hub.tsx';
-import { machineSetupAnswer } from './machine-setup-fixture.ts';
+import { machineSetupAnswer, scanAfterImports } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -2165,7 +2165,8 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     const setup = machineSetupAnswer(String(connection.daemonId), setUp, path, init);
     if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
-    if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
+    if (path === '/v1/fleet/setup/scan')
+      return setUp ? HARNESS_SETUP_SCAN : scanAfterImports(String(connection.daemonId), HARNESS_FIRST_RUN_SCAN);
     // The Browser tab: a running browser behind a proxy, and a Test proxy that reaches it.
     if (path === '/v1/browser/state')
       return {

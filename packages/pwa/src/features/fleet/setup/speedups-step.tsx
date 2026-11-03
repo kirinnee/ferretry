@@ -1,0 +1,206 @@
+/**
+ * New machine setup's **Speed-ups** step: ONE `Save keys` primary in the pinned footer. It saves every key
+ * that was typed through the ordinary secret route (write-only, never shown back), runs the existing test
+ * on each, and moves on when they worked. Jev is the one on show; Groq and Cerebras (dictation clean-up)
+ * are folded under their own heading. Settings › Speed-ups (`speedups-surface.tsx`) is where a key is
+ * replaced, tested again, or looked at later.
+ */
+
+import { MIN_SECRET_VALUE_LENGTH, type SpeedupStatus, type SpeedupsView } from '@ferretry/protocol';
+import { ExternalLink } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { putSecret } from '../../secrets/secrets-api.ts';
+import { readSpeedups, testSpeedup } from '../../speedups/speedups-api.ts';
+import { keyDraftProblem } from '../../speedups/speedups-surface.tsx';
+import { changeRefusalSentence } from '../shell/apply-change.ts';
+import type { MachineTabProps } from '../shell/machines-surface.tsx';
+import { PrimaryAction } from './footer-slot.tsx';
+import { SetupNote } from './setup-ui.tsx';
+
+/** The keys that were typed long enough to be a whole key, by provider. */
+const typedKeys = (drafts: Readonly<Record<string, string>>): readonly [string, string][] =>
+  Object.entries(drafts)
+    .map(([provider, value]): [string, string] => [provider, value.trim()])
+    .filter(([, value]) => value.length >= MIN_SECRET_VALUE_LENGTH);
+
+function KeyField({
+  status,
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly status: SpeedupStatus;
+  readonly value: string;
+  readonly disabled: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  const id = `speedup-key-${status.provider}`;
+  const problem = keyDraftProblem(value);
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-speedup-field={status.provider}>
+      <label htmlFor={id} className="flex flex-wrap items-center gap-2 text-cell font-semibold text-fg">
+        {status.label} key
+        {status.set ? (
+          <span className="text-meta font-normal text-ok" data-speedup-set="">
+            set ✓ · type a new one to replace it
+          </span>
+        ) : null}
+      </label>
+      <p className="m-0 text-meta leading-base text-muted">{status.purpose}</p>
+      <input
+        id={id}
+        // `password` so it is not read over a shoulder; `new-password` so no password manager keeps a
+        // copy of a credential this browser only relays.
+        type="password"
+        autoComplete="new-password"
+        spellCheck={false}
+        className="kt-input w-full min-w-0 font-mono"
+        value={value}
+        disabled={disabled}
+        placeholder="Paste your key — it is never shown again"
+        aria-invalid={problem !== undefined}
+        onChange={event => onChange(event.target.value)}
+      />
+      {problem === undefined ? null : <span className="text-meta text-err">{problem}</span>}
+      <a
+        href={status.keyUrl}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="inline-flex min-w-0 items-center gap-1 self-start text-meta text-accent underline"
+      >
+        Get a {status.label} key
+        <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
+      </a>
+    </div>
+  );
+}
+
+export function OnboardingSpeedupsStep({
+  tab,
+  onSaved,
+  onFinished,
+}: {
+  readonly tab: MachineTabProps;
+  /** At least one key is stored: the step is set. */
+  readonly onSaved: () => void;
+  /** Every typed key was stored and worked: the page moves on. */
+  readonly onFinished: () => void;
+}) {
+  const { connection, createClient, machineName } = tab;
+  const [view, setView] = useState<SpeedupsView | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
+  const [busy, setBusy] = useState<'saving' | 'testing' | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const latest = useRef({ onSaved, onFinished });
+  latest.current = { onSaved, onFinished };
+
+  useEffect(() => {
+    let live = true;
+    void createClient(connection)
+      .then(readSpeedups)
+      .then(
+        next => {
+          if (live) setView(next);
+        },
+        (cause: unknown) => {
+          if (live) setFailure(changeRefusalSentence(cause));
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [connection, createClient]);
+
+  const typed = typedKeys(drafts);
+  const idle = busy === null;
+
+  const save = useCallback(async (): Promise<void> => {
+    setProblem(null);
+    setBusy('saving');
+    try {
+      const client = await createClient(connection);
+      for (const [provider, value] of typed) {
+        const status = view?.providers.find(candidate => candidate.provider === provider);
+        if (status !== undefined) await putSecret(client, status.secretName, value);
+      }
+      setDrafts({});
+      latest.current.onSaved();
+      setBusy('testing');
+      const failed: string[] = [];
+      for (const [provider] of typed) {
+        const status = view?.providers.find(candidate => candidate.provider === provider);
+        const result = await testSpeedup(client, provider as SpeedupStatus['provider']).catch((cause: unknown) => ({
+          ok: false,
+          message: changeRefusalSentence(cause),
+        }));
+        if (!result.ok) failed.push(`${status?.label ?? provider}: ${result.message}`);
+      }
+      setView(await readSpeedups(client));
+      if (failed.length === 0) latest.current.onFinished();
+      else setProblem(`Saved, but the test didn’t pass. ${failed.join(' ')} Paste a corrected key, or skip.`);
+    } catch (cause) {
+      setProblem(changeRefusalSentence(cause));
+    } finally {
+      setBusy(null);
+    }
+  }, [connection, createClient, typed, view]);
+
+  const jev = view?.providers.find(status => status.provider === 'jev');
+  const dictation = view?.providers.filter(status => status.provider !== 'jev') ?? [];
+  const field = (status: SpeedupStatus) => (
+    <KeyField
+      key={status.provider}
+      status={status}
+      value={drafts[status.provider] ?? ''}
+      disabled={!idle}
+      onChange={value => setDrafts(current => ({ ...current, [status.provider]: value }))}
+    />
+  );
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="speedups">
+      <p className="m-0 text-cell leading-base text-muted">
+        Keys make Ferretry faster and cheaper. Nothing breaks without them. Each key goes to {machineName}’s secret
+        store and is never shown again.
+      </p>
+      {failure !== null ? (
+        <SetupNote live tone="warn" name="speedups-unreadable" title={`Couldn’t read ${machineName}’s keys`}>
+          <span>{failure}</span>
+        </SetupNote>
+      ) : view === null ? (
+        <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="speedups">
+          Reading {machineName}’s speed-up keys…
+        </p>
+      ) : (
+        <>
+          {view.vault === 'ok' ? null : (
+            <SetupNote tone="warn" name="speedups-vault" title="The secret store can’t be read">
+              <span>Fix it in Secrets before pasting a key, or you may write over one that is still there.</span>
+            </SetupNote>
+          )}
+          {jev === undefined ? null : <div className="kt-panel p-panel">{field(jev)}</div>}
+          {dictation.length === 0 ? null : (
+            <details className="kt-panel p-panel" data-speedups-dictation="">
+              <summary className="cursor-pointer text-cell font-semibold text-fg">
+                Dictation clean-up keys ({dictation.map(status => status.label).join(', ')})
+              </summary>
+              <div className="mt-3 flex min-w-0 flex-col gap-4">{dictation.map(field)}</div>
+            </details>
+          )}
+        </>
+      )}
+      {problem === null ? null : (
+        <p role="alert" className="m-0 text-cell text-err" data-speedups-problem="">
+          {problem}
+        </p>
+      )}
+      <PrimaryAction
+        label={busy === 'saving' ? 'Saving…' : busy === 'testing' ? 'Testing…' : 'Save keys'}
+        disabled={!idle || typed.length === 0 || view === null}
+        onClick={() => void save()}
+        name="save-keys"
+      />
+    </div>
+  );
+}

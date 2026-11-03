@@ -121,7 +121,13 @@ export interface ChangeApplyPanelProps {
   readonly children?: ReactNode;
   /** Extra classes for the submit button: a label long enough to need two lines on a phone wraps. */
   readonly submitClassName?: string;
+  /** The caller draws the submit button itself (in a pinned footer); the sentences here still show. */
+  readonly hideSubmit?: boolean;
 }
+
+/** Whether the change may be sent now: the authority is read and allows it, and nothing is in flight. */
+export const changeReady = (authority: FleetApplyAuthority | null, disabled: boolean, busy: boolean): boolean =>
+  authority !== null && authority.kind !== 'refused' && !disabled && !busy;
 
 export function ChangeApplyPanel({
   machineName,
@@ -135,8 +141,9 @@ export function ChangeApplyPanel({
   onSubmit,
   children,
   submitClassName,
+  hideSubmit = false,
 }: ChangeApplyPanelProps) {
-  const ready = authority !== null && authority.kind !== 'refused' && !disabled && !busy;
+  const ready = changeReady(authority, disabled, busy);
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -160,12 +167,16 @@ export function ChangeApplyPanel({
           {refusal}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
-          {busy ? busyLabel : submitLabel}
-        </Button>
-        {children}
-      </div>
+      {hideSubmit && children === undefined ? null : (
+        <div className="flex flex-wrap gap-2">
+          {hideSubmit ? null : (
+            <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
+              {busy ? busyLabel : submitLabel}
+            </Button>
+          )}
+          {children}
+        </div>
+      )}
     </form>
   );
 }

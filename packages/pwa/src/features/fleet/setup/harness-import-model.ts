@@ -175,6 +175,39 @@ export const foundRows = (scan: FleetSetupScan, harness: SetupHarness, claudeImp
   return rows;
 };
 
+/** One line under "Found": a tick when it is fine, a bang when it needs the person's eye. */
+export interface FoundLine {
+  readonly ok: boolean;
+  readonly text: string;
+}
+
+/** The short, ticked version of {@link foundRows}: what the CLI has, in a line each. Details has the rest. */
+export const foundLines = (rows: readonly FoundRow[]): readonly FoundLine[] =>
+  rows.map((row): FoundLine => {
+    switch (row.key) {
+      case 'account':
+        if (row.status === 'refresh_due')
+          return { ok: true, text: 'Signed in — the login renews itself on first launch' };
+        if (row.status === 'ready')
+          return { ok: true, text: row.detail === undefined ? row.title : `${row.title} as ${row.detail}` };
+        return {
+          ok: false,
+          text:
+            row.title === 'Not signed in'
+              ? 'Not signed in — you can sign in after importing'
+              : `${row.title} — you can sign in after importing`,
+        };
+      case 'mcp':
+        return { ok: true, text: `${row.title} MCP ${row.title === '1' ? 'server' : 'servers'}` };
+      case 'skills':
+        return { ok: true, text: `${row.title} ${row.title === '1' ? 'skill' : 'skills'}` };
+      case 'setup':
+        return { ok: true, text: 'Nothing to copy yet — Ferretry will make a plain Starter profile' };
+      default:
+        return { ok: true, text: row.detail === undefined ? row.title : `${row.title} · ${row.detail}` };
+    }
+  });
+
 /** Problems the scan could not get past for this harness, as sentences. */
 export const harnessProblems = (scan: FleetSetupScan, harness: SetupHarness): readonly string[] =>
   scanOf(scan, harness)?.problems ?? [];
@@ -202,6 +235,8 @@ export interface HarnessAnswers {
   readonly addAnother?: boolean;
   /** Updates ticked under What changed (O6). */
   readonly accepted?: readonly string[];
+  /** "Also bring my conversations from the last 7 days": imported after the runtime is. Off unless ticked. */
+  readonly conversations?: boolean;
 }
 
 /** The runtime the import would make for this CLI, or the one it would duplicate. */
@@ -227,10 +262,6 @@ export const makesRuntime = (plan: RuntimePlan, answers: HarnessAnswers): boolea
 /** The name in the field: what was typed, else the daemon's suggestion. */
 export const runtimeName = (plan: RuntimePlan, answers: HarnessAnswers): string =>
   answers.name ?? (plan.kind === 'none' ? '' : plan.suggested);
-
-/** The step's one button: "Import and create claude-default", "…, sign in later" when not signed in (E4). */
-export const importButtonLabel = (plan: RuntimePlan, answers: HarnessAnswers, signedIn: boolean): string =>
-  `${makesRuntime(plan, answers) ? `Import and create ${runtimeName(plan, answers)}` : 'Import'}${signedIn ? '' : ', sign in later'}`;
 
 /** The ONE change this step sends: this CLI only, under the name in the field. */
 export const harnessImportChange = (

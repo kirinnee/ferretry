@@ -1640,8 +1640,9 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
 
 /**
  * NEW MACHINE SETUP'S CONTRACT, measured: no app chrome at all; a progress rail — a column on a desktop,
- * a strip on a phone — marking exactly the step on screen; and ‹ Back with Skip and Continue in ONE footer
- * pinned inside the viewport, above a phone's home indicator, on every step. Counted with the Machines frames.
+ * a strip on a phone — marking exactly the step on screen; and ‹ Back · Skip · ONE primary in ONE footer
+ * pinned inside the viewport, above a phone's home indicator, on every step, with no second primary anywhere
+ * on the page. Counted with the Machines frames.
  */
 const assertSetupGeometry = async (page: Page, where: string): Promise<void> => {
   await settleTransitions(page);
@@ -1650,7 +1651,7 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
     if (document.querySelector('[data-density-region="app-bar"], [data-app-tab-bar]') !== null)
       found.push('app chrome is on screen around the setup');
     // New machine setup (P9): a progress rail — a column on a desktop, a strip on a phone — with the open
-    // step marked, and Back / Skip / Continue pinned to the bottom of the screen.
+    // step marked, and Back / Skip / the one primary pinned to the bottom of the screen.
     const setup = document.querySelector<HTMLElement>('[data-machine-onboarding]');
     if (setup === null) return [...found, 'New machine setup is not on screen'];
     const wide = window.innerWidth >= 768;
@@ -1672,6 +1673,13 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
       );
     const buttons = [...foot.querySelectorAll('button')];
     if (buttons.length === 0) found.push('the footer holds no Back and no action');
+    const primaries = [...setup.querySelectorAll('button')].filter(
+      button => button.getAttribute('data-variant') === 'primary' && button.getBoundingClientRect().width > 0,
+    );
+    if (primaries.length > 1)
+      found.push(
+        `${primaries.length} primary buttons are on screen: ${primaries.map(b => b.textContent?.trim()).join(' / ')}`,
+      );
     for (const button of buttons) {
       const rect = button.getBoundingClientRect();
       if (rect.left < -0.5 || rect.right > window.innerWidth + 0.5)
@@ -3630,18 +3638,19 @@ try {
             await setupStep('start');
             await setupShot('start', 'Start from');
             await setupNext();
-            await setupScreen.locator('[data-harness-name="claude"]').waitFor({ state: 'visible' });
-            await setupShot('claude', 'Claude Code, its runtime named in place');
+            const setupPrimary = setupScreen.locator('[data-onboarding-foot] [data-onboarding-primary]');
+            await setupScreen.locator('[data-harness-runtime-line]').waitFor({ state: 'visible' });
+            await setupShot('claude', 'Claude Code, Import in the footer');
+            await setupScreen.locator('[data-harness-name-change]').click();
             await setupScreen.locator('[data-harness-name="claude"]').fill('claude-main');
-            await setupScreen.locator('[data-onboarding-step-body="claude"] [data-change-submit]').click();
-            await setupScreen.locator('[data-harness-imported="claude"]').waitFor({ state: 'visible' });
-            await setupShot('claude-imported', 'Claude Code imported, claude-main made');
-            await setupNext();
-            await setupScreen.locator('[data-harness-name="codex"]').waitFor({ state: 'visible' });
-            await setupShot('codex', 'Codex, not signed in');
-            await setupScreen.locator('[data-onboarding-step-body="codex"] [data-change-submit]').click();
-            await setupScreen.locator('[data-harness-imported="codex"]').waitFor({ state: 'visible' });
-            await setupNext();
+            await setupShot('claude-name', 'Claude Code, its runtime named in place');
+            await setupPrimary.click();
+            // The import moves on by itself: the next page is Codex, carrying what Claude Code did.
+            await setupScreen.locator('[data-setup-note="import-carry"]').waitFor({ state: 'visible' });
+            await setupStep('codex');
+            await setupShot('codex', 'Codex, carrying the Claude Code import, not signed in');
+            await setupPrimary.click();
+            await setupStep('speedups');
             for (const [step, label] of [
               ['speedups', 'Speed-ups'],
               ['voice', 'Voice'],
@@ -3651,7 +3660,7 @@ try {
             ] as const) {
               await setupStep(step);
               await setupShot(step, label);
-              if (step === 'voice') await setupScreen.locator('[data-onboarding-skip]').click();
+              if (step === 'voice' || step === 'speedups') await setupScreen.locator('[data-onboarding-skip]').click();
               else await setupNext();
             }
             await setupStep('done');
@@ -3664,7 +3673,13 @@ try {
               fail(`Done does not name the runtime Claude Code made: ${claudeRow}`);
             await setupShot('done', 'Done naming both runtimes, Voice skipped');
             // Leaving lands back on the machine in Settings, banner and all.
-            await setupScreen.locator('[data-onboarding-restart]').click();
+            await page
+              .locator('[data-onboarding-restart]')
+              .count()
+              .then(count => {
+                if (count > 0) fail('Done still offers Start again');
+              });
+            await setupScreen.locator('[data-onboarding-rail] [data-onboarding-go="start"]:visible').first().click();
             await setupScreen.locator('[data-onboarding-later-all]').click();
             await page
               .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
@@ -3678,11 +3693,12 @@ try {
               await page.goto(importUrl.toString());
               await setupScreen.locator('[data-harness-add-another]').waitFor({ state: 'visible' });
               await setupScreen.locator('[data-harness-add-another]').check();
+              await setupScreen.locator('[data-harness-name-change]').click();
               await setupScreen.locator('[data-harness-name="claude"]').fill('claude-default');
               await setupScreen.locator('[data-harness-name-problem="claude"]').waitFor({ state: 'visible' });
               await setupShot('import-again-claude', 'Import again on Claude Code');
-              await setupNext();
-              await setupScreen.locator('[data-onboarding-step-body="codex"] [data-tool-install]').first().waitFor();
+              await setupScreen.locator('[data-onboarding-skip]').click();
+              await setupScreen.locator('[data-onboarding-foot] [data-onboarding-primary]').waitFor();
               await setupShot('import-again-codex', 'Import again, Codex to install');
             }
             settingsPage = page.getByLabel('Settings page preview', { exact: true });

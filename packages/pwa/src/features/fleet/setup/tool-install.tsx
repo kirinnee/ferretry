@@ -15,7 +15,8 @@ import { Spinner } from '../../../components/spinner.tsx';
 import { useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { installFleetTools } from '../setup-api.ts';
-import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { changeReady, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { PrimaryAction } from './footer-slot.tsx';
 import {
   type InstallPhase,
   installedSentence,
@@ -43,6 +44,8 @@ export interface ToolInstallProps {
   readonly onSkip?: () => void;
   /** Said under "Installed …": what happens next. */
   readonly doneHint?: string;
+  /** The install button is the pinned footer's primary, and Skip is the footer's too: no buttons of its own here. */
+  readonly inFooter?: boolean;
 }
 
 export function ToolInstall({
@@ -54,6 +57,7 @@ export function ToolInstall({
   onInstalled,
   onSkip,
   doneHint,
+  inFooter = false,
 }: ToolInstallProps) {
   const runnable = runnableTools(tools);
   const [picked, setPicked] = useState<readonly SetupHarness[]>(() => runnable.map(tool => tool.harness));
@@ -125,21 +129,31 @@ export function ToolInstall({
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Retry"
+          hideSubmit={inFooter}
           onSubmit={() => install(phase.harnesses)}
         >
-          {onSkip === undefined ? null : (
+          {onSkip === undefined || inFooter ? null : (
             <Button type="button" data-install-skip="" onClick={onSkip}>
               Skip, continue without them
             </Button>
           )}
         </ChangeApplyPanel>
+        {inFooter ? (
+          <PrimaryAction
+            label="Retry"
+            disabled={!changeReady(changes.authority, false, changes.busy)}
+            onClick={() => install(phase.harnesses)}
+          />
+        ) : null}
       </div>
     );
 
   const manual = tools.filter(tool => tool.install.kind !== 'runnable');
   return (
     <div className="flex min-w-0 flex-col gap-3" data-tool-install="">
-      {runnable.length === 0 ? null : (
+      {runnable.length === 0 ? null : inFooter && runnable.length === 1 ? (
+        <SetupCommand>{toolCommand(runnable[0] as MissingTool)}</SetupCommand>
+      ) : (
         <CheckChoices
           legend="Tools to install"
           legendHidden
@@ -178,9 +192,21 @@ export function ToolInstall({
           refusal={changes.refusal}
           submitLabel={installLabel(picked.length)}
           disabled={picked.length === 0}
+          hideSubmit={inFooter}
           onSubmit={() => install(picked)}
         />
       )}
+      {inFooter && runnable.length > 0 ? (
+        <PrimaryAction
+          label={
+            runnable.length === 1
+              ? `Install ${SETUP_HARNESS_NAMES[(runnable[0] as MissingTool).harness]}`
+              : installLabel(picked.length)
+          }
+          disabled={picked.length === 0 || !changeReady(changes.authority, false, changes.busy)}
+          onClick={() => install(picked)}
+        />
+      ) : null}
     </div>
   );
 }
