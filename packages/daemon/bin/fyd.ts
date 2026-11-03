@@ -628,6 +628,7 @@ import {
   AgendaCardLinks,
   AgendaToTestLanes,
   alertFallback,
+  BoardAlerts,
   BOARD_SWEEP_INTERVAL_MS,
   BoardGateCheck,
   BoardService,
@@ -10372,6 +10373,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
       const boardSubFerrets = new StorageSubFerretDirectory(storage);
+      // Every board alert — stale, red CI, closed unmerged — passes here, whoever it was routed to: one for the owner's
+      // own interactive chat is journalled on it instead of typed (lib/board/alert-sends.ts).
+      const boardAlertJournal = new JournalBoardChecks(storage);
+      const boardAlerts = new BoardAlerts({
+        mode: async sessionId => {
+          const id = tryParseSessionId(sessionId);
+          return id === undefined ? undefined : (await sendRepository.read(id))?.mode;
+        },
+        send: async (sessionId, message) => {
+          await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+        },
+        withheld: async (sessionId, message) => await boardAlertJournal.recordWithheldAlert(sessionId, message),
+      });
       const boardCopies = new GitWorkingCopies();
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
@@ -10413,7 +10427,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           send: async (card, message, reason) => {
             const recipient = noticeRecipient(await boardSessions.roster(), card);
             const sessionId = recipient?.sessionId ?? (await nudgeTarget(boardSubFerrets, alertFallback(card, reason)));
-            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await boardAlerts.send(sessionId, message);
           },
         },
         timers: {
@@ -11452,8 +11466,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A stale nudge was routed by the plan (assignee, else nearest live lead, else owner); a go-ahead still
           // goes to the assignee's lead when the assignee is a sub-ferret.
           send: async (sessionId, message, kind) => {
+            if (kind === 'stale') {
+              await boardAlerts.send(sessionId, message);
+              return;
+            }
             await boardSends.send({
-              id: parseSessionId(kind === 'stale' ? sessionId : await nudgeTarget(boardSubFerrets, sessionId)),
+              id: parseSessionId(await nudgeTarget(boardSubFerrets, sessionId)),
               sendId: crypto.randomUUID(),
               message,
             });

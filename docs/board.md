@@ -1087,9 +1087,12 @@ even when a lead was doing the work. Now one function, `noticeRecipient`
 2. else the **nearest live lead above the assignee** (`config.parent`, walked up);
 3. else the card's **owner** (its creator by default), and then the owner's leads, ONLY when nobody in that line is alive;
 4. an **interactive** session (the owner's own chat) only when no automatic session is alive anywhere in that order.
-   Such an alert is sent as it was before: it takes the direct path and never enters the chat's queue
-   ([message-delivery.md](message-delivery.md)). Folding it into the owner's agenda instead is a declared GAP: the agenda is
-   being redesigned and a daemon-written notice there has no home yet.
+   Such an alert is **never typed** into it: `BoardAlerts` (`packages/daemon/src/lib/board/alert-sends.ts`) reads the
+   recipient's `config.mode` at the send, whichever way it was picked — this route, the fallback below, or a
+   sub-ferret's lead standing in — and journals an interactive one's alert on it as `board.alert-withheld` with its
+   words. Nothing is lost that the board does not show: a red CI is the card's PR checks, a PR closed unmerged is a note
+   in its history, a stale card is its activity. An automatic session gets every alert as before. Folding them into the
+   owner's agenda is a declared GAP: the agenda is being redesigned, and a lead's turns are the cost this saves.
 
 A session that declared `fy signal waiting` is never nudged, and nobody is nudged in its place. An assignee that
 cannot be read (neither alive nor ended) gets the stale nudge withheld rather than passed to someone else. What is
