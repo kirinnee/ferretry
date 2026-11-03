@@ -706,6 +706,157 @@ describe('a session started with a brief', () => {
     });
   });
 
+  describe('a fy start --card that cannot be honoured', () => {
+    const stopper = () => {
+      const stopped: string[] = [];
+      return { stopped, stop: async (reason: string) => void stopped.push(reason) };
+    };
+
+    it('should refuse a dropped or closed card up front, for a lead and for the owner, and write nothing', async () => {
+      // Arrange
+      const { subject, ports } = build({
+        cards: [
+          card({ id: 'F3', owner: 'lead', dropped: { at: NOW, reason: 'superseded' } }),
+          card({ id: 'F4', owner: 'lead', laneId: 'closed' }),
+        ],
+      });
+
+      // Act
+      const outcomes = [
+        await subject.startOn('lead', 'F3'),
+        await subject.startOn('lead', 'F4'),
+        await subject.startOn(undefined, 'F3'),
+        await subject.startOn(undefined, 'F4'),
+      ];
+
+      // Assert
+      for (const outcome of outcomes) should(outcome.delegation).be.undefined();
+      should(outcomes.map(outcome => outcome.refusal)).match([
+        /&F3 is dropped/u,
+        /&F4 is closed/u,
+        /&F3 is dropped/u,
+        /&F4 is closed/u,
+      ]);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should refuse a start that is not an ordinary ferret, whatever the card', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+
+      // Act
+      const byLead = await subject.startOn('lead', 'F9', false);
+      const byOwner = await subject.startOn(undefined, 'F9', false);
+
+      // Assert
+      should(byLead.delegation).be.undefined();
+      should(byLead.refusal).match(/ordinary ferret/u);
+      should(byOwner.refusal).match(/ordinary ferret/u);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should refuse, not fail, when the board cannot be read', async () => {
+      // Arrange
+      const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+      store.read = async () => {
+        throw new TypeError('the board is unreadable');
+      };
+      const { subject } = build({ world: { store } });
+
+      // Act
+      const outcome = await subject.startOn(undefined, 'F9');
+
+      // Assert
+      should(outcome.delegation).be.undefined();
+      should(outcome.refusal).match(/the board is unreadable/u);
+    });
+
+    it('should hand the card over and stop nothing when it is still open', async () => {
+      // Arrange
+      const { subject, ports, focus } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).be.undefined();
+      should(taken.opened?.card).match({ id: 'F9', assignee: 'child' });
+      should(stopped).be.empty();
+      should(focus.focused.get('child')).deepEqual({ id: 'F9' });
+      should(stored(ports, 'F9').assignee).equal('child');
+    });
+
+    it('should stop the session and leave the card alone when it was dropped after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'changed course' } }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.opened).be.undefined();
+      should(taken.refusal).match(/&F9 could not be handed to the new session: .*&F9 is dropped/u);
+      should(stopped).deepEqual([taken.refusal]);
+      should(stored(ports, 'F9').assignee).be.null();
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop the session when the owner’s card was closed after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn(undefined, 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', laneId: 'closed' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.refusal).match(/&F9 is closed/u);
+      should(stopped).have.length(1);
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should stop the session when the card was reassigned away from the lead after the preflight', async () => {
+      // Arrange
+      const { subject, ports } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { stopped, stop } = stopper();
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'stranger', assignee: 'stranger' }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', stop);
+
+      // Assert
+      should(taken.opened).be.undefined();
+      should(taken.refusal).be.a.String();
+      should(stopped).have.length(1);
+      should(stored(ports, 'F9').assignee).equal('stranger');
+      should(ports.store.writes).be.empty();
+    });
+
+    it('should still refuse, and say the stop failed, when the session cannot be stopped', async () => {
+      // Arrange
+      const { subject, ports, warnings } = build({ cards: [card({ id: 'F9', owner: 'lead' })] });
+      const { delegation } = await subject.startOn('lead', 'F9');
+      ports.store.cards.set('F9', card({ id: 'F9', owner: 'lead', dropped: { at: NOW, reason: 'x' } }));
+
+      // Act
+      const taken = await subject.takeOver(delegation as NonNullable<typeof delegation>, 'child', async () => {
+        throw new Error('tmux would not answer');
+      });
+
+      // Assert
+      should(taken.refusal).be.a.String();
+      should(warnings.join('\n')).match(/could not stop child after a refused card: tmux would not answer/u);
+    });
+  });
+
   it('should start without a card, and say why, when the card cannot be read', async () => {
     // Arrange
     const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);

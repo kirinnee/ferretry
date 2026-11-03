@@ -31,9 +31,14 @@ async function refusal(work: Promise<unknown>): Promise<BoardError | undefined> 
   return error instanceof BoardError ? error : undefined;
 }
 
-const REFUSED_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
+// The card's holder may do these; a sub-ferret that holds neither F2 nor its assignment is refused (F2 is its lead's).
+const HOLDER_ONLY_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
   ['move', { action: 'move', to: 'in-progress' }],
   ['focus', { action: 'focus' }],
+  ['link a commit', { action: 'link', commit: 'abc123' }],
+];
+
+const REFUSED_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
   ['block', { action: 'block', reason: 'waiting' }],
   ['unblock', { action: 'unblock' }],
   ['depend', { action: 'depend', task: { machineId: 'machine-1', id: 'F2' } as never }],
@@ -41,7 +46,6 @@ const REFUSED_VERBS: readonly [string, BoardTaskActionRequestInput][] = [
   ['reopen', { action: 'reopen', to: 'todo', reason: 'again', ask: { text: 'again', source: 'owner' } }],
   ['assign', { action: 'assign', assignee: null }],
   ['reparent', { action: 'reparent', parent: null }],
-  ['link a commit', { action: 'link', commit: 'abc123' }],
   ['order', { action: 'order', order: 1 }],
 ];
 
@@ -57,6 +61,22 @@ describe('a sub-ferret on the board', () => {
       // Assert
       should(error?.code).equal('forbidden');
       should(error?.message).match(REFUSED);
+    });
+  }
+
+  for (const [verb, request] of HOLDER_ONLY_VERBS) {
+    it(`should be refused ${verb} on a card it does not hold, and let through on the one it does`, async () => {
+      // Arrange
+      const service = serviceWith();
+
+      // Act
+      const error = await refusal(service.act('F2', action(request), child));
+      const held = await refusal(service.act('F1', action(request), child));
+
+      // Assert
+      should(error?.code).equal('forbidden');
+      should(error?.message).containEql('Your lead holds this card: claim it first: fy task claim &F2');
+      should(held?.code).not.equal('forbidden');
     });
   }
 

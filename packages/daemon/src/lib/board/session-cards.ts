@@ -295,14 +295,66 @@ export class SessionCards {
   /**
    * `fy start --card <id>`, before the session exists: the existing card the new session takes over, judged with the
    * same authority as `fy new --card`. A ferret's start (`lead`) hands over only a card it may hand down; the owner's
-   * (no lead) needs the card to exist. `refusal` says why a card cannot be had; the start must not go on.
+   * (no lead) needs the card to exist. Either way the card must still be open work: a dropped or closed card is refused
+   * here, before anything is written, and so is a start that is not an ordinary ferret (a miner, a guide builder or a
+   * warden takes no card). `refusal` says why a card cannot be had; the start must not go on. The judgement is early,
+   * not final: {@link takeOver} re-judges inside the write that assigns the card.
    */
-  async startOn(lead: string | undefined, id: BoardTaskId): Promise<DelegationOutcome> {
-    if (lead !== undefined) return await this.existingCard(lead, id);
+  async startOn(lead: string | undefined, id: BoardTaskId, ordinary = true): Promise<DelegationOutcome> {
+    if (!ordinary) {
+      return {
+        refusal: `--card is for an ordinary ferret: a worker the daemon starts for itself takes no card`,
+        notes: [],
+      };
+    }
+    try {
+      const outcome = lead === undefined ? await this.ownerStart(id) : await this.existingCard(lead, id);
+      if (outcome.delegation === undefined) return outcome;
+      const unavailable = await this.unavailable(id);
+      return unavailable === undefined ? outcome : { refusal: unavailable, notes: [] };
+    } catch (error) {
+      return { refusal: `the board could not be read: ${said(error)}`, notes: [] };
+    }
+  }
+
+  /**
+   * `fy start --card`, once the session's record exists and before its agent launches: the card is assigned to it, or
+   * the start is refused and `stop` takes the record down, so a session never runs on a card it was not given. The
+   * assignment is one write that re-judges the card (dropped, closed, still the lead's to hand down), so a drop or a
+   * reassignment between {@link startOn} and here loses the race cleanly: nothing is assigned and nothing launches.
+   */
+  async takeOver(
+    delegation: Delegation,
+    sessionId: string,
+    stop: (reason: string) => Promise<void>,
+  ): Promise<{ readonly opened?: OpenedCard; readonly refusal?: string }> {
+    try {
+      return { opened: await this.handOver(delegation, sessionId) };
+    } catch (error) {
+      const refusal = `${formatTaskRef({ id: delegation.id })} could not be handed to the new session: ${said(error)}`;
+      await stop(refusal).catch((stopped: unknown) => {
+        this.ports.diagnostics.warn(`could not stop ${sessionId} after a refused card: ${said(stopped)}`);
+      });
+      return { refusal };
+    }
+  }
+
+  private async ownerStart(id: BoardTaskId): Promise<DelegationOutcome> {
     const { cards } = await this.ports.board.snapshot();
     const card = cards.find(each => each.id === id);
     if (card === undefined) return { refusal: `there is no card ${formatTaskRef({ id })} on this machine`, notes: [] };
     return { delegation: ownerDelegation(card), notes: [] };
+  }
+
+  /** Why a card cannot take a new session: it is dropped or closed. `undefined` when it is open work. */
+  private async unavailable(id: BoardTaskId): Promise<string | undefined> {
+    const { cards, laneSets } = await this.ports.board.snapshot();
+    const card = cards.find(each => each.id === id);
+    if (card === undefined) return `there is no card ${formatTaskRef({ id })} on this machine`;
+    if (card.dropped !== null) return `${formatTaskRef(card)} is dropped; reopen it before you start a ferret on it`;
+    if (cardCategory(card, laneSets) === 'closed')
+      return `${formatTaskRef(card)} is closed; reopen it before you start a ferret on it`;
+    return undefined;
   }
 
   /** `--card`: the lead's existing card, handed over; refused (not failed) when it cannot be. */

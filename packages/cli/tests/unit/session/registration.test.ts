@@ -278,6 +278,17 @@ describe('registerSessionCommands · start', () => {
     should(subject.api.calls[0]?.args[0]).containDeep({ parent: 'ses-lead' });
   });
 
+  it('should pass an existing card to take over, by its bare id', async () => {
+    // Arrange
+    const subject = harness({}, { cwd: '/work/repo' });
+
+    // Act
+    await subject.run(['start', 'go', '--agent', 'claude-alpha', '--card', '&F121']);
+
+    // Assert
+    should(subject.api.calls[0]?.args[0]).containDeep({ card: 'F121' });
+  });
+
   it('should reject an unknown --mode at parse time', async () => {
     // Arrange
     const subject = harness();

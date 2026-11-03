@@ -377,7 +377,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
 - **Refused** (`forbidden`, saying what to do instead): every agenda write (`add`, `edit`, `surface`, `done`, `dismiss`),
   `fy notify`, every card verb except the two below, and editing a project's lanes. The message reads
   `You are a sub-ferret, so you can't <this>. You may <what it may>. For anything else ask your lead: fy send <lead-callsign> "…"`.
-  On a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's; [board.md](board.md#claiming-a-card-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
+  For a `move`, `focus` or commit/doc `link` on a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-card-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
 - **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
   reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and

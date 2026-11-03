@@ -173,16 +173,82 @@ describe('claiming a card', () => {
     should(owned.message).equal('you own &F2: take it with `fy task assign &F2 child`');
   });
 
-  it('should leave a claimed card to move only through its daemon triggers, never a sub-ferret’s move', async () => {
+  it('should let the claimer move the card it now holds, and journal the move as the ferret’s', async () => {
+    // Arrange
+    const { ports, service } = treeWith({ owner: 'lead' });
+    await service.act('F1', claim, ferret('child'));
+
+    // Act
+    const moved = await service.act('F1', action({ action: 'move', to: 'plan' }), ferret('child'));
+
+    // Assert
+    should(moved.task.laneId).equal('plan');
+    should(ports.store.cards.get('F1')?.history.at(-1)).match({ actor: { kind: 'ferret', sessionId: 'child' } });
+  });
+
+  it('should let the claimer focus on and link a commit or doc to the card it now holds', async () => {
+    // Arrange
+    const { ports, service } = treeWith({ owner: 'lead' });
+    await service.act('F1', claim, ferret('child'));
+
+    // Act
+    await service.act('F1', action({ action: 'focus' }), ferret('child'));
+    const linked = await service.act('F1', action({ action: 'link', commit: 'abc1234' }), ferret('child'));
+    const documented = await service.act('F1', action({ action: 'link', doc: 'docs/board.md' }), ferret('child'));
+
+    // Assert
+    should(linked.task.links.commits.length).equal(1);
+    should(documented.task.links.docs.length).equal(1);
+    should(ports.focus.focused.get('child')).deepEqual({ id: 'F1' });
+  });
+
+  it('should keep the claimer to its own card: other holders stay refused for a move, a focus and a link', async () => {
+    // Arrange — the sibling holds F1, the lead holds F2, and the claimer holds nothing it did not take.
+    const { ports, service } = treeWith({ owner: 'lead', assignee: 'sibling' }, { id: 'F2', owner: 'lead' });
+    await service.act('F2', claim, ferret('child'));
+
+    // Act
+    const refused = [
+      await refusal(service.act('F1', action({ action: 'move', to: 'plan' }), ferret('child'))),
+      await refusal(service.act('F1', action({ action: 'focus' }), ferret('child'))),
+      await refusal(service.act('F1', action({ action: 'link', commit: 'abc1234' }), ferret('child'))),
+    ];
+
+    // Assert
+    for (const error of refused) should(error.code).equal('forbidden');
+    should(ports.store.cards.get('F1')?.laneId).equal('todo');
+  });
+
+  it('should not let a claim widen a sub-ferret beyond move, focus and link', async () => {
     // Arrange
     const { service } = treeWith({ owner: 'lead' });
     await service.act('F1', claim, ferret('child'));
 
     // Act
-    const moved = await refusal(service.act('F1', action({ action: 'move', to: 'plan' }), ferret('child')));
+    const blocked = await refusal(service.act('F1', action({ action: 'edit', title: 'Renamed' }), ferret('child')));
+    const dropped = await refusal(service.act('F1', action({ action: 'drop', reason: 'not needed' }), ferret('child')));
 
     // Assert
-    should(moved.code).equal('forbidden');
+    should(blocked.code).equal('forbidden');
+    should(blocked.message).not.containEql('claim it first');
+    should(dropped.code).equal('forbidden');
+  });
+
+  it('should keep the owner gate and the dependency check on a claimer’s move', async () => {
+    // Arrange — the claimer holds F1, which depends on an unfinished F2.
+    const { service } = treeWith(
+      { owner: 'lead', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] },
+      { id: 'F2', owner: 'lead' },
+    );
+    await service.act('F1', claim, ferret('child'));
+
+    // Act
+    const gated = await refusal(service.act('F1', action({ action: 'move', to: 'closed' }), ferret('child')));
+    const blocked = await refusal(service.act('F1', action({ action: 'move', to: 'plan' }), ferret('child')));
+
+    // Assert
+    should(gated.code).equal('owner-gate');
+    should(blocked.code).equal('blocked-by');
   });
 });
 
@@ -204,6 +270,26 @@ describe('what a refused sub-ferret is told about a card its lead holds', () => 
       );
       should(error.message).not.containEql('fy send');
     }
+  });
+
+  it('should say to claim it first when a note or a PR link on a lead’s card is refused', async () => {
+    // Arrange
+    const { service } = treeWith({ owner: 'lead' });
+
+    // Act
+    const refused = [
+      await refusal(service.act('F1', action({ action: 'note', text: 'progress' }), ferret('child'))),
+      await refusal(
+        service.act(
+          'F1',
+          action({ action: 'link', pr: 'https://github.com/kirinnee/ferretry/pull/1' }),
+          ferret('child'),
+        ),
+      ),
+    ];
+
+    // Assert
+    for (const error of refused) should(error.message).endWith('your lead holds it: claim it first: fy task claim &F1');
   });
 
   it('should keep telling the sub-ferret to ask its lead for a card it cannot claim', async () => {
