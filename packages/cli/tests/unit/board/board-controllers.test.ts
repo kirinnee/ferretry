@@ -24,7 +24,7 @@ import {
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from '../../../src/lib/board/ports';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { RelatedCheck } from '../../../src/lib/work-search/related';
-import { CapturingOutput, FakeWorkSearchGateway, taskHit } from '../work-search/fixtures';
+import { agendaHit, CapturingOutput, FakeWorkSearchGateway, taskHit } from '../work-search/fixtures';
 import {
   card,
   DENISHA,
@@ -1371,6 +1371,64 @@ describe('fy task create — related work', () => {
     // Assert
     should(gateway.createCalls).eql([]);
     should(JSON.parse(searchOutput.lines[0] ?? '').related[0].hit.id).equal('F303');
+  });
+
+  it('should list the weak related cards and offer --related, then create', async () => {
+    // Arrange
+    const { controller, gateway, log } = related([
+      { strength: 'weak', hit: taskHit() },
+      { strength: 'weak', hit: agendaHit() },
+    ]);
+
+    // Act
+    await controller.create([], base);
+
+    // Assert — only cards are offered; the agenda match is not a card to note.
+    should(gateway.createCalls).have.length(1);
+    const listed = log.find(line => line.startsWith('diag: Related cards')) ?? '';
+    should(listed).containEql('prefer adding to one (a note, nothing created)');
+    should(listed).containEql('&F303');
+    should(listed).not.containEql('!A3');
+    should(listed).containEql('fy task create … --related F12');
+  });
+
+  it('should refuse an umbrella card, creating nothing and asking nothing of the daemon', async () => {
+    // Arrange
+    const { controller, gateway, searchGateway } = related([]);
+
+    // Act
+    const message = await refusal(() => controller.create([], { ...base, title: 'Agenda overhaul' }));
+
+    // Assert
+    should(gateway.createCalls).eql([]);
+    should(searchGateway.relatedCalls).eql([]);
+    should(message).containEql('This looks like an umbrella card (the title says "overhaul")');
+    should(message).containEql('fy task create … --parent F12');
+    should(message).containEql('fy task create … --related F12');
+    should(message).containEql('fy task create … --broad "<why this must be one card>"');
+  });
+
+  it('should create an umbrella card with --broad "<why>", or one under a parent', async () => {
+    // Arrange
+    const { controller, gateway } = related([]);
+
+    // Act
+    await controller.create([], { ...base, title: 'Agenda overhaul', broad: 'the owner asked for one tracker' });
+    await controller.create([], { ...base, title: 'Agenda overhaul', parent: 'F12' });
+
+    // Assert
+    should(gateway.createCalls).have.length(2);
+  });
+
+  it('should still refuse an umbrella card with a blank --broad', async () => {
+    // Arrange
+    const { controller, gateway } = related([]);
+
+    // Act + Assert
+    should(await refusal(() => controller.create([], { ...base, title: 'Misc fixes', broad: '  ' }))).containEql(
+      'umbrella card',
+    );
+    should(gateway.createCalls).eql([]);
   });
 
   it('should create on weak matches alone', async () => {

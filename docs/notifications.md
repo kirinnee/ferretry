@@ -259,14 +259,20 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,240 characters, capped at 1,300 by a
-test; the shipped prompt as a whole has its own cap, so a new rule here is paid for by tightening words) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
-action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
-and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, on the item itself (`edit --question-answer`, its options stay live; the owner reads the agenda, not every reply; [agenda.md](agenda.md)), tells it to answer several bugs or asks the owner raised at once with ONE `-k info` item, a short line each and where it is tracked, so the owner knows each was heard ([agenda.md](agenda.md#rules-the-writing-keeps)), teaches the card formatting (an ask of about 80 characters with the detail in `--body`, short Markdown points in every segment, no `#` headings anywhere), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
-`--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — one line mapping each kind to its answer shape (`AGENDA_SHAPE_LINE`; [agenda.md](agenda.md#what-i-need-from-you)), what `--blocking`,
-`--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
-parks the item as replied (the ferret does the work and closes it with `done`, `--reason` to withdraw a question; `fy agenda edit --back` with the whole card refreshed — `--summary`, `--premise` and `--context` — only for something NEW, and a plain `edit` leaves it parked —
-[agenda.md](agenda.md#parked-items)).
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,276 characters, capped at 1,290 by a test; the shipped
+prompt as a whole has its own cap, so a new rule here is paid for by tightening words) teaches the model first: what an
+agenda is (one channel of the owner's attention), the three-part test, search-check-open, splitting, then the one
+command that opens one, then the states, the type, chat discussion, and the two standing rules (a bug batch is one
+agenda; an owner’s question is answered on its item)
+([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)). It names only verbs that exist. Exactly this,
+with the binary's name for `fy`:
+
+```text
+Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest (unsure: closest). Split parts that stop fitting.
+Open: `fy agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`. Title ≤40, ask ≤80 (rest: `--body`). Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
+Needs you buzzes; Resting is quiet. Owner reply rests it; your answer (`edit <id> --question-answer "<text>"` or `--back`) brings it back. Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected. Type: explainer→question→plan→tracker→test. Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.
+Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.
+```
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
   means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into

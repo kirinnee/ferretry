@@ -1,4 +1,10 @@
-import type { AgendaActionRequest, AgendaClearAgentsResult, AgendaSnapshot, IFyApiClient } from '@ferretry/protocol';
+import type {
+  AgendaActionRequest,
+  AgendaClearAgentsResult,
+  AgendaSnapshot,
+  IFyApiClient,
+  TaskRef,
+} from '@ferretry/protocol';
 
 /**
  * Presentation port for the agenda commands — the narrowest slice of the shipped `ConsoleIo`
@@ -40,4 +46,15 @@ export type AgendaApiClient = Pick<IFyApiClient, 'request'>;
 /** Reads the JSON body `fy agenda add --json-file <path>` names; `-` is standard input. */
 export interface IAgendaBriefInput {
   read(path: string): Promise<string>;
+}
+
+/**
+ * What a card is tied to on the board: the cards it depends on, and the cards that depend on it. `fy agenda add --task`
+ * reads it so an open agenda carrying a tied card is listed first (dependent things share one agenda); `undefined`
+ * when the board cannot say, which never stops an add.
+ */
+export interface IAgendaCardTies {
+  ties(
+    card: TaskRef,
+  ): Promise<{ readonly dependsOn: readonly TaskRef[]; readonly blocks: readonly TaskRef[] } | undefined>;
 }

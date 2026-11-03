@@ -5,6 +5,7 @@ import {
   type BoardTaskResponse,
   formatTaskRef,
   type LaneSet,
+  MAX_WORK_RELATED_HITS,
   type TaskRef,
 } from '@ferretry/protocol';
 import { resolveBoardProject } from '../board-lanes/lane-request';
@@ -50,6 +51,7 @@ import {
   requireCardRef,
 } from './board-request';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
+import { umbrellaRefusal, umbrellaSignals } from './umbrella';
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -107,6 +109,8 @@ export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions 
   readonly new?: boolean | undefined;
   /** A card to note instead of creating a new one. */
   readonly related?: string | undefined;
+  /** `--broad "<why this must be one card>"`: create a card the umbrella check would refuse. */
+  readonly broad?: string | undefined;
 }
 
 export interface TaskEditFlags extends BoardEditOptions, BoardCommonOptions {}
@@ -248,15 +252,18 @@ export class BoardController {
   }
 
   /**
-   * The related-work check of a create. `--related <card>` turns the create into a note on that card (true:
-   * nothing is created); a strong duplicate otherwise refuses; `--new` skips the check.
+   * The checks of a create, before anything is made. `--related <card>` turns the create into a note on that card
+   * (true: nothing is created). An umbrella card — many outcomes in one — is refused unless `--broad "<why>"` says why
+   * it must be one (docs/board.md § One card, one outcome). Then the related cards are listed, weak matches too, with
+   * `--related F12` offered so the work is added to one instead; a strong duplicate refuses; `--new` skips the check.
    */
   private async noteInsteadOfCreate(
-    title: string,
+    request: { readonly title: string; readonly summary?: string; readonly parent?: unknown },
     ask: string,
     as: string | undefined,
     options: TaskCreateFlags,
   ): Promise<boolean> {
+    const { title } = request;
     const related = options.related?.trim();
     if (options.new === true && related !== undefined && related !== '') {
       refuse('pass --new or --related <id>, not both');
@@ -272,9 +279,13 @@ export class BoardController {
       if (options.json !== true) this.deps.output.success(`Added to ${formatTaskRef(ref)} instead of a new card`);
       return true;
     }
-    if (options.new === true || this.deps.related === undefined) return false;
     const binary = this.deps.binary;
-    await this.deps.related.guard('task', title, ask, {
+    const signals = umbrellaSignals(request);
+    if (signals.length > 0 && (options.broad?.trim() ?? '') === '') refuse(umbrellaRefusal(signals, binary));
+    if (options.new === true || this.deps.related === undefined) return false;
+    const response = await this.deps.related.matches('task', title, ask, as);
+    if (response === undefined) return false;
+    await this.deps.related.refuseStrong(response, {
       as,
       json: options.json,
       choices: [
@@ -282,6 +293,17 @@ export class BoardController {
         `${binary} task create … --new          it really is separate; create it anyway`,
       ],
     });
+    // Nothing strong: the weaker matches are still worth a look, and adding to one beats a new card.
+    const cards = response.matches.filter(match => match.hit.kind === 'task').slice(0, MAX_WORK_RELATED_HITS);
+    if (cards.length > 0 && options.json !== true) {
+      this.deps.output.diagnostic(
+        [
+          'Related cards — prefer adding to one (a note, nothing created):',
+          ...(await this.deps.related.lines(cards, as)).map(line => `  ${line}`),
+          `  ${binary} task create … --related F12`,
+        ].join('\n'),
+      );
+    }
     return false;
   }
 
@@ -303,7 +325,7 @@ export class BoardController {
       projectId: options.project === undefined ? undefined : target?.id,
       assignee,
     });
-    if (await this.noteInsteadOfCreate(request.title, request.ask.text, as, options)) return;
+    if (await this.noteInsteadOfCreate(request, request.ask.text, as, options)) return;
     const created = await explainingRefusals({ binary: this.deps.binary, project: target?.name }, async () => {
       return await this.gateway.create(as, request);
     });

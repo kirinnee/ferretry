@@ -764,72 +764,85 @@ describe('NOTIFY_INSTRUCTION', () => {
 });
 
 describe('AGENDA_INSTRUCTION', () => {
-  it('should teach adding one item per owner ask, cold-readable, with the verbs and flags, and the binary name given', () => {
+  it('should teach what an agenda is first: one channel, the three-part test, search-check-open, split', () => {
     // Act
     const text = AGENDA_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Agenda mode: ONLY what the owner alone can give: info, a decision or action.');
-    should(text).containEql('Search first (`zz search`).');
-    // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
-    should(text).containEql('No tracking items (test/verify)');
-    should(text).containEql('gates/`zz notify` cover it; after Not good');
-    should(text).containEql('after Not good, open one only for input.');
-    // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
-    should(text).containEql("Owner's question: answer ON it, options stay");
-    should(text).containEql('`zz agenda edit <id> --question-answer "<text>"`');
-    should(text).containEql('not `-k info`.');
-    should(text).containEql('One item per ask:');
-    // Premise and context are part of the one command, and required: every item is read cold.
+    should(text).startWith("Agenda mode: one channel of the owner's attention; only what they can give.");
+    should(text).containEql('Share if same place, same context, same pace;');
+    // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
+    should(text).containEql('dependent things always share.');
+    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest (unsure: closest).');
+    should(text).containEql('Split parts that stop fitting.');
+  });
+
+  it('should teach the one command that opens one, cold-readable, with the shape of every kind', () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert — premise and context are part of the one command: every item is read cold.
     should(text).containEql(
-      '`zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"` (required)',
+      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`.',
     );
     should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`).');
-    // The owner's formatting rule: a short title-like ask, short points in every segment, no Markdown headings anywhere.
-    should(text).containEql('short Markdown points, no headings, answer first;');
-    should(text).not.containEql('ask ≤120');
-    // Several bugs or asks at once get ONE info item that says each was heard and where it is tracked.
-    should(text).containEql('Many bugs/asks: ONE `-k info`, line each + where tracked.');
-    should(text).containEql('no "as above", ticket/PR ids, paths, acronyms');
-    should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql('`--decided`=settled, `--still-open`=left');
-    should(text).containEql('`--body`=hypermedia.');
+    // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
+    should(text).containEql(
+      'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
+    );
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);
-    should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
-    should(text).containEql('reply=open or several asks (one `-q` each)');
-    should(text).containEql('form=several structured answers (`--field`), text in the reply');
-    should(text).containEql('todo=`--step`s');
-    should(text).containEql('info=Got it');
-    should(text).containEql('permission=Approve/Deny');
     // When it is needed: it blocks now, will block later, or by a time.
-    should(text).containEql('`--blocking`');
-    should(text).containEql('`--will-block`');
-    should(text).containEql('`--by <time>`');
-    // The answer and discussion loops, then resolving and reading.
-    should(text).containEql('"[answer to !A3 …]"=answer;');
-    // A reply PARKS the item: the ferret does the work and closes it; only `edit --back` brings it back, for NEW asks.
-    should(text).containEql('"[re !A3 …]"=chat, parks it: do the work, `done <id>`');
-    should(text).containEql('`edit <id> --back` + refreshed card only for NEW asks');
-    // Closing a question the owner has not answered withdraws it and says why; only the owner's pick answers it.
-    should(text).containEql('(question: `--reason "<why>"`)');
-    should(text).not.containEql('agenda surface');
-    // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
-    should(text).containEql('KEEP CURRENT:');
-    should(text).containEql('`edit` if changed');
-    should(text).containEql('`done` if settled');
+    should(text).containEql('`--blocking`=stuck, `--will-block`=later, `--by <time>`.');
+  });
+
+  it("should teach the states: Needs you buzzes, Resting is quiet, the owner's reply rests it, only the ferret marks Done", () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert
+    should(text).containEql('Needs you buzzes; Resting is quiet.');
+    should(text).containEql('Owner reply rests it;');
+    // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
+    should(text).containEql('your answer (`edit <id> --question-answer "<text>"` or `--back`) brings it back.');
+    should(text).containEql(
+      'Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected.',
+    );
+    should(text).containEql('Type: explainer→question→plan→tracker→test.');
+    // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
+    should(text).containEql(
+      'Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.',
+    );
+  });
+
+  it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert — the bug batch is ONE agenda with a line per bug and where each is tracked.
+    should(text).containEql('Bug batch: ONE agenda, line each + where tracked.');
+    // Both owner-question cases: it is about an item → answer ON it, the options stay; there is none → ONE `-k info`.
+    should(text).containEql('Owner Q: answer ON it, options stay; no item: ONE `-k info`.');
+    // The retired tracking rule stays gone.
+    should(text).not.containEql('No tracking items');
+  });
+
+  it('should name only the verbs that exist today, under the binary name given', () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert — `answer`, `rest`, `log`, `split` and `merge` join the text in the PRs that ship them.
+    for (const verb of ['answer', 'rest', 'log', 'split', 'merge']) should(text).not.containEql(`agenda ${verb}`);
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
+    // The retired rules: an agenda now evolves into a tracker, and a reply no longer parks it.
+    should(text).not.containEql('No tracking items');
+    should(text).not.containEql('parks it');
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
-  });
-
-  it('should keep the owner-card formatting and bug-batch rules inside the shipped total, not past it', () => {
-    // Assert — measured 1,252 after the two rules were added and other wording tightened (was 1,237)
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_260);
+    // Assert — measured 1,276 with both owner rules restored; the total keeps its headroom below.
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_290);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
@@ -844,41 +857,46 @@ describe('AGENDA_INSTRUCTION', () => {
 });
 
 describe('BOARD_INSTRUCTION', () => {
-  it('should make the board opt-in: a card only when asked, handed one or switched on, else ask first', () => {
+  it('should make the board opt-in: a card only when asked, handed one or switched on', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
-    // Assert
+    // Assert — the daemon's opt-in refusal says how to ask for the Yes (`board/opt-in.ts`).
     should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
     should(text).containEql(
-      'Card only if `zz board status` is on, under your card (`--parent`), or the owner said Yes to `zz agenda add -k yesno` "Track this on the board?" (`--approval !A<n>`).',
+      "Card only if `zz board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`).",
     );
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
   });
 
-  it('should teach every card rule of the design, with the real verbs and the binary name given', () => {
+  it('should say a card shows progress only, its asks ride its agenda, and one card is never an umbrella', () => {
+    // Act
+    const text = BOARD_INSTRUCTION('zz');
+
+    // Assert
+    should(text).containEql("Cards (&F412) show progress only; every human ask goes in the card's agenda.");
+    should(text).containEql('No umbrella cards; check related cards first and prefer adding to one.');
+    // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
+    should(text).not.containEql('Gate?');
+    should(text).not.containEql('raise nothing');
+    should(text).not.containEql('owner closes');
+  });
+
+  it('should teach working a card, with the real verbs and the binary name given', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).containEql('A card (&F412; agenda !A48):');
-    should(text).containEql('`zz search` first; link a match.');
     should(text).not.containEql('#F');
-    should(text).containEql(
-      'Make: `zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
-    );
-    should(text).containEql(
-      'before To test `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
-    );
+    should(text).containEql('Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see>"`');
     should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
-    should(text).containEql('PRs, merges, `zz signal done` self-move; owner closes.');
-    should(text).endWith('Gate? The daemon asks; raise nothing.');
+    should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
   });
 
@@ -886,7 +904,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(840);
+    should(BOARD_INSTRUCTION('fy').length).be.below(700);
   });
 });
 
