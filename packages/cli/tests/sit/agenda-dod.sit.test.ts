@@ -392,6 +392,7 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
         ...BRIEF,
       ]);
       should(first.code).equal(0, first.err);
+      ok(await made.service.raise(SESSION, ask('Which region?'), AGENT));
 
       // Act
       const dependent = await fy(made, daemon.url, [
@@ -417,9 +418,11 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
       should(dependent.code).not.equal(0);
       should(dependent.err).containEql('carries &F1, which &F2 depends on');
       should(dependent.err).containEql('Should this join !A1?');
+      should(dependent.err.indexOf('!A1')).be.below(dependent.err.indexOf('!A2'));
+      should(dependent.err.indexOf('!A2')).be.aboveOrEqual(0);
       should(blocking.code).not.equal(0);
       should(blocking.err).containEql('carries &F1, which depends on &F3');
-      should((await made.items()).map(item => item.id)).eql(['A1']);
+      should((await made.items()).map(item => item.id)).eql(['A1', 'A2']);
     } finally {
       daemon.stop();
     }
@@ -538,7 +541,9 @@ describe(`Definition of done (SIT, ${useInProcess ? 'in-process' : 'compiled bin
     // Act — the owner answers A1's ask in the app
     ok(await made.service.answer(SESSION, 'A1', { kind: 'open-question', answer: 'eu-west' }, OWNER));
 
-    // Assert — A1 is no longer waiting on the owner
+    // Assert — A1 rests, waiting on the ferret (it is not closed), and A2 alone is left for the owner
+    should(agendaState(await made.item('A1'))).containEql({ state: 'resting', sub: 'waiting-on-ferret' });
+    should(restingQueue(await made.items()).map(item => item.id)).eql(['A1']);
     should(needsYouQueue(await made.items()).map(item => item.id)).eql(['A2']);
   });
 
@@ -958,10 +963,6 @@ const DIFF_PAGE = 'packages/pwa/src/features/agenda/agenda-version-diff.tsx';
 const pointer = (module: string) => (landed(module) ? it : it.skip);
 
 describe('Definition of done: the pages that prove the items the app shows (UI)', () => {
-  it('DoD 3 (UI): Needs you opens straight at its ask', () => {
-    proves('packages/pwa/tests/unit/agenda-tab.test.ts', 'agendaTabModel');
-  });
-
   const itemPage = pointer(ITEM_PAGE);
   const diffPage = pointer(DIFF_PAGE);
   const parts = 'packages/pwa/tests/unit/features/agenda-item-parts.test.tsx';

@@ -1672,7 +1672,7 @@ source module does not exist yet), and fails the checklist once it does.
 
 **GAP: a long report cannot reach "where we are now" through `edit`.** `fy agenda edit --where` takes its text on the
 command line (`--where` is argv-only, and argv is capped), so the 200,000-character proof of item 8 goes through
-`--body-file`. Only `fy agenda add --json-file` can put a long report into "where we are". Closing this means giving
+`--body-file`. Only a new item (`add` or `split --json-file`) can put a long report into "where we are"; an existing item cannot. Closing this means giving
 `edit` a file input for `--where`.
 
 The teaching that makes a ferret follow these rules is held to the spec by

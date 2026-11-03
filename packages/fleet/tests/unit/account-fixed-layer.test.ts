@@ -815,7 +815,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
     should(text).containEql(
-      'Chat: `log <id> --reply|--rest` logs their words verbatim; link; unsure: closest, say so.',
+      'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
     );
   });
 
@@ -846,9 +846,9 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,267: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
+    // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
-    // for by "logs their words verbatim; link".
+    // for by "logs their words verbatim" and "unsure→closest".
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 

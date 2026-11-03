@@ -115,18 +115,20 @@ applies the plan with the same card drop and agenda "done" the ferret could type
 change keeps its history and its authority check, and it names each failure without stopping. A failure makes
 the command exit non-zero.
 
-| It **drops** a card when …                                         | It **never** drops …                                     |
-| ------------------------------------------------------------------ | -------------------------------------------------------- |
-| the caller owns or is assigned it, and it is not closed or dropped | a card the owner asked for (`askedBy: person`)           |
-| its project's board is **off** ([switch](#the-board-is-opt-in))    | a card on a board that is on                             |
-| `askedBy` is `agent`: it is the ferret's own work                  | a card assigned to another live session (a sub-ferret)   |
-|                                                                    | a card waiting at a gate on the owner (an open card ask) |
+| It **drops** a card when …                                         | It **never** drops …                                      |
+| ------------------------------------------------------------------ | --------------------------------------------------------- |
+| the caller owns or is assigned it, and it is not closed or dropped | a card the owner asked for (`askedBy: person`)            |
+| its project's board is **off** ([switch](#the-board-is-opt-in))    | a card on a board that is on                              |
+| `askedBy` is `agent`: it is the ferret's own work                  | a card assigned to another live session (a sub-ferret)    |
+|                                                                    | a card waiting at a gate on the owner (an open gate item) |
 
 | It **closes** an item when … (any open state: active, snoozed, replied, in discussion)       | It **never** closes …                                                                                                                       |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| it is on the caller's own agenda and the caller raised it                                    | a card ask or gate follow-up, or anything the daemon raised                                                                                 |
+| it is on the caller's own agenda and the caller raised it                                    | a gate item or gate follow-up, or anything the daemon raised                                                                                |
 | it is kind `info`, or linked (`--task`) to a card this run drops, or an ask with no question | an item on the owner's turn mid-reply (a reply held or being sent)                                                                          |
 |                                                                                              | an item with a question, fields, options or a confirm: listed as "kept: needs the owner" with the `fy agenda done <id>` to close it by hand |
+
+**GAP: `fy tidy` does not see card asks.** It keeps a card or an item only for a legacy gate item (`item.gate`), not for an open card ask (`cardAsks`; `tidy/service.ts`, `tidy/plan.ts`). A follow-up should make tidy treat an open card ask like a gate.
 
 A sub-ferret may run it: its plan has no cards (the daemon already refuses a sub-ferret's drop) and only its own
 tracking items. An older daemon without the route answers 404; the CLI says to run `fy daemon update`.
