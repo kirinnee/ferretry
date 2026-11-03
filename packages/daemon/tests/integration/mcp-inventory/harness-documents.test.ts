@@ -237,6 +237,21 @@ describe('ConfinedMcpHarnessDocuments', () => {
     should(error.message).not.containEql('stolen');
   });
 
+  // Root reads anything, so this says nothing when the suite runs as root.
+  it.skipIf(process.getuid?.() === 0)('should say a folder the daemon cannot enter cannot be read', async () => {
+    const { project, documents } = await world();
+    await mkdir(path.join(project, 'locked'));
+    await chmod(path.join(project, 'locked'), 0o000);
+
+    try {
+      const error = await refused(documents, path.join(project, 'locked', 'sub', '.mcp.json'));
+
+      should(error.message).containEql('cannot be read by the daemon');
+    } finally {
+      await chmod(path.join(project, 'locked'), 0o700);
+    }
+  });
+
   it('should refuse when the folder itself is gone', async () => {
     const { project, documents } = await world();
     await rm(project, { recursive: true });
