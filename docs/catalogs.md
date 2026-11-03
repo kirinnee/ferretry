@@ -1503,9 +1503,10 @@ The Add skills page has a second group under the subscriptions, **On this machin
 
 ## Links (catalogs 3f)
 
-> **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4,
-> [The daemon](#the-daemon-3f-4)) exist. The Worker is bound behind the hosted relay in code (3f-3) but not published yet (that is a relay deploy), no app
-> screen exists (3f-6), and the daemon does not report `catalogs.links.1`, so no client offers links today. Where a
+> **PARTLY BUILT.** The libraries below (3f-1), the store Worker (3f-2) and the daemon's owner side (3f-4 and 3f-5,
+> [The daemon](#the-daemon-3f-4)) exist, and the daemon reports `catalogs.links.1`. The Worker is bound behind the
+> hosted relay in code (3f-3) but not published yet (that is a relay deploy), and no app screen exists (3f-6), so no
+> client offers links today. Where a
 > sentence says "the store", it means the link store of [relay-protocol.md](relay-protocol.md), a Worker of its own
 > behind the relay by service binding.
 
@@ -1611,15 +1612,17 @@ the reverse. Copying needs only the unlock; turning a link off never asks.
 the store client and the store locator, and `lib/runtime/mounts/catalog-links.ts` the routes. Every route is
 `sharing`/`use`, `noStore`, minimum `operator`.
 
-| Route                                 | Caller | What it does                                                                          |
-| ------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
-| `GET /v1/catalog-links/store`         | any    | whether a store is set up and reachable, and its origin (not a secret)                |
-| `POST /v1/catalog-links/preview`      | person | what a link would hold and whether it fits; no passkey; nothing is signed or uploaded |
-| `GET /v1/catalog-links[?itemId=]`     | any    | the owner's links, newest first; no URL, key, bundle id or store address              |
-| `POST /v1/catalog-links`              | person | mint; a fresh `share-link` passkey for a governed caller; `201 {link, url}`           |
-| `GET /v1/catalog-links/:linkId`       | any    | one link                                                                              |
-| `POST /v1/catalog-links/:linkId/copy` | person | a **public** link's URL again; a one-time link is `link_not_public`                   |
-| `DELETE /v1/catalog-links/:linkId`    | person | turn off (idempotent, no passkey)                                                     |
+| Route                                   | Caller | What it does                                                                                                              |
+| --------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/catalog-links/store`           | any    | whether a store is set up and reachable, and its origin (not a secret)                                                    |
+| `POST /v1/catalog-links/preview`        | person | what a link would hold and whether it fits; no passkey; nothing is signed or uploaded                                     |
+| `GET /v1/catalog-links[?itemId=]`       | any    | the owner's links, newest first; no URL, key, bundle id or store address                                                  |
+| `POST /v1/catalog-links`                | person | mint; a fresh `share-link` passkey for a governed caller; `201 {link, url}`                                               |
+| `GET /v1/catalog-links/:linkId`         | any    | one link                                                                                                                  |
+| `PUT /v1/catalog-links/:linkId/version` | person | move the link to another kept version of its item; `share-link` passkey; `{version, from, digest}`                        |
+| `PATCH /v1/catalog-links/:linkId`       | person | change a **public** link's end and cap (`{expires?, installCap?}`, `null` removes the cap); a passkey only when it widens |
+| `POST /v1/catalog-links/:linkId/copy`   | person | a **public** link's URL again; a one-time link is `link_not_public`                                                       |
+| `DELETE /v1/catalog-links/:linkId`      | person | turn off (idempotent, no passkey)                                                                                         |
 
 A ferret holds the admin token and may only read (`GET`). Preview, mint, copy and turn off answer it 403 `forbidden`
 (`ownerOnly`): a prompt-injected agent that could mint could hand a stranger a skill from this machine, and one that
@@ -1660,23 +1663,57 @@ that, or too slow, is `unreachable`. A store that fails a status call is not ask
 polls the list cannot hold up Mint or Turn off. A mint whose upload answer never came says "the link may have been
 made", not "no link was made": the pending record stays and reconciliation settles it.
 
-**Audit.** `catalog.link.minted` (link id, item id, version, kind, expiry, install cap), `catalog.link.copied` and
-`catalog.link.ended` ([audit.md](audit.md)). Never the URL, the key, the token or the bundle id.
+**Audit.** `catalog.link.minted` (link id, item id, version, kind, expiry, install cap, and `created` when the link
+made a new item), `catalog.link.copied`, `catalog.link.ended`, `catalog.link.moved` (`from`, `to`, `sequence`),
+`catalog.link.changed` (the new end and cap) and `catalog.link.revived` (written by the daemon itself, with the
+sequence) ([audit.md](audit.md)). Never the URL, the key, the token or the bundle id.
 
-**Not yet reported.** The feature `catalogs.links.1` stays in `NOT_YET_REPORTED` until 3f-5 and the app land, so no
-client offers links against this daemon yet.
+**Move (3f-5).** `PUT /v1/catalog-links/:linkId/version` points a **live public** link at another kept version of the
+same item. The request names the version it is moving `from`, so a move from a stale screen is `409 current_changed`, and
+the digest the person reviewed, so a version that changed since is `changed_since_preview`. The link keeps its URL,
+bundle id and key; the daemon re-signs the document at `sequence + 1` and uploads it as a compare-and-swap on the old
+sequence, with the same pending-record order as Mint (pending record, upload, commit). The link then reads
+`movedFrom`. A one-time link is `409 link_not_public` (it is made once and cannot be changed); a pending, ending or
+ended link is `409 link_not_live`; moving to the version it serves already is `nothing_to_publish`. The check that the target version is still kept runs again after the pending record is written,
+so a retire that races the move cannot leave a link serving a version that is gone.
+
+**Change (3f-5).** `PATCH /v1/catalog-links/:linkId` changes a public link's end and install cap. Narrowing (an
+earlier end, a lower cap) needs only the unlock, like turning a link off; **widening** (a later end, a higher cap or
+removing the cap) is a `share-link` act. The route asks the service whether the change widens before it claims the
+passkey, and the service refuses an unproven widening as `current_changed`.
+
+**Lease, refresh and revival (3f-5).** The store keeps a link only for its `notAfter`, at most 30 days after the
+document was signed, so a link with no end of its own is re-signed. `refresh()` runs at boot and every six hours: a
+live public link with less than 23 days of lease left (a week after its last signing) is re-signed at `sequence + 1`
+up to the new lease, never past its own end. A link the store reports **lapsed** (this machine was off past the lease,
+or the store no longer knows the bundle) stays `live`, shows `storeState: lapsed` and a sentence in the list, and is
+**revived**: uploaded again with action `create` at `sequence + 1`, under the same id and key, then `revivedAt` is set
+and `catalog.link.revived` is written. A lapsed **one-time** link becomes `expired` instead (it cannot be revived: a
+spent or lost one-time link is never put back). A store that cannot be reached leaves everything as it was.
+
+**Identity rotation (3f-5).** The store takes a link's owner only from the daemon id that uploaded it. When the
+daemon id is no longer the link's `publisher`, every pending or live link of that publisher is ended with reason
+`identity-changed` and its key is forgotten; `stopsBy` is the last time the store may still serve it (its own end) and
+the list sentence says how many are stranded. Turning one off remains the slow retry described above.
+
+**Retire and usage (3f-5).** A kept version that a pending, live or ending link serves cannot be retired: the item
+route answers `409 version_linked`. `usedBy.linkIds` on the item's versions lists those links. The retire check sees a
+version whose link is still `pending`, so a Mint cannot race a retire either.
+
+**Reported.** The feature `catalogs.links.1` is reported by the daemon (`NOT_YET_REPORTED` is empty). No client offers
+links yet, because the Worker is not published (a relay deploy) and the app has no screen (3f-6).
 
 **Built in 3f-4 and left to later slices:**
 
-- 3f-5: move, `PATCH`, refresh, lease and revival (so a public link with no end lapses after 30 days until then),
-  `usedBy.linkIds`, `version_linked`, the `catalog.link.moved|changed|revived` events, an identity rotation ending
-  links, and reporting `catalogs.links.1`.
 - 3f-6 (the app), 3f-7 and 3f-8. (3f-3, the Worker binding, is built and waits for the owner's relay deploy.)
 - Preview returns no `matches`, and it needs no summary, so a skill that needs one is `source_refused` at preview.
   `link_kind_unsupported` is unreachable today. A stored link carries the item's name and kind.
 - **A new item whose upload answer never came is never kept**, so its `pending` public link reconciles to `ended`
   (`item-gone`). The link is safe (the store was not told, or its delete was retried); the owner makes it again.
 - `storeState` stays `ok` on a link the refresh has just found used.
+- **The link URL's app origin is the hosted app's (`HOSTED_APP_ORIGIN`) in the daemon.** `FY_APP_URL` is read only by
+  the CLI, so a daemon run for a self-hosted app still mints links that point at the hosted one. The review of 3f-4 (F8)
+  asked for it; it is left until the daemon has a configured app origin of its own, which also shares need.
 
 ### Declared gaps
 

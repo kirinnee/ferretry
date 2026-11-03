@@ -43,7 +43,7 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(63);
+    should(audit.AUDIT_EVENTS).have.length(66);
     should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
     should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
     should(audit.AuditEventSchema.parse('session.credential-refused')).equal('session.credential-refused');
@@ -80,6 +80,16 @@ describe('audit schemas', () => {
     for (const event of [...kept, ...general]) should(audit.AuditEventSchema.parse(event)).equal(event);
     for (const event of kept) should(audit.AUDIT_KEPT_EVENTS).containEql(event);
     for (const event of general) should(audit.AUDIT_KEPT_EVENTS).not.containEql(event);
+  });
+
+  it('should keep a link move and a link change past rotation, and let the daemon putting a link back rotate away', () => {
+    // Arrange
+    const kept = ['catalog.link.moved', 'catalog.link.changed'] as const;
+
+    // Act / Assert
+    for (const event of kept) should(audit.AUDIT_KEPT_EVENTS).containEql(event);
+    should(audit.AuditEventSchema.parse('catalog.link.revived')).equal('catalog.link.revived');
+    should(audit.AUDIT_KEPT_EVENTS).not.containEql('catalog.link.revived');
   });
 
   it('should only keep events the log can hold, each once', () => {

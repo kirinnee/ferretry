@@ -103,16 +103,18 @@ describe('CatalogLinkService list and get', () => {
     should((await r.service.get(made.link.linkId)).state).equal('live');
   });
 
-  it('should apply what the store says: used, lapsed and ended, and forget a public key', async () => {
+  it('should apply what the store says: used, ended and a one-time link that lapsed, and keep a lapsed public link to put back', async () => {
     const r = await linkRig();
     const one = await mintOneTime(r);
     const two = await mintPublic(r);
     const three = await mintPublic(r);
+    const four = await mintOneTime(r);
     const bundles = new Map(r.documents.document.links.map(link => [link.linkId, link.bundleId]));
     const states = new Map([
       [one.link.linkId, 'used'],
       [two.link.linkId, 'lapsed'],
       [three.link.linkId, 'ended'],
+      [four.link.linkId, 'lapsed'],
     ] as const);
     r.client.statusAnswer = () => ({
       ok: true,
@@ -124,10 +126,13 @@ describe('CatalogLinkService list and get', () => {
     const list = await r.service.list();
     const byId = new Map(list.links.map(link => [link.linkId, link]));
     should(byId.get(one.link.linkId)?.state).equal('used');
-    should(byId.get(two.link.linkId)?.state).equal('expired');
+    should(byId.get(two.link.linkId)?.state).equal('live');
+    should(byId.get(two.link.linkId)?.storeState).equal('lapsed');
     should(byId.get(three.link.linkId)?.state).equal('ended');
-    should(r.vault.forgotten.toSorted()).deepEqual([two.link.linkId, three.link.linkId].toSorted());
-    should(r.vault.keys.has(two.link.linkId)).equal(false);
+    should(byId.get(four.link.linkId)?.state).equal('expired');
+    should(r.vault.forgotten).deepEqual([three.link.linkId]);
+    should(r.vault.keys.has(two.link.linkId)).equal(true);
+    should(list.sentence).containEql('1 link was dropped by the link store');
   });
 
   it('should end a link locally once its own end has passed, without asking the store', async () => {

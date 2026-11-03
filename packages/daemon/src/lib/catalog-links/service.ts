@@ -33,6 +33,7 @@ import {
   catalogLinkUrl,
   type CreateCatalogLinkRequest,
   type CreatedCatalogLink,
+  type MoveCatalogLinkRequest,
   LINK_ITEM_CATALOG_ID,
   LINK_MAX_LEASE_MS,
   LINK_TOO_BIG_SENTENCE,
@@ -40,6 +41,7 @@ import {
   type OwnedCatalogLinkList,
   type SharedCatalogLink,
   type SharedCatalogLinkBundle,
+  type UpdateCatalogLinkRequest,
 } from '@ferretry/protocol';
 import {
   catalogItemCanonical,
@@ -63,8 +65,24 @@ import {
   type LinkSubject,
   publisherLabel,
 } from '../shared-catalogs/index.ts';
-import { type LinksDocument, type StoredLink, findLink, heldCount, pruned, withLink, withoutLink } from './document.ts';
-import type { LinkDocumentStore, LinkItems, LinkKeyVault, LinkStoreClient, LinkStoreLocator } from './ports.ts';
+import {
+  type LinksDocument,
+  type PendingUpload,
+  type StoredLink,
+  findLink,
+  heldCount,
+  pruned,
+  withLink,
+  withoutLink,
+} from './document.ts';
+import type {
+  LinkAuditSink,
+  LinkDocumentStore,
+  LinkItems,
+  LinkKeyVault,
+  LinkStoreClient,
+  LinkStoreLocator,
+} from './ports.ts';
 import { CatalogLinkRefusal, isLinkRefusalCode } from './refusal.ts';
 
 export interface CatalogLinkDeps {
@@ -80,6 +98,8 @@ export interface CatalogLinkDeps {
   readonly appOrigin: string;
   /** A number in [0, 1) for the retry jitter. */
   readonly random: () => number;
+  /** Told when a link is put back after the store let it lapse. Absent in a build with no audit log. */
+  readonly audit?: LinkAuditSink;
 }
 
 /** A count is refreshed from the store at most this often. */
@@ -87,6 +107,8 @@ export const LINK_REFRESH_MS = 60_000;
 export const LINK_RETRY_MIN_MS = 30_000;
 export const LINK_RETRY_MAX_MS = 10 * 60_000;
 const STATUS_BATCH = 64;
+/** A public link is re-signed once its lease has less than this left: a week after the last refresh. */
+export const LINK_RENEW_WITHIN_MS = 23 * 24 * 60 * 60 * 1000;
 
 const STORE_SILENT =
   'The link store did not answer, so the link may have been made. Check your links, and turn it off if you do not want it.';
@@ -94,6 +116,10 @@ const NOT_THE_PUBLISHER =
   "This link was made under this machine's previous identity, so it cannot be turned off from here.";
 const REVOKE_UNREACHABLE =
   'Turning it off could not reach the link store, so the link may still work. Ferretry keeps trying.';
+const STORE_SILENT_CHANGE =
+  'The link store did not answer, so the change may have been made. Check the link again in a minute.';
+const STORE_DID_NOT_TAKE_IT = 'The link store did not take that change, so the link is as it was.';
+const CHANGE_WAITING = 'An earlier change to this link is still waiting for the link store. Try again in a minute.';
 const SIGNING_UNAVAILABLE =
   "This machine's identity cannot be read, so it cannot make a link. Restart the daemon, and check its log.";
 
@@ -101,6 +127,9 @@ const instant = (ms: number): string => new Date(ms).toISOString();
 
 const isHeld = (link: StoredLink): boolean =>
   link.state === 'pending' || link.state === 'live' || link.state === 'ending';
+
+const isEnded = (link: StoredLink): boolean =>
+  link.state === 'ended' || link.state === 'expired' || link.state === 'used';
 
 /** When the store stops serving a link by itself: its own end, or its lease, whichever comes first. */
 const linkEnd = (link: StoredLink): number =>
@@ -113,7 +142,7 @@ interface EndAttempt {
 }
 
 /** What the owner sees of a stored link: never the bundle id, the store, a key or a URL. */
-function owned(link: StoredLink, storeState?: 'ok' | 'unreachable'): OwnedCatalogLink {
+function owned(link: StoredLink, storeState?: 'ok' | 'unreachable' | 'lapsed'): OwnedCatalogLink {
   return {
     linkId: link.linkId,
     itemId: link.itemId,
@@ -130,7 +159,48 @@ function owned(link: StoredLink, storeState?: 'ok' | 'unreachable'): OwnedCatalo
     ...(link.opensCheckedAt === undefined ? {} : { opensCheckedAt: link.opensCheckedAt }),
     ...(storeState === undefined ? {} : { storeState }),
     ...(link.endedAt === undefined ? {} : { endedAt: link.endedAt }),
+    ...(link.kind === 'public' ? { sequence: link.sequence } : {}),
+    ...(link.movedFrom === undefined ? {} : { movedFrom: link.movedFrom }),
+    ...(link.revivedAt === undefined ? {} : { revivedAt: link.revivedAt }),
+    ...(link.endReason === undefined || !isEnded(link) ? {} : { endReason: link.endReason }),
+    ...(link.endReason === 'identity-changed' ? { stopsBy: instant(linkEnd(link)) } : {}),
   };
+}
+
+/** The one sentence the list says when the store let a link lapse, or a changed identity left links it cannot touch. */
+function listSentence(
+  links: readonly StoredLink[],
+  states: ReadonlyMap<string, 'ok' | 'unreachable' | 'lapsed'>,
+  now: number,
+): string | undefined {
+  const lapsed = links.filter(link => states.get(link.linkId) === 'lapsed').length;
+  const stranded = links.filter(link => link.endReason === 'identity-changed' && linkEnd(link) > now).length;
+  const parts = [
+    ...(lapsed === 0
+      ? []
+      : [
+          `${lapsed === 1 ? '1 link was' : `${lapsed} links were`} dropped by the link store while this machine was off, and ${lapsed === 1 ? 'is' : 'are'} put back the next time this machine checks.`,
+        ]),
+    ...(stranded === 0
+      ? []
+      : [
+          `${stranded === 1 ? '1 link was' : `${stranded} links were`} made under this machine's previous identity, so ${stranded === 1 ? 'it' : 'they'} cannot be changed or turned off from here. ${stranded === 1 ? 'It stops' : 'They stop'} working when the lease ends.`,
+        ]),
+  ];
+  return parts.length === 0 ? undefined : parts.join(' ');
+}
+
+/** What a change to a public link's document changes; a field left out stays as it is. */
+interface Change {
+  readonly version?: number;
+  /** The digest the person reviewed for `version`. */
+  readonly digest?: string;
+  /** `null` removes the end. */
+  readonly expiresAt?: string | null;
+  /** `null` removes the cap. */
+  readonly installCap?: number | null;
+  /** The store had lapsed the link: upload it again with action `create`. */
+  readonly revive?: boolean;
 }
 
 type Selection = Parameters<LinkItems['linkSubject']>[0];
@@ -271,6 +341,12 @@ export class CatalogLinkService {
       // between leaves a pending record the next boot settles, never a link on the store nobody knows about.
       if (request.kind === 'public') await this.deps.vault.put(linkId, key);
       await this.deps.documents.write(withLink(document, record));
+      // A version retired between the read above and the record just written would be served though retired; once the
+      // record is written a retire sees it and is refused, so this is the last moment to notice.
+      if (!subject.newItem && !(await this.deps.items.holdsLinkVersion(subject.itemId, subject.version))) {
+        await this.#drop(linkId);
+        throw new CatalogLinkRefusal('version_retired', `${subject.name} version ${subject.version} was retired.`);
+      }
 
       const uploaded = await this.deps.client.upload(site.origin, {
         bundleId,
@@ -312,7 +388,7 @@ export class CatalogLinkService {
         publisher: identity.daemonId,
         ...(site.selfHosted ? { storeOrigin: site.origin } : {}),
       });
-      return { link: owned(live), url };
+      return { link: owned(live), url, created: subject.newItem };
     });
   }
 
@@ -321,12 +397,14 @@ export class CatalogLinkService {
   async list(itemId?: string): Promise<OwnedCatalogLinkList> {
     const identity = await this.#identity();
     const { document, states } = await this.#refreshed();
+    const sentence = listSentence(document.links, states, this.deps.now());
     return {
       publisher: identity.daemonId,
       links: document.links
         .filter(link => itemId === undefined || link.itemId === itemId)
         .map(link => owned(link, states.get(link.linkId))),
       max: CATALOG_LINKS_MAX_LIVE,
+      ...(sentence === undefined ? {} : { sentence }),
     };
   }
 
@@ -373,6 +451,264 @@ export class CatalogLinkService {
     });
   }
 
+  // ── Move, change, refresh ──────────────────────────────────────────────────────────────────────
+
+  /** Moves a public link to another version of the same item: the same URL and key, a new document. */
+  move(linkId: string, request: MoveCatalogLinkRequest): Promise<OwnedCatalogLink> {
+    return this.#serially(async () => {
+      const link = await this.#livePublic(linkId);
+      if (link.version !== request.from)
+        throw new CatalogLinkRefusal(
+          'current_changed',
+          `This link serves version ${link.version} now, not version ${request.from}. Look at it again before moving it.`,
+        );
+      if (request.version === link.version)
+        throw new CatalogLinkRefusal('nothing_to_publish', `This link already serves version ${link.version}.`);
+      return owned(await this.#replace(link, { version: request.version, digest: request.digest }));
+    });
+  }
+
+  /** Whether this change makes the link reach further (a later end, a higher or no cap): the route asks for a passkey first if so. */
+  widens(linkId: string, request: UpdateCatalogLinkRequest): Promise<boolean> {
+    return this.#serially(async () => {
+      const link = this.#publicLive(await this.#applyLocal(), linkId);
+      return this.#plan(link, request, this.deps.now()).widens;
+    });
+  }
+
+  /**
+   * Changes a public link's end and cap. `proven` says the caller proved a passkey for a change that widens; a change
+   * that turned into a widening after the caller was asked (the link moved on meanwhile) is refused, not made.
+   */
+  update(linkId: string, request: UpdateCatalogLinkRequest, proven: boolean): Promise<OwnedCatalogLink> {
+    return this.#serially(async () => {
+      const link = await this.#livePublic(linkId);
+      const plan = this.#plan(link, request, this.deps.now());
+      if (!plan.changes) return owned(link);
+      if (plan.widens && !proven)
+        throw new CatalogLinkRefusal(
+          'current_changed',
+          'This link changed while you were confirming, and the change now reaches further than what you confirmed. Look at it again.',
+        );
+      return owned(await this.#replace(link, plan.change));
+    });
+  }
+
+  #plan(
+    link: StoredLink,
+    request: UpdateCatalogLinkRequest,
+    now: number,
+  ): { readonly changes: boolean; readonly widens: boolean; readonly change: Change } {
+    const lifetime = request.expires === undefined ? undefined : CATALOG_LINK_EXPIRY_MS[request.expires];
+    const currentEnd = link.expiresAt === undefined ? Infinity : Date.parse(link.expiresAt);
+    const newEnd = lifetime === undefined ? currentEnd : lifetime === null ? Infinity : now + lifetime;
+    const newCap = request.installCap === undefined ? link.installCap : (request.installCap ?? undefined);
+    const widensEnd = newEnd > currentEnd;
+    const widensCap = link.installCap !== undefined && (newCap === undefined || newCap > link.installCap);
+    return {
+      changes: newEnd !== currentEnd || newCap !== link.installCap,
+      widens: widensEnd || widensCap,
+      change: {
+        ...(newEnd === currentEnd ? {} : { expiresAt: Number.isFinite(newEnd) ? instant(newEnd) : null }),
+        ...(newCap === link.installCap ? {} : { installCap: newCap ?? null }),
+      },
+    };
+  }
+
+  /**
+   * Keeps every live public link inside its 30-day lease, and puts back one the store let lapse. Run at boot and
+   * every six hours. A link is re-signed a week after its last refresh; one the store reports lapsed (this machine
+   * was off past the lease) or no longer knows is uploaded again under the same id and key. A link whose item or
+   * version is gone is ended, not refreshed. A store that cannot be reached leaves everything as it was.
+   */
+  refresh(): Promise<void> {
+    return this.#serially(async () => {
+      const document = await this.#applyLocal();
+      const now = this.deps.now();
+      const candidates = document.links.filter(
+        link => link.state === 'live' && link.kind === 'public' && link.pendingUpload === undefined,
+      );
+      for (const origin of new Set(candidates.map(link => link.storeOrigin))) {
+        const here = candidates.filter(link => link.storeOrigin === origin);
+        for (let at = 0; at < here.length; at += STATUS_BATCH) {
+          const batch = here.slice(at, at + STATUS_BATCH);
+          const answer = await this.deps.client.status(
+            origin,
+            batch.map(link => link.bundleId),
+          );
+          if (!answer.ok) continue;
+          for (const link of batch) {
+            const entry = answer.value.links.find(candidate => candidate.bundleId === link.bundleId);
+            if (entry === undefined) continue;
+            const lapsed = entry.state === 'lapsed' || entry.state === 'unknown';
+            const renews =
+              entry.state === 'live' &&
+              Date.parse(link.notAfter) - now < LINK_RENEW_WITHIN_MS &&
+              Math.min(now + LINK_MAX_LEASE_MS, link.expiresAt === undefined ? Infinity : Date.parse(link.expiresAt)) >
+                Date.parse(link.notAfter);
+            if (lapsed || renews) await this.#keepOn(link, lapsed);
+          }
+        }
+      }
+    });
+  }
+
+  async #keepOn(link: StoredLink, revive: boolean): Promise<void> {
+    try {
+      await this.#replace(link, { revive });
+    } catch (error) {
+      if (!(error instanceof CatalogLinkRefusal)) throw error;
+      if (
+        error.refusal === 'version_retired' ||
+        error.refusal === 'version_unknown' ||
+        error.refusal === 'item_unknown'
+      )
+        await this.#attemptEnd(link, 'item-gone');
+    }
+  }
+
+  /**
+   * Uploads the next document of a public link: a new version, a new end or cap, a fresh lease, or the same link put
+   * back. The change is written down BEFORE the upload so a crash leaves a change the next boot settles. The store
+   * takes it only if the link is still at the sequence this machine last wrote (a compare-and-swap).
+   */
+  async #replace(link: StoredLink, change: Change): Promise<StoredLink> {
+    const identity = await this.#identity();
+    const now = this.deps.now();
+    const version = change.version ?? link.version;
+    const expiresAt = change.expiresAt === undefined ? link.expiresAt : (change.expiresAt ?? undefined);
+    const installCap = change.installCap === undefined ? link.installCap : (change.installCap ?? undefined);
+    const issuedAt = instant(now);
+    const notAfter = instant(
+      Math.min(now + LINK_MAX_LEASE_MS, expiresAt === undefined ? Infinity : Date.parse(expiresAt)),
+    );
+    const sequence = link.sequence + 1;
+    const subject = await this.#subject({ itemId: link.itemId, version });
+    if (change.digest !== undefined && subject.contentDigest !== change.digest)
+      throw new CatalogLinkRefusal(
+        'changed_since_preview',
+        `${subject.name} version ${version} changed since you looked at it. Look at it again, read what it holds now, and then confirm.`,
+      );
+    const key = await this.deps.vault.open(link.linkId);
+    if (key === undefined)
+      throw new CatalogLinkRefusal('link_not_live', 'This machine no longer holds the key to this link.');
+    const text = await this.#bundleText(identity, subject, {
+      linkId: link.linkId,
+      bundleId: link.bundleId,
+      kind: 'public',
+      sequence,
+      issuedAt,
+      notAfter,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+    });
+    const sealed = await sealLinkEnvelope(this.deps.crypto, key, link.bundleId, sequence, text);
+    if (!sealed.ok) throw new CatalogLinkRefusal('link_too_big', LINK_TOO_BIG_SENTENCE);
+    const token = await linkFetchToken(this.deps.crypto, key, link.bundleId);
+    const verifier = token === null ? null : await linkFetchVerifier(this.deps.crypto, token);
+    if (verifier === null) throw new Error('A link key could not be turned into a fetch verifier.');
+
+    const pending: PendingUpload = {
+      sequence,
+      version,
+      notAfter,
+      issuedAt,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+      ...(installCap === undefined ? {} : { installCap }),
+      ...(change.revive === true ? { revived: true } : {}),
+    };
+    await this.#write(link.linkId, current => ({ ...current, pendingUpload: pending }));
+    // A version retired since it was read is refused now that the record names it: a retire from here on sees the record.
+    if (version !== link.version && !(await this.deps.items.holdsLinkVersion(link.itemId, version))) {
+      await this.#unpend(link.linkId);
+      throw new CatalogLinkRefusal('version_retired', `${subject.name} version ${version} was retired.`);
+    }
+    const uploaded = await this.deps.client.upload(link.storeOrigin, {
+      bundleId: link.bundleId,
+      action: change.revive === true ? 'create' : 'replace',
+      kind: 'public',
+      sequence,
+      ...(change.revive === true ? {} : { expectSequence: link.sequence }),
+      notAfter,
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+      ...(installCap === undefined ? {} : { installCap }),
+      fetchVerifier: verifier,
+      envelope: sealed.value,
+    });
+    if (!uploaded.ok) {
+      // A refusal is a definite no, so the link is as it was. An answer that never came may still have been a yes:
+      // the change stays written down and the next reconciliation asks the store.
+      if (uploaded.reason === 'refused') await this.#unpend(link.linkId);
+      throw new CatalogLinkRefusal(
+        'link_store_unavailable',
+        uploaded.reason === 'refused'
+          ? `${STORE_DID_NOT_TAKE_IT} ${LINK_STORE_REFUSAL_DETAIL[uploaded.code].message}`
+          : STORE_SILENT_CHANGE,
+      );
+    }
+    return await this.#commit(link.linkId, pending);
+  }
+
+  async #unpend(linkId: string): Promise<void> {
+    await this.#write(linkId, ({ pendingUpload: _dropped, ...rest }) => rest);
+  }
+
+  /** A public link that is live, with a change of its own that was left unconfirmed settled first. */
+  async #livePublic(linkId: string): Promise<StoredLink> {
+    let link = this.#publicLive(await this.#applyLocal(), linkId);
+    if (link.pendingUpload === undefined) return link;
+    await this.#settle(link, 'replace');
+    link = this.#publicLive(await this.deps.documents.read(), linkId);
+    if (link.pendingUpload !== undefined) throw new CatalogLinkRefusal('link_store_unavailable', CHANGE_WAITING);
+    return link;
+  }
+
+  #publicLive(document: LinksDocument, linkId: string): StoredLink {
+    const link = this.#found(document, linkId);
+    if (link.kind !== 'public')
+      throw new CatalogLinkRefusal('link_not_public', 'A one-time link is made once and cannot be changed.');
+    if (link.state !== 'live') throw new CatalogLinkRefusal('link_not_live', 'This link is not on any more.');
+    return link;
+  }
+
+  /**
+   * What time and identity decide with no store call: a live link past its end has expired, and a pending or live
+   * link made under another identity is ended (the store takes changes and deletes only from the identity that made
+   * a link, and a refresh signed by a new identity would fail the fingerprint check in the app). The key is forgotten.
+   */
+  async #local(
+    links: readonly StoredLink[],
+    now: number,
+  ): Promise<{ readonly links: StoredLink[]; readonly forgotten: string[] }> {
+    const current = (await this.deps.identity.identity())?.daemonId;
+    const forgotten: string[] = [];
+    const next = links.map((link): StoredLink => {
+      const expired = link.state === 'live' && linkEnd(link) <= now;
+      const changed =
+        !expired &&
+        current !== undefined &&
+        link.publisher !== current &&
+        (link.state === 'live' || link.state === 'pending');
+      if (!expired && !changed) return link;
+      if (link.keyRef !== undefined) forgotten.push(link.keyRef);
+      const { pendingUpload: _dropped, ...rest } = link;
+      return expired
+        ? { ...rest, state: 'expired', endedAt: instant(linkEnd(link)), endReason: 'expired' }
+        : { ...rest, state: 'ended', endedAt: instant(now), endReason: 'identity-changed' };
+    });
+    return { links: next, forgotten };
+  }
+
+  /** {@link #local} written to the file, and the keys of the links it ended forgotten. */
+  async #applyLocal(): Promise<LinksDocument> {
+    const original = await this.deps.documents.read();
+    const local = await this.#local(original.links, this.deps.now());
+    const document = pruned({ ...original, links: local.links }, this.deps.now());
+    if (JSON.stringify(document) === JSON.stringify(original)) return original;
+    await this.deps.documents.write(document);
+    for (const linkId of local.forgotten) await this.deps.vault.forget(linkId);
+    return document;
+  }
+
   // ── Reconciliation ─────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -416,15 +752,43 @@ export class CatalogLinkService {
         return;
       }
     }
-    await this.#write(link.linkId, ({ pendingUpload: _committed, ...rest }) => ({
-      ...rest,
-      state: 'live',
-      version: pending.version,
-      sequence: pending.sequence,
-      notAfter: pending.notAfter,
-      ...(pending.expiresAt === undefined ? {} : { expiresAt: pending.expiresAt }),
-      ...(pending.installCap === undefined ? {} : { installCap: pending.installCap }),
-    }));
+    await this.#commit(link.linkId, pending);
+  }
+
+  /** The upload the store took becomes the link: its version, sequence, lease, end and cap, whichever of them it changed. */
+  async #commit(linkId: string, pending: PendingUpload): Promise<StoredLink> {
+    const committed = await this.#write(
+      linkId,
+      ({ pendingUpload: _committed, expiresAt: _end, installCap: _cap, ...rest }) => ({
+        ...rest,
+        state: 'live',
+        version: pending.version,
+        sequence: pending.sequence,
+        notAfter: pending.notAfter,
+        ...(pending.issuedAt === undefined ? {} : { issuedAt: pending.issuedAt }),
+        ...(pending.version === rest.version
+          ? {}
+          : { movedFrom: rest.version, servedSince: pending.issuedAt ?? rest.servedSince }),
+        ...(pending.revived === true ? { revivedAt: pending.issuedAt ?? instant(this.deps.now()) } : {}),
+        ...(pending.expiresAt === undefined ? {} : { expiresAt: pending.expiresAt }),
+        ...(pending.installCap === undefined ? {} : { installCap: pending.installCap }),
+      }),
+    );
+    if (pending.revived === true) await this.#revived(committed);
+    return committed;
+  }
+
+  async #revived(link: StoredLink): Promise<void> {
+    await this.deps.audit
+      ?.record({
+        event: 'catalog.link.revived',
+        actor: { kind: 'host' },
+        cause: 'daemon',
+        subject: link.linkId,
+        outcome: 'succeeded',
+        detail: { linkId: link.linkId, sequence: link.sequence },
+      })
+      .catch(() => undefined);
   }
 
   /**
@@ -496,20 +860,15 @@ export class CatalogLinkService {
    */
   #refreshed(): Promise<{
     readonly document: LinksDocument;
-    readonly states: ReadonlyMap<string, 'ok' | 'unreachable'>;
+    readonly states: ReadonlyMap<string, 'ok' | 'unreachable' | 'lapsed'>;
   }> {
     return this.#serially(async () => {
       const now = this.deps.now();
       const original = await this.deps.documents.read();
-      const states = new Map<string, 'ok' | 'unreachable'>();
-      const forgotten: string[] = [];
-      let links = original.links.map(link => {
-        if (link.state !== 'live') return link;
-        const end = linkEnd(link);
-        if (end > now) return link;
-        if (link.keyRef !== undefined) forgotten.push(link.keyRef);
-        return { ...link, state: 'expired' as const, endedAt: instant(end), endReason: 'expired' as const };
-      });
+      const states = new Map<string, 'ok' | 'unreachable' | 'lapsed'>();
+      const local = await this.#local(original.links, now);
+      const forgotten = [...local.forgotten];
+      let links = local.links;
       const stale = links.filter(
         link =>
           link.state === 'live' &&
@@ -543,6 +902,11 @@ export class CatalogLinkService {
             const counted = { ...link, opens: entry.opens ?? link.opens, opensCheckedAt: instant(now) };
             if (entry.state === 'used')
               return { ...counted, state: 'used' as const, endedAt: instant(now), endReason: 'used' as const };
+            if (entry.state === 'lapsed' && link.kind === 'public') {
+              // A public link the store let lapse (this machine was off past its lease) is put back by the next refresh.
+              states.set(link.linkId, 'lapsed');
+              return counted;
+            }
             if (entry.state === 'lapsed' || entry.state === 'ended') {
               if (link.keyRef !== undefined) forgotten.push(link.keyRef);
               return {

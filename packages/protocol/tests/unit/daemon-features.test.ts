@@ -168,6 +168,8 @@ describe('daemon features', () => {
     should(list).containEql('agenda.gate.attachments.1');
     // The app draws "Done · closes &F12" only where this name is listed (an older daemon refuses `offerClose`).
     should(list).containEql('agenda.offer-close.1');
+    // The app offers download links only where this name is listed: moving, editing and the lease are all built.
+    should(list).containEql('catalogs.links.1');
   });
 
   it('should keep the older idea limit below the raised one the feature unlocks', () => {

@@ -822,6 +822,7 @@ import {
   CapabilityGrantService,
   type CatalogIdentitySource,
   CatalogLinkService,
+  linkUsageOf,
   CatalogMemberService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -4293,6 +4294,8 @@ const AGENDA_DEADLINE_SWEEP_MS = 5 * 60_000;
 /** How often the member sweep looks for browsers whose passkey window closed or that sat idle. */
 const MEMBER_SWEEP_INTERVAL_MS = 60_000;
 const LINK_RECONCILE_INTERVAL_MS = 60_000;
+/** How often a live public link is kept inside its 30-day lease and a lapsed one is put back. */
+const LINK_REFRESH_INTERVAL_MS = 6 * 60 * 60_000;
 
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -13886,8 +13889,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         (error: unknown) =>
           process.stderr.write(`member sweep failed: ${error instanceof Error ? error.message : String(error)}\n`),
       ).start(MEMBER_SWEEP_INTERVAL_MS);
+      const linkDocuments = new FileLinkDocumentStore(paths, stateFiles);
       const sharedCatalogs = new SharedCatalogService({
         membership: catalogMembers,
+        linkUsage: linkUsageOf(linkDocuments),
         documents: new FileCatalogDocumentStore(paths, stateFiles),
         blobs: new FileCatalogBlobStore(paths, stateFiles),
         skillTree: new NodeSkillFolder(),
@@ -13928,7 +13933,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const linkCrypto = new WebCryptoRelayCrypto();
       const linkStoreClient = new HttpLinkStoreClient(linkCrypto, sharedCatalogIdentity);
       const catalogLinks = new CatalogLinkService({
-        documents: new FileLinkDocumentStore(paths, stateFiles),
+        documents: linkDocuments,
         vault: new FileLinkKeyVault(paths, stateFiles, new FileSecretKey(secretDocuments.keyFile, stateFiles)),
         locator: new ConfiguredLinkStoreLocator(
           () => facts().linkStore(),
@@ -13942,6 +13947,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         now: () => millisecondClock.now(),
         appOrigin: HOSTED_APP_ORIGIN,
         random: () => Math.random(),
+        audit: auditLog,
       });
       // Settles an upload or an end a crash left half done, and retries an end the store could not take.
       new MemberSweepTimer(
@@ -13950,6 +13956,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         (error: unknown) =>
           process.stderr.write(`link reconcile failed: ${error instanceof Error ? error.message : String(error)}\n`),
       ).start(LINK_RECONCILE_INTERVAL_MS);
+      // Keeps each live public link inside its 30-day lease and puts back one the store let lapse: at boot, then every 6 h.
+      new MemberSweepTimer(
+        systemSweepClock,
+        async () => await catalogLinks.refresh(),
+        (error: unknown) =>
+          process.stderr.write(`link refresh failed: ${error instanceof Error ? error.message : String(error)}\n`),
+      ).start(LINK_REFRESH_INTERVAL_MS);
       return {
         ...mounted,
         // Built after the rest because it reads three of them: the session directory, and the project

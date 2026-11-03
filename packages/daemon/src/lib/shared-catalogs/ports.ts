@@ -45,6 +45,18 @@ export interface McpDirectory {
   servers(): Promise<readonly McpSourceServer[]>;
 }
 
+/** The links serving a version: pending, live or ending (docs/catalogs.md § Links). A retired version may serve none. */
+export interface LinkServing {
+  readonly linkId: string;
+  readonly itemId: string;
+  readonly version: number;
+}
+
+/** Which links serve which versions, read from the links file by the program that owns it. */
+export interface LinkUsage {
+  serving(): Promise<readonly LinkServing[]>;
+}
+
 /** This daemon's signing identity and the name it gives itself, or `undefined` when it has none. */
 export interface CatalogIdentitySource {
   identity(): Promise<DaemonIdentity | undefined>;
