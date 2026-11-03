@@ -10707,6 +10707,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // Built below, once the boards it reads exist; a push that lands before then has no stale line to look for.
       const alertClearerBox: { clearer?: AgendaAlertClearer } = {};
+      // One lane per ferret shared by its pushes and its clears, so a clear decided from one board is sent before a
+      // newer push about it is (`agendaAlertLane`).
+      const alertLanes = new KeyedSerialExecutor();
       const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
         ledger: notificationLedger,
@@ -10725,6 +10728,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         push,
         serial: new KeyedSerialExecutor(),
+        lanes: alertLanes,
         clock,
         diagnostics: notificationHealth,
         // A push that landed after its item was handled or opened is taken down as soon as it is recorded.
@@ -10772,7 +10776,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
         },
         push,
-        serial: new KeyedSerialExecutor(),
+        serial: alertLanes,
         clock,
       });
       alertClearerBox.clearer = alertClearer;

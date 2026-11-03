@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgendaIdSchema } from './agenda.ts';
+import { AgendaIdSchema, MAX_AGENDA_PER_SESSION, MAX_AGENDA_RESOLUTIONS } from './agenda.ts';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 /**
@@ -245,12 +245,19 @@ export const PushSeenRequestSchema = z.strictObject({
 export type PushSeenRequest = z.infer<typeof PushSeenRequestSchema>;
 
 /**
+ * The most tags one `seen` answers: as many as one board can name — the ferret's own, and an item's and its approval's
+ * for each open and retained resolved item. A daemon answers no more than this: a clear past it goes to every device,
+ * the caller's too (`AgendaAlertClearer.seen`).
+ */
+export const PUSH_SEEN_MAX_TAGS = 1 + 2 * (MAX_AGENDA_PER_SESSION + MAX_AGENDA_RESOLUTIONS);
+
+/**
  * Whether a clear went out, and the tags it named (`PushClearPayloadSchema`'s), empty when nothing of that item's was
  * still up. The clear skipped the caller's own device, so its page takes these tags down there itself.
  */
 export const PushSeenResponseSchema = z.strictObject({
   cleared: z.boolean(),
-  tags: z.array(PushTagSchema).max(64),
+  tags: z.array(PushTagSchema).max(PUSH_SEEN_MAX_TAGS),
 });
 export type PushSeenResponse = z.infer<typeof PushSeenResponseSchema>;
 

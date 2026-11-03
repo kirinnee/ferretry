@@ -247,6 +247,15 @@ as several clears, and a push counts as covered only by the clear that names its
 sends the rest again on the next look. Opening an item again tells the machine again, because it may have buzzed
 since; a clear with nothing left to cover sends nothing.
 
+**A push raised while a clear is decided.** A ferret's pushes and its clears run one at a time in one lane
+(`agendaAlertLane`): a push is recorded, sent and its outcome recorded inside it, and a clear reads the ledger, then
+the board, and is recorded and sent inside it. So a clear decided from a board read before an item was raised or woke
+is sent before that item's new push, never after it, and never counts that push as covered.
+
+**An open that names many tags.** One answer to `seen` carries at most `PUSH_SEEN_MAX_TAGS` (as many as one board can
+name: the ferret's tag, and an item's and its approval's for each open and retained item). A clear past that skips
+nobody: it reaches the opening device too, whose worker takes those lines down (an iPhone may show the quiet note).
+
 **A push still on its way.** A push the owner handles or opens before it has reached a device had no line to take
 down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
 and an open made while it was on its way is honoured then too (that memory is not kept across a restart). That late

@@ -1,4 +1,4 @@
-import { type AgendaSnapshot, agendaItemPushTag, type PushPayload } from '@ferretry/protocol';
+import { type AgendaSnapshot, agendaItemPushTag, PUSH_SEEN_MAX_TAGS, type PushPayload } from '@ferretry/protocol';
 import {
   type AgendaBoardChange,
   type AgendaChangeObserver,
@@ -8,6 +8,7 @@ import {
 } from '../agenda/index.ts';
 import type { PushDispatch } from '../push/types.ts';
 import {
+  agendaAlertLane,
   alertsToClear,
   stopLineDone,
   clearNotificationKey,
@@ -27,6 +28,7 @@ export interface AgendaAlertClearerOptions {
   readonly ledger: Pick<NotificationDeliveryLedger, 'entries' | 'append'>;
   readonly boards: Pick<AgendaLedgerRepository, 'read'>;
   readonly push: { notify(dispatch: PushDispatch<PushPayload>): Promise<unknown> };
+  /** The alert lanes, shared with `NotificationService`'s `lanes` (`agendaAlertLane`). */
   readonly serial: NotificationSerialExecutor;
   readonly clock: NotificationClock;
 }
@@ -75,16 +77,18 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
    * handled or opened while its push was still on its way had nothing to clear then. Total.
    */
   async recheck(sessionId: string): Promise<void> {
-    await this.run(sessionId, async snapshot => {
-      await this.send(sessionId, snapshot, {});
-      const entries = await this.options.ledger.entries();
+    await this.run(sessionId, async (snapshot, entries) => {
+      await this.send(sessionId, snapshot, entries, {});
       for (const [key, open] of [...this.pendingOpens]) {
         if (open.sessionId !== sessionId) continue;
-        const landed = entries.find(entry => normalizedNotificationKey(entry.requested.key) === key);
+        // Read again for what the sends so far covered. Newer than the board, but each send is held to one push
+        // that was already on its way at the open, before the board was read.
+        const now = await this.options.ledger.entries();
+        const landed = now.find(entry => normalizedNotificationKey(entry.requested.key) === key);
         if (landed !== undefined && landed.outcome === undefined) continue;
         this.pendingOpens.delete(key);
         // EVERY device, the opener's too: its page closed what was showing when it asked, and this line came after.
-        await this.send(sessionId, snapshot, { opened: open.agendaId, only: key });
+        await this.send(sessionId, snapshot, now, { opened: open.agendaId, only: key });
       }
     }).catch(() => undefined);
   }
@@ -103,15 +107,15 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
 
   /** The owner opened `agendaId` on the device `exceptDevice` names: its alerts come down everywhere else. */
   async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
-    return await this.run(sessionId, async snapshot => {
+    return await this.run(sessionId, async (snapshot, entries) => {
       if (![...snapshot.items, ...snapshot.resolved].some(item => item.id === agendaId)) return { found: false };
       // A stop on its way counts too when this open is what lets its line come down (the last item it could count).
       const stopsToo = stopLineDone(snapshot, agendaId);
-      for (const key of inFlightAlerts(sessionId, agendaId, stopsToo, await this.options.ledger.entries()))
+      for (const key of inFlightAlerts(sessionId, agendaId, stopsToo, entries))
         this.remember(key, { sessionId, agendaId });
       return {
         found: true,
-        tags: await this.send(sessionId, snapshot, {
+        tags: await this.send(sessionId, snapshot, entries, {
           opened: agendaId,
           ...(exceptDevice === undefined ? {} : { exceptDevice }),
         }),
@@ -130,26 +134,46 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
       this.pendingOpens.delete(oldest);
   }
 
-  private async run<T>(sessionId: string, work: (snapshot: AgendaSnapshot) => Promise<T>): Promise<T> {
-    return await this.options.serial.run(`agenda-clear:${sessionId}`, async () => {
+  /**
+   * Runs one look at a session in its alert lane (`agendaAlertLane`), which its pushes share, so no push is recorded or
+   * sent while a clear is decided and sent from the board it read. THE LEDGER IS READ BEFORE THE BOARD as well: every push it
+   * names was recorded before the board was read, so the board is never older than a push it judges. A push recorded
+   * after (the item woke, the next was raised) is not in this look at all; its own landing looks again.
+   */
+  private async run<T>(
+    sessionId: string,
+    work: (snapshot: AgendaSnapshot, entries: readonly NotificationLedgerEntry[]) => Promise<T>,
+  ): Promise<T> {
+    return await this.options.serial.run(agendaAlertLane(sessionId), async () => {
+      const entries = await this.options.ledger.entries();
       const now = this.options.clock.now();
       const ledger = (await this.options.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, now);
-      return await work(agendaSnapshot(ledger));
+      return await work(agendaSnapshot(ledger), entries);
     });
   }
 
-  /** Records and sends every clear the board calls for now; the tags they named. */
-  private async send(sessionId: string, snapshot: AgendaSnapshot, how: SendOptions): Promise<readonly string[]> {
-    const entries = await this.options.ledger.entries();
+  /** Records and sends every clear the board calls for now, from the ledger as `entries` read it; the tags they named. */
+  private async send(
+    sessionId: string,
+    snapshot: AgendaSnapshot,
+    entries: readonly NotificationLedgerEntry[],
+    how: SendOptions,
+  ): Promise<readonly string[]> {
     let sequence = entries.filter(entry => entry.requested.origin === 'agenda-clear').length;
     const uncovered = uncoveredAlerts(sessionId, entries).filter(
       alert => how.only === undefined || pushKeyOf(alert) === how.only,
     );
     const clears = alertsToClear(sessionId, uncovered, snapshot, how.opened);
+    // The tags the caller is answered, which its page closes itself. Past what one answer may carry, a clear skips
+    // nobody: the caller's device takes those lines down too, rather than keeping them.
+    const answered: string[] = [];
     for (const clear of clears) {
       const at = this.options.clock.now();
       sequence += 1;
       const key = clearNotificationKey(sessionId, at, sequence);
+      const fits = answered.length + clear.tags.length <= PUSH_SEEN_MAX_TAGS;
+      const skip = fits && how.exceptDevice !== undefined;
+      if (fits) answered.push(...clear.tags);
       await this.options.ledger.append(
         NotificationRecordSchema.parse({
           v: 1,
@@ -167,11 +191,11 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
       await this.options.push
         .notify({
           payload: clearPushPayload(sessionId, key, clear.tags),
-          ...(how.exceptDevice === undefined ? {} : { exceptDevice: how.exceptDevice }),
+          ...(skip ? { exceptDevice: how.exceptDevice } : {}),
         })
         .catch(() => undefined);
     }
-    return clears.flatMap(clear => clear.tags);
+    return answered;
   }
 }
 

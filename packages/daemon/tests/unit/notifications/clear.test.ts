@@ -6,6 +6,7 @@ import {
   AgendaItemSchema,
   type AgendaSnapshot,
   PUSH_CLEAR_MAX_TAGS,
+  PUSH_SEEN_MAX_TAGS,
   PushPayloadSchema,
   type PushPayload,
   type ResolvedAgendaItem,
@@ -14,6 +15,7 @@ import should from 'should';
 import type { AgendaLedger } from '../../../src/lib/agenda/index.ts';
 import {
   AgendaAlertClearer,
+  agendaAlertLane,
   alertStillWanted,
   alertsToClear,
   clearNotificationKey,
@@ -21,6 +23,7 @@ import {
   type DeliveredAlert,
   type NotificationLedgerEntry,
   type NotificationRecord,
+  type NotificationSerialExecutor,
   NotificationRecordSchema,
   uncoveredAlerts,
 } from '../../../src/lib/notifications/index.ts';
@@ -373,20 +376,48 @@ interface World {
   readonly boards: Map<string, AgendaLedger>;
   readonly sent: PushDispatch<PushPayload>[];
   failPush: boolean;
+  /** The ferret's lanes, one at a time per key, as the daemon shares them with its pushes. */
+  readonly lanes: NotificationSerialExecutor;
+  /** Runs once as the clearer reads a board, and is gone after. */
+  beforeBoard?: (() => Promise<void>) | undefined;
 }
+
+/** One at a time per key, in the order asked: the daemon's lanes. */
+const laneExecutor = (): NotificationSerialExecutor => {
+  const tails = new Map<string, Promise<unknown>>();
+  return {
+    run: <T>(key: string, work: () => Promise<T>): Promise<T> => {
+      const next = (tails.get(key) ?? Promise.resolve()).then(work, work);
+      tails.set(
+        key,
+        next.catch(() => undefined),
+      );
+      return next;
+    },
+  };
+};
 
 const world = (seed: readonly NotificationRecord[] = []): World => {
   const ledger = new MemoryLedger(seed);
   const boards = new Map<string, AgendaLedger>();
   const sent: PushDispatch<PushPayload>[] = [];
+  const lanes = laneExecutor();
   const state: World = {
     ledger,
     boards,
     sent,
     failPush: false,
+    lanes,
     clearer: new AgendaAlertClearer({
       ledger,
-      boards: { read: async sessionId => boards.get(sessionId) ?? null },
+      boards: {
+        read: async sessionId => {
+          const hook = state.beforeBoard;
+          state.beforeBoard = undefined;
+          await hook?.();
+          return boards.get(sessionId) ?? null;
+        },
+      },
       push: {
         notify: async dispatch => {
           if (state.failPush) throw new Error('push service down');
@@ -394,7 +425,7 @@ const world = (seed: readonly NotificationRecord[] = []): World => {
           return { delivered: 1, failed: 0 };
         },
       },
-      serial: { run: async (_key, work) => await work() },
+      serial: lanes,
       clock: { now: () => LATER },
     }),
   };
@@ -850,6 +881,55 @@ describe('a push still on its way when its item is handled or opened (review rou
 
     // Assert
     should(test.sent).deepEqual([]);
+  });
+});
+
+describe('an open that names more tags than one answer carries (review round 5)', () => {
+  it(`should answer at most ${PUSH_SEEN_MAX_TAGS} tags, and send the rest to every device, the opener's too`, async () => {
+    // Arrange — a legacy stop, and more code cards handled since than one answer may name.
+    const cards = Array.from({ length: PUSH_SEEN_MAX_TAGS + 20 }, (_, index) => resolved(code(`A${index + 2}`)));
+    const test = world(pushed('A1', { stoppedAt: AT }, { tag: null }));
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')], cards));
+
+    // Act
+    const outcome = await test.clearer.seen(SESSION, 'A1', 'device-1');
+
+    // Assert
+    const tags = outcome.found ? outcome.tags : [];
+    const skipped = test.sent.filter(dispatch => dispatch.exceptDevice === 'device-1');
+    should(tags.length).be.belowOrEqual(PUSH_SEEN_MAX_TAGS);
+    should(skipped.flatMap(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual(tags);
+    should(test.sent.length).be.above(skipped.length);
+    should(new Set(test.sent.flatMap(dispatch => (dispatch.payload as { tags: string[] }).tags)).size).equal(
+      cards.length + 1,
+    );
+  });
+});
+
+describe('a push raised while a clear reads the board (review round 5)', () => {
+  it('should send the clear before the newer push about the item, and never cover that push', async () => {
+    // Arrange — A1's push is up and A1 is handled; as the clear reads the board, A1 wakes and its push is sent.
+    const test = world(pushed('A1'));
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1'))]));
+    const seenBefore: number[] = [];
+    let woke: Promise<void> = Promise.resolve();
+    test.beforeBoard = async () => {
+      // As NotificationService sends it: in the ferret's lane, recorded and landed there.
+      woke = test.lanes.run(agendaAlertLane(SESSION), async () => {
+        seenBefore.push(test.sent.length);
+        for (const record of pushed('A1', { deadline: true })) await test.ledger.append(record);
+      });
+    };
+
+    // Act
+    await test.clearer.changed(SESSION, CHANGE);
+    await woke;
+
+    // Assert — the older clear went first, and the woken push is still up, uncovered.
+    should(seenBefore).deepEqual([1]);
+    should(uncoveredAlerts(SESSION, await test.ledger.entries()).map(alert => alert.key)).deepEqual([
+      `agenda:${SESSION}:A1:deadline`,
+    ]);
   });
 });
 

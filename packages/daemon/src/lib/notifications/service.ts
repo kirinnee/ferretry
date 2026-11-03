@@ -7,6 +7,7 @@ import {
 } from '@ferretry/protocol';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
+  agendaAlertLane,
   agendaNotificationAttribution,
   deadlineNotificationPayload,
   legacyNotificationKey,
@@ -54,6 +55,11 @@ export interface NotificationServiceOptions {
    * was on its way, so its line may already be stale (`AgendaAlertClearer.recheck`). Not awaited, never fails a push.
    */
   readonly landed?: (sessionId: string) => void;
+  /**
+   * One lane per ferret, shared with `AgendaAlertClearer` (`agendaAlertLane`): a push is recorded, sent and its outcome
+   * recorded inside it, so a clear decided from an older board is sent before a newer push, never after it.
+   */
+  readonly lanes?: NotificationSerialExecutor;
 }
 
 /**
@@ -247,12 +253,20 @@ export class NotificationService implements AgendaRaisedObserver {
         // The high slot is kept only when a device accepted the push; every other ending gives it back.
         let reached = false;
         try {
-          reached = await this.send(identity, item, key, session, payload, urgent !== undefined, options.ttlSeconds);
+          reached = await this.inLane(sessionId, () =>
+            this.send(identity, item, key, session, payload, urgent !== undefined, options.ttlSeconds),
+          );
         } finally {
           if (urgent !== undefined && !reached) this.refund(sessionId, urgent.at);
         }
       })
       .catch((error: unknown) => this.tell(diagnostics => diagnostics.failed(key, errorText(error))));
+  }
+
+  private async inLane<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    return this.options.lanes === undefined
+      ? await work()
+      : await this.options.lanes.run(agendaAlertLane(sessionId), work);
   }
 
   /** Records, sends and records the outcome of one push: whether a device accepted it. */

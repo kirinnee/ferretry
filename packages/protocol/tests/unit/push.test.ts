@@ -546,6 +546,15 @@ describe('the seen request', () => {
     ).be.false();
     should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [] }).success).be.true();
     should(push.PushSeenResponseSchema.safeParse({ cleared: true, tags: [], title: 'Deploy?' }).success).be.false();
+    // As many tags as one board can name, and no more (review round 5).
+    const tags = (count: number) => Array.from({ length: count }, (_, index) => `attention-s:A${index + 1}`);
+    should(push.PUSH_SEEN_MAX_TAGS).equal(241);
+    should(
+      push.PushSeenResponseSchema.safeParse({ cleared: true, tags: tags(push.PUSH_SEEN_MAX_TAGS) }).success,
+    ).be.true();
+    should(
+      push.PushSeenResponseSchema.safeParse({ cleared: true, tags: tags(push.PUSH_SEEN_MAX_TAGS + 1) }).success,
+    ).be.false();
   });
 });
 

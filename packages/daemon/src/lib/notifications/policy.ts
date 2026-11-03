@@ -439,3 +439,10 @@ export function agendaNotificationTitle(title: string): string {
     return clipAtWord(name, AGENDA_PUSH_TITLE_LENGTH);
   return `Ferret “${clipAtWord(name, AGENDA_PUSH_TITLE_LENGTH - 9)}”`;
 }
+
+/**
+ * A ferret's alert lane: its pushes (`NotificationService`) and its clears (`AgendaAlertClearer`) run one at a time in
+ * it, so a clear that read the board before an item was raised or woke is sent before that item's push, never after —
+ * and the newer push is never covered by it.
+ */
+export const agendaAlertLane = (sessionId: string): string => `agenda-alerts:${sessionId}`;

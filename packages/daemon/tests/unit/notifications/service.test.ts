@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { AgendaItemSchema, AgendaSnapshotSchema, type PushDeliveryResult } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import { agendaAlertLane } from '../../../src/lib/notifications/policy.ts';
 import { NotificationService } from '../../../src/lib/notifications/service.ts';
 import { NotificationRecordSchema } from '../../../src/lib/notifications/types.ts';
 import type {
@@ -106,6 +107,7 @@ function fixture(
     readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
     readonly now?: () => string;
     readonly landed?: (sessionId: string) => void;
+    readonly lanes?: ConstructorParameters<typeof NotificationService>[0]['lanes'];
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -134,6 +136,7 @@ function fixture(
           }),
       ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
       ...(options.landed === undefined ? {} : { landed: options.landed }),
+      ...(options.lanes === undefined ? {} : { lanes: options.lanes }),
     }),
   };
 }
@@ -867,6 +870,36 @@ describe('NotificationService approve-on-phone push', () => {
       'Ferret “Approve on your phone”',
       'Ferret “Аpprove оn your phone now”',
     ]);
+  });
+});
+
+describe("NotificationService sends in the ferret's alert lane (review round 5: a clear never follows a newer push)", () => {
+  it('should record, send and record the outcome of a push inside that lane, and tell of its landing there', async () => {
+    // Arrange
+    const order: string[] = [];
+    const world = fixture({
+      callLog: order,
+      lanes: {
+        run: async (key, work) => {
+          order.push(`enter ${key}`);
+          try {
+            return await work();
+          } finally {
+            order.push(`leave ${key}`);
+          }
+        },
+      },
+      landed: () => void order.push('landed'),
+    });
+
+    // Act
+    await world.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(order[0]).equal(`enter ${agendaAlertLane(SESSION)}`);
+    should(order.at(-1)).equal(`leave ${agendaAlertLane(SESSION)}`);
+    should(order).containEql('landed');
+    should(order.filter(line => line.startsWith('enter'))).have.length(1);
   });
 });
 
