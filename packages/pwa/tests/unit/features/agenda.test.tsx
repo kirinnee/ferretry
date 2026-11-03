@@ -16,8 +16,8 @@ import {
   useAgenda,
 } from '../../../src/features/agenda/agenda.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
-import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
+import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -133,7 +133,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
         {agenda.above}
         <div data-composer="" />
       </div>
-      <div data-section="">{agenda.section(rest.afterOpen)}</div>
+      <div data-section="">{agenda.tab(rest.afterOpen)}</div>
     </div>
   );
 }
@@ -700,71 +700,82 @@ describe('what the item view sends', () => {
   });
 });
 
-describe('the agenda as a section of Info', () => {
-  const rowIds = (view: ReturnType<typeof render>) =>
-    section(view.root)
-      .findAllByType(AgendaRow)
-      .map(row => row.props.item.id);
+describe('the agenda as the Agenda tab of Info', () => {
+  const rowButtons = (view: ReturnType<typeof render>) =>
+    section(view.root).findAll(node => node.type === 'button' && node.props['data-agenda-tab-row'] !== undefined);
+  const rowIds = (view: ReturnType<typeof render>) => rowButtons(view).map(row => row.props['data-agenda-row']);
+  const chips = (view: ReturnType<typeof render>) =>
+    section(view.root).findAll(node => node.props?.['data-context-chip'] !== undefined && node.type === 'button');
+  const choose = (view: ReturnType<typeof render>, key: string) =>
+    run(() =>
+      chips(view)
+        .find(chip => chip.props['data-context-chip'] === key)
+        ?.props.onClick(),
+    );
 
-  test('shows the ferret’s open items as rows, most pressing first', () => {
+  test('opens on what needs the owner, blockers first', () => {
     const view = mount({ snapshot: board(MIXED) });
-    expect(rowIds(view)).toEqual(['A3', 'A2', 'A1']);
+    expect(rowIds(view)).toEqual(['A3', 'A2']);
   });
 
-  test('says so when there is nothing on the agenda', () => {
+  test('draws the four filters, each count the length of its list', () => {
+    const view = mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    expect(chips(view).map(chip => chip.props['data-context-chip'])).toEqual([
+      'needs-you',
+      'resting',
+      'snoozed',
+      'resolved',
+    ]);
+    const counts = chips(view).map(chip => Number(/(\d+)$/u.exec(textOf(chip))?.[1]));
+    for (const [index, key] of ['needs-you', 'resting', 'snoozed', 'resolved'].entries()) {
+      choose(view, key);
+      expect(rowIds(view).length).toBe(counts[index] ?? -1);
+    }
+  });
+
+  test('keeps a ferret’s-turn item in Resting and never in Needs you', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    choose(view, 'resting');
+    expect(rowIds(view)).toEqual(['A1']);
+    expect(textOf(section(view.root).find(node => node.props['data-agenda-tab-state'] !== undefined))).toBe(
+      'Resting · waiting on Johnnie',
+    );
+  });
+
+  test('says so when a filter has nothing in it', () => {
     const view = mount({ snapshot: board([]) });
     expect(rowIds(view)).toEqual([]);
-    expect(textOf(section(view.root))).toBe('Nothing on the agenda.');
+    expect(textOf(section(view.root).find(node => node.props['data-agenda-tab-empty'] !== undefined))).toBe(
+      'Nothing needs you.',
+    );
   });
 
   test('draws nothing when the ferret is not in agenda mode and its ledger is empty', () => {
     const view = mount({ snapshot: board([]), agendaMode: false });
     expect(section(view.root).children).toHaveLength(0);
+    expect(live().counts).toBeNull();
   });
 
   test('still lists the ledger without agenda mode: there is one agenda list in Info, never a dead one', () => {
     const view = mount({ snapshot: board(MIXED), agendaMode: false });
-    expect(rowIds(view)).toEqual(['A3', 'A2', 'A1']);
+    expect(rowIds(view)).toEqual(['A3', 'A2']);
   });
 
-  test('filters Open / Parked / Resolved, and a parked or resolved row opens the same card', () => {
-    const view = mount({
-      snapshot: board([...MIXED, item('A89', { parked: { reason: 'replied', at: '2026-07-31T11:50:00.000Z' } })], {}, [
-        resolvedItem('A9'),
-      ]),
-    });
-    const chips = section(view.root).findAll(
-      node => node.props?.['data-context-chip'] !== undefined && node.type === 'button',
-    );
-    expect(chips.map(chip => chip.props['data-context-chip'])).toEqual(['open', 'parked', 'resolved']);
-    run(() => chips[1]?.props.onClick());
-    expect(rowIds(view)).toEqual(['A89']);
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
-    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A89');
-    run(() => view.root.findByType(AgendaItemView).props.onClose());
-    run(() =>
-      section(view.root)
-        .findAll(node => node.props?.['data-context-chip'] === 'resolved' && node.type === 'button')[0]
-        ?.props.onClick(),
-    );
+  test('a resolved row opens the same card, read-only', () => {
+    const view = mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    choose(view, 'resolved');
     expect(rowIds(view)).toEqual(['A9']);
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
+    run(() => rowButtons(view)[0]?.props.onClick());
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A9');
-  });
-
-  test('shows only Open when nothing is parked or resolved', () => {
-    const view = mount({ snapshot: board(MIXED) });
-    expect(section(view.root).findAll(node => node.props?.['data-context-chip'] !== undefined)).toHaveLength(0);
   });
 
   test('opens the item’s card when a row is opened, then tells the host', () => {
     const opened: string[] = [];
     const view = mount({ snapshot: board(MIXED), afterOpen: () => opened.push('closed-info') });
     run(() =>
-      section(view.root)
-        .findAllByType(AgendaRow)
-        .find(row => row.props.item.id === 'A2')
-        ?.props.onOpen(),
+      rowButtons(view)
+        .find(row => row.props['data-agenda-row'] === 'A2')
+        ?.props.onClick(),
     );
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
     expect(live().covered).toBe(true);
@@ -773,8 +784,13 @@ describe('the agenda as a section of Info', () => {
 
   test('opens the card without a host callback', () => {
     const view = mount({ snapshot: board(MIXED) });
-    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
+    run(() => rowButtons(view)[0]?.props.onClick());
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A3');
+  });
+
+  test('gives Overview the same counts the tab shows', () => {
+    mount({ snapshot: board(MIXED, {}, [resolvedItem('A9')]) });
+    expect(live().counts?.()).toEqual({ 'needs-you': 2, resting: 1, snoozed: 0, resolved: 1 });
   });
 
   test('keeps the composer last', () => {

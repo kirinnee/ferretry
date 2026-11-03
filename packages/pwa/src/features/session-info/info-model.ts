@@ -2,7 +2,7 @@
  * INFO — what one ferret IS, as rows a person can read and learn from. Pure.
  *
  * The session header's rule (the Info / Actions spec, §1–§2): Info is for LOOKING. It opens as a
- * resizable right panel on a desktop and a bottom sheet on a phone, with six tabs, and every row is
+ * resizable right panel on a desktop and a bottom sheet on a phone, with seven tabs, and every row is
  * `label — value`: paths and ids in mono with a copy button, and a small `?` that explains the label
  * in one line ("Worktree: a separate checkout…"). That is the "see and learn" half of the page.
  *
@@ -20,15 +20,16 @@ import {
 } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
-export type InfoTab = 'overview' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'surfaces';
+export type InfoTab = 'overview' | 'agenda' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'surfaces';
 
-export const INFO_TABS: readonly InfoTab[] = ['overview', 'tasks', 'runtime', 'usage', 'folder', 'surfaces'];
+export const INFO_TABS: readonly InfoTab[] = ['overview', 'agenda', 'tasks', 'runtime', 'usage', 'folder', 'surfaces'];
 
 /** The tabs a host without a board shows: Tasks is the board filtered to this ferret, so it needs one. */
 export const INFO_TABS_WITHOUT_BOARD: readonly InfoTab[] = INFO_TABS.filter(tab => tab !== 'tasks');
 
 export const INFO_TAB_LABEL: Readonly<Record<InfoTab, string>> = {
   overview: 'Overview',
+  agenda: 'Agenda',
   tasks: 'Tasks',
   runtime: 'Runtime',
   usage: 'Usage',

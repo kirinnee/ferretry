@@ -1415,6 +1415,19 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate]);
+  // A sub-ferret's items are raised on its lead's agenda: its own tab says so and opens the lead.
+  const leadView =
+    session.config.parent === undefined
+      ? undefined
+      : daemonSessions?.find(candidate => candidate.config.id === session.config.parent);
+  const agendaLead =
+    leadView === undefined || onNavigate === undefined
+      ? undefined
+      : {
+          name: sessionDisplayName(leadView),
+          open: () => onNavigate(daemonSessionPath(connection.daemonId, leadView.config.id)),
+        };
+  const agendaCounts = agenda.counts;
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   boardFullRef.current = tasksFull;
   collapseBoardRef.current = () => tasks.setExpanded(false);
@@ -1437,8 +1450,11 @@ export function SessionChatPage({
               browser={browserPages.status}
               driving={driving}
               name={agentName}
+              agendaTab={agenda.tab(presentation === 'sheet' ? info.close : undefined, agendaLead)}
               about={{
-                agenda: agenda.section(presentation === 'sheet' ? info.close : undefined),
+                ...(agendaCounts === null
+                  ? {}
+                  : { agenda: { counts: agendaCounts(), onOpen: () => info.show('agenda') } }),
                 ...(switches === undefined
                   ? {}
                   : {

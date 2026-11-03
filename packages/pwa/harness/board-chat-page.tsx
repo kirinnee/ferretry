@@ -313,6 +313,7 @@ function Harness() {
       onTabChange={() => undefined}
       render={{
         overview: () => null,
+        agenda: () => null,
         tasks: () => board(false),
         runtime: () => null,
         usage: () => null,

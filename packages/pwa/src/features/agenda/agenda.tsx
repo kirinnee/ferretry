@@ -19,8 +19,8 @@
  * - A FORM is filled in here exactly as in the Inbox: the same fields on the card, the same picks (the Inbox's key for
  *   the item), and the composer's Send answers it (`sendForm`) instead of chatting. The view stays until the answer
  *   lands, so a refusal is read on the card; once it has, a "Sent to …" line above the composer says what was picked.
- * - The same rows, with the parked and resolved ones, are this ferret's one list in Info (`section`): the agenda has
- *   no side bar of its own.
+ * - The same items, in four filters (Needs you · Resting · Snoozed · Resolved), are this ferret's Agenda tab in Info
+ *   (`tab`): the agenda has no side bar of its own. Overview carries only a one-line count that opens the tab.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request, and EVERY id
  *   the ledger holds opens the same view, agenda mode or not: an open item to answer, a parked one with "Back to my
  *   list", a resolved one read-only (`agenda-settled.tsx`). A proved link is never a dead click; only an id the
@@ -33,6 +33,7 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
+import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
@@ -56,12 +57,11 @@ import { SignInRuleSuggestionHost } from '../secure-copy/sign-in-rule-suggestion
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
-import { AgendaInfoList } from './agenda-info-list.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from './agenda-line.tsx';
 import { agendaProse } from './agenda-prose.tsx';
-import { byNewestResolution } from './agenda-resolved.tsx';
 import { AgendaSettled, isResolved } from './agenda-settled.tsx';
+import { AgendaTab } from './agenda-tab.tsx';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
@@ -182,11 +182,13 @@ export interface Agenda {
   /** The line's slot for the transcript's Jump-to-latest pill; `null` while the line is not drawn. */
   readonly jumpHost: HTMLElement | null;
   /**
-   * The ferret's agenda as its one list in Info: open, parked and resolved, each row opening the same view.
-   * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way.
-   * `null` while this ferret is not in agenda mode and its ledger is empty.
+   * The ferret's agenda as Info's Agenda tab: four filters, each row opening the same view.
+   * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way; `lead` says
+   * where a sub-ferret's items live. `null` while this ferret is not in agenda mode and its ledger is empty.
    */
-  readonly section: (afterOpen?: () => void) => ReactNode;
+  readonly tab: (afterOpen?: () => void, lead?: { readonly name: string; readonly open: () => void }) => ReactNode;
+  /** The tab's counts for Overview's one line, each the length of that filter's rows; `null` where `tab` is. */
+  readonly counts: (() => Readonly<Record<AgendaTabFilter, number>>) | null;
   /** The ids the next message is about: the open item. */
   readonly references: () => readonly AgendaId[];
   /** The composer's placeholder while an item is open ("Reply to Piper…"); absent in plain chat. */
@@ -634,25 +636,33 @@ export const useAgenda = ({
     />
   ) : null;
 
-  const section = (afterOpen?: () => void): ReactNode => {
-    const parked = board.filter(item => item.parked !== undefined && item.notice !== true);
-    if (!agendaMode && openItems.length + parked.length + records.length === 0) return null;
-    return (
+  const hasTab = agendaMode || board.some(item => item.notice !== true) || records.length > 0;
+  const modelNow = (): ReturnType<typeof agendaTabModel> =>
+    agendaTabModel({ items: board, resolved: records, ferret, now: now ?? Date.now() });
+  const tab = (afterOpen?: () => void, lead?: { readonly name: string; readonly open: () => void }): ReactNode =>
+    hasTab ? (
       <AgendaDeliveryContext.Provider value={deliveryState}>
-        <AgendaInfoList
-          ferret={ferret}
+        <AgendaTab
+          model={modelNow()}
           onOpen={item => {
             openCard(item);
             afterOpen?.();
           }}
-          open={openItems}
-          parked={parked}
-          resolved={[...records].sort(byNewestResolution)}
-          {...(now === undefined ? {} : { now })}
+          {...(lead === undefined ? {} : { lead })}
         />
       </AgendaDeliveryContext.Provider>
-    );
-  };
+    ) : null;
+  const tabCounts = hasTab
+    ? () => {
+        const { rows } = modelNow();
+        return {
+          'needs-you': rows['needs-you'].length,
+          resting: rows.resting.length,
+          snoozed: rows.snoozed.length,
+          resolved: rows.resolved.length,
+        };
+      }
+    : null;
 
   return {
     above,
@@ -662,7 +672,8 @@ export const useAgenda = ({
     close: () => update(() => ({ drawer: false, card: null })),
     hostsLive,
     jumpHost,
-    section,
+    tab,
+    counts: tabCounts,
     references: () => aboutRef.current,
     placeholder:
       cardId === null || closed
