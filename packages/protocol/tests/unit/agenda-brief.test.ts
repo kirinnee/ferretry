@@ -6,12 +6,16 @@ import {
   AgendaQuestionSchema,
   agendaBriefOf,
   MAX_AGENDA_BODY_LENGTH,
+  MAX_AGENDA_FOLDED_DETAIL_LENGTH,
+  MAX_AGENDA_WHERE_LENGTH,
   MAX_AGENDA_QUESTIONS,
   MAX_AGENDA_STEP_LENGTH,
   MAX_AGENDA_STEPS,
   MAX_AGENDA_TERMS,
   recommendedAgendaOption,
   singleAgendaQuestion,
+  MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH,
+  MAX_AGENDA_POINTS_LENGTH,
 } from '../../src/lib/agenda.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
@@ -43,6 +47,11 @@ describe('attention brief', () => {
     const body = AgendaItemSchema.safeParse({ ...minimal, body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
     const answer = AgendaItemSchema.safeParse({ ...minimal, questionAnswer: 'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1) });
     const step = AgendaItemSchema.safeParse({ ...minimal, steps: ['x'.repeat(MAX_AGENDA_STEP_LENGTH + 1)] });
+    const where = AgendaItemSchema.safeParse({ ...minimal, whereWeAre: 'x'.repeat(MAX_AGENDA_WHERE_LENGTH + 1) });
+    const detail = AgendaItemSchema.safeParse({
+      ...minimal,
+      detail: 'x'.repeat(MAX_AGENDA_FOLDED_DETAIL_LENGTH + 1),
+    });
     const fits = AgendaItemSchema.safeParse({
       ...minimal,
       body: 'x'.repeat(MAX_AGENDA_BODY_LENGTH),
@@ -52,10 +61,14 @@ describe('attention brief', () => {
     // Assert
     should(fits.success).be.true();
     should(body.error?.issues[0]?.message).equal(
-      'the body is 8,001 characters; the most is 8,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice.',
+      'the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice.',
     );
-    should(answer.error?.issues[0]?.message).match(/^the question answer is 8,001 characters; the most is 8,000\./u);
-    should(step.error?.issues[0]?.message).match(/^a step is 2,001 characters; the most is 2,000\./u);
+    should(answer.error?.issues[0]?.message).match(
+      /^the question answer is 200,001 characters; the most is 200,000\./u,
+    );
+    should(step.error?.issues[0]?.message).match(/^a step is 16,001 characters; the most is 16,000\./u);
+    should(where.error?.issues[0]?.message).match(/^where we are is 200,001 characters; the most is 200,000\./u);
+    should(detail.error?.issues[0]?.message).match(/^the detail is 200,001 characters; the most is 200,000\./u);
   });
 
   it('should read an item raised before the brief existed, with nothing structured on it', () => {
@@ -130,7 +143,9 @@ describe('attention brief', () => {
   it('should refuse a blank or oversized premise', () => {
     // Arrange / Act / Assert
     should(AgendaItemSchema.safeParse({ ...minimal, premise: '   ' }).success).be.false();
-    should(AgendaItemSchema.safeParse({ ...minimal, decided: 'x'.repeat(10_000) }).success).be.false();
+    should(
+      AgendaItemSchema.safeParse({ ...minimal, decided: 'x'.repeat(MAX_AGENDA_POINTS_LENGTH + 1) }).success,
+    ).be.false();
   });
 
   it('should carry steps, a body and progress, and refuse what is over the limit or inconsistent', () => {
@@ -348,7 +363,7 @@ describe('agenda option details', () => {
     const blank = AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [{ label: 'Go', detail: '  ' }] });
     const long = AgendaActionRequestSchema.safeParse({
       ...raise,
-      optionDetails: [{ label: 'Go', detail: 'x'.repeat(1_001) }],
+      optionDetails: [{ label: 'Go', detail: 'x'.repeat(MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH + 1) }],
     });
     const multiline = AgendaActionRequestSchema.safeParse({
       ...raise,

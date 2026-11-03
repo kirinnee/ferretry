@@ -61,6 +61,13 @@ const tick = async (): Promise<void> => {
 };
 
 describe('attention transport', () => {
+  it('should opt into the channel on Send now and retain its request identity', async () => {
+    await sendAgendaReplies(daemonA, scopeA, async (_input, init) => {
+      should(new Headers(init?.headers).get('x-fy-agenda-channel')).equal('1');
+      should(new Headers(init?.headers).get('x-fy-request-id')).not.be.empty();
+      return response(snapshot(scopeA.sessionId));
+    });
+  });
   it('binds board, derived badge, and mutation requests to the paired daemon', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -85,6 +92,7 @@ describe('attention transport', () => {
     should(new Headers(calls[2]?.init.headers).get('content-type')).equal('application/json');
     should(new Headers(calls[2]?.init.headers).get('x-fy-request-id')).not.be.empty();
     should(calls[2]?.init.method).equal('POST');
+    for (const call of calls) should(new Headers(call.init.headers).get('x-fy-agenda-channel')).equal('1');
     should(JSON.parse(String(calls[2]?.init.body))).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 

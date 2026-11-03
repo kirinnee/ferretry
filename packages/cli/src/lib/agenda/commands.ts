@@ -9,6 +9,7 @@ import type {
   AgendaController,
   AgendaEditOptions,
   AgendaResolveOptions,
+  AgendaRestOptions,
   AgendaSnoozeOptions,
   AgendaStepOptions,
   AgendaSurfaceOptions,
@@ -54,10 +55,11 @@ Every field renders as markdown: short bullets, one idea each, no walls of text;
 (fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
 internal codenames, file paths or unexplained capitals — say it in plain words, or define the term
 with --term. The daemon warns when an item breaks these; fix it with
-\`edit <id>\`. Agenda items never expire on a timer. Answering or dismissing on the agenda already
-resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
-longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
-whose reason is gone but is still open is a bug, not a safe default.
+\`edit <id>\`. Agenda items never expire on a timer. The owner's answer or reply RESTS an item, waiting
+on you: \`answer <id> "<text>"\` brings it back to them, \`rest <id> --why "<what>"\` while you work on it,
+and \`done\` closes it once nothing more is expected — only you (or the owner's own done or dismiss)
+close it, so run \`done\` or \`dismiss\` yourself the moment it is settled. An item whose reason is gone
+but is still open is a bug, not a safe default.
 
 The card is swiped, so it offers at most 3 answers (left, up, right) — see --kind below.
 
@@ -260,6 +262,17 @@ function mountVerbs(
         '--confirms <file>',
         "a config file with a change held for the owner (fy config status): the owner's Allow applies it; the card's answers are Allow, Deny, Discard change",
       )
+      .option(
+        '--stage <stage>',
+        'what it needs from the owner now: explainer, question, plan, tracker or test (its kind says when absent)',
+      )
+      .option(
+        '--where <point>',
+        'where things stand now, one point each (repeat); an explainer or report the owner asked for',
+        collect,
+        [],
+      )
+      .option('--detail <markdown>', 'the context explained from zero, for a reader new to the topic (shown folded)')
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${AGENDA_OPEN_RULE}\n\n${askKinds(root.parent?.name() ?? 'fy')}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
@@ -270,7 +283,7 @@ function mountVerbs(
     agenda
       .command('edit')
       .description(
-        'reword an open item you raised — only the writing, never the ask; on your turn it hands the item back to the owner, but an item the owner replied to stays off their list unless you pass --back',
+        "rewrite an open item you raised: its writing and its stage, never the ask; an item resting on the owner's reply stays resting unless you answer on it (agenda answer)",
       )
       .argument('<id>', 'the item reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
@@ -318,8 +331,11 @@ function mountVerbs(
       .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin')
       .option(
         '--question-answer <markdown>',
-        "answer the owner's QUESTION about this item: shown above its options, which stay open for the owner's own answer",
+        'the same as `agenda answer`: your answer to the owner, shown above its options; a resting item goes back to their list',
       )
+      .option('--stage <stage>', 'what it needs from the owner now: explainer, question, plan, tracker or test')
+      .option('--where <point>', 'replace where things stand now, one point each (repeat)', collect, [])
+      .option('--detail <markdown>', 'replace the context explained from zero')
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--not-blocking', 'you are no longer stopped')
       .option('--will-block <thing>', 'what this will block, in a few words')
@@ -327,12 +343,33 @@ function mountVerbs(
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--clear-by', 'drop when it is needed')
       .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)')
-      .option(
-        '--back',
-        'you need something NEW from the owner, who already replied: put the item back on their list (also needs --summary, --premise and --context, or --question-answer); without it the edit leaves the item off their list',
-      ),
+      .option('--back', 'retired: answer the owner with `agenda answer`'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('answer')
+      .description(
+        'answer the owner on an item you raised: shown above its ask; one resting on their reply goes back to their list, in its old place',
+      )
+      .argument('<id>', 'the item reference, like !A3')
+      .argument('<text...>', 'your answer, as Markdown'),
+  ).action(async (id: string, words: string[], _flags: unknown, command: Command) => {
+    await controller.answer(id, words, merged(command));
+  });
+
+  scoped(
+    agenda
+      .command('rest')
+      .description(
+        'take an item on without asking the owner anything yet: it rests as working, quiet and never nudged, until you answer on it or mark it done',
+      )
+      .argument('<id>', 'the item reference, like !A3')
+      .option('-w, --why <line>', 'REQUIRED: what you are doing about it, in a line'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.rest(id, merged<AgendaRestOptions>(command));
   });
 
   scoped(

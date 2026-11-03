@@ -71,7 +71,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,319      | 330      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,236      | 309      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -83,7 +83,7 @@ The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settin
 8 KB (the Tools section grew by 351 to teach the login rule and `terminal_request_input`: do the login or website step yourself, ask the owner only for the one secret value, then by 6 more, its wording tightened, to teach `browser_request_input` and to never create a passkey; the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
 section (749, with the card-writing rule, How to test and the lane-by-category rule) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
-is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-parks-the-item rule — do the work and `done`; `edit --back` with the card refreshed only for something new — and the rule that an owner's question about an item is answered ON it (`edit --question-answer`, options kept) and an unanswered question is closed only with `done --reason`, paid for in its own words and by raising the cap from 7.9 to 8 KB; its one kind → answer-shape line, `AGENDA_SHAPE_LINE` from `@ferretry/protocol`, replaced the old per-kind flag hints and was paid for by tightening the section's own wording, leaving 6 characters under the cap; the `form=` clause for agenda forms, added after, was paid for by trimming the Lessons rule, so the measured total is 7,841), and the test keeps at least 150 characters of headroom under the 8 KB cap. The routing line grew from a 150-character
+is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-rests-the-item rule — `agenda answer` brings it back, `agenda rest` takes it on, `done` closes it once nothing is left (it replaced the older `edit --back`, in one character less) — and the rule that an owner's question about an item is answered ON it (`agenda answer`, options kept) and an unanswered question is closed only with `done --reason`, paid for in its own words and by raising the cap from 7.9 to 8 KB; its one kind → answer-shape line, `AGENDA_SHAPE_LINE` from `@ferretry/protocol`, replaced the old per-kind flag hints and was paid for by tightening the section's own wording, leaving 6 characters under the cap; the `form=` clause for agenda forms, added after, was paid for by trimming the Lessons rule, so the measured total is 7,841), and the test keeps at least 150 characters of headroom under the 8 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told. The agenda-first model (2026-11-03) rewrote the Agenda section to teach what an agenda
 is — one channel of the owner's attention, the three-part test, search-check-open, the states, the type stages,
@@ -100,7 +100,13 @@ section 1,276 → 1,319 (cap 1,290 → 1,330). With the send-label rule that too
 (7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The
 pack-status rule (`fy status --subtree`, screenshot review by a sub-agent) then took Pack to 1,166 and the total to 7,954, over both
 caps; the Pack wording was tightened (1,166 → 1,046, no rule dropped), so the measured total is 7,834 (7,848 counting the
-separators), leaving 16 characters under the 7,850 cap (2 counting the separators). The whole-prompt cap is unchanged.
+separators), leaving 16 characters under the 7,850 cap (2 counting the separators). The merge of that with the agenda model tightened
+the Agenda section's own wording (the repeated "unsure: closest", `done <id>` → `done`, `"<the ask>"` → `"<ask>"`, the form's
+"text in the reply", which the help already says, "on it" in the chat line, "say so" and "your"): agenda 1,319 → 1,230, the measured
+total 7,745 (7,759 counting the separators), leaving 105 characters under the 7,850 cap (91 counting the separators).
+Final review then restored "on it" in the chat line (the owner's words go ON the agenda item): agenda 1,230 → 1,236, the measured total
+7,751 (7,765 counting the separators), 99 characters under the 7,850 cap (85 counting the separators).
+The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

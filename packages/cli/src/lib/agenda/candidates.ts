@@ -275,8 +275,8 @@ export type JoinPlan =
  * is plain words (a line, with its premise and context) joins by one edit that keeps everything both agendas say, and
  * any other ask is never squeezed into one: the plan says what would be lost, and its own agenda is the safe way out.
  *
- * An item the owner replied to is Resting, and its card must be written again whole to come back (`--back` with the
- * summary, premise and context): the new line becomes its summary and the old summary moves into what is still open.
+ * An item the owner replied to is Resting. The joined update answers on that item (`--question-answer`) to return
+ * it to the owner; the new line becomes its summary and the old summary stays in what is still open.
  */
 export function joinPlan(
   binary: string,
@@ -299,7 +299,7 @@ export function joinPlan(
     flags('--premise', union(points(item.premise), points(request.premise))),
     flags('--context', union(points(item.context), points(request.context))),
     decided.length > points(item.decided).length ? flags('--decided', decided) : '',
-    replied ? ` --back${flags('--summary', [request.subject])}` : '',
+    replied ? `${flags('--question-answer', [request.subject])}${flags('--summary', [request.subject])}` : '',
   ].join('');
   return { kind: 'edit', command: edit };
 }

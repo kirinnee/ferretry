@@ -4,6 +4,8 @@ import {
   AgendaActionRequestSchema,
   type AgendaAsk,
   type AgendaAskOption,
+  type AgendaStage,
+  AgendaStageSchema,
   type AgendaItem,
   type AgendaLink,
   type AgendaOptionDetail,
@@ -27,6 +29,12 @@ import { DEFAULT_HOW_TO_RESOLVE } from './how-to-resolve.ts';
 
 /** The flags that describe a new item, beside its one-line summary. */
 export interface BriefFlags extends AskFlags {
+  /** `--stage`: what the item needs from the owner now (explainer, question, plan, tracker, test). */
+  readonly stage?: string;
+  /** `--where`, repeated: where things stand now, one point each; an explainer or a report the owner asked for. */
+  readonly where?: string | readonly string[];
+  /** `--detail`: the context explained from zero, as Markdown (drawn folded away). */
+  readonly detail?: string;
   /** The card's heading and the push's title: what this is about, in a few plain words. Required. */
   readonly title?: string;
   /** The one-line ask, when it is not given as words; `summary` is the older name for it. */
@@ -122,6 +130,9 @@ const BriefFileSchema = z.strictObject({
   willBlock: z.string().optional(),
   neededBy: z.string().optional(),
   confirms: z.string().optional(),
+  stage: z.string().optional(),
+  whereWeAre: Prose.optional(),
+  detail: z.string().optional(),
   optionDetails: z.array(z.object({ label: z.string(), detail: z.string() })).optional(),
   fields: z
     .array(
@@ -207,6 +218,9 @@ export function composeAddRequest(
   const blocking = flags.blocking === true || file.blocking === true;
   const willBlock = text(flags.willBlock) ?? text(file.willBlock);
   const neededBy = text(flags.neededBy) ?? text(file.neededBy);
+  const stage = stageFrom(text(flags.stage) ?? text(file.stage));
+  const whereWeAre = prose(flags.where) ?? prose(file.whereWeAre);
+  const detail = text(flags.detail) ?? text(file.detail);
   const answers = defaultAgendaAnswers(
     card.kind,
     ask,
@@ -246,6 +260,9 @@ export function composeAddRequest(
     ...(blocking ? { blockingNow: true as const } : {}),
     ...(willBlock === undefined ? {} : { willBlock }),
     ...(neededBy === undefined ? {} : { neededBy }),
+    ...(stage === undefined ? {} : { stage }),
+    ...(whereWeAre === undefined ? {} : { whereWeAre }),
+    ...(detail === undefined ? {} : { detail }),
   };
   // ONE ANSWER SHAPE PER KIND: the daemon refuses a mix with the same words, so it is said here first.
   const shape = confirms === undefined ? agendaShapeProblems(request) : [];
@@ -538,6 +555,12 @@ function describeIssues(error: z.ZodError): string {
 
 /** The fields `fy agenda edit` may change, as flags. */
 export interface EditFlags {
+  /** `--stage`: what the item needs from the owner now. */
+  readonly stage?: string;
+  /** `--where`, repeated: replaces where things stand now. */
+  readonly where?: string | readonly string[];
+  /** `--detail`: replaces the context explained from zero. */
+  readonly detail?: string;
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
@@ -574,6 +597,18 @@ export interface EditFlags {
   readonly field?: readonly string[];
 }
 
+/** A typed `--stage`, read as one of the stages, or `undefined` when none was given. */
+function stageFrom(typed: string | undefined): AgendaStage | undefined {
+  if (typed === undefined) return undefined;
+  const parsed = AgendaStageSchema.safeParse(typed.trim().toLowerCase());
+  if (!parsed.success || parsed.data === 'done') {
+    throw new Error(
+      `--stage is one of ${AgendaStageSchema.options.filter(each => each !== 'done').join(', ')} (done is \`agenda done\`), not "${typed}"`,
+    );
+  }
+  return parsed.data;
+}
+
 /**
  * The edit request one `fy agenda edit <id>` describes, merged onto the item as it stands: only the
  * writing changes. New question words replace the old in order and keep each question's options,
@@ -604,6 +639,9 @@ export function composeEditRequest(
   const fields = fieldsFrom(flags.field, undefined);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);
+  const stage = stageFrom(text(flags.stage));
+  const whereWeAre = prose(flags.where);
+  const detail = text(flags.detail);
   const optionDetails = optionDetailsFrom(
     (flags.option ?? []).map(raw => {
       const picked = splitOption(raw);
@@ -640,6 +678,9 @@ export function composeEditRequest(
   const request = {
     action: 'edit' as const,
     id,
+    ...(stage === undefined ? {} : { stage }),
+    ...(whereWeAre === undefined ? {} : { whereWeAre }),
+    ...(detail === undefined ? {} : { detail }),
     ...(summary === undefined ? {} : { subject: summary }),
     ...(title === undefined ? {} : { title }),
     ...(premise === undefined ? {} : { premise }),

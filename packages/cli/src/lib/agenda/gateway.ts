@@ -1,4 +1,6 @@
 import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaClearAgentsResult,
@@ -52,7 +54,11 @@ const jsonPost = (body: unknown, headers: Record<string, string>): RequestInit =
  */
 function attributionHeaders(ownSessionId: string | undefined): Record<string, string> {
   const own = ownSessionId?.trim() ?? '';
-  return { [FY_CLIENT_HEADER]: FY_CLIENT_NAME, ...(own === '' ? {} : { [FY_SESSION_ID_HEADER]: own }) };
+  return {
+    [FY_CLIENT_HEADER]: FY_CLIENT_NAME,
+    [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION,
+    ...(own === '' ? {} : { [FY_SESSION_ID_HEADER]: own }),
+  };
 }
 
 /**

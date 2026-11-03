@@ -106,7 +106,9 @@ describe('Agenda board observers', () => {
       ['created', 'board'],
       ['resolved', 'conversation'],
     ]);
-    should(changes.seen[1]?.change.addressed).containDeep({ id: 'A1', response: { choice: 'Wait' } });
+    // A ferret's item rests on the owner's answer: it stays open, carrying the answer.
+    should(changes.seen[1]?.change.addressed).be.undefined();
+    should(changes.seen[1]?.change.item).containDeep({ id: 'A1', ownerAnswer: { response: { choice: 'Wait' } } });
     should(changes.seen[2]?.change.item).containDeep({ id: 'A2' });
   });
 
@@ -220,7 +222,7 @@ describe('Agenda board observers', () => {
     ]);
   });
 
-  it('should tell a ferret every closing the owner makes of its own item on the board, under one send id each', async () => {
+  it('should tell a ferret every answer and closing the owner makes of its own item on the board, under one send id each', async () => {
     // Arrange
     const changes = new RecordingChanges();
     const agenda = service(new MemoryRepository(), changes);
@@ -246,7 +248,7 @@ describe('Agenda board observers', () => {
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        id: 'A1',
+        id: 'A1~1',
       },
       {
         sessionId: SESSION,
@@ -256,7 +258,7 @@ describe('Agenda board observers', () => {
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        id: 'A1',
+        id: 'A1~1',
       },
       {
         sessionId: SESSION,
@@ -318,7 +320,7 @@ describe('Agenda board observers', () => {
     for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
 
     // Assert — the gate's own answer is the board's to tell (the done ladder); the follow-up is the ferret's
-    should(messenger.sent.map(sent => sent.id)).deepEqual(['A2']);
+    should(messenger.sent.map(sent => sent.id)).deepEqual(['A2~1']);
     should(messenger.sent[0]?.message).containEql('make it faster');
   });
 
@@ -728,7 +730,8 @@ describe('Attention undelivered answers', () => {
     await agenda.discuss(SESSION, 'A2', HUMAN, 'why?');
 
     // Act
-    await sink.undelivered(SESSION, 'A1', 'it never appeared in the ferret’s transcript');
+    // A ferret's item rested on the answer, so the answer's key names its request (`A1~1`).
+    await sink.undelivered(SESSION, 'A1~1', 'it never appeared in the ferret’s transcript');
     await sink.undelivered(SESSION, 'A2~1', 'the ferret was removed');
     await sink.undelivered(SESSION, 'instructions~0123456789abcd', 'ignored');
     const board = await agenda.list(SESSION);

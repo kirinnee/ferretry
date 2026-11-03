@@ -104,12 +104,17 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
 export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'> {
   /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
   readonly now?: boolean;
-  /** `--back`: it needs something new from the owner, so an item they replied to returns to their list. */
+  /** `--back`: RETIRED (`agenda answer` replaced it); refused with the way to say it now. */
   readonly back?: boolean;
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A Markdown file for the new body; `-` reads standard input. */
   readonly bodyFile?: string;
+}
+
+/** Flags of `fy agenda rest`: what the ferret is doing. */
+export interface AgendaRestOptions extends AgendaCommandOptions {
+  readonly why?: string;
 }
 
 /** Flags that tick or untick a step. */
@@ -182,7 +187,7 @@ export class AgendaController {
 
   async list(options: AgendaCommandOptions): Promise<void> {
     const snapshot = await this.gateway.snapshot(this.#target(options));
-    this.#report(snapshot, options, () => renderAgendaList(snapshot));
+    this.#report(snapshot, options, () => renderAgendaList(snapshot, new Date(this.now()).toISOString()));
   }
 
   /** Prints one item, open or resolved; read-only, so a mistyped verb can never raise anything. */
@@ -194,7 +199,11 @@ export class AgendaController {
     const resolved = snapshot.resolved.find(item => item.id === id);
     const found = open ?? resolved;
     if (found === undefined) throw new Error(`no agenda item ${agendaReference(id)} in ${sessionId}`);
-    this.out.success(options.json === true ? JSON.stringify(found, null, 2) : renderAgendaItem(found));
+    this.out.success(
+      options.json === true
+        ? JSON.stringify(found, null, 2)
+        : renderAgendaItem(found, new Date(this.now()).toISOString()),
+    );
   }
 
   async history(options: AgendaCommandOptions): Promise<void> {
@@ -226,6 +235,9 @@ export class AgendaController {
       file,
     );
     requireBrief(composed);
+    if (composed.stage !== undefined || composed.whereWeAre !== undefined || composed.detail !== undefined) {
+      await this.#requireChannel('--stage, --where and --detail');
+    }
     if (pointer.item !== undefined) return await this.#editInstead(pointer.item, composed, options);
     const sessionId = this.#target(options);
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -410,6 +422,17 @@ export class AgendaController {
 
   async edit(reference: string, options: AgendaEditOptions): Promise<void> {
     const id = parseAgendaReference(reference);
+    if (options.back === true) {
+      throw new Error(
+        `--back is retired. To answer the owner on ${id}: \`agenda answer ${id} "<text>"\` (it goes back to their list in its old place). To ask them something new, raise it: \`agenda add\``,
+      );
+    }
+    const channel =
+      options.stage !== undefined ||
+      // `--where` collects, so it is an empty list when not given.
+      (typeof options.where === 'string' ? options.where : (options.where ?? []).join('')).trim() !== '' ||
+      options.detail !== undefined;
+    if (channel) await this.#requireChannel('--stage, --where and --detail on edit');
     const sessionId = this.#target(options);
     const wording = (options.question ?? []).some(question => question.trim() !== '');
     const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
@@ -422,9 +445,40 @@ export class AgendaController {
     const snapshot = await this.gateway.apply(sessionId, {
       ...request,
       ...(options.now === true ? { now: true as const } : {}),
-      ...(options.back === true ? { back: true as const } : {}),
     });
     this.#report(snapshot, options, () => renderAgendaMutation('edited', agendaReference(id), snapshot, id));
+  }
+
+  /**
+   * The ferret's ANSWER on an item (docs/agenda.md § States): shown above its ask, and an item resting on the
+   * owner's reply goes back to their list in its old place. `edit --question-answer` sends the same request.
+   */
+  async answer(reference: string, words: readonly string[], options: AgendaCommandOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const said = text(words.join(' '));
+    if (said === undefined) throw new Error(`say the answer: \`agenda answer ${id} "<text>"\``);
+    const snapshot = await this.gateway.apply(
+      this.#target(options),
+      composeEditRequest(id, { questionAnswer: said }, undefined),
+    );
+    this.#report(snapshot, options, () => renderAgendaMutation('answered', agendaReference(id), snapshot, id));
+  }
+
+  /** The ferret takes an item on without asking anything yet: it rests as `working`, quiet, never nudged. */
+  async rest(reference: string, options: AgendaRestOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const why = text(options.why);
+    if (why === undefined) throw new Error(`say what you are doing: \`agenda rest ${id} --why "<what>"\``);
+    await this.#requireChannel('taking an item on (agenda rest)');
+    const snapshot = await this.gateway.apply(this.#target(options), { action: 'rest', id, why });
+    this.#report(snapshot, options, () => renderAgendaMutation('resting (working)', agendaReference(id), snapshot, id));
+  }
+
+  /** Refuses, in words, before sending what a daemon older than `agenda.channel.1` would refuse as malformed. */
+  async #requireChannel(what: string): Promise<void> {
+    if (!(await featuresOrNone(this.gateway)).includes(DAEMON_FEATURES.agendaChannel)) {
+      throw new Error(`this daemon is older than ${what}; update the daemon first (fy daemon update)`);
+    }
   }
 
   /** Ticks step `number` (counted from 1, as `ls` prints them) of an open item, or unticks it with `--undo`. */

@@ -1,4 +1,6 @@
 import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaCountResponse,
@@ -46,7 +48,9 @@ const fetchAgenda = async (
   fetcher: DaemonFetch,
 ): Promise<unknown> => {
   assertScopeDaemon(daemon, scope);
-  const request = daemonRequest(daemon, path, init);
+  const headers = new Headers(init.headers);
+  headers.set(AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION);
+  const request = daemonRequest(daemon, path, { ...init, headers });
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
   return await response.json();

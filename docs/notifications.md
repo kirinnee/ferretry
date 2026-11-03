@@ -84,8 +84,9 @@ for a stop, else the oldest.
 
 **What counts as a stop.** The ferret's session state says its turn ended on the owner (`turnState` is
 `your-turn` or `needs-input`, with `turnStateAt`), and at least one non-notice item is on the owner's turn
-(no `waitingOn: 'ferret'`, unresolved). A stop is named by that `turnStateAt` instant, so the same stop
-never pushes twice — across a daemon restart too — and the next idle period is a new stop.
+(unresolved, and not resting or snoozed: [agenda.md](agenda.md#states)); a push's count is the Needs-you items
+(`agendaBadgeCount`). A stop is named by that `turnStateAt` instant, so the same stop never pushes twice — across a
+daemon restart too — and the next idle period is a new stop.
 
 **What never buzzes.**
 
@@ -93,7 +94,8 @@ never pushes twice — across a daemon restart too — and the next idle period 
 - A ferret that is working. Items raised mid-turn wait for the stop.
 - A ferret that was **already idle when the daemon started**. The start-up pass looks at deadlines only;
   a stop is something the daemon sees happen.
-- An item on the ferret's turn (the owner asked for more, or to discuss it; the ferret has the ball).
+- A RESTING item: the owner replied to or answered it, asked for more or to discuss it, or the ferret took it on
+  (`fy agenda rest`). The ferret has the ball.
 - A parked item: one the owner replied to, or snoozed and not yet woken.
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
@@ -414,7 +416,7 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,319 characters, capped at 1,330 by a test; the shipped
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,252 characters, capped at 1,270 by a test; the shipped
 prompt as a whole has its own cap, so a new rule here is paid for by tightening words) teaches the model first: what an
 agenda is (one channel of the owner's attention), the three-part test, search-check-open, splitting, then the one
 command that opens one, then the states, the type, chat discussion, and the two standing rules (a bug batch is one
@@ -423,9 +425,9 @@ agenda; an owner’s question is answered on its item)
 with the binary's name for `fy`:
 
 ```text
-Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest (unsure: closest). Split parts that stop fitting.
-Open: `fy agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`. Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`). Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
-Needs you buzzes; Resting is quiet. Owner reply rests it; your answer (`edit <id> --question-answer "<text>"` or `--back`) brings it back. Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected. Type: explainer→question→plan→tracker→test. Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.
+Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. Split parts that stop fitting.
+Open: `fy agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`. Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`). Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
+Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "<text>"` returns it. `rest <id> --why …`=working; `--stage`, `--where`=now. Keep current (`edit`); only you mark it Done when nothing's left. Type: explainer→question→plan→tracker→test. Chat: their words verbatim on it + reply; link it; unsure: closest.
 Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.
 ```
 

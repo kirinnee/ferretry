@@ -6,6 +6,8 @@ import {
   agendaCardAnswers,
   agendaInDiscussion,
   agendaShape,
+  agendaStage,
+  agendaState,
   agendaTurn,
   agendaWakeAt,
   hasOwnTitle,
@@ -71,7 +73,7 @@ function newestFirst(left: ResolvedAgendaItem, right: ResolvedAgendaItem): numbe
   return agendaOrdinal(right.id) - agendaOrdinal(left.id);
 }
 
-function itemLines(item: AgendaItem): string[] {
+function itemLines(item: AgendaItem, now?: string): string[] {
   // A card with a title of its own is headed by it, the ask under it; an old item's ask is its heading.
   const titled = hasOwnTitle(item);
   const lines = [
@@ -97,7 +99,12 @@ function itemLines(item: AgendaItem): string[] {
   lines.push(...agendaLines(item), ...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(displayHowToResolve(item.howToResolve))}`);
-  lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
+  if (item.whereWeAre !== undefined && item.whereWeAre.trim() !== '') {
+    lines.push(`${INDENT}where we are: ${compact(item.whereWeAre)}`);
+  }
+  lines.push(
+    `${INDENT}stage: ${agendaStage(item)} · since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`,
+  );
   if (item.notice === true) {
     lines.push(`${INDENT}notice: read, not answered${item.ping === true ? ' (pinged)' : ''}`);
   } else if (item.parked?.reason === 'snoozed') {
@@ -105,19 +112,56 @@ function itemLines(item: AgendaItem): string[] {
       `${INDENT}snoozed by the owner until ${agendaWakeAt(item) ?? item.parked.until}: it comes back then — \`agenda surface --now\` only if it is urgent`,
     );
   } else if (item.parked?.reason === 'replied') {
-    lines.push(
-      `${INDENT}replied ${item.parked.at}: off the owner's list — do the work, then \`agenda done ${item.id}\`; \`agenda edit ${item.id} --back --summary … --premise … --context …\` (the whole card, refreshed) only if you need something NEW from them`,
-    );
+    lines.push(...restingLines(item, now));
   } else if (agendaInDiscussion(item)) {
     lines.push(
-      `${INDENT}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),
+      `${INDENT}${restedPrefix(item, now)}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),
     );
   } else if (item.waitingOn !== undefined) {
-    lines.push(`${INDENT}ferret's turn: more information asked ${item.askedAt ?? ''}`.trimEnd());
+    lines.push(
+      `${INDENT}${restedPrefix(item, now)}ferret's turn: more information asked ${item.askedAt ?? ''}`.trimEnd(),
+    );
   } else if (agendaTurn(item) === 'owner') {
     lines.push(`${INDENT}owner's turn`);
   }
   return lines;
+}
+
+/** How long ago `since` was, as a person says it ("45m", "3h", "2d"); empty when it cannot be told. */
+function ageOf(since: string, now: string | undefined): string {
+  const elapsed = now === undefined ? Number.NaN : Date.parse(now) - Date.parse(since);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return '';
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** "resting 2h (since …), " for an item that derives as Resting but is not the replied kind; empty otherwise. */
+function restedPrefix(item: AgendaItem, now: string | undefined): string {
+  const view = agendaState(item);
+  if (view.state !== 'resting') return '';
+  const age = ageOf(view.since, now);
+  return `resting${age === '' ? '' : ` ${age}`} (since ${view.since}), `;
+}
+
+/**
+ * A RESTING item's lines (docs/agenda.md § States): how long it has rested, so a finished one gets closed, and what
+ * the ferret does next — answer on it (back to the owner), take it on, or mark it done.
+ */
+function restingLines(item: AgendaItem, now: string | undefined): string[] {
+  const view = agendaState(item);
+  if (view.state !== 'resting') return [];
+  const age = ageOf(view.since, now);
+  const rested = `resting${age === '' ? '' : ` ${age}`} (since ${view.since})`;
+  if (view.sub === 'working') {
+    return [
+      `${INDENT}${rested}, working: ${compact(item.resting?.why ?? '', SHORT_WIDTH)} — \`agenda answer ${item.id} "<text>"\` when you need the owner, \`agenda done ${item.id}\` when nothing more is expected`,
+    ];
+  }
+  return [
+    `${INDENT}${rested}, waiting on you: the owner replied — \`agenda answer ${item.id} "<text>"\` brings it back to their list, \`agenda rest ${item.id} --why "<what you are doing>"\` while you work on it, \`agenda done ${item.id}\` when nothing more is expected`,
+  ];
 }
 
 /** What the item blocks: stopped now, a named thing, and when it is needed — each only when set. */
@@ -201,19 +245,19 @@ function parseErrorWarning(snapshot: AgendaSnapshot): string | undefined {
 }
 
 /** The open agenda as a human reads it. */
-export function renderAgendaList(snapshot: AgendaSnapshot): string {
+export function renderAgendaList(snapshot: AgendaSnapshot, now?: string): string {
   const warning = parseErrorWarning(snapshot);
   const preamble = warning === undefined ? [] : [warning];
   if (snapshot.items.length === 0) return [...preamble, 'Nothing on the agenda.'].join('\n');
 
   const header = `${pluralItems(snapshot.count)} in ${snapshot.sessionId} — oldest first`;
-  const body = [...snapshot.items].sort(oldestFirst).flatMap(itemLines);
+  const body = [...snapshot.items].sort(oldestFirst).flatMap(item => itemLines(item, now));
   return [...preamble, header, ...body].join('\n');
 }
 
 /** One item as `agenda show` prints it: the open item's full brief, or the line its resolution left. */
-export function renderAgendaItem(item: AgendaItem | ResolvedAgendaItem): string {
-  return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item).join('\n');
+export function renderAgendaItem(item: AgendaItem | ResolvedAgendaItem, now?: string): string {
+  return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item, now).join('\n');
 }
 
 /** A ferret closed a question the owner never answered: it was withdrawn, not settled. */

@@ -171,7 +171,7 @@ describe('agenda candidates', () => {
     should(plan).eql({
       kind: 'edit',
       command:
-        "fy agenda edit A2 --still-open 'relay' --still-open 'Pick the relay region' --premise 'Old premise' --premise 'The relay goes live' --context 'The relay goes live' --context 'Two regions are near' --back --summary 'Pick the relay region'",
+        "fy agenda edit A2 --still-open 'relay' --still-open 'Pick the relay region' --premise 'Old premise' --premise 'The relay goes live' --context 'The relay goes live' --context 'Two regions are near' --question-answer 'Pick the relay region' --summary 'Pick the relay region'",
     });
   });
 

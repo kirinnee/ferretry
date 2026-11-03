@@ -8,7 +8,10 @@ import {
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
+  legacyAgendaSnapshot,
   MAX_AGENDA_SUBJECT_LENGTH,
+  readsAgendaChannel,
+  restoredLegacyAgendaReply,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -112,6 +115,13 @@ function pathSessionId(context: RouteContext): string {
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
 /**
+ * The board in the shape its caller reads: a caller that has not said it reads the channel (`x-fy-agenda-channel`)
+ * gets the legacy projection, so an app that shipped before it never meets an item its strict schema refuses.
+ */
+export const servedAgendaSnapshot = (context: RouteContext, snapshot: AgendaSnapshot): AgendaSnapshot =>
+  readsAgendaChannel(context.request.headers) ? snapshot : legacyAgendaSnapshot(snapshot);
+
+/**
  * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
  * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
  * cannot be read is left off: the board is the answer.
@@ -131,7 +141,9 @@ async function withReplies(replies: HeldReplies, sessionId: string, snapshot: Ag
 async function list(agenda: AgendaService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
-  return result.ok ? jsonResponse(await withReplies(replies, sessionId, result.value)) : refusal(result.error);
+  return result.ok
+    ? jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value)))
+    : refusal(result.error);
 }
 
 /**
@@ -148,7 +160,7 @@ async function sendReplies(
   const before = await agenda.list(sessionId);
   if (!before.ok) return refusal(before.error);
   await replies.sendNow(sessionId);
-  return jsonResponse(await withReplies(replies, sessionId, before.value));
+  return jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, before.value)));
 }
 
 /**
@@ -168,8 +180,22 @@ async function apply(
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, AgendaActionRequestSchema);
+  let request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  // Restore a legacy Retry before gate/config side effects as well as in the atomic ledger transition.
+  if (
+    actor.kind === 'human' &&
+    !readsAgendaChannel(context.request.headers) &&
+    request.action === 'resolve' &&
+    request.response !== undefined &&
+    (gates !== undefined || config !== undefined)
+  ) {
+    const board = await agenda.list(sessionId);
+    if (!board.ok) return refusal(board.error);
+    const id = request.id;
+    const item = board.value.items.find(item => item.id === id);
+    if (item !== undefined) request = restoredLegacyAgendaReply(item, request);
+  }
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     request.action === 'resolve' && request.response !== undefined && gates !== undefined
@@ -217,28 +243,30 @@ async function apply(
               ? agenda.discuss(sessionId, request.id, actor, request.note)
               : request.action === 'surface'
                 ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
-                : request.action === 'snooze'
-                  ? agenda.snooze(sessionId, request.id, request.until, actor)
-                  : request.action === 'unsnooze'
-                    ? agenda.unsnooze(sessionId, request.id, actor)
-                    : request.action === 'dismiss'
-                      ? agenda.dismiss(sessionId, request.id, actor, request.note)
-                      : request.response === undefined
-                        ? agenda.resolve(sessionId, request.id, actor, request.note)
-                        : agenda.answer(
-                            sessionId,
-                            request.id,
-                            request.response,
-                            actor,
-                            confirmed?.note ?? request.note,
-                          ));
+                : request.action === 'rest'
+                  ? agenda.rest(sessionId, request.id, request.why, actor)
+                  : request.action === 'snooze'
+                    ? agenda.snooze(sessionId, request.id, request.until, actor)
+                    : request.action === 'unsnooze'
+                      ? agenda.unsnooze(sessionId, request.id, actor)
+                      : request.action === 'dismiss'
+                        ? agenda.dismiss(sessionId, request.id, actor, request.note)
+                        : request.response === undefined
+                          ? agenda.resolve(sessionId, request.id, actor, request.note)
+                          : agenda.answer(
+                              sessionId,
+                              request.id,
+                              request.response,
+                              actor,
+                              confirmed?.note ?? request.note,
+                            ));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAgendaWriting(mutation.item) : [];
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...(await withReplies(replies, sessionId, mutation.snapshot)),
+    ...servedAgendaSnapshot(context, await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),

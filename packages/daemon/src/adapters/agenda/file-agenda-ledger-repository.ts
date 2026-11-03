@@ -1,14 +1,22 @@
 import { randomUUID } from 'node:crypto';
+import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord, AgendaArchiveRecordSchema } from '../../lib/agenda/archive.ts';
 import {
   AGENDA_FILES,
-  agendaLedgerDocument,
   type AgendaFileStore,
-  isAgendaSessionId,
-  parseAgendaLedger,
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
+  agendaLedgerDocument,
+  isAgendaSessionId,
+  parseAgendaLedger,
 } from '../../lib/agenda/index.ts';
+import {
+  type AppendOnlyFiles,
+  appendLogRecords,
+  commitLogAppend,
+  completeLinesCursor,
+  uncommittedLogFrom,
+} from '../../lib/append-only-log.ts';
 import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
 import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
@@ -24,6 +32,7 @@ export const AGENDA_CACHE_LIMIT = 2_048;
 
 /** The files a repository reads: the agenda's store, with the identity reads the cache is proved by. */
 type IdentifiedAgendaFiles = AgendaFileStore &
+  AppendOnlyFiles &
   Required<Pick<AgendaFileStore, 'identity' | 'readIdentified'>> &
   Pick<FileAgendaFileStore, 'file'>;
 
@@ -83,7 +92,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
       const ledger = deepFreezeJson(
-        this.parse(sessionId, name, read.text) as unknown as JsonValue,
+        (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
       ) as unknown as AgendaLedger;
       this.cache.delete(sessionId);
       for (const oldest of this.cache.keys()) {
@@ -97,28 +106,86 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     return null;
   }
 
-  private parse(sessionId: string, name: string, text: string): AgendaLedger {
+  private async parse(sessionId: string, name: string, text: string): Promise<AgendaLedger> {
+    let ledger: AgendaLedger | null;
+    let rewrittenByOlderDaemon: boolean;
     try {
-      const ledger = parseAgendaLedger(JSON.parse(text), sessionId);
+      const raw: unknown = JSON.parse(text);
+      ledger = parseAgendaLedger(raw, sessionId);
       if (ledger === null) throw new Error('invalid ledger');
-      return ledger;
+      const version = (raw as { readonly version?: unknown }).version;
+      rewrittenByOlderDaemon = version === undefined || version === 1;
     } catch {
       throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
     }
+    // An older daemon's write drops the cursor and the version but leaves the sidecar: its complete lines are
+    // the history it was keeping, so they are adopted as committed rather than cut as an uncommitted tail. A
+    // pre-cursor ledger whose own write failed after an append looks the same, so the append's mark stops the
+    // adoption where that never-committed append began. The history is read before the mark: a write racing
+    // this read marks before it appends, so any appended byte read here has its mark there to be read next.
+    if (!rewrittenByOlderDaemon || ledger.archive !== undefined) return ledger;
+    const history = await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0);
+    const uncommitted = await uncommittedLogFrom(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+    const adopted = completeLinesCursor(uncommitted === undefined ? history : history.subarray(0, uncommitted));
+    return adopted.count === 0 ? ledger : { ...ledger, archive: adopted };
   }
 
   async transact(sessionId: string, apply: (current: AgendaLedger | null) => AgendaMutation): Promise<AgendaMutation> {
     this.assertSessionId(sessionId);
     return await this.serial(sessionId, async () => {
-      const mutation = apply(await this.read(sessionId));
-      if (mutation.ok && mutation.changed) await this.write(sessionId, mutation.ledger);
+      let current = await this.read(sessionId);
+      // Migrate old in-ledger history before applying even an unchanged command. Appending precedes the
+      // atomic cursor write; a retry after a crash cuts the uncommitted append and writes it once again.
+      if ((current?.archivePending?.length ?? 0) > 0 && current !== null)
+        current = await this.write(sessionId, current);
+      const mutation = apply(current);
+      if (mutation.ok && mutation.changed) {
+        const ledger = await this.write(sessionId, mutation.ledger);
+        return { ...mutation, ledger };
+      }
       return mutation;
     });
   }
 
-  private async write(sessionId: string, ledger: AgendaLedger): Promise<void> {
+  /**
+   * Explicit, lazy history read. Snapshots and transactions never read committed archive records. It queues
+   * behind writers and serves only the bytes the ledger's cursor has committed: a record appended by a
+   * transaction whose ledger write then failed, or torn by a crash, is not history.
+   */
+  async readArchive(sessionId: string): Promise<readonly AgendaArchiveRecord[]> {
+    this.assertSessionId(sessionId);
+    await this.ready;
+    return await this.serial(sessionId, async () => {
+      const committed = (await this.read(sessionId))?.archive?.bytes ?? 0;
+      if (committed === 0) return [];
+      const bytes = Buffer.from((await this.files.read(sessionId, AGENDA_ARCHIVE_FILE)) ?? '');
+      const text = bytes.subarray(0, committed).toString('utf8');
+      if (bytes.length < committed || !text.endsWith('\n')) throw new Error('incomplete agenda history');
+      return text
+        .slice(0, -1)
+        .split('\n')
+        .map(line => AgendaArchiveRecordSchema.parse(JSON.parse(line)));
+    });
+  }
+
+  private async write(sessionId: string, ledger: AgendaLedger): Promise<AgendaLedger> {
     try {
-      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, agendaLedgerDocument(ledger));
+      const { archivePending, ...clean } = ledger;
+      const archive =
+        (archivePending?.length ?? 0) === 0
+          ? clean.archive
+          : await appendLogRecords(
+              this.files,
+              sessionId,
+              AGENDA_ARCHIVE_FILE,
+              ledger.archive ?? { bytes: 0, count: 0 },
+              archivePending ?? [],
+            );
+      const committed = { ...clean, ...(archive === undefined ? {} : { archive }) };
+      await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, agendaLedgerDocument(committed));
+      // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.
+      await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+      return committed;
     } finally {
       // After the disk, whether or not it landed: the next read asks the file. A read racing this write may
       // keep the old copy, but against the old file's identity, which the next read no longer finds.

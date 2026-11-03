@@ -90,6 +90,14 @@ export const DAEMON_FEATURES = {
    */
   agendaCards: 'agenda.cards.1',
   /**
+   * THE AGENDA AS A CHANNEL (docs/agenda.md § States): an owner's answer or reply RESTS a ferret's item instead of
+   * closing it, and the ferret's answer brings it back to its old place in the Needs-you queue. The add and edit
+   * requests take `stage`, `whereWeAre` and `detail`; the `rest` action takes an item on as `working`; and text caps
+   * rise to a per-item transport bound. A daemon without this name refuses every one of those, so a client sends them
+   * only to one that reports it.
+   */
+  agendaChannel: 'agenda.channel.1',
+  /**
    * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
    * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
    * machine that reports it, because there the gate item is the card's one ask.

@@ -11,7 +11,13 @@
  * what the last good read said and says nothing is complete, so the page never claims more than it read.
  */
 
-import { type AgendaItem, AgendaOpenPageSchema, type AgendaOpenPage } from '@ferretry/protocol';
+import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
+  type AgendaItem,
+  AgendaOpenPageSchema,
+  type AgendaOpenPage,
+} from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
 import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
@@ -30,7 +36,7 @@ export const fetchAgendaRollup = async (daemon: DaemonConnection, fetcher: Daemo
     const request = daemonRequest(
       daemon,
       after === undefined ? '/v1/agenda/open' : `/v1/agenda/open?after=${encodeURIComponent(after)}`,
-      {},
+      { headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION } },
     );
     const response = await fetcher(request.url, request.init);
     if (!response.ok) throw new DaemonResponseError(response.status, `HTTP ${response.status}`, undefined);

@@ -6,6 +6,7 @@ import {
   AgendaItemSchema,
   AgendaSnapshotSchema,
   agendaBadgeCount,
+  agendaState,
   gateReference,
   gatesAnsweredOn,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -461,7 +462,7 @@ describe('Agenda state machine', () => {
     should(noIds.error.code).equal('full');
   });
 
-  it('should answer every tagged ask kind, remove it immediately, and retain the response', () => {
+  it('should answer every tagged ask kind of an item no ferret raised, close it at once, and retain the response', () => {
     // Arrange
     const cases: Array<{ ask: AgendaAsk; response: AgendaResponse }> = [
       { ask: { kind: 'permission' }, response: { kind: 'permission', decision: 'approve' } },
@@ -482,7 +483,7 @@ describe('Agenda state machine', () => {
 
     // Act + Assert
     for (const { ask, response } of cases) {
-      const board = raised(AGENT, { ask });
+      const board = raised(HUMAN, { ask });
       const actual = succeeded(
         applyAgendaCommand(board.ledger, {
           action: 'answer',
@@ -686,7 +687,7 @@ describe('Agenda state machine', () => {
 
   it('should make repeated terminal actions idempotent and preserve the original resolver', () => {
     // Arrange
-    const board = raised();
+    const board = raised(HUMAN);
     const answered = succeeded(
       applyAgendaCommand(board.ledger, {
         action: 'answer',
@@ -767,7 +768,7 @@ describe('Agenda state machine', () => {
       applyAgendaCommand(daemon.ledger, {
         action: 'answer',
         actor: HUMAN,
-        id: 'A1',
+        id: 'A2',
         response: { kind: 'permission', decision: 'approve' },
         at: THIRD,
       }),
@@ -1553,7 +1554,7 @@ describe('Agenda state machine undelivered', () => {
       at: THIRD,
     });
 
-  it('should reopen an answered item as a card, keeping the answer for a retry', () => {
+  it('should put a rested answer that never arrived back to the owner, keeping the answer for a retry', () => {
     // Arrange
     const answered = succeeded(
       applyAgendaCommand(raised().ledger, {
@@ -1567,18 +1568,43 @@ describe('Agenda state machine undelivered', () => {
     );
 
     // Act
-    const reopened = succeeded(undelivered(answered.ledger));
+    const reopened = succeeded(undelivered(answered.ledger, answered.item?.ownerAnswer?.request));
     const snapshot = agendaSnapshot(reopened.ledger);
 
-    // Assert — open again, out of the resolved history, and the retry is the same answer.
+    // Assert — the owner's again (no longer resting), never closed, and the retry is the same answer.
     should(reopened.change).equal('reopened');
     should(snapshot.items.map(item => item.id)).deepEqual(['A1']);
     should(snapshot.resolved).be.empty();
-    should(snapshot.items[0]).not.have.properties(['resolvedAt', 'disposition', 'response']);
+    should(snapshot.items[0]).not.have.properties(['resolvedAt', 'disposition', 'response', 'parked', 'resting']);
     should(snapshot.items[0]?.undelivered).deepEqual({
       at: THIRD,
       reply: { action: 'resolve', note: 'ship it', response: { kind: 'permission', decision: 'approve' } },
       reason: REASON,
+    });
+  });
+
+  it('should reopen an item closed WITH an answer (the ferret’s own choice) as a resolve to retry, answer and note kept', () => {
+    // Arrange — a ferret answering its own item still closes it, so its delivery can fail like any closing
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, {
+        action: 'answer',
+        actor: AGENT,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        note: 'went ahead',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(closed.ledger));
+
+    // Assert
+    should(closed.addressed?.disposition).equal('done');
+    should(reopened.item?.undelivered?.reply).deepEqual({
+      action: 'resolve',
+      note: 'went ahead',
+      response: { kind: 'permission', decision: 'approve' },
     });
   });
 
@@ -1985,7 +2011,7 @@ describe('Agenda state machine reply', () => {
     should(agendaSnapshot(replied.ledger).resolved).have.length(0);
   });
 
-  it('should refuse a bare surface of it by the ferret and say to edit the whole card instead', () => {
+  it('should refuse a bare surface of it by the ferret and say to answer on it instead', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger, HUMAN, SECOND, 'A1', 'Why us?'));
 
@@ -1994,9 +2020,8 @@ describe('Agenda state machine reply', () => {
 
     // Assert
     should(refused.error.code).equal('invalid');
-    should(refused.error.message).containEql('fy agenda edit A1 --back --summary');
-    should(refused.error.message).containEql('--premise');
-    should(refused.error.message).containEql('--context');
+    should(refused.error.message).containEql('fy agenda answer A1');
+    should(refused.error.message).containEql('fy agenda done A1');
   });
 
   it('should come back fresh on the owner’s turn when the ferret edits the whole card with back, keeping its id and history', () => {
@@ -2315,7 +2340,7 @@ describe('Agenda state machine reply', () => {
 
     // Assert
     should(refused.error.code).equal('invalid');
-    should(refused.error.message).match(/add --back to bring it back/);
+    should(refused.error.message).match(/fy agenda answer A1 .* brings it back/);
     should(agendaSnapshot(legacy).items).be.empty();
   });
 
@@ -4015,7 +4040,7 @@ describe('Agenda state machine answer shapes', () => {
       should(refused.error.code).equal('invalid');
     });
 
-    it('should record the answer by field id and close the card', () => {
+    it('should record the answer by field id on the card, which rests waiting on its ferret', () => {
       const response: AgendaResponse = {
         kind: 'form',
         answers: [
@@ -4026,8 +4051,9 @@ describe('Agenda state machine answer shapes', () => {
 
       const actual = succeeded(answer(form(), response));
 
-      should(actual.snapshot.items).have.length(0);
-      should(actual.snapshot.resolved[0]).containDeep({ response, resolutionNote: 'Ship at 6pm' });
+      should(actual.snapshot.resolved).be.empty();
+      should(actual.item?.ownerAnswer).containDeep({ response, note: 'Ship at 6pm' });
+      should(agendaState(actual.item ?? {})).containDeep({ state: 'resting', sub: 'waiting-on-ferret' });
     });
 
     it('should refuse an answer to a field the form does not have, or a value that is not an option', () => {
@@ -4075,7 +4101,7 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     should(twice.item?.notice).be.undefined();
   });
 
-  it('should take the ferret’s answer to the owner’s question onto the SAME item, with the options unchanged and live again', () => {
+  it('should take the ferret’s answer to the owner’s question onto the SAME item, options unchanged, live again in its OLD place', () => {
     // Arrange
     const replied = succeeded(replying(raised(AGENT, REGION).ledger));
 
@@ -4086,7 +4112,8 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     should(answered.item?.questionAnswer).equal('EU keeps the data in Frankfurt.');
     should(answered.item?.parked).be.undefined();
     should(answered.item?.waitingOn).be.undefined();
-    should(answered.item?.waitingSince).equal(THIRD);
+    should(answered.item?.waitingSince).equal(FIRST);
+    should(answered.item?.resting).be.undefined();
     should(shapeOf(answered.item)).deepEqual(shapeOf(replied.item));
     should(agendaSnapshot(answered.ledger).items.map(item => item.id)).deepEqual(['A1']);
     should(answered.item?.revisions?.map(revision => revision.changed)).deepEqual([['questionAnswer']]);
@@ -4112,7 +4139,7 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     should(refused.error.message).containEql('missing --summary, --premise, --context');
   });
 
-  it('should leave an owner’s answer to the original options the only thing that closes it, even while parked as replied', () => {
+  it('should never close it on the owner’s answer to the original options, even while resting: it rests on the answer', () => {
     // Arrange
     const replied = succeeded(replying(raised(AGENT, REGION).ledger));
 
@@ -4128,8 +4155,11 @@ describe('Agenda state machine: a question item is never lost to a Got it (the o
     );
 
     // Assert
-    should(answered.addressed?.response).deepEqual({ kind: 'multiple-choice', choice: 'EU' });
-    should(agendaSnapshot(answered.ledger).items).have.length(0);
+    should(answered.change).equal('answered');
+    should(answered.addressed).be.undefined();
+    should(answered.item?.ownerAnswer?.response).deepEqual({ kind: 'multiple-choice', choice: 'EU' });
+    should(agendaSnapshot(answered.ledger).items.map(item => item.id)).deepEqual(['A1']);
+    should(agendaState(answered.item ?? {})).containDeep({ state: 'resting', sub: 'waiting-on-ferret', since: THIRD });
   });
 
   it('should never let Got it on an info item resolve a question item, however the two relate', () => {
@@ -4344,6 +4374,57 @@ describe('Agenda state machine: one unreadable entry', () => {
     // Assert
     should(ledger.entries.filter(entry => entry.lifecycle === 'addressed')).have.length(MAX_AGENDA_RESOLUTIONS - 1);
     should(parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID)?.unreadable).have.length(1);
+  });
+
+  describe('with every closed slot held by a set-aside entry', () => {
+    // Arrange — a readable open A1 beside MAX_AGENDA_RESOLUTIONS closed entries that cannot be read: the history has no room.
+    const saturated = (overrides: Partial<RaiseAgendaRequest>): AgendaLedger => {
+      const first = raised(HUMAN, overrides);
+      const board = {
+        ...first.ledger,
+        nextId: MAX_AGENDA_RESOLUTIONS + 2,
+        entries: [
+          ...first.ledger.entries,
+          ...Array.from({ length: MAX_AGENDA_RESOLUTIONS }, (_, index) => ({
+            lifecycle: 'addressed',
+            origin: HUMAN,
+            item: { id: `A${index + 2}`, invalidFutureItem: true },
+          })),
+        ],
+      };
+      return parseAgendaLedger(board, SESSION_ID)!;
+    };
+    const closing: ReadonlyArray<readonly [string, Partial<RaiseAgendaRequest>, (words: string) => AgendaCommand]> = [
+      ['resolve', {}, words => ({ action: 'resolve', actor: HUMAN, id: 'A1', note: words, at: SECOND })],
+      ['dismiss', {}, words => ({ action: 'dismiss', actor: HUMAN, id: 'A1', note: words, at: SECOND })],
+      [
+        'answer to an open question',
+        { ask: { kind: 'open-question' } },
+        words => ({
+          action: 'answer',
+          actor: HUMAN,
+          id: 'A1',
+          response: { kind: 'open-question', answer: words },
+          note: words,
+          at: SECOND,
+        }),
+      ],
+    ];
+
+    for (const [name, overrides, command] of closing) {
+      it(`should archive the closed snapshot of a ${name}, so the owner's words survive the immediate pruning`, () => {
+        // Act
+        const closed = succeeded(applyAgendaCommand(saturated(overrides), command('OWNER_FINAL_WORDS')));
+
+        // Assert — the hot history has no room, but the sidecar holds the closed item and its words
+        should(closed.ledger.entries.filter(entry => entry.lifecycle === 'addressed')).have.length(0);
+        const versions = (closed.ledger.archivePending ?? []).filter(record => record.kind === 'version');
+        should(versions).have.length(1);
+        should(versions[0]).containDeep({ id: 'A1', item: { disposition: closed.addressed!.disposition } });
+        should(JSON.stringify(versions[0])).containEql('OWNER_FINAL_WORDS');
+        should((versions[0] as { item: { resolvedAt?: string } }).item.resolvedAt).equal(SECOND);
+      });
+    }
   });
 
   it('should refuse a board whose set-aside entry claims an id another item holds', () => {

@@ -104,6 +104,17 @@ export function boardReplyMessage(item: ResolvedAgendaItem): string {
 }
 
 /**
+ * The message a ferret receives when the owner ANSWERED one of its items and the item rests, waiting on the ferret
+ * (docs/agenda.md § States): the same words as an answer that closed it, so the ferret reads every answer one way.
+ * `undefined` when the item carries no answer.
+ */
+export function ownerAnswerMessage(item: AgendaItem): string | undefined {
+  const answer = item.ownerAnswer;
+  if (answer === undefined) return undefined;
+  return agendaAnswerMessage(byAsk(item), responseWords(answer.response, item.fields), answer.note?.trim() ?? '');
+}
+
+/**
  * The message a ferret receives when the owner asks it for more information on one of ITS items. The item
  * stays open: the ferret answers by expanding it (`agenda edit`), not by closing it.
  */

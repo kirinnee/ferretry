@@ -14,9 +14,10 @@ today: a finished card reaches its "To test" lane and the owner presses **Done**
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
 given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re !A163 …] what is X?"), the
-ferret answers ON that item: `fy agenda edit !A163 --question-answer "<text>"` brings it back (even from the replied pile) with an "Answer to your
+ferret answers ON that item: `fy agenda answer !A163 "<text>"` brings it back to the owner's list, in its old place, with an "Answer to your
 question" block above its own options, which stay visible and answerable. **A question item keeps its own answer shape
-until the owner answers it with one of its answers, or the ferret closes it with `done`.** The owner's reply never turns
+until the ferret closes it with `done`**: the owner's answer rests it, waiting on the ferret ([States](#states)), and
+never closes it. The owner's reply never turns
 it into a Got it, and an answer is never a separate `--kind info` item standing in for it: tapping Got it on an info item
 resolves only that info item, never the question it was about. A question the owner asks about nothing in particular
 gets one `--kind info` item holding the answer (premise = the question, ask or body = the answer, readable with no chat
@@ -42,8 +43,8 @@ they would want to hear about in the same place, against the same background, an
   owner right now.
 - **Its states, as the ferret is taught them:** Needs you buzzes the owner; Resting is quiet. The owner's reply rests
   an item, the ferret's answer on it brings it back, and only the ferret marks it Done, when nothing more is
-  expected. (Today a reply parks the item as replied, and `edit --question-answer` or `edit --back` brings it back:
-  [Parked items](#parked-items).)
+  expected. `agenda answer` (or `edit --question-answer`) brings it back; `agenda rest --why` takes it on quietly:
+  [States](#states).
 - **Chat discussion lands in the agenda.** When the owner discusses an agenda in the main chat, the ferret puts the
   exchange into it — the owner's words verbatim, then its reply — and links the agenda from its chat reply. Unsure
   which agenda: the closest, and it says so.
@@ -73,7 +74,7 @@ Open a new agenda only when none passes the test:
   urgency or a deadline (the agenda edit verbs that can arrive later). So a **plain-words ask** (a line with its
   premise and context) joins by the one printed `edit`, which keeps every line both agendas say: the old still-open
   lines stay, the new ask is added to them, and the premise and context are the union of both. An item the owner
-  replied to is brought back by the same edit with `--back --summary '<the new ask>'`, the old subject kept as a
+  replied to is brought back by the same edit with `--question-answer '<the new ask>' --summary '<the new ask>'`, the old subject kept as a
   still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
   `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card, `--offer-close` onto an agenda that does not already offer the Done button) is never squeezed in:
   the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
@@ -244,15 +245,144 @@ task note F12 "<text>"`. An add with no `--task` that would take the focus card 
   asks left open"). `GET /v1/health` gives an unauthenticated caller only the **count** (`duplicateAskCount`); the
   list (`duplicateAsks`) is for the privileged loopback path.
 
+## States
+
+**An agenda item is a channel: the owner and its ferret talk on it until the ferret says it is done.** Its STATE is
+who it waits on, derived by one function (`agendaState`, `packages/protocol/src/lib/agenda-state.ts`) from the
+fields every item already carries, so an item from any daemon reads as exactly one:
+
+| State         | When                                                                                     | Notifies? |
+| ------------- | ---------------------------------------------------------------------------------------- | --------- |
+| **Needs you** | A new ask, or the ferret answered on it. It is in the Needs-you queue.                   | Yes       |
+| **Resting**   | It waits on work. Sub-state **waiting on the ferret** or **working** (below).            | Never     |
+| **Snoozed**   | The owner put it away until a time ([Snoozed](#snoozed)).                                | Never     |
+| **Done**      | Closed, by the ferret's `done` or the owner's explicit done or dismiss. Notices read so. | —         |
+
+**The rules (the owner's decisions on !A304):**
+
+- **Any reply or answer from the owner RESTS the item, waiting on the ferret.** A chat message naming it
+  (`[re !A5 …]`), an answer to its ask (a choice, Approve, a typed answer, a form) and a request for more
+  information all do. **An answer never closes an item**: it is kept on the open item (`ownerAnswer`) and
+  delivered to the ferret as `[answer to !A5 …]`, and the item leaves the owner's queue.
+- **The ferret's answer brings it back to Needs you, in its OLD place.** `fy agenda answer A5 "<text>"` (the same
+  request as `fy agenda edit A5 --question-answer "<text>"`) shows the answer above the item's ask and puts it back
+  where it stood in the queue: the item's `waitingSince`, which is when it last STARTED needing the owner
+  (`agendaNeedsYouSince`), is left as it was.
+- **A genuinely new need re-enters fresh** (`waitingSince` is now): the ferret's answer after it took the item on as
+  `working`.
+- **`fy agenda rest A5 --why "<what I'm doing>"`** takes an item on without asking anything yet: Resting, sub-state
+  **working**, quiet, never nudged. Refused on an item the owner snoozed.
+- **Only the ferret marks it Done** (`fy agenda done`), once nothing more is expected; the owner's own done or
+  dismiss closes it too. `fy agenda ls` shows each Resting item's age, so a finished one gets closed. A ferret's
+  `done` on an item the owner answered needs no `--reason`: the question was answered.
+- **A blocker wakes a snooze.** A ferret's edit that newly sets `--blocking` on a snoozed item wakes it, fresh, as
+  `--now` does — but it is its own reason, outside the once-an-hour limit that `--now` keeps, so an item that woke as
+  urgent a moment ago still wakes for a new blocker.
+
+**What a Resting item stores.** The field every app reads stays `parked: { reason: 'replied', at }` (or
+`waitingOn: 'ferret'` for a request for more information), so an app from before Resting lists it under
+**Replied** and never as needing the owner. Beside it, `resting: { sub, at, why?, nudgedAt?, nudges?, migrated? }`
+says what that field cannot: the sub-state, what the ferret is doing, and when it began resting. `parked` is what says
+the item rests; a `resting` with nothing parked is dropped on the next write.
+
+**Who is exempt (until card asks move into agendas).** An answer still CLOSES what the daemon acts on: a card's
+gate item, a held configuration change (`--confirms`), an input card, and every item the daemon raised for itself
+(`restsOnAnswer`). Gate items keep working end to end as before.
+
+**What counts.** The daemon's badge count (`agendaBadgeCount`) and its stop push count Needs-you items only: a
+resting, snoozed or done item, or a notice, never moves them.
+
+### Stage, where we are, and the detail
+
+- **`stage`** is what the item needs from the owner right now — `explainer`, `question`, `plan`, `tracker`, `test`,
+  then `done` — separate from its state (a question can rest; a tracker can need the owner). A ferret sets it with
+  `--stage` on `add` and `edit`; without one it is read from the kind (`agendaStageOfKind`: info is an explainer, a
+  permission or review a plan, a to-do a test, the rest a question).
+  Every stage the item entered is kept, oldest first, in `stages` (at most 64); closing it adds `done`.
+- **`whereWeAre`** (`--where`, point form or Markdown) is where things stand now. Anything the owner asked for to
+  complete the item — an explainer, a report — lives here.
+- **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
+  folded away.
+
+### No size limit
+
+There is no size limit a reader meets: **an item may weigh up to a transport bound of 1,000,000 characters of
+JSON** (`MAX_AGENDA_ITEM_LENGTH`), and each field keeps its own explicit bound under it — the body, where we are,
+the detail and an answer to the owner's question 200,000; the context and every reply or answer of the owner's
+64,000; a point-form segment and a step 16,000. Nothing is cut on the way: a reply is kept whole in the history.
+The wire history (20 entries) and the revisions (10) stay bounded until the conversation and the versions move to
+their own store. Before an owner record leaves that history, it is durably appended to the session's
+`agenda-history.jsonl`, keyed by item id. The sidecar has no eviction policy and stays off the wire. Pruning a
+closed item removes its hot view, retaining all its owner words in this file: its conversation, and the closing note
+and any structured answer, as the item's complete last snapshot (a `version` record). History is read only when
+explicitly requested; an ordinary transaction never rereads or rewrites the committed sidecar.
+
+**Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
+`agenda.json` holds only an `archive` cursor with a UTF-8 byte offset and record count, so the hot file does not
+grow with the conversation. Transaction-local `archivePending` records are appended and synced before the hot
+ledger is atomically written without them; that ledger write is the commit. Every byte past the committed cursor
+was never committed (a rolled-back command's records, or an append a crash tore, split UTF-8 characters included),
+so history reads stop at the cursor and the next append cuts that tail before it writes: a retried command's
+records land once, and a different command never adopts another's. Before it writes, an append puts down a
+`agenda-history.jsonl.pending` mark saying where it began, and every successful ledger write lifts it, so a mark
+on disk means "this append was not committed". The cursor decides wherever there is one; the mark matters to a
+ledger with none (below). The generic append mechanism can also hold later versions. Existing in-ledger
+`ownerHistory` records move here on the next transaction, including an unchanged one, with the same rule: a
+migration whose ledger write fails is cut and written again, never twice.
+
+**A ledger with no cursor** reads as version 1 (no `version`, or 1): one a daemon before the cursor wrote, or one an
+older daemon rewrote after a downgrade. Its sidecar's complete lines are adopted as committed history (the cursor
+then covers them), stopping at the mark when one is down, so an append whose ledger write failed is never
+served or adopted, and a torn last line is left out and cut by the next append. A version-2 ledger with no
+cursor has no history yet and adopts nothing.
+
+**Older ledgers are decoded before today's wire budgets are applied.** An old-valid item whose escaped versions
+exceed the transport bound keeps its complete original snapshot as a sidecar `version`; its served view sheds
+the oldest versions to fit. Its current words stay readable and actionable. Read-time normalization is
+idempotent, and the sidecar is committed before the migrated view replaces the old file.
+
+**An item can always be closed, rested, edited shorter and answered.** What the item says (its fields; `MAX_AGENDA_CONTENT_LENGTH`,
+560,000) is bounded well under the transport bound. A response alone is at most 70,000 characters of JSON, and the
+**complete response plus note** is at most 136,000 (`MAX_AGENDA_REPLY_ENVELOPE_LENGTH`), including JSON escaping.
+Three retained envelopes (latest answer, Retry, closing response/note) take at most 408,000, leaving 32,000 for
+control metadata. Non-evictable gate receipts use at most 16,000 of that reserve. The reserve includes all
+transition-only fields: request counters, waiting state and timestamps, stage and step progress never consume
+the item's own content budget. Requests and stored reply
+envelopes share this check; a 64,000-character printable answer plus a printable note fits, while a note whose
+escaping exceeds the envelope is refused before writing. The complete merged closed item also checks the
+1,000,000-character bound, including all resolution fields.
+
+A request that raises or edits an item past the content bound is refused, naming it. When versions or history
+would push an item past the transport bound, the machine removes oldest retained versions first, then oldest
+history entries (never a gate receipt), **archiving owner records in the same write before removing them**. The
+20-entry wire history limit uses that same archive path. Rebuildable activity and version metadata can be shed;
+owner responses and notes remain durable.
+
+An owner's earlier answers are kept: each `replied` history entry carries the `response` (the choice or typed
+answer) next to its note, because `ownerAnswer` keeps only the latest.
+
+### The migration (ledger version 2)
+
+The board file says its shape (`version`; absent reads as 1). It is brought to version 2 as it is read
+(`toChannel`, pure, total and idempotent: a board already in the shape is the same object), and the next write
+persists it; nothing on an item is dropped.
+
+- An open item parked as `replied` rests as **waiting on the ferret**, its reply time when it began resting. One
+  from a version-1 file is marked `migrated`: an old reply, kept apart from new ones so that a backlog of them is
+  never nudged as a burst.
+- An item with no stage gets the one its kind says (`done` once closed), as the first of its stages.
+
 ## Turns
 
-Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:
+The turn is the older view of the [state](#states), kept for every app that reads it: `agendaTurn(item)` (protocol)
+is its one definition, and a Resting item reads as `parked` through its `parked: replied`.
 
-| Turn       | When                                                                   |
-| ---------- | ---------------------------------------------------------------------- |
-| **owner**  | A new ask. The owner has not answered, or the ferret handed it back.   |
-| **ferret** | The owner asked to talk it through (Discuss), or asked for more info.  |
-| **done**   | Resolved (answered, dismissed or replied to), or the item is a notice. |
+| Turn       | When                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| **owner**  | Needs you: a new ask, or the ferret answered on it.                          |
+| **ferret** | The owner asked to talk it through (Discuss), or asked for more info.        |
+| **parked** | Resting on a reply, an answer or the ferret's work, or snoozed.              |
+| **done**   | Closed by the ferret's done or the owner's done or dismiss, or it is notice. |
 
 A new ask is the owner's turn. Nothing starts "in discussion": the ferret raises it, the owner reads it.
 
@@ -262,15 +392,17 @@ fields. **A chat reply is not a turn at all: it parks the item** (see "Parked it
 
 ## Handing it back
 
-On the ferret's turn there are three ways out. An item the owner's reply parked (see "Parked items") is off their list:
-a plain `edit` updates the card and leaves it parked, only `edit --back` — with the whole card refreshed — brings it
-back, and a bare `surface` is refused there. **None of the first two pings the owner.**
+On the ferret's turn there are a few ways out. An item RESTING on the owner's reply or answer (see [States](#states))
+is off their list: a plain `edit` updates the card and leaves it resting, `fy agenda answer` brings it back to its old
+place, and a bare `surface` is refused there. **None of them pings the owner.**
 
-- `fy agenda edit <id> …` — change the card (settled answers, what is still open, new options). Any edit by
-  the raising agent on its own turn hands the item back to the owner, even one that changes nothing. (Not an item
-  the owner replied to: that edit keeps it parked, unless it carries `--back`.)
-- `fy agenda surface <id> [--why "…"]` — hand it back as it stands.
-- `fy agenda done <id>` / `dismiss <id>` — close it, if the talk settled it.
+- `fy agenda answer <id> "<text>"` — answer the owner on it: it is theirs again, in its old place.
+- `fy agenda edit <id> …` — change the card (settled answers, what is still open, its stage). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
+  even one that changes nothing. (Not an item resting on a reply: that edit keeps it resting, unless it answers on
+  it. `--back` is retired: the CLI refuses it and names the verbs above.)
+- `fy agenda rest <id> --why "…"` — take it on, quiet, while working.
+- `fy agenda surface <id> [--why "…"]` — hand a discussed item back as it stands.
+- `fy agenda done <id>` / `dismiss <id>` — close it, once nothing more is expected.
 
 A human's edit never changes whose turn it is.
 
@@ -283,16 +415,17 @@ The ferret receives the message as
 [re !A5 «title», !A7 «title»] <text>
 ```
 
-**A reply is not an answer, and it is not "still open" either.** Each referenced item is closed for the
-owner at once (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
+**A reply is not an answer, and it is not "still open" either.** Each referenced item RESTS at once, waiting on
+the ferret (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
 and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
-referenced. If the ferret finishes a turn without touching a referenced item, the daemon nudges it once
-(nudge-once keys on the `[re !A…` opener); after that it stays quiet. The nudge says the item is off the owner's
-list: "Owner replied about !A5; it is off their list. Do the work, then `fy agenda done A5`. Use `fy agenda edit A5
---back …` only if you need something NEW from them." It never says it is the ferret's turn to hand the item back.
+referenced. If the ferret finishes a turn without touching a referenced item (an `answer`, `rest`, `edit`, `done`,
+`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re !A…` opener); after that it stays quiet. The nudge says: "Owner replied about !A5; it
+rests, waiting on you. Answer on it: `fy agenda answer A5 "<text>"` (back on their list), or `fy agenda done A5`
+when nothing more is expected." It never says it is the ferret's turn to hand the item back.
 
-Picking an option on the card (`respond`) still answers the item, exactly as before. `--other "<words>"`
-remains on the CLI and in the app for "none of the options"; chat no longer guesses it.
+Picking an option on the card (`respond`) answers the item and rests it, waiting on the ferret ([States](#states));
+it no longer closes it. `--other "<words>"` remains on the CLI and in the app for "none of the options"; chat no
+longer guesses it.
 
 ## Parked items
 
@@ -303,32 +436,29 @@ mechanism: why it is parked, and its way back.
 
 ### Replied
 
-An item the owner replied to in the chat (`[re !A5 «title»] …`) is **parked as `replied`** the moment the message
-is accepted. Otherwise an item a ferret never touches would hang on the owner's list for ever, and closing it
-would lose it when the ferret still needs something.
+An item the owner replied to in the chat (`[re !A5 «title»] …`), or ANSWERED on its card, RESTS the moment the
+message or answer is accepted: it is **parked as `replied`** (the field every app reads) and its `resting` says it
+waits on the ferret ([States](#states)). Otherwise an item a ferret never touches would hang on the owner's list for
+ever, and closing it would lose it when the ferret still needs something.
 
-- **The words are kept.** The reply text is a `replied` entry in the item's history, cut at the detail limit. A
-  reply with no words (a bare chip) records the entry without a note. Any wait (more information, a discussion)
-  ends: the reply answered it.
-- **It stays off the list until there is something new.** The owner has answered, so the ferret does the work. A
-  plain `fy agenda edit <id> …` by the ferret updates the card (the living summary) and **leaves it parked**: no
-  `waitingSince` bump, nothing unread, no badge. `fy agenda done <id>` / `dismiss <id>` closes it **without telling
-  the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified (they had
-  already replied)", and the item shows under Resolved as usual.
-- **`--back` is the one way back.** When the ferret needs something NEW from the owner it runs
-  `fy agenda edit <id> --back --summary "…" --premise "…" --context "…"`, on the owner's turn — **fresh**:
-  `waitingSince` is now, so it reads as new and unread. **The whole card is refreshed**: the owner's words changed
-  what is going on, so the ask, the premise and the context are all written again (restating one unchanged is
-  fine) and the card stays an isolated, self-contained statement of the situation. A `--back` that leaves one out
-  is refused (`invalid`, naming the missing flags), and so is a bare `fy agenda surface <id>` of a replied item.
-  An answer to the owner's own question (`--question-answer`) counts as new and needs no `--back`. The owner, the
-  daemon's timer and a snoozed or never-replied item are unaffected.
+- **The words are kept.** The reply text, or an answer's note, is a `replied` entry in the item's history, whole up
+  to the reply bound. A reply with no words (a bare chip) records the entry without a note. Any wait (more
+  information, a discussion) ends: the reply answered it.
+- **It stays off the list until the ferret answers on it.** A plain `fy agenda edit <id> …` by the ferret updates the
+  card (the living summary) and **leaves it resting**: no `waitingSince` bump, nothing unread, no badge.
+  `fy agenda answer <id> "<text>"` brings it back to the owner **in its old place** (`waitingSince` unchanged). `fy agenda done <id>` / `dismiss <id>` closes it **without
+  telling the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified
+  (they had already replied)", and the item shows under Resolved as usual.
+- **`--back` is retired** from the CLI, which refuses it and names `agenda answer`. The daemon
+  still takes it from an older CLI: a `--back` with the whole card refreshed (`--summary`, `--premise`, `--context`)
+  brings the item back fresh, and one that leaves one out is refused (`invalid`, naming the missing flags); so is a
+  bare `fy agenda surface <id>` of a resting item.
 - The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list"). The Inbox does not wait for the next board read: a reply sent from an open Inbox item is shown as replied at once, with an Undo (see "In the Inbox").
-- Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a response, as `done`.
 - **Warden items follow the same rule.** A daemon-raised item the owner replied to parks like any other; it is
   not raised again for the same anomaly while the Warden's "already told" record holds.
 - **Discuss is separate.** The owner's explicit Discuss (and a request for more information) still puts the item
-  on the ferret's turn and counts as a request.
+  on the ferret's turn and counts as a request; it rests too, waiting on the ferret, and any edit of the ferret's
+  hands it back.
 
 ### Snoozed
 
@@ -346,7 +476,9 @@ list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the c
 - **The ferret is told without text tags**: the state is the item's own field, and `fy agenda ls` says
   "snoozed by the owner until …". A ferret's `edit` or `surface` leaves a snoozed item asleep (an edit still
   changes its words). Only `--now` — it is urgent — wakes it, and a ferret may do that **once an hour per item**
-  (`urgentAt`; a second try inside the hour is refused as `rate-limited`).
+  (`urgentAt`; a second try inside the hour is refused as `rate-limited`). A **newly blocking** edit (`--blocking`)
+  wakes it on its own, outside that throttle: an item that woke as urgent half an hour ago still wakes for a new
+  blocker.
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
 - **The app ships first**: a daemon reports `agenda.snooze.1` on `GET /v1/health`, and the app sends snooze or
   unsnooze only to a machine that lists it. To an older machine it sends nothing and says the machine needs an
@@ -357,7 +489,7 @@ ferret's turn. When a board is read, an item still waiting on the ferret only be
 parked as `replied` at the reply, and an item closed as `replied` is open again, parked as `replied` at its
 close — newest first, and only while the board has room (the per-session cap, and the agent cap for a ferret's
 item); the rest stay closed, and `surface` or `edit` still reopens one. It is pure and idempotent
-(`parkOwnerReplies`), and the next write persists it.
+(`parkOwnerReplies`), and the next write persists it. Every item it parks then rests, as the [ledger version 2 migration](#the-migration-ledger-version-2) says.
 
 ## What an item blocks
 
@@ -555,22 +687,24 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 ## Verbs
 
-`fy agenda add | edit | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
+`fy agenda add | edit | answer | rest | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                    | Does                                                                                                                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `add`                   | Open an agenda (the owner's turn). `--title` and the ask are required. Lists the open ones first and opens only with `--new "<why none fits>"` when there are some ([One channel per topic](#one-channel-per-topic)). |
-| `add --offer-close`     | With `--task`: the owner may close the card with the same tap that resolves it.                                                                                                                                       |
-| `add --task <card>`     | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                                                                                             |
-| `edit <id>`             | Reword; on the ferret's turn hands it to the owner. A replied item stays parked.                                                                                                                                      |
-| `edit <id> --back`      | Needs something NEW from the owner: bring a replied item back, whole card refreshed.                                                                                                                                  |
-| `surface <id>`          | Hand it back to the owner, unchanged (silent). Refused for a replied item.                                                                                                                                            |
-| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                                                                                                          |
-| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.                                                                                                                                                    |
-| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a replied item.                                                                                                                     |
-| `dismiss <id>`          | Close without answering; agents only their own. Quiet on a replied item.                                                                                                                                              |
-| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                                                                                                                                                          |
-| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.                                                                                                                                               |
+| Verb                       | Does                                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `add`                      | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
+| `add --offer-close`        | With `--task`: the owner may close the card with the same tap that resolves it.                                                            |
+| `add --task <card>`        | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
+| `edit <id>`                | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
+| `answer <id> "<text>"`     | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
+| `rest <id> --why "<what>"` | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
+| `edit <id> --back`         | Retired: refused, naming `answer`.                                                                                                         |
+| `surface <id>`             | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
+| `snooze <id>`              | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
+| `unsnooze <id>`            | The owner's: bring a snoozed or resting item back to the list now.                                                                         |
+| `done <id>`                | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.                                         |
+| `dismiss <id>`             | Close without answering; agents only their own. Quiet on a resting item.                                                                   |
+| `ls` / `show`              | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.                                       |
+| `needs-info`, `discuss`    | The owner's side, kept for old clients. They make it the ferret's turn.                                                                    |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 
@@ -659,7 +793,7 @@ or bold the answer first. Lists, tables, headings and fenced code are not counte
 
 **A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. The prompt says it in one line — "Bug batch: ONE agenda, line each + where tracked." — a line per bug and where each is tracked. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
 
-**A body over 8,000 characters is refused, never trimmed.** `body` and `questionAnswer` (`--question-answer`) take at most `MAX_AGENDA_BODY_LENGTH` (8,000) characters, and a step at most `MAX_AGENDA_STEP_LENGTH` (2,000). One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 12,345 characters; the most is 8,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections, and the agenda is a decision surface, not a document store. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
+**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000). One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to a one-screen summary and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections, and the agenda is a decision surface, not a document store. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
 
 **A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
 as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
@@ -992,8 +1126,10 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    those items again.
 5. **Undelivered.** A send refused outright, a fate of `timed_out`, `unaccounted`, `withdrawn` or
    `cancelled`, no proof within the receipt wait (15 minutes), or a composer that never emptied: each
-   item goes **back to the owner as an open card**. An answer, done or dismiss reopens the closed item; a
-   Discuss or request for more information ends that wait. The item carries
+   item goes **back to the owner as an open card**. A done or dismiss reopens the closed item; an answer that
+   rested a ferret's item brings it back from resting (each answer is its own delivery, keyed by the item's request
+   counter, `A5~2`, so a second answer after the ferret replied is told too); a Discuss or request for more
+   information ends that wait. The item carries
    `undelivered: {at, reply, reason}`: the app shows "Your answer didn't reach <ferret> — answer again
    or Retry", and Retry posts `{...reply, id}`, the same action again. The owner's next action on the
    item clears the mark. An agenda already full of open items keeps the answer closed.
@@ -1028,6 +1164,35 @@ The agenda was called Attention, and its wire still carries that name for older 
 `main` the moment a change merges while a daemon changes only after a release and `fy daemon update`, so for a while
 every combination of old and new meets.
 
+### The channel (`agenda.channel.1`)
+
+A daemon that rests items on an answer and takes the channel's requests reports `agenda.channel.1` on
+`GET /v1/health`. Every new item field (`resting`, `stage`, `stages`, `ownerAnswer`, `whereWeAre`, `detail`) is
+optional, so an app or CLI from before reads every item; the request fields (`stage`, `whereWeAre`, `detail`, the
+`rest` action) are refused as malformed by an older daemon, so the CLI checks the feature first and says the daemon
+needs an update. `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
+item back fresh instead of in its old place.
+
+### An older app keeps reading the board
+
+An app from before the channel parses a **whole** board with its own schema, so one item it cannot read makes the board
+unreadable. Its limits were smaller (a point-form segment 1,024, the context and every note 2,048, a step 2,000, a body
+8,000), and its revisions and history entries are strict, so an edit of `whereWeAre` or `detail` or a `response` on a
+history entry is a key it refuses. A daemon therefore serves the items in two shapes, chosen by the **request header
+`x-fy-agenda-channel: 1`** (the same version as `agenda.channel.1` on `GET /v1/health`):
+
+- **With the header** — the whole shape, exactly as stored. The CLI and current PWA send it on agenda requests,
+  including snapshot reads, actions, Send now and every roll-up page. Older daemons ignore the header (it is already
+  allowed by the daemon's CORS preflight).
+- **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
+  every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
+  `stages`, `whereWeAre`, `detail`) and the `response` of a history entry left out, and a revision that only changed a
+  field the older app does not know dropped. The projection is a view: it is never written back, so nothing is lost on
+  the machine. It covers the board, Send now, the roll-up of every conversation and the machine agenda, including
+  `questionAnswer`, revision `previous` values and nested undelivered responses and notes. If an older app retries
+  the exact clipped reply it received, the ledger transition restores the stored full reply before applying it;
+  a legacy view never replaces the owner's words with a shortened answer.
+
 ### Both spellings, one window
 
 | Older name (still answered)               | Agenda name                       | Today                                                                      |
@@ -1061,6 +1226,15 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
   written only when every session succeeded, and the migration never stops the daemon starting.
 - **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
+- **The ledger says its shape** (`version`, 2 since the channel): it is read as 1 when absent and brought to 2 as it
+  is read ([the migration](#the-migration-ledger-version-2)). An older daemon reads a version-2 file as it always did
+  and drops the fields it does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the `version`; its
+  `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is left alone, and a
+  ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete lines as committed
+  history up to any mark ([a ledger with no cursor](#no-size-limit)), so no owner history is lost across
+  a downgrade and an upgrade. Two limits are declared: an uncommitted tail a later commit outlived (it lifted the
+  mark, and its cursor went with the downgrade) is adopted too, and a crash between a commit and the lifting of its
+  mark, followed by a downgrade before that session's next write, leaves that last append out.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same

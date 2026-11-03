@@ -775,7 +775,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Share if same place, same context, same pace;');
     // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
     should(text).containEql('dependent things always share.');
-    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest (unsure: closest).');
+    should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest.');
     should(text).containEql('Split parts that stop fitting.');
   });
 
@@ -785,7 +785,7 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // Assert — premise and context are part of the one command: every item is read cold.
     should(text).containEql(
-      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`.',
+      'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"`.',
     );
     should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`).');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
@@ -804,17 +804,15 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // Assert
     should(text).containEql('Needs you buzzes; Resting is quiet.');
-    should(text).containEql('Owner reply rests it;');
+    should(text).containEql('Owner reply/answer rests it;');
     // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
-    should(text).containEql('your answer (`edit <id> --question-answer "<text>"` or `--back`) brings it back.');
-    should(text).containEql(
-      'Keep current (`edit`); only you mark it Done (`done <id>`) when nothing more is expected.',
-    );
+    should(text).containEql('`answer <id> "<text>"` returns it.');
+    should(text).containEql('`rest <id> --why …`=working; `--stage`, `--where`=now.');
+    should(text).not.containEql('--back');
+    should(text).containEql("Keep current (`edit`); only you mark it Done when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
     // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
-    should(text).containEql(
-      'Chat about it: put their words verbatim + your reply on it; link it in chat; unsure: closest, say so.',
-    );
+    should(text).containEql('Chat: their words verbatim on it + reply; link it; unsure: closest.');
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -833,8 +831,8 @@ describe('AGENDA_INSTRUCTION', () => {
     // Act
     const text = AGENDA_INSTRUCTION('zz');
 
-    // Assert — `answer`, `rest`, `log`, `split` and `merge` join the text in the PRs that ship them.
-    for (const verb of ['answer', 'rest', 'log', 'split', 'merge']) should(text).not.containEql(`agenda ${verb}`);
+    // Assert — conversation logging, split and merge commands join when their implementations ship.
+    for (const verb of ['log', 'split', 'merge']) should(text).not.containEql(`agenda ${verb}`);
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
     // The retired rules: an agenda now evolves into a tracker, and a reply no longer parks it.
@@ -843,8 +841,8 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,319: 1,276 with both owner rules restored, plus 43 for the body rule (one-screen summary, full report via `--link`); the total keeps its headroom below.
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_330);
+    // Assert — measured 1,236: the body rule (one-screen summary, full report via `--link`) added 43 to the 1,276 of the agenda-first model, and tightening the section's own wording (the repeated "unsure: closest", `done <id>`, "<the ask>", the form's "text in the reply" that the help already says) paid for it and for main's send-label rule; the total keeps at least 99 of headroom.
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

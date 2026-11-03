@@ -27,7 +27,7 @@ class MemoryRepository implements AgendaLedgerRepository {
   }
 }
 
-async function fixture(options: { readonly broken?: boolean } = {}) {
+async function fixture(options: { readonly broken?: boolean; readonly long?: boolean } = {}) {
   const repository = new MemoryRepository();
   const service = new AgendaService(
     options.broken === true
@@ -55,6 +55,7 @@ async function fixture(options: { readonly broken?: boolean } = {}) {
       waitingSince: NOW,
       notice: true,
       kind: 'info',
+      ...(options.long === true ? { body: 'b'.repeat(50_000), whereWeAre: 'Halfway there.' } : {}),
     },
     { kind: 'daemon', cause: 'system' },
   );
@@ -112,5 +113,35 @@ describe('the machine agenda routes', () => {
     const { get, post } = await fixture({ broken: true });
     should((await get()).status).equal(500);
     should((await post({ action: 'dismiss', id: 'A1' })).status).equal(500);
+  });
+});
+
+describe('the machine agenda for an older app', () => {
+  type Served = { items: { body?: string; whereWeAre?: string }[] };
+
+  it('should serve an item in the shape the older app reads when the caller names no channel', async () => {
+    // Arrange
+    const { get } = await fixture({ long: true });
+
+    // Act
+    const response = await get();
+
+    // Assert
+    const [item] = (jsonBody(response) as Served).items;
+    should(item?.body).have.length(8_000);
+    should(item).not.have.property('whereWeAre');
+  });
+
+  it('should serve the whole item to a caller that names the channel', async () => {
+    // Arrange
+    const { get } = await fixture({ long: true });
+
+    // Act
+    const response = await get({ ...human, 'x-fy-agenda-channel': '1' });
+
+    // Assert
+    const [item] = (jsonBody(response) as Served).items;
+    should(item?.body).have.length(50_000);
+    should(item?.whereWeAre).equal('Halfway there.');
   });
 });

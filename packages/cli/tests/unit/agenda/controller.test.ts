@@ -926,7 +926,7 @@ describe('agenda controller add — related work', () => {
     const message = (failure as Error).message;
     should(message).match(/!A3\s+resting/u);
     should(message).containEql(
-      "fy agenda edit A3 --still-open 'pick a relay' --still-open 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.' --back --summary 'choose a relay'",
+      "fy agenda edit A3 --still-open 'pick a relay' --still-open 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.' --question-answer 'choose a relay' --summary 'choose a relay'",
     );
   });
 
