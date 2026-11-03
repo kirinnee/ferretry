@@ -10,15 +10,23 @@
  * lead's card filed in its own words is. `?long=1` gives the first card to test sixteen steps (the box scrolls).
  */
 
-import { type BoardTaskView, boardOk, type SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type BoardTaskView,
+  boardOk,
+  type ResolvedAgendaItem,
+  type SessionView,
+} from '@ferretry/protocol';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
+import { AgendaTab } from '../src/features/agenda/agenda-tab.tsx';
 import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
 import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import { AGENDA_TAB_FILTERS, type AgendaTabFilter, agendaTabModel } from '../src/lib/agenda-tab.ts';
 import type { ChatTasksView } from '../src/lib/board-chat-url.ts';
 import { boardSideView } from '../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
@@ -253,6 +261,49 @@ store.act = async (_daemon, id, request) => {
   return boardOk(card(id));
 };
 
+const agendaItem = (id: string, subject: string, extra: Record<string, unknown> = {}): AgendaItem =>
+  ({
+    id,
+    source: 'agent-raised',
+    sourceRef: null,
+    subject,
+    why: 'It needs the owner.',
+    waitingSince: ago(40),
+    howToResolve: 'Answer it.',
+    raisedBy: 'agent',
+    raisedBySession: LEAD,
+    raisedByName: null,
+    ask: { kind: 'multiple-choice', question: subject, options: [{ label: 'Yes' }, { label: 'No' }] },
+    ...extra,
+  }) as unknown as AgendaItem;
+
+const AGENDA_ITEMS: readonly AgendaItem[] = [
+  agendaItem('A12', 'Approve the release notes for 4.121?', { waitingSince: ago(190), blockingNow: true }),
+  agendaItem('A14', 'Which relay region should the hosted default use?', { waitingSince: ago(35) }),
+  agendaItem('A15', 'Rotate the relay signing key this week?', { waitingSince: ago(8) }),
+  agendaItem('A9', 'Plan: split the daemon route spine', {
+    waitingOn: 'ferret',
+    askedAt: ago(75),
+    resting: { sub: 'waiting-on-ferret', at: ago(75) },
+  }),
+  agendaItem('A10', 'Tracker: card asks rollout', {
+    waitingOn: 'ferret',
+    askedAt: ago(300),
+    resting: { sub: 'working', at: ago(300) },
+  }),
+  agendaItem('A7', 'Re-run the flaky SIT suite?', {
+    parked: { reason: 'snoozed', at: ago(60), until: new Date(NOW + 20 * 3_600_000).toISOString() },
+  }),
+  agendaItem('A8', 'Move the Pages deploy to Friday?', {
+    parked: { reason: 'snoozed', at: ago(600), until: new Date(NOW + 3 * 3_600_000).toISOString() },
+  }),
+];
+const AGENDA_RESOLVED: readonly ResolvedAgendaItem[] = [
+  { ...agendaItem('A3', 'Ship the pairing QR change?'), resolvedAt: ago(45) },
+  { ...agendaItem('A2', 'Use the operator password for relays?'), resolvedAt: ago(26 * 60) },
+  { ...agendaItem('A1', 'Name the new lane “Ready to try”?'), resolvedAt: ago(3 * 24 * 60) },
+] as unknown as readonly ResolvedAgendaItem[];
+
 const agendaStore = new DaemonAgendaStore();
 const agenda = {
   store: agendaStore,
@@ -287,7 +338,11 @@ function Harness() {
   });
   const compact = window.innerWidth < 640;
   const scope = { daemonId: laptop.daemonId, sessionId: LEAD };
-  const tab = params.get('tab') === 'surfaces' ? 'surfaces' : 'tasks';
+  const tabParam = params.get('tab');
+  const tab = tabParam === 'surfaces' || tabParam === 'agenda' ? tabParam : 'tasks';
+  const filterParam = params.get('filter');
+  const initial = AGENDA_TAB_FILTERS.find((each): each is AgendaTabFilter => each === filterParam);
+  const agendaModel = agendaTabModel({ items: AGENDA_ITEMS, resolved: AGENDA_RESOLVED, ferret: 'Denisha', now: NOW });
   const board = (isExpanded: boolean) =>
     chat === null ? null : (
       <ChatTasks
@@ -312,7 +367,9 @@ function Harness() {
       onTabChange={() => undefined}
       render={{
         overview: () => null,
-        agenda: () => null,
+        agenda: () => (
+          <AgendaTab model={agendaModel} onOpen={() => undefined} {...(initial === undefined ? {} : { initial })} />
+        ),
         tasks: () => board(false),
         runtime: () => null,
         usage: () => null,
