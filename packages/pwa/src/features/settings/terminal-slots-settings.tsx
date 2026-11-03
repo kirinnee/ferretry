@@ -118,7 +118,7 @@ export function TerminalSlotsSettings({
             <SettingRow
               key={holder.sessionId}
               name={holder.label}
-              attrs={{ 'data-terminal-holder': holder.sessionId }}
+              dataAttributes={{ 'data-terminal-holder': holder.sessionId }}
               control={() => (
                 <>
                   <Badge tone={isFinished(holder) ? 'warn' : 'ok'}>{holder.status}</Badge>

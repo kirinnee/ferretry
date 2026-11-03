@@ -172,7 +172,9 @@ export function SettingSwitch({
       role="switch"
       aria-checked={checked}
       aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       disabled={disabled}
+      {...attrs}
       onClick={() => onChange(!checked)}
       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-60"
     >

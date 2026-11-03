@@ -151,7 +151,7 @@ export function LearningSettingsSurface({ connection, sessions = null, fetcher }
                 key={entry.sessionId}
                 name={sessionName(entry.sessionId, byId)}
                 hint={cwd === undefined ? undefined : basename(cwd)}
-                attrs={{ 'data-learning-ferret': entry.sessionId }}
+                dataAttributes={{ 'data-learning-ferret': entry.sessionId }}
                 control={() => (
                   <>
                     <Badge tone={entry.passive ? 'ok' : 'pend'}>{entry.passive ? 'On' : 'Off'}</Badge>
