@@ -1012,8 +1012,8 @@
   align-self: center;
   max-width: min(100%, 520px);
   padding: 4px 10px;
-  border: 1px dashed var(--border);
-  border-radius: 999px;
+  border: var(--stroke, 1px) dashed var(--border);
+  border-radius: var(--radius-control);
   color: var(--muted);
   font-size: var(--text-xs);
   text-align: center;
