@@ -78,6 +78,10 @@ const GATE = {
   options: [{ id: 'done', label: 'Done', outcome: 'close' as const }],
 };
 
+/** A one-time code card: an input card, whose line a legacy high stop may have shown. */
+const code = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
+  ({ ...item(id, extra), kind: 'input', ask: undefined, input: { requestId: 'a'.repeat(32) } }) as AgendaItem;
+
 const alert = (agendaId: string, extra: Partial<DeliveredAlert> = {}): DeliveredAlert => ({
   key: `agenda:${SESSION}:${agendaId}:ping`,
   agendaId,
@@ -260,11 +264,9 @@ describe('the clear payload (lead: "content-free end to end")', () => {
     should(PushPayloadSchema.parse(payload)).deepEqual(payload);
   });
 
-  it('should name a clear by the newest push it covers', () => {
+  it('should give every clear its own key, from the instant and how many clears the ledger held', () => {
     // Act / Assert
-    should(clearNotificationKey(SESSION, ['agenda:s:A1:ping', 'agenda:s:A1:deadline'])).equal(
-      'clear:session-1:agenda:s:A1:ping',
-    );
+    should(clearNotificationKey(SESSION, LATER, 3)).equal(`clear:session-1:${LATER}:3`);
   });
 });
 
@@ -286,6 +288,12 @@ class MemoryLedger {
 
   async append(record: NotificationRecord): Promise<void> {
     if (this.failAppend) throw new Error('ledger cannot be written');
+    // As the file ledger reads it: a second request for one key is skipped, so a clear that reused one is a bug.
+    if (
+      record.phase === 'requested' &&
+      this.records.some(other => other.phase === 'requested' && other.key === record.key)
+    )
+      throw new Error(`a second request for ${record.key}`);
     this.records.push(NotificationRecordSchema.parse(record));
   }
 }
@@ -411,7 +419,7 @@ describe('AgendaAlertClearer (the owner: "when on 1 device is alr replied or res
     should(test.sent[0]?.payload).deepEqual({
       version: 1,
       kind: 'clear',
-      eventKey: 'clear:session-1:agenda:session-1:A1:ping',
+      eventKey: `clear:session-1:${LATER}:1`,
       sessionId: SESSION,
       tags: ['attention-session-1:A1'],
     });
@@ -460,8 +468,8 @@ describe('AgendaAlertClearer (the owner: "when on 1 device is alr replied or res
 
     // Assert
     should(test.sent.map(dispatch => dispatch.payload.eventKey)).deepEqual([
-      'clear:session-1:agenda:session-1:A1:ping',
-      'clear:session-1:agenda:session-1:A1:deadline',
+      `clear:session-1:${LATER}:1`,
+      `clear:session-1:${LATER}:2`,
     ]);
   });
 
@@ -675,11 +683,10 @@ describe('a legacy push (recorded before tags were; review round 1)', () => {
     ]);
   });
 
-  it('should clear a legacy stop under every code card waiting when it went out, which a high stop showed (review round 3)', async () => {
-    // Arrange — the ledger names the stop's oldest item, A1, but a high stop showed the blocking code card A2's tag.
+  it('should clear a legacy stop under every code card that no longer waits, whenever it was handled (review rounds 3–4)', async () => {
+    // Arrange — the ledger names the stop's oldest item, A1, but a high stop showed a code card's tag. A2 was snoozed
+    // and woken since (its waiting time moved past the stop) and A4 was resolved before the stop's record was written.
     const EARLIER = '2026-11-03T08:00:00.000Z';
-    const code = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
-      ({ ...item(id, extra), kind: 'input', ask: undefined, input: { requestId: 'a'.repeat(32) } }) as AgendaItem;
     const gone = { ...resolved(code('A4', { waitingSince: EARLIER })), resolvedAt: EARLIER } as ResolvedAgendaItem;
     const test = world(pushed('A1', { stoppedAt: AT }, { tag: null }));
     test.boards.set(
@@ -687,17 +694,37 @@ describe('a legacy push (recorded before tags were; review round 1)', () => {
       ledgerOf(
         SESSION,
         [{ ...code('A3', { waitingSince: LATER }), gate: GATE } as AgendaItem],
-        [resolved(item('A1')), resolved(code('A2', { waitingSince: EARLIER })), gone],
+        [resolved(item('A1')), resolved(code('A2', { waitingSince: LATER })), gone],
       ),
     );
 
     // Act
     await test.clearer.changed(SESSION, CHANGE);
 
-    // Assert — A3 came after the stop and A4 was handled before it: neither was the stop's line.
+    // Assert — A3 still waits on the owner, so its line is still true and stays.
     should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
-      ['attention-session-1', 'attention-session-1:A2'],
+      ['attention-session-1', 'attention-session-1:A2', 'attention-session-1:A4'],
     ]);
+  });
+
+  it('should give every part of a split legacy burst its own key, and count a stop cleared only by its last part', async () => {
+    // Arrange — three untagged stops; nine code cards handled since, each a tag any of them may have shown.
+    const stops = ['08:00', '08:20', '08:40'].map(at => `2026-11-03T${at}:00.000Z`);
+    const cards = Array.from({ length: 9 }, (_, index) => resolved(code(`A${index + 2}`)));
+    const test = world(stops.flatMap(at => pushed('A1', { stoppedAt: at }, { tag: null })));
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), ...cards]));
+
+    // Act
+    await test.clearer.changed(SESSION, CHANGE);
+    await test.clearer.changed(SESSION, CHANGE);
+
+    // Assert
+    const records = test.ledger.records.flatMap(record =>
+      record.phase === 'requested' && record.origin === 'agenda-clear' ? [record] : [],
+    );
+    should(records.map(record => record.tags.length)).deepEqual([PUSH_CLEAR_MAX_TAGS, 10 - PUSH_CLEAR_MAX_TAGS]);
+    should(new Set(records.map(record => record.key)).size).equal(2);
+    should(records.map(record => record.covers.length)).deepEqual([0, 3]);
   });
 
   it('should leave an approve-on-phone push uncovered when its item is gone from the board', () => {

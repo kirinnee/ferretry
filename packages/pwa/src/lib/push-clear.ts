@@ -97,9 +97,15 @@ export const planClear = (
   return { close: rest, show: handledNotification(machine, origin, first) };
 };
 
+/** One notification showing, as a registration lists it: `timestamp` is when it was shown, where the browser says. */
+export interface ShownNotification {
+  close(): void;
+  readonly timestamp?: number;
+}
+
 /** The slice of a service-worker registration a clear needs. */
 export interface ClearRegistration {
-  getNotifications(options: { tag: string }): PromiseLike<readonly { close(): void }[]>;
+  getNotifications(options: { tag: string }): PromiseLike<readonly ShownNotification[]>;
   showNotification(title: string, options?: NotificationOptions): PromiseLike<void>;
   readonly pushManager?: { getSubscription(): PromiseLike<{ readonly endpoint: string } | null> };
 }
@@ -248,15 +254,22 @@ export const settleIfCleared = async (
  * skipped this device (so it never swaps them for "Handled on another device" on the phone in the owner's hand); the
  * page closes the tags the daemon named, plus the item's own tag, which it can name itself even on a daemon too old
  * to answer.
+ *
+ * With `shownBy`, only a line shown at or before that moment is closed: the daemon's answer arrives later, and a
+ * newer line under one of its tags (a new stop, after the next item was raised) is not the one the open saw. A line
+ * whose browser gives no `timestamp` is left up then: losing a newer alert is worse than keeping an old one.
  */
 export const closeShownTags = async (
   registration: Pick<ClearRegistration, 'getNotifications'>,
   tags: readonly string[],
   machine: PushMachine,
+  shownBy?: number,
 ): Promise<number> => {
   let closed = 0;
   for (const tag of new Set(tags.map(each => shownTag(each, machine)))) {
     for (const notification of await registration.getNotifications({ tag })) {
+      if (shownBy !== undefined && !(typeof notification.timestamp === 'number' && notification.timestamp <= shownBy))
+        continue;
       notification.close();
       closed += 1;
     }

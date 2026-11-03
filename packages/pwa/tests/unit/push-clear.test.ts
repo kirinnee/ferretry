@@ -19,6 +19,7 @@ import {
   isApplePushService,
   planClear,
   RecentlyCleared,
+  type ShownNotification,
   settleIfCleared,
   shownTag,
 } from '../../src/lib/push-clear.ts';
@@ -58,9 +59,14 @@ class FakeRegistration implements ClearRegistration {
     };
   }
 
-  async getNotifications(options: { tag: string }): Promise<readonly { close(): void }[]> {
+  /** When each tag's line was shown; a tag not here was shown at 0, long ago, and one set to `undefined` has no stamp. */
+  readonly stamps: Record<string, number | undefined> = {};
+
+  async getNotifications(options: { tag: string }): Promise<readonly ShownNotification[]> {
+    const stamp = options.tag in this.stamps ? this.stamps[options.tag] : 0;
     return Array.from({ length: this.showing[options.tag] ?? 0 }, () => ({
       close: () => void this.closed.push(options.tag),
+      ...(stamp === undefined ? {} : { timestamp: stamp }),
     }));
   }
 
@@ -247,12 +253,15 @@ describe('opening an item here (the owner opened it in the app)', () => {
   const connection = daemonConnection({ daemonId: 'home', baseUrl: 'https://home.example.test', deviceId: 'token-h' });
   const itemTag = shownTag(agendaItemPushTag('session-1', 'A3'), HOME);
   const stopTag = shownTag('attention-session-1', HOME);
+  /** The page's clock at the open. */
+  const OPENED_AT = 1_000;
 
   const world = (options: { features?: readonly string[]; seen?: () => Promise<PushSeenResponse> } = {}) => {
     const registration = new FakeRegistration({ [itemTag]: 1, [stopTag]: 1 });
     const told: string[][] = [];
     const opened = agendaItemOpenedHandler({
       registration: async () => registration,
+      now: () => OPENED_AT,
       health: async () => ({ features: options.features ?? ['push.clear.1'] }),
       seen: async (daemon, sessionId, agendaId) => {
         told.push([daemon.daemonId, sessionId, agendaId]);
@@ -274,6 +283,60 @@ describe('opening an item here (the owner opened it in the app)', () => {
     expect(told).toEqual([['home', 'session-1', 'A3']]);
     expect(registration.closed).toEqual([itemTag, stopTag]);
     expect(registration.shown).toEqual([]);
+  });
+
+  it('should leave a line shown after the open up when the answer names its tag: it is newer (review round 4)', async () => {
+    // Arrange — the answer is slow; meanwhile the next item was raised and a new stop line went up under the same tag.
+    const { registration, opened } = world();
+    registration.stamps[stopTag] = OPENED_AT + 1;
+
+    // Act
+    const result = await opened(connection, 'session-1', 'A3');
+
+    // Assert
+    expect(result).toEqual({ closed: 1, told: true });
+    expect(registration.closed).toEqual([itemTag]);
+  });
+
+  it('should leave a line the browser gives no time for up when the answer names its tag', async () => {
+    // Arrange
+    const { registration, opened } = world();
+    registration.stamps[stopTag] = undefined;
+
+    // Act
+    await opened(connection, 'session-1', 'A3');
+
+    // Assert — the item's own line, closed at the open itself, still comes down.
+    expect(registration.closed).toEqual([itemTag]);
+  });
+
+  it('should close a line shown at the very moment of the open', async () => {
+    // Arrange
+    const { registration, opened } = world();
+    registration.stamps[stopTag] = OPENED_AT;
+
+    // Act
+    await opened(connection, 'session-1', 'A3');
+
+    // Assert
+    expect(registration.closed).toEqual([itemTag, stopTag]);
+  });
+
+  it('should read the moment of the open from the page clock when none is given', async () => {
+    // Arrange — a line stamped in the future is newer than this open.
+    const registration = new FakeRegistration({ [itemTag]: 1, [stopTag]: 1 });
+    registration.stamps[stopTag] = Date.now() + 60_000;
+    const opened = agendaItemOpenedHandler({
+      registration: async () => registration,
+      health: async () => ({ features: ['push.clear.1'] }),
+      seen: async () => ({ cleared: true, tags: ['attention-session-1'] }),
+    });
+
+    // Act
+    await opened(connection, 'session-1', 'A3');
+
+    // Assert
+    expect(registration.closed).toEqual([itemTag]);
   });
 
   it('should tell the machine again when the item is opened again: it may have buzzed since, or the first try failed', async () => {

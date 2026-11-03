@@ -109,7 +109,8 @@ export const AgendaClearRequestedRecordSchema = z.strictObject({
   sessionId: z.string().min(1),
   /** The item the owner opened, when that is what cleared it. */
   opened: AgendaIdSchema.optional(),
-  covers: z.array(z.string().min(1)).min(1),
+  /** The pushes this clear finished: each one's LAST tag is in it (`alertsToClear`). Empty for an earlier part of a burst. */
+  covers: z.array(z.string().min(1)),
   tags: z.array(z.string().min(1)).min(1),
   enrolled: NonNegativeIntegerSchema,
 });

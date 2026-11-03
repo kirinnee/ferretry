@@ -140,18 +140,22 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
 
   /** Records and sends every clear the board calls for now; the tags they named. */
   private async send(sessionId: string, snapshot: AgendaSnapshot, how: SendOptions): Promise<readonly string[]> {
-    const uncovered = uncoveredAlerts(sessionId, await this.options.ledger.entries()).filter(
+    const entries = await this.options.ledger.entries();
+    let sequence = entries.filter(entry => entry.requested.origin === 'agenda-clear').length;
+    const uncovered = uncoveredAlerts(sessionId, entries).filter(
       alert => how.only === undefined || pushKeyOf(alert) === how.only,
     );
     const clears = alertsToClear(sessionId, uncovered, snapshot, how.opened);
     for (const clear of clears) {
-      const key = clearNotificationKey(sessionId, clear.covers);
+      const at = this.options.clock.now();
+      sequence += 1;
+      const key = clearNotificationKey(sessionId, at, sequence);
       await this.options.ledger.append(
         NotificationRecordSchema.parse({
           v: 1,
           phase: 'requested',
           key,
-          at: this.options.clock.now(),
+          at,
           origin: 'agenda-clear',
           sessionId,
           ...(how.opened === undefined ? {} : { opened: how.opened }),
@@ -221,7 +225,7 @@ function inFlightAlerts(
  *
  * A push recorded before tags were is named by every tag it may have gone out under: an approve-on-phone push by its
  * approval's (`approval`, resolved from the board), a stop's by the session's and the code cards waiting then
- * (`legacyStopAt`: a high stop showed one), and any other by the session's AND — as a second alert, keyed
+ * (`legacyStop`: a high stop showed one), and any other by the session's AND — as a second alert, keyed
  * `<key>#item` and covered on its own — the item's, which a high push used.
  */
 export function uncoveredAlerts(
@@ -244,7 +248,7 @@ export function uncoveredAlerts(
         : requested.phoneApproval !== undefined
           ? [{ key, ...base, approval: true }]
           : requested.stoppedAt !== undefined
-            ? [{ key, ...base, legacyStopAt: requested.at }]
+            ? [{ key, ...base, legacyStop: true }]
             : [
                 { key, ...base },
                 {

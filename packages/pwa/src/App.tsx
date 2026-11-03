@@ -1218,6 +1218,24 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
   random: () => Math.random(),
 };
 
+/**
+ * An item opened here — in the Inbox or a conversation: its lines come down on this device, and on the owner's others
+ * through the machine (docs/notifications.md § When an alert is cleared).
+ */
+function useAgendaItemOpened() {
+  const store = useAppStore();
+  const daemonFetch = useDaemonFetch();
+  return useMemo(
+    () =>
+      agendaItemOpenedHandler({
+        registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
+        health: async daemon => await (await store.clients.client(daemon)).health(),
+        seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
+      }),
+    [store.clients, daemonFetch],
+  );
+}
+
 function SessionRoute({
   connection,
   scope,
@@ -1227,6 +1245,7 @@ function SessionRoute({
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
   useRenderTiming(store.performance, 'session');
+  const itemOpened = useAgendaItemOpened();
   // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
   const boardTasks = useMemo(
     () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch) }),
@@ -1824,6 +1843,7 @@ function SessionRoute({
             browserLogin={store.browserLogin}
             attention={agenda}
             agendaReplies={agendaReplies}
+            onAgendaItemOpened={itemOpened}
             // A notification tap or an unread row names the item it opens at (`?attention=A3`).
             agendaTarget={
               agendaOverride !== undefined ? agendaOverride : agendaTargetFromSearch(window.location.search)
@@ -2271,16 +2291,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
   const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
-  // An item opened here: its lines come down on this device, and on the owner's others through the machine.
-  const itemOpened = useMemo(
-    () =>
-      agendaItemOpenedHandler({
-        registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
-        health: async daemon => await (await clientFor(daemon)).health(),
-        seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
-      }),
-    [clientFor, daemonFetch],
-  );
+  const itemOpened = useAgendaItemOpened();
   const pairings = useBoardMachines();
   const boardActions = useBoardActions(
     store.board,

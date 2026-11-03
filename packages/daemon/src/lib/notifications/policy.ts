@@ -206,10 +206,10 @@ export interface DeliveredAlert {
   /** An approve-on-phone push recorded without a tag: its tag is its approval's, read from the item on the board. */
   readonly approval?: true;
   /**
-   * A STOP's push recorded without a tag, and when: a high one went out under the tag of the item it showed — a
+   * A STOP's push recorded without a tag: a high one went out under the tag of the item it showed — a
    * one-time code card waiting then, which the ledger did not name — so its clear names those cards' tags too.
    */
-  readonly legacyStopAt?: string;
+  readonly legacyStop?: true;
 }
 
 /** What one clear takes down (at most `PUSH_CLEAR_MAX_TAGS` tags), and which pushes it answers for. */
@@ -262,12 +262,12 @@ export function alertsToClear(
       item.phoneApproval === undefined ? [] : [[item.id, phoneApprovalTag(item.phoneApproval.id)] as const],
     ),
   );
-  // The one-time code cards that were waiting at an instant: what a legacy high stop may have shown.
-  const codeCardTags = (at: string): string[] =>
-    [...snapshot.items, ...snapshot.resolved]
-      .filter(item => item.input !== undefined && Date.parse(item.waitingSince) <= Date.parse(at))
-      .filter(item => !('resolvedAt' in item) || Date.parse(String(item.resolvedAt)) >= Date.parse(at))
-      .map(item => agendaItemPushTag(sessionId, item.id));
+  // The one-time code cards a legacy high stop may have shown: every one on the board that no longer waits on the
+  // owner (the opened one included). Not narrowed by time — a card can be resolved, or its waiting time moved by a
+  // snooze, after the stop went out — and a card still waiting keeps its line, which is still true.
+  const codeCardTags = [...snapshot.items, ...snapshot.resolved]
+    .filter(item => item.input !== undefined && !waiting.has(item.id))
+    .map(item => agendaItemPushTag(sessionId, item.id));
   const tagOf = (alert: DeliveredAlert): string | undefined =>
     alert.tag ?? (alert.approval === true ? approvals.get(alert.agendaId) : sessionTag);
   const handled = uncovered.flatMap(alert => {
@@ -280,28 +280,32 @@ export function alertsToClear(
           ? !waiting.has(alert.agendaId)
           : alert.agendaId === opened;
     if (!down) return [];
-    return [tag, ...(alert.legacyStopAt === undefined ? [] : codeCardTags(alert.legacyStopAt))].map(each => ({
-      key: alert.key,
-      tag: each,
-    }));
+    return [tag, ...(alert.legacyStop === true ? codeCardTags : [])].map(each => ({ key: alert.key, tag: each }));
   });
   const tags = [...new Set(handled.map(alert => alert.tag))];
-  // A key is covered by every clear that names one of its tags: a burst split across clears still clears it once each.
-  // One clear names at most `PUSH_CLEAR_MAX_TAGS`: a burst that handled more is sent as several.
+  // One clear names at most `PUSH_CLEAR_MAX_TAGS`: a burst that handled more is sent as several. A key is covered by
+  // the clear that names its LAST tag, so one stopped between two clears never counts a push as cleared before every
+  // tag it may have used was sent; the next look sends the rest again.
+  const chunkOf = (tag: string): number => Math.floor(tags.indexOf(tag) / PUSH_CLEAR_MAX_TAGS);
+  const lastChunk = new Map<string, number>();
+  for (const alert of handled) lastChunk.set(alert.key, Math.max(lastChunk.get(alert.key) ?? 0, chunkOf(alert.tag)));
   const clears: AlertClear[] = [];
   for (let start = 0; start < tags.length; start += PUSH_CLEAR_MAX_TAGS) {
-    const chunk = tags.slice(start, start + PUSH_CLEAR_MAX_TAGS);
+    const index = start / PUSH_CLEAR_MAX_TAGS;
     clears.push({
-      tags: chunk,
-      covers: [...new Set(handled.filter(alert => chunk.includes(alert.tag)).map(alert => alert.key))],
+      tags: tags.slice(start, start + PUSH_CLEAR_MAX_TAGS),
+      covers: [...lastChunk].filter(([, chunk]) => chunk === index).map(([key]) => key),
     });
   }
   return clears;
 }
 
-/** A clear's ledger key: named by the newest push it covers, so the same handling is never cleared twice. */
-export const clearNotificationKey = (sessionId: string, covers: readonly string[]): string =>
-  `clear:${sessionId}:${[...covers].sort().at(-1) ?? ''}`;
+/**
+ * A clear's ledger key: the ferret's, the instant and how many clears its ledger already held. Each one is its own
+ * notification — two chunks of one burst never share a key, which the ledger would refuse as a second request.
+ */
+export const clearNotificationKey = (sessionId: string, at: string, sequence: number): string =>
+  `clear:${sessionId}:${at}:${sequence}`;
 
 /**
  * THE CLEAR ITSELF: the session and the tags to take down, and nothing else — no title, no body, no url, no item

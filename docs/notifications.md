@@ -186,8 +186,8 @@ shows two lines**, not one line with "+1 more". A stop's push keeps the ferret's
 (`agendaSessionPushTag`), even when it goes out loud for a code card, because it is about the ferret and everything
 waiting then: clearing that one card never takes the stop's line down. The own tag is what lets a handled item's line
 come down on its own (below). A push recorded before tags were went out under the ferret's tag, the item's (a high
-push), its approval's (`pa-<id>`) or — a high stop — the code card's that was waiting then: a clear names each one it
-may have used.
+push), its approval's (`pa-<id>`) or — a high stop — a code card's: a clear names each one it may have used, every
+code card that no longer waits included, since the ledger never said which card a high stop showed.
 
 ## When an alert is cleared
 
@@ -206,11 +206,21 @@ It decides from the board, not from what changed, so a new way for an item to st
 without a new rule. The **stop's line** ("N need you") comes down only once no item it could count is left on the
 owner's turn, because until then its words are still true.
 
-**When the owner opens the item.** Opening an item in the Inbox (it is the deck's top card) takes its alerts down too.
-The app closes that item's lines on the device in the owner's hand at once, and tells the machine
+**When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox
+deck's top card, or the item's card in its conversation (an agenda row, a `!A3` reference, a notification tap, paging
+to it). The app closes that item's lines on the device in the owner's hand at once, and tells the machine
 (`POST /v1/push/seen`, `fleet.use`, only where the machine lists `push.clear.1`). The machine clears every OTHER device
 and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.
 The device the item was opened on is skipped, so it never gets the iPhone note below about its own tap.
+
+The answer can be slow, and by then a NEWER line can be up under one of its tags (the next item was raised, and a new
+stop went out). So the app closes, for the answer's tags, only a line whose `timestamp` is at or before the moment of
+the open, read when the item was opened rather than when the answer came. A line the browser gives no `timestamp`
+(Safari does not stamp them) is left up: losing a newer alert is worse than keeping an old one. **GAP:** on such a
+browser the stop's or approval's line the answer names stays up on the opening device until it is handled again or
+swiped away. **GAP:** a push that already reached the opening device but is still being shown when the owner opens its
+item there (its worker is reading the filter) is not caught by either half, and that one stale line stays on that
+device; the other devices are cleared as usual.
 
 **What a clear says.** Nothing about the item. A clear push is `{ version, kind: "clear", eventKey, sessionId, tags }`
 and the parser refuses anything more (`PushClearPayloadSchema`): no title, no body, no link, no item words. The
@@ -232,8 +242,10 @@ opens that machine.
 
 **Once each.** A clear is written to `notifications.jsonl` with the pushes it covers before it is sent, so a second
 change or a restart never clears the same push again; a later push about the same item (it woke again) is cleared on
-its own later. Opening an item again tells the machine again, because it may have buzzed since; a clear with nothing
-left to cover sends nothing.
+its own later. Each clear has its own key (`clear:<session>:<instant>:<count>`). A burst of more than eight tags goes
+as several clears, and a push counts as covered only by the clear that names its LAST tag, so one stopped between two
+sends the rest again on the next look. Opening an item again tells the machine again, because it may have buzzed
+since; a clear with nothing left to cover sends nothing.
 
 **A push still on its way.** A push the owner handles or opens before it has reached a device had no line to take
 down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
