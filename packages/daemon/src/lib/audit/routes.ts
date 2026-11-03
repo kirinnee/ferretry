@@ -417,6 +417,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'credentialId',
     detail: { action: 'login-test' },
   },
+  // A runtime check runs the runtime once with its login's secrets in its environment; the runtime is the subject.
+  {
+    method: 'POST',
+    path: '/v1/fleet/runtimes/:runtimeId/check',
+    event: 'secrets.used',
+    subject: 'runtimeId',
+    detail: { action: 'runtime-check' },
+  },
   {
     method: 'POST',
     path: '/v1/secrets',

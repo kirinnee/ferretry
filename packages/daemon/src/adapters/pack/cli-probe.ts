@@ -83,6 +83,7 @@ export class CliPackProbe implements PackProbePort {
         ok: false,
         ms: elapsed(),
         reason: `it cannot be launched: ${reasonOf(error, 'its launcher is unknown')}`,
+        stage: 'launcher',
       };
     }
     // The pane's precedence: the login's profile over the daemon's sanitized environment, never its HOME.
@@ -90,7 +91,7 @@ export class CliPackProbe implements PackProbePort {
     try {
       env = { ...this.base, ...launchEnvironment(await this.environment.forWrapper(launcher), {}) };
     } catch (error) {
-      return { ok: false, ms: elapsed(), reason: reasonOf(error, 'its login could not be read') };
+      return { ok: false, ms: elapsed(), reason: reasonOf(error, 'its login could not be read'), stage: 'environment' };
     }
     const outcome = await this.spawn({
       cmd: probeCommand(request, launcher),
@@ -102,9 +103,14 @@ export class CliPackProbe implements PackProbePort {
       reason: error instanceof Error ? error.message : String(error),
     }));
     if (outcome.kind === 'failed')
-      return { ok: false, ms: elapsed(), reason: `it could not be started (${outcome.reason})` };
+      return { ok: false, ms: elapsed(), reason: `it could not be started (${outcome.reason})`, stage: 'spawn' };
     if (outcome.kind === 'timeout')
-      return { ok: false, ms: elapsed(), reason: `no answer within ${String(Math.round(request.timeoutMs / 1_000))}s` };
+      return {
+        ok: false,
+        ms: elapsed(),
+        reason: `no answer within ${String(Math.round(request.timeoutMs / 1_000))}s`,
+        stage: 'timeout',
+      };
     if (outcome.code === 0 && probeAnswered(outcome.stdout)) return { ok: true, ms: elapsed() };
     const code = classifyProbeFailure(`${outcome.stdout}\n${outcome.stderr ?? ''}`);
     const what = outcome.code === 0 ? 'it answered, but not OK' : `it exited ${String(outcome.code)}`;
@@ -113,6 +119,7 @@ export class CliPackProbe implements PackProbePort {
       ms: elapsed(),
       reason: code === undefined ? what : `${what}: ${FAILURE_WORDS[code]}`,
       ...(code === undefined ? {} : { code }),
+      stage: outcome.code === 0 ? 'answer' : 'exit',
     };
   }
 }

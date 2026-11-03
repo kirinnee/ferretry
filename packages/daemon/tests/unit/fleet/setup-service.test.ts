@@ -23,6 +23,8 @@ import {
   type FleetLayout,
   type HostHarnessScan,
   parseAccountModel,
+  type ProviderPreset,
+  type ShellEnvironmentReading,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
 } from '@ferretry/fleet';
@@ -165,6 +167,14 @@ interface World {
     keysWriteError: unknown;
     keysWrites: number;
     baseWrites: string[];
+    /**
+     * The preset catalogue env providers are recognised by. `undefined` (the default) is a catalogue that
+     * cannot be read, so nothing is looked for and the scan is what it was before env detection.
+     */
+    presets: readonly ProviderPreset[] | undefined;
+    /** What the login shell answers, and every `keep` it was asked with. */
+    shell: ShellEnvironmentReading | (() => ShellEnvironmentReading);
+    shellReads: ((name: string) => boolean)[];
   };
 }
 
@@ -216,6 +226,9 @@ function world(
     keysWriteError: undefined,
     keysWrites: 0,
     baseWrites: [],
+    presets: undefined,
+    shell: { state: 'read', env: {} },
+    shellReads: [],
   };
   let drawn = 0;
   const deps: FleetSetupServiceDeps = {
@@ -255,6 +268,16 @@ function world(
     scan: async () => {
       if (state.scanError !== undefined) throw state.scanError;
       return state.scans;
+    },
+    shellEnvironment: {
+      read: async keep => {
+        state.shellReads.push(keep);
+        return typeof state.shell === 'function' ? state.shell() : state.shell;
+      },
+    },
+    presets: async () => {
+      if (state.presets === undefined) throw new Error('the catalogue cannot be read');
+      return state.presets;
     },
     tools: {
       plans: harnesses => state.plans.filter(plan => harnesses.includes(plan.harness)),
@@ -369,7 +392,9 @@ describe('scan', () => {
     should(claude?.skills).deepEqual(['review']);
     should(claude?.secretKeys).deepEqual(['env.GITHUB_TOKEN']);
     should(JSON.stringify(scan)).not.containEql(SECRET_VALUE);
-    should(scan.runtimes).deepEqual([{ harness: 'claude', name: 'claude-default', profile: 'claude-default' }]);
+    should(scan.runtimes).deepEqual([
+      { harness: 'claude', name: 'claude-default', profile: 'claude-default', login: 'claude-you' },
+    ]);
     should(scan.updates).deepEqual([]);
     should(scan.duplicates).deepEqual([]);
     should(scan.importing).deepEqual({ available: true });
@@ -1516,5 +1541,241 @@ describe('parseImportRecord', () => {
 describe('createFleetSetupSubsystem', () => {
   it('should build the service the composition root mounts', () => {
     should(world().service).be.instanceOf(FleetSetupService);
+  });
+});
+
+// ── Env providers (docs/provider-presets.md § Detect) ───────────────────────────────────────────
+
+const BEDROCK_KEY = 'ABSKbedrockkeyvalue0123456789abcdefghij';
+
+/** A host whose Claude Code is signed in AND switched onto Amazon Bedrock by the login shell. */
+function bedrockWorld(env: Readonly<Record<string, string>> = {}): World {
+  const handle = world();
+  handle.state.presets = builtInPresets();
+  handle.state.shell = {
+    state: 'read',
+    env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_PROFILE: 'work', AWS_REGION: 'us-east-1', ...env },
+  };
+  return handle;
+}
+
+describe('env providers', () => {
+  it('should list the sign-in and the shell provider as two findings, each with a runtime of its own', async () => {
+    // Arrange
+    const { service, state } = bedrockWorld();
+
+    // Act
+    const scan = FleetSetupScanSchema.parse(await service.scan());
+
+    // Assert
+    should(scan.shell).equal('read');
+    const claude = scan.harnesses.find(harness => harness.harness === 'claude');
+    should(claude?.findings).deepEqual([
+      { kind: 'sign-in', state: 'signed-in', email: 'you@example.com', login: 'claude-you', runtime: 'claude-default' },
+      {
+        kind: 'provider',
+        preset: 'amazon-bedrock',
+        label: 'Amazon Bedrock (AWS profile)',
+        source: 'shell',
+        clues: ['CLAUDE_CODE_USE_BEDROCK', 'AWS_PROFILE'],
+        facts: [
+          { name: 'AWS_REGION', value: 'us-east-1' },
+          { name: 'AWS_PROFILE', value: 'work' },
+        ],
+        secrets: [],
+        login: 'claude-amazon-bedrock',
+        runtime: 'claude-amazon-bedrock',
+      },
+    ]);
+    should(scan.runtimes).containDeep([
+      { harness: 'claude', name: 'claude-default', login: 'claude-you' },
+      { harness: 'claude', name: 'claude-amazon-bedrock', login: 'claude-amazon-bedrock', provider: 'amazon-bedrock' },
+    ]);
+    // The shell was asked with a filter that keeps what a preset reads and drops the rest unread.
+    const keep = state.shellReads[0] as (name: string) => boolean;
+    should(keep('CLAUDE_CODE_USE_BEDROCK')).be.true();
+    should(keep('AWS_PROFILE')).be.true();
+    should(keep('GITHUB_TOKEN')).be.false();
+    should(keep('HOME')).be.false();
+  });
+
+  it('should say the shell was not read when it did not answer, and still find the sign-in', async () => {
+    // Arrange
+    const { service, state } = bedrockWorld();
+    state.shell = { state: 'unavailable', cause: 'timed-out' };
+
+    // Act
+    const scan = FleetSetupScanSchema.parse(await service.scan());
+
+    // Assert
+    should(scan.shell).equal('timed-out');
+    should(scan.harnesses.find(harness => harness.harness === 'claude')?.findings).deepEqual([
+      { kind: 'sign-in', state: 'signed-in', email: 'you@example.com', login: 'claude-you', runtime: 'claude-default' },
+    ]);
+  });
+
+  it('should never put a value the shell holds in the scan, only its name', async () => {
+    // Arrange — the Bedrock key preset, whose key the shell holds
+    const { service } = bedrockWorld({ AWS_BEARER_TOKEN_BEDROCK: BEDROCK_KEY });
+    const handle = world();
+    handle.state.presets = builtInPresets();
+    handle.state.shell = {
+      state: 'read',
+      env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_BEARER_TOKEN_BEDROCK: BEDROCK_KEY, AWS_REGION: 'eu-west-1' },
+    };
+
+    // Act
+    const scans = [await service.scan(), await handle.service.scan()];
+
+    // Assert
+    for (const scan of scans) should(JSON.stringify(scan)).not.containEql(BEDROCK_KEY);
+    const finding = FleetSetupScanSchema.parse(scans[1])
+      .harnesses.find(harness => harness.harness === 'claude')
+      ?.findings?.find(entry => entry.kind === 'provider');
+    should(finding).containDeep({ preset: 'amazon-bedrock-api-key', secrets: ['AWS_BEARER_TOKEN_BEDROCK'] });
+  });
+
+  it('should import the provider as an environment login, its key into the secret store, beside the sign-in', async () => {
+    // Arrange
+    const handle = world();
+    handle.state.presets = builtInPresets();
+    handle.state.shell = {
+      state: 'read',
+      env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_BEARER_TOKEN_BEDROCK: BEDROCK_KEY, AWS_REGION: 'eu-west-1' },
+    };
+
+    // Act
+    const { description, summary } = await importOnce(handle.service);
+
+    // Assert
+    should(description).containEql('Login claude-amazon-bedrock-api-key: Amazon Bedrock (API key), from your shell');
+    should(description).not.containEql(BEDROCK_KEY);
+    should(summary).equal('studio is ready · 2 runtimes created: claude-amazon-bedrock-api-key, claude-default.');
+    should(handle.secrets.get('AWS_BEARER_TOKEN_BEDROCK')).equal(BEDROCK_KEY);
+    const documents = handle.applied[0]?.documents ?? [];
+    for (const document of documents) should(document.content).not.containEql(BEDROCK_KEY);
+    const model = modelOfWrites(documents);
+    should(model.credentials['claude-you']).containDeep({ store: 'host' });
+    should(model.credentials['claude-amazon-bedrock-api-key']).containDeep({
+      harness: 'claude',
+      store: 'environment',
+      preset: 'amazon-bedrock-api-key',
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        AWS_REGION: 'eu-west-1',
+        AWS_BEARER_TOKEN_BEDROCK: '${secret:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+    });
+    should(model.runtimes['claude-default']).containDeep({ credential: 'claude-you', profile: 'claude-default' });
+    should(model.runtimes['claude-amazon-bedrock-api-key']).containDeep({
+      credential: 'claude-amazon-bedrock-api-key',
+      profile: 'claude-default',
+    });
+  });
+
+  it('should name the provider runtime claude-default when nothing is signed in, and make no empty sign-in', async () => {
+    // Arrange
+    const handle = bedrockWorld();
+    handle.state.scans = [claudeScan({ login: { state: 'not-signed-in' } }), codexScan()];
+
+    // Act
+    await importOnce(handle.service);
+
+    // Assert
+    const model = modelOfWrites(handle.applied[0]?.documents ?? []);
+    should(Object.keys(model.credentials)).deepEqual(['claude-amazon-bedrock']);
+    should(model.credentials['claude-amazon-bedrock']).containDeep({ cloudCredential: 'aws-profile:work' });
+    should(model.runtimes['claude-default']).containDeep({ credential: 'claude-amazon-bedrock' });
+  });
+
+  it('should take the switch off the shared settings when settings.json holds it, so the sign-in runtime stays on its sign-in', async () => {
+    // Arrange
+    const handle = world();
+    handle.state.presets = builtInPresets();
+    handle.state.scans = [
+      claudeScan({
+        settings: {
+          kind: 'text',
+          source: '/person/.claude/settings.json',
+          text: JSON.stringify({
+            theme: 'dark',
+            env: {
+              CLAUDE_CODE_USE_VERTEX: '1',
+              ANTHROPIC_VERTEX_PROJECT_ID: 'acme-dev',
+              CLOUD_ML_REGION: 'us-east5',
+              KEEP: 'me',
+            },
+          }),
+          bytes: 120,
+        },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const scan = FleetSetupScanSchema.parse(await handle.service.scan());
+    await importOnce(handle.service);
+
+    // Assert
+    should(scan.harnesses[0]?.findings?.[1]).containDeep({ preset: 'google-vertex', source: 'settings.json' });
+    const model = modelOfWrites(handle.applied[0]?.documents ?? []);
+    const settings = Object.values(model.components.settings);
+    should(settings.map(component => component.env)).deepEqual([{ KEEP: 'me' }]);
+    should(model.credentials['claude-google-vertex']).containDeep({
+      store: 'environment',
+      env: { CLAUDE_CODE_USE_VERTEX: '1', ANTHROPIC_VERTEX_PROJECT_ID: 'acme-dev', CLOUD_ML_REGION: 'us-east5' },
+      cloudCredential: 'gcloud-adc',
+    });
+  });
+
+  it('should read the shell again at the apply and refuse it as stale when what it set changed', async () => {
+    // Arrange
+    const { service, state } = bedrockWorld();
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+    state.shell = {
+      state: 'read',
+      env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_PROFILE: 'work', AWS_REGION: 'eu-west-1' },
+    };
+
+    // Act + Assert
+    await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+    should(state.shellReads.length).equal(2);
+  });
+
+  it('should rename only the first runtime with the name the person gave, and import no provider when skipped', async () => {
+    // Arrange
+    const named = bedrockWorld();
+    const skipped = bedrockWorld();
+
+    // Act
+    await importOnce(named.service, IMPORT({ names: { claude: 'my-claude' } }));
+    await importOnce(skipped.service, IMPORT({ skipProviders: ['claude'] }));
+
+    // Assert
+    should(Object.keys(modelOfWrites(named.applied[0]?.documents ?? []).runtimes).toSorted()).deepEqual([
+      'claude-amazon-bedrock',
+      'my-claude',
+    ]);
+    const plain = modelOfWrites(skipped.applied[0]?.documents ?? []);
+    should(Object.keys(plain.runtimes)).deepEqual(['claude-default']);
+    should(Object.keys(plain.credentials)).deepEqual(['claude-you']);
+  });
+
+  it('should reuse an environment login from the same preset on Import again, and add no second runtime', async () => {
+    // Arrange
+    const handle = bedrockWorld();
+    await importOnce(handle.service);
+    const written = handle.applied[0]?.documents ?? [];
+    for (const document of written) handle.state.assets[document.path] = document.content;
+    handle.state.reading = configReading(modelOfWrites(written), 'rev-2');
+
+    // Act
+    const scan = FleetSetupScanSchema.parse(await handle.service.scan());
+
+    // Assert
+    should(scan.harnesses[0]?.findings?.[1]).containDeep({ kind: 'provider', login: 'claude-amazon-bedrock' });
+    should(scan.harnesses[0]?.findings?.[1]).not.have.property('runtime');
+    should(scan.duplicates).containDeep([{ harness: 'claude', existing: 'claude-amazon-bedrock' }]);
   });
 });

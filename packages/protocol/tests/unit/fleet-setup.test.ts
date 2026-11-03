@@ -18,6 +18,29 @@ const missing = {
   install: { kind: 'runnable', command: 'npm install -g @openai/codex' },
 };
 
+const signInFinding = {
+  kind: 'sign-in',
+  state: 'signed-in',
+  email: 'person@example.test',
+  login: 'claude-you',
+  runtime: 'claude-default',
+};
+
+const providerFinding = {
+  kind: 'provider',
+  preset: 'amazon-bedrock',
+  label: 'Amazon Bedrock (AWS profile)',
+  source: 'shell',
+  clues: ['CLAUDE_CODE_USE_BEDROCK', 'AWS_PROFILE'],
+  facts: [
+    { name: 'AWS_REGION', value: 'us-east-1' },
+    { name: 'AWS_PROFILE', value: 'work' },
+  ],
+  secrets: [],
+  login: 'claude-amazon-bedrock',
+  runtime: 'claude-amazon-bedrock',
+};
+
 const harnessScan = {
   harness: 'claude',
   installed: true,
@@ -29,6 +52,7 @@ const harnessScan = {
   secretKeys: ['env.ANTHROPIC_API_KEY'],
   missingCommands: ['uvx'],
   problems: [],
+  findings: [signInFinding, providerFinding],
 };
 
 const scan = {
@@ -42,6 +66,7 @@ const scan = {
   duplicates: [{ harness: 'claude', existing: 'claude-default', suggested: 'claude-default-2' }],
   notes: [{ harness: 'claude', text: 'CLAUDE.md and AGENTS.md say the same thing.' }],
   importing: { available: true },
+  shell: 'read',
 };
 
 const bundle = {
@@ -99,6 +124,26 @@ const cases: SchemaCase[] = [
     value: { state: 'unreadable', reason: 'The keychain is locked.' },
   },
   { name: 'FleetHarnessScanSchema', schema: setup.FleetHarnessScanSchema, value: harnessScan },
+  { name: 'FleetSetupSignInFindingSchema', schema: setup.FleetSetupSignInFindingSchema, value: signInFinding },
+  { name: 'FleetSetupProviderFindingSchema', schema: setup.FleetSetupProviderFindingSchema, value: providerFinding },
+  { name: 'FleetSetupFindingSchema', schema: setup.FleetSetupFindingSchema, value: providerFinding },
+  { name: 'FleetSetupProviderFactSchema', schema: setup.FleetSetupProviderFactSchema, value: providerFinding.facts[0] },
+  {
+    name: 'FleetSetupProviderSourceSchema',
+    schema: setup.FleetSetupProviderSourceSchema,
+    value: 'config.toml+shell',
+  },
+  {
+    name: 'FleetSetupRuntimeSchema on a provider',
+    schema: setup.FleetSetupRuntimeSchema,
+    value: {
+      harness: 'claude',
+      name: 'claude-amazon-bedrock',
+      profile: 'claude-default',
+      login: 'claude-amazon-bedrock',
+      provider: 'amazon-bedrock',
+    },
+  },
   { name: 'FleetSetupRuntimeSchema', schema: setup.FleetSetupRuntimeSchema, value: scan.runtimes[0] },
   { name: 'FleetSetupUpdateSchema', schema: setup.FleetSetupUpdateSchema, value: scan.updates[0] },
   { name: 'FleetSetupDuplicateSchema', schema: setup.FleetSetupDuplicateSchema, value: scan.duplicates[0] },
@@ -117,6 +162,40 @@ const cases: SchemaCase[] = [
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
 
 describe('the machine setup wire contract', () => {
+  it('should give a provider finding no field a value could ride in, and refuse one that tries', () => {
+    // Arrange — a key where a secret NAME goes, a value field the schema does not have, a URL as a fact name
+    assertRejects([
+      rejects('a key in secrets', setup.FleetSetupProviderFindingSchema, {
+        ...providerFinding,
+        secrets: ['sk-ant-api03-abcdefghijklmnop'],
+      }),
+      rejects('a values field', setup.FleetSetupProviderFindingSchema, {
+        ...providerFinding,
+        values: { AWS_BEARER_TOKEN_BEDROCK: 'ABSKkey' },
+      }),
+      rejects('a fact named like a URL', setup.FleetSetupProviderFactSchema, {
+        name: 'https://user:pw@gw.example',
+        value: 'x',
+      }),
+      rejects('a sign-in that is not signed in', setup.FleetSetupSignInFindingSchema, {
+        ...signInFinding,
+        state: 'not-signed-in',
+      }),
+    ]);
+    should(Object.keys(setup.FleetSetupProviderFindingSchema.shape).toSorted()).deepEqual([
+      'clues',
+      'facts',
+      'kind',
+      'label',
+      'login',
+      'preset',
+      'problem',
+      'runtime',
+      'secrets',
+      'source',
+    ]);
+  });
+
   it('should round-trip every shape a browser reads and every request it may send', () => {
     // Act & Assert
     assertRoundTrips(cases);

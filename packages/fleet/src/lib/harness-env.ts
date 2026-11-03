@@ -51,7 +51,17 @@ export const INHERITED_HARNESS_ENV: readonly string[] = [
  */
 const MODEL_DEFAULT_PATTERN = /^ANTHROPIC_DEFAULT_.*_MODEL$/;
 
-const isInherited = (name: string): boolean => INHERITED_HARNESS_ENV.includes(name) || MODEL_DEFAULT_PATTERN.test(name);
+/**
+ * Claude Code's provider SWITCHES (`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY`, `_MANTLE` and any it
+ * grows). One inherited from the shell the daemon was started in would turn EVERY runtime onto that
+ * provider — a runtime on a sign-in included — whatever login it was given. A runtime that runs on a
+ * provider is given its switch by its own login (`store: environment`) or its own settings, never by
+ * the surroundings.
+ */
+const PROVIDER_SWITCH_PATTERN = /^CLAUDE_CODE_USE_[A-Z0-9_]+$/;
+
+const isInherited = (name: string): boolean =>
+  INHERITED_HARNESS_ENV.includes(name) || MODEL_DEFAULT_PATTERN.test(name) || PROVIDER_SWITCH_PATTERN.test(name);
 
 /**
  * `environment` with the inherited harness state removed, except for the names in `preserve`.

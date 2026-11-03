@@ -142,6 +142,48 @@ key is only compared with a declared prefix. The browser runs the same function 
 block is never sent anywhere to be recognised; its secrets go to the secret store when the login is
 added, like any other.
 
+A variable clue counts only when the variable is **set to something**: an empty one says nothing. That
+is what lets `anthropic-api-key` detect a bare `ANTHROPIC_API_KEY` (the commonest setup, with no base
+URL) while a gateway that sets `ANTHROPIC_API_KEY` empty on purpose still reads as the gateway.
+
+### From this machine's own setup
+
+New machine setup's scan (`GET /v1/fleet/setup/scan`) runs the same table over what each CLI is really
+set up with, read where the CLI itself reads it, in the order it applies them:
+
+|     | Claude Code                                                  | Codex                                                                 |
+| --- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| 1   | `settings.json` `env` (applied over the process environment) | `config.toml` `model_provider` and its `[model_providers.<id>]` table |
+| 2   | the owner's **login shell** (`~/.zshrc` and friends)         | the login shell: the key the table's `env_key` names, `OPENAI_*`      |
+| 3   | the sign-in, used only when nothing above switches it        | `auth.json`, the same                                                 |
+
+- **The shell is read safely**: the shell every terminal opens, with a fixed command, no terminal, killed
+  at 5 s, and filtered to the names a preset declares or detects by the moment it is parsed — everything
+  else is dropped unread ([secrets.md](secrets.md#the-setup-scan-reads-your-login-shell)). A shell that
+  does not answer leaves the scan to `settings.json` and `config.toml`, and the scan says `shell:
+timed-out`.
+- **Only a provider the CLI would USE is a finding**: a `CLAUDE_CODE_USE_*` switch that is on, an
+  `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` for Claude Code; an active
+  `model_provider` table (recognised by its `base_url` host), `OPENAI_API_KEY` or `OPENAI_BASE_URL` for
+  Codex. A shell that merely has an `AWS_PROFILE` or an `OPENROUTER_API_KEY` is no finding. A switch
+  that is on admits only the presets that set it; a base URL on a host the winner does not declare is
+  the **custom gateway**.
+- **Each finding says**: the preset and its label, the source (`settings.json`, `shell`,
+  `settings.json+shell`, `config.toml`, `config.toml+shell`), the clue NAMES, the secret NAMES, and plain
+  facts — a value the preset declares plain that does not look like a secret, a URL only as its host, an
+  AWS profile only as its name. The wire type has no field a secret value could ride in.
+- **Import makes it an environment login of its own** — what `fy login add --from-env` makes: plain
+  values, each secret into the store as `${secret:NAME}`, `AWS_PROFILE` as `cloudCredential:
+aws-profile:<name>` (never `~/.aws`) — and a runtime on it. When the person is ALSO signed in, both
+  import: `claude-default` stays on the sign-in and the provider gets `claude-<preset>` on the same
+  profile (owner decision !A316). With no sign-in, the provider's runtime is `claude-default`. The
+  provider's variables leave the shared settings component for the login, so the sign-in runtime is
+  never switched onto the provider by the profile they share; a daemon never passes an inherited
+  `CLAUDE_CODE_USE_*` to any runtime either. `setup.import` `skipProviders` imports a harness as
+  before, settings untouched.
+- **Values are read again at the apply, never cached**, and the review's fingerprint covers what was
+  detected: a shell that changed after the preview is refused `fleet_change_stale`.
+
 ## One-click add
 
 - **Settings › Logins › Add a login** shows them, under its two sign-in tiles, as a grid of compact provider tiles, one per preset,
@@ -181,6 +223,22 @@ login's own `https://` values (or `http://` to this machine), or a host a built-
 literally. A `{VARIABLE}` in a test's host takes one DNS label. A preset file of this machine's own can
 never name a new host for a key. The Test reads the login's variables of every half, so a two-CLI
 login's one key is found in whichever half carries it.
+
+### Check a runtime
+
+A login's Test proves a key is accepted; it cannot prove Bedrock or Vertex, whose presets declare
+`test: none`. `POST /v1/fleet/runtimes/:runtimeId/check` (`fleet.use`, audited as `secrets.used`,
+`action: runtime-check`) proves the RUNTIME starts: it runs the start probe `fy new` runs — the
+runtime's own launcher, its login's launch environment, "Reply with exactly: OK" on its **default
+model** — 30 seconds at most, and answers `{ ok, ms, code?, sentence }`. It is one real model call: a
+few cents on a pay-per-token login, nothing extra on a subscription. A pass is kept by the same probe
+cache `fy new` reads; a failure is not, so "test again" asks again.
+
+The `code` is `not_logged_in`, `out_of_quota`, `model_unavailable`, `timed_out`, `not_launchable` or
+`no_answer`, and the `sentence` is built from that code and plain facts — the runtime's name, the
+model id, the preset's label, a region, a profile NAME, a secret NAME ("Amazon Bedrock refused the model
+claude-sonnet-5-5 in us-east-1") — **never from what the CLI printed**, which can echo a key or a URL
+with a password in it.
 
 ## Clone
 

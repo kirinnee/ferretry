@@ -33,7 +33,21 @@
  * ## Nothing here leaves on a timer
  *
  * The scan reads files and resolves commands; a package manager starts only inside an explicit install
- * request; nothing is launched to find anything out, and no provider is called.
+ * request, and no provider is called.
+ *
+ * ## The one thing the scan starts: the owner's login shell
+ *
+ * A Bedrock or Vertex Claude Code is very often switched on in `~/.zshrc`, which this daemon's own
+ * environment never sees. So the scan, and an import's preview and apply, each ask the login shell for
+ * its environment once (`./shell-environment.ts`: a fixed command, no terminal, killed at 5 s), keep only
+ * the names a preset can be recognised by, and drop the rest unread. That runs the person's rc files —
+ * the one real side effect of opening the page, bounded by the 5 s cap — and a shell that does not answer
+ * leaves the findings to `settings.json` and `config.toml`, and says so.
+ *
+ * What it finds becomes an ENVIRONMENT LOGIN of its own (docs/provider-presets.md), beside the sign-in
+ * when there is one (owner decision !A316). A value is never cached: the apply reads the shell again, and
+ * the fingerprint covers what was detected, so a shell that changed after the preview is refused as stale.
+ * No value of anything the shell holds leaves this service except into the secret store.
  */
 import {
   applyCloneToBase,
@@ -58,6 +72,9 @@ import {
   HARNESS_DISPLAY_NAMES,
   type HarnessKind,
   type HostHarnessScan,
+  type ImportedProvider,
+  type ImportFinding,
+  type ImportOptions,
   type ImportPlan,
   type ImportRecord,
   isRuntimeName,
@@ -78,12 +95,18 @@ import {
   skillFrontmatterKeys,
   serializeExportKeys,
   skillSourceReference,
+  providerShellNames,
+  type ProviderPreset,
+  type ShellEnvironmentReading,
+  shellVariableFilter,
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetCloneFile,
+  type FleetSetupFinding,
+  FleetSetupFindingSchema,
   type FleetSetupRefusalCode,
   type FleetSetupScan,
   type FleetSetupTool,
@@ -99,6 +122,7 @@ import {
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
 } from './catalog-service.ts';
+import type { ShellEnvironmentPort } from './shell-environment.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
@@ -154,6 +178,10 @@ export interface FleetSetupServiceDeps {
   readonly catalog: SetupCatalogDeps;
   /** Read this machine's own Claude Code and Codex setup. Reads files and resolves commands only. */
   scan(): Promise<readonly HostHarnessScan[]>;
+  /** The owner's login shell's environment, narrowed to what a provider can be recognised by as it is read. */
+  readonly shellEnvironment: ShellEnvironmentPort;
+  /** The provider presets this machine offers: an env provider is recognised by their own `detect:` blocks. */
+  presets(): Promise<readonly ProviderPreset[]>;
   /** The tool installer (`tool-install.ts`): its plans, and an install a person asked for. */
   readonly tools: {
     plans(harnesses: readonly HarnessKind[]): readonly ToolInstallPreview[];
@@ -281,10 +309,12 @@ export class FleetSetupService {
     const catalog = this.deps.catalog;
     const reading = await this.#read();
     const scans = await this.#scans();
+    const providers = await this.#providers(scans);
     const plan = planImport(scans, {
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
       digest: text => this.deps.digest(text),
+      ...(providers === undefined ? {} : { providers }),
     });
     return {
       machine: catalog.machineName(),
@@ -301,6 +331,7 @@ export class FleetSetupService {
         secretKeys: [...harness.secretKeys],
         missingCommands: [...harness.missingCommands],
         problems: [...harness.problems],
+        ...(harness.findings === undefined ? {} : { findings: harness.findings.flatMap(findingView) }),
       })),
       ...(plan.preview.instructionsIdentical === undefined
         ? {}
@@ -310,7 +341,32 @@ export class FleetSetupService {
       duplicates: plan.duplicates.map(duplicate => ({ ...duplicate })),
       notes: plan.notes.map(note => ({ ...note })),
       importing: { available: true },
+      ...(plan.preview.shell === undefined ? {} : { shell: plan.preview.shell }),
     };
+  }
+
+  /**
+   * What env providers are looked for with: the catalogue's presets and the login shell, read once for
+   * this call and never kept. A catalogue that cannot be read looks for none, as before detection.
+   */
+  async #providers(
+    scans: readonly HostHarnessScan[],
+    skip?: readonly HarnessKind[],
+  ): Promise<ImportOptions['providers']> {
+    let presets: readonly ProviderPreset[];
+    try {
+      presets = await this.deps.presets();
+    } catch {
+      return undefined;
+    }
+    const keep = shellVariableFilter(presets, providerShellNames(scans));
+    let shell: ShellEnvironmentReading;
+    try {
+      shell = await this.deps.shellEnvironment.read(keep);
+    } catch {
+      shell = { state: 'unavailable', cause: 'failed' };
+    }
+    return { presets, shell, ...(skip === undefined ? {} : { skip }) };
   }
 
   #tools(): FleetSetupTool[] {
@@ -524,6 +580,8 @@ export class FleetSetupService {
         `this machine's secret store could not be read, so nothing can be imported yet: ${errorMessage(error)}`,
       );
     }
+    // Read again for this preview or this apply: a shell value is never carried over from the scan.
+    const providers = await this.#providers(scans, change.skipProviders);
     const raw = planImport(scans, {
       ...(change.include === undefined ? {} : { include: change.include }),
       ...(existing === undefined ? {} : { existing }),
@@ -531,6 +589,7 @@ export class FleetSetupService {
       existingSecrets,
       addDuplicates: change.addDuplicates === true ? installed : [],
       digest: text => this.deps.digest(text),
+      ...(providers === undefined ? {} : { providers }),
     });
     const plan = this.#named(raw, change.names ?? {}, reading.model);
     const accepted = change.acceptedUpdates ?? [];
@@ -590,11 +649,14 @@ export class FleetSetupService {
     }));
     const runtimes = Object.keys(plan.runtimes).toSorted();
     const lines = [
-      ...Object.entries(plan.credentials).map(([id, credential]) =>
-        credential.store === 'host'
-          ? `Login ${id}: shared with ${credential.harness} in your terminal — signing out in one signs out both.`
-          : `Login ${id}: a new ${HARNESS_DISPLAY_NAMES[credential.harness]} login that needs sign-in.`,
-      ),
+      ...Object.entries(plan.credentials).map(([id, credential]) => {
+        if (credential.store === 'host')
+          return `Login ${id}: shared with ${credential.harness} in your terminal — signing out in one signs out both.`;
+        const provider = plan.providers.find(entry => entry.credential === id);
+        if (credential.store === 'environment' && provider !== undefined)
+          return `Login ${id}: ${provider.label}, from ${sourceWords(provider.source)} — read again when this is applied; its secrets go to the secret store.`;
+        return `Login ${id}: a new ${HARNESS_DISPLAY_NAMES[credential.harness]} login that needs sign-in.`;
+      }),
       ...(plan.components.length > 0 ? [`Adds ${plural(plan.components.length, 'part')} of your setup.`] : []),
       ...updates.map(update => `Updates ${update.reference} from its changed source.`),
       ...Object.keys(plan.profiles).map(name => `Profile ${name}.`),
@@ -610,21 +672,27 @@ export class FleetSetupService {
         runtimes.length > 0
           ? `${catalog.machineName()} is ready · ${plural(runtimes.length, 'runtime')} created: ${runtimes.join(', ')}.`
           : `Imported into ${catalog.machineName()}.`,
-      fingerprint: this.#fingerprint(
-        documents,
-        secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
-      ),
+      fingerprint: this.#fingerprint(documents, [
+        ...secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
+        // What was detected, and whether the shell answered: a shell that changed since the preview is stale.
+        this.deps.digest(
+          JSON.stringify({ shell: plan.preview.shell, findings: plan.preview.harnesses.map(entry => entry.findings) }),
+        ),
+      ]),
     };
   }
 
-  /** The plan with each runtime under the name the person gave it (§4.3 step 4, E16). */
+  /**
+   * The plan with each harness's FIRST runtime under the name the person gave it (§4.3 step 4, E16). An
+   * env provider's runtime beside a sign-in keeps the name its preset gave it (`claude-amazon-bedrock`).
+   */
   #named(plan: ImportPlan, names: Partial<Record<HarnessKind, string>>, existing: AccountModel): ImportPlan {
     const harnessOf = (credential: string): HarnessKind | undefined =>
       plan.credentials[credential]?.harness ?? existing.credentials[credential]?.harness;
     const runtimes: Record<string, ImportPlan['runtimes'][string]> = {};
     for (const [suggested, runtime] of Object.entries(plan.runtimes)) {
       const harness = harnessOf(runtime.credential);
-      const wanted = harness === undefined ? undefined : names[harness];
+      const wanted = harness === undefined || plan.primary[harness] !== suggested ? undefined : names[harness];
       if (wanted === undefined || wanted === suggested) {
         runtimes[suggested] = runtime;
         continue;
@@ -649,11 +717,24 @@ export class FleetSetupService {
   }
 
   /** The runtimes an import would create, by harness, for the naming step. */
-  #runtimesOf(plan: ImportPlan, existing: AccountModel): { harness: HarnessKind; name: string; profile: string }[] {
+  #runtimesOf(
+    plan: ImportPlan,
+    existing: AccountModel,
+  ): { harness: HarnessKind; name: string; profile: string; login: string; provider?: string }[] {
     return Object.entries(plan.runtimes).flatMap(([name, runtime]) => {
       const harness =
         plan.credentials[runtime.credential]?.harness ?? existing.credentials[runtime.credential]?.harness;
-      return harness === undefined ? [] : [{ harness, name, profile: runtime.profile }];
+      const provider = plan.providers.find(entry => entry.runtime === name)?.preset;
+      if (harness === undefined) return [];
+      return [
+        {
+          harness,
+          name,
+          profile: runtime.profile,
+          login: runtime.credential,
+          ...(provider === undefined ? {} : { provider }),
+        },
+      ];
     });
   }
 
@@ -938,6 +1019,44 @@ export class FleetSetupService {
       );
     }
   }
+}
+
+/** How a review line says where a provider was found. */
+const sourceWords = (source: ImportedProvider['source']): string =>
+  source === 'shell' ? 'your shell' : `your ${source.replace('+shell', ' and your shell')}`;
+
+/**
+ * A finding as the wire carries it: the same names and plain facts, and nothing a value could ride in. One
+ * the wire schema would refuse — a name no variable can have — is left out, so one odd entry in a settings
+ * file never stops the whole scan from answering.
+ */
+function findingView(finding: ImportFinding): FleetSetupFinding[] {
+  const parsed = FleetSetupFindingSchema.safeParse(findingShape(finding));
+  return parsed.success ? [parsed.data] : [];
+}
+
+function findingShape(finding: ImportFinding): FleetSetupFinding {
+  if (finding.kind === 'sign-in') {
+    return {
+      kind: 'sign-in',
+      state: finding.state,
+      ...(finding.email === undefined ? {} : { email: finding.email }),
+      login: finding.login,
+      ...(finding.runtime === undefined ? {} : { runtime: finding.runtime }),
+    };
+  }
+  return {
+    kind: 'provider',
+    preset: finding.preset,
+    label: finding.label,
+    source: finding.source,
+    clues: [...finding.clues],
+    facts: finding.facts.map(fact => ({ name: fact.name, value: fact.value })),
+    secrets: [...finding.secrets],
+    ...(finding.login === undefined ? {} : { login: finding.login }),
+    ...(finding.runtime === undefined ? {} : { runtime: finding.runtime }),
+    ...(finding.problem === undefined ? {} : { problem: finding.problem }),
+  };
 }
 
 /** Builds the setup subsystem the composition root mounts. */

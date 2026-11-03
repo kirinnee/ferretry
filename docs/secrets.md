@@ -179,7 +179,8 @@ token, by the rule above. Shape is a floor, not a guarantee: the store is the on
   Only keeping ferrets out of the state home would.
 - **Two writers that are not the store's own routes.** Importing your harness setup
   (`fy`'s setup import and clone, through `/v1/fleet/proposals/:id/apply`) adds secrets read from this
-  machine's harness files, and only under names the store does not hold, so it cannot replace one. An
+  machine's harness files and the owner's login shell ([below](#the-setup-scan-reads-your-login-shell)), and
+  only under names the store does not hold, so it cannot replace one. An
   MCP sign-in stores the token its authorization server answered, after a browser consent. Neither takes a
   value the agent chose; both are listed so they are decisions, not oversights.
 - **A paired device, once it unlocks.** The secret routes sit on the seventh capability, `secrets`:
@@ -280,6 +281,40 @@ What this makes a wall: every `caller: 'person'` refusal now holds against a fer
 ferret that reads `api-token`, `secrets.key` or the sealed files through its own shell is still the owner to
 this daemon. That needs keeping ferrets out of the state home, which a later change adds where the agent's
 sandbox can enforce it.
+
+## The setup scan reads your login shell
+
+A Bedrock, Vertex or gateway Claude Code is very often switched on by an `export` in `~/.zshrc`, which a
+daemon under a service manager never inherits. So New machine setup's scan — and an import's preview
+and apply — ask the owner's login shell for its environment
+([provider-presets.md](provider-presets.md#from-this-machines-own-setup)). It is the one place the daemon
+reads a value it did not store itself, so it is bounded on every side:
+
+- **Which shell, which command.** The shell every terminal opens (`SystemLoginShell`), started as
+  `<shell> -l -i -c 'printf "\0FY-ENV\0"; command env -0'`. The argv is a constant: nothing of anybody's
+  is ever part of it. It runs as the daemon's own user, which is already the owner; nothing is elevated.
+- **No terminal, no inherited environment.** stdin is `/dev/null`, there is no TTY, `TERM=dumb`, and the
+  shell starts from the account's own `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH` and locale — not from
+  whatever the daemon inherited. It is SIGKILLed at **5 s**, and output past 4 MiB is not read.
+- **Only what follows the marker, NUL-separated.** A banner an rc file prints, a value that spans lines,
+  or a marker an rc file printed first cannot be read as a variable; an entry that does not end in a NUL
+  is dropped.
+- **Filtered the moment it is parsed.** Only the names a preset can be recognised by are kept: a name a
+  preset declares or detects by, a `CLAUDE_CODE_USE_*` switch, the address and key shapes of an
+  `ANTHROPIC_`/`CLAUDE_`/`OPENAI_`/`CODEX_`/`AZURE_OPENAI_` name, and a Codex table's `env_key`. Every other
+  variable — a `GITHUB_TOKEN`, an `AWS_SECRET_ACCESS_KEY` — is dropped unread, never stored, never logged.
+  stderr is never read at all.
+- **What leaves the daemon is names.** The scan's findings carry the preset, clue NAMES, secret NAMES and
+  plain facts (a region, a host, a profile NAME); the wire type has no field a value could ride in.
+- **A value goes one place: the store.** At the apply the shell is read AGAIN — never cached from the scan
+  — each secret value goes straight to the store under a name it does not hold yet, and the login keeps
+  `${secret:NAME}`. A plain value the shell gave that looks like a secret, or a URL with a user or a
+  password in it, goes to the store too. The review's fingerprint covers what was detected, so a shell
+  that changed after the preview is refused as stale.
+
+**What it does not protect against:** reading the shell RUNS the person's rc files on every scan — their
+side effects (a slow `nvm`, a network mount, a prompt that waits) are theirs, bounded by the 5 s kill. And
+whatever the rc files export is, by definition, something that user's own shell already holds.
 
 ## References in configuration
 

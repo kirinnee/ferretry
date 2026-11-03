@@ -68,6 +68,12 @@ change, like every other. There are three ways to choose, and they ask the same 
   in now**, which adds the person's own login (`credential.add` with `store: host`), signs it in
   there, and returns to the step; the import then reuses that login. Skipping both ends on "Nothing
   is set up on _machine_ yet", with the way back.
+  The scan also reads the owner's **login shell** (5 s at most) and each CLI's settings for an **env
+  provider** — Bedrock, Vertex, Foundry, a gateway, an API key — and lists it beside the sign-in. Import
+  brings in both as separate logins: `claude-default` on the sign-in, and `claude-<preset>` on an
+  environment login made from the preset (or `claude-default` on it when nothing is signed in). After
+  the import, `POST /runtimes/:runtimeId/check` proves each new runtime answers
+  ([provider-presets.md](provider-presets.md#from-this-machines-own-setup)).
 - **`fy daemon setup`** asks the same questions in a terminal, one at a time. With no terminal it
   refuses and names `fy daemon import`.
 - **`fy daemon import claude|codex`** imports one tool with no questions, for scripts, under
@@ -178,17 +184,18 @@ read_ contract.
 All under `/v1/fleet`. Reads need `fleet.use`; every write is `fleet.configure`, and a caller that is
 not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing is typed.
 
-| Route                                                                                | Does                                                                    |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `GET /machine`                                                                       | settings, tools, setup state, and the caller's authority to apply       |
-| `POST /machine/tools/install`                                                        | install a named tool (the command is shown first)                       |
-| `GET /setup/scan`                                                                    | what a first run would import (key names only, never a value)           |
-| `GET /credentials`, `POST /credentials/:credentialId/check`                          | logins with status and usage; Check now                                 |
-| `POST /credentials/:credentialId/test`, `GET /presets`                               | an environment login's Test; the provider presets (provider-presets.md) |
-| `POST /login`, `GET\|POST\|DELETE /login/:flowId`                                    | sign a credential in, through the harness's own flow                    |
-| `GET /components`, `GET /profiles`, `POST /profiles/preview`, `GET /runtimes`        | read the catalogue; preview a profile's stack before saving             |
-| `GET /export`                                                                        | the clone bundle: no login, no history                                  |
-| `POST /proposals`, `GET /proposals/:proposalId`, `POST /proposals/:proposalId/apply` | stage, read and apply any change                                        |
+| Route                                                                                | Does                                                                      |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `GET /machine`                                                                       | settings, tools, setup state, and the caller's authority to apply         |
+| `POST /machine/tools/install`                                                        | install a named tool (the command is shown first)                         |
+| `GET /setup/scan`                                                                    | what a first run would import (key names only, never a value)             |
+| `GET /credentials`, `POST /credentials/:credentialId/check`                          | logins with status and usage; Check now                                   |
+| `POST /credentials/:credentialId/test`, `GET /presets`                               | an environment login's Test; the provider presets (provider-presets.md)   |
+| `POST /login`, `GET\|POST\|DELETE /login/:flowId`                                    | sign a credential in, through the harness's own flow                      |
+| `GET /components`, `GET /profiles`, `POST /profiles/preview`, `GET /runtimes`        | read the catalogue; preview a profile's stack before saving               |
+| `GET /export`                                                                        | the clone bundle: no login, no history                                    |
+| `POST /runtimes/:runtimeId/check`                                                    | one real "reply OK" through a runtime (`fleet.use`; a code, never output) |
+| `POST /proposals`, `GET /proposals/:proposalId`, `POST /proposals/:proposalId/apply` | stage, read and apply any change                                          |
 
 ## The single file is retired
 

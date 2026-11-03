@@ -109,6 +109,9 @@ async function machine(
   });
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
+      // No login shell is asked and no preset recognised: env providers have their own tests.
+      shellEnvironment: { read: async () => ({ state: 'unavailable', cause: 'failed' }) },
+      presets: async () => [],
       catalog: catalogDeps,
       daemonId: () => 'daemon-source',
       credentials: {

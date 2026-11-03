@@ -290,6 +290,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       },
     },
   },
+  fleetRuntimeCheck: {
+    check: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   cgroups: {
     config: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -974,6 +979,7 @@ describe('the mounted daemon surface', () => {
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
+      1 + // checking a runtime: one real "reply OK" through it, answered with a code and a sentence of plain facts
       1 + // the security log read
       1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
@@ -1140,6 +1146,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/setup/scan',
       'POST /v1/fleet/machine/tools/install',
       'GET /v1/fleet/export',
+      // One real "reply OK" through a runtime: the start probe, asked for on purpose. NOTE WHAT IS ABSENT:
+      // the answer is a code and a sentence built from plain facts, never what the CLI printed.
+      'POST /v1/fleet/runtimes/:runtimeId/check',
       // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
       // provider token. Two values go out — a verification URL, and for Codex a device code — and one
       // short-lived authorization code comes in, straight to the harness child’s stdin. Every route here is

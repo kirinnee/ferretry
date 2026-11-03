@@ -32,13 +32,23 @@
  * Pure: documents in, a plan out. Reading the host is the adapter's; writing the plan is the setup
  * executor's. A content digest is a caller-supplied function, because hashing is not this layer's.
  */
-import { MIN_SECRET_VALUE_LENGTH, secretReference, secretReferencesIn } from '@ferretry/protocol';
+import { secretReference, secretReferencesIn } from '@ferretry/protocol';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
 import type { HarnessKind } from '../manifest.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
+import {
+  codexConfigProvider,
+  findProvider,
+  type ProviderFinding,
+  type ProviderFindingView,
+  providerCredential,
+  providerFindingView,
+  type ShellEnvironmentReading,
+} from './provider-findings.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
   type AccountModel,
@@ -58,6 +68,10 @@ import {
   type SettingsComponent,
   type SkillsComponent,
 } from './schema.ts';
+import { looksSecret } from './secret-values.ts';
+
+/** Whether a value looks like a secret lives in `./secret-values.ts`, which every reader of an environment shares. */
+export { looksSecret, SECRET_TOKEN_SOURCE } from './secret-values.ts';
 
 // ── What the host scan hands in ──────────────────────────────────────────────────────────────────
 
@@ -220,10 +234,51 @@ export interface HarnessImportPreview {
   readonly missingCommands: readonly string[];
   /** Sentences for anything that could not be read or imported. */
   readonly problems: readonly string[];
+  /**
+   * What the import found this harness signed in to or set up for, each as its own login (owner
+   * decision !A316): the person's sign-in and an env provider can both be here, and each gets a runtime.
+   * Absent when providers were not looked for.
+   */
+  readonly findings?: readonly ImportFinding[];
+}
+
+/** One login the import found for a harness: the person's sign-in, or an env provider. Never a value. */
+export type ImportFinding =
+  | {
+      readonly kind: 'sign-in';
+      readonly state: 'signed-in' | 'refresh-due';
+      readonly email?: string;
+      /** The login it is, or becomes. */
+      readonly login: string;
+      /** The runtime the import makes on it; absent when one already uses that login and profile. */
+      readonly runtime?: string;
+    }
+  | (ProviderFindingView & {
+      readonly kind: 'provider';
+      readonly login?: string;
+      readonly runtime?: string;
+      /** Why it was not imported, when it was not (a required variable is missing). */
+      readonly problem?: string;
+    });
+
+/** An env provider the import makes a login and a runtime for. */
+export interface ImportedProvider {
+  readonly harness: HarnessKind;
+  readonly preset: string;
+  readonly label: string;
+  readonly source: ProviderFindingView['source'];
+  readonly credential: string;
+  /** Absent when one already uses that login and profile (E15). */
+  readonly runtime?: string;
 }
 
 export interface ImportPreview {
   readonly harnesses: readonly HarnessImportPreview[];
+  /**
+   * Whether the login shell was read for env providers: `read`, or why not. Absent when providers were
+   * not looked for at all.
+   */
+  readonly shell?: 'read' | 'timed-out' | 'failed';
   /**
    * Whether `CLAUDE.md` and `AGENTS.md` say the same thing: `undefined` unless both were found.
    * "Same as your CLAUDE.md · one shared copy" / "Different from your CLAUDE.md · kept separately".
@@ -250,6 +305,13 @@ export interface ImportPlan {
   readonly duplicates: readonly ImportDuplicate[];
   /** The record to persist once this plan has been applied. */
   readonly record: ImportRecord;
+  /** The env providers it imports, each its own login. */
+  readonly providers: readonly ImportedProvider[];
+  /**
+   * Each harness's FIRST runtime, under its suggested name: the one on the person's sign-in, or on the
+   * provider when nothing is signed in. A name the person gives a harness (§4.3 step 4) renames this one.
+   */
+  readonly primary: Readonly<Partial<Record<HarnessKind, string>>>;
 }
 
 export interface ImportOptions {
@@ -264,6 +326,16 @@ export interface ImportOptions {
   readonly addDuplicates?: readonly HarnessKind[];
   /** A content digest. Equal inputs give equal outputs; that is all that is asked of it. */
   readonly digest: (text: string) => string;
+  /**
+   * Look for env providers (docs/provider-presets.md § Detect): the catalogue's presets, and the login
+   * shell as read. Left out, nothing but each harness's sign-in is imported, as before.
+   */
+  readonly providers?: {
+    readonly presets: readonly ProviderPreset[];
+    readonly shell: ShellEnvironmentReading;
+    /** Harnesses whose env provider the person chose not to import. */
+    readonly skip?: readonly HarnessKind[];
+  };
 }
 
 // ── Names ────────────────────────────────────────────────────────────────────────────────────────
@@ -306,74 +378,6 @@ export function freeName(name: string, taken: (candidate: string) => boolean): s
 }
 
 // ── Secrets ──────────────────────────────────────────────────────────────────────────────────────
-
-/** Name words that say a variable holds a credential. Matched per `_`-separated word. */
-const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
-  'TOKEN',
-  'SECRET',
-  'PASSWORD',
-  'PASSWD',
-  'APIKEY',
-  'CREDENTIAL',
-  'CREDENTIALS',
-  'AUTH',
-  'AUTHORIZATION',
-  'COOKIE',
-  'PAT',
-]);
-
-/** Name word pairs that say the same: `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `SECRET_KEY`. */
-const SECRET_NAME_PAIRS: ReadonlySet<string> = new Set(['API_KEY', 'ACCESS_KEY', 'PRIVATE_KEY', 'SECRET_KEY']);
-
-const TOKEN_BODY = '[A-Za-z0-9_-]{8,}';
-
-/**
- * THE list of well-known token formats (one owner): each is a fixed prefix and the body that follows it. A
- * value that starts with a prefix is a secret by value ({@link looksSecret}), and text that holds a whole token
- * anywhere, glued to anything, is cut ({@link SECRET_TOKEN_SOURCE}). Every body is a linear class of a minimum
- * length and no format looks behind it: `<&ghp_x` and `{sk-x` are cut as `ghp_x` and `sk-x` are. A new format
- * is added here and nowhere else.
- */
-const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
-  ['sk-', TOKEN_BODY],
-  ['sk_live_', TOKEN_BODY],
-  ['gh[pousr]_', TOKEN_BODY],
-  ['github_pat_', TOKEN_BODY],
-  ['glpat-', TOKEN_BODY],
-  ['xox[abposr]-', TOKEN_BODY],
-  ['(?:AKIA|ASIA)', '[A-Z0-9]{16}'],
-  ['AIza', TOKEN_BODY],
-  ['npm_', TOKEN_BODY],
-  ['hf_', TOKEN_BODY],
-];
-
-/** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
-const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
-
-/** The regular expression source of any whole token in a text; a caller builds it with the `g` and `u` flags. */
-export const SECRET_TOKEN_SOURCE: string = TOKEN_FORMATS.map(([prefix, body]) => `${prefix}${body}`).join('|');
-
-/** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
-const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;
-
-/**
- * Whether one environment entry looks like a secret (E7).
- *
- * By NAME (a word such as `TOKEN` or `API_KEY`) or by VALUE (a well-known token prefix). A value
- * that is only a reference to another variable is not a secret, because it holds none, and a value
- * shorter than the secret store accepts is a flag rather than a credential (`AUTH=1`).
- */
-export function looksSecret(name: string, value: string): boolean {
-  if (value.length < MIN_SECRET_VALUE_LENGTH || INDIRECT_VALUE.test(value)) return false;
-  if (secretReferencesIn(value).length > 0) return false;
-  if (SECRET_VALUE_PREFIX.test(value)) return true;
-  const words = name
-    .toUpperCase()
-    .split(/[^A-Z0-9]+/u)
-    .filter(Boolean);
-  if (words.some(word => SECRET_NAME_WORDS.has(word))) return true;
-  return words.some((word, index) => SECRET_NAME_PAIRS.has(`${word}_${words[index + 1] ?? ''}`));
-}
 
 /** A secret name in the store's grammar, from an environment variable name. */
 const secretNameOf = (variable: string): string => {
@@ -621,7 +625,18 @@ const countHooks = (block: Readonly<Record<string, unknown>>): number =>
     0,
   );
 
-function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSecret[]): HarnessHarvest {
+/**
+ * One harness's setup, read into components. `provider` is the env provider found for it: its
+ * variables and its Codex provider table leave the SHARED settings and live on its own environment login
+ * instead, so a runtime on the person's sign-in is never switched onto the provider by the profile it
+ * shares with the provider's runtime.
+ */
+function harvest(
+  scan: HostHarnessScan,
+  names: SecretNames,
+  secrets: ImportedSecret[],
+  provider?: ProviderFinding,
+): HarnessHarvest {
   const { harness } = scan;
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
@@ -651,11 +666,24 @@ function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSec
       };
     }
     delete rest.hooks;
-    envImport = importEnv(rest.env, 'env.', settingsFile, names, secrets);
+    const taken = new Set(provider?.fromSettings ?? []);
+    const env = isRecord(rest.env)
+      ? Object.fromEntries(Object.entries(rest.env).filter(([variable]) => !taken.has(variable)))
+      : rest.env;
+    envImport = importEnv(env, 'env.', settingsFile, names, secrets);
     delete rest.env;
   } else {
     delete rest.mcp_servers;
     for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
+    const table = provider?.codexConfigProvider;
+    if (table !== undefined && rest.model_provider === table) {
+      delete rest.model_provider;
+      if (isRecord(rest.model_providers)) {
+        const others = Object.fromEntries(Object.entries(rest.model_providers).filter(([id]) => id !== table));
+        if (Object.keys(others).length === 0) delete rest.model_providers;
+        else rest.model_providers = others;
+      }
+    }
     const policy = rest.shell_environment_policy;
     if (isRecord(policy) && isRecord(policy.set)) {
       envImport = importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets);
@@ -1053,8 +1081,15 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const names = new SecretNames(options.existingSecrets ?? []);
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
+  const found = providerFindings(scans, imported, options.providers);
   const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets),
+    harvest(
+      scans.find(scan => scan.harness === harness) as HostHarnessScan,
+      names,
+      secrets,
+      // Only a provider that becomes a login takes its variables off the shared settings.
+      found[harness]?.refusal === undefined ? found[harness]?.finding : undefined,
+    ),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 
@@ -1219,44 +1254,139 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     }
   }
 
-  // Credentials and runtimes.
+  // Credentials and runtimes: the person's sign-in, and each env provider as a login of its own (owner
+  // decision !A316). Both found is two logins and two runtimes on the same profile; a provider with no
+  // sign-in beside it takes the harness's first runtime name, so `claude-default` is what runs.
   const credentials: Record<string, Credential> = {};
   const runtimes: Record<string, Runtime> = {};
   const duplicates: ImportDuplicate[] = [];
-  for (const harness of imported) {
-    const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
-    const wanted = credentialOf(harness, scan.login);
-    const reuse =
-      wanted.store === 'host'
-        ? Object.entries(existing?.credentials ?? {}).find(
-            ([, credential]) => credential.harness === harness && credential.store === 'host',
-          )?.[0]
-        : undefined;
-    const credentialId =
-      reuse ?? freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
-    if (reuse === undefined) credentials[credentialId] = wanted;
-    const profileName = profileOf[harness];
-    if (profileName === undefined) continue;
-    const suggested = freeName(
-      profileName.startsWith(`${harness}-`) ? profileName : importedRuntimeName(harness, profileName),
-      candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
-    );
+  const providers: ImportedProvider[] = [];
+  const primary: Partial<Record<HarnessKind, string>> = {};
+  const findingsOf: Partial<Record<HarnessKind, ImportFinding[]>> = {};
+  const credentialTaken = (candidate: string): boolean =>
+    existing?.credentials[candidate] !== undefined || credentials[candidate] !== undefined;
+  const runtimeTaken = (candidate: string): boolean =>
+    existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined;
+  /** A runtime on `credential` and `profile`, unless one already uses both (E15). Its name, when made. */
+  const addRuntime = (
+    harness: HarnessKind,
+    credential: string,
+    profile: string,
+    wanted: string,
+  ): string | undefined => {
+    const suggested = freeName(wanted, runtimeTaken);
     const twin = Object.entries(existing?.runtimes ?? {}).find(
-      ([, runtime]) => runtime.credential === credentialId && runtime.profile === profileName,
+      ([, runtime]) => runtime.credential === credential && runtime.profile === profile,
     )?.[0];
     if (twin !== undefined && !(options.addDuplicates ?? []).includes(harness)) {
       duplicates.push({ harness, existing: twin, suggested });
-      continue;
+      return undefined;
     }
-    if (!isRuntimeName(suggested)) continue;
-    runtimes[suggested] = { credential: credentialId, profile: profileName, agent: true };
+    if (!isRuntimeName(suggested)) return undefined;
+    runtimes[suggested] = { credential, profile, agent: true };
+    return suggested;
+  };
+  for (const harness of imported) {
+    const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
+    const profileName = profileOf[harness];
+    const firstName =
+      profileName === undefined
+        ? undefined
+        : profileName.startsWith(`${harness}-`)
+          ? profileName
+          : importedRuntimeName(harness, profileName);
+    const finding = found[harness]?.finding;
+    const made =
+      finding === undefined
+        ? undefined
+        : providerLogin(
+            found[harness] as FoundProvider,
+            existing,
+            credentials,
+            credentialTaken,
+            names,
+            secrets,
+            keptSecrets,
+          );
+    const signedIn = isSignedIn(scan.login.state);
+    const findings: ImportFinding[] = [];
+    // The sign-in is imported as before unless a provider stands in for it: a provider with nothing
+    // signed in beside it is what the CLI really runs on, so no empty sign-in slot is made for it.
+    if (made?.credential === undefined || signedIn) {
+      const wanted = credentialOf(harness, scan.login);
+      const reuse =
+        wanted.store === 'host'
+          ? Object.entries(existing?.credentials ?? {}).find(
+              ([, credential]) => credential.harness === harness && credential.store === 'host',
+            )?.[0]
+          : undefined;
+      const credentialId = reuse ?? freeName(harnessNamed(harness, 'you'), credentialTaken);
+      if (reuse === undefined) credentials[credentialId] = wanted;
+      const runtime =
+        profileName === undefined || firstName === undefined
+          ? undefined
+          : addRuntime(harness, credentialId, profileName, firstName);
+      if (runtime !== undefined) primary[harness] = runtime;
+      if (isSignedIn(scan.login.state)) {
+        findings.push({
+          kind: 'sign-in',
+          state: scan.login.state,
+          ...(scan.login.email === undefined ? {} : { email: scan.login.email }),
+          login: credentialId,
+          ...(runtime === undefined ? {} : { runtime }),
+        });
+      }
+    }
+    if (finding !== undefined && made !== undefined) {
+      const view = providerFindingView(finding);
+      if (made.credential === undefined) {
+        findings.push({ kind: 'provider', ...view, problem: made.problem as string });
+      } else {
+        const runtime =
+          profileName === undefined || firstName === undefined
+            ? undefined
+            : addRuntime(
+                harness,
+                made.credential,
+                profileName,
+                signedIn ? harnessNamed(harness, finding.preset.id) : firstName,
+              );
+        if (!signedIn && runtime !== undefined) primary[harness] = runtime;
+        providers.push({
+          harness,
+          preset: view.preset,
+          label: view.label,
+          source: view.source,
+          credential: made.credential,
+          ...(runtime === undefined ? {} : { runtime }),
+        });
+        findings.push({
+          kind: 'provider',
+          ...view,
+          login: made.credential,
+          ...(runtime === undefined ? {} : { runtime }),
+        });
+        if (made.secrets.length > 0) {
+          notes.push({
+            harness,
+            text: `${String(made.secrets.length)} secret value${made.secrets.length === 1 ? '' : 's'} for ${view.label} went to Ferretry's secret store and ${made.secrets.length === 1 ? 'is' : 'are'} never shown: ${made.secrets.join(', ')}.`,
+          });
+        }
+      }
+    }
+    findingsOf[harness] = findings;
   }
 
   const recordedProfiles: Partial<Record<HarnessKind, string>> = { ...record.profiles, ...profileOf };
 
+  const shell = options.providers?.shell;
   const preview: ImportPreview = {
-    harnesses: scans.map(scan => previewOf(scan, harvestOf(scan.harness))),
+    harnesses: scans.map(scan => ({
+      ...previewOf(scan, harvestOf(scan.harness)),
+      ...(options.providers === undefined ? {} : { findings: findingsOf[scan.harness] ?? [] }),
+    })),
     ...(instructions.identical === undefined ? {} : { instructionsIdentical: instructions.identical }),
+    ...(shell === undefined ? {} : { shell: shell.state === 'read' ? 'read' : shell.cause }),
   };
 
   return {
@@ -1278,7 +1408,119 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       ...(record.profile === undefined ? {} : { profile: record.profile }),
       ...(Object.keys(recordedProfiles).length === 0 ? {} : { profiles: recordedProfiles }),
     },
+    providers,
+    primary,
   };
+}
+
+/** Whether the person is signed in to a harness: a sign-in an import shares, rather than an empty slot. */
+const isSignedIn = (state: HostLoginState): state is 'signed-in' | 'refresh-due' =>
+  state === 'signed-in' || state === 'refresh-due';
+
+/** An env provider found for a harness, and why it cannot become a login when it cannot. */
+interface FoundProvider {
+  readonly finding: ProviderFinding;
+  readonly refusal?: string;
+}
+
+/** The env provider each imported harness is set up for (docs/provider-presets.md § Detect). */
+function providerFindings(
+  scans: readonly HostHarnessScan[],
+  imported: readonly HarnessKind[],
+  providers: ImportOptions['providers'],
+): Partial<Record<HarnessKind, FoundProvider>> {
+  if (providers === undefined) return {};
+  const shell = providers.shell.state === 'read' ? providers.shell.env : {};
+  const found: Partial<Record<HarnessKind, FoundProvider>> = {};
+  for (const harness of imported) {
+    if (providers.skip?.includes(harness)) continue;
+    const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
+    const settings = quietlyParsed(scan.settings, HOST_SETTINGS_FORMAT[harness]);
+    const finding =
+      harness === 'claude'
+        ? findProvider({ harness, presets: providers.presets, shell, settingsEnv: textValues(settings?.env) })
+        : findProvider({ harness, presets: providers.presets, shell, codexConfig: codexConfigProvider(settings) });
+    if (finding === undefined) continue;
+    // Whether it can be a login is decided now, claiming nothing: a refused one leaves the settings as they are.
+    const trial = providerCredential(finding, name => name);
+    found[harness] = { finding, ...('refusal' in trial ? { refusal: trial.refusal } : {}) };
+  }
+  return found;
+}
+
+/** The names of the shell variables a Codex provider table sends as its key: read from the shell too. */
+export function providerShellNames(scans: readonly HostHarnessScan[]): readonly string[] {
+  const codex = scans.find(scan => scan.harness === 'codex');
+  const key = codex === undefined ? undefined : codexConfigProvider(quietlyParsed(codex.settings, 'toml'))?.envKey;
+  return key === undefined ? [] : [key];
+}
+
+/** A settings document as a record, or `undefined`; its problems are the harvest's to report. */
+function quietlyParsed(read: HostDocumentRead, format: SettingsFormat): SettingsObject | undefined {
+  if (read.kind !== 'text' || read.text.trim() === '') return undefined;
+  try {
+    return parseSettings(read.text, format);
+  } catch {
+    return undefined;
+  }
+}
+
+/** An `env` block's text values, as the CLI reads them: a number or a boolean as its text. */
+function textValues(env: unknown): Readonly<Record<string, string>> {
+  if (!isRecord(env)) return {};
+  return Object.fromEntries(
+    Object.entries(env).flatMap(([name, value]) =>
+      typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        ? [[name, String(value)]]
+        : [],
+    ),
+  );
+}
+
+/**
+ * A finding's environment login: an existing one from the same preset for the same CLI, reused as Import
+ * again finds it; else a new one, its secrets claimed into the plan; else why it cannot be made.
+ */
+function providerLogin(
+  { finding, refusal }: FoundProvider,
+  existing: AccountModel | undefined,
+  credentials: Record<string, Credential>,
+  taken: (candidate: string) => boolean,
+  names: SecretNames,
+  secrets: ImportedSecret[],
+  kept: Set<string>,
+): { readonly credential?: string; readonly problem?: string; readonly secrets: readonly string[] } {
+  const reuse = Object.entries(existing?.credentials ?? {}).find(
+    ([, credential]) =>
+      credential.store === 'environment' &&
+      credential.harness === finding.harness &&
+      credential.preset === finding.preset.id,
+  )?.[0];
+  if (reuse !== undefined) return { credential: reuse, secrets: [] };
+  const where =
+    finding.source === 'shell' ? 'your shell' : `your ${finding.source.replace('+shell', ' and your shell')}`;
+  if (refusal !== undefined) {
+    return {
+      problem: `${finding.preset.label} was found in ${where}, but ${refusal}, so it was not imported.`,
+      secrets: [],
+    };
+  }
+  const claimed: string[] = [];
+  const made = providerCredential(finding, (name, value) => {
+    const secret = names.claim(name, value, `${where} · ${name}`, secrets);
+    claimed.push(secret);
+    kept.add(secret);
+    return secret;
+  });
+  if ('refusal' in made) {
+    return {
+      problem: `${finding.preset.label} was found in ${where}, but ${made.refusal}, so it was not imported.`,
+      secrets: [],
+    };
+  }
+  const id = freeName(harnessNamed(finding.harness, finding.preset.id), taken);
+  credentials[id] = made.credential;
+  return { credential: id, secrets: [...new Set(claimed)] };
 }
 
 /** A configuration to import into when the machine has none yet. */

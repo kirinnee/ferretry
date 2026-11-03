@@ -67,6 +67,7 @@ export * from './fleet-clone-digest.ts';
 export * from './fleet-clone-logins.ts';
 export * from './fleet-clone-review.ts';
 export * from './fleet-credentials.ts';
+export * from './fleet-runtime-check.ts';
 export * from './fleet-setup.ts';
 export * from './foreign-history.ts';
 export * from './grants.ts';

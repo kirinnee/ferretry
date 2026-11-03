@@ -32,9 +32,22 @@ export interface PackProbeRequest {
 /** What a failed probe's output says went wrong, when it says; otherwise it is only `probe_failed`. */
 export type ProbeFailureCode = 'out_of_quota' | 'not_logged_in' | 'model_unavailable';
 
+/**
+ * WHERE a failed probe stopped, decided by the probe itself and never read from the CLI: its launcher
+ * could not be found, its login's environment could not be built (a secret it names is missing), the
+ * process could not start, it ran out of time, it exited, or it answered with something other than OK.
+ */
+export type ProbeFailureStage = 'launcher' | 'environment' | 'spawn' | 'timeout' | 'exit' | 'answer';
+
 export type PackProbeOutcome =
   | { readonly ok: true; readonly ms: number }
-  | { readonly ok: false; readonly ms: number; readonly reason: string; readonly code?: ProbeFailureCode };
+  | {
+      readonly ok: false;
+      readonly ms: number;
+      readonly reason: string;
+      readonly code?: ProbeFailureCode;
+      readonly stage?: ProbeFailureStage;
+    };
 
 /** Runs one probe. The adapter starts the runtime's CLI in its one-shot mode. */
 export interface PackProbePort {

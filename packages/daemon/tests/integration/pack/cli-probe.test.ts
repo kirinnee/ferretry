@@ -131,7 +131,12 @@ describe('CliPackProbe', () => {
     const probe = build({ spawn: async () => ({ kind: 'exited', code: 0, stdout: 'I cannot do that' }) });
 
     // Act + Assert
-    should(await probe.probe(request())).eql({ ok: false, ms: 250, reason: 'it answered, but not OK' });
+    should(await probe.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it answered, but not OK',
+      stage: 'answer',
+    });
   });
 
   it('should name a failure the CLI reports — quota, sign-in, a missing model — without repeating its words', async () => {
@@ -152,26 +157,30 @@ describe('CliPackProbe', () => {
       ms: 250,
       reason: 'it exited 1: its login is out of quota or rate-limited',
       code: 'out_of_quota',
+      stage: 'exit',
     });
     should(login).eql({
       ok: false,
       ms: 250,
       reason: 'it exited 1: its login is not signed in or its key was refused',
       code: 'not_logged_in',
+      stage: 'exit',
     });
     should(model).eql({
       ok: false,
       ms: 250,
       reason: 'it exited 1: the provider does not serve that model',
       code: 'model_unavailable',
+      stage: 'exit',
     });
     should(answered).eql({
       ok: false,
       ms: 250,
       reason: 'it answered, but not OK: its login is out of quota or rate-limited',
       code: 'out_of_quota',
+      stage: 'answer',
     });
-    should(other).eql({ ok: false, ms: 250, reason: 'it exited 1' });
+    should(other).eql({ ok: false, ms: 250, reason: 'it exited 1', stage: 'exit' });
     should(JSON.stringify([quota, login, model])).not.containEql('1761156000');
   });
 
@@ -180,7 +189,7 @@ describe('CliPackProbe', () => {
     const probe = build({ spawn: async () => ({ kind: 'exited', code: 3, stdout: 'OK' }) });
 
     // Act + Assert
-    should(await probe.probe(request())).eql({ ok: false, ms: 250, reason: 'it exited 3' });
+    should(await probe.probe(request())).eql({ ok: false, ms: 250, reason: 'it exited 3', stage: 'exit' });
   });
 
   it('should fail with the allowed seconds when it times out', async () => {
@@ -192,6 +201,7 @@ describe('CliPackProbe', () => {
       ok: false,
       ms: 250,
       reason: 'no answer within 20s',
+      stage: 'timeout',
     });
   });
 
@@ -213,11 +223,13 @@ describe('CliPackProbe', () => {
       ok: false,
       ms: 250,
       reason: 'it could not be started (ENOENT: no such file)',
+      stage: 'spawn',
     });
     should(await notAnError.probe(request())).eql({
       ok: false,
       ms: 250,
       reason: 'it could not be started (plain string)',
+      stage: 'spawn',
     });
   });
 
@@ -248,11 +260,13 @@ describe('CliPackProbe', () => {
       ms: 250,
       reason:
         'it cannot be launched: the fleet publishes claude-work at /fy/fleet/bin/claude-work, but this host cannot run that file',
+      stage: 'launcher',
     });
     should(await opaque.probe(request())).eql({
       ok: false,
       ms: 250,
       reason: 'it cannot be launched: its launcher is unknown',
+      stage: 'launcher',
     });
     should(spawned).be.false();
   });
@@ -277,8 +291,18 @@ describe('CliPackProbe', () => {
     });
 
     // Act + Assert
-    should(await probe.probe(request())).eql({ ok: false, ms: 250, reason: 'secret NAME is not set' });
-    should(await opaque.probe(request())).eql({ ok: false, ms: 250, reason: 'its login could not be read' });
+    should(await probe.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'secret NAME is not set',
+      stage: 'environment',
+    });
+    should(await opaque.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'its login could not be read',
+      stage: 'environment',
+    });
     should(spawned).be.false();
   });
 

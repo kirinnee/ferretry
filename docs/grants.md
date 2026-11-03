@@ -120,6 +120,14 @@ It is not an investigation request (`warden.use`): it switches supervision of th
 which is how the Warden behaves on this host — so a governed device steps up for it, and a remote warden,
 which can never step up, can never quiet its own supervision or anyone else's.
 
+**Checking a runtime is `fleet.use`.** `POST /v1/fleet/runtimes/:runtimeId/check` runs the runtime's own
+launcher once with "Reply with exactly: OK" — the probe every Pack start already runs — and answers a code
+and a sentence built from plain facts, never the CLI's output ([provider-presets.md](provider-presets.md#check-a-runtime)).
+It changes nothing and starts no ferret, so it sits with the other uses of the fleet's runtimes; it does
+spend one model call on that runtime's login, and the security log records it as `secrets.used`
+(`action: runtime-check`). The setup scan beside it stays `fleet.configure`: it now also reads the owner's
+login shell for env providers, and still answers names only.
+
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
