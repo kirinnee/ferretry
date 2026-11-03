@@ -7,6 +7,9 @@
  *   is a blocker of its card — and moves its stage to `test` or `plan`. Restating an open one (a renamed lane, edited
  *   steps) changes only the ask. An ask the owner already answered is never asked again.
  * - **Withdraw.** The card left that gate unanswered (moved on by the owner on the Board, dropped): the open ask goes.
+ *   An agenda left with nothing to answer does not sit in Needs you: one with answered asks goes back to resting on its
+ *   ferret, and the card agenda the daemon opened (`card-agenda:`) with no talk in it closes. A ferret's own thread
+ *   that carried only that ask stays as it is: its own question is what it asks.
  * - **Answer.** The owner's answer is kept on the ask, with its receipt; the agenda RESTS, waiting on its ferret,
  *   unless another card ask on it is still open. It is never closed by the answer: the ferret marks it Done.
  * - **Not yet.** The ask stays open, marked, and the agenda rests the same way.
@@ -25,6 +28,7 @@ import {
   MAX_AGENDA_REPLY_LENGTH,
   mirroredCardAsk,
   openCardAsks,
+  parseCardAgendaReference,
 } from '@ferretry/protocol';
 
 /** What the gate engine does to one agenda's card asks. */
@@ -42,7 +46,9 @@ export type CardAskOperation =
 export type CardAskOutcome =
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly code: 'invalid' | 'full'; readonly message: string }
-  | { readonly kind: 'changed'; readonly item: AgendaItem; readonly change: 'refreshed' | 'woke' | 'answered' };
+  | { readonly kind: 'changed'; readonly item: AgendaItem; readonly change: 'refreshed' | 'woke' | 'answered' }
+  /** The last open ask was withdrawn from a card agenda with nothing else in it: it closes, as the daemon's. */
+  | { readonly kind: 'closed'; readonly item: AgendaItem; readonly note: string };
 
 /**
  * The asks an agenda keeps: every open one, then the newest answered ones up to {@link MAX_AGENDA_CARD_ASKS}, in
@@ -99,6 +105,15 @@ const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
   return { ...open, parked: { reason: 'replied', at }, resting: { sub: 'waiting-on-ferret', at } };
 };
 
+/** Whether the daemon opened this agenda for its card (`card-agenda:`): it holds the card's asks and nothing of the ferret's. */
+const isCardAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
+  item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined;
+
+/** Whether the owner or a ferret has said anything on an agenda: the daemon's own lines are not talk. */
+const hasTalk = (item: AgendaItem): boolean =>
+  (item.history ?? []).some(entry => entry.kind !== 'updated' && entry.kind !== 'gate-answered') ||
+  item.ownerAnswer !== undefined;
+
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 /**
@@ -154,14 +169,19 @@ export const applyCardAsk = (
   const target = asks.find(ask => cardAskReference(ask) === operation.reference);
   if (operation.kind === 'withdraw') {
     if (target === undefined || !isOpenCardAsk(target)) return { kind: 'unchanged' };
-    return {
-      kind: 'changed',
-      item: withCardAsks(
-        item,
-        asks.filter(ask => ask !== target),
-      ),
-      change: 'refreshed',
-    };
+    const left = withCardAsks(
+      item,
+      asks.filter(ask => ask !== target),
+    );
+    if (openCardAsks(left).length > 0) return { kind: 'changed', item: left, change: 'refreshed' };
+    const note = `${formatTaskRef({ id: target.gate.cardId })} moved on, so nothing is left to answer`;
+    const told = effects.history(left, 'updated', note);
+    if ((left.cardAsks ?? []).length > 0 || (isCardAgenda(left) && hasTalk(left))) {
+      return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };
+    }
+    return isCardAgenda(left)
+      ? { kind: 'closed', item: told, note }
+      : { kind: 'changed', item: left, change: 'refreshed' };
   }
   if (target === undefined) {
     return { kind: 'refused', code: 'invalid', message: `${item.id} carries no card ask ${operation.reference}` };

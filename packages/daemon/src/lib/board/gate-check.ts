@@ -84,7 +84,7 @@ export const gateCheckMessage = (duplicates: readonly DuplicateGateItem[], binar
   duplicates
     .map(
       ({ card, gateItem, item }) =>
-        `&${card} already asks the owner on !${gateItem}, which carries the card: add yours to it (${binary} agenda edit ${gateItem} --where "<what you need>"), then drop !${item}: ${binary} agenda dismiss !${item}`,
+        `&${card} already asks the owner on !${gateItem}, which carries the card: put yours on it (${binary} agenda edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !${item}: ${binary} agenda dismiss !${item}`,
     )
     .join('\n');
 

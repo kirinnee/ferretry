@@ -2,6 +2,7 @@ import {
   agendaItemPushTag,
   type AgendaItem,
   type AgendaSnapshot,
+  asksOnlyCardAsks,
   hasOpenCardAsk,
   type PushSubject,
   pushUrgencyFor,
@@ -127,7 +128,7 @@ export class NotificationService implements AgendaRaisedObserver {
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
     // A card's gate item made its own push at its raise: a stop never names it again.
     const [first, ...rest] = ownerTurnItems(snapshot.items).filter(
-      item => item.gate === undefined && !hasOpenCardAsk(item),
+      item => item.gate === undefined && !asksOnlyCardAsks(item),
     );
     if (first === undefined) return;
     await this.announce(

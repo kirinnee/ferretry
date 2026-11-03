@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../src/lib/agenda.ts';
 import {
+  asksOnlyCardAsks,
+  canCarryCardAsk,
   cardAgendaReference,
   cardAskOf,
   cardAskReference,
@@ -121,5 +123,75 @@ describe('an agenda item’s card asks', () => {
     const twice = AgendaItemSchema.safeParse(item([open('F412'), answered('F412')]));
     should(twice.success).be.false();
     should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each card ask once');
+  });
+});
+
+const thread = {
+  notice: undefined,
+  gate: undefined,
+  kind: 'reply' as const,
+  confirms: undefined,
+  copyPlan: undefined,
+  taskPlan: undefined,
+  twoFactorSeed: undefined,
+  phoneApproval: undefined,
+  signInRuleSuggestion: undefined,
+  signInRuleSuspended: undefined,
+  raisedBy: 'agent' as const,
+  source: 'agent-raised' as const,
+  sourceRef: null,
+};
+
+describe('which agendas can carry a card ask', () => {
+  it('should let a ferret’s own thread, and the daemon’s card agenda and Not good conversation, carry one', () => {
+    should(canCarryCardAsk(thread)).be.true();
+    should(canCarryCardAsk({ ...thread, raisedBy: 'daemon', source: 'task', sourceRef: 'card-agenda:F1' })).be.true();
+    should(
+      canCarryCardAsk({ ...thread, raisedBy: 'daemon', source: 'task', sourceRef: 'gate-followup:F1:2' }),
+    ).be.true();
+  });
+
+  it('should refuse every item that is answered another way', () => {
+    should(canCarryCardAsk({ ...thread, notice: true })).be.false();
+    should(canCarryCardAsk({ ...thread, kind: 'input' })).be.false();
+    should(canCarryCardAsk({ ...thread, raisedBy: 'daemon', source: 'task', sourceRef: null })).be.false();
+    should(
+      canCarryCardAsk({ ...thread, raisedBy: 'daemon', source: 'task', sourceRef: 'gate:F1:tested:2' }),
+    ).be.false();
+    for (const field of [
+      'confirms',
+      'copyPlan',
+      'taskPlan',
+      'twoFactorSeed',
+      'phoneApproval',
+      'signInRuleSuggestion',
+      'signInRuleSuspended',
+    ] as const)
+      should(canCarryCardAsk({ ...thread, [field]: {} as never })).be.false();
+  });
+});
+
+describe('an agenda that asks only card asks', () => {
+  const base = { raisedBy: 'agent' as const, sourceRef: null, waitingSince: AT };
+
+  it('should be false with no open ask', () => {
+    should(asksOnlyCardAsks({ ...base })).be.false();
+    should(asksOnlyCardAsks({ ...base, cardAsks: [answered('F1')] })).be.false();
+  });
+
+  it('should be true for the daemon’s card agenda, whatever else is on it', () => {
+    should(
+      asksOnlyCardAsks({
+        raisedBy: 'daemon',
+        sourceRef: 'card-agenda:F1',
+        waitingSince: LATER,
+        cardAsks: [open('F1')],
+      }),
+    ).be.true();
+  });
+
+  it('should be true for a thread the ask was put on after its last question, false when the ferret asked since', () => {
+    should(asksOnlyCardAsks({ ...base, cardAsks: [{ ...open('F1'), at: LATER }] })).be.true();
+    should(asksOnlyCardAsks({ ...base, waitingSince: LATER, cardAsks: [open('F1')] })).be.false();
   });
 });

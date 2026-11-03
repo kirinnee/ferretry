@@ -1,4 +1,4 @@
-import { type AgendaItem, type AgendaSnapshot, hasOpenCardAsk } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaSnapshot, asksOnlyCardAsks, hasOpenCardAsk } from '@ferretry/protocol';
 import {
   type AgendaBoardChange,
   type AgendaChangeObserver,
@@ -118,11 +118,11 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, this.clock.now());
       const snapshot = agendaSnapshot(ledger);
       // A card being filled in advance is not the owner's to answer: it neither pushes its deadline nor makes a stop.
-      // A gate item, or an agenda carrying a card ask, made its one push when it was asked: never a second inside a stop.
+      // A gate item, or an agenda that asks only its card asks, made its one push when it was asked: never a second inside a stop.
       const owner = ownerTurnItems(snapshot.items).filter(
         item =>
           item.gate === undefined &&
-          !hasOpenCardAsk(item) &&
+          !asksOnlyCardAsks(item) &&
           (item.input === undefined || !this.quiet(sessionId, item.input.requestId)),
       );
       if (owner.length === 0) return;

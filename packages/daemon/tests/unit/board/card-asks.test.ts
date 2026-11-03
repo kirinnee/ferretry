@@ -468,20 +468,56 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
     should(agendaState(openOf(world, 'lead', raised.item.id)).state).equal('needs-you');
   });
 
-  it('withdraws the ask when the card leaves the gate some other way, and keeps the agenda', async () => {
+  it('closes the daemon-opened card agenda when its last ask is withdrawn and nobody talked on it', async () => {
     // Arrange
     const { world, item } = await atTest();
 
-    // Act — the owner closes it on the Board
+    // Act — the owner closes the card on the Board
     await world.move('closed');
 
-    // Assert
+    // Assert — nothing is left in Needs you
+    should(world.open()).be.empty();
+    should(world.closed().map(each => each.id)).eql([item.id]);
+  });
+
+  it('rests the card agenda, waiting on its ferret, when its last ask is withdrawn after the owner talked on it', async () => {
+    // Arrange — the owner said something on the card's agenda
+    const { world, item } = await atTest();
+    const talked = await world.agenda.answer(
+      'grandchild',
+      item.id,
+      { kind: 'open-question', answer: 'looks odd' },
+      HUMAN,
+    );
+    if (!talked.ok) throw new Error(talked.error.message);
+
+    // Act
+    await world.move('closed');
+
+    // Assert — it stays, with no ask, and is not in Needs you
     const after = openOf(world, 'grandchild', item.id);
     should(after.cardAsks).be.undefined();
     should(after.gateAttached).be.undefined();
+    should(agendaState(after).state).equal('resting');
   });
 
-  it('asks the next entry on the same agenda when the card comes back to the gate', async () => {
+  it('leaves a ferret’s thread as it was when the ask it carried is withdrawn', async () => {
+    // Arrange — the ask rides the lead's thread
+    const world = fixture([leads()]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    await world.board.trigger('F1', 'release.running');
+
+    // Act
+    await world.move('closed');
+
+    // Assert — the thread is still open and carries no ask
+    const after = openOf(world, 'lead', raised.item.id);
+    should(after.cardAsks).be.undefined();
+    should(agendaState(after).state).equal('needs-you');
+  });
+
+  it('asks the next entry on a fresh agenda when the card comes back to the gate', async () => {
     // Arrange
     const { world, item } = await atTest();
 
@@ -489,9 +525,10 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
     await world.move('implement', OWNER, 'one more fix');
     await world.board.trigger('F1', 'release.running');
 
-    // Assert — still one agenda; the old entry's ask went, the new one is open
+    // Assert — the old entry's agenda closed with its ask; the new one is open, alone
     const items = world.open();
-    should(items.map(each => each.id)).eql([item.id]);
+    should(items).have.length(1);
+    should(items[0]?.id).not.equal(item.id);
     should(items[0]?.cardAsks?.map(ask => ask.gate.entry)).eql([4]);
   });
 
@@ -713,6 +750,99 @@ describe('answering a card ask', () => {
     const named = await world.answer(id, choose('Done'), { sessionId: 'lead', cardAsk: 'gate:F2:tested:2' });
     should(named).match({ handled: true, mutation: { ok: true } });
     should(world.stored('F2').laneId).equal('closed');
+  });
+
+  it('never spends an older app’s double tap on the next of two OPEN asks, whenever it was put on', async () => {
+    // Arrange — the parent's thread carries two sub-cards' plan asks, both already open
+    const world = fixture([
+      leads(),
+      leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }),
+      leads({ id: 'F3', laneId: 'todo', parent: { id: 'F1' } }),
+    ]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    for (const each of ['F2', 'F3'])
+      await world.board.act(each, BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    should(openOf(world, 'lead', id).cardAsks?.map(ask => ask.gate.cardId)).eql(['F2', 'F3']);
+
+    // Act — the first tap, then the same tap again: a retry, or a double tap
+    const first = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+    const again = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert — F2 moved on; F3, which the owner never saw, did not
+    should(first).match({ handled: true, mutation: { ok: true } });
+    should(again).match({ handled: true, refused: { code: 'moved-on' } });
+    should(world.stored('F2').laneId).not.equal('todo');
+    should(world.stored('F3').laneId).equal('plan');
+    should(
+      openOf(world, 'lead', id)
+        .cardAsks?.filter(ask => ask.answer === undefined)
+        .map(ask => ask.gate.cardId),
+    ).eql(['F3']);
+  });
+
+  it('takes an older app’s exact repeat once nothing is left to show, open agenda or closed', async () => {
+    // Arrange — the lead's own card: answered without naming the ask, then marked done by the lead
+    const world = fixture([leads()]);
+    await world.board.trigger('F1', 'release.running');
+    const [item] = world.open('lead') as [AgendaItem];
+    const lead = { sessionId: 'lead', gate: true as const };
+    await world.answer(item.id, choose('Done'), lead);
+
+    // Act — the lost response's retry on the resting agenda, then again after it closed, then a different answer
+    const resting = await world.answer(item.id, choose('Done'), lead);
+    const closed = await world.agenda.resolve('lead', item.id, AGENT, 'the owner tried it');
+    if (!closed.ok) throw new Error(closed.error.message);
+    const after = await world.answer(item.id, choose('Done'), lead);
+    const other = await world.answer(item.id, choose('Not good'), { ...lead, note: 'it broke' });
+
+    // Assert
+    should(resting).match({ handled: true, mutation: { ok: true, changed: false } });
+    should(after).match({ handled: true, mutation: { ok: true, changed: false } });
+    should(other).match({ handled: true, refused: { code: 'moved-on' } });
+    should(world.done.notices).have.length(1);
+  });
+
+  it('puts the ask again when the owner sets aside a ferret’s thread that carried it', async () => {
+    // Arrange — the ask rides the lead's thread
+    const world = fixture([leads()]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    await world.board.trigger('F1', 'release.running');
+
+    // Act — Not needed on the thread drops the thread, not the ask
+    await world.agenda.dismiss('lead', raised.item.id, HUMAN);
+    await world.gates.written('F1');
+
+    // Assert — the card's own agenda now carries it
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.sourceRef).equal('card-agenda:F1');
+    should(items[0]?.cardAsks?.map(ask => ask.gate.cardId)).eql(['F1']);
+  });
+
+  it('refuses a plain answer to an open gate item the migration could not lift, and moves nothing', async () => {
+    // Arrange — a gate item from before card asks, as the ledger still holds it
+    const { world, item } = await atTest();
+    const gate = item.cardAsks?.[0]?.gate;
+    const ledger = world.ledgers.ledgers.get('grandchild');
+    if (gate === undefined || ledger === undefined) throw new Error('expected a card ask');
+    const { cardAsks: _asks, gateAttached: _attached, ...bare } = item;
+    world.ledgers.ledgers.set('grandchild', {
+      ...ledger,
+      entries: ledger.entries.map(entry =>
+        entry.lifecycle === 'active' ? { ...entry, item: { ...bare, gate } } : entry,
+      ),
+    });
+
+    // Act
+    const outcome = await world.answer(item.id, choose('Done'));
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
+    should(world.stored().laneId).equal('tested');
+    should(world.open().map(each => each.id)).eql([item.id]);
   });
 
   it('leaves an answer that names no card ask to the agenda’s own ask', async () => {
@@ -1060,7 +1190,8 @@ describe('the gate engine, edge by edge', () => {
 
     // Assert
     should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
-    should(openOf(world, 'grandchild', item.id).cardAsks).be.undefined();
+    should(world.open()).be.empty();
+    should(world.closed().map(each => each.id)).eql([item.id]);
   });
 
   it('takes a repeat of the answer once its ferret marked the agenda done, and refuses anything else', async () => {
@@ -1117,7 +1248,7 @@ describe('the gate engine, edge by edge', () => {
     should(world.warnings.some(each => each.startsWith('the ask of &F1 could not follow it'))).be.true();
   });
 
-  it('spends an older app’s double tap once: the second finds no ask left to answer', async () => {
+  it('spends an older app’s double tap once: the second comes back unchanged', async () => {
     // Arrange
     const { world, item } = await atTest();
 
@@ -1129,7 +1260,7 @@ describe('the gate engine, edge by edge', () => {
 
     // Assert
     should(first).match({ handled: true, mutation: { ok: true } });
-    should(second).match({ handled: true, refused: { code: 'moved-on' } });
+    should(second).match({ handled: true, mutation: { ok: true, changed: false } });
     should(world.done.notices).have.length(1);
   });
 

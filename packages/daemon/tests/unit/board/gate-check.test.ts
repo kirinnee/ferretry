@@ -106,7 +106,7 @@ describe('the gate check words', () => {
   it('should name the card, the agenda that carries it, how to add to it and how to drop the ferret item, one line each', () => {
     // Act + Assert
     should(gateCheckMessage([{ card: 'F412', gateItem: 'A31', item: 'A44' }], 'zz')).equal(
-      '&F412 already asks the owner on !A31, which carries the card: add yours to it (zz agenda edit A31 --where "<what you need>"), then drop !A44: zz agenda dismiss !A44',
+      '&F412 already asks the owner on !A31, which carries the card: put yours on it (zz agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !A44: zz agenda dismiss !A44',
     );
     should(
       gateCheckMessage(
@@ -143,7 +143,7 @@ describe('BoardGateCheck', () => {
         sessionId: 's-1',
         sendId: 'board-gate-check-s-1-A44',
         message:
-          '&F412 already asks the owner on !A31, which carries the card: add yours to it (zz agenda edit A31 --where "<what you need>"), then drop !A44: zz agenda dismiss !A44',
+          '&F412 already asks the owner on !A31, which carries the card: put yours on it (zz agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !A44: zz agenda dismiss !A44',
       },
     ]);
     should(h.records).eql([{ sessionId: 's-1', items: ['A44'], cards: ['F412'] }]);

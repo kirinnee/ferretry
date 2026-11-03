@@ -4,7 +4,7 @@
  * reference of the agenda the daemon opens for a card nobody's agenda carries yet. Total.
  */
 import type { AgendaCardAsk, AgendaGate, AgendaItem } from './agenda.ts';
-import { gateReference } from './agenda-gate.ts';
+import { gateReference, parseGateFollowupReference } from './agenda-gate.ts';
 import type { AgendaStage } from './agenda-state.ts';
 import type { TaskRef } from './board-refs.ts';
 
@@ -36,6 +36,22 @@ export const openCardAsks = (item: { readonly cardAsks?: readonly AgendaCardAsk[
 export const hasOpenCardAsk = (item: { readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer'>[] | undefined }) =>
   (item.cardAsks ?? []).some(isOpenCardAsk);
 
+/**
+ * Whether an agenda asks the owner NOTHING BUT its card asks: its open asks are all there is to answer, so the push they
+ * made when they were put is its whole signal and a stop never names it again. The card agenda the daemon opened is
+ * that; a ferret's thread is, until its ferret asks it something NEW (its turn with the owner starts after the asks).
+ */
+export const asksOnlyCardAsks = (
+  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef' | 'waitingSince'> & {
+    readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer' | 'at'>[] | undefined;
+  },
+): boolean => {
+  const open = (item.cardAsks ?? []).filter(isOpenCardAsk);
+  if (open.length === 0) return false;
+  if (item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined) return true;
+  return Date.parse(item.waitingSince) <= Math.max(...open.map(ask => Date.parse(ask.at)));
+};
+
 /** The card ask an app that predates card asks is shown (`gateAttached`): the first open one. */
 export const mirroredCardAsk = (item: {
   readonly cardAsks?: readonly AgendaCardAsk[] | undefined;
@@ -50,6 +66,46 @@ export const cardAskOf = (
 /** What a card ask needs of the owner: a test to try (its gate can send the card back with words), else a plan to approve. */
 export const cardAskStage = (gate: Pick<AgendaGate, 'options'>): Extract<AgendaStage, 'test' | 'plan'> =>
   gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'test' : 'plan';
+
+/**
+ * Whether an open agenda can carry a card's ask: a ferret's own item, or one the daemon raised on a ferret's behalf (the
+ * card's own agenda, a Not good follow-up). Not a notice, a gate item from before card asks, nor an item that is
+ * something else for the owner to do (an input, a confirmation, a copied plan, a task plan, a 2FA seed, a phone
+ * approval, a sign-in rule). The ONE test the engine and the boot migration share.
+ */
+export const canCarryCardAsk = (
+  item: Pick<
+    AgendaItem,
+    | 'notice'
+    | 'gate'
+    | 'kind'
+    | 'confirms'
+    | 'copyPlan'
+    | 'taskPlan'
+    | 'twoFactorSeed'
+    | 'phoneApproval'
+    | 'signInRuleSuggestion'
+    | 'signInRuleSuspended'
+    | 'raisedBy'
+    | 'source'
+    | 'sourceRef'
+  >,
+): boolean =>
+  item.notice !== true &&
+  item.gate === undefined &&
+  item.kind !== 'input' &&
+  item.confirms === undefined &&
+  item.copyPlan === undefined &&
+  item.taskPlan === undefined &&
+  item.twoFactorSeed === undefined &&
+  item.phoneApproval === undefined &&
+  item.signInRuleSuggestion === undefined &&
+  item.signInRuleSuspended === undefined &&
+  (item.raisedBy === 'agent' ||
+    (item.raisedBy === 'daemon' &&
+      item.source === 'task' &&
+      (parseCardAgendaReference(item.sourceRef) !== undefined ||
+        parseGateFollowupReference(item.sourceRef) !== undefined)));
 
 const sameCard = (ref: TaskRef, cardId: string, machineId: string | undefined): boolean =>
   ref.id === cardId && (ref.machineId === undefined || machineId === undefined || ref.machineId === machineId);

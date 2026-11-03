@@ -978,4 +978,52 @@ describe('NotificationService card-ask push', () => {
       });
     }
   });
+
+  it('should leave an agenda whose sole open items are card asks out of a stop: alone it is no stop, beside another it is not counted', async () => {
+    // Arrange
+    const alone = fixture();
+    const beside = fixture();
+    const onlyAsk = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying], count: 1 });
+    const both = AgendaSnapshotSchema.parse({ ...snapshot, items: [carrying, item], count: 2 });
+
+    // Act
+    await alone.service.stopped(SESSION, AT, onlyAsk);
+    await beside.service.stopped(SESSION, AT, both);
+
+    // Assert
+    should(alone.push.calls).equal(0);
+    should(beside.push.calls).equal(1);
+    should(beside.push.dispatches[0]?.payload.url).containEql('A1');
+  });
+
+  it('should count a ferret’s own thread that carries an ask once the ferret asked something after it', async () => {
+    // Arrange — the ask was put on the thread at AT; the ferret asked its question later
+    const asked = { ...carrying.cardAsks?.[0], at: AT };
+    const askedOnly = AgendaItemSchema.parse({
+      ...item,
+      id: 'A7',
+      task: { id: 'F412' },
+      cardAsks: [asked],
+      waitingSince: '2026-08-06T10:30:00.000Z',
+    });
+    const quiet = AgendaItemSchema.parse({ ...askedOnly, waitingSince: '2026-08-06T09:00:00.000Z' });
+    const talked = fixture();
+    const silent = fixture();
+
+    // Act
+    await talked.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [askedOnly], count: 1 }),
+    );
+    await silent.service.stopped(
+      SESSION,
+      '2026-08-06T11:00:00.000Z',
+      AgendaSnapshotSchema.parse({ ...snapshot, items: [quiet], count: 1 }),
+    );
+
+    // Assert
+    should(talked.push.calls).equal(1);
+    should(silent.push.calls).equal(0);
+  });
 });

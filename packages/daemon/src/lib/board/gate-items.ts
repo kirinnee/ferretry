@@ -35,6 +35,7 @@ import {
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskId,
+  canCarryCardAsk,
   carriesCard,
   cardAskOf,
   cardAskReference,
@@ -194,29 +195,12 @@ interface HeldItems {
   /** The open Not good conversations of earlier rounds (`gate-followup:`), from before card asks. */
   readonly followups: readonly OpenItem[];
   /**
-   * The references of this card's asks the OWNER answered or set aside: answered on any agenda, open on one the owner
-   * closed, or a gate item from before card asks the owner closed. Each of those has been asked, for good.
+   * The references of this card's asks the OWNER answered or set aside: answered on any agenda, open on the card's
+   * own agenda (`card-agenda:`) the owner closed, or a gate item from before card asks the owner closed. Each of
+   * those has been asked, for good.
    */
   readonly asked: ReadonlySet<string>;
 }
-
-/** Whether an open item can carry a card's ask: a ferret's own item, or one the daemon raised on a ferret's behalf. */
-const canCarry = (item: AgendaItem): boolean =>
-  item.notice !== true &&
-  item.gate === undefined &&
-  item.kind !== 'input' &&
-  item.confirms === undefined &&
-  item.copyPlan === undefined &&
-  item.taskPlan === undefined &&
-  item.twoFactorSeed === undefined &&
-  item.phoneApproval === undefined &&
-  item.signInRuleSuggestion === undefined &&
-  item.signInRuleSuspended === undefined &&
-  (item.raisedBy === 'agent' ||
-    (item.raisedBy === 'daemon' &&
-      item.source === 'task' &&
-      (parseCardAgendaReference(item.sourceRef) !== undefined ||
-        parseGateFollowupReference(item.sourceRef) !== undefined)));
 
 /** The card a daemon item of the gate producers is about: a follow-up or a card agenda. */
 const producedFor = (item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): string | undefined => {
@@ -292,9 +276,27 @@ const serially = async <T>(
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** The ask an answer is to: the one it names, else (an app that predates card asks) the one `gateAttached` mirrors. */
-const askOf = (item: AgendaItem | ResolvedAgendaItem, answer: GateAnswer): AgendaCardAsk | undefined =>
-  answer.cardAsk === undefined ? mirroredCardAsk(item) : cardAskOf(item, answer.cardAsk);
+/**
+ * The ask an answer is to: the one it names, else (an app that predates card asks) the one `gateAttached` mirrors —
+ * and, when none is open, the one answered last within {@link LEGACY_REPLAY_MS}, so a retry of that very answer (a lost
+ * response) finds it and is read as the repeat it is.
+ */
+const askOf = (item: AgendaItem | ResolvedAgendaItem, answer: GateAnswer, now: number): AgendaCardAsk | undefined => {
+  if (answer.cardAsk !== undefined) return cardAskOf(item, answer.cardAsk);
+  return mirroredCardAsk(item) ?? answeredLast(item, now);
+};
+
+/** The ask answered last on an item, if that was within {@link LEGACY_REPLAY_MS} of `now`. */
+const answeredLast = (item: AgendaItem | ResolvedAgendaItem, now: number): AgendaCardAsk | undefined => {
+  const recent = (item.cardAsks ?? []).filter(
+    ask => ask.answer !== undefined && now - Date.parse(ask.answer.at) < LEGACY_REPLAY_MS,
+  );
+  return recent.length === 0
+    ? undefined
+    : recent.reduce((one, other) =>
+        Date.parse(other.answer?.at ?? '') > Date.parse(one.answer?.at ?? '') ? other : one,
+      );
+};
 
 /** Whether the answer is to a card ask at all: it names one, or says it picks the shown one's option. */
 const toCardAsk = (answer: GateAnswer): boolean => answer.cardAsk !== undefined || answer.gate === true;
@@ -312,6 +314,10 @@ export class GateItems implements CardWriteObserver {
   private scanning: Promise<void> | undefined;
 
   constructor(private readonly ports: GateItemsDependencies) {}
+
+  private now(): number {
+    return Date.parse(this.ports.now());
+  }
 
   /** Whether this open item carries a card ask the owner has yet to answer: setting it aside needs the board's grant. */
   async isGate(sessionId: string, id: AgendaId): Promise<boolean> {
@@ -361,14 +367,28 @@ export class GateItems implements CardWriteObserver {
 
   /**
    * The owner's answer to a card ask: the card moves first, as the owner, and only then is the answer recorded. A
-   * refusal leaves the ask open and says why. `handled: false` for an answer that is not to a card ask.
+   * refusal leaves the ask open and says why. `handled: false` for an answer that is not to a card ask. A plain answer
+   * to an open gate item from before card asks — one the boot migration could not read onto an agenda — is refused:
+   * the agenda would close it with its card unmoved.
    */
   async answer(answer: GateAnswer): Promise<GateAnswerOutcome> {
-    if (!toCardAsk(answer)) return { handled: false };
+    if (!toCardAsk(answer)) return (await this.unmigrated(answer)) ?? { handled: false };
     const found = await this.find(answer);
     if (found === undefined) return refused('moved-on', `${answer.id} carries no card ask, so nothing was moved`);
     // Answers to one card take turns: the second reads the board the first one left.
     return await serially(this.answers, found.gate.cardId, async () => await this.answerAlone(answer));
+  }
+
+  /** A refusal when the answer is to an open gate item the migration left as it was; `undefined` for any other item. */
+  private async unmigrated(answer: GateAnswer): Promise<GateAnswerOutcome | undefined> {
+    const listed = await this.ports.agenda.list(answer.sessionId);
+    const gate = listed.ok ? listed.value.items.find(each => each.id === answer.id)?.gate : undefined;
+    return gate === undefined
+      ? undefined
+      : refused(
+          'not-moved',
+          `${answer.id} is the gate of ${formatTaskRef({ id: gate.cardId })} from before card asks, and it could not be moved onto an agenda: nothing was moved. Say Not needed to set it aside`,
+        );
   }
 
   /** The item and the ask an answer is to, open or answered; a closed item from before card asks by its gate. */
@@ -381,7 +401,7 @@ export class GateItems implements CardWriteObserver {
       listed.value.items.find(each => each.id === answer.id) ??
       listed.value.resolved.find(each => each.id === answer.id);
     if (item === undefined) return undefined;
-    const gate = askOf(item, answer)?.gate ?? ('resolvedAt' in item ? item.gate : undefined);
+    const gate = askOf(item, answer, this.now())?.gate ?? ('resolvedAt' in item ? item.gate : undefined);
     return gate === undefined ? undefined : { item, gate };
   }
 
@@ -390,7 +410,7 @@ export class GateItems implements CardWriteObserver {
     if (!listed.ok) return refused('not-moved', `${answer.id}'s agenda could not be read, so nothing was moved`);
     const open = listed.value.items.find(each => each.id === answer.id);
     if (open === undefined) return await this.replayedClosed(answer, listed.value.resolved);
-    const ask = askOf(open, answer);
+    const ask = askOf(open, answer, this.now());
     if (ask === undefined) {
       return refused('moved-on', `${answer.id} no longer carries that card ask, so nothing was moved`);
     }
@@ -482,7 +502,7 @@ export class GateItems implements CardWriteObserver {
     resolved: readonly ResolvedAgendaItem[],
   ): Promise<GateAnswerOutcome> {
     const closed = resolved.find(each => each.id === answer.id);
-    const ask = closed === undefined ? undefined : askOf(closed, answer);
+    const ask = closed === undefined ? undefined : askOf(closed, answer, this.now());
     const gate = ask?.gate ?? closed?.gate;
     if (closed === undefined || gate === undefined) {
       return refused('moved-on', `${answer.id} is closed, so nothing was moved`);
@@ -510,9 +530,10 @@ export class GateItems implements CardWriteObserver {
   }
 
   /**
-   * An app that predates card asks names no ask: it answers the one `gateAttached` shows. When that ask took the place
-   * of one answered moments ago with these very words, the answer is that earlier answer retried after a lost
-   * response, and is refused rather than spent on an ask the owner never saw.
+   * An app that predates card asks names no ask: it answers the one `gateAttached` shows. When an ask on this agenda
+   * was answered moments ago with these very words, this answer is that one retried or tapped twice — whenever the
+   * shown ask came to the agenda, since the owner may well not have seen it — and is refused rather than spent on an
+   * ask they never saw. (An app that names its ask, `agenda.card-asks.1`, is never in doubt.)
    */
   private legacyRepeat(
     answer: GateAnswer,
@@ -521,17 +542,14 @@ export class GateItems implements CardWriteObserver {
     receipt: string,
   ): GateRefusal | undefined {
     if (answer.cardAsk !== undefined) return undefined;
-    const now = Date.parse(this.ports.now());
+    const now = this.now();
     const earlier = (item.cardAsks ?? []).find(
-      each =>
-        each.answer?.receipt === receipt &&
-        now - Date.parse(each.answer.at) < LEGACY_REPLAY_MS &&
-        Date.parse(shown.at) >= Date.parse(each.answer.at),
+      each => each.answer?.receipt === receipt && now - Date.parse(each.answer.at) < LEGACY_REPLAY_MS,
     );
     if (earlier === undefined) return undefined;
     return {
       code: 'moved-on',
-      message: `${formatTaskRef({ id: earlier.gate.cardId })} was already answered on ${answer.id}; it now asks about ${formatTaskRef({ id: shown.gate.cardId })}: read it and answer again`,
+      message: `${formatTaskRef({ id: earlier.gate.cardId })} was just answered on ${answer.id}; it now asks about ${formatTaskRef({ id: shown.gate.cardId })}: read it, and answer again in a moment`,
     };
   }
 
@@ -681,7 +699,7 @@ export class GateItems implements CardWriteObserver {
         for (const ask of item.cardAsks ?? []) {
           if (ask.gate.cardId === cardId && ask.answer !== undefined) asked.add(cardAskReference(ask));
         }
-        if (!canCarry(item)) continue;
+        if (!canCarryCardAsk(item)) continue;
         if (carriesCard(item, cardId, task.machineId)) carriers.push({ sessionId, item });
         else if (parentId !== undefined && carriesCard(item, parentId, task.machineId))
           parents.push({ sessionId, item });
@@ -692,8 +710,13 @@ export class GateItems implements CardWriteObserver {
       for (const item of listed.value.resolved) {
         for (const ask of item.cardAsks ?? []) {
           if (ask.gate.cardId !== cardId) continue;
-          // Answered, or still open when the OWNER closed its agenda: either way, asked.
-          if (ask.answer !== undefined || item.resolvedBy === 'human') asked.add(cardAskReference(ask));
+          // Answered, or still open when the OWNER closed the card's OWN agenda: either way, asked. Their Not needed on
+          // a ferret's thread that happened to carry the ask drops that thread, not the ask: it is put again.
+          if (
+            ask.answer !== undefined ||
+            (item.resolvedBy === 'human' && parseCardAgendaReference(item.sourceRef) !== undefined)
+          )
+            asked.add(cardAskReference(ask));
         }
         for (const reference of gatesAnsweredOn(item)) {
           if (parseGateReference(reference)?.cardId === cardId) asked.add(reference);

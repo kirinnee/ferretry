@@ -203,7 +203,7 @@ const carriedBy = (
   from: string,
 ): string =>
   asking.sessionId === from
-    ? `${formatTaskRef(task)} already asks the owner on !${asking.id}, which carries the card; add yours to it: fy agenda edit ${asking.id} --where "<what you need>"`
+    ? `${formatTaskRef(task)} already asks the owner on !${asking.id}, which carries the card; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
     : `${formatTaskRef(task)} already asks the owner on !${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy task note ${task.id} "<text>"`;
 
 /**

@@ -1,6 +1,7 @@
 import {
   AGENDA_SCHEMA_VERSION,
   AGENDA_URGENT_WAKE_MS,
+  canCarryCardAsk,
   type AgendaAsk,
   type AgendaBrief,
   type AgendaCardAnswer,
@@ -992,7 +993,7 @@ const cardAgendaOf = (item: AgendaItem & { readonly gate: AgendaGate }, at: stri
 
 /** Whether an open item is a thread about this card: an agent's own item on it, never a notice or a gate item. */
 const isCardThread = (item: AgendaItem, cardId: string): boolean =>
-  item.raisedBy === 'agent' && item.notice !== true && !isGateItem(item) && item.task?.id === cardId;
+  item.raisedBy === 'agent' && canCarryCardAsk(item) && item.task?.id === cardId;
 
 /** The thread that takes a card's ask: one already carrying it, else one on the owner's turn, else the newest. */
 const threadFor = (entries: readonly AgendaEntry[], cardId: string): AgendaItem | undefined => {
@@ -3432,6 +3433,11 @@ function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation 
   });
   if (outcome.kind === 'unchanged') return unchanged(ledger);
   if (outcome.kind === 'refused') return failure(outcome.code, outcome.message);
+  if (outcome.kind === 'closed') {
+    const moved = { ...target, item: outcome.item };
+    const entries = ledger.entries.map(entry => (entry === target ? moved : entry));
+    return addressed({ ...ledger, entries }, moved, command.actor, outcome.note, command.at, 'done', 'resolved');
+  }
   return replaceItem(ledger, outcome.item, command.at, outcome.change);
 }
 

@@ -175,7 +175,7 @@ describe('the turn-end gate check', () => {
       {
         sessionId: 'lead-1',
         message:
-          '&F412 already asks the owner on !A31, which carries the card: add yours to it (fy agenda edit A31 --where "<what you need>"), then drop !A44: fy agenda dismiss !A44',
+          '&F412 already asks the owner on !A31, which carries the card: put yours on it (fy agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !A44: fy agenda dismiss !A44',
       },
     ]);
     const journal = await world.nudged(LEAD);
