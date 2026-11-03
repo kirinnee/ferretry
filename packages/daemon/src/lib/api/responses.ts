@@ -104,7 +104,14 @@ export function namesTag(ifNoneMatch: string, etag: string): boolean {
  * alone. The client keeps the body it already holds, so nothing about what it shows can differ.
  */
 export function conditional(response: ApiResponse, ifNoneMatch: string | undefined): ApiResponse {
-  const etag = entityTag(response.body);
+  return conditionalWithTag(response, entityTag(response.body), ifNoneMatch);
+}
+
+/**
+ * {@link conditional} for a caller that already holds the tag of this exact body — one that kept a large body
+ * and its digest between requests and must not hash it again to answer a request that names the tag.
+ */
+export function conditionalWithTag(response: ApiResponse, etag: string, ifNoneMatch: string | undefined): ApiResponse {
   const headers = new Map(response.headers);
   headers.set('etag', etag);
   if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, etag)) return { status: 304, headers, body: '' };

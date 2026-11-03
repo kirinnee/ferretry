@@ -246,4 +246,101 @@ describe('the session read mount', () => {
     // Assert
     should(response.headers.get('cache-control')).match(/no-store/u);
   });
+
+  describe('an unchanged fleet', () => {
+    /** A view that counts every time the JSON of the list renders it. */
+    const counted = (view: SessionView): { readonly view: SessionView; readonly renders: () => number } => {
+      let renders = 0;
+      return {
+        view: Object.defineProperty({ ...view }, 'toJSON', {
+          enumerable: false,
+          value: () => {
+            renders += 1;
+            return view;
+          },
+        }),
+        renders: () => renders,
+      };
+    };
+    const read = async (subsystem: SessionDirectorySubsystem, headers: Record<string, string> = {}) =>
+      await dispatcher(subsystem).dispatch(request({ path: '/v1/sessions', headers: { ...human, ...headers } }));
+
+    it('should serve the same bytes and tag without rendering the list again', async () => {
+      // Arrange
+      const watched = counted(FIRST);
+      const views = [watched.view, SECOND];
+      const routes = new ApiRouter(sessionRoutes(sessionDirectory(views)));
+      const through = new ApiDispatcher(routes, CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+      const first = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Act
+      const second = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Assert
+      should(second.status).equal(200);
+      should(second.body).equal(first.body);
+      should(second.headers.get('etag')).equal(first.headers.get('etag'));
+      should(watched.renders()).equal(1);
+    });
+
+    it('should answer a client that holds the tag with a 304, still without rendering', async () => {
+      // Arrange
+      const watched = counted(FIRST);
+      const through = dispatcher(sessionDirectory([watched.view, SECOND]));
+      const first = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+      const etag = first.headers.get('etag') ?? '';
+
+      // Act
+      const again = await through.dispatch(
+        request({ path: '/v1/sessions', headers: { ...human, 'if-none-match': etag } }),
+      );
+
+      // Assert
+      should(again.status).equal(304);
+      should(again.body).equal('');
+      should(again.headers.get('etag')).equal(etag);
+      should(watched.renders()).equal(1);
+    });
+
+    it('should render again, with a new tag, as soon as one element is a different view', async () => {
+      // Arrange
+      let views: readonly SessionView[] = [FIRST, SECOND];
+      const through = dispatcher({ list: async () => views, get: async () => undefined });
+      const first = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+      const moved = sessionView('s2', { name: 'Mount The Boards' }, { status: 'stopped' });
+      views = [FIRST, moved];
+
+      // Act
+      const second = await through.dispatch(
+        request({
+          path: '/v1/sessions',
+          headers: { ...human, 'if-none-match': first.headers.get('etag') ?? '' },
+        }),
+      );
+      views = [FIRST];
+      const shorter = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Assert
+      should(second.status).equal(200);
+      should(second.headers.get('etag')).not.equal(first.headers.get('etag'));
+      should(SessionListSchema.parse(JSON.parse(second.body))[1]?.state.status).equal('stopped');
+      should(SessionListSchema.parse(JSON.parse(shorter.body))).have.length(1);
+    });
+
+    it('should serve byte-identical bodies and tags whether or not the body was reused', async () => {
+      // Arrange
+      const views = [FIRST, SECOND];
+      const fresh = await read(sessionDirectory([FIRST, SECOND]));
+      const through = dispatcher(sessionDirectory(views));
+      await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Act
+      const reused = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Assert
+      should(reused.body).equal(fresh.body);
+      should(reused.headers.get('etag')).equal(fresh.headers.get('etag'));
+      should([...reused.headers.entries()]).eql([...fresh.headers.entries()]);
+    });
+  });
 });
