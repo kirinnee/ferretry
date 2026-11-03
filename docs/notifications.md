@@ -260,7 +260,9 @@ nobody: it reaches the opening device too, whose worker takes those lines down (
 down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
 and an open made while it was on its way is honoured then too (that memory is not kept across a restart). That late
 clear reaches EVERY device, the one that opened the item included: its page closed only what was showing when it
-asked, so an iPhone there may show the quiet note for that one line. At start the daemon looks once at every ferret
+asked, so an iPhone there may show the quiet note for that one line. The same holds for a push being sent when the
+owner opens its item: the open notes it before it waits its turn in the ferret's lane, and clears it on every device
+if it landed meanwhile. At start the daemon looks once at every ferret
 with a line still up, for a board that changed while it was down.
 
 **A push and its clear at once.** A service worker can handle a push and the clear after it at the same time, and a

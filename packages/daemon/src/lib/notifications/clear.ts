@@ -107,15 +107,31 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
 
   /** The owner opened `agendaId` on the device `exceptDevice` names: its alerts come down everywhere else. */
   async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
+    // Read BEFORE waiting for the lane (review round 6): a push of the item's being sent in it now lands before this
+    // open runs, and was still on its way when the owner opened the item — so no page closed its line.
+    const before = await this.options.ledger.entries();
     return await this.run(sessionId, async (snapshot, entries) => {
       if (![...snapshot.items, ...snapshot.resolved].some(item => item.id === agendaId)) return { found: false };
       // A stop on its way counts too when this open is what lets its line come down (the last item it could count).
       const stopsToo = stopLineDone(snapshot, agendaId);
-      for (const key of inFlightAlerts(sessionId, agendaId, stopsToo, entries))
-        this.remember(key, { sessionId, agendaId });
+      const onItsWay = new Set([
+        ...inFlightAlerts(sessionId, agendaId, stopsToo, before),
+        ...inFlightAlerts(sessionId, agendaId, stopsToo, entries),
+      ]);
+      let current = entries;
+      for (const key of onItsWay) {
+        const landed = entries.find(entry => normalizedNotificationKey(entry.requested.key) === key)?.outcome;
+        if (landed === undefined) {
+          this.remember(key, { sessionId, agendaId });
+          continue;
+        }
+        // Landed while this open waited: EVERY device, the opener's too, as a pending open's late clear does.
+        await this.send(sessionId, snapshot, current, { opened: agendaId, only: key });
+        current = await this.options.ledger.entries();
+      }
       return {
         found: true,
-        tags: await this.send(sessionId, snapshot, entries, {
+        tags: await this.send(sessionId, snapshot, current, {
           opened: agendaId,
           ...(exceptDevice === undefined ? {} : { exceptDevice }),
         }),

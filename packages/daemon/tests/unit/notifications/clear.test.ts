@@ -884,6 +884,39 @@ describe('a push still on its way when its item is handled or opened (review rou
   });
 });
 
+describe('an open made while a push is being sent in its lane (review round 6)', () => {
+  for (const [what, records, tag] of [
+    ['an item push', pushed('A1'), 'attention-session-1:A1'],
+    ['a stop, for the last item', pushed('A1', { stoppedAt: AT }), 'attention-session-1'],
+  ] as const) {
+    it(`should clear ${what} that landed while the open waited on every device, the opener's too`, async () => {
+      // Arrange — the push is recorded and being sent, holding the ferret's lane, when the owner opens A1.
+      const [requested, outcome] = records;
+      const test = world([requested as NotificationRecord]);
+      test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+      let release = (): void => undefined;
+      const transport = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const sending = test.lanes.run(agendaAlertLane(SESSION), async () => {
+        await transport;
+        await test.ledger.append(outcome as NotificationRecord);
+      });
+      // Act — the open waits for the lane; the push lands (shown after the open) before the open runs.
+      const opening = test.clearer.seen(SESSION, 'A1', 'device-1');
+      release();
+      await sending;
+      const answer = await opening;
+
+      // Assert
+      should(answer).deepEqual({ found: true, tags: [] });
+      should(test.sent).have.length(1);
+      should(test.sent[0]).not.have.property('exceptDevice');
+      should(test.sent[0]?.payload).containDeep({ tags: [tag] });
+    });
+  }
+});
+
 describe('an open that names more tags than one answer carries (review round 5)', () => {
   it(`should answer at most ${PUSH_SEEN_MAX_TAGS} tags, and send the rest to every device, the opener's too`, async () => {
     // Arrange — a legacy stop, and more code cards handled since than one answer may name.
