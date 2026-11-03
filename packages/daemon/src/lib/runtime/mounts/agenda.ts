@@ -217,21 +217,23 @@ async function apply(
               ? agenda.discuss(sessionId, request.id, actor, request.note)
               : request.action === 'surface'
                 ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
-                : request.action === 'snooze'
-                  ? agenda.snooze(sessionId, request.id, request.until, actor)
-                  : request.action === 'unsnooze'
-                    ? agenda.unsnooze(sessionId, request.id, actor)
-                    : request.action === 'dismiss'
-                      ? agenda.dismiss(sessionId, request.id, actor, request.note)
-                      : request.response === undefined
-                        ? agenda.resolve(sessionId, request.id, actor, request.note)
-                        : agenda.answer(
-                            sessionId,
-                            request.id,
-                            request.response,
-                            actor,
-                            confirmed?.note ?? request.note,
-                          ));
+                : request.action === 'rest'
+                  ? agenda.rest(sessionId, request.id, request.why, actor)
+                  : request.action === 'snooze'
+                    ? agenda.snooze(sessionId, request.id, request.until, actor)
+                    : request.action === 'unsnooze'
+                      ? agenda.unsnooze(sessionId, request.id, actor)
+                      : request.action === 'dismiss'
+                        ? agenda.dismiss(sessionId, request.id, actor, request.note)
+                        : request.response === undefined
+                          ? agenda.resolve(sessionId, request.id, actor, request.note)
+                          : agenda.answer(
+                              sessionId,
+                              request.id,
+                              request.response,
+                              actor,
+                              confirmed?.note ?? request.note,
+                            ));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAgendaWriting(mutation.item) : [];

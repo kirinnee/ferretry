@@ -776,7 +776,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('after Not good, open one only for input.');
     // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
     should(text).containEql("Owner's question: answer ON it, options stay");
-    should(text).containEql('`zz agenda edit <id> --question-answer "<text>"`');
+    should(text).containEql('`zz agenda answer <id> "…"`');
     should(text).containEql('not `-k info`.');
     should(text).containEql('One item per ask:');
     // Premise and context are part of the one command, and required: every item is read cold.
@@ -806,17 +806,20 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--will-block`');
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
-    should(text).containEql('"[answer to !A3 …]"=answer;');
-    // A reply PARKS the item: the ferret does the work and closes it; only `edit --back` brings it back, for NEW asks.
-    should(text).containEql('"[re !A3 …]"=chat, parks it: do the work, `done <id>`');
-    should(text).containEql('`edit <id> --back` + refreshed card only for NEW asks');
+    should(text).containEql('"[answer to !A3 …]"=answer,');
+    // Any reply or answer RESTS the item on its ferret (docs/agenda.md § States): the ferret's answer returns it, `rest`
+    // takes it on, and only the ferret marks it done. `--back` is retired.
+    should(text).containEql('"[re !A3 …]"=chat: both rest it on you;');
+    should(text).containEql('`answer <id>` returns it, `rest <id> --why …` if working;');
+    should(text).containEql('`--stage`, `--where`=now.');
+    should(text).not.containEql('--back');
     // Closing a question the owner has not answered withdraws it and says why; only the owner's pick answers it.
-    should(text).containEql('(question: `--reason "<why>"`)');
+    should(text).containEql('(open question: `--reason`)');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP CURRENT:');
     should(text).containEql('`edit` if changed');
-    should(text).containEql('`done` if settled');
+    should(text).containEql("`done` once nothing's left");
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
   });

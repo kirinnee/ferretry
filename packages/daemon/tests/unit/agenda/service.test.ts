@@ -141,7 +141,8 @@ describe('Attention service', () => {
     const { repository, service } = createService();
 
     // Act
-    const created = await service.raise(SESSION, request, AGENT);
+    // The owner's own item: an answer closes it (a ferret's would rest, waiting on the ferret).
+    const created = await service.raise(SESSION, request, { kind: 'human' });
     if (!created.ok) throw new Error(created.error.message);
     const answered = await service.answer(
       SESSION,

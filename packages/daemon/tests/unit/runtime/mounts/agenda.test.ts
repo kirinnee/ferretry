@@ -278,12 +278,17 @@ describe('attention routes', () => {
       post({ action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } }),
     );
 
-    // Assert
+    // Assert — a ferret's item RESTS on the owner's answer (docs/agenda.md § States): still open, the choice on it.
     should(answered.status).equal(200);
-    should(jsonBody(answered)).have.property('count', 0);
-    should((jsonBody(answered).resolved as readonly { response?: { choice?: string } }[])[0]?.response?.choice).equal(
-      'main',
-    );
+    const items = jsonBody(answered).items as readonly {
+      ownerAnswer?: { response?: { choice?: string } };
+      parked?: { reason: string };
+      resting?: { sub: string };
+    }[];
+    should(jsonBody(answered).resolved).be.empty();
+    should(items[0]?.ownerAnswer?.response?.choice).equal('main');
+    should(items[0]?.parked?.reason).equal('replied');
+    should(items[0]?.resting?.sub).equal('waiting-on-ferret');
   });
 
   it('should refuse an agent raise that declares no structured ask', async () => {

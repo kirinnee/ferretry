@@ -52,7 +52,7 @@ describe('attention listing', () => {
     // Assert
     should(row(actual, 3)).equal('      why: nothing else can proceed');
     should(row(actual, 4)).equal('      resolve: answer on the board');
-    should(row(actual, 5)).equal('      since 2026-07-31T09:05:00.000Z · raised by agent sol');
+    should(row(actual, 5)).equal('      stage: explainer · since 2026-07-31T09:05:00.000Z · raised by agent sol');
   });
 
   it('should print a legacy default howToResolve as the current agenda default', () => {
@@ -614,8 +614,9 @@ describe('agenda turns', () => {
     should(snoozed).containEql('snoozed by the owner until 2026-07-31T15:00:00.000Z');
     should(snoozed).containEql('agenda surface --now');
     should(snoozed).not.containEql("owner's turn");
-    should(replied).containEql("replied 2026-07-31T09:10:00.000Z: off the owner's list");
-    should(replied).containEql('agenda edit A3 --back --summary … --premise … --context …');
+    should(replied).containEql('resting (since 2026-07-31T09:10:00.000Z), waiting on you: the owner replied');
+    should(replied).containEql('agenda answer A3');
+    should(replied).containEql('agenda rest A3 --why');
     should(replied).not.containEql('agenda surface');
     should(replied).containEql('agenda done');
   });

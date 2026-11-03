@@ -303,16 +303,16 @@ describe('attentionNudge — an item written about and left as it was', () => {
   const left = (overrides: Partial<FinishedTurn> = {}): FinishedTurn =>
     turn({ opener: '[re !A5 «x»] ok', reply: 'Understood, thanks.', discussed: ['A5'], ...overrides });
 
-  it('should nudge once to do the work and close it, naming --back for something new', () => {
+  it('should nudge once to answer on it or close it: it rests, waiting on the ferret', () => {
     // Act
     const actual = attentionNudge(left(), TOP, 'fy');
 
     // Assert
     should(actual?.asks).deepEqual(['discussed !A5']);
     should(actual?.message).startWith(AGENDA_NUDGE_MARK);
-    should(actual?.message).containEql('Owner replied about !A5; it is off their list.');
+    should(actual?.message).containEql('Owner replied about !A5; it rests, waiting on you.');
     should(actual?.message).containEql('fy agenda done A5');
-    should(actual?.message).containEql('fy agenda edit A5 --back');
+    should(actual?.message).containEql('fy agenda answer A5');
     should(actual?.message).not.containEql('your turn');
     should(actual?.message).not.containEql('agenda surface');
     should(actual?.message).not.match(/Attention/u);
@@ -361,8 +361,8 @@ describe('discussionNudgeMessage', () => {
     const actual = discussionNudgeMessage(['A5', 'A6'], 'zz');
 
     // Assert
-    should(actual).containEql('Owner replied about !A5, !A6; they are off their list.');
-    should(actual).containEql('`zz agenda edit A5 --back …`');
+    should(actual).containEql('Owner replied about !A5, !A6; they rest, waiting on you.');
+    should(actual).containEql('`zz agenda answer A5 "<text>"`');
     should(actual).containEql('`zz agenda done A5`');
   });
 
@@ -373,7 +373,7 @@ describe('discussionNudgeMessage', () => {
 
     // Assert
     should(one).equal(
-      `${AGENDA_NUDGE_MARK} Owner replied about !A5; it is off their list. Do the work, then \`zz agenda done A5\`. Use \`zz agenda edit A5 --back …\` only if you need something NEW from them.`,
+      `${AGENDA_NUDGE_MARK} Owner replied about !A5; it rests, waiting on you. Answer on it: \`zz agenda answer A5 "<text>"\` (back on their list), or \`zz agenda done A5\` when nothing more is expected.`,
     );
     should(one).not.match(/your turn/u);
     should(several).not.match(/your turn/u);

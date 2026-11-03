@@ -280,6 +280,11 @@ const agendaCases: SchemaCase[] = [
     value: { reason: 'snoozed', at: INSTANT, until: LATER_INSTANT },
   },
   { name: 'replied park', schema: agenda.AgendaParkedSchema, value: { reason: 'replied', at: INSTANT } },
+  {
+    name: 'owner answer on an open item',
+    schema: agenda.AgendaOwnerAnswerSchema,
+    value: { at: INSTANT, response: { kind: 'open-question', answer: 'EU' }, note: 'keep it near', request: 2 },
+  },
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },

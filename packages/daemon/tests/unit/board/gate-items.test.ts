@@ -8,6 +8,7 @@ import {
   type LaneSet,
   gateReference,
   type ResolvedAgendaItem,
+  MAX_AGENDA_BODY_LENGTH,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiError } from '../../../src/lib/api/error.ts';
@@ -363,8 +364,12 @@ describe('the gate policy', () => {
       body: '1. Open the Inbox\n2. Answer the card',
     });
     should(raise).not.have.property('steps');
-    const long = gateRaise(gate, { ...task, howToTest: `1. ${'x'.repeat(9000)}`, summary: '' });
-    should(long.body?.length).equal(8000);
+    const long = gateRaise(gate, {
+      ...task,
+      howToTest: `1. ${'x'.repeat(MAX_AGENDA_BODY_LENGTH + 1000)}`,
+      summary: '',
+    });
+    should(long.body?.length).equal(MAX_AGENDA_BODY_LENGTH);
     should(long.body?.endsWith('…')).be.true();
     should(long).not.have.property('premise');
     should(gateRaise(gate, { ...task, howToTest: '' })).not.have.property('body');

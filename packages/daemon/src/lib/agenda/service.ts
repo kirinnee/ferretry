@@ -138,6 +138,7 @@ const SUB_FERRET_DOING: Readonly<Record<string, string>> = {
   resolve: 'close agenda items',
   dismiss: 'dismiss agenda items',
   progress: 'tick agenda items',
+  rest: 'take agenda items on',
 };
 
 export function isAgendaSessionId(value: string): boolean {
@@ -382,6 +383,11 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'surface', actor, id, why, ...(now ? { now } : {}), at: this.clock.now() });
   }
 
+  /** The ferret takes an item on without asking anything yet: it rests as `working`, quiet (docs/agenda.md § States). */
+  async rest(sessionId: string, id: AgendaId, why: string, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'rest', actor, id, why, at: this.clock.now() });
+  }
+
   /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */
   async snooze(sessionId: string, id: AgendaId, until: string, actor: AgendaActor): Promise<AgendaMutation> {
     return this.apply(sessionId, { action: 'snooze', actor, id, until, at: this.clock.now() });
@@ -620,7 +626,7 @@ export class AgendaService {
   }
 }
 
-const LEAD_VERBS: ReadonlySet<string> = new Set(['edit', 'surface', 'resolve', 'dismiss']);
+const LEAD_VERBS: ReadonlySet<string> = new Set(['edit', 'surface', 'rest', 'resolve', 'dismiss']);
 
 function invalidSession(sessionId: string): AgendaFailure | null {
   return isAgendaSessionId(sessionId)

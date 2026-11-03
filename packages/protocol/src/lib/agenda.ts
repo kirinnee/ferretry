@@ -6,6 +6,15 @@ import {
   TwoFactorStageIdSchema,
 } from './account-ids.ts';
 import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
+import {
+  AgendaRestingSchema,
+  type AgendaStateSource,
+  agendaState,
+  AgendaStageEntrySchema,
+  AgendaStageSchema,
+  MAX_AGENDA_REST_WHY_LENGTH,
+  MAX_AGENDA_STAGES,
+} from './agenda-state.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const AGENDA_SCHEMA_VERSION = 1 as const;
@@ -13,6 +22,21 @@ export const MAX_AGENDA_PER_SESSION = 20;
 export const MAX_AGENDA_RESOLUTIONS = 100;
 export const MAX_AGENDA_SUBJECT_LENGTH = 240;
 export const MAX_AGENDA_DETAIL_LENGTH = 2_048;
+/**
+ * THE TRANSPORT BOUND (docs/agenda.md § No size limit): an agenda item has no size limit a reader meets, only this
+ * bound on what one item may weigh on the wire, as the length of its JSON. Each field keeps its own explicit bound
+ * below it, so every schema stays bounded; together they may add up to more, and the item's own check refuses that.
+ */
+export const MAX_AGENDA_ITEM_LENGTH = 1_000_000;
+/** The longest context an item carries: the facts around the situation, as Markdown. */
+export const MAX_AGENDA_CONTEXT_LENGTH = 64_000;
+/** The longest the owner's own words are — an answer, a reply, a note — so every reply shows whole. */
+export const MAX_AGENDA_REPLY_LENGTH = 64_000;
+/** The longest a point-form segment is (premise, decided, still open, impact). */
+export const MAX_AGENDA_POINTS_LENGTH = 16_000;
+/** The longest "where we are now" and the longest folded from-zero detail, as Markdown. */
+export const MAX_AGENDA_WHERE_LENGTH = 200_000;
+export const MAX_AGENDA_FOLDED_DETAIL_LENGTH = 200_000;
 export const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
 export const MAX_AGENDA_ASK_OPTIONS = 12;
 export const MAX_AGENDA_ASK_OPTION_LENGTH = 120;
@@ -212,7 +236,7 @@ const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
   z.strictObject({
     kind: z.literal('answer-review'),
     verdict: z.literal('clarify'),
-    clarification: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+    clarification: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
   }),
 ]);
 
@@ -220,7 +244,7 @@ const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
 export const AgendaFormAnswerSchema = z.strictObject({
   id: z.string().trim().min(1).max(MAX_AGENDA_FIELD_ID_LENGTH),
   picked: z.union([
-    z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+    z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
     z.array(singleLine(MAX_AGENDA_ASK_OPTION_LENGTH)).min(1).max(MAX_AGENDA_ASK_OPTIONS),
   ]),
 });
@@ -235,7 +259,7 @@ export const AgendaResponseSchema = z.union([
   AnswerReviewResponseSchema,
   z.strictObject({
     kind: z.literal('open-question'),
-    answer: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+    answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
   }),
   /** A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). */
   z.strictObject({
@@ -248,7 +272,7 @@ export const AgendaResponseSchema = z.union([
    */
   z.strictObject({
     kind: z.literal('other'),
-    answer: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+    answer: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH),
   }),
 ]);
 export type AgendaResponse = z.infer<typeof AgendaResponseSchema>;
@@ -265,11 +289,11 @@ export const MAX_AGENDA_LINK_LABEL_LENGTH = 120;
 export const MAX_AGENDA_LINK_TARGET_LENGTH = 1_024;
 /** The most steps an item carries, and the longest one: each is Markdown, one thing to do. */
 export const MAX_AGENDA_STEPS = 20;
-export const MAX_AGENDA_STEP_LENGTH = 2_000;
+export const MAX_AGENDA_STEP_LENGTH = 16_000;
 /** The longest instruction document an item carries, as one block of Markdown. */
-export const MAX_AGENDA_BODY_LENGTH = 8_000;
+export const MAX_AGENDA_BODY_LENGTH = 200_000;
 /** The longest Markdown explanation one option carries (`optionDetails`). */
-export const MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH = 1_000;
+export const MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH = 16_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -417,14 +441,14 @@ export type AgendaLink = z.infer<typeof AgendaLinkSchema>;
  */
 export const AgendaBriefShape = {
   /** The situation the item comes out of — what is going on — in point form, so a cold reader starts here. */
-  premise: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
+  premise: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
   /** Earlier answers that bear on this one, in point form: what the owner already decided. */
-  decided: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
+  decided: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
   /**
    * What is STILL OPEN after the discussion so far, in point form: it shrinks as `decided` grows, so a card read
    * after several rounds of talk says where things stand, not where they started.
    */
-  stillOpen: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
+  stillOpen: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
   /** Jargon the item uses, each spelled out. */
   terms: z.array(AgendaTermSchema).min(1).max(MAX_AGENDA_TERMS).optional(),
   /** What the owner is asked, one entry per decision. */
@@ -436,7 +460,7 @@ export const AgendaBriefShape = {
   /** The fields of a `form` card, in order: what the owner fills in before one Send (`agendaFormProblems`). */
   fields: z.array(AgendaFormFieldSchema).min(1).max(MAX_AGENDA_FIELDS).optional(),
   /** What happens if nobody answers. */
-  impact: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
+  impact: z.preprocess(asBullets, prose(MAX_AGENDA_POINTS_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
   urgency: singleLine(MAX_AGENDA_URGENCY_LENGTH).optional(),
   /** It stops the ferret NOW: nothing else can move until the owner answers ("Blocking now"). */
@@ -456,6 +480,13 @@ export const AgendaBriefShape = {
    * the ask is still waiting for the owner's own answer, and this block never closes it.
    */
   questionAnswer: prose(MAX_AGENDA_BODY_LENGTH).optional(),
+  /**
+   * WHERE WE ARE NOW, as Markdown: the current situation, in the reader's terms. Anything the owner asked for to
+   * complete the item lives here — an explainer, a report — so it is read where the item is.
+   */
+  whereWeAre: prose(MAX_AGENDA_WHERE_LENGTH).optional(),
+  /** The context explained from zero, as Markdown, for a reader who knows nothing of the topic: drawn folded away. */
+  detail: prose(MAX_AGENDA_FOLDED_DETAIL_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */
@@ -482,6 +513,8 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
   ...(value.questionAnswer === undefined ? {} : { questionAnswer: value.questionAnswer }),
+  ...(value.whereWeAre === undefined ? {} : { whereWeAre: value.whereWeAre }),
+  ...(value.detail === undefined ? {} : { detail: value.detail }),
 });
 
 /** Every option label an item offers: its ask's options, each question's options and its `choose` answers. */
@@ -596,7 +629,10 @@ export const recommendedAgendaOption = (item: AgendaBrief & { readonly ask?: Age
     .find(candidate => candidate !== undefined && labels.includes(candidate));
 };
 
-/** The most entries an item's history keeps, oldest dropped. */
+/**
+ * The most entries an item's history keeps, oldest dropped. Kept, with the revisions' bound, until the item's
+ * conversation and versions move to their own store (the next step of docs/agenda.md § States).
+ */
 export const MAX_AGENDA_HISTORY = 20;
 
 /**
@@ -611,7 +647,7 @@ export const MAX_AGENDA_HISTORY = 20;
 export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
   kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced', 'replied', 'gate-answered']),
-  note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+  note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
 
@@ -626,9 +662,10 @@ export const gatesAnsweredOn = (item: { readonly history?: readonly AgendaHistor
  *
  * - `snoozed` — the owner put it away `until` a time ("waiting for approval"); the daemon wakes it then, or at
  *   its `neededBy` when that is sooner, as a fresh item. The ferret's `edit` or `surface` leaves it asleep
- *   unless it says it is urgent (`now`).
- * - `replied` — the owner wrote about it in the chat; it waits for the ferret to bring it back (`surface` or
- *   `edit`) if the owner still has to act, or to close it (`done`).
+ *   unless it says it is urgent (`now`) or newly blocking (`blockingNow`).
+ * - `replied` — the item RESTS (`agenda-state.ts`): the owner replied or answered and it waits on the ferret, or the
+ *   ferret took it on (`rest`). Its `resting` says which; this reason is what an app from before Resting reads,
+ *   so its Replied filter still lists every Resting item. The ferret's answer brings it back; its `done` closes it.
  *
  * `at` is when it was parked. A parked item is nobody's turn (`agendaTurn`): it is never "needs you", never a
  * badge, never in the Inbox's open list.
@@ -653,11 +690,12 @@ export const agendaWakeAt = (item: {
 };
 
 /**
- * The number a badge shows for a board: its open items less the PARKED ones (snoozed, or replied to), which wait
- * on nobody. A snapshot's `count` stays every open item — the wire checks `count === items.length`.
+ * The number a badge shows for a board: its Needs-you items (`agendaState`) —
+ * never a resting, snoozed or done item, nor a notice. A snapshot's `count` stays every open
+ * item — the wire checks `count === items.length`.
  */
-export const agendaBadgeCount = (snapshot: { readonly items: readonly { readonly parked?: unknown }[] }): number =>
-  snapshot.items.filter(item => item.parked === undefined).length;
+export const agendaBadgeCount = (snapshot: { readonly items: readonly AgendaStateSource[] }): number =>
+  snapshot.items.filter(item => agendaState(item).state === 'needs-you').length;
 
 /** How often a ferret may wake an item the owner snoozed (`now`): once an hour per item. */
 export const AGENDA_URGENT_WAKE_MS = 60 * 60_000;
@@ -692,6 +730,8 @@ export const AgendaRevisableFieldSchema = z.enum([
   'steps',
   'body',
   'questionAnswer',
+  'whereWeAre',
+  'detail',
 ]);
 export type AgendaRevisableField = z.infer<typeof AgendaRevisableFieldSchema>;
 
@@ -707,7 +747,7 @@ export const AgendaRevisionSchema = z.strictObject({
   previous: z.strictObject({
     subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
     why: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
-    context: z.string().max(MAX_AGENDA_DETAIL_LENGTH).nullable().optional(),
+    context: z.string().max(MAX_AGENDA_CONTEXT_LENGTH).nullable().optional(),
     howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
     ask: AgendaAskSchema.optional(),
     ...AgendaCardShape,
@@ -738,20 +778,20 @@ export type AgendaBy = z.infer<typeof AgendaBySchema>;
 export const AgendaUndeliveredReplySchema = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('resolve'),
-    note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+    note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
     response: AgendaResponseSchema.optional(),
   }),
   z.strictObject({
     action: z.literal('dismiss'),
-    note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+    note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
   }),
   z.strictObject({
     action: z.literal('needs-info'),
-    note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+    note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
   }),
   z.strictObject({
     action: z.literal('discuss'),
-    note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+    note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
   }),
 ]);
 export type AgendaUndeliveredReply = z.infer<typeof AgendaUndeliveredReplySchema>;
@@ -948,6 +988,19 @@ export const AgendaGateSchema = z.strictObject({
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;
 
+/**
+ * THE OWNER'S LATEST ANSWER TO AN OPEN ITEM'S ASK (docs/agenda.md § States): an answer rests the item, it never
+ * closes it, so the answer is kept on the item until the ferret replies or marks it done. `request` is the item's
+ * request counter (`infoRequests`) when it was given: it names this answer's one delivery to the ferret.
+ */
+export const AgendaOwnerAnswerSchema = z.object({
+  at: InstantSchema,
+  response: AgendaResponseSchema,
+  note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+  request: PositiveIntegerSchema,
+});
+export type AgendaOwnerAnswer = z.infer<typeof AgendaOwnerAnswerSchema>;
+
 const AgendaItemBaseShape = {
   id: AgendaIdSchema,
   source: AgendaSourceSchema,
@@ -955,7 +1008,7 @@ const AgendaItemBaseShape = {
   sourceSeq: PositiveIntegerSchema.optional(),
   subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH),
   why: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
-  context: z.string().max(MAX_AGENDA_DETAIL_LENGTH).nullable().optional(),
+  context: z.string().max(MAX_AGENDA_CONTEXT_LENGTH).nullable().optional(),
   waitingSince: InstantSchema,
   howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
   ask: AgendaAskSchema.optional(),
@@ -1033,6 +1086,18 @@ const AgendaItemBaseShape = {
    * about a card whose gate is asking carries it instead of a gate item of its own. Only the daemon sets or clears it.
    */
   gateAttached: AgendaGateSchema.optional(),
+  /**
+   * How a RESTING item rests (`agenda-state.ts`): waiting on its ferret, or the ferret working on it, and the nudge
+   * clock. It rides beside the `parked: replied` (or `waitingOn: 'ferret'`) every app reads, which stays the field
+   * that says the item rests; absent on an item parked before Resting existed, which reads as waiting on the ferret.
+   */
+  resting: AgendaRestingSchema.optional(),
+  /** What the item needs from the owner right now; absent on an item from before stages, read from its kind (`agendaStage`). */
+  stage: AgendaStageSchema.optional(),
+  /** Bounded, oldest first: every stage the item entered, so its history keeps each one. */
+  stages: z.array(AgendaStageEntrySchema).min(1).max(MAX_AGENDA_STAGES).optional(),
+  /** The owner's latest answer while the item stays open (`AgendaOwnerAnswer`); absent until they answer. */
+  ownerAnswer: AgendaOwnerAnswerSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -1057,6 +1122,12 @@ export const AgendaItemSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
+      context.addIssue({
+        code: 'custom',
+        message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON: move the long part to a file and link it`,
+      });
+    }
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
     }
@@ -1114,7 +1185,7 @@ export type AgendaItem = z.infer<typeof AgendaItemSchema>;
 
 const ResolvedAgendaBaseShape = {
   resolvedAt: InstantSchema,
-  resolutionNote: z.string().max(MAX_AGENDA_DETAIL_LENGTH).nullable(),
+  resolutionNote: z.string().max(MAX_AGENDA_REPLY_LENGTH).nullable(),
   response: AgendaResponseSchema.optional(),
   /** A SHA-256 of everything a gate answer said, kept with the answered item so an exact repeat reads as one. */
   answerReceipt: z
@@ -1256,7 +1327,7 @@ const AddAgendaRequestSchema = z.strictObject({
   sourceRef: z.string().max(MAX_AGENDA_SOURCE_REF_LENGTH).nullable().default(null),
   subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH),
   why: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
-  context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_DETAIL_LENGTH)).nullable().optional(),
+  context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
   ask: AgendaAskSchema.optional(),
   /** Sent by older CLIs: a new ask is the owner's turn now, so there is nothing to surface to. Accepted, ignored. */
@@ -1282,6 +1353,8 @@ const AddAgendaRequestSchema = z.strictObject({
    * without `DAEMON_FEATURES.agendaOfferClose` refuses the whole add, so a client sends it only to one that has it.
    */
   offerClose: z.literal(true).optional(),
+  /** What the item needs from the owner (`--stage`); read from its kind when absent. Only for `agenda.channel.1`. */
+  stage: AgendaStageSchema.optional(),
   ...AgendaBriefShape,
 });
 
@@ -1325,29 +1398,34 @@ export const agendaConfirmsProblems = (value: {
 export const AgendaActionRequestSchema = z
   .discriminatedUnion('action', [
     AddAgendaRequestSchema,
-    /** Reword an open item in place: only the writing, never its ask or who raised it. */
+    /** Rewrite an open item in place: its writing and its stage, never its ask or who raised it. */
     z.strictObject({
       action: z.literal('edit'),
       id: AgendaIdSchema,
       subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
       title: AgendaCardShape.title,
-      context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_DETAIL_LENGTH)).nullable().optional(),
+      /**
+       * What the item needs from the owner now (`--stage`); a change is kept in its `stages`. Only a daemon that
+       * reports `agenda.channel.1` takes it.
+       */
+      stage: AgendaStageSchema.optional(),
+      context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
       ...AgendaBriefShape,
       /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
       clear: z.array(AgendaClearableFieldSchema).min(1).max(3).optional(),
       /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
       now: z.literal(true).optional(),
       /**
-       * `--back`: the ferret needs something NEW from the owner, so an item they REPLIED to returns to their list
-       * (fresh, with the whole card refreshed). Without it an edit of a replied item only rewrites the card: it stays
-       * parked and nothing reaches the owner.
+       * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
+       * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
+       * (and without a `questionAnswer`) an edit of a resting item only rewrites the card.
        */
       back: z.literal(true).optional(),
     }),
     z.strictObject({
       action: z.literal('resolve'),
       id: AgendaIdSchema,
-      note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+      note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
       response: AgendaResponseSchema.optional(),
       /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
@@ -1369,7 +1447,7 @@ export const AgendaActionRequestSchema = z
     z.strictObject({
       action: z.literal('needs-info'),
       id: AgendaIdSchema,
-      note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+      note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
     }),
     /**
      * The owner wants to talk a SURFACED item through before answering — the premise is wrong, or the card is
@@ -1380,7 +1458,7 @@ export const AgendaActionRequestSchema = z
     z.strictObject({
       action: z.literal('discuss'),
       id: AgendaIdSchema,
-      note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+      note: z.string().trim().min(1).max(MAX_AGENDA_REPLY_LENGTH).optional(),
     }),
     /**
      * The raising ferret (or the owner) moves an item out of discussion into the owner's queue: the owner did
@@ -1392,6 +1470,16 @@ export const AgendaActionRequestSchema = z
       why: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
       /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
       now: z.literal(true).optional(),
+    }),
+    /**
+     * The raising ferret TAKES AN ITEM ON without asking anything yet (`fy agenda rest --why`, `agenda.channel.1`):
+     * it rests as `working`, quiet and never nudged, until the ferret answers on it (it then asks again, fresh) or
+     * marks it done.
+     */
+    z.strictObject({
+      action: z.literal('rest'),
+      id: AgendaIdSchema,
+      why: z.string().trim().min(1).max(MAX_AGENDA_REST_WHY_LENGTH),
     }),
     /** The owner puts an open item away `until` a time still ahead; it comes back then as a fresh item. */
     z.strictObject({
@@ -1407,7 +1495,7 @@ export const AgendaActionRequestSchema = z
     z.strictObject({
       action: z.literal('dismiss'),
       id: AgendaIdSchema,
-      note: z.string().max(MAX_AGENDA_DETAIL_LENGTH).optional(),
+      note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
     }),
   ])
   .superRefine((value, context) => {

@@ -12,6 +12,8 @@ import {
   MAX_AGENDA_TERMS,
   recommendedAgendaOption,
   singleAgendaQuestion,
+  MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH,
+  MAX_AGENDA_POINTS_LENGTH,
 } from '../../src/lib/agenda.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
@@ -110,7 +112,9 @@ describe('attention brief', () => {
   it('should refuse a blank or oversized premise', () => {
     // Arrange / Act / Assert
     should(AgendaItemSchema.safeParse({ ...minimal, premise: '   ' }).success).be.false();
-    should(AgendaItemSchema.safeParse({ ...minimal, decided: 'x'.repeat(10_000) }).success).be.false();
+    should(
+      AgendaItemSchema.safeParse({ ...minimal, decided: 'x'.repeat(MAX_AGENDA_POINTS_LENGTH + 1) }).success,
+    ).be.false();
   });
 
   it('should carry steps, a body and progress, and refuse what is over the limit or inconsistent', () => {
@@ -328,7 +332,7 @@ describe('agenda option details', () => {
     const blank = AgendaActionRequestSchema.safeParse({ ...raise, optionDetails: [{ label: 'Go', detail: '  ' }] });
     const long = AgendaActionRequestSchema.safeParse({
       ...raise,
-      optionDetails: [{ label: 'Go', detail: 'x'.repeat(1_001) }],
+      optionDetails: [{ label: 'Go', detail: 'x'.repeat(MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH + 1) }],
     });
     const multiline = AgendaActionRequestSchema.safeParse({
       ...raise,

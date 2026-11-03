@@ -135,6 +135,7 @@ class FakeAgendaDaemon {
       request.action === 'edit' ||
       request.action === 'progress' ||
       request.action === 'surface' ||
+      request.action === 'rest' ||
       request.action === 'snooze' ||
       request.action === 'unsnooze'
     ) {

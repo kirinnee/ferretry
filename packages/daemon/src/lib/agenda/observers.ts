@@ -6,6 +6,7 @@ import {
   discussMessage,
   isQuietAcknowledgement,
   needsInfoMessage,
+  ownerAnswerMessage,
   sessionAgendaSummary,
 } from './conversation.ts';
 import {
@@ -135,6 +136,14 @@ export class AgendaReplyDelivery implements AgendaChangeObserver {
         needsInfoReplyKey(item.id, item.infoRequests),
         change.change === 'discussing' ? discussMessage(item, this.binary) : needsInfoMessage(item),
       );
+      return;
+    }
+    // An answer that RESTED the item (it stays open, waiting on the ferret) is told under its own request key, so a
+    // second answer after the ferret replied is told too.
+    if (change.change === 'answered' && change.via === 'board' && change.actor.kind === 'human' && item !== undefined) {
+      const message = ownerAnswerMessage(item);
+      if (!speaksFor(item, sessionId) || message === undefined || item.ownerAnswer === undefined) return;
+      await this.replies.add(sessionId, needsInfoReplyKey(item.id, item.ownerAnswer.request), message);
       return;
     }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
