@@ -184,7 +184,8 @@ export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
 }).refine(
   request => {
     if (request.act === undefined) return request.subject === undefined;
-    if (stepUpBindsSubject(request.act)) return STEP_UP_SUBJECTS_SKIPPABLE[request.act].safeParse(request.subject).success;
+    if (stepUpBindsSubject(request.act))
+      return STEP_UP_SUBJECTS_SKIPPABLE[request.act].safeParse(request.subject).success;
     if (stepUpSkippableAtMachine(request.act)) return request.subject === undefined;
     return STEP_UP_SUBJECTS[request.act].safeParse(request.subject).success;
   },
