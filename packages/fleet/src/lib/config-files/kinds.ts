@@ -17,6 +17,8 @@ import {
   AccountDefaultsFileSchema,
   accountDefaultLines,
   accountDefaultScopeWords,
+  type CompactAt,
+  CompactAtSchema,
   type ConfigComponentKind,
   type ConfigSchemaId,
   DEFAULT_LEARNING_CONFIG,
@@ -80,6 +82,8 @@ export interface MachineFileValue {
  */
 export const ProfileFileSchema = z.strictObject({
   contents: z.array(LayerReferenceTextSchema).default([]),
+  /** Where this profile's ferrets compact their conversation (docs/compact-at.md): the runtime's own value wins. */
+  compactAt: CompactAtSchema.optional(),
   /** The origin key a copy stamped: which item on the source machine this one came from. */
   clonedFromKey: z.string().min(1).optional(),
 });
@@ -121,7 +125,11 @@ export interface ConfigValues {
   readonly machine: MachineFileValue;
   readonly login: z.infer<typeof CredentialSchema>;
   readonly component: ComponentOf<ConfigComponentKind>;
-  readonly profile: { readonly layers: readonly LayerReferenceText[]; readonly clonedFromKey?: string };
+  readonly profile: {
+    readonly layers: readonly LayerReferenceText[];
+    readonly compactAt?: CompactAt;
+    readonly clonedFromKey?: string;
+  };
   readonly runtime: z.infer<typeof RuntimeSchema>;
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
@@ -143,6 +151,7 @@ export function configValue(schema: ConfigSchemaId, parsed: unknown): ConfigValu
     case 'profile':
       return {
         layers: (parsed as ProfileFile).contents,
+        ...((parsed as ProfileFile).compactAt === undefined ? {} : { compactAt: (parsed as ProfileFile).compactAt }),
         ...((parsed as ProfileFile).clonedFromKey === undefined
           ? {}
           : { clonedFromKey: (parsed as ProfileFile).clonedFromKey }),
@@ -168,6 +177,9 @@ export function configFileBody(schema: ConfigSchemaId, value: ConfigValues[keyof
     case 'profile':
       return {
         contents: [...(value as ConfigValues['profile']).layers],
+        ...((value as ConfigValues['profile']).compactAt === undefined
+          ? {}
+          : { compactAt: (value as ConfigValues['profile']).compactAt }),
         ...((value as ConfigValues['profile']).clonedFromKey === undefined
           ? {}
           : { clonedFromKey: (value as ConfigValues['profile']).clonedFromKey }),
