@@ -291,6 +291,63 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
         });
       });
 
+      it('should follow the repository git itself reaches through a symlinked folder, not the one enclosing the link', async () => {
+        await withTempRoot(async root => {
+          // Arrange — `outer` is a repository holding a link into a folder of ANOTHER repository.
+          const outer = await repository(root);
+          const other = join(root, 'another-repo');
+          await mkdir(other);
+          await git(other, 'init', '--quiet', '-b', 'main');
+          await git(
+            other,
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@t',
+            'commit',
+            '--allow-empty',
+            '--quiet',
+            '-m',
+            'r',
+          );
+          await git(other, 'checkout', '--quiet', '-b', 'other/one');
+          const target = join(other, 'subdir');
+          await mkdir(target);
+          const alias = join(outer, 'alias');
+          await symlink(target, alias);
+          const copies = new GitWorkingCopies();
+
+          // Act
+          const one = await copies.branchOf(alias);
+          await git(other, 'checkout', '--quiet', '-b', 'other/two');
+          const two = await copies.branchOf(alias);
+
+          // Assert
+          should([one, two]).deepEqual(['other/one', 'other/two']);
+        });
+      });
+
+      it('should name the branch HEAD points at, not where a symbolic branch ref leads', async () => {
+        await withTempRoot(async root => {
+          // Arrange — HEAD -> refs/heads/feat/one -> refs/heads/target/one.
+          const repo = await repository(root);
+          await git(repo, 'branch', 'target/one');
+          await git(repo, 'branch', 'target/two');
+          await git(repo, 'symbolic-ref', 'refs/heads/feat/one', 'refs/heads/target/one');
+          await git(repo, 'symbolic-ref', 'HEAD', 'refs/heads/feat/one');
+          const copies = new GitWorkingCopies();
+
+          // Act — the middle ref moves; HEAD, the only file the answer is kept against, does not.
+          const before = await copies.branchOf(repo);
+          await git(repo, 'symbolic-ref', 'refs/heads/feat/one', 'refs/heads/target/two');
+          const kept = await copies.branchOf(repo);
+          const fresh = await new GitWorkingCopies().branchOf(repo);
+
+          // Assert
+          should([before, kept, fresh]).deepEqual(['feat/one', 'feat/one', 'feat/one']);
+        });
+      });
+
       it('should name nothing for a folder that has been removed, whatever repository encloses it', async () => {
         await withTempRoot(async root => {
           // Arrange

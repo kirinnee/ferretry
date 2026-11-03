@@ -1,4 +1,4 @@
-import { lstat, readFile, stat } from 'node:fs/promises';
+import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { githubRepositoryOf, parseGitRemote, type WorkingCopies } from '../../lib/board-github/index.ts';
 
@@ -49,11 +49,14 @@ const INCLUDES = /\[\s*include(?:if)?[\s"\]]/iu;
  * The git dir `git -C <path>` would use: the nearest `.git` at or above the folder — a directory (or a
  * symlink to one), or a linked worktree's `gitdir:` file — or `undefined` where there is none to find.
  *
+ * The folder is the PHYSICAL one (`realpath`): git changes into it and walks up from where it finds itself, so
+ * a link to a folder of another repository is that repository's, not that of the folder holding the link.
+ *
  * A `.git` entry of ANY kind ends the search: one that is neither (a dangling link, a socket) is a
  * boundary this cannot read, and walking past it would answer from the enclosing repository's files.
  */
-async function gitDirectoryOf(path: string): Promise<string | undefined> {
-  let folder = resolve(path);
+async function gitDirectoryOf(physicalFolder: string): Promise<string | undefined> {
+  let folder = physicalFolder;
   for (;;) {
     const dotGit = join(folder, '.git');
     if (
@@ -115,10 +118,11 @@ export class GitWorkingCopies implements WorkingCopies {
   /**
    * The branch `HEAD` names. Read from the FULL ref, not `--short`: git shortens it against every other ref,
    * so a tag of the same name makes `--short` print `heads/<name>` — an answer that depends on files other than
-   * `HEAD`, and one `HEAD` alone cannot vouch for.
+   * `HEAD`, and one `HEAD` alone cannot vouch for. `--no-recurse` stops at what `HEAD` itself holds: followed
+   * through a symbolic branch ref, the answer would move with a file `HEAD` knows nothing of.
    */
   private async askBranch(path: string): Promise<string | null> {
-    const ref = await this.git(path, ['symbolic-ref', '--quiet', 'HEAD']);
+    const ref = await this.git(path, ['symbolic-ref', '--quiet', '--no-recurse', 'HEAD']);
     return ref?.startsWith(BRANCHES) === true ? ref.slice(BRANCHES.length) : null;
   }
 
@@ -154,9 +158,10 @@ export class GitWorkingCopies implements WorkingCopies {
    */
   private async filesBehind(question: Question, path: string): Promise<string | undefined> {
     // `git -C` fails in a folder that is gone, however unchanged the repository above it.
-    const folder = await stat(path).catch(() => undefined);
-    if (folder?.isDirectory() !== true) return undefined;
-    const gitDirectory = await gitDirectoryOf(path);
+    const physical = await realpath(path).catch(() => undefined);
+    if (physical === undefined || (await stat(physical).catch(() => undefined))?.isDirectory() !== true)
+      return undefined;
+    const gitDirectory = await gitDirectoryOf(physical);
     if (gitDirectory === undefined) return undefined;
     const head = join(gitDirectory, 'HEAD');
     // A git dir without a `HEAD` is not one: git walks on past it, so what this found is not what git uses.
