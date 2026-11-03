@@ -256,6 +256,14 @@ export function stepUpRoutes(
             StepUpOptionsSchema.parse(value),
           );
         }
+        // Approving a sign-in recipe binds its challenge, and so its proof, to the ONE proposal it names (`rp_…`): the
+        // schema already refused a request without a well-formed one, and only a decision on that proposal can spend it.
+        // (Were it ever missing, `''` names no proposal, so the proof could approve nothing: closed, not open.)
+        if (body.act === STEP_UP_ACTS.approveRecipe)
+          return answer(
+            await service.stepUpOptions(caller(context), body.origin, body.act, body.subject ?? ''),
+            value => StepUpOptionsSchema.parse(value),
+          );
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

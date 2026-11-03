@@ -162,6 +162,7 @@ export const handsOnRaise = (request: RaiseAgendaRequest, actor: AgendaActor): b
   (HANDS_ON_CAUSES.has(actor.cause) ||
     request.input !== undefined ||
     request.phoneApproval !== undefined ||
+    request.recipeProposal !== undefined ||
     request.copyPlan !== undefined ||
     request.taskPlan !== undefined ||
     request.signInRuleSuggestion !== undefined ||
@@ -177,6 +178,7 @@ export const handsOnItem = (item: AgendaItem): boolean =>
   item.source === 'question' ||
   item.input !== undefined ||
   item.phoneApproval !== undefined ||
+  item.recipeProposal !== undefined ||
   item.copyPlan !== undefined ||
   item.taskPlan !== undefined ||
   item.signInRuleSuggestion !== undefined ||

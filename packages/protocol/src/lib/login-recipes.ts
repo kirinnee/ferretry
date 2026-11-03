@@ -261,8 +261,17 @@ export const LoginRecipeProposedSchema = z.strictObject({
 });
 export type LoginRecipeProposed = z.infer<typeof LoginRecipeProposedSchema>;
 
-/** The owner's answer to a proposal (`POST /v1/secrets/logins/:id/recipe/proposals/:pid`). */
-export const LoginRecipeDecisionSchema = z.strictObject({ decision: z.enum(['approve', 'decline']) });
+/**
+ * The owner's answer to a proposal (`POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`, and the older
+ * `/v1/secrets/logins/:id/…`). An approval may carry `recipe`: the owner's own version, edited from the proposal where
+ * it was suggested, which becomes the recipe instead of the ferret's text, in the same act (and is the owner's, never
+ * the ferret's). An older daemon refuses the field (strict), so the app sends it only to a daemon that raised the card
+ * with its `recipeProposal` ref.
+ */
+export const LoginRecipeDecisionSchema = z.discriminatedUnion('decision', [
+  z.strictObject({ decision: z.literal('approve'), recipe: LoginRecipeSchema.optional() }),
+  z.strictObject({ decision: z.literal('decline') }),
+]);
 export type LoginRecipeDecision = z.infer<typeof LoginRecipeDecisionSchema>;
 
 /** One line of a recipe diff: kept, removed or added. */

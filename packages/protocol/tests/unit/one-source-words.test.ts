@@ -16,6 +16,7 @@ import {
   SIGN_IN_RULE_DEFAULT_DAYS,
   SIGN_IN_RULE_HISTORY_TAPS,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
+  signInRuleProgressWords,
   SIGN_IN_RULE_MAX_DAYS,
   SIGN_IN_RULE_TERMINAL_DEFAULT_DAYS,
   SIGN_IN_RULE_TERMINAL_MAX_DAYS,
@@ -70,9 +71,17 @@ describe('one source per fact: durations and counts in words', () => {
 
   it('should say the history a rule needs from the number of taps', () => {
     should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal(
-      `Sign in yourself ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} from the app first`,
+      `Fill this sign-in yourself from the app ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} in a row first`,
     );
-    should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal('Sign in yourself twice from the app first');
+    should(SIGN_IN_RULE_INELIGIBLE_WORDS['no-history']).equal(
+      'Fill this sign-in yourself from the app twice in a row first',
+    );
+  });
+
+  it('should say how far the owner is toward a rule, never past the taps it needs (#F640)', () => {
+    should(signInRuleProgressWords(1)).equal('1 of 2 sign-ins done');
+    should(signInRuleProgressWords(0)).equal('0 of 2 sign-ins done');
+    should(signInRuleProgressWords(5)).equal('2 of 2 sign-ins done');
   });
 });
 

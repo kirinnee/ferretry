@@ -31,8 +31,11 @@ import {
  * on. A terminal fact is tapped only where the kernel proved sudo, su or doas setuid root (login-observer.ts).
  */
 const ownerHistory = (fact: LoginObserved): boolean =>
+  countsAsOwnerFill(fact) && (fact.tapped?.count ?? 0) >= SIGN_IN_RULE_HISTORY_TAPS;
+
+/** A fact of the owner's own fill that counts toward the history, whatever its run's length. */
+const countsAsOwnerFill = (fact: LoginObserved): boolean =>
   fact.tapped?.value === true &&
-  fact.tapped.count >= SIGN_IN_RULE_HISTORY_TAPS &&
   fact.masked?.value === true &&
   (fact.surface === 'terminal' || fact.navigatedAway?.value === true);
 
@@ -56,6 +59,19 @@ export function tappedCount(signIn: Pick<SignInSummary, 'place' | 'observed'>): 
     .filter(fact => keys.has(fact.at) && ownerHistory(fact))
     .map(fact => fact.tapped?.count ?? 0);
   return Math.min(Math.max(0, ...counts), SIGN_IN_RULE_HISTORY_MAX);
+}
+
+/**
+ * How far the owner is toward the history a rule needs, for "1 of 2 sign-ins done" (#F640): the longest run of the
+ * owner's own fills at the sign-in's places that count in every other way ({@link ownerHistory} but the length), kept
+ * below {@link SIGN_IN_RULE_HISTORY_TAPS}. Read only for a `no-history` answer, where no run is long enough yet.
+ */
+export function tapProgress(signIn: Pick<SignInSummary, 'place' | 'observed'>): number {
+  const keys = new Set(placeKeys(signIn.place));
+  const runs = (signIn.observed ?? [])
+    .filter(fact => keys.has(fact.at) && countsAsOwnerFill(fact))
+    .map(fact => fact.tapped?.count ?? 0);
+  return Math.min(Math.max(0, ...runs), SIGN_IN_RULE_HISTORY_TAPS - 1);
 }
 
 /** The surface a rule for this sign-in would be for: the protocol's one decision from its place. */

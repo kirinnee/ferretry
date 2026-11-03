@@ -150,6 +150,39 @@ describe('binding the proof to one staged key', () => {
     should(stamped).eql([{ act: 'add-2fa-key', subject: STAGE_ONE }]);
   });
 
+  it('should stamp an approve-recipe proof with the one proposal it is for, though the machine may skip the act', async () => {
+    // Arrange
+    const { gate, stamped } = subjects();
+    const waiting = gate.require(
+      first,
+      'approve this sign-in recipe',
+      'explicit',
+      'approve-recipe',
+      'rp_000000000000000a',
+    );
+
+    // Act
+    await gate.confirm();
+    await waiting;
+
+    // Assert
+    should(stamped).eql([{ act: 'approve-recipe', subject: 'rp_000000000000000a' }]);
+  });
+
+  it('should leave an approve-recipe proof unstamped when two proposals share the prompt', async () => {
+    // Arrange
+    const { gate, stamped } = subjects();
+    const one = gate.require(first, 'approve', 'explicit', 'approve-recipe', 'rp_000000000000000a');
+    const two = gate.require(first, 'approve', 'explicit', 'approve-recipe', 'rp_000000000000000b');
+
+    // Act
+    await gate.confirm();
+    await Promise.all([one, two]);
+
+    // Assert
+    should(stamped).eql([{ act: undefined, subject: undefined }]);
+  });
+
   it('should leave the proof unstamped when two staged keys share the prompt, so neither is saved by it', async () => {
     // Arrange
     const { gate, stamped } = subjects();

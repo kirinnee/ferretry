@@ -26,6 +26,7 @@ import {
   LOGIN_RECIPE_PROPOSALS_MAX,
   LoginDomainSchema,
   LoginObservedSchema,
+  type LoginRecipeDecision,
   type LoginRecipeProposal,
   LoginRecipeProposalSchema,
   LoginMethodSchema,
@@ -364,7 +365,7 @@ export class LoginDirectory {
   async decide(
     id: LoginEntryId,
     proposalId: string,
-    decision: 'approve' | 'decline',
+    answer: LoginRecipeDecision,
   ): Promise<{ readonly entry: LoginEntrySummary; readonly proposal: LoginRecipeProposal }> {
     return await this.accounts.transact(draft => {
       const found = this.holding(draft, id, proposalId);
@@ -373,7 +374,7 @@ export class LoginDirectory {
           'unknown_proposal',
           `${id} has no recipe proposal ${proposalId}; it was answered or replaced`,
         );
-      const { proposal } = decideOn(draft, found[0], found[1], proposalId, decision);
+      const { proposal } = decideOn(draft, found[0], found[1], proposalId, answer);
       return { entry: savedLoginIn(draft, id), proposal };
     });
   }

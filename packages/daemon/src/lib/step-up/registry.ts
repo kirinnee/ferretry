@@ -6,6 +6,7 @@ import {
   type StepUpAct,
   stepUpKeepsProof,
   stepUpSkippableAtMachine,
+  type SubjectBoundSkippableStepUpAct,
   type StoredProofStepUpAct,
   type StoredStepUpProof,
 } from '@ferretry/protocol';
@@ -34,6 +35,8 @@ interface HeldStepUp {
 interface FreshProof {
   readonly provedAtMs: number;
   readonly act: MachineSkippableStepUpAct | undefined;
+  /** The one subject the proof is for, when the act binds one (`approve-recipe`: the proposal). Absent otherwise. */
+  readonly bound?: string;
 }
 
 /**
@@ -73,7 +76,7 @@ export type SpentProofStepUpAct = Exclude<EveryCallerStepUpAct, StoredProofStepU
  * No stamp: an act-less proof.
  */
 export type ChallengeStamp =
-  | { readonly kind: 'act'; readonly act: MachineSkippableStepUpAct }
+  | { readonly kind: 'act'; readonly act: MachineSkippableStepUpAct; readonly bound?: string }
   | { readonly kind: 'bound'; readonly act: SpentProofStepUpAct; readonly bound: string }
   | { readonly kind: 'kept'; readonly act: StoredProofStepUpAct; readonly stage: string };
 
@@ -152,10 +155,10 @@ export class StepUpRegistry {
    * AN ACT (a step-up): the unlock opens the machine and is never one (`fresh: false`), so it can never
    * be spent on an act that adds access. `act` stamps the proof with the act it was proved for.
    */
-  grant(subject: StepUpSubject, nowMs: number, fresh = true, act?: MachineSkippableStepUpAct): number {
+  grant(subject: StepUpSubject, nowMs: number, fresh = true, act?: MachineSkippableStepUpAct, bound?: string): number {
     const held: HeldStepUp = { grantedAtMs: nowMs };
     this.#held.set(key(subject), held);
-    if (fresh) this.#fresh.set(key(subject), { provedAtMs: nowMs, act });
+    if (fresh) this.#fresh.set(key(subject), { provedAtMs: nowMs, act, ...(bound === undefined ? {} : { bound }) });
     else this.#fresh.delete(key(subject));
     return this.#endOf(held);
   }
@@ -234,6 +237,12 @@ export class StepUpRegistry {
    */
   claimFresh(subject: StepUpSubject, nowMs: number, act?: MachineSkippableStepUpAct): boolean;
   /**
+   * An act the machine may skip whose proof is bound to one subject (`approve-recipe`) takes only a proof stamped with
+   * that act AND bound to exactly `bound`; a proof bound to another subject stays where it is, and an act-less claim, or
+   * a claim without a subject, never takes a bound proof.
+   */
+  claimFresh(subject: StepUpSubject, nowMs: number, act: SubjectBoundSkippableStepUpAct, bound: string): boolean;
+  /**
    * An act every caller must prove takes only a proof stamped with that act AND bound to exactly `bound`, within a
    * challenge's life, on a copy of the app with a live session. A proof bound to anything else stays where it is.
    */
@@ -241,7 +250,9 @@ export class StepUpRegistry {
   claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string): boolean {
     if (act !== undefined && !stepUpSkippableAtMachine(act)) return this.#claimBound(subject, nowMs, act, bound);
     if (!this.freshlyHeld(subject, nowMs)) return false;
-    if (act !== undefined && this.#fresh.get(key(subject))?.act !== act) return false;
+    const proof = this.#fresh.get(key(subject));
+    if (act !== undefined && proof?.act !== act) return false;
+    if (proof?.bound !== bound) return false;
     this.#fresh.delete(key(subject));
     return true;
   }

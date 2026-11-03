@@ -220,6 +220,7 @@ describe('handsOnRaise', () => {
     for (const field of [
       'input',
       'phoneApproval',
+      'recipeProposal',
       'copyPlan',
       'taskPlan',
       'signInRuleSuggestion',
@@ -248,6 +249,7 @@ describe('handsOnItem', () => {
     for (const field of [
       'input',
       'phoneApproval',
+      'recipeProposal',
       'copyPlan',
       'taskPlan',
       'signInRuleSuggestion',

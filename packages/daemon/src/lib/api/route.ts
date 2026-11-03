@@ -1,6 +1,7 @@
 import type {
   EveryCallerStepUpAct,
   MachineSkippableStepUpAct,
+  SubjectBoundSkippableStepUpAct,
   StepUpSubjectOf,
   StoredProofStepUpAct,
   StoredStepUpProof,
@@ -176,7 +177,9 @@ export type ClaimStoredProof = <Act extends StoredProofStepUpAct>(
  * route must not read `governance` at all: the machine's admin token, which every ferret holds, proves nothing.
  */
 export interface ClaimFreshStepUp {
-  (act?: MachineSkippableStepUpAct): boolean;
+  (act?: Exclude<MachineSkippableStepUpAct, SubjectBoundSkippableStepUpAct>): boolean;
+  /** An act the machine may skip whose proof is bound to one subject (`approve-recipe`, the proposal) names it. */
+  (act: SubjectBoundSkippableStepUpAct, subject: string): boolean;
   /** A stored-proof act is claimed only through {@link RouteContext.claimStoredProof}, so it does not compile here. */
   (act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, subject: string): boolean;
 }

@@ -318,7 +318,7 @@ describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 3
     should([untapped.status, untapped.code, untapped.message]).eql([
       409,
       'no_history',
-      'Sign in yourself twice from the app first',
+      'Fill this sign-in yourself from the app twice in a row first',
     ]);
     should(eligible).eql({ signIn: SSH, eligible: false, because: 'tool-not-covered' });
     should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();
@@ -798,6 +798,44 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
 
     // Assert
     should([refused.status, refused.code]).eql([409, 'no_history']);
+  });
+
+  it('should say how far the owner is toward a rule, only to an app that asks (#F640)', async () => {
+    // Arrange — one tap into sudo so far, of the two in a row a rule needs
+    const base = listing();
+    const once = (taps: number) =>
+      world({
+        listing: {
+          ...base,
+          signIns: base.signIns.map(each =>
+            each.id === SUDO
+              ? { ...each, observed: [{ ...tappedFact('sudo@kirin-box', taps), surface: 'terminal' }] }
+              : each,
+          ),
+        } as never,
+      });
+    const w = await once(1);
+    const fresh = await once(0);
+
+    // Act / Assert — asked: the run so far; not asked: today's answer, so an older app's strict read never meets it
+    should(await w.service.eligibility(deviceOwner(), SUDO, true)).eql({
+      signIn: SUDO,
+      eligible: false,
+      because: 'no-history',
+      history: 1,
+    });
+    should(await w.service.eligibility(deviceOwner(), SUDO)).eql({
+      signIn: SUDO,
+      eligible: false,
+      because: 'no-history',
+    });
+    should(await fresh.service.eligibility(deviceOwner(), SUDO, true)).containEql({ history: 0 });
+    // An eligible sign-in answers as it always did.
+    should(await (await once(2)).service.eligibility(deviceOwner(), SUDO, true)).eql({
+      signIn: SUDO,
+      eligible: true,
+      history: 2,
+    });
   });
 
   it('should suspend it when its tool or host drifts, or it stops being a terminal sign-in, and stay suspended', async () => {

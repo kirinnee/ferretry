@@ -632,7 +632,7 @@ stage answers `409` with the reason:
 | `tool_not_covered` | A terminal sign-in for any program but sudo, su or doas (ssh, npm, …): no rule ever covers it. |
 | `via_provider`     | The sign-in goes through another account ("via Google").                                       |
 | `not_password`     | The sign-in does not use a password.                                                           |
-| `no_history`       | "Sign in yourself twice from the app first".                                                   |
+| `no_history`       | "Fill this sign-in yourself from the app twice in a row first".                                |
 | `passkey_required` | No passkey has been added on a paired device yet.                                              |
 | `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.                  |
 | `terminal_off`     | sudo, su or doas, on a machine that does not offer terminal rules.                             |
@@ -808,20 +808,20 @@ Two more limits are declared:
 
 Every route is `caller: 'person'` ([grants.md](grants.md)).
 
-| Route                                                 | Does                                                              | Grant                               |
-| ----------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
-| `GET /v1/sign-in-rules[?signIn=]`                     | every rule (or one sign-in's), machine stages waiting, the health | `secrets.use`                       |
-| `GET /v1/sign-in-rules/eligibility?signIn=`           | whether a rule can be made, and why not                           | `secrets.use`                       |
-| `POST /v1/sign-in-rules/stages`                       | stage a rule                                                      | `secrets.configure` + `browser.use` |
-| `GET` / `DELETE /v1/sign-in-rules/stages/:stage`      | where a stage stands; drop it                                     | `secrets.use`                       |
-| `POST /v1/sign-in-rules/stages/:stage/confirm-in-app` | show a machine stage in the app                                   | `secrets.configure` + `browser.use` |
-| `POST /v1/sign-in-rules/stages/:stage/bind`           | a paired device with a passkey takes a machine stage              | `secrets.configure` + `browser.use` |
-| `POST /v1/sign-in-rules/stages/:stage/commit`         | commit, **with the kept `approve-sign-in-rule` proof**            | `secrets.configure` + `browser.use` |
-| `POST /v1/sign-in-rules/:id/narrow`                   | drop the code, end earlier, lower the cap                         | `secrets.use`                       |
-| `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
-| `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
-| `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)          | `secrets.use`                       |
-| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down, on the owner's side only: its card stays  | `secrets.use`                       |
+| Route                                                 | Does                                                                                                                                    | Grant                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `GET /v1/sign-in-rules[?signIn=]`                     | every rule (or one sign-in's), machine stages waiting, the health                                                                       | `secrets.use`                       |
+| `GET /v1/sign-in-rules/eligibility?signIn=`           | whether a rule can be made, and why not; `&progress=1` adds how far the owner is toward a `no_history` sign-in ("1 of 2 sign-ins done") | `secrets.use`                       |
+| `POST /v1/sign-in-rules/stages`                       | stage a rule                                                                                                                            | `secrets.configure` + `browser.use` |
+| `GET` / `DELETE /v1/sign-in-rules/stages/:stage`      | where a stage stands; drop it                                                                                                           | `secrets.use`                       |
+| `POST /v1/sign-in-rules/stages/:stage/confirm-in-app` | show a machine stage in the app                                                                                                         | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/stages/:stage/bind`           | a paired device with a passkey takes a machine stage                                                                                    | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/stages/:stage/commit`         | commit, **with the kept `approve-sign-in-rule` proof**                                                                                  | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/:id/narrow`                   | drop the code, end earlier, lower the cap                                                                                               | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                                                                                         | `secrets.use`                       |
+| `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                                                                                         | `secrets.use`                       |
+| `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)                                                                                | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down, on the owner's side only: its card stays                                                                        | `secrets.use`                       |
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 

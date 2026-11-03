@@ -11,6 +11,7 @@ import {
   type AgendaSignInRuleSuggestionRef,
   type AgendaCardRow,
   type AgendaPhoneApprovalRef,
+  type AgendaRecipeProposalRef,
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
   type AgendaErrorCode,
@@ -153,6 +154,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
   readonly phoneApproval?: AgendaPhoneApprovalRef;
+  /** The ferret's suggested sign-in recipe a `task` card presents (`AgendaRecipeProposalRef`); only the daemon raises one. */
+  readonly recipeProposal?: AgendaRecipeProposalRef;
   /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
   readonly cards?: readonly AgendaCardRow[];
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
@@ -937,6 +940,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.signInRuleSuggestion === undefined ? {} : { signInRuleSuggestion: request.signInRuleSuggestion }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
+      ...(request.recipeProposal === undefined ? {} : { recipeProposal: request.recipeProposal }),
       ...(request.cards === undefined ? {} : { cards: request.cards }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
       ...(request.gate === undefined ? {} : { gate: request.gate }),
@@ -1096,6 +1100,14 @@ function addressById(
       return failure(
         'use_input_form',
         `${command.id} is a sign-in to approve on your phone: approve it there, or tap Not me on its card`,
+      );
+    }
+    // A suggested recipe is approved by the owner's recipe route, with a passkey from a paired device: an agenda answer
+    // would approve nothing, and must never read as an approval.
+    if (target.item.recipeProposal !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} suggests a sign-in recipe: approve, edit or decline it on its card in the app, or with fy account site recipe`,
       );
     }
     // A gate's answer moves the owner's card: never a ferret's, a lead's or the daemon's own.

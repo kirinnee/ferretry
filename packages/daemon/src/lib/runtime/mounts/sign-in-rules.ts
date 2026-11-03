@@ -126,6 +126,9 @@ function signInQuery(context: RouteContext, required: boolean): SignInId | undef
   return parsed.data;
 }
 
+/** `&progress=1`: the app draws "1 of 2 sign-ins done", so a `no-history` answer says how far the owner is. */
+const progressQuery = (context: RouteContext): boolean => context.request.query.get('progress')?.[0] === '1';
+
 /** The extra demands of a route that names accounts and loosens what fills a page: `undefined` when allowed. */
 const refusedLoosening = (context: RouteContext): ApiResponse | undefined =>
   refusedAccountNames(context, 'read the accounts a standing rule names') ??
@@ -168,7 +171,9 @@ export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRu
         if (names !== undefined) return names;
         const signIn = signInQuery(context, true);
         return jsonResponse(
-          SignInRuleEligibilitySchema.parse(await rules.eligibility(owner(context), signIn).catch(answered)),
+          SignInRuleEligibilitySchema.parse(
+            await rules.eligibility(owner(context), signIn, progressQuery(context)).catch(answered),
+          ),
         );
       },
     },

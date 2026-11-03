@@ -322,6 +322,11 @@ const agendaCases: SchemaCase[] = [
     value: { id: `pa_${'0'.repeat(23)}1` },
   },
   {
+    name: 'attention recipe proposal pointer',
+    schema: agenda.AgendaRecipeProposalRefSchema,
+    value: { signIn: 'si_0000000000000001', id: 'rp_0000000000000001' },
+  },
+  {
     name: 'attention 2FA seed pointer',
     schema: agenda.AgendaTwoFactorSeedRefSchema,
     value: { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' },

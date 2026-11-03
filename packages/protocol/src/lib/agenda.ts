@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AccountIdSchema,
+  SignInIdSchema,
   SignInRuleIdSchema,
   SignInRuleSuggestionIdSchema,
   TwoFactorStageIdSchema,
@@ -834,6 +835,19 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 });
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
+/**
+ * A ferret's suggested sign-in recipe a `task` card presents (login-recipes.ts): the sign-in and the proposal, so the
+ * app draws the steps, what Ferretry saw, and Approve, Edit and Decline on the card itself. Only the daemon raises one
+ * (the agenda's add route has no field for it), and the generic answer refuses it: the owner's recipe route answers it,
+ * with a passkey from a paired device. An app from before it drops the ref and shows the plain card, whose context holds
+ * the changed lines and whose how-to points to Settings.
+ */
+export const AgendaRecipeProposalRefSchema = z.strictObject({
+  signIn: SignInIdSchema,
+  id: z.string().regex(/^rp_[0-9a-f]{16}$/u, 'a recipe proposal id is rp_ and 16 hex digits'),
+});
+export type AgendaRecipeProposalRef = z.infer<typeof AgendaRecipeProposalRefSchema>;
+
 /** The most cards one machine notice lists, each with its own buttons. */
 export const MAX_AGENDA_CARDS = 12;
 
@@ -1018,6 +1032,8 @@ const AgendaItemBaseShape = {
   taskPlan: AgendaTaskPlanRefSchema.optional(),
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
+  /** A ferret's suggested sign-in recipe a `task` card presents; only the daemon raises one. */
+  recipeProposal: AgendaRecipeProposalRefSchema.optional(),
   /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
   cards: z.array(AgendaCardRowSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
@@ -1071,6 +1087,13 @@ export const AgendaItemSchema = z
         code: 'custom',
         message: 'only an info card presents a phone approval',
         path: ['phoneApproval'],
+      });
+    }
+    if (value.recipeProposal !== undefined && value.kind !== 'task') {
+      context.addIssue({
+        code: 'custom',
+        message: 'only a task card presents a recipe proposal',
+        path: ['recipeProposal'],
       });
     }
     if (value.cards !== undefined && value.kind !== 'info') {
