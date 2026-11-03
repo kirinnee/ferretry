@@ -895,7 +895,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
-    should(text).containEql('Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see>"`');
+    should(text).containEql('Before it is ready to try: `zz task edit <id> --how-to-test "<1. where 2. do 3. see>"`');
     should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
     should(text).containEql('`zz task depend` (card)');

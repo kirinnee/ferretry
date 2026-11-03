@@ -481,7 +481,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * related cards and refuses a broad one without `--broad`). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first and prefer adding to one. Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first and prefer adding to one. Before it is ready to try: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
