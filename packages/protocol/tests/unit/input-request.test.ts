@@ -10,6 +10,8 @@ import {
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_PROMPT_MARKER,
+  inputContextLines,
   INPUT_MAX_FIELDS,
   INPUT_PAD_BUCKET_BYTES,
   INPUT_SINGLE_FIELD_ID,
@@ -916,5 +918,23 @@ describe('a one-time code (`code`)', () => {
     // Act / Assert — the request still parses here, and an old reader refuses it rather than guessing.
     should(InputRequestSchema.parse(code).sensitivity).equal('code');
     should(olderRequest.safeParse(code).success).be.false();
+  });
+});
+
+describe('an input card’s context without the agent’s prompt', () => {
+  it('keeps the daemon’s own lines and leaves out the prompt after the marker', () => {
+    should(inputContextLines(`This follows !A7 in the same login.\n${INPUT_PROMPT_MARKER}[sudo] password:`)).equal(
+      'This follows !A7 in the same login.',
+    );
+  });
+
+  it('is null when the context held only the prompt, or nothing', () => {
+    should(inputContextLines(`${INPUT_PROMPT_MARKER}[sudo] password:`)).be.null();
+    should(inputContextLines(undefined)).be.null();
+    should(inputContextLines('   ')).be.null();
+  });
+
+  it('keeps a context with no marker whole', () => {
+    should(inputContextLines('Ferretry types it there.')).equal('Ferretry types it there.');
   });
 });

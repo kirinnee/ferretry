@@ -345,9 +345,12 @@ export function InputCard({
             )}
           </>
         )}
-        <p className="m-0 text-meta text-faint" data-input-agent-says="">
-          {agentName} says: “{request.prompt}”
-        </p>
+        {/* The ferret's words, unless they are the very prompt line the daemon saw just above. */}
+        {facts?.promptLine !== undefined && facts.promptLine.trim() === request.prompt.trim() ? null : (
+          <p className="m-0 text-meta text-faint" data-input-agent-says="">
+            {agentName} says: “{request.prompt}”
+          </p>
+        )}
       </div>
 
       {planMissLine === undefined ? null : (
