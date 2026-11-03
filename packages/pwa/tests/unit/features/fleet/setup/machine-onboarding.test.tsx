@@ -643,6 +643,41 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     expect(screen.q('[data-setup-note="import-carry"]')).toBeNull();
   });
 
+  it('carries the conversations result and a sign-in link for a login that still needs one', async () => {
+    let imported = false;
+    const signedOut = runtimes([
+      runtimeView('claude-default', { credential: { id: 'claude-work', store: 'ferretry', status: 'needs_sign_in' } }),
+    ]);
+    const adopt = { adopted: [{ id: 'a', session: 's-a', name: 'ferret-a', status: 'stopped' }], refused: [] };
+    const recent = {
+      id: 'a',
+      harness: 'claude',
+      project: '/work/shop',
+      preview: 'conversation a',
+      lastActivityAt: new Date(Date.now() - 3_600_000).toISOString(),
+      turns: 3,
+    };
+    const screen = await fresh(
+      () => (imported ? signedOut : NO_RUNTIMES),
+      {},
+      {
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' },
+        '/v1/imports/conversations?harness=claude&limit=5000': { conversations: [recent], matched: 1, skipped: 0 },
+        '/v1/imports/conversations/adopt': adopt,
+      },
+    );
+    await screen.rail('claude');
+    await screen.click('[data-harness-conversations]');
+    imported = true;
+    await screen.click('[data-onboarding-primary="import"]');
+    const note = must(screen.q('[data-setup-note="import-carry"]'), 'the carried note');
+    expect(note.textContent).toContain('Brought in 1 conversation.');
+    const link = must(note.querySelector('[data-carry-sign-in]'), 'the sign-in link');
+    expect(link.textContent).toBe('Sign in claude-default later');
+    expect(link.getAttribute('data-carry-sign-in')).toBe('claude-work');
+  });
+
   it('stays on the page, and does not set the step, when the import is refused', async () => {
     const screen = await fresh(
       NO_RUNTIMES,
@@ -977,6 +1012,54 @@ describe('MachineOnboarding · the page’s one primary', () => {
     await screen.click('[data-agent-control] [role=switch]');
     expect(primaries(screen)).toHaveLength(1);
     expect(screen.q('[data-onboarding-foot] button[data-variant="primary"]')).not.toBeNull();
+  });
+
+  describe('with a switch flipped AND a different default runtime picked', () => {
+    const bothPending = async () => {
+      const screen = await render({
+        routes: {
+          ...SET_UP_READS,
+          'GET /v1/fleet/runtimes': CLAUDE_RUNTIME,
+          '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+        },
+        machine: machineView({ defaultRuntime: null, runtimeCount: 1 }),
+      });
+      await screen.rail('controls');
+      await screen.click('[data-agent-control] [role=switch]');
+      const select = must(screen.q('[data-default-runtime-select]') as HTMLSelectElement | null, 'runtime select');
+      await interact(() => {
+        select.value = 'claude-default';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await settle();
+      return screen;
+    };
+
+    it('shows exactly one primary: the form opened first keeps it', async () => {
+      const screen = await bothPending();
+      expect(primaries(screen)).toEqual(['Save what agents may control']);
+    });
+
+    it('keeps both reviewed changes saveable, each on its own button with the passkey line', async () => {
+      const screen = await bothPending();
+      const labels = screen.all('form [data-change-submit]').map(button => button.textContent?.trim());
+      expect(labels).toEqual(['Save what agents may control', 'Save default runtime']);
+      expect(screen.all('form [data-change-step-up]')).toHaveLength(2);
+    });
+
+    it('hands the primary to the form left open when the first one is undone', async () => {
+      const screen = await bothPending();
+      await screen.click('[data-agent-control-undo]');
+      expect(primaries(screen)).toEqual(['Save default runtime']);
+    });
+
+    it('gives the footer its primary back once both are undone', async () => {
+      const screen = await bothPending();
+      await screen.click('[data-agent-control-undo]');
+      await screen.click('[data-default-runtime-undo]');
+      expect(primaries(screen)).toHaveLength(1);
+      expect(screen.q('[data-onboarding-foot] button[data-variant="primary"]')).not.toBeNull();
+    });
   });
 });
 

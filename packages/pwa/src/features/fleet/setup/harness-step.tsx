@@ -700,7 +700,7 @@ function ProviderRuntime({
   const [name, setName] = useState(() => suggestedRuntimeName(harness, credential, runtimes));
   const [made, setMade] = useState<string | null>(null);
   const problem = runtimeNameProblem(name, runtimes, machineName);
-  useQuietFooter(made === null && profile !== undefined);
+  const leads = useQuietFooter(made === null && profile !== undefined);
 
   if (made !== null)
     return (
@@ -767,6 +767,7 @@ function ProviderRuntime({
         busyLabel="Creating…"
         refusal={changes.refusal}
         submitLabel={`Create ${name || 'runtime'}`}
+        quiet={!leads}
         disabled={problem !== null || !online}
         onSubmit={() => void create()}
       />

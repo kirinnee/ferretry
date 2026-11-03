@@ -114,6 +114,8 @@ export interface ChangeApplyPanelProps {
   /** Shown while busy; defaults to "Saving…". */
   readonly busyLabel?: string;
   readonly variant?: 'primary' | 'danger';
+  /** Another form on the page owns the primary: draw this submit as a plain button (it still saves). */
+  readonly quiet?: boolean;
   /** The step's own answer is not ready yet (an invalid name). */
   readonly disabled?: boolean;
   readonly onSubmit: () => void;
@@ -137,6 +139,7 @@ export function ChangeApplyPanel({
   submitLabel,
   busyLabel = 'Saving…',
   variant = 'primary',
+  quiet = false,
   disabled = false,
   onSubmit,
   children,
@@ -170,7 +173,13 @@ export function ChangeApplyPanel({
       {hideSubmit && children === undefined ? null : (
         <div className="flex flex-wrap gap-2">
           {hideSubmit ? null : (
-            <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
+            <Button
+              type="submit"
+              variant={quiet && variant === 'primary' ? 'outline' : variant}
+              disabled={!ready}
+              className={submitClassName}
+              data-change-submit=""
+            >
               {busy ? busyLabel : submitLabel}
             </Button>
           )}

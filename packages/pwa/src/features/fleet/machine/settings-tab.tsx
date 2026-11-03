@@ -242,7 +242,7 @@ export function AgentControlSection({
   const current = machine.agentControl;
   const [draft, setDraft] = useState<FleetAgentControl>(current);
   const pending = AGENT_CONTROL_KINDS.some(kind => draft[kind] !== current[kind]);
-  useQuietFooter(pending);
+  const leads = useQuietFooter(pending);
   const save = (): void => {
     void changes.apply(machineSettings(machine, { agentControl: draft })).then(result => {
       if (result.kind === 'refused') return;
@@ -276,6 +276,7 @@ export function AgentControlSection({
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Save what agents may control"
+          quiet={!leads}
           onSubmit={save}
         >
           <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>

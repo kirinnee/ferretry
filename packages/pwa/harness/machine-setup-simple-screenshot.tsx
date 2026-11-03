@@ -178,6 +178,21 @@ try {
               .first()
               .waitFor({ state: 'visible' });
             await shot('controls-changed');
+            // And a different default runtime picked too: two reviewed changes pending, still ONE primary.
+            const pick = screen.locator('[data-default-runtime-select]');
+            await pick.waitFor({ state: 'visible' });
+            const options = await pick
+              .locator('option:not([disabled])')
+              .evaluateAll(list =>
+                list.map(option => (option as HTMLOptionElement).value).filter(value => value !== ''),
+              );
+            const chosen = options[0] ?? fail('Agent controls has no runtime to pick as the default');
+            await pick.selectOption(chosen);
+            await screen.locator('[data-default-runtime] [data-change-submit]').waitFor({ state: 'visible' });
+            const saves = await screen.locator('form [data-change-submit]:visible').allInnerTexts();
+            if (saves.length !== 2) fail(`both reviewed changes should keep a save button, saw: ${saves.join(' / ')}`);
+            await shot('controls-both-changed');
+            await screen.locator('[data-default-runtime-undo]').click();
             await flip.click();
           }
           await screen.locator('[data-onboarding-next]').click();

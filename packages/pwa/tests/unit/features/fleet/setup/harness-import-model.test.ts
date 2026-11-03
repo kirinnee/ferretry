@@ -6,6 +6,7 @@ import {
   changeSummary,
   foundLines,
   foundRows,
+  type FoundRow,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
@@ -481,6 +482,43 @@ describe('foundLines', () => {
     );
     expect(line?.ok).toBe(true);
     expect(line?.text).toContain('renews itself');
+  });
+
+  const line = (row: Partial<FoundRow> & Pick<FoundRow, 'key' | 'title'>) =>
+    foundLines([{ label: row.key, badges: [], ...row }])[0];
+
+  it('names a signed-in account with and without an email', () => {
+    expect(line({ key: 'account', title: 'Signed in', status: 'ready' })).toEqual({ ok: true, text: 'Signed in' });
+    expect(line({ key: 'account', title: 'Signed in', detail: 'a@b.test', status: 'ready' })).toEqual({
+      ok: true,
+      text: 'Signed in as a@b.test',
+    });
+  });
+
+  it('says any other login that is not ready can be signed in after importing', () => {
+    expect(line({ key: 'account', title: 'Login expired', status: 'needs_sign_in' })).toEqual({
+      ok: false,
+      text: 'Login expired — you can sign in after importing',
+    });
+  });
+
+  it('counts MCP servers and skills, singular and plural', () => {
+    expect(line({ key: 'mcp', title: '1' })?.text).toBe('1 MCP server');
+    expect(line({ key: 'mcp', title: '3' })?.text).toBe('3 MCP servers');
+    expect(line({ key: 'skills', title: '1' })?.text).toBe('1 skill');
+    expect(line({ key: 'skills', title: '2' })?.text).toBe('2 skills');
+  });
+
+  it('says an empty setup will get a plain Starter profile', () => {
+    expect(line({ key: 'setup', title: 'Nothing found' })).toEqual({
+      ok: true,
+      text: 'Nothing to copy yet — Ferretry will make a plain Starter profile',
+    });
+  });
+
+  it('joins any other row’s title and detail', () => {
+    expect(line({ key: 'instructions', title: 'CLAUDE.md' })?.text).toBe('CLAUDE.md');
+    expect(line({ key: 'instructions', title: 'CLAUDE.md', detail: '4 KB' })?.text).toBe('CLAUDE.md · 4 KB');
   });
 });
 

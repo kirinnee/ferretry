@@ -27,12 +27,19 @@ const SOURCE_FILES: Readonly<Record<string, string>> = {
   'voice.yaml': '# yaml-language-server: $schema=./.schema/voice.json\npostProcessing:\n  provider: groq\n',
 };
 
+/** A runtime setup made: an agent one, so the machine's default for new agents can be picked from it. */
+type AgentRuntime = ReturnType<typeof harnessRuntime>;
+const agentRuntime = (...args: Parameters<typeof harnessRuntime>): AgentRuntime => ({
+  ...harnessRuntime(...args),
+  agent: true,
+});
+
 interface MachineState {
   secrets: string[];
   warden: WardenConfig;
   passiveDefault: boolean;
   /** The runtimes a machine that is not set up has made so far. */
-  runtimes: ReturnType<typeof harnessRuntime>[];
+  runtimes: AgentRuntime[];
 }
 
 const DAY = 86_400_000;
@@ -124,11 +131,11 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
         for (const [harness, name] of Object.entries(change.names ?? {}))
           if (!state.runtimes.some(made => made.name === name))
             state.runtimes.push(
-              harnessRuntime(name, harness === 'codex' ? 'codex' : 'claude', 'default', `${harness}-you`),
+              agentRuntime(name, harness === 'codex' ? 'codex' : 'claude', 'default', `${harness}-you`),
             );
       if (change?.kind === 'runtime.put' && change.name !== undefined)
         state.runtimes.push(
-          harnessRuntime(
+          agentRuntime(
             change.name,
             change.credential?.startsWith('codex') === true ? 'codex' : 'claude',
             'default',

@@ -52,7 +52,7 @@ export function DefaultRuntimeControl({
   const current = machine.defaultRuntime;
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
-  useQuietFooter(pending);
+  const leads = useQuietFooter(pending);
   const save = (): void => {
     if (picked === null) return;
     void changes.apply(machineSettings(machine, { defaultRuntime: picked })).then(result => {
@@ -109,6 +109,7 @@ export function DefaultRuntimeControl({
           busy={changes.busy}
           refusal={changes.refusal}
           submitLabel="Save default runtime"
+          quiet={!leads}
           onSubmit={save}
         >
           <Button
