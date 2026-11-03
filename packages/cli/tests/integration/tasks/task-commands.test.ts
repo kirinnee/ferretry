@@ -281,11 +281,13 @@ describe('fy task create --help', () => {
     await program.parseAsync(['node', 'fy', 'task', 'create', '--help']).catch(() => undefined);
 
     // Assert
-    const help = written.join('');
+    const flat = (text: string): string => text.replace(/\s+/g, ' ');
+    const help = flat(written.join(''));
+    const rule = flat(TASK_CREATE_RULE);
     should(help).containEql('--broad <why>');
     should(help).containEql('prefer adding to a related card');
-    should(help).containEql(TASK_CREATE_RULE);
-    should(help.indexOf(TASK_CREATE_RULE)).be.above(help.indexOf('--broad <why>'));
+    should(help).containEql(rule);
+    should(help.indexOf(rule)).be.above(help.indexOf('--broad <why>'));
   });
 });
 
