@@ -90,6 +90,77 @@ describe('SendPathQueueTransport', () => {
     should(requests[1]).not.have.property('now');
   });
 
+  it('should hand a ferret’s label over with its message, and a question as one that expects a reply', async () => {
+    const { subject, requests } = transport('delivered');
+
+    await subject.handOver(
+      ID,
+      one(message({ sender: 'agent', from: 'session-2', label: 'blocker', replyExpected: true })),
+    );
+
+    should(requests[0]).containEql({ label: 'blocker', replyExpected: true, senderReference: 'session-2' });
+  });
+
+  it('should hand several ferret messages over as ONE send under the lead id, each member as a part', async () => {
+    const { subject, requests } = transport('delivered');
+    const first = message({ id: 'q-1', sender: 'agent', from: 'session-2', text: 'one', label: 'action' });
+    const second = message({
+      id: 'q-2',
+      sender: 'agent',
+      from: 'session-3',
+      text: 'two',
+      label: 'fyi',
+      attachmentIds: ['a-1'],
+    });
+    const third = message({
+      id: 'q-3',
+      sender: 'agent',
+      from: 'session-2',
+      text: 'three',
+      attachmentIds: ['a-1', 'a-2'],
+      replyExpected: true,
+      interrupt: true,
+    });
+
+    should(await subject.handOver(ID, { sendId: 'q-1', members: [first, second, third] })).deepEqual({
+      kind: 'landed',
+    });
+
+    should(requests).have.length(1);
+    should(requests[0]).containEql({
+      sendId: 'q-1',
+      message: 'one\n\ntwo\n\nthree',
+      replyExpected: true,
+      now: true,
+      senderReference: 'session-2',
+      attachmentIds: ['a-1', 'a-2'],
+    });
+    should((requests[0] as { parts: unknown }).parts).deepEqual([
+      { queueId: 'q-1', senderReference: 'session-2', text: 'one', replyExpected: false, label: 'action' },
+      { queueId: 'q-2', senderReference: 'session-3', text: 'two', replyExpected: false, label: 'fyi' },
+      { queueId: 'q-3', senderReference: 'session-2', text: 'three', replyExpected: true },
+    ]);
+  });
+
+  it('should keep a combined send free of reply, interrupt and attachment flags nobody set', async () => {
+    const { subject, requests } = transport('delivered');
+    const first = message({ id: 'q-1', sender: 'agent', from: 'session-2' });
+    const second = message({ id: 'q-2', sender: 'agent', from: 'session-3' });
+
+    await subject.handOver(ID, { sendId: 'q-1', members: [first, second] });
+
+    for (const key of ['replyExpected', 'now', 'attachmentIds']) should(requests[0]).not.have.property(key);
+  });
+
+  it('should refuse a delivery that carries no message at all', async () => {
+    const { subject } = transport('delivered');
+
+    await subject.handOver(ID, { sendId: 'q-1', members: [] }).then(
+      () => should.fail('a delivery with no message was handed over', undefined, undefined),
+      (error: unknown) => should((error as Error).message).containEql('at least one message'),
+    );
+  });
+
   it('should leave a ferret’s message with no sender session unattributed', async () => {
     const { subject, requests } = transport('delivered');
 
