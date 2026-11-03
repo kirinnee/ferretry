@@ -13,8 +13,9 @@
  *   (`lane-facts.ts`); `release.running` reads this machine's version.
  * - **Never backwards.** Every move goes through {@link triggerMove}, which refuses a move back and records
  *   "… while blocked by &F18" when a dependency had not shipped: reality wins over the gate (§2.7).
- * - **A PR closed unmerged** moves nothing: it adds a note and asks the watcher to nudge the card's owner
- *   ferret. CI going red moves nothing either; the card shows it, and the assignee is nudged once.
+ * - **A PR closed unmerged** moves nothing: it adds a note and asks the watcher to nudge the card's ferret.
+ *   CI going red moves nothing either; the card shows it, and its ferret is nudged once. Who that is — the
+ *   assignee, else the nearest live lead — is decided where the message is sent (`notice-route.ts`).
  * - **`releasedIn` is immutable** once set: a later poll never rewrites the release a PR shipped in.
  */
 import {
@@ -26,7 +27,6 @@ import {
   prUrlParts,
   type ReleasedIn,
 } from '@ferretry/protocol';
-import { effectiveAssignee } from './authority.ts';
 import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
 
 /**
@@ -59,10 +59,9 @@ export interface PrUpdate {
   readonly runningVersion: string | null;
 }
 
-/** A message the watcher queues to one of the card's ferrets. */
+/** A message the watcher queues about a card; WHO gets it is the sender's call (`notice-route.ts`). */
 interface PrNudge {
   readonly reason: 'closed-unmerged' | 'ci-failing';
-  readonly sessionId: string;
   readonly message: string;
 }
 
@@ -203,14 +202,12 @@ export const applyPrUpdate = (card: BoardTask, update: PrUpdate, context: CardCo
       next = withEvent(next, { type: 'note', text: `${name} was closed without merging` }, context);
       nudges.push({
         reason: 'closed-unmerged',
-        sessionId: card.owner,
         message: `${ref} ${name} was closed without merging. Reopen it, link its replacement, or drop the card.`,
       });
     }
     if (change.turnedRed) {
       nudges.push({
         reason: 'ci-failing',
-        sessionId: effectiveAssignee(card),
         message: `${ref} ${name} CI is red. Fix it, or note on the card why it can stay red.`,
       });
     }

@@ -136,16 +136,22 @@ The board types only what a ferret has to **act on**, each as a plain sentence w
 footer behind. Who sent it is the queue item's metadata, `by: {kind: 'ferretry', feature: 'Board'}`, which
 the app shows as a "Ferretry · Board" sender chip — never as text in the message:
 
-| Producer                                     | To                                                                | Message                                                                                                            |
-| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Stale nudge (`lib/board/sweep.ts`)           | the card's assignee, alive and idle; else the card's owner ferret | `&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.`                          |
-| Go-ahead (`lib/board/sweep.ts`)              | the dependent card's assignee, once its last blocker ships        | `&F20 can go ahead: &F18 merged.`                                                                                  |
-| PR closed unmerged (`lib/board/pr-cache.ts`) | the card's owner ferret                                           | `&F412 PR #930 was closed without merging. Reopen it, link its replacement, or drop the card.`                     |
-| CI red (`lib/board/pr-cache.ts`)             | the card's assignee                                               | `&F412 PR #930 CI is red. Fix it, or note on the card why it can stay red.`                                        |
-| Turn-end check (`lib/board/turn-check.ts`)   | the ferret that changed code with no card                         | `You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"` |
-| Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                        | `&F412 was reopened by the owner: <reason>`                                                                        |
+| Producer                                     | To                                                         | Message                                                                                                            |
+| -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Stale nudge (`lib/board/sweep.ts`)           | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.`                          |
+| Go-ahead (`lib/board/sweep.ts`)              | the dependent card's assignee, once its last blocker ships | `&F20 can go ahead: &F18 merged.`                                                                                  |
+| PR closed unmerged (`lib/board/pr-cache.ts`) | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 was closed without merging. Reopen it, link its replacement, or drop the card.`                     |
+| CI red (`lib/board/pr-cache.ts`)             | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 CI is red. Fix it, or note on the card why it can stay red.`                                        |
+| Turn-end check (`lib/board/turn-check.ts`)   | the ferret that changed code with no card                  | `You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"` |
+| Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                 | `&F412 was reopened by the owner: <reason>`                                                                        |
 
-The stale nudge goes at most once per card per its lane's stale threshold, and never to a ferret that
+**The alert route.** A stale nudge, a red CI and a closed-unmerged PR go to the card's assignee while it is alive, else
+the nearest live lead above it, else the card's owner (its creator) and the owner's leads — and an interactive session
+only when nobody automatic is left. They are never sent to the session that merely made a card another lead is working.
+The route is `noticeRecipient` (`lib/board/notice-route.ts`); [board.md](board.md#who-a-board-alert-is-for) has the
+rules.
+
+The stale nudge goes at most once per card per its lane's stale threshold, whoever receives it, and never to a ferret that
 declared `fy signal waiting`. A go-ahead that could not be sent is said again on the next sweep. The
 contract is tested in `packages/daemon/tests/unit/board/no-prepend.test.ts`.
 

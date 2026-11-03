@@ -9,8 +9,9 @@
  * app shows as "Ferretry · Board"), never text in the message:
  *
  * 1. **A stale card's ferret is nudged**: `&F412 has had no activity for 3h in Implement. Move it, note
- *    why, block it, or drop it.` The assignee when it is alive and idle; the card's OWNER when the
- *    assignee is busy on another card (or gone). At most once per card per its lane's `staleAfter`; never
+ *    why, block it, or drop it.` The assignee while it is alive; else the nearest live lead above it; the
+ *    card's OWNER (its creator) only when nobody in that line is left, and an interactive session last of all
+ *    ({@link noticeRecipient}). At most once per card per its lane's `staleAfter` whoever it goes to; never
  *    to a session that declared a wait; never for a waiting card (a waiting card is not stale, by
  *    derivation).
  * 2. **A dependent card's assignee is told it can go ahead** once its last blocker ships:
@@ -41,9 +42,10 @@ import {
   type TaskRef,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { cardStaleAfterMs, isWorking, presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
+import { cardStaleAfterMs, presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
+import { noticeRecipient } from './notice-route.ts';
 import { HELPER_ENDED_GRACE_MS, isPrFreeHelper } from './sub-card-close.ts';
 import type { BoardClock, BoardDiagnostics } from './ports.ts';
 
@@ -183,20 +185,14 @@ const helperEnded = (view: BoardTaskView, roster: SessionRoster, nowMs: number):
   return Number.isNaN(touched) || nowMs - touched >= HELPER_ENDED_GRACE_MS;
 };
 
-/** Who a stale card's nudge goes to, or `null` when nobody should be nudged now. */
+/**
+ * Who a stale card's nudge goes to, or `null` when nobody should be nudged now: the card's assignee while it is
+ * alive, else the nearest live lead above it, the card's owner only when nobody in that line is left
+ * ({@link noticeRecipient}). A session that declared a wait is never nudged, and nobody is nudged in its place.
+ */
 export const nudgeRecipient = (view: BoardTaskView, roster: SessionRoster): string | null => {
-  const assignee = effectiveAssignee(view);
-  const doing = roster.sessions.get(assignee);
-  if (doing !== undefined && presenceOf(roster, assignee) === 'alive') {
-    if (doing.declaredWait) return null;
-    if (!isWorking(doing)) return assignee;
-  } else if (presenceOf(roster, assignee) === 'unknown') {
-    return null;
-  }
-  // Busy on another card, or gone: the card's owner answers for it.
-  const owner = roster.sessions.get(view.owner);
-  if (view.owner === assignee || owner === undefined || presenceOf(roster, view.owner) !== 'alive') return null;
-  return owner.declaredWait ? null : view.owner;
+  const recipient = noticeRecipient(roster, view);
+  return recipient === null || recipient.session.declaredWait ? null : recipient.sessionId;
 };
 
 /** One tick's decisions. Pure. */
@@ -247,7 +243,8 @@ export interface SweepMemoryStore {
 
 /** Queues a message to a session through the ordinary send path, as the board's. */
 interface BoardNudgeSender {
-  send(sessionId: string, message: string): Promise<void>;
+  /** `kind` lets a sender treat a stale nudge (already routed to its recipient) apart from a go-ahead. */
+  send(sessionId: string, message: string, kind: BoardNudge['kind']): Promise<void>;
 }
 
 export interface BoardSweepPorts {
@@ -304,7 +301,7 @@ export class BoardSweep {
     const unblocked: BoardTaskId[] = [];
     const seen = { ...plan.memory.seen };
     for (const nudge of plan.nudges) {
-      await this.ports.nudges.send(nudge.sessionId, nudge.message).then(
+      await this.ports.nudges.send(nudge.sessionId, nudge.message, nudge.kind).then(
         () => (nudge.kind === 'stale' ? nudged : unblocked).push(nudge.taskId),
         (error: unknown) => {
           const previous = memory.seen[nudge.taskId];

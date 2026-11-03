@@ -20,7 +20,10 @@ interface DocumentLiveness {
   /** The configuration document it was read from: a new document is a new value, so it is read again. */
   readonly config: unknown;
   /** Everything but the life-signs, which the ledger may move. */
-  readonly fields: Pick<SessionLiveness, 'id' | 'status' | 'turnState' | 'focusTask' | 'declaredWait'>;
+  readonly fields: Pick<
+    SessionLiveness,
+    'id' | 'status' | 'turnState' | 'focusTask' | 'declaredWait' | 'lead' | 'interactive'
+  >;
   readonly instants: WardenSessionState;
   /** The whole liveness when the ledger has nothing to add. */
   readonly unledgered: SessionLiveness;
@@ -93,8 +96,12 @@ export class StorageSessionRoster implements SessionLivenessSource {
     };
     const turnState = SessionTurnStateSchema.safeParse(document.turnState);
     const focus = TaskRefSchema.safeParse(jsonObject(config)?.focusTask);
+    const settings = jsonObject(config);
+    const lead = typeof settings?.parent === 'string' && settings.parent !== '' ? settings.parent : undefined;
     const fields = {
       id,
+      ...(lead === undefined ? {} : { lead }),
+      ...(settings?.mode === 'interactive' ? { interactive: true } : {}),
       status: status.data,
       ...(turnState.success ? { turnState: turnState.data } : {}),
       focusTask: focus.success ? focus.data : null,

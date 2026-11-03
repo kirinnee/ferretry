@@ -57,6 +57,10 @@ export interface SessionLiveness {
   readonly focusTask: TaskRef | null;
   /** It declared a wait (`fy signal waiting`): it is parked on purpose and must not be nudged. */
   readonly declaredWait: boolean;
+  /** The session that started it (`config.parent`); absent for a root. */
+  readonly lead?: string;
+  /** It is the owner's own chat (`config.mode`): board notices reach it only when nobody else is left. */
+  readonly interactive?: boolean;
   readonly lastTokenAdvanceAt?: string;
   readonly lastTranscriptAt?: string;
   readonly lastSubprocessAt?: string;

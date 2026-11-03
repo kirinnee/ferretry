@@ -388,7 +388,7 @@ describe('applyPrUpdate', () => {
     should(task?.links.prs[0]?.state).equal('merged');
   });
 
-  it('should note a PR closed unmerged and nudge the owner ferret, never moving the card back', () => {
+  it('should note a PR closed unmerged and nudge the card ferret, never moving the card back', () => {
     const open = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'review', assignee: 'child' });
     const { task, nudges } = apply(open, { observed: [observed({ state: 'closed' })] });
     should(task?.laneId).equal('review');
@@ -396,14 +396,13 @@ describe('applyPrUpdate', () => {
     should(nudges).deepEqual([
       {
         reason: 'closed-unmerged',
-        sessionId: 'lead',
         message: '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.',
       },
     ]);
     should(apply(task as BoardTask, { observed: [observed({ state: 'closed' })] }).nudges).be.empty();
   });
 
-  it('should nudge the assignee once when CI turns red, and keep the card in its lane', () => {
+  it('should nudge once when CI turns red, and keep the card in its lane', () => {
     const open = withPr({ state: 'open', checks: 'pending', polledAt: NOW }, { laneId: 'review', assignee: 'child' });
     const { task, nudges } = apply(open, { observed: [observed({ checks: 'failing' })] });
     should(task?.laneId).equal('review');
@@ -411,7 +410,6 @@ describe('applyPrUpdate', () => {
     should(nudges).deepEqual([
       {
         reason: 'ci-failing',
-        sessionId: 'child',
         message: '&F1 PR #940 CI is red. Fix it, or note on the card why it can stay red.',
       },
     ]);
