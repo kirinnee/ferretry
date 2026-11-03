@@ -102,30 +102,29 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
     const sessions = new Set(
       entries.flatMap(entry => (entry.requested.origin === 'direct' ? [] : [entry.requested.sessionId])),
     );
-    for (const sessionId of sessions) if (uncoveredAlerts(sessionId, entries).length > 0) await this.recheck(sessionId);
+    for (const sessionId of sessions)
+      if (uncoveredAlerts(sessionId, entries, this.legacySince()).length > 0) await this.recheck(sessionId);
   }
 
   /** The owner opened `agendaId` on the device `exceptDevice` names: its alerts come down everywhere else. */
   async seen(sessionId: string, agendaId: string, exceptDevice?: string): Promise<AlertSeenOutcome> {
-    // Read BEFORE waiting for the lane (review round 6): a push of the item's being sent in it now lands before this
-    // open runs, and was still on its way when the owner opened the item — so no page closed its line.
+    // Read BEFORE waiting for the lane (review rounds 6–7): a push of the item's that was on its way when the owner
+    // opened it — still being sent, or landed in the moments the page took to ask — reached no page that could close
+    // it, so it comes down on every device. A push recorded after this read is newer than the open and stays.
+    const admitted = Date.parse(this.options.clock.now());
     const before = await this.options.ledger.entries();
     return await this.run(sessionId, async (snapshot, entries) => {
       if (![...snapshot.items, ...snapshot.resolved].some(item => item.id === agendaId)) return { found: false };
       // A stop on its way counts too when this open is what lets its line come down (the last item it could count).
       const stopsToo = stopLineDone(snapshot, agendaId);
-      const onItsWay = new Set([
-        ...inFlightAlerts(sessionId, agendaId, stopsToo, before),
-        ...inFlightAlerts(sessionId, agendaId, stopsToo, entries),
-      ]);
       let current = entries;
-      for (const key of onItsWay) {
+      for (const key of onItsWayAtOpen(sessionId, agendaId, stopsToo, before, admitted)) {
         const landed = entries.find(entry => normalizedNotificationKey(entry.requested.key) === key)?.outcome;
         if (landed === undefined) {
           this.remember(key, { sessionId, agendaId });
           continue;
         }
-        // Landed while this open waited: EVERY device, the opener's too, as a pending open's late clear does.
+        // Landed since the open: EVERY device, the opener's too, as a pending open's late clear does.
         await this.send(sessionId, snapshot, current, { opened: agendaId, only: key });
         current = await this.options.ledger.entries();
       }
@@ -137,6 +136,11 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
         }),
       };
     });
+  }
+
+  /** The oldest a push recorded before tags were may be and still be cleared (`LEGACY_CLEARABLE_FOR_MS`). */
+  private legacySince(): number {
+    return Date.parse(this.options.clock.now()) - LEGACY_CLEARABLE_FOR_MS;
   }
 
   private remember(key: string, open: PendingOpen): void {
@@ -176,7 +180,7 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
     how: SendOptions,
   ): Promise<readonly string[]> {
     let sequence = entries.filter(entry => entry.requested.origin === 'agenda-clear').length;
-    const uncovered = uncoveredAlerts(sessionId, entries).filter(
+    const uncovered = uncoveredAlerts(sessionId, entries, this.legacySince()).filter(
       alert => how.only === undefined || pushKeyOf(alert) === how.only,
     );
     const clears = alertsToClear(sessionId, uncovered, snapshot, how.opened);
@@ -215,6 +219,14 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
   }
 }
 
+/**
+ * How far back a push recorded before tags were is still cleared (review round 7). No daemon before this one wrote a
+ * clear, so on the first start every push it ever made counts as uncovered: without a bound, the sweep would send
+ * hundreds of clears for lines dismissed days ago, and a browser that revokes a site whose pushes show nothing would
+ * drop the subscription. A push made by this release has no such bound: its item may be answered days later.
+ */
+const LEGACY_CLEARABLE_FOR_MS = 2 * 24 * 60 * 60_000;
+
 /** The most opens remembered while their pushes are on their way. */
 const MAX_PENDING_OPENS = 256;
 
@@ -240,24 +252,35 @@ const pushKeyOf = (alert: DeliveredAlert): string =>
   alert.key.endsWith(ITEM_VARIANT) ? alert.key.slice(0, -ITEM_VARIANT.length) : alert.key;
 
 /**
- * The keys of one item's pushes that are recorded as requested and have no outcome yet: on their way. With `stopsToo`,
- * the session's stops on their way as well, whichever item a stop's record names (a stop is about the group).
+ * The keys of one item's pushes that were on their way when the owner opened it, as `entries` read then (at
+ * `admitted`): recorded and not landed yet — for at most `IN_FLIGHT_FOR_MS`, past which a push that never got an
+ * outcome is not coming — or landed in the last `LANDED_DURING_OPEN_MS`, while the page was asking. With `stopsToo`,
+ * the session's stops as well, whichever item a stop's record names (a stop is about the group).
  */
-function inFlightAlerts(
+function onItsWayAtOpen(
   sessionId: string,
   agendaId: string,
   stopsToo: boolean,
   entries: readonly NotificationLedgerEntry[],
+  admitted: number,
 ): string[] {
   return entries.flatMap(({ requested, outcome }) =>
     (requested.origin === 'agenda' || requested.origin === 'attention') &&
     requested.sessionId === sessionId &&
     (requested.agendaId === agendaId || (stopsToo && requested.stoppedAt !== undefined)) &&
-    outcome === undefined
+    (outcome === undefined
+      ? admitted - Date.parse(requested.at) <= IN_FLIGHT_FOR_MS
+      : admitted - Date.parse(outcome.at) <= LANDED_DURING_OPEN_MS)
       ? [normalizedNotificationKey(requested.key)]
       : [],
   );
 }
+
+/** How long a recorded push with no outcome counts as on its way: longer than any push transport takes. */
+const IN_FLIGHT_FOR_MS = 10 * 60_000;
+
+/** How recently a push may have landed and still have been on its way when the owner opened its item. */
+const LANDED_DURING_OPEN_MS = 30_000;
 
 /**
  * The pushes for one session a device accepted and no clear has covered yet. A push that reached nothing, or
@@ -266,11 +289,12 @@ function inFlightAlerts(
  * A push recorded before tags were is named by every tag it may have gone out under: an approve-on-phone push by its
  * approval's (`approval`, resolved from the board), a stop's by the session's and the code cards waiting then
  * (`legacyStop`: a high stop showed one), and any other by the session's AND — as a second alert, keyed
- * `<key>#item` and covered on its own — the item's, which a high push used.
+ * `<key>#item` and covered on its own — the item's, which a high push used. One made before `legacySince` is left up.
  */
 export function uncoveredAlerts(
   sessionId: string,
   entries: readonly NotificationLedgerEntry[],
+  legacySince = Number.NEGATIVE_INFINITY,
 ): readonly DeliveredAlert[] {
   const covered = new Set(
     entries.flatMap(entry => (entry.requested.origin === 'agenda-clear' ? entry.requested.covers : [])),
@@ -280,6 +304,7 @@ export function uncoveredAlerts(
     if (requested.origin !== 'agenda' && requested.origin !== 'attention') return [];
     if (requested.sessionId !== sessionId) return [];
     if (outcome === undefined || outcome.error !== undefined || outcome.delivered === 0) return [];
+    if (requested.tag === undefined && Date.parse(requested.at) < legacySince) return [];
     const key = normalizedNotificationKey(requested.key);
     const base = { agendaId: requested.agendaId, stop: requested.stoppedAt !== undefined };
     const alerts: DeliveredAlert[] =

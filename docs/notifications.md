@@ -228,17 +228,19 @@ worker turns each tag into its own machine's namespace (`fy-push:<daemonId>:<tag
 down another's lines.
 
 **What each device does with it** (owner decision !A324). Which push service delivers it is read from the
-registration's own subscription: an endpoint on `*.push.apple.com` is Apple's (iPhone, iPad and Safari on a Mac
-alike); one the worker cannot read counts as Apple's.
+registration's own subscription endpoint (`mustShowForEveryPush`): only FCM (`fcm.googleapis.com`) and WNS
+(`*.notify.windows.com`) are known to let a push show nothing; every other service — Apple's, Mozilla's, one not
+known — and an endpoint the worker cannot read need every push to show something.
 
-| Device                        | The item's line is showing                                                                         | Nothing is showing                                                            |
-| ----------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Android, desktop Chrome, Edge | closed                                                                                             | nothing                                                                       |
-| iPhone, iPad, Safari          | **replaced** by "<machine> · Handled on another device" / "Nothing to do here." (same tag, silent) | the same note once, under one fixed tag per machine (`fy-handled:<daemonId>`) |
+| Push service                                      | The item's line is showing                                                                         | Nothing is showing                                                            |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| FCM, WNS (Android, Chrome, Edge)                  | closed                                                                                             | nothing                                                                       |
+| any other (iPhone, iPad, Safari, Firefox, others) | **replaced** by "<machine> · Handled on another device" / "Nothing to do here." (same tag, silent) | the same note once, under one fixed tag per machine (`fy-handled:<daemonId>`) |
 
-An Apple device swaps rather than closes because Apple's push service revokes the subscription of a site that receives
-a push and shows nothing, the same rule a muted push answers (below). The note never names the item. A tap on it
-opens that machine.
+Such a device swaps rather than closes because its push service revokes the subscription of a site that receives a
+push and shows nothing — Apple's at once, Mozilla's once a small quota of such pushes is spent — the same rule a
+muted push answers (below). The note never names the item. A tap on it opens that machine. Chrome lets a push show
+nothing too, within a budget: past it, Chrome shows its own "This site has been updated in the background" line.
 
 **Once each.** A clear is written to `notifications.jsonl` with the pushes it covers before it is sent, so a second
 change or a restart never clears the same push again; a later push about the same item (it woke again) is cleared on
@@ -262,7 +264,9 @@ and an open made while it was on its way is honoured then too (that memory is no
 clear reaches EVERY device, the one that opened the item included: its page closed only what was showing when it
 asked, so an iPhone there may show the quiet note for that one line. The same holds for a push being sent when the
 owner opens its item: the open notes it before it waits its turn in the ferret's lane, and clears it on every device
-if it landed meanwhile. At start the daemon looks once at every ferret
+if it landed meanwhile — as it does for one that landed in the 30 s before the open reached the machine, which the
+page asking could not yet see (an iPhone there may show the quiet note). A push recorded with no outcome counts as on
+its way for 10 minutes at most. At start the daemon looks once at every ferret
 with a line still up, for a board that changed while it was down.
 
 **A push and its clear at once.** A service worker can handle a push and the clear after it at the same time, and a
@@ -274,6 +278,11 @@ newer line: on an iPhone it shows only the quiet line under the fixed tag. A cle
 the push it clears is not caught: nothing on the wire tells that push from a newer one. A clear is never in
 `fy doctor`'s push count: one that reached no device (the only one was the device that opened the item) is not a
 failed push. A clear the push service refused leaves that line up.
+
+**Pushes from before this release.** No daemon before this one wrote a clear, so on the first start every push it
+ever made counts as uncovered. A push recorded before tags were is therefore cleared only while it is under two days
+old; older ones are left as they are, so an upgrade never sends a burst of clears for lines dismissed long ago. A push
+this release made has no such bound: its item may be answered days later.
 
 **Older apps.** A service worker older than this release cannot read a clear and shows its plain "Something is
 waiting in your Inbox." line instead. The hosted app ships before a daemon release does and a worker refreshes the

@@ -16,7 +16,7 @@ import {
   HANDLED_TAG_PREFIX,
   HANDLED_TITLE,
   handledNotification,
-  isApplePushService,
+  mustShowForEveryPush,
   planClear,
   RecentlyCleared,
   type ShownNotification,
@@ -75,23 +75,25 @@ class FakeRegistration implements ClearRegistration {
   }
 }
 
-describe('which push service delivers this registration', () => {
-  it('should read Apple’s from its endpoint, whatever the device calls itself', () => {
+describe('whether this registration’s push service needs every push to show something', () => {
+  it('should let only FCM and WNS show nothing, read from the endpoint whatever the device calls itself', () => {
     // Act / Assert
-    expect(isApplePushService(APPLE)).toBe(true);
-    expect(isApplePushService('https://api.push.apple.com/x')).toBe(true);
-    expect(isApplePushService(FCM)).toBe(false);
-    expect(isApplePushService('https://updates.push.services.mozilla.com/wpush/v2/x')).toBe(false);
-    expect(isApplePushService('https://wns2-db5p.notify.windows.com/w/?token=x')).toBe(false);
-    // Not Apple's just because the name ends like it.
-    expect(isApplePushService('https://push.apple.com.example.test/x')).toBe(false);
+    expect(mustShowForEveryPush(FCM)).toBe(false);
+    expect(mustShowForEveryPush('https://wns2-db5p.notify.windows.com/w/?token=x')).toBe(false);
+    expect(mustShowForEveryPush(APPLE)).toBe(true);
+    expect(mustShowForEveryPush('https://api.push.apple.com/x')).toBe(true);
+    // Mozilla's revokes a subscription whose pushes show nothing, once its quota is spent (review round 7).
+    expect(mustShowForEveryPush('https://updates.push.services.mozilla.com/wpush/v2/x')).toBe(true);
+    // Not a quiet service just because the name ends like one.
+    expect(mustShowForEveryPush('https://notify.windows.com/x')).toBe(true);
+    expect(mustShowForEveryPush('https://fcm.googleapis.com.example.test/x')).toBe(true);
   });
 
-  it('should treat a subscription it cannot read as Apple’s, the answer that only costs a quiet line', () => {
+  it('should treat a subscription it cannot read as needing a line, the answer that only costs a quiet line', () => {
     // Act / Assert
-    expect(isApplePushService(null)).toBe(true);
-    expect(isApplePushService(undefined)).toBe(true);
-    expect(isApplePushService('not a url')).toBe(true);
+    expect(mustShowForEveryPush(null)).toBe(true);
+    expect(mustShowForEveryPush(undefined)).toBe(true);
+    expect(mustShowForEveryPush('not a url')).toBe(true);
   });
 });
 

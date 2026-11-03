@@ -305,7 +305,13 @@ class MemoryLedger {
 const pushed = (
   agendaId: string,
   identity: { readonly ping?: true; readonly stoppedAt?: string; readonly deadline?: true } = { ping: true },
-  options: { readonly sessionId?: string; readonly delivered?: number; readonly tag?: string | null } = {},
+  options: {
+    readonly sessionId?: string;
+    readonly delivered?: number;
+    readonly tag?: string | null;
+    /** When it was asked for and landed: AT, an hour before the clearer's clock, unless said. */
+    readonly at?: string;
+  } = {},
 ): NotificationRecord[] => {
   const sessionId = options.sessionId ?? SESSION;
   const key =
@@ -327,7 +333,7 @@ const pushed = (
       v: 1,
       phase: 'requested',
       key,
-      at: AT,
+      at: options.at ?? AT,
       origin: 'agenda',
       attribution: `attention:agent:${sessionId}`,
       sessionId,
@@ -341,7 +347,7 @@ const pushed = (
       v: 1,
       phase: 'outcome',
       key,
-      at: AT,
+      at: options.at ?? AT,
       delivered: options.delivered ?? 1,
       failed: 0,
     }),
@@ -768,8 +774,11 @@ describe('a legacy push (recorded before tags were; review round 1)', () => {
 
 describe('a push still on its way when its item is handled or opened (review round 1)', () => {
   /** A push recorded as requested, with no outcome yet. */
-  const onItsWay = (agendaId: string): NotificationRecord[] => pushed(agendaId).slice(0, 1);
-  const landing = (agendaId: string): NotificationRecord => pushed(agendaId)[1] as NotificationRecord;
+  /** A push recorded as requested, with no outcome yet: asked for at the clearer's own clock. */
+  const onItsWay = (agendaId: string): NotificationRecord[] =>
+    pushed(agendaId, { ping: true }, { at: LATER }).slice(0, 1);
+  const landing = (agendaId: string): NotificationRecord =>
+    pushed(agendaId, { ping: true }, { at: LATER })[1] as NotificationRecord;
 
   it('should clear it once it lands, after the item was answered while it was on its way', async () => {
     // Arrange
@@ -809,8 +818,8 @@ describe('a push still on its way when its item is handled or opened (review rou
 
   it('should honour an open of the last item for a stop on its way, and not while another item still waits (review round 3)', async () => {
     // Arrange — a grouped stop is on its way; the owner opens an item before it lands.
-    const stopOnItsWay = pushed('A1', { stoppedAt: AT }).slice(0, 1);
-    const stopLanding = pushed('A1', { stoppedAt: AT })[1] as NotificationRecord;
+    const stopOnItsWay = pushed('A1', { stoppedAt: AT }, { at: LATER }).slice(0, 1);
+    const stopLanding = pushed('A1', { stoppedAt: AT }, { at: LATER })[1] as NotificationRecord;
     const last = world(stopOnItsWay);
     last.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
     const notLast = world(stopOnItsWay);
@@ -886,8 +895,8 @@ describe('a push still on its way when its item is handled or opened (review rou
 
 describe('an open made while a push is being sent in its lane (review round 6)', () => {
   for (const [what, records, tag] of [
-    ['an item push', pushed('A1'), 'attention-session-1:A1'],
-    ['a stop, for the last item', pushed('A1', { stoppedAt: AT }), 'attention-session-1'],
+    ['an item push', pushed('A1', { ping: true }, { at: LATER }), 'attention-session-1:A1'],
+    ['a stop, for the last item', pushed('A1', { stoppedAt: AT }, { at: LATER }), 'attention-session-1'],
   ] as const) {
     it(`should clear ${what} that landed while the open waited on every device, the opener's too`, async () => {
       // Arrange — the push is recorded and being sent, holding the ferret's lane, when the owner opens A1.
@@ -915,6 +924,57 @@ describe('an open made while a push is being sent in its lane (review round 6)',
       should(test.sent[0]?.payload).containDeep({ tags: [tag] });
     });
   }
+});
+
+describe('pushes from before an open, and from before this release (review round 7)', () => {
+  const DAYS_AGO = '2026-11-01T09:00:00.000Z';
+  const JUST_NOW = '2026-11-03T09:59:45.000Z';
+
+  it('should clear a push that landed just before the open on every device: the page that asked could not see it', async () => {
+    // Arrange — A1's push landed 15 s before the open was admitted; another, an hour ago, the page could close.
+    const test = world([...pushed('A1', { ping: true }, { at: JUST_NOW }), ...pushed('A1', { deadline: true })]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+
+    // Act
+    const answer = await test.clearer.seen(SESSION, 'A1', 'device-1');
+
+    // Assert — the late one went to every device first; the opener is told of the rest, which it closes itself.
+    should(test.sent.map(dispatch => 'exceptDevice' in dispatch)).deepEqual([false, true]);
+    should(answer).deepEqual({ found: true, tags: ['attention-session-1:A1'] });
+  });
+
+  it('should forget a push that never landed long ago: it is not on its way any more', async () => {
+    // Arrange — recorded half an hour before the open, and no outcome ever.
+    const test = world(pushed('A1', { ping: true }, { at: '2026-11-03T09:30:00.000Z' }).slice(0, 1));
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+    await test.clearer.seen(SESSION, 'A1', 'device-1');
+
+    // Act
+    await test.ledger.append(pushed('A1', { ping: true }, { at: '2026-11-03T09:30:00.000Z' })[1] as NotificationRecord);
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(test.sent).deepEqual([]);
+  });
+
+  it('should leave a push from before tags were up once it is two days old, but clear a tagged one of any age', async () => {
+    // Arrange — on the first start after upgrade, the whole history is uncovered.
+    const test = world([
+      ...pushed('A1', { ping: true }, { tag: null, at: DAYS_AGO }),
+      ...pushed('A2', { ping: true }, { at: DAYS_AGO }),
+      ...pushed('A3', { ping: true }, { tag: null, at: DAYS_AGO, sessionId: OTHER }),
+    ]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), resolved(item('A2'))]));
+
+    // Act
+    await test.clearer.sweep();
+
+    // Assert — the other ferret had nothing young enough to look at, so its board was never read.
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1:A2'],
+    ]);
+    should(uncoveredAlerts(OTHER, await test.ledger.entries())).have.length(2);
+  });
 });
 
 describe('an open that names more tags than one answer carries (review round 5)', () => {

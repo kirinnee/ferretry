@@ -10,14 +10,16 @@
  * ## WHY AN IPHONE SWAPS RATHER THAN CLOSES (owner decision !A324)
  *
  * Apple's push service revokes a site's subscription that receives a push and shows nothing — the same rule
- * `filteredPushNotification` answers for a muted push. So where Apple delivers the push, a clear REPLACES the item's
- * notification with one quiet "Handled on another device" line under the same tag (silent, no item words); where it
- * finds nothing showing, it shows that line once under a fixed per-machine tag, so lines never pile up. Everywhere
- * else a clear closes the matching notifications and shows nothing new.
+ * `filteredPushNotification` answers for a muted push — and so does Mozilla's, once a small quota is spent (review
+ * round 7). So wherever the service needs every push to show something, a clear REPLACES the item's notification with
+ * one quiet "Handled on another device" line under the same tag (silent, no item words); where it finds nothing
+ * showing, it shows that line once under a fixed per-machine tag, so lines never pile up. Only where the service is
+ * known to let a push show nothing — FCM (Chrome, Android, Edge on Android) and WNS (Edge on Windows) — does a clear
+ * just close the matching notifications.
  *
- * WHICH SERVICE IS APPLE'S is read from this registration's own push subscription — its endpoint is on
- * `*.push.apple.com` — never from the user agent: an iPad's says Mac, and Safari on a Mac has the same rule. A
- * subscription that cannot be read is treated as Apple's: a needless quiet line beats a revoked subscription.
+ * WHICH SERVICE IT IS is read from this registration's own push subscription endpoint, never from the user agent: an
+ * iPad's says Mac, and Safari on a Mac has the same rule. A subscription that cannot be read, or a service not named
+ * above, is treated as needing a line: a needless quiet line beats a revoked subscription.
  *
  * ## ONE MACHINE, ITS OWN TAGS
  *
@@ -36,18 +38,24 @@ export const HANDLED_TAG_PREFIX = 'fy-handled:';
 export const HANDLED_TITLE = 'Handled on another device';
 export const HANDLED_BODY = 'Nothing to do here.';
 
-/** The host suffix of Apple's push service, which shards by subdomain (`PUSH_SERVICE_HOST_SUFFIXES`). */
-const APPLE_PUSH_HOST_SUFFIX = '.push.apple.com';
+/** The push services known to let a site's push show nothing (Chrome's and Android's FCM, Windows' WNS). */
+const QUIET_PUSH_HOST = 'fcm.googleapis.com';
+const QUIET_PUSH_HOST_SUFFIX = '.notify.windows.com';
 
 /**
- * Whether the push service behind this registration is Apple's, from its subscription endpoint. Unreadable, absent or
- * not a URL is Apple's (see the header): the answer that can only cost a quiet line.
+ * Whether the push service behind this registration needs every push to show something, from its subscription
+ * endpoint (see the header). Only FCM and WNS are known to let a push show nothing; Apple's and Mozilla's revoke a
+ * subscription that does, and an unknown, absent or unreadable one is treated the same: a needless quiet line beats
+ * a revoked subscription.
  */
-export const isApplePushService = (endpoint: string | null | undefined): boolean => {
+export const mustShowForEveryPush = (endpoint: string | null | undefined): boolean => {
   if (endpoint === null || endpoint === undefined) return true;
   const host = URL.parse(endpoint)?.hostname.toLowerCase();
   if (host === undefined) return true;
-  return host.endsWith(APPLE_PUSH_HOST_SUFFIX) && host.length > APPLE_PUSH_HOST_SUFFIX.length;
+  return !(
+    host === QUIET_PUSH_HOST ||
+    (host.endsWith(QUIET_PUSH_HOST_SUFFIX) && host.length > QUIET_PUSH_HOST_SUFFIX.length)
+  );
 };
 
 /** A daemon's tag, as THIS registration showed it: inside its machine's namespace, or the app-wide one's. */
@@ -79,15 +87,15 @@ export interface ClearPlan {
 
 /**
  * THE DECISION, pure: given which of the clear's tags are showing here (as shown, in the clear's order) and whether
- * Apple delivers this registration's pushes.
+ * this registration's push service needs every push to show something.
  */
 export const planClear = (
   showing: readonly string[],
-  apple: boolean,
+  mustShow: boolean,
   machine: PushMachine | null,
   origin: string,
 ): ClearPlan => {
-  if (!apple) return { close: showing };
+  if (!mustShow) return { close: showing };
   const [first, ...rest] = showing;
   if (first === undefined) {
     const fixed = `${HANDLED_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`;
@@ -110,16 +118,16 @@ export interface ClearRegistration {
   readonly pushManager?: { getSubscription(): PromiseLike<{ readonly endpoint: string } | null> };
 }
 
-/** Whether Apple delivers this registration's pushes, read from its own subscription. */
-const deliveredByApple = async (registration: ClearRegistration): Promise<boolean> => {
+/** Whether this registration's push service needs every push to show something, read from its own subscription. */
+const mustShowSomething = async (registration: ClearRegistration): Promise<boolean> => {
   try {
-    return isApplePushService((await registration.pushManager?.getSubscription())?.endpoint);
+    return mustShowForEveryPush((await registration.pushManager?.getSubscription())?.endpoint);
   } catch {
     return true;
   }
 };
 
-/** Carries one clear out on this registration: closes what it names, and shows the quiet line where Apple needs one. */
+/** Carries one clear out on this registration: closes what it names, and shows the quiet line where its push service needs one. */
 export const applyClear = async (
   registration: ClearRegistration,
   payload: PushClearPayload,
@@ -132,8 +140,8 @@ export const applyClear = async (
   order?.recent.remember(tags, order.place);
   const found = await Promise.all(tags.map(async tag => [tag, await registration.getNotifications({ tag })] as const));
   const showing = found.filter(([, notifications]) => notifications.length > 0).map(([tag]) => tag);
-  const plan = planClear(showing, await deliveredByApple(registration), machine, origin);
-  // The line is shown first: on Apple's service a push must show something, and the replacement is that something.
+  const plan = planClear(showing, await mustShowSomething(registration), machine, origin);
+  // The line is shown first: where a push must show something, the replacement is that something.
   if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
   for (const [tag, notifications] of found) {
     if (!plan.close.includes(tag)) continue;
@@ -225,7 +233,7 @@ interface Stamp {
 
 /**
  * A push at `place` about to show under `tag` (inside {@link RecentlyCleared.serial}): settled as a later clear would
- * have, instead of showing — on Apple's service the quiet line under the tag (or under the fixed tag when a newer push
+ * have, instead of showing — where a push must show something, the quiet line under the tag (or under the fixed tag when a newer push
  * owns it, or nothing is under it), elsewhere nothing. Answers whether it was; `false` means show it, and it is
  * recorded as shown.
  */
@@ -244,7 +252,7 @@ export const settleIfCleared = async (
   }
   // Only the clear's own quiet line can be under a cleared tag here; a newer push's line is never touched.
   const showing = verdict === 'cleared' ? await registration.getNotifications({ tag }) : [];
-  const plan = planClear(showing.length > 0 ? [tag] : [], await deliveredByApple(registration), machine, origin);
+  const plan = planClear(showing.length > 0 ? [tag] : [], await mustShowSomething(registration), machine, origin);
   if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
   return true;
 };

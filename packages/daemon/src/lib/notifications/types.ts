@@ -96,8 +96,9 @@ export const AgendaNotificationRequestedRecordSchema = z.preprocess(
 );
 
 /**
- * A CLEAR the daemon sent: the pushes it answers for (`covers`, their ledger keys) and the tags it named. Recorded
- * like any push — requested, then its outcome — so a push is cleared once, across restarts too. It carries no words
+ * A CLEAR the daemon sent: the pushes it answers for (`covers`, their ledger keys) and the tags it named. Only the
+ * request is recorded, never an outcome, so a clear never stands in `fy doctor` for the newest push (`enrolled` is
+ * always 0); a push is still cleared once, across restarts too. It carries no words
  * from the item, because the clear itself carries none (docs/notifications.md § When an alert is cleared).
  */
 export const AgendaClearRequestedRecordSchema = z.strictObject({
