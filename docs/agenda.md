@@ -723,7 +723,8 @@ anything is sent, naming BOTH agendas by id and title and marking the open one "
 say which agenda it is: "Merge !A2 "Pick the queue" into !A5 "Queue choice" (this one)?", then "!A2 "Pick the queue"
 closes as merged into !A5 "Queue choice" (this one). Both conversations and all cards are kept, and nothing is cut."
 The viewed item survives by default, and "Keep !A2 "Pick the queue" instead of this one" flips it (the button then
-reads "Merge into !A2 "Pick the queue""). A long title is cut at a word with "…". There is no grant to gate on: the daemon decides by who acts, so the app offers the button
+reads "Merge into !A2 "Pick the queue""). The choices sit in the fixed order: Cancel and Back on the left, the
+confirming merge on the right. A long title is cut at a word with "…". There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so

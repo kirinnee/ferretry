@@ -1603,5 +1603,9 @@
 .fy-merge__actions {
   display: flex;
   flex-wrap: wrap;
+  align-self: stretch;
   gap: 8px;
+}
+.fy-merge__actions .fy-merge__go {
+  margin-inline-start: auto;
 }

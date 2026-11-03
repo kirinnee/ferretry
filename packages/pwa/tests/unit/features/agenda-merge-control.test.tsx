@@ -111,6 +111,16 @@ describe('Merge with…', () => {
     expect(root.querySelector('[data-agenda-merge-open]')).not.toBeNull();
   });
 
+  test('draws the confirm step with the negative choices left and the confirming merge right', async () => {
+    const root = await draw(item(), mergeView([]));
+    await click(root, '[data-agenda-merge-open]');
+    await click(root, '[data-agenda-merge-candidate="A2"]');
+    const actions = must(root.querySelector('.fy-merge__actions'), 'actions');
+    const labels = [...actions.querySelectorAll('button')].map(button => button.textContent?.trim().split(' ')[0]);
+    expect(labels).toEqual(['Cancel', 'Back', 'Merge']);
+    expect(actions.lastElementChild?.hasAttribute('data-agenda-merge-go')).toBe(true);
+  });
+
   test('can keep the other agenda instead', async () => {
     const sent: Sent[] = [];
     const root = await draw(item(), mergeView(sent));
@@ -137,10 +147,10 @@ describe('Merge with…', () => {
     await click(root, '[data-agenda-merge-open]');
     await click(root, '[data-agenda-merge-candidate="A2"]');
     const quiet = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('.fy-merge__actions .fy-merge__quiet')];
-    await interact(() => must(quiet()[0], 'back').click());
+    await interact(() => must(quiet()[1], 'back').click());
     expect(root.querySelector('[data-agenda-merge-picker]')).not.toBeNull();
     await click(root, '[data-agenda-merge-candidate="A2"]');
-    await interact(() => must(quiet()[1], 'cancel').click());
+    await interact(() => must(quiet()[0], 'cancel').click());
     expect(root.querySelector('[data-agenda-merge-picker]')).toBeNull();
     expect(root.querySelector('[data-agenda-merge-confirm]')).toBeNull();
   });

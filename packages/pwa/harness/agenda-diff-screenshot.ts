@@ -147,7 +147,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     ...(form === 'phone' ? PHONE : DESKTOP),
     ...LOCALE,
     colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
-    // The header title is a marquee that scrolls; reduced motion draws it cut at a word with "…", the same frame each time.
+    // A title longer than two lines still scrolls in the head; reduced motion keeps every frame the same.
     reducedMotion: 'reduce',
   });
   const open = async (id: string, extra = ''): Promise<Page> => {

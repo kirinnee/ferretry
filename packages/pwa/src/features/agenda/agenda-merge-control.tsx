@@ -112,14 +112,14 @@ function MergePanel({
         </p>
       )}
       <div className="fy-merge__actions">
-        <button className="fy-merge__go" data-agenda-merge-go="" disabled={sending} onClick={send} type="button">
-          {words.button}
+        <button className="fy-merge__quiet" disabled={sending} onClick={onDone} type="button">
+          Cancel
         </button>
         <button className="fy-merge__quiet" disabled={sending} onClick={() => setState({ step: 'pick' })} type="button">
           Back
         </button>
-        <button className="fy-merge__quiet" disabled={sending} onClick={onDone} type="button">
-          Cancel
+        <button className="fy-merge__go" data-agenda-merge-go="" disabled={sending} onClick={send} type="button">
+          {words.button}
         </button>
       </div>
     </div>
