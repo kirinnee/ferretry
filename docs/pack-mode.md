@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,276      | 319      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,319      | 330      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -94,7 +94,9 @@ example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,
 "Bug batch: ONE agenda, line each + where tracked." and "Owner Q: answer ON it, options stay; no item: ONE `-k info`." —
 paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276, the measured total 7,725 → 7,716
 (7,730 counting the 14 section-separator characters), leaving 134 characters under the 7,850 cap (120 counting the
-separators). The cap is unchanged.
+separators). The agenda body rule (keep the body a one-screen summary; link the full report) then took the agenda
+section 1,276 → 1,319 (cap 1,290 → 1,330), so the measured total is 7,759 (7,773 counting the separators), leaving 91
+characters under the 7,850 cap (77 counting the separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

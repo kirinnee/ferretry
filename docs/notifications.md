@@ -259,7 +259,7 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,276 characters, capped at 1,290 by a test; the shipped
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,319 characters, capped at 1,330 by a test; the shipped
 prompt as a whole has its own cap, so a new rule here is paid for by tightening words) teaches the model first: what an
 agenda is (one channel of the owner's attention), the three-part test, search-check-open, splitting, then the one
 command that opens one, then the states, the type, chat discussion, and the two standing rules (a bug batch is one
