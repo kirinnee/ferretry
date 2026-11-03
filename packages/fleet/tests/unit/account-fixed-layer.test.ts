@@ -785,7 +785,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       'Open: `zz agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"`.',
     );
-    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`).');
+    should(text).containEql('Title ≤40, ask ≤80 (rest: `--body`, one-screen summary; full report: `--link`).');
     // The owner's formatting rule: short points, answer first, no Markdown headings anywhere.
     should(text).containEql(
       'Read cold: no ids/paths/jargon (`--term "X=meaning"`); short points, answer first, no headings.',
@@ -841,8 +841,8 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,276 with both owner rules restored; the total keeps its headroom below.
-    should(AGENDA_INSTRUCTION('fy').length).be.below(1_290);
+    // Assert — measured 1,319: 1,276 with both owner rules restored, plus 43 for the body rule (one-screen summary, full report via `--link`); the total keeps its headroom below.
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_330);
   });
 
   it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {

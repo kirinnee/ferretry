@@ -443,7 +443,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
     should(sizes.notify).be.below(450);
-    should(sizes.agenda).be.below(1_290);
+    should(sizes.agenda).be.below(1_330);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {
