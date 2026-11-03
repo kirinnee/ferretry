@@ -643,7 +643,7 @@ export function DaemonSettingsFrame({
             <li key={tab.id}>
               <button
                 type="button"
-                className="kt-grouprow min-h-11 items-center"
+                className="kt-grouprow items-center"
                 data-daemon-panel={tab.id}
                 title={tab.description}
                 onClick={() => onOpenPanel(tab.id)}

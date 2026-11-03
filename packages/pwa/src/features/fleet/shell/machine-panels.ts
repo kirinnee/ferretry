@@ -42,7 +42,7 @@ const PANEL_GROUPS = [
     id: 'advanced',
     label: 'Advanced',
     tab: 'machine',
-    panels: ['files', 'terminal-slots', 'speedups', 'model-pricing'],
+    panels: ['files', 'terminals', 'speedups', 'model-pricing'],
   },
   { id: 'about', label: 'About', tab: 'machine', panels: ['about'] },
 ] as const satisfies readonly PanelGroup[];
@@ -72,7 +72,7 @@ export const PANEL_NAMES: Readonly<Record<string, string>> = {
   'resource-limits': 'Resource limits',
   'agent-clis': 'Agent tools',
   'security-log': 'Security log',
-  'terminal-slots': 'Terminal slots',
+  terminals: 'Terminal slots',
   'model-pricing': 'Model pricing',
   files: 'Settings files',
   about: 'Version and updates',
