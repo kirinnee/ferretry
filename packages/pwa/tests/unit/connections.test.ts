@@ -419,10 +419,26 @@ class SharedBrowser {
   readonly announcements: unknown[] = [];
   readonly #listeners = new Set<{ tab: number; listener: () => void }>();
 
+  #held: Promise<string | null> | undefined;
+
+  /** The next load is read at once but answers only when released, with the value given then. */
+  holdNextLoad(): (value: string | null) => void {
+    let release: (value: string | null) => void = () => undefined;
+    this.#held = new Promise(resolve => {
+      release = resolve;
+    });
+    return release;
+  }
+
   repository(): DaemonConnectionRepository {
     return {
       load: async () => {
         if (this.failLoad) throw new Error('load failed');
+        const held = this.#held;
+        if (held !== undefined) {
+          this.#held = undefined;
+          return await held;
+        }
         return this.value;
       },
       save: async (_key, value) => {
@@ -521,6 +537,54 @@ describe('two tabs of one browser', () => {
     await settle();
 
     should(original.list().map(record => record.daemonId)).deepEqual(['a']);
+  });
+
+  it('does not let a slow read of the old registry overwrite a newer local add', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    original.add(connection('a'));
+    await original.flush();
+    const stale = browser.value;
+    const release = browser.holdNextLoad();
+
+    browser.channel(2).announce();
+    await settle();
+    original.add(connection('b'));
+    await original.flush();
+    release(stale);
+    await settle();
+    await original.flush();
+
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
+    should(parseDaemonConnections(browser.value).connections.length).equal(2);
+  });
+
+  it('lets only the newest reload adopt what it read', async () => {
+    const browser = new SharedBrowser();
+    const original = await open(browser, 1);
+    browser.value = persisted([row('a', 1)], 'a');
+    const releaseOld = browser.holdNextLoad();
+
+    browser.channel(2).announce();
+    await settle();
+    const stale = browser.value;
+    browser.value = persisted([row('a', 1), row('b', 2)], 'b');
+    browser.channel(2).announce();
+    await settle();
+    releaseOld(stale);
+    await settle();
+
+    should(
+      original
+        .list()
+        .map(record => record.daemonId)
+        .sort(),
+    ).deepEqual(['a', 'b']);
   });
 
   it('carries no record, id or token in the signal', () => {

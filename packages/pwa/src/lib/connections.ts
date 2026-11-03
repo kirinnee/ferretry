@@ -269,6 +269,10 @@ export class DaemonConnectionStore {
   readonly #now: () => number;
   readonly #forget: (daemonId: DaemonId) => void;
   #write: Promise<void> = Promise.resolve();
+  /** Bumped by every local change; a reload's read that began before one is stale. */
+  #revision = 0;
+  /** Bumped by every reload; only the newest one may adopt what it read. */
+  #reloads = 0;
 
   constructor(initial: DaemonConnectionsSnapshot = emptySnapshot(), options: DaemonConnectionStoreOptions = {}) {
     const maximum = options.maxConnections ?? MAX_CONNECTIONS;
@@ -521,9 +525,21 @@ export class DaemonConnectionStore {
   async #reload(): Promise<void> {
     const repository = this.#repository;
     if (repository === undefined) return;
+    const generation = ++this.#reloads;
     try {
-      await this.#write;
-      const next = parseDaemonConnections(await repository.load(CONNECTIONS_KEY), this.#maximum);
+      // A read is only trusted if no local write began, and no newer reload started, while it was in
+      // flight; otherwise it may be older than what this tab already shows. Re-read once writes settle.
+      let next: DaemonConnectionsSnapshot;
+      for (;;) {
+        const pending = this.#write;
+        await pending;
+        if (generation !== this.#reloads) return;
+        if (pending !== this.#write) continue;
+        const revision = this.#revision;
+        next = parseDaemonConnections(await repository.load(CONNECTIONS_KEY), this.#maximum);
+        if (generation !== this.#reloads) return;
+        if (revision === this.#revision) break;
+      }
       if (serialized(next) === serialized(this.#snapshot)) return;
       for (const record of this.#snapshot.connections) {
         const kept = next.connections.find(candidate => candidate.daemonId === record.daemonId);
@@ -547,6 +563,7 @@ export class DaemonConnectionStore {
   }
 
   #publish(snapshot: DaemonConnectionsSnapshot): void {
+    this.#revision += 1;
     this.#snapshot = snapshot;
     for (const listener of this.#listeners) listener();
     if (this.#repository === undefined) return;
