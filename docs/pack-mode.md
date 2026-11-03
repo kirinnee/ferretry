@@ -71,7 +71,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,236      | 309      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,266      | 317      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -106,7 +106,10 @@ the Agenda section's own wording (the repeated "unsure: closest", `done <id>` �
 total 7,745 (7,759 counting the separators), leaving 105 characters under the 7,850 cap (91 counting the separators).
 Final review then restored "on it" in the chat line (the owner's words go ON the agenda item): agenda 1,230 → 1,236, the measured total
 7,751 (7,765 counting the separators), 99 characters under the 7,850 cap (85 counting the separators).
-The whole-prompt cap is unchanged.
+PR 3's conversation verbs then joined it — `log <id> --reply|--rest` in the chat line, and `split` and `merge`
+in the splitting sentence — partly paid for by `answer <id> "<text>"` → `answer <id> "…"`: agenda 1,236 → 1,266 (cap
+1,270), the measured total 7,781 (7,795 counting the separators), 69 characters under the 7,850 cap (55 counting the
+separators). The whole-prompt cap is unchanged.
 
 ## The routing prompt
 

@@ -280,3 +280,17 @@ describe('the bounds of an owner response', () => {
     should(MAX_AGENDA_CONTENT_LENGTH).be.above(MAX_AGENDA_RESPONSE_LENGTH);
   });
 });
+
+it('sheds oldest history when it crowds the transport bound, retaining gate receipts', async () => {
+  const { fitAgendaItem, MAX_AGENDA_ITEM_LENGTH } = await import('../../src/lib/agenda.ts');
+  const item = {
+    body: 'b'.repeat(MAX_AGENDA_ITEM_LENGTH - 100),
+    history: [
+      { kind: 'replied', note: 'r'.repeat(500) },
+      { kind: 'gate-answered', note: 'gate:F12' },
+    ],
+  };
+  const fitted = fitAgendaItem(item);
+  should(fitted.history).deepEqual([{ kind: 'gate-answered', note: 'gate:F12' }]);
+  should(JSON.stringify(fitted).length).be.below(MAX_AGENDA_ITEM_LENGTH);
+});

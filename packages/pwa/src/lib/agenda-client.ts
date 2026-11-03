@@ -4,9 +4,15 @@ import {
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaCountResponse,
+  type AgendaId,
   type AgendaResponse,
+  AgendaSeenResponseSchema,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
+  type AgendaVersion,
+  type AgendaVersionList,
+  AgendaVersionListSchema,
+  AgendaVersionSchema,
   type BoardReopenAttachments,
   FY_REQUEST_ID_HEADER,
   isMachineAgendaId,
@@ -132,6 +138,57 @@ export const sendAgendaReplies = async (
       fetcher,
     ),
   );
+
+const itemVersionsPath = (sessionId: string, id: AgendaId): string =>
+  `/v1/sessions/${encodeURIComponent(sessionId)}/agenda/${encodeURIComponent(id)}/versions`;
+
+/**
+ * Every version an item has been kept as (`agenda.conversation.1`), with the one this device last opened. A daemon
+ * without the feature answers 404, which the caller reads as "no versions": the app ships before the daemon.
+ */
+export const fetchAgendaVersions = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AgendaVersionList> =>
+  AgendaVersionListSchema.parse(
+    await fetchAgenda(daemon, scope, itemVersionsPath(scope.sessionId, id), { method: 'GET' }, fetcher),
+  );
+
+/** One whole version of an item, as it was left. */
+export const fetchAgendaVersion = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AgendaVersion> =>
+  AgendaVersionSchema.parse(
+    await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
+  );
+
+/** Tells the daemon this device opened `version` of an item; answers the mark that stands. */
+export const markAgendaVersionSeen = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  id: AgendaId,
+  version: number,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<number> =>
+  AgendaSeenResponseSchema.parse(
+    await fetchAgenda(
+      daemon,
+      scope,
+      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/seen`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ version }),
+      },
+      fetcher,
+    ),
+  ).seen;
 
 /**
  * How many boards one daemon is asked for at once.

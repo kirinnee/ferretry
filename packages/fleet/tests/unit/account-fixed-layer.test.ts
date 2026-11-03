@@ -776,7 +776,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // Dependent things are always one agenda: splitting them would make the owner decide half a thing.
     should(text).containEql('dependent things always share.');
     should(text).containEql('Search, check, then open (`zz search`): none fits→open, else closest.');
-    should(text).containEql('Split parts that stop fitting.');
+    should(text).containEql('`split` what stops fitting, `merge` twins.');
   });
 
   it('should teach the one command that opens one, cold-readable, with the shape of every kind', () => {
@@ -806,13 +806,15 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Needs you buzzes; Resting is quiet.');
     should(text).containEql('Owner reply/answer rests it;');
     // The ferret's answer ON the item brings it back; an owner's question is answered there, its options open.
-    should(text).containEql('`answer <id> "<text>"` returns it.');
+    should(text).containEql('`answer <id> "…"` returns it.');
     should(text).containEql('`rest <id> --why …`=working; `--stage`, `--where`=now.');
     should(text).not.containEql('--back');
     should(text).containEql("Keep current (`edit`); only you mark it Done when nothing's left.");
     should(text).containEql('Type: explainer→question→plan→tracker→test.');
-    // All discussion about an agenda lands in it, the owner's words verbatim (!A304).
-    should(text).containEql('Chat: their words verbatim on it + reply; link it; unsure: closest.');
+    // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
+    should(text).containEql(
+      'Chat: `log <id> --reply|--rest` puts their words on it verbatim; link it; unsure: closest.',
+    );
   });
 
   it("should keep the owner's two standing rules word for word: one agenda for a bug batch, and an owner's question answered on its item", () => {
@@ -831,8 +833,9 @@ describe('AGENDA_INSTRUCTION', () => {
     // Act
     const text = AGENDA_INSTRUCTION('zz');
 
-    // Assert — conversation logging, split and merge commands join when their implementations ship.
-    for (const verb of ['log', 'split', 'merge']) should(text).not.containEql(`agenda ${verb}`);
+    // The conversation verbs ship on this branch, inside the unchanged section and total budgets.
+    should(text).containEql('`log <id> --reply|--rest`');
+    should(text).containEql('`split` what stops fitting, `merge` twins');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
     // The retired rules: an agenda now evolves into a tracker, and a reply no longer parks it.
@@ -841,7 +844,8 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 
   it('should stay within its cap: it is in every prompt that turns the mode on', () => {
-    // Assert — measured 1,236: the body rule (one-screen summary, full report via `--link`) added 43 to the 1,276 of the agenda-first model, and tightening the section's own wording (the repeated "unsure: closest", `done <id>`, "<the ask>", the form's "text in the reply" that the help already says) paid for it and for main's send-label rule; the total keeps at least 99 of headroom.
+    // Assert — measured 1,266: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
+    // split line names both verbs), paid for in part by `answer <id> "…"`; the total keeps 69 of headroom.
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_270);
   });
 

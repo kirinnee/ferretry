@@ -1,4 +1,4 @@
-import { type AgendaItem, type ResolvedAgendaItem, type SessionAgendaSummary } from '@ferretry/protocol';
+import type { AgendaItem, ResolvedAgendaItem, SessionAgendaSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
@@ -20,12 +20,22 @@ import type { AgendaBoardChange, AgendaChangeObserver, AgendaLedgerRepository, A
 import { agendaSnapshot, emptyAgendaLedger, isGateFollowupItem } from './state-machine.ts';
 import { type AgendaModes, decoratedSummary, type SessionStops } from './stopped.ts';
 
-/** Every observer told, in order, each on its own: one that throws never silences the next. */
+/** Every observer is told, even after a failure. Critical delivery failures prevent durable acknowledgement. */
 export class AgendaChangeFanout implements AgendaChangeObserver {
+  readonly requiresAcceptance = true;
+
   constructor(private readonly observers: readonly AgendaChangeObserver[]) {}
 
   async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
-    for (const observer of this.observers) await observer.changed(sessionId, change).catch(() => undefined);
+    const failures: unknown[] = [];
+    for (const observer of this.observers) {
+      try {
+        await observer.changed(sessionId, change);
+      } catch (error) {
+        if (observer.requiresAcceptance === true) failures.push(error);
+      }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'agenda reply delivery was not durably accepted');
   }
 }
 
@@ -115,6 +125,8 @@ const speaksFor = (item: AgendaItem | ResolvedAgendaItem, sessionId: string): bo
  * delivers a burst of answers as one message and never the same item twice.
  */
 export class AgendaReplyDelivery implements AgendaChangeObserver {
+  readonly requiresAcceptance = true;
+
   /** `binary` names the CLI in the words a discussion tells the ferret to run. */
   constructor(
     private readonly replies: AgendaReplyQueue,
@@ -188,9 +200,14 @@ export class AgendaConversation {
   }
 
   /** Closes every item the accepted message named, `words` kept; each on its own, none able to fail the send. */
-  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>, words?: string): Promise<void> {
+  async settle(
+    sessionId: string,
+    turn: ReturnType<typeof conversationTurn>,
+    words?: string,
+    fromChat?: { readonly messageId: string; readonly at: string },
+  ): Promise<void> {
     for (const item of turn.referenced) {
-      await this.agenda.reply(sessionId, item.id, { kind: 'human' }, words).catch(() => undefined);
+      await this.agenda.reply(sessionId, item.id, { kind: 'human' }, words, fromChat).catch(() => undefined);
     }
   }
 }

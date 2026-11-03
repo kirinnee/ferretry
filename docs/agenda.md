@@ -376,23 +376,31 @@ and any structured answer, as the item's complete last snapshot (a `version` rec
 explicitly requested; an ordinary transaction never rereads or rewrites the committed sidecar.
 
 **Storage layout.** Each line is an `owner-history` record (`id`, `entry`) or a `version` record (`id`, `item`).
-`agenda.json` holds only an `archive` cursor with a UTF-8 byte offset and record count, so the hot file does not
-grow with the conversation. Transaction-local `archivePending` records are appended and synced before the hot
-ledger is atomically written without them; that ledger write is the commit. Every byte past the committed cursor
-was never committed (a rolled-back command's records, or an append a crash tore, split UTF-8 characters included),
-so history reads stop at the cursor and the next append cuts that tail before it writes: a retried command's
-records land once, and a different command never adopts another's. Before it writes, an append puts down a
-`agenda-history.jsonl.pending` mark saying where it began, and every successful ledger write lifts it, so a mark
-on disk means "this append was not committed". The cursor decides wherever there is one; the mark matters to a
-ledger with none (below). The generic append mechanism can also hold later versions. Existing in-ledger
-`ownerHistory` records move here on the next transaction, including an unchanged one, with the same rule: a
-migration whose ledger write fails is cut and written again, never twice.
+`agenda.json` holds an `archive` cursor with a UTF-8 byte offset and record count rather than embedding that
+history. Its current entries stay bounded; the version-4 full-conversation map ([the conversation](#the-conversation))
+grows with an open item's thread and is committed with state. Transaction-local `archivePending` records are appended
+and synced before the hot ledger is atomically written without them; that ledger write is the commit. Every byte
+past the committed cursor was never committed (a rolled-back command's records, or an append a crash tore, split
+UTF-8 characters included), so history reads stop at the cursor and the next append cuts that tail before it
+writes: a retried command's records land once, and a different command never adopts another's. Before it writes,
+an append puts down a `agenda-history.jsonl.pending` mark saying where it began, and every successful ledger write
+lifts it, so a mark on disk means "this append was not committed". The cursor decides wherever there is one; the
+mark matters to a ledger with none (below). Existing in-ledger `ownerHistory` records move here on the next
+transaction, including an unchanged one, with the same rule: a migration whose ledger write fails is cut and
+written again, never twice.
+
+**One writer, one reader rule per file.** This sidecar is the hot ledger's history and nothing else: only the
+ledger write appends to it, and every read (`readArchive`, the version-4 migration's seed of archived owner words,
+and the fallback that finds a pruned item's last snapshot) stops at the committed cursor. Full versions and full
+conversations are not kept here; they live in the per-item version store ([versions](#versions)), which reads
+this file but never writes it.
 
 **A ledger with no cursor** reads as version 1 (no `version`, or 1): one a daemon before the cursor wrote, or one an
 older daemon rewrote after a downgrade. Its sidecar's complete lines are adopted as committed history (the cursor
 then covers them), stopping at the mark when one is down, so an append whose ledger write failed is never
-served or adopted, and a torn last line is left out and cut by the next append. A version-2 ledger with no
-cursor has no history yet and adopts nothing.
+served or adopted, and a torn last line is left out and cut by the next append. The conversation migration seeds
+from exactly those adopted lines, in the same read. A ledger of version 2 or later with no cursor has no history
+yet and adopts nothing.
 
 **Older ledgers are decoded before today's wire budgets are applied.** An old-valid item whose escaped versions
 exceed the transport bound keeps its complete original snapshot as a sidecar `version`; its served view sheds
@@ -421,7 +429,8 @@ answer) next to its note, because `ownerAnswer` keeps only the latest.
 
 ### The migration (ledger version 2)
 
-The board file says its shape (`version`; absent reads as 1). It is brought to version 2 as it is read
+The board file says its shape (`version`; absent reads as 1). The channel migration introduced version 2;
+the conversation migration now brings it to version 4 as it is read
 (`toChannel`, pure, total and idempotent: a board already in the shape is the same object), and the next write
 persists it; nothing on an item is dropped.
 
@@ -485,6 +494,156 @@ when nothing more is expected." It never says it is the ferret's turn to hand th
 Picking an option on the card (`respond`) answers the item and rests it, waiting on the ferret ([States](#states));
 it no longer closes it. `--other "<words>"` remains on the CLI and in the app for "none of the options"; chat no
 longer guesses it.
+
+## The conversation, versions, merge and split
+
+### The conversation
+
+Every word the owner and the ferret say about an item is stored **oldest first and whole**, with no count or text
+cap. Full threads live in the ledger-level `conversations` map in `agenda.json`, keyed by item id, outside the bounded
+current items. The existing atomic ledger write and session lock commit words, logged message ids and state together.
+This avoids a separate sidecar commit that could keep the words but lose the state change, or the reverse. The trade-off
+is that a write rewrites the full ledger; there is no cap and no truncation of the durable thread.
+
+Each entry is `{ at, by: owner | ferret | daemon, text, via, fromChat?: { messageId, at } }`. Insertion is chronological;
+timestamp ties keep insertion order. Chat text keeps its exact indentation and trailing whitespace. A backdated log
+inserts at its source time. A merge interleaves both full threads, keeping the survivor's entries first on ties.
+
+The optional item fields `conversationCount` and `conversationLastAt` describe the full thread. `conversation` is only
+a recent tail of complete entries, at most 8,192 JSON characters; an entry larger than that remains available through
+the conversation route. These fields do not count toward the bounded own-content budget. Items and version snapshots
+stay schema-valid under the item transport bound regardless of how much conversation accumulates.
+
+`GET /v1/sessions/:sessionId/agenda/:id/conversation?index=0&offset=0` reads the full thread in bounded fragments.
+The response has `total`, `index`, `offset`, an optional `entry`, and an optional `next: { index, offset }`. Each fragment
+holds at most 16,384 UTF-16 code units of one entry's text; concatenate fragments of the same index verbatim. Follow
+`next` until absent. An empty thread has no entry. Cursors describe the current chronological thread: restart at zero
+if the item changes while paging, because a backdated entry or merge can change indices. Add `version=<n>` to page
+a frozen historical thread instead; its order and text remain fixed even after a later merge or backdated log. The route requires
+`operator`, serves `any` caller allowed to read the session, and never treats relayed loopback as host arrival.
+
+Every path that carries words writes the conversation in the same transaction as its state change: a chat
+`[re !A5 …]` reply, the Inbox composer, textual owner answers (including free text without a note), optional notes,
+`fy agenda answer`, `needs-info`, `discuss`, `rest --why`, `surface`, gate notes and closing notes.
+
+**Migration.** Earlier ledgers read as version 4. A stored embedded conversation is moved intact into the full-thread
+map; otherwise the migration seeds both archived owner-history records and live history notes and textual responses,
+the owner's answer and note, the ferret's
+answer and the closing note. The resulting current item is bounded and validated before it is returned. Migration is
+pure, lossless and idempotent; the next atomic write persists both the thread and the item. If new metadata
+displaces bounded history or revisions at the transport limit, `carriedEntries` retains the original valid snapshot
+in the ledger, and it becomes the first carried version on the next change. History already dropped
+by an earlier daemon cannot be recovered. The existing PWA `item-conversation.ts` continues reading session transcripts;
+rendering the stored thread is deferred to PR 7. `agenda.conversation.1` remains the health feature, and the new fields
+are optional for older apps.
+
+### `fy agenda log`
+
+`fy agenda log A5 --reply "<text>" | --rest "<what I'm doing>" [--message <id>]`
+
+The ferret never retypes the owner's words. The daemon copies them **verbatim** from the session's own message store
+(its queue and send ledger): the owner's latest message, or `--message <id>`, tagged `fromChat` with the message id
+and time. The owner's words rest the item. `--reply` then answers them: the item goes back to the owner's list in its
+old place, as `answer` does. `--rest` says what the ferret is doing, and the item stays Resting, working.
+
+Refused: a message that is not the owner's (`forbidden`), a message that is not in this session (`not-found`; no other
+session's messages are visible), a message id already logged on the item (the log is idempotent per message id), and an
+item the caller may not edit (the sub-ferret rules below apply).
+
+### Versions
+
+Every change that writes an item keeps the **whole item** as it was left, numbered from 1, in a sidecar beside the
+board: `agenda-versions/<id>.sqlite`. Each version holds a bounded `snapshot` and ordered references to immutable
+conversation entries, shared by SHA-256 content address. The references preserve the full historical thread and its
+order, including backdated insertions and merges, without copying the same long text into every version. Whole snapshots rather than diffs, because a version is read
+on its own (the app puts any two side by side) and a diff chain is only as good as its oldest link — one lost line
+would corrupt every version after it. The board file holds the item as it is now, within the bounds an older app reads
+(20 history entries, 10 revisions); the sidecar holds how it got there, uncapped. An item from before versions is kept
+as it stood first (change `carried`) when it is next changed. A merge or a split makes a version of each item it
+touched. Before writing versions, the repository syncs the exact mutation drafts and next ledger to
+`agenda-versions.pending.json`. An archive failure rejects the request and leaves that intent for recovery; the
+current ledger stays unchanged until every draft is acknowledged. Reads and transactions replay an outstanding
+intent before proceeding. A retry after an uncertain acknowledgement uses the same per-item transaction identities,
+so partial merge/split batches and commits whose replies were lost never duplicate or omit a version. The intent is
+removed only after the hot ledger commit and an idempotent copy of its original change event to
+`agenda-changes.pending.json`. That event keeps the actor, origin (`board` or `conversation`), affected items and
+snapshot. The service drains these events through its ordinary raised/change observers after a read or mutation,
+outside the repository transaction queue, so a projection can read the board without deadlocking. A critical reply
+delivery is acknowledged only after the reply queue durably accepts it. Presentation observers remain isolated:
+their failure cannot acknowledge a failed delivery or hold an accepted one. Each acknowledged event is removed
+durably. A failed delivery stays pending with its original event and a persisted retry count, deadline and error.
+Delivery is attempted at most five times, with delays of 1, 2, 4 and 8 seconds between attempts; reads and unchanged
+retries before the deadline do not attempt it again. A pending, backing-off or parked event is a FIFO barrier for
+its item: later events for that item wait until it is durably accepted. Merged items share that barrier with their
+survivor, including through successive merges; a split child is an independent item. Unrelated eligible events
+continue past a failing event. Every
+failure is logged. After the fifth failure the event stays parked in `agenda-changes.pending.json`, with a warning
+naming the session, event and file; it is never silently dropped. After repairing delivery, an operator can remove
+that event's `retry` field to rearm it. Later events remain behind a parked barrier, and each drain logs their
+session, event and blocking parked event through the same warning sink as the parking diagnostic. An operator who
+explicitly decides that the old instruction is superseded can instead remove that event from the pending array;
+the later instructions then proceed on the next drain. Stop the daemon before editing this file so the drain
+cannot overwrite the repair; restart it and read the agenda to drain again. Recovery followed by an unchanged retry therefore still delivers an owner's answer or
+closure to the ferret. A crash before acknowledgement can repeat an event; reply delivery uses its existing durable
+per-item/request keys to make that replay idempotent. This outbox keeps the original effects with the intent instead
+of trying to infer them from later state, which cannot reconstruct who answered or how their words arrived.
+
+Snapshots use an integer primary key; append numbering reads its largest value without parsing earlier snapshots.
+Conversation references are indexed by version and position, and words by content hash. A historical read loads just
+that version and its entries. The store caches one immutable read version and its thread, so later fragments parse
+no archive text; changing versions releases that cached thread. Listing reads only small summaries. Appending writes
+the new snapshot and its ordered references in one SQLite transaction, with new words inserted once. Its work depends
+on the current thread, not the number or size of historical versions; unchanged words take no additional text storage.
+This avoids repeated full-archive scans while keeping independently readable complete snapshots and uncapped words.
+
+Earlier draft sidecars (`<id>.jsonl`), both bare snapshots and snapshot/conversation envelopes, import once inside
+the database's initialization transaction. The old file stays untouched. Complete records survive, including a final
+record without a newline; malformed records and torn tails are skipped. The next append numbers from the durable
+imported records, so it cannot join onto a torn tail or swallow the next version. Interrupted database writes roll
+back as a unit; a failed import is retried on the next open. These earlier files were never deployed.
+
+Pruning a closed item cold-archives its complete thread, final snapshot and any carried legacy snapshot before
+removing its `conversations` and `carriedEntries` keys from the hot ledger. Previously orphaned keys follow the same
+path on the next change. Preserved unreadable entries are live: their conversation and carried-snapshot keys stay
+in the hot ledger until the entry is actually pruned, even when it has no archive yet. Active threads remain uncapped. The unchanged conversation route reads a pruned item
+from its latest archive version, and historical version reads remain available. A crash between archive and hot
+commit replays the durable intent without losing words. Merge and split still require open items.
+
+The `agenda-versions` worker owns SQLite opens, initialization, legacy JSONL parsing, reads and commits. The session
+transaction queue awaits each archive request before committing the ledger; no version writes run behind that queue.
+A busy disk delays that session's next change while other routes and streams keep running. Worker failures reject
+the request without falling back to disk IO on the main thread. The worker closes connections after each operation
+and ends after a minute idle. Both ends cache at most one immutable read version for fragment paging.
+
+`GET /v1/sessions/:id/agenda/:itemId/versions` lists them (and this device's last seen version),
+`GET …/versions/:version` fetches any one in full, and `PUT …/seen` records that this device opened the item at a
+version. The mark is per device (`agenda-seen.json`, `{ deviceId: { itemId: version } }`), monotonic (a device that
+has seen a later version keeps it), and refused for a version the item does not have.
+
+Declared GAPs: rolling a daemon back leaves the sidecar in place, and an older daemon does not write to it, so versions
+made meanwhile are missing; a snapshot is the item, so an item at the 1 MB transport bound writes a snapshot that size.
+
+### Merge
+
+`fy agenda merge A2 A5` merges A5 **into** A2 (`POST …/agenda` with `{ action: 'merge', id, from }`). The two
+conversations are interleaved by time, and all cards, card asks and links of both are kept (a merge that would pass a
+bound is refused, never trimmed). A2 keeps its state and its ask. A5 closes as `merged into !A2`, and the two point at
+each other (`mergedFrom` on A2, `mergedInto` on A5), A5's versions kept.
+
+Who may: the owner, or a lead over its own items and its sub-ferrets'. A merge is within one board, so across sessions
+only items in the same agenda home (one lineage) can be merged. Refused: an item with itself, into or from a done item,
+a gate, a notice or a card the daemon acts on, and a caller the item is not theirs to address.
+
+### Split
+
+`fy agenda split A5 --title … --premise … --context … "<ask>" [--move-cards F12,…] [--stage …]` raises a new item for
+the part of A5 that stopped passing the one-agenda test. The new item is the same ferret's, with its own ask and its own
+place in the owner's queue (one Needs-you entry per item); it and A5 point at each other (`splitFrom`, `splitInto`),
+and the cards named in `--move-cards` go along. A5 keeps its state, ask and conversation. Refused: a card A5 does not
+hold, a gate, a notice or a card the daemon acts on, and a request an open item of the ferret already makes.
+
+Card asks (cards waiting on the owner through an item) are not stored on the item yet; a merge and a split carry
+an item's cards, so they will carry its card asks when those move into agendas.
 
 ## Parked items
 
@@ -747,7 +906,7 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 ## Verbs
 
-`fy agenda add | edit | answer | rest | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
+`fy agenda add | edit | answer | rest | log | merge | split | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
 | Verb                                | Does                                                                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -759,6 +918,9 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                                                  |
 | `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
 | `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
+| `log <id> --reply\|--rest`          | Copy the owner's chat words onto the item verbatim, then answer or rest ([`fy agenda log`](#fy-agenda-log)).                               |
+| `merge <into> <from>`               | Merge `<from>` into `<into>`: one conversation, every card kept ([Merge](#merge)).                                                         |
+| `split <id> …`                      | Split a new item off `<id>`, linked both ways ([Split](#split)).                                                                           |
 | `edit <id> --back`                  | Retired: refused, naming `answer` and `edit --kind`.                                                                                       |
 | `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
 | `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
@@ -1259,6 +1421,15 @@ history entry is a key it refuses. A daemon therefore serves the items in two sh
   the exact clipped reply it received, the ledger transition restores the stored full reply before applying it;
   a legacy view never replaces the owner's words with a shortened answer.
 
+### The conversation (`agenda.conversation.1`)
+
+A daemon that stores the conversation, takes `log`, `merge` and `split`, and keeps versions reports
+`agenda.conversation.1` on `GET /v1/health`. Every new item field (`conversation`, `mergedFrom`, `mergedInto`,
+`splitFrom`, `splitInto`, `relatedTasks`) is optional, and the version routes are new, so an app or CLI from before
+reads every item; the CLI checks the feature first and says the daemon needs an update. The app ships before the daemon:
+the current app still reconstructs conversation from session transcripts (`item-conversation.ts`). Stored conversation
+rendering is deferred to PR 7; there is no history fallback in that reader.
+
 ### Both spellings, one window
 
 | Older name (still answered)               | Agenda name                       | Today                                                                      |
@@ -1292,15 +1463,16 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
   written only when every session succeeded, and the migration never stops the daemon starting.
 - **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
-- **The ledger says its shape** (`version`, 2 since the channel): it is read as 1 when absent and brought to 2 as it
-  is read ([the migration](#the-migration-ledger-version-2)). An older daemon reads a version-2 file as it always did
-  and drops the fields it does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the `version`; its
-  `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is left alone, and a
-  ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete lines as committed
-  history up to any mark ([a ledger with no cursor](#no-size-limit)), so no owner history is lost across
-  a downgrade and an upgrade. Two limits are declared: an uncommitted tail a later commit outlived (it lifted the
-  mark, and its cursor went with the downgrade) is adopted too, and a crash between a commit and the lifting of its
-  mark, followed by a downgrade before that session's next write, leaves that last append out.
+- **The ledger says its shape** (`version`, 4 since stored conversations): it is read as 1 when absent and brought to
+  4 as it is read ([the channel migration](#the-migration-ledger-version-2) and [the conversation
+  migration](#the-conversation)). An older daemon reads a version-4 file as it always did and drops the fields it
+  does not know (`resting`, `stage`, `ownerAnswer`…) on its next write, and with them the `archive` cursor and the
+  `version`; its `parked: replied` still says the item rests, so the next upgrade rests it again. The sidecar is
+  left alone, and a ledger that reads as version 1 with no cursor is upgraded by adopting the sidecar's complete
+  lines as committed history up to any mark ([a ledger with no cursor](#no-size-limit)), so no owner history is
+  lost across a downgrade and an upgrade. Two limits are declared: an uncommitted tail a later commit outlived (it
+  lifted the mark, and its cursor went with the downgrade) is adopted too, and a crash between a commit and the
+  lifting of its mark, followed by a downgrade before that session's next write, leaves that last append out.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
   one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same

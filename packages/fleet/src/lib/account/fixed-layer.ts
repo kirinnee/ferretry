@@ -450,14 +450,13 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /**
  * The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. It teaches the model first
  * (what an agenda is, the three-part test, search-check-open, the states, the type, splitting, chat discussion),
- * then the commands that open, answer and rest one. Conversation logging, split and merge commands join it
- * when they ship (docs/pack-mode.md keeps the room for them).
+ * then the commands that open, answer, rest, log, split and merge one (docs/pack-mode.md records their budget).
  */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. Split parts that stop fitting.`,
+    `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. \`split\` what stops fitting, \`merge\` twins.`,
     `Open: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<ask>"\`. Title ≤40, ask ≤80 (rest: \`--body\`, one-screen summary; full report: \`--link\`). Read cold: no ids/paths/jargon (\`--term "X=meaning"\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "<text>"\` returns it. \`rest <id> --why …\`=working; \`--stage\`, \`--where\`=now. Keep current (\`edit\`); only you mark it Done when nothing's left. Type: explainer→question→plan→tracker→test. Chat: their words verbatim on it + reply; link it; unsure: closest.`,
+    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working; \`--stage\`, \`--where\`=now. Keep current (\`edit\`); only you mark it Done when nothing's left. Type: explainer→question→plan→tracker→test. Chat: \`log <id> --reply|--rest\` puts their words on it verbatim; link it; unsure: closest.`,
     'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 

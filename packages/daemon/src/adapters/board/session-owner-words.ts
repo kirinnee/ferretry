@@ -84,11 +84,11 @@ const ownerPart = (by: QueueAuthor | undefined, text: string): string | null =>
   by === undefined ? ownerPartOf(text) : by.kind === 'owner' ? text : null;
 
 /** A person's message in the queue (one a ferret or Ferretry sent says so), as far as it is the owner's. */
-const queuedByOwner = (message: QueuedMessage): string | null =>
+export const queuedByOwner = (message: QueuedMessage): string | null =>
   message.sender === 'human' ? ownerPart(message.by, message.text) : null;
 
 /** A person's send (no sending session; a ferret's or Ferretry's says so), as far as it is the owner's. */
-const sentByOwner = (record: SendRecord): string | null =>
+export const sentByOwner = (record: SendRecord): string | null =>
   (record.senderKind ?? 'human') === 'human' && record.from === undefined ? ownerPart(record.by, record.message) : null;
 
 /** One turn document as read, or nothing worth keeping when it is plainly somebody else's. */

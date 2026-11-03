@@ -12,6 +12,8 @@ export * from './machine-agenda.ts';
 export * from './machine-migration.ts';
 export * from './observers.ts';
 export * from './owner-asks.ts';
+export * from './owner-chat.ts';
+export * from './versions.ts';
 export * from './reply-batch.ts';
 export * from './resurfacer.ts';
 export * from './rollup.ts';

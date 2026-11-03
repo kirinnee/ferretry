@@ -1385,3 +1385,143 @@ describe('attention routes for an older app', () => {
     should(item?.parked).containDeep({ reason: 'replied' });
   });
 });
+
+it('reads stored conversation through the mounted operator route and refuses invalid cursors', async () => {
+  // Arrange
+  const dispatch = fixture();
+  await dispatch(post(raise, agentIn('s1')));
+  await dispatch(post({ action: 'resolve', id: 'A1', response: { kind: 'other', answer: 'Use eu-west, please.' } }));
+
+  // Act
+  const response = await dispatch({ path: '/v1/sessions/s1/agenda/A1/conversation', headers: human });
+  const invalid = await dispatch({
+    path: '/v1/sessions/s1/agenda/A1/conversation',
+    headers: human,
+    query: [['offset', '-1']],
+  });
+
+  // Assert
+  should(response.status).equal(200);
+  should(jsonBody(response)).containDeep({
+    total: 1,
+    index: 0,
+    offset: 0,
+    entry: { by: 'owner', text: 'Use eu-west, please.', via: 'answer' },
+  });
+  should(response.headers.get('cache-control')).equal('no-store');
+  should(invalid.status).equal(400);
+});
+
+it('serves full versions, per-device seen marks and conversation mutations through the real route handlers', async () => {
+  // Arrange
+  const at = '2026-11-03T10:00:00.000Z';
+  const summary = { version: 1, at, by: 'ferret' as const, change: 'created', lifecycle: 'active' as const };
+  const item = {
+    id: 'A1',
+    source: 'agent-raised' as const,
+    sourceRef: null,
+    subject: 'Which region?',
+    why: 'A deploy is ready.',
+    waitingSince: at,
+    howToResolve: 'Choose a region.',
+    ask: { kind: 'open-question' as const },
+    raisedBy: 'agent' as const,
+    raisedBySession: 's1',
+    raisedByName: null,
+  };
+  const service = new AgendaService(
+    new FakeLedgerRepository(),
+    { now: () => at },
+    { has: async id => id === 's1' },
+    { raised: async () => undefined },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      find: async (_session, messageId) => ({
+        ok: true,
+        message: { messageId: messageId ?? 'owner-1', at, text: '    Use eu-west.\n' },
+      }),
+    },
+    {
+      record: async () => undefined,
+      list: async () => [summary],
+      get: async (_session, id, version) => (id === 'A1' && version === 1 ? { ...summary, item } : undefined),
+    },
+    { seen: async () => 1, mark: async (_session, _id, _device, version) => version },
+  );
+  const dispatcher = new ApiDispatcher(
+    new ApiRouter([...agendaRoutes(service, new FakeNotifications(), NO_HELD_REPLIES)]),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
+  const dispatch = (input: Parameters<typeof request>[0]) => dispatcher.dispatch(request(input));
+
+  // Act and assert: version reads and cursor errors.
+  const listed = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  should(listed.status).equal(200);
+  should(jsonBody(listed)).containDeep({ latest: 1, seen: 1, versions: [summary] });
+  const phone = await dispatch({
+    path: '/v1/sessions/s1/agenda/A1/versions',
+    device: { deviceId: 'phone', appSession: 'app' },
+  });
+  should(phone.status).equal(200);
+  const version = await dispatch({ path: '/v1/sessions/s1/agenda/A1/versions/1', headers: human });
+  should(version.status).equal(200);
+  should(jsonBody(version)).containDeep({ version: 1, item: { subject: item.subject } });
+  for (const [path, status] of [
+    ['/v1/sessions/s1/agenda/A1/versions/nope', 400],
+    ['/v1/sessions/s1/agenda/nope/versions', 400],
+    ['/v1/sessions/s1/agenda/A1/versions/2', 404],
+    ['/v1/sessions/missing/agenda/A1/versions', 404],
+    ['/v1/sessions/missing/agenda/A1/versions/1', 404],
+  ] as const)
+    should((await dispatch({ path, headers: human })).status).equal(status);
+  const marked = await dispatch({
+    method: 'PUT',
+    path: '/v1/sessions/s1/agenda/A1/seen',
+    headers: human,
+    body: '{"version":1}',
+  });
+  should(marked.status).equal(200);
+  should(jsonBody(marked)).deepEqual({ seen: 1 });
+  should(
+    (await dispatch({ method: 'PUT', path: '/v1/sessions/s1/agenda/A1/seen', headers: human, body: '{"version":2}' }))
+      .status,
+  ).equal(400);
+  const emptyList = await fixture()({ path: '/v1/sessions/s1/agenda/A1/versions', headers: human });
+  should(jsonBody(emptyList)).containDeep({ latest: 0, versions: [] });
+
+  // The shipped mutation verbs run through the parsed API boundary, with source text held by the daemon.
+  for (const subject of ['Which region?', 'Which quota?'])
+    should((await dispatch(post({ ...raise, subject }, agentIn('s1')))).status).equal(200);
+  should(
+    (await dispatch(post({ action: 'log', id: 'A1', mode: 'reply', text: 'OK', messageId: 'owner-1' }, agentIn('s1'))))
+      .status,
+  ).equal(200);
+  should((await dispatch(post({ action: 'merge', id: 'A1', from: 'A2' }, agentIn('s1')))).status).equal(200);
+  const split = await dispatch(
+    post(
+      {
+        action: 'split',
+        id: 'A1',
+        item: {
+          subject: 'Which cache?',
+          title: 'Cache',
+          why: 'A cache is needed.',
+          premise: 'A cache is needed.',
+          context: 'Cache rollout has its own schedule.',
+          howToResolve: 'Pick a cache.',
+          ask: { kind: 'open-question' },
+        },
+      },
+      agentIn('s1'),
+    ),
+  );
+  should(split.status).equal(200);
+  should(jsonBody(split).items).containDeep([{ id: 'A3', splitFrom: 'A1' }]);
+});

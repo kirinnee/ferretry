@@ -1,14 +1,65 @@
 import { randomUUID } from 'node:crypto';
-import { AGENDA_ARCHIVE_FILE, type AgendaArchiveRecord, AgendaArchiveRecordSchema } from '../../lib/agenda/archive.ts';
+import {
+  AgendaConversationEntrySchema,
+  type AgendaVersionSummary,
+  AgendaVersionSummarySchema,
+} from '@ferretry/protocol';
+import { z } from 'zod';
+import type { AgendaVia } from '../../lib/agenda/service.ts';
+import type { AgendaActor, AgendaEntry } from '../../lib/agenda/state-machine.ts';
+import { parseAgendaEntry } from '../../lib/agenda/state-machine.ts';
+import type { AgendaVersionDraft } from '../../lib/agenda/versions.ts';
+import {
+  type AgendaChangeEffect,
+  AgendaChangeEffectSchema,
+  type AgendaChangeOutboxRuntime,
+  FileAgendaChangeOutbox,
+} from './file-agenda-change-outbox.ts';
+
+export const AGENDA_VERSION_PENDING = 'agenda-versions.pending.json';
+const EntrySchema = z.unknown().transform((value, context) => {
+  const entry = parseAgendaEntry(value, false, []);
+  if (entry !== null) return entry;
+  context.addIssue({ code: 'custom', message: 'invalid prepared agenda entry' });
+  return z.NEVER;
+});
+const PreparedSchema = z.strictObject({
+  ledger: z.string(),
+  effect: AgendaChangeEffectSchema.optional(),
+  drafts: z.array(
+    z.strictObject({
+      mutationId: z.string().min(1),
+      entry: EntrySchema,
+      conversation: z.array(AgendaConversationEntrySchema).optional(),
+      beforeConversation: z.array(AgendaConversationEntrySchema).optional(),
+      before: EntrySchema.optional(),
+      at: z.string().datetime({ offset: true }),
+      by: AgendaVersionSummarySchema.shape.by,
+      change: z.string(),
+    }),
+  ),
+});
+
+import {
+  AGENDA_ARCHIVE_FILE,
+  type AgendaArchiveCursor,
+  AgendaArchiveCursorSchema,
+  type AgendaArchiveRecord,
+  AgendaArchiveRecordSchema,
+} from '../../lib/agenda/archive.ts';
 import {
   AGENDA_FILES,
+  AGENDA_LEDGER_VERSION,
   type AgendaFileStore,
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
+  type AgendaVersionStore,
   agendaLedgerDocument,
   isAgendaSessionId,
+  NO_AGENDA_VERSIONS,
   parseAgendaLedger,
+  versionDrafts,
 } from '../../lib/agenda/index.ts';
 import {
   type AppendOnlyFiles,
@@ -43,6 +94,15 @@ interface CachedLedger {
   readonly ledger: AgendaLedger;
 }
 
+function archiveRecords(text: string): AgendaArchiveRecord[] {
+  if (text === '') return [];
+  if (!text.endsWith('\n')) throw new Error('incomplete agenda history');
+  return text
+    .slice(0, -1)
+    .split('\n')
+    .map(line => AgendaArchiveRecordSchema.parse(JSON.parse(line)));
+}
+
 /**
  * Durable per-session agenda storage, as `agenda.json` (a board written before the rename is read from
  * `attention.json` until the migration moves it, and every write goes to `agenda.json`). The owning daemon process supplies one
@@ -60,15 +120,30 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
   private readonly files: IdentifiedAgendaFiles;
+  readonly changeOutbox?: FileAgendaChangeOutbox;
 
   /** `ready` settles when the agenda files migration has finished; no read or write goes to disk before it. */
   constructor(
     sessionDirectory: (sessionId: string) => string,
-    uniqueId: () => string = randomUUID,
+    private readonly uniqueId: () => string = randomUUID,
     private readonly ready: Promise<unknown> = Promise.resolve(),
     files?: IdentifiedAgendaFiles,
+    /** Where every committed change is kept as a full version; absent, none is. */
+    private readonly versions: AgendaVersionStore = NO_AGENDA_VERSIONS,
+    changeOutboxRuntime?: AgendaChangeOutboxRuntime,
   ) {
     this.files = files ?? new FileAgendaFileStore(sessionDirectory, uniqueId);
+    if (versions !== NO_AGENDA_VERSIONS)
+      this.changeOutbox = new FileAgendaChangeOutbox(
+        this.files,
+        (session, work) =>
+          this.serial(session, async () => {
+            // No event may be acknowledged while its intent can still replay and enqueue it again.
+            await this.recoverVersions(session);
+            return work();
+          }),
+        changeOutboxRuntime,
+      );
   }
 
   file(sessionId: string): string {
@@ -79,6 +154,13 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   async read(sessionId: string): Promise<AgendaLedger | null> {
     this.assertSessionId(sessionId);
     await this.ready;
+    return this.serial(sessionId, async () => {
+      await this.recoverVersions(sessionId);
+      return this.load(sessionId);
+    });
+  }
+
+  private async load(sessionId: string): Promise<AgendaLedger | null> {
     // THE READER'S RULE (`readAgendaFile`): the new name when it exists, else the old one.
     for (const name of [AGENDA_FILES.ledger.current, AGENDA_FILES.ledger.legacy]) {
       const now = await this.files.identity(sessionId, name);
@@ -107,44 +189,183 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   }
 
   private async parse(sessionId: string, name: string, text: string): Promise<AgendaLedger> {
-    let ledger: AgendaLedger | null;
-    let rewrittenByOlderDaemon: boolean;
+    let raw: Record<string, unknown> | null;
+    let cursor: AgendaArchiveCursor | undefined;
     try {
-      const raw: unknown = JSON.parse(text);
-      ledger = parseAgendaLedger(raw, sessionId);
-      if (ledger === null) throw new Error('invalid ledger');
-      const version = (raw as { readonly version?: unknown }).version;
-      rewrittenByOlderDaemon = version === undefined || version === 1;
+      raw = JSON.parse(text) as Record<string, unknown> | null;
+      cursor = AgendaArchiveCursorSchema.optional().parse(raw?.archive);
     } catch {
       throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
     }
+    const version = raw?.version;
     // An older daemon's write drops the cursor and the version but leaves the sidecar: its complete lines are
     // the history it was keeping, so they are adopted as committed rather than cut as an uncommitted tail. A
     // pre-cursor ledger whose own write failed after an append looks the same, so the append's mark stops the
     // adoption where that never-committed append began. The history is read before the mark: a write racing
     // this read marks before it appends, so any appended byte read here has its mark there to be read next.
-    if (!rewrittenByOlderDaemon || ledger.archive !== undefined) return ledger;
-    const history = await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0);
-    const uncommitted = await uncommittedLogFrom(this.files, sessionId, AGENDA_ARCHIVE_FILE);
-    const adopted = completeLinesCursor(uncommitted === undefined ? history : history.subarray(0, uncommitted));
-    return adopted.count === 0 ? ledger : { ...ledger, archive: adopted };
+    let history: Buffer | undefined;
+    let adopted: AgendaArchiveCursor | undefined;
+    if ((version === undefined || version === 1) && cursor === undefined) {
+      history = Buffer.from(await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0));
+      const uncommitted = await uncommittedLogFrom(this.files, sessionId, AGENDA_ARCHIVE_FILE);
+      const lines = completeLinesCursor(uncommitted === undefined ? history : history.subarray(0, uncommitted));
+      if (lines.count > 0) adopted = lines;
+    }
+    const committed = cursor ?? adopted;
+    try {
+      let archived: AgendaArchiveRecord[] = [];
+      if (version !== AGENDA_LEDGER_VERSION && committed !== undefined && committed.bytes > 0) {
+        // Read-time migration reads only the committed prefix. An interrupted or concurrent append beyond
+        // its cursor belongs to a later hot ledger, never this snapshot. Modern ledgers never read this file.
+        history ??= Buffer.from(await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0));
+        if (history.length < committed.bytes) throw new Error('incomplete agenda history');
+        archived = archiveRecords(history.subarray(0, committed.bytes).toString('utf8'));
+      }
+      const ledger = parseAgendaLedger(raw, sessionId, archived);
+      if (ledger === null) throw new Error('invalid ledger');
+      return adopted === undefined ? ledger : { ...ledger, archive: adopted };
+    } catch {
+      throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
+    }
   }
 
-  async transact(sessionId: string, apply: (current: AgendaLedger | null) => AgendaMutation): Promise<AgendaMutation> {
+  async transact(
+    sessionId: string,
+    apply: (current: AgendaLedger | null) => AgendaMutation,
+    by: AgendaVersionSummary['by'] = 'daemon',
+    provenance?: { readonly actor: AgendaActor; readonly via: AgendaVia },
+  ): Promise<AgendaMutation> {
     this.assertSessionId(sessionId);
     return await this.serial(sessionId, async () => {
-      let current = await this.read(sessionId);
+      await this.ready;
+      await this.recoverVersions(sessionId);
+      let current = await this.load(sessionId);
       // Migrate old in-ledger history before applying even an unchanged command. Appending precedes the
       // atomic cursor write; a retry after a crash cuts the uncommitted append and writes it once again.
       if ((current?.archivePending?.length ?? 0) > 0 && current !== null)
         current = await this.write(sessionId, current);
       const mutation = apply(current);
       if (mutation.ok && mutation.changed) {
-        const ledger = await this.write(sessionId, mutation.ledger);
+        if (this.versions === NO_AGENDA_VERSIONS)
+          return { ...mutation, ledger: await this.write(sessionId, mutation.ledger) };
+        const drafts = [...versionDrafts(current, mutation, by)];
+        const prepared = await this.coldVersions(sessionId, mutation.ledger, current, drafts);
+        const mutationId = this.uniqueId();
+        const identified = drafts.map((draft, index) => ({ ...draft, mutationId: `${mutationId}:${index}` }));
+        const effect: AgendaChangeEffect | undefined =
+          provenance === undefined || mutation.change === 'unchanged'
+            ? undefined
+            : {
+                id: mutationId,
+                event: {
+                  ...provenance,
+                  change: mutation.change,
+                  snapshot: mutation.snapshot,
+                  ...(mutation.item === undefined ? {} : { item: mutation.item }),
+                  ...(mutation.addressed === undefined ? {} : { addressed: mutation.addressed }),
+                },
+              };
+        // This fsynced intent precedes archive requests and the hot commit. Recovery always replays the SAME
+        // snapshots and per-item identity, including a worker commit whose acknowledgement was lost.
+        await this.files.writeAtomic(
+          sessionId,
+          AGENDA_VERSION_PENDING,
+          JSON.stringify({
+            ledger: agendaLedgerDocument(prepared),
+            drafts: identified,
+            effect,
+          }),
+        );
+        const ledger = await this.commitVersions(sessionId, prepared, identified, effect);
         return { ...mutation, ledger };
       }
       return mutation;
     });
+  }
+
+  private async recoverVersions(sessionId: string): Promise<AgendaLedger | undefined> {
+    const text = await this.files.read(sessionId, AGENDA_VERSION_PENDING);
+    if (text === undefined) return undefined;
+    if (this.versions === NO_AGENDA_VERSIONS)
+      throw new Error('agenda version archive is required to recover this transaction');
+    const prepared = PreparedSchema.parse(JSON.parse(text));
+    const ledger = await this.parse(sessionId, AGENDA_VERSION_PENDING, prepared.ledger);
+    return this.commitVersions(sessionId, ledger, prepared.drafts, prepared.effect);
+  }
+
+  private async commitVersions(
+    sessionId: string,
+    ledger: AgendaLedger,
+    drafts: readonly AgendaVersionDraft[],
+    effect?: AgendaChangeEffect,
+  ): Promise<AgendaLedger> {
+    await this.versions.record(sessionId, drafts);
+    const committed = await this.write(sessionId, ledger);
+    if (effect !== undefined) await this.changeOutbox?.append(sessionId, effect);
+    await this.files.remove(sessionId, AGENDA_VERSION_PENDING);
+    return committed;
+  }
+
+  /** Cold threads leave the hot maps only after their complete snapshots have been acknowledged by SQLite. */
+  private async coldVersions(
+    sessionId: string,
+    ledger: AgendaLedger,
+    before: AgendaLedger | null,
+    drafts: AgendaVersionDraft[],
+  ): Promise<AgendaLedger> {
+    const live = new Set(ledger.entries.map(entry => entry.item.id));
+    // Raw entries remain in agenda.json until repaired or explicitly pruned. Their sidecars are still live too.
+    for (const raw of ledger.unreadable ?? []) {
+      const preserved = z.object({ item: z.object({ id: z.string() }) }).safeParse(raw);
+      if (preserved.success) live.add(preserved.data.item.id);
+    }
+    const conversations = { ...ledger.conversations };
+    const carriedEntries = { ...ledger.carriedEntries };
+    for (const id of new Set([...Object.keys(conversations), ...Object.keys(carriedEntries)])) {
+      if (live.has(id)) continue;
+      let entry = before?.entries.find(entry => entry.item.id === id);
+      if (entry === undefined) {
+        const latest = (await this.versions.list(sessionId, id)).at(-1);
+        const version = latest === undefined ? undefined : await this.versions.get(sessionId, id, latest.version);
+        const records =
+          version === undefined ? [...(await this.archiveInQueue(sessionId)), ...(ledger.archivePending ?? [])] : [];
+        const record = records.findLast(record => record.kind === 'version' && record.id === id);
+        const item = version?.item ?? (record?.kind === 'version' ? record.item : undefined);
+        if (item === undefined) {
+          entry = carriedEntries[id];
+          if (entry === undefined) throw new Error('missing cold agenda snapshot');
+        } else {
+          const origin =
+            item.raisedBy === 'agent'
+              ? { kind: 'agent' as const, sessionId: item.raisedBySession ?? sessionId, name: item.raisedByName }
+              : item.raisedBy === 'human'
+                ? { kind: 'human' as const }
+                : { kind: 'daemon' as const, cause: 'system' as const };
+          entry = { origin, lifecycle: 'resolvedAt' in item ? 'addressed' : 'active', item } as AgendaEntry;
+        }
+      }
+      const carried = carriedEntries[id];
+      if (carried !== undefined)
+        drafts.push({
+          entry: carried,
+          at: ledger.updatedAt,
+          by: 'daemon',
+          change: 'carried',
+          conversation: carried.item.conversation ?? [],
+        });
+      drafts.push({
+        entry,
+        before: carriedEntries[id] ?? entry,
+        beforeConversation: conversations[id] ?? entry.item.conversation ?? [],
+        conversation: conversations[id] ?? entry.item.conversation ?? [],
+        at: ledger.updatedAt,
+        by: 'daemon',
+        change: 'archived',
+      });
+      delete conversations[id];
+      delete carriedEntries[id];
+    }
+    return { ...ledger, conversations, carriedEntries };
   }
 
   /**
@@ -156,16 +377,18 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     this.assertSessionId(sessionId);
     await this.ready;
     return await this.serial(sessionId, async () => {
-      const committed = (await this.read(sessionId))?.archive?.bytes ?? 0;
-      if (committed === 0) return [];
-      const bytes = Buffer.from((await this.files.read(sessionId, AGENDA_ARCHIVE_FILE)) ?? '');
-      const text = bytes.subarray(0, committed).toString('utf8');
-      if (bytes.length < committed || !text.endsWith('\n')) throw new Error('incomplete agenda history');
-      return text
-        .slice(0, -1)
-        .split('\n')
-        .map(line => AgendaArchiveRecordSchema.parse(JSON.parse(line)));
+      await this.recoverVersions(sessionId);
+      return this.archiveInQueue(sessionId);
     });
+  }
+
+  /** The committed history only, inside the session's queue: bytes past the ledger's cursor were never committed. */
+  private async archiveInQueue(sessionId: string): Promise<AgendaArchiveRecord[]> {
+    const committed = (await this.load(sessionId))?.archive?.bytes ?? 0;
+    if (committed === 0) return [];
+    const bytes = Buffer.from(await this.files.readAfter(sessionId, AGENDA_ARCHIVE_FILE, 0));
+    if (bytes.length < committed) throw new Error('incomplete agenda history');
+    return archiveRecords(bytes.subarray(0, committed).toString('utf8'));
   }
 
   private async write(sessionId: string, ledger: AgendaLedger): Promise<AgendaLedger> {

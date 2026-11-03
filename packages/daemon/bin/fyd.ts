@@ -130,6 +130,8 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
+import { SessionOwnerChat } from '../src/adapters/agenda/session-owner-chat.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
@@ -3735,7 +3737,12 @@ function createSessionSendSubsystem(
         );
         // Still held to be combined with others: say so, so the sender does not read "queued" as stuck.
         const held = queued?.state === 'queued' && queued.label !== undefined && queued.holdUntil !== undefined;
-        if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
+        if (turn.referenced.length > 0) {
+          await conversation.settle(id, turn, request.message, {
+            messageId: enqueued.message.id,
+            at: enqueued.message.enqueuedAt,
+          });
+        }
         if (person) await instructions.queueIfStale(id);
         return {
           ...(await view(id, 'took the message')),
@@ -3760,7 +3767,12 @@ function createSessionSendSubsystem(
         .catch((error: unknown) => sendRefusal(error));
       // Only once the words were accepted: an item must never close as replied for a message the
       // ferret was not given.
-      if (turn.referenced.length > 0) await conversation.settle(id, turn, request.message);
+      if (turn.referenced.length > 0) {
+        await conversation.settle(id, turn, request.message, {
+          messageId: outcome.record.sendId,
+          at: outcome.record.acceptedAt,
+        });
+      }
       if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),
@@ -9773,6 +9785,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     webrtcEngine: new NodeDataChannelEngine(),
     probeWorkers: async () => [
+      await probeBundledWorker('agenda-versions'),
       await probeBundledWorker('analytics-fold'),
       await probeBundledWorker('session'),
       await probeBundledWorker('housekeeping'),
@@ -10757,10 +10770,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           log: line => process.stderr.write(`${line}\n`),
         },
       );
+      // Every version of an item, and which version each device last opened, beside the board (docs/agenda.md § Versions).
+      const agendaSessionDirectory = (id: string): string => createSessionPaths(paths, parseSessionId(id)).directory;
+      const agendaVersions = new FileAgendaVersionStore(agendaSessionDirectory);
       const agendaBoards = new FileAgendaLedgerRepository(
-        id => createSessionPaths(paths, parseSessionId(id)).directory,
+        agendaSessionDirectory,
         undefined,
         agendaFilesMigrated,
+        undefined,
+        agendaVersions,
       );
       // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
       const machineBoards = new FileAgendaLedgerRepository(
@@ -11086,6 +11104,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           resolve: async (...parameters) => await machineAgenda.resolve(...parameters),
           list: async () => await machineAgenda.list(),
         },
+        // `fy agenda log` copies the owner's words from this session's own queue and send ledger.
+        new SessionOwnerChat(sessionQueue, sendLedger),
+        agendaVersions,
+        new FileAgendaSeenStore(agendaSessionDirectory),
       );
       // The machine agenda: the same agenda machinery over its own ledger. Nothing a ferret sends reaches it (no
       // session route names it); the daemon raises through `machineAgenda`, the owner answers over /v1/machine/agenda.

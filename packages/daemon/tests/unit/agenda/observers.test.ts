@@ -129,6 +129,53 @@ describe('Agenda board observers', () => {
     should(repository.ledgers.get(SESSION)?.entries).have.length(1);
   });
 
+  it('should preserve a proven ancestor identity in change effects and refuse an unrelated agent', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const agenda = new AgendaService(
+      new MemoryRepository(),
+      { now: () => NOW },
+      { has: async () => true },
+      { raised: async () => {} },
+      changes,
+      undefined,
+      { leadOf: async id => (id === 'child' ? 'lead' : undefined), addressOf: async id => id },
+    );
+    await agenda.raise('child', ASK, HUMAN);
+
+    // Act
+    const refused = await agenda.edit(
+      'child',
+      'A1',
+      { subject: 'Unrelated' },
+      {
+        kind: 'agent',
+        sessionId: 'stranger',
+        name: 'Stranger',
+      },
+    );
+    const edited = await agenda.edit(
+      'child',
+      'A1',
+      { subject: 'Approved edit' },
+      {
+        kind: 'agent',
+        sessionId: 'lead',
+        name: 'Lead',
+      },
+    );
+
+    // Assert
+    should(refused).containDeep({ ok: false, error: { code: 'forbidden' } });
+    should(edited).containDeep({ ok: true, changed: true });
+    should(changes.seen.at(-1)?.change.actor).deepEqual({
+      kind: 'agent',
+      sessionId: 'lead',
+      name: 'Lead',
+      overSubFerret: true,
+    });
+  });
+
   it('should tell every observer even when one before it fails', async () => {
     // Arrange
     const after = new RecordingChanges();
@@ -149,6 +196,34 @@ describe('Agenda board observers', () => {
 
     // Assert
     should(after.seen).have.length(1);
+  });
+
+  it('should propagate critical acceptance failures through nested fanouts after telling every observer', async () => {
+    // Arrange
+    const after = new RecordingChanges();
+    const error = new Error('reply queue unavailable');
+    const delivery = new AgendaReplyDelivery(
+      {
+        add: async () => {
+          throw error;
+        },
+      },
+      'fy',
+    );
+    const changes = new RecordingChanges();
+    const agenda = service(new MemoryRepository(), changes);
+    await agenda.raise(SESSION, ASK, AGENT);
+    await agenda.resolve(SESSION, 'A1', HUMAN, 'All done');
+    const change = changes.seen.at(-1)?.change as AgendaBoardChange;
+    const fanout = new AgendaChangeFanout([new AgendaChangeFanout([delivery]), after]);
+
+    // Act + Assert
+    await should(fanout.changed(SESSION, change)).be.rejectedWith('agenda reply delivery was not durably accepted');
+    should(after.seen).have.length(1);
+    // Legacy repositories still keep their committed board if critical delivery fails.
+    const legacy = service(new MemoryRepository(), delivery);
+    await legacy.raise(SESSION, ASK, AGENT);
+    should(await legacy.resolve(SESSION, 'A1', HUMAN, 'All done')).containDeep({ ok: true });
   });
 
   it('should project the board as it is NOW, not as the change described it', async () => {

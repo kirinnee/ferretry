@@ -8,9 +8,11 @@ import type {
   AgendaCommandOptions,
   AgendaController,
   AgendaEditOptions,
+  AgendaLogOptions,
   AgendaResolveOptions,
   AgendaRestOptions,
   AgendaSnoozeOptions,
+  AgendaSplitOptions,
   AgendaStepOptions,
   AgendaSurfaceOptions,
 } from './controller.ts';
@@ -380,6 +382,58 @@ function mountVerbs(
       .option('-w, --why <line>', 'REQUIRED: what you are doing about it, in a line'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.rest(id, merged<AgendaRestOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('log')
+      .description(
+        "keep what the owner said in chat on the item, word for word: you give YOUR words, the daemon copies theirs from this session's chat",
+      )
+      .argument('<id>', 'the item reference, like !A3')
+      .option('--reply <text>', 'your answer to what they said; the item goes back to their list, in its old place')
+      .option('--rest <text>', 'what you are doing about it; the item rests as working')
+      .option('--message <id>', 'log this chat message of theirs instead of the latest')
+      .addHelpText(
+        'after',
+        '\nOne of --reply or --rest. Their words are refused when they are not theirs, not from this session, or already logged.',
+      ),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.log(id, merged<AgendaLogOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('merge')
+      .description(
+        'merge a duplicate into an item: both conversations (by time), every card and link are kept; the duplicate closes as merged',
+      )
+      .argument('<into>', 'the item that stays, like !A2')
+      .argument('<from>', 'the item that is absorbed, like !A5'),
+  ).action(async (into: string, from: string, _flags: unknown, command: Command) => {
+    await controller.merge(into, from, merged(command));
+  });
+
+  scoped(
+    agenda
+      .command('split')
+      .description(
+        'split a new item off one that grew two asks: written as an add is, linked both ways, named cards moved to it',
+      )
+      .argument('<id>', 'the item to split, like !A5')
+      .argument('<ask...>', "the NEW item's ask: one line naming what the owner must decide or do")
+      .option('-t, --title <text>', 'REQUIRED: what the new item is about, plain words')
+      .option('--premise <point>', 'the situation (repeat for more points)', collect, [])
+      .option('-c, --context <point>', 'the facts around it (repeat for more points)', collect, [])
+      .option('--decided <point>', 'an earlier answer that bears on it (repeat)', collect, [])
+      .option('--still-open <point>', 'what is still open to decide (repeat)', collect, [])
+      .option(`-k, --kind <kind>`, `what the owner does: ${ASK_KIND_NAMES.join(', ')}`)
+      .option('--stage <stage>', 'explainer, question, plan, tracker or test')
+      .option('--move-cards <cards>', 'cards of the item that go to the new one, like F12,F13')
+      .option('--body-file <path>', 'a Markdown file for the new item, or - for stdin')
+      .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin'),
+  ).action(async (id: string, words: string[], _flags: unknown, command: Command) => {
+    await controller.split(id, words, merged<AgendaSplitOptions>(command));
   });
 
   scoped(
