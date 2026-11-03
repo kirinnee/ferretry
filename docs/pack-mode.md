@@ -95,8 +95,9 @@ example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,
 paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276, the measured total 7,725 → 7,716
 (7,730 counting the 14 section-separator characters), leaving 134 characters under the 7,850 cap (120 counting the
 separators). The agenda body rule (keep the body a one-screen summary; link the full report) then took the agenda
-section 1,276 → 1,319 (cap 1,290 → 1,330), so the measured total is 7,759 (7,773 counting the separators), leaving 91
-characters under the 7,850 cap (77 counting the separators). The whole-prompt cap is unchanged.
+section 1,276 → 1,319 (cap 1,290 → 1,330). With the send-label rule that took Pack to 1,026, the measured total is 7,814
+(7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The
+whole-prompt cap is unchanged.
 
 ## The routing prompt
 
