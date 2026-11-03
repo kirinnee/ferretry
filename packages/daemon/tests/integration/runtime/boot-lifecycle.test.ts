@@ -2988,7 +2988,8 @@ describe('daemon boot lifecycle', () => {
       await fetch(`${sessions}/${recipient.config.id}/send`, {
         method: 'POST',
         headers: { ...cli, ...headers, 'x-fy-request-id': requestId },
-        body: JSON.stringify({ message }),
+        // A blocker, so the ferret's message is handed over now: an unlabelled one is an action and waits out its window.
+        body: JSON.stringify({ message, label: 'blocker' }),
       });
 
     // Act
