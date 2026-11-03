@@ -15,13 +15,10 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   agentSetupPrompt,
-  DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
-  DAEMON_STATUS_COMMAND,
   installChannel,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
-  VERIFY_COMMAND,
 } from '../../../src/features/onboarding/onboarding-model.ts';
 import {
   BriefStage,
@@ -58,7 +55,7 @@ const visibleCommand = (container: HTMLElement): string =>
 
 describe('the install stage', () => {
   it('puts the detected install command and the daemon start in ONE block to copy', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="apt" onAgentInstead={() => {}} />);
+    const view = await mount(<InstallStage write={async () => {}} channel="apt" />);
 
     // Verbatim from the pinned channel table, never reworded, then the start.
     expect(visibleCommand(view.container)).toBe(`${installChannel('apt').command}\n${DAEMON_START_COMMAND}`);
@@ -68,55 +65,20 @@ describe('the install stage', () => {
     await view.unmount();
   });
 
-  it('folds the check, the service and the agent route away, still there', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="apt" onAgentInstead={() => {}} />);
+  it('folds ONE disclosure away, the service, and drops the three that asked questions nobody had', async () => {
+    const view = await mount(<InstallStage write={async () => {}} channel="apt" />);
 
-    const check = aside(view.container, 'Check it is running');
-    expect(check.open).toBe(false);
-    expect(check.textContent).toContain(VERIFY_COMMAND);
-    expect(check.textContent).toContain(DAEMON_STATUS_COMMAND);
-    expect(check.textContent).toContain(DAEMON_SERVING_OUTPUT);
     expect(aside(view.container, 'Keep it running after a reboot').open).toBe(false);
-    expect(aside(view.container, 'Rather have an agent do it?').open).toBe(false);
-    // No escape from an assumption nobody made: this reader chose the machine.
+    expect(view.container.querySelectorAll('[data-onboarding-aside]')).toHaveLength(1);
+    expect(view.container.querySelector('[data-onboarding-agent-instead]')).toBeNull();
     expect(view.container.querySelector('[data-onboarding-other-machine]')).toBeNull();
     // The prompt itself lives on the agent route's own page, not here.
     expect(view.container.querySelector('[data-onboarding-prompt]')).toBeNull();
     await view.unmount();
   });
 
-  it('changes answer to an agent instead of restating what an agent would do', async () => {
-    const switched: string[] = [];
-    const view = await mount(
-      <InstallStage write={async () => {}} channel="apt" onAgentInstead={() => switched.push('agent')} />,
-    );
-
-    await click(must(view.container.querySelector('[data-onboarding-agent-instead]'), 'the change-answer control'));
-    expect(switched).toEqual(['agent']);
-    await view.unmount();
-  });
-
-  it('offers a way out of an ASSUMED machine, from the screen the assumption is wrong on', async () => {
-    // A reader who did not read the screen before this is looking at commands for
-    // the wrong host. The way out has to be here, not only back there.
-    const switched: string[] = [];
-    const view = await mount(
-      <InstallStage
-        write={async () => {}}
-        channel="apt"
-        onAgentInstead={() => {}}
-        onOtherMachine={() => switched.push('other')}
-      />,
-    );
-
-    expect(aside(view.container, 'Setting up a different machine?').open).toBe(false);
-    await click(must(view.container.querySelector('[data-onboarding-other-machine]'), 'the escape control'));
-    expect(switched).toEqual(['other']);
-    await view.unmount();
-  });
-
   it('keeps the other platforms behind a link, then offers the named routes as an even grid', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="brew" onAgentInstead={() => {}} />);
+    const view = await mount(<InstallStage write={async () => {}} channel="brew" />);
 
     // Collapsed by default: the detected route is the page, the rest is a link.
     expect(view.container.querySelector('[role="toolbar"]')).toBeNull();
@@ -145,7 +107,7 @@ describe('the install stage', () => {
   });
 
   it('says the generic fallback is a fallback, and calls the link "Other platforms"', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="curl" onAgentInstead={() => {}} />);
+    const view = await mount(<InstallStage write={async () => {}} channel="curl" />);
 
     expect(view.container.querySelector('[data-onboarding-fallback-note]')).not.toBeNull();
     expect(must(view.container.querySelector('[data-onboarding-other-platforms]'), 'the link').textContent).toBe(
@@ -173,6 +135,32 @@ describe('the brief stage', () => {
     // Scrolls in its own box, so a thirty-line prompt cannot push the next action off a phone.
     expect(prompt.className).toContain('overflow-auto');
     await view.unmount();
+  });
+
+  it('steps the copy down to a plain button while the pairing screen has its own primary', async () => {
+    const resting = await mount(
+      <BriefStage write={async () => {}} target="this" plainUrl={PLAIN_URL} pairing={<p>the pairing screen</p>} />,
+    );
+    expect(
+      must(resting.container.querySelector('[data-onboarding-copy="Copy prompt"]'), 'resting').getAttribute(
+        'data-variant',
+      ),
+    ).toBe('primary');
+    await resting.unmount();
+
+    const engaged = await mount(
+      <BriefStage
+        write={async () => {}}
+        target="this"
+        plainUrl={PLAIN_URL}
+        pairing={<p>the pairing screen</p>}
+        engaged
+      />,
+    );
+    const copy = must(engaged.container.querySelector('[data-onboarding-copy="Copy prompt"]'), 'engaged');
+    expect(copy.hasAttribute('data-variant')).toBe(false);
+    expect(copy.textContent).toBe('Copy prompt');
+    await engaged.unmount();
   });
 
   it('says what finishes the page, and puts the pairing surface after it', async () => {

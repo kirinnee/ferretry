@@ -130,6 +130,8 @@ export interface CopyActionProps {
   /** The visible name, which is also the accessible one: "Copy prompt". */
   readonly label: string;
   readonly write: ClipboardWriter;
+  /** Another control on the page is the primary action right now, so this one is drawn as a plain button. */
+  readonly demoted?: boolean;
 }
 
 /**
@@ -141,14 +143,14 @@ export interface CopyActionProps {
  * thing to press and has to look like it. The label turns to "Copied" in place,
  * with the tick, so the state is never colour alone.
  */
-export function CopyAction({ text, label, write }: CopyActionProps) {
+export function CopyAction({ text, label, write, demoted = false }: CopyActionProps) {
   const [state, copy] = useCopy(text, write);
   return (
     <>
       <button
         type="button"
         className="kt-btn min-h-[44px] w-full"
-        data-variant="primary"
+        {...(demoted ? {} : { 'data-variant': 'primary' })}
         onClick={copy}
         data-onboarding-copy={label}
       >

@@ -417,12 +417,17 @@ const SECTIONS = [
   // share sheet and the page's own address.
   'harness-onboarding-brief',
   'harness-onboarding-brief-elsewhere',
+  // The composed states: the embedded pairing screen confirming a pasted link, and failed.
+  'harness-onboarding-brief-confirm',
+  'harness-onboarding-brief-failed',
   // By hand, this computer: install and start, then open, then the optional phone.
   'harness-onboarding-local',
   'harness-onboarding-handoff',
   // "Another computer, by hand" is ONE page, the same on a phone and on a computer.
   'harness-onboarding-elsewhere',
   'harness-onboarding-elsewhere-mobile',
+  'harness-onboarding-elsewhere-confirm',
+  'harness-onboarding-elsewhere-failed',
   // Arrived holding a link: one page, `fy pair` and the scan.
   'harness-onboarding-pair',
   // The two picker fields AT REST, and an unreadable roster beside a field that

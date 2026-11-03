@@ -324,6 +324,26 @@ describe('PairingScreen exchange', () => {
     await screen.unmount();
   });
 
+  it('tells its host which stage it is in, so the host can step its own primary down', async () => {
+    const stages: string[] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onStageChange: kind => stages.push(kind),
+      onPair: async () => {
+        throw new Error('Failed to fetch');
+      },
+    });
+    expect(stages).toEqual(['confirm']);
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+    expect(stages.at(0)).toBe('confirm');
+    expect(stages.at(-1)).toBe('failed');
+
+    await interact(() => buttonNamed(screen.container, 'Start over').click());
+    expect(stages.at(-1)).toBe('browse');
+    await screen.unmount();
+  });
+
   it('declines a confirmation without pairing anything', async () => {
     let calls = 0;
     const screen = await screenWith({

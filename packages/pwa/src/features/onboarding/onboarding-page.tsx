@@ -51,6 +51,7 @@ import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useStat
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
+import type { PairingStageKind } from '../pairing/pairing-screen.tsx';
 import type { ClipboardWriter } from './copy-button.tsx';
 import type { HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
@@ -61,7 +62,6 @@ import {
   type InstallChannelId,
   isLastOnboardingStep,
   nextOnboardingStep,
-  type OnboardingDoerId,
   type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
@@ -98,6 +98,11 @@ export interface OnboardingPairingHost {
   readonly onStatedFailure: (stated: boolean) => void;
   /** Draw the scan and paste controls as secondary: another control on this page is the primary action. */
   readonly quiet: boolean;
+  /**
+   * The pairing screen moved to another stage of its arc. Past `browse` it draws its own primary
+   * ("Pair this device", "Start over"), so the page demotes its own filled button.
+   */
+  readonly onStageChange: (stage: PairingStageKind) => void;
 }
 
 export interface OnboardingPageProps {
@@ -285,12 +290,6 @@ export function OnboardingPage({
           onChooseRoute={route => {
             progress.choose(route);
           }}
-          onChooseDoer={doer => {
-            progress.switchDoer(doer);
-          }}
-          onChooseTarget={target => {
-            progress.chooseTarget(target);
-          }}
           onLeaveRoute={() => {
             progress.leaveRoute();
           }}
@@ -316,10 +315,6 @@ interface RouteFlowProps {
   readonly onGoTo: (step: OnboardingStepId) => void;
   /** Switch to a different ENTRY without going back through the question. */
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
-  /** Change who installs it, from a step rather than from the question. */
-  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
-  /** Change which computer runs it, from a step rather than from the question. */
-  readonly onChooseTarget: (target: SetupTargetId) => void;
   /** Back out of the journey entirely, to the question that opened it. */
   readonly onLeaveRoute: () => void;
 }
@@ -354,8 +349,6 @@ function RouteFlow({
   share,
   onGoTo,
   onChooseRoute,
-  onChooseDoer,
-  onChooseTarget,
   onLeaveRoute,
 }: RouteFlowProps) {
   const step = onboardingStep(at.current);
@@ -412,9 +405,21 @@ function RouteFlow({
   const [statedAt, setStatedAt] = useState<OnboardingStepId | null>(null);
   const stated = statedAt === at.current;
   const onStatedFailure = useCallback((failed: boolean) => setStatedAt(failed ? at.current : null), [at.current]);
+  /*
+   * TWO PRIMARIES IS A PAGE WITH NO NEXT MOVE. The embedded pairing screen draws its own filled button
+   * the moment it leaves its resting scan ("Pair this device" while confirming or retrying, "Start over"
+   * on a failure), so the copy button above it steps down for as long as that lasts. Kept per step, so
+   * a screen that was confirming on one page never demotes the next.
+   */
+  const [stageAt, setStageAt] = useState<{ readonly step: OnboardingStepId; readonly kind: PairingStageKind } | null>(
+    null,
+  );
+  const onStageChange = useCallback((kind: PairingStageKind) => setStageAt({ step: at.current, kind }), [at.current]);
+  const engaged = stageAt?.step === at.current && stageAt.kind !== 'browse';
   const pairing = renderPairing({
     onPaired: settle,
     onStatedFailure,
+    onStageChange,
     quiet: PAIRING_UNDER_A_PRIMARY.has(at.current),
   });
   /*
@@ -432,6 +437,7 @@ function RouteFlow({
       receiver={away.receiver}
       write={write}
       share={share}
+      demoted={engaged}
       label={
         away.receiver === 'computer'
           ? 'Link carrying this setup to a computer'
@@ -469,11 +475,10 @@ function RouteFlow({
           pairing={pairing}
           stated={stated}
           handoff={handoff}
+          engaged={engaged}
           fallback={fallback}
           onGoTo={onGoTo}
           onChooseRoute={onChooseRoute}
-          onChooseDoer={onChooseDoer}
-          onChooseTarget={onChooseTarget}
           href={href}
           share={share}
         />
@@ -563,10 +568,10 @@ interface StageProps {
   readonly fallback: HostedRelayFallback;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
-  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
-  readonly onChooseTarget: (target: SetupTargetId) => void;
   readonly href: string;
   readonly share: SetupSharePort | undefined;
+  /** The pairing screen is past its resting scan and draws its own primary; see {@link OnboardingPairingHost}. */
+  readonly engaged: boolean;
   /** The pairing screen shows a failure that already says its remedy; see {@link OnboardingPairingHost}. */
   readonly stated: boolean;
 }
@@ -589,15 +594,14 @@ function Stage({
   handoff,
   fallback,
   onChooseRoute,
-  onChooseDoer,
-  onChooseTarget,
   href,
   share,
+  engaged,
   stated,
 }: StageProps) {
   /*
-   * THE PAIRING JOURNEY REACHES NONE OF THE STAGES THAT READ THESE — it has no
-   * \`brief\` and no \`install\` — but the switch below is over steps rather than
+   * THE PAIRING JOURNEY REACHES NONE OF THE STAGE THAT READS THIS — it has no
+   * \`brief\` — but the switch below is over steps rather than
    * over journeys, so the type cannot say so. The stand-in is the CONSERVATIVE
    * answer rather than a plausible one: "another computer" never claims the
    * daemon is on this machine, so nothing can end up telling a reader they are
@@ -605,7 +609,6 @@ function Stage({
    */
   const daemon = path.route === 'add-client' ? undefined : path;
   const target: SetupTargetId = daemon?.target ?? 'other';
-  const assumed = daemon !== undefined && targetBasis(daemon.route, daemon.device) === 'assumed';
   switch (at.current) {
     case 'brief':
       return (
@@ -616,23 +619,11 @@ function Stage({
           share={share}
           pairing={pairing}
           stated={stated}
+          engaged={engaged}
         />
       );
     case 'install':
-      return (
-        <InstallStage
-          write={write}
-          channel={channel}
-          onAgentInstead={() => onChooseDoer('agent')}
-          /*
-            OFFERED ONLY WHERE "THIS COMPUTER" WAS ASSUMED RATHER THAN CHOSEN. A
-            reader who picked this machine on the question one Back away needs no
-            escape hatch from their own answer, and a control that undoes a
-            deliberate choice reads as the page doubting them.
-          */
-          {...(assumed ? { onOtherMachine: () => onChooseTarget('other') } : {})}
-        />
-      );
+      return <InstallStage write={write} channel={channel} />;
     case 'local':
       return <LocalStage write={write} pairing={pairing} fallback={fallback} stated={stated} />;
     case 'elsewhere':

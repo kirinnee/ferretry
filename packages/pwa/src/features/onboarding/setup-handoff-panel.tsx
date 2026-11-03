@@ -109,9 +109,19 @@ export interface SetupHandoffPanelProps {
   readonly share?: SetupSharePort | undefined;
   /** What the QR's accessible name says this link is for. */
   readonly label: string;
+  /** The pairing screen beside this link is showing its own primary, so copying is drawn as a plain button. */
+  readonly demoted?: boolean;
 }
 
-export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label }: SetupHandoffPanelProps) {
+export function SetupHandoffPanel({
+  url,
+  plainUrl,
+  receiver,
+  write,
+  share,
+  label,
+  demoted = false,
+}: SetupHandoffPanelProps) {
   return (
     <div className="flex min-w-0 flex-col gap-2" data-onboarding-handoff={receiver}>
       {receiver === 'phone' ? (
@@ -144,7 +154,9 @@ export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label
       </div>
 
       {/* Sending the link IS the page when the receiver is a computer, so copying it is the loud control. */}
-      {receiver === 'computer' ? <CopyAction text={url} label="Copy setup link" write={write} /> : null}
+      {receiver === 'computer' ? (
+        <CopyAction text={url} label="Copy setup link" write={write} demoted={demoted} />
+      ) : null}
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {share === undefined ? null : (

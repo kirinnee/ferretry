@@ -71,6 +71,29 @@ describe('the setup hand-off panel', () => {
     await view.unmount();
   });
 
+  it('steps its Copy setup link down to secondary when demoted, with the same bytes', async () => {
+    const copied: string[] = [];
+    const view = await mount(
+      <SetupHandoffPanel
+        url={URL_WITH_PLACE}
+        plainUrl={PLAIN}
+        receiver="computer"
+        demoted
+        write={async text => {
+          copied.push(text);
+        }}
+        label="Setup link"
+      />,
+    );
+
+    const copy = must(view.container.querySelector('[data-onboarding-copy="Copy setup link"]'), 'the copy');
+    expect(copy.getAttribute('data-variant')).toBeNull();
+    expect(view.container.querySelector('[data-variant="primary"]')).toBeNull();
+    await click(copy);
+    expect(copied).toEqual([URL_WITH_PLACE]);
+    await view.unmount();
+  });
+
   it('offers the share sheet only when the browser has one, and swallows a declined share', async () => {
     const without = await mount(
       <SetupHandoffPanel url={URL_WITH_PLACE} plainUrl={PLAIN} receiver="computer" write={async () => {}} label="x" />,

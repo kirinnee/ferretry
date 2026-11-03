@@ -100,6 +100,12 @@ export interface PairingScreenProps {
    * finishing itself), which is about the one thing that was working.
    */
   readonly onStatedFailure?: (stated: boolean) => void;
+  /**
+   * Told where the reader is in the arc whenever it changes (and once on mount), so a host page can
+   * stop drawing its own primary the moment this screen draws one — scan, confirm and "Start over"
+   * are never on a page together with another filled button.
+   */
+  readonly onStageChange?: (stage: PairingStageKind) => void;
 }
 
 /**
@@ -117,6 +123,9 @@ type Stage =
   | { readonly kind: 'pairing'; readonly seed: PairingSeed }
   | { readonly kind: 'paired'; readonly host: string }
   | { readonly kind: 'failed'; readonly message: string; readonly cause: PairingFailureCause };
+
+/** The screens of the arc, by name; `browse` is the resting scan-or-paste screen. */
+export type PairingStageKind = Stage['kind'];
 
 /**
  * WHY A REDEMPTION FAILED, AS THE ONLY TWO ANSWERS THAT LEAD ANYWHERE DIFFERENT.
@@ -179,8 +188,12 @@ export function PairingScreen({
   quiet = false,
   defaultName = browserDeviceName,
   onStatedFailure,
+  onStageChange,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
+  useEffect(() => {
+    onStageChange?.(stage.kind);
+  }, [onStageChange, stage.kind]);
   const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
   useEffect(() => {
     onStatedFailure?.(statedFailure);

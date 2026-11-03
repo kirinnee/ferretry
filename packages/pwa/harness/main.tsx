@@ -239,7 +239,7 @@ import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
 import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
-import type { PairingArrival } from '../src/lib/pairing.ts';
+import { type PairingArrival, pairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
 import type { DaemonFetch } from '../src/lib/runtime-models.ts';
@@ -2551,11 +2551,15 @@ type HarnessOnboardingScreen =
   | 'doer-mobile'
   | 'brief'
   | 'brief-elsewhere'
+  | 'brief-confirm'
+  | 'brief-failed'
   | 'install'
   | 'local'
   | 'handoff'
   | 'elsewhere'
   | 'elsewhere-mobile'
+  | 'elsewhere-confirm'
+  | 'elsewhere-failed'
   | 'pair';
 
 const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
@@ -2567,6 +2571,9 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   'doer-mobile': harnessQuestion({ stage: 'doer', route: 'first-time', target: 'other' }, 'mobile'),
   brief: harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
   'brief-elsewhere': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'agent' }, 'brief', 'mobile'),
+  /* The composed states: the embedded pairing screen has its OWN primary, so the page's copy button steps down. */
+  'brief-confirm': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
+  'brief-failed': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
   install: harnessOnboarding(hereByHand(), 'install'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
   local: harnessOnboarding(hereByHand(), 'local'),
@@ -2574,17 +2581,32 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   handoff: harnessOnboarding(hereByHand(), 'handoff'),
   /* The recursion, on a computer: the reader walks to the machine that will host it. */
   elsewhere: harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
+  'elsewhere-confirm': harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
+  'elsewhere-failed': harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
   /* And on a phone, where the answer was forced rather than chosen. */
   'elsewhere-mobile': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'self' }, 'elsewhere', 'mobile'),
   /* The entry that arrives holding a link: one page, `fy pair` and the scan. */
   pair: harnessOnboarding({ route: 'add-client' }, 'pair'),
 };
 
+/**
+ * The arrivals that park the embedded pairing screen past its scanner: a pasted link (confirming) and a damaged one
+ * (failed). The code in the link is invented and the screen redeems nothing.
+ */
+const HARNESS_PAIRING_ARRIVALS: Partial<Record<HarnessOnboardingScreen, PairingArrival>> = {
+  'brief-confirm': pairingArrival(HARNESS_PAIR_URL),
+  'elsewhere-confirm': pairingArrival(HARNESS_PAIR_URL),
+  'brief-failed': { kind: 'unreadable', reason: 'the code is incomplete' },
+  'elsewhere-failed': { kind: 'unreadable', reason: 'the code is incomplete' },
+};
+
 /** The embedded pairing screen the real app renders, with a camera that never decodes. */
-const renderHarnessPairing = (host: OnboardingPairingHost) => (
+const renderHarnessPairing = (arrival: PairingArrival | undefined) => (host: OnboardingPairingHost) => (
   <PairingScreen
     embedded
+    {...(arrival === undefined ? {} : { arrival })}
     quiet={host.quiet}
+    onStageChange={host.onStageChange}
     connections={[]}
     selectedDaemonId={null}
     scanHost={HARNESS_SCAN_HOST}
@@ -2615,7 +2637,7 @@ function HarnessSetup({ screen, channel = 'apt', pairing = false, pairings = 0, 
       pairings={pairings}
       onOpenFleet={() => {}}
       share={share ? HARNESS_SHARE : undefined}
-      renderPairing={pairing ? renderHarnessPairing : () => null}
+      renderPairing={pairing ? renderHarnessPairing(HARNESS_PAIRING_ARRIVALS[screen]) : () => null}
     />
   );
 }
@@ -5428,6 +5450,22 @@ function Shell() {
       ),
     },
     {
+      label: 'Setup — agent: a pasted link is being confirmed',
+      render: () => (
+        <section aria-label="Setup agent brief step confirming" id="harness-onboarding-brief-confirm">
+          <HarnessSetup screen="brief-confirm" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — agent: the pairing failed',
+      render: () => (
+        <section aria-label="Setup agent brief step failed" id="harness-onboarding-brief-failed">
+          <HarnessSetup screen="brief-failed" pairing />
+        </section>
+      ),
+    },
+    {
       label: 'Setup — which computer runs it',
       render: () => (
         <section aria-label="Setup target question" id="harness-onboarding-target">
@@ -5480,6 +5518,22 @@ function Shell() {
       render: () => (
         <section aria-label="Setup elsewhere step" id="harness-onboarding-elsewhere">
           <HarnessSetup screen="elsewhere" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — another computer: a pasted link is being confirmed',
+      render: () => (
+        <section aria-label="Setup elsewhere step confirming" id="harness-onboarding-elsewhere-confirm">
+          <HarnessSetup screen="elsewhere-confirm" pairing />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — another computer: the pairing failed',
+      render: () => (
+        <section aria-label="Setup elsewhere step failed" id="harness-onboarding-elsewhere-failed">
+          <HarnessSetup screen="elsewhere-failed" pairing />
         </section>
       ),
     },

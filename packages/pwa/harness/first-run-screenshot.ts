@@ -6,7 +6,8 @@
  * Files are `device-<screen>-<light|dark>-<phone|desktop>.png` (plus `-bottom` when the page scrolls). It
  * bundles `harness/main.tsx`, serves it on an ephemeral loopback port, aborts anything that leaves it, opens
  * each page by its `#onboarding-<screen>` fragment, and fails when a page scrolls sideways at 390px or draws
- * more than one primary button. Pairing codes are fake: the harness's pairing screen redeems nothing and
+ * more than one primary button (the composed pages included: resting, confirming a pasted link, failed) or
+ * clips a command block (its inner `pre` must not overflow). Pairing codes are fake: the harness's pairing screen redeems nothing and
  * the hand-off QR carries only a `.invalid` setup link.
  */
 
@@ -28,11 +29,15 @@ const SCREENS = [
   ['doer-mobile', 'doer-mobile'],
   ['brief', 'agent'],
   ['brief-elsewhere', 'agent-elsewhere'],
+  ['brief-confirm', 'agent-confirm'],
+  ['brief-failed', 'agent-failed'],
   ['install', 'hand'],
   ['local', 'open'],
   ['handoff', 'phone'],
   ['elsewhere', 'elsewhere'],
   ['elsewhere-mobile', 'elsewhere-mobile'],
+  ['elsewhere-confirm', 'elsewhere-confirm'],
+  ['elsewhere-failed', 'elsewhere-failed'],
   ['pair', 'pair'],
 ] as const;
 
@@ -103,10 +108,14 @@ const inspect = async (page: Page, label: string, phone: boolean): Promise<boole
         (shell !== null && shell.scrollWidth > shell.clientWidth + 1),
       primaries: primaries.map(button => button.textContent?.trim() ?? ''),
       tall: shell !== null && shell.scrollHeight > shell.clientHeight + 4,
+      clipped: [...document.querySelectorAll<HTMLElement>('[data-onboarding="setup"] pre')]
+        .filter(pre => pre.closest('details:not([open])') === null && pre.scrollWidth > pre.clientWidth + 1)
+        .map(pre => (pre.textContent ?? '').slice(0, 40)),
     };
   });
   if (phone && found.sideways) defects.push(`${label} scrolls sideways at 390px`);
-  if (found.primaries.length > 1 && !label.startsWith('device-pair') && !label.startsWith('device-agent')) {
+  if (found.clipped.length > 0) defects.push(`${label} clips a command block: ${found.clipped.join(' | ')}`);
+  if (found.primaries.length > 1) {
     defects.push(`${label} draws ${found.primaries.length} primary buttons: ${found.primaries.join(' | ')}`);
   }
   return found.tall;

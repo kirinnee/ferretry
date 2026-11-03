@@ -37,10 +37,13 @@ describe('CommandBlock', () => {
     await click(must(view.container.querySelector('button'), 'the copy button'));
     expect(copied).toEqual([command]);
 
-    // A horizontal scroller without this grows a phantom vertical scrollbar.
-    const scroller = must(view.container.querySelector('pre'), 'the command scroller');
-    expect(scroller.className).toContain('overflow-x-auto');
-    expect(scroller.className).toContain('overflow-y-hidden');
+    // The command WRAPS rather than scrolling sideways: a clipped install command
+    // shows only its first words, and the copied bytes stay the same either way.
+    const scroller = must(view.container.querySelector('pre'), 'the command block');
+    expect(scroller.className).toContain('whitespace-pre-wrap');
+    expect(scroller.className).toContain('[overflow-wrap:anywhere]');
+    expect(scroller.className).not.toContain('overflow-x-auto');
+    expect(scroller.className).not.toContain('whitespace-nowrap');
 
     // THE COMMAND IS THE LARGEST TEXT IN THE BLOCK. It is the string a reader
     // has to check character by character before running it on their own

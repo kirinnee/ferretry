@@ -32,16 +32,13 @@ import { OnboardingConnectionNote } from './onboarding-connection-note.tsx';
 import {
   agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
-  DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
-  DAEMON_STATUS_COMMAND,
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
   type SetupTargetId,
-  VERIFY_COMMAND,
 } from './onboarding-model.ts';
 import type { SetupSharePort } from './setup-handoff-panel.tsx';
 
@@ -99,15 +96,6 @@ export interface InstallStageProps {
   readonly write: ClipboardWriter;
   /** The detected install route. A guess; every other route stays one tap away. */
   readonly channel: InstallChannelId;
-  /** Change answer: hand the whole thing to an agent instead of typing it. */
-  readonly onAgentInstead: () => void;
-  /**
-   * Change the other answer: these commands are for a machine the reader is not at.
-   *
-   * Absent when the reader chose this machine outright, because then there is a
-   * question one Back away and nothing to escape from.
-   */
-  readonly onOtherMachine?: (() => void) | undefined;
 }
 
 /**
@@ -119,7 +107,7 @@ export interface InstallStageProps {
  * paste into one terminal is the whole job. The other platforms are behind a link
  * rather than a row of buttons.
  */
-export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }: InstallStageProps) {
+export function InstallStage({ write, channel }: InstallStageProps) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
   const [choosing, setChoosing] = useState(false);
   const chosen = installChannel(selected);
@@ -181,63 +169,10 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
 
       <p className={COPY}>Needs Claude Code or Codex — Ferretry offers to install them once you are in.</p>
 
-      <Aside summary="Check it is running">
-        <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
-        <CommandBlock command={DAEMON_STATUS_COMMAND} copyLabel="Copy status command" write={write} />
-        <p className={COPY}>
-          A healthy daemon prints <code className="font-mono text-syn-string">{DAEMON_SERVING_OUTPUT}</code>.
-        </p>
-      </Aside>
       <Aside summary="Keep it running after a reboot">
         <CommandBlock command={DAEMON_INSTALL_COMMAND} copyLabel="Copy service command" write={write} />
         <p className={COPY}>Installs the user service and starts the daemon under it.</p>
       </Aside>
-
-      {/*
-        CHANGING ANSWER, not a second copy of the agent path. A reader who is
-        looking at a command they did not want should not have to find the way
-        back to the first question and re-answer it; and the prompt itself lives
-        on the agent route's own page, where it is the whole screen.
-      */}
-      <Aside summary="Rather have an agent do it?">
-        <p className={COPY}>
-          If you already have Claude or Codex on that machine, it can install Ferretry, start the daemon and pair with
-          this browser. You copy one prompt and nothing else.
-        </p>
-        <button
-          type="button"
-          className="kt-btn min-h-[44px] w-full"
-          data-variant="ghost"
-          onClick={onAgentInstead}
-          data-onboarding-agent-instead=""
-        >
-          Let an agent do it
-        </button>
-      </Aside>
-
-      {/*
-        THE SECOND PLACE THE ASSUMPTION CAN BE ESCAPED, and the one that catches
-        the reader who did not read the screen before this. These commands are
-        addressed to the machine holding this page; somebody who meant a different
-        one has to be able to say so from the screen that is wrong for them.
-      */}
-      {onOtherMachine === undefined ? null : (
-        <Aside summary="Setting up a different machine?">
-          <p className={COPY}>
-            These commands install Ferretry on the machine reading this page. If the agents are meant to run somewhere
-            else, the setup happens over there instead.
-          </p>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px] w-full"
-            data-variant="ghost"
-            onClick={onOtherMachine}
-            data-onboarding-other-machine=""
-          >
-            It is another computer
-          </button>
-        </Aside>
-      )}
     </div>
   );
 }
@@ -257,6 +192,8 @@ export interface BriefStageProps {
   readonly pairing: ReactNode;
   /** The pairing failure on screen already says its remedy, so the code-expiry advice is not added. */
   readonly stated?: boolean;
+  /** The pairing screen is past its resting scan (confirming, retrying or failed) and draws its own primary. */
+  readonly engaged?: boolean;
 }
 
 /**
@@ -279,7 +216,15 @@ export interface BriefStageProps {
  * the plain page address beside it, because the prompt is public and identical on
  * every device.
  */
-export function BriefStage({ write, target, plainUrl, share, pairing, stated = false }: BriefStageProps) {
+export function BriefStage({
+  write,
+  target,
+  plainUrl,
+  share,
+  pairing,
+  stated = false,
+  engaged = false,
+}: BriefStageProps) {
   const prompt = agentSetupPrompt(target);
   const here = target === 'this';
   return (
@@ -288,7 +233,7 @@ export function BriefStage({ write, target, plainUrl, share, pairing, stated = f
         1. Copy this prompt into Claude Code or Codex{' '}
         <strong className="font-semibold text-fg">on {here ? 'this computer' : 'that computer'}</strong>.
       </p>
-      <CopyAction text={prompt} label="Copy prompt" write={write} />
+      <CopyAction text={prompt} label="Copy prompt" write={write} demoted={engaged} />
 
       <Aside summary="Show prompt">
         {/* Scrolls inside its own box: it is thirty lines, and a stage that grows to thirty lines pushes its own next action off a phone. */}

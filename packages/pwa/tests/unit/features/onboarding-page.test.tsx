@@ -100,9 +100,14 @@ const pageWith = async (options: PageOptions = {}) => {
       pairings={pairings}
       fallback={options.fallback ?? CHECKING_HOSTED_RELAY}
       onOpenFleet={daemonId => opened.push(daemonId)}
-      renderPairing={({ onPaired, onStatedFailure, quiet }) => (
+      renderPairing={({ onPaired, onStatedFailure, onStageChange, quiet }) => (
         <>
           <span data-test-quiet={String(quiet)} />
+          {(['browse', 'confirm', 'pairing', 'failed'] as const).map(kind => (
+            <button key={kind} type="button" data-test-stage={kind} onClick={() => onStageChange(kind)}>
+              pretend the pairing screen is {kind}
+            </button>
+          ))}
           <input id="fake-pairing-link" aria-label="Pairing link" />
           <button type="button" data-test-pair="" onClick={() => onPaired('daemon-a' as DaemonId)}>
             pretend the daemon answered
@@ -400,13 +405,29 @@ describe('an agent doing it: ONE page', () => {
     await view.unmount();
   });
 
-  it('is reachable from the install page, for a reader who changes their mind', async () => {
+  it('has no way in from the install page: the doer question is the only fork', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
     expect(screenOf(view.container)).toBe('install');
+    expect(view.container.querySelector('[data-onboarding-agent-instead]')).toBeNull();
+    await view.unmount();
+  });
 
-    await click(buttonWith(view.container, '[data-onboarding-agent-instead]'));
-    expect(screenOf(view.container)).toBe('brief');
+  it('keeps ONE primary: Copy prompt steps down while the pairing screen has its own', async () => {
+    const { view } = await pageWith();
+    await enter(view.container, 'first-time', 'agent');
+    const copyVariant = () =>
+      buttonWith(view.container, '[data-onboarding-copy="Copy prompt"]').getAttribute('data-variant');
+
+    // Resting: the host button is the page's one primary.
+    expect(copyVariant()).toBe('primary');
+    for (const kind of ['confirm', 'pairing', 'failed'] as const) {
+      await click(buttonWith(view.container, `[data-test-stage="${kind}"]`));
+      expect(copyVariant()).toBeNull();
+    }
+    // Back to the scanner: it is primary again.
+    await click(buttonWith(view.container, '[data-test-stage="browse"]'));
+    expect(copyVariant()).toBe('primary');
     await view.unmount();
   });
 
@@ -485,16 +506,39 @@ describe('another computer, by hand: ONE page', () => {
     await view.unmount();
   });
 
-  it('is reachable from the install page, for a reader the assumption was wrong for', async () => {
+  it('has no way in from the install page: the doer question is the only fork', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
-    expect(screenOf(view.container)).toBe('install');
+    expect(view.container.querySelector('[data-onboarding-other-machine]')).toBeNull();
+    await view.unmount();
+  });
 
-    await click(buttonWith(view.container, '[data-onboarding-other-machine]'));
-    // The answer is changed, so the question behind it (who installs it) is asked again.
-    expect(screenOf(view.container)).toBe('doer');
+  it('keeps ONE primary: Copy setup link steps down while the pairing screen has its own', async () => {
+    const { view } = await pageWith();
+    await enter(view.container, 'first-time', 'self', 'other');
+    const copyVariant = () =>
+      buttonWith(view.container, '[data-onboarding-copy="Copy setup link"]').getAttribute('data-variant');
+
+    expect(copyVariant()).toBe('primary');
+    for (const kind of ['confirm', 'pairing', 'failed'] as const) {
+      await click(buttonWith(view.container, `[data-test-stage="${kind}"]`));
+      expect(copyVariant()).toBeNull();
+    }
+    await click(buttonWith(view.container, '[data-test-stage="browse"]'));
+    expect(copyVariant()).toBe('primary');
+    await view.unmount();
+  });
+
+  it("forgets the pairing screen's stage when the reader leaves the page", async () => {
+    const { view } = await pageWith();
+    await enter(view.container, 'first-time', 'self', 'other');
+    await click(buttonWith(view.container, '[data-test-stage="confirm"]'));
+    await click(buttonWith(view.container, '[data-onboarding-back]'));
     await answerDoer(view.container, 'self');
     expect(screenOf(view.container)).toBe('elsewhere');
+    expect(buttonWith(view.container, '[data-onboarding-copy="Copy setup link"]').getAttribute('data-variant')).toBe(
+      'primary',
+    );
     await view.unmount();
   });
 });

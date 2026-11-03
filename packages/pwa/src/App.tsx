@@ -835,11 +835,12 @@ function SetupGuide() {
               navigate,
             );
         }}
-        renderPairing={({ onPaired, onStatedFailure, quiet }) => (
+        renderPairing={({ onPaired, onStatedFailure, onStageChange, quiet }) => (
           <PairingScreen
             embedded
             quiet={quiet}
             onStatedFailure={onStatedFailure}
+            onStageChange={onStageChange}
             arrival={arrival}
             scanHost={scanHost}
             onArrivalTaken={takeArrival}
