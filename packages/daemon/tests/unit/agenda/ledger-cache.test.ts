@@ -467,13 +467,9 @@ describe('the private agenda archive', () => {
       const { files, repository } = await saturated();
       ok(await repository.transact(SESSION, command(resolveA1('COMMITTED'))));
       files.put(SESSION, AGENDA_ARCHIVE_FILE, '');
-      await should(repository.readArchive(SESSION)).be.rejectedWith(
-        'agenda history is shorter than its committed cursor',
-      );
+      await should(repository.readArchive(SESSION)).be.rejectedWith('incomplete agenda history');
       files.files.delete(`${SESSION}/${AGENDA_ARCHIVE_FILE}`);
-      await should(repository.readArchive(SESSION)).be.rejectedWith(
-        'agenda history is shorter than its committed cursor',
-      );
+      await should(repository.readArchive(SESSION)).be.rejectedWith('incomplete agenda history');
     });
 
     it('should serve no history for a session with no ledger, whatever the sidecar holds', async () => {

@@ -141,9 +141,8 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const committed = (await this.read(sessionId))?.archive?.bytes ?? 0;
       if (committed === 0) return [];
       const bytes = Buffer.from((await this.files.read(sessionId, AGENDA_ARCHIVE_FILE)) ?? '');
-      if (bytes.length < committed) throw new Error('agenda history is shorter than its committed cursor');
       const text = bytes.subarray(0, committed).toString('utf8');
-      if (!text.endsWith('\n')) throw new Error('incomplete agenda history');
+      if (bytes.length < committed || !text.endsWith('\n')) throw new Error('incomplete agenda history');
       return text
         .slice(0, -1)
         .split('\n')
