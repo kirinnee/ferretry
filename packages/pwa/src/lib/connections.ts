@@ -47,8 +47,24 @@ export interface DaemonScopedCache {
   clearDaemon(daemonId: DaemonId): void;
 }
 
+/**
+ * "The stored registry changed", between the tabs of one browser — and nothing else.
+ *
+ * It carries no record, id or token: a receiver re-reads the repository, which is the one place a
+ * connection is kept. A tab that never hears this (no `BroadcastChannel`) simply keeps the registry
+ * it loaded, exactly as before.
+ */
+export interface DaemonConnectionsChanged {
+  /** Tell the other tabs; never delivered back to the announcer. */
+  announce(): void;
+  /** Hear another tab announce. Returns its unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
 export interface DaemonConnectionStoreOptions {
   readonly repository?: DaemonConnectionRepository;
+  /** Cross-tab change signal. Without a `repository` there is nothing to re-read, so it is ignored. */
+  readonly changed?: DaemonConnectionsChanged | undefined;
   readonly caches?: readonly DaemonScopedCache[];
   readonly maxConnections?: number;
   readonly now?: () => number;
@@ -248,6 +264,7 @@ export class DaemonConnectionStore {
   readonly #listeners = new Set<Listener>();
   readonly #caches = new Set<DaemonScopedCache>();
   readonly #repository: DaemonConnectionRepository | undefined;
+  readonly #changed: DaemonConnectionsChanged | undefined;
   readonly #maximum: number;
   readonly #now: () => number;
   readonly #forget: (daemonId: DaemonId) => void;
@@ -258,6 +275,7 @@ export class DaemonConnectionStore {
     if (!Number.isInteger(maximum) || maximum < 1) throw new Error('maxConnections must be a positive integer');
     this.#maximum = maximum;
     this.#repository = options.repository;
+    this.#changed = options.repository === undefined ? undefined : options.changed;
     this.#now = options.now ?? Date.now;
     this.#forget = options.forget ?? (() => undefined);
     const selected = initial.selectedDaemonId;
@@ -272,6 +290,8 @@ export class DaemonConnectionStore {
       selectedDaemonId,
     };
     for (const cache of options.caches ?? []) this.#caches.add(cache);
+    // Document-lifetime, like the store itself: there is no moment this tab stops caring.
+    this.#changed?.subscribe(() => void this.#reload());
   }
 
   static async open(options: DaemonConnectionStoreOptions = {}): Promise<DaemonConnectionStore> {
@@ -489,6 +509,33 @@ export class DaemonConnectionStore {
     return this.#write;
   }
 
+  /**
+   * Another tab saved: take its registry as ours.
+   *
+   * Last writer wins, as it already does for the saves themselves. Any pairing this tab was holding
+   * that the stored registry no longer has — or now has a different credential for — is cleared from
+   * every cache before the new snapshot is visible, the same invalidation a local unpair does. The
+   * device key is NOT forgotten here: the tab that removed the pairing already did, in the key store
+   * all tabs share. Nothing is saved or announced back, so two tabs cannot echo each other.
+   */
+  async #reload(): Promise<void> {
+    const repository = this.#repository;
+    if (repository === undefined) return;
+    try {
+      await this.#write;
+      const next = parseDaemonConnections(await repository.load(CONNECTIONS_KEY), this.#maximum);
+      if (serialized(next) === serialized(this.#snapshot)) return;
+      for (const record of this.#snapshot.connections) {
+        const kept = next.connections.find(candidate => candidate.daemonId === record.daemonId);
+        if (kept === undefined || !sameConnection(kept, record)) this.#clearDaemon(record.daemonId);
+      }
+      this.#snapshot = next;
+      for (const listener of this.#listeners) listener();
+    } catch {
+      // Best-effort, like every other repository read: this tab keeps the registry it has.
+    }
+  }
+
   #clearDaemon(id: DaemonId): void {
     for (const cache of this.#caches) {
       try {
@@ -507,7 +554,7 @@ export class DaemonConnectionStore {
     this.#write = this.#write
       .catch(() => undefined)
       .then(async () => await this.#repository?.save(CONNECTIONS_KEY, value))
-      .then(() => undefined)
+      .then(() => this.#changed?.announce())
       .catch(() => undefined);
   }
 }

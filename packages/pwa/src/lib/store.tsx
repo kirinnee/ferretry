@@ -57,6 +57,7 @@ import {
 import {
   type DaemonConnectionRepository,
   DaemonConnectionStore,
+  type DaemonConnectionsChanged,
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
@@ -232,6 +233,28 @@ export const browserConnectionRepository = (
   factory: IDBFactory | undefined = globalThis.indexedDB,
 ): DaemonConnectionRepository | undefined =>
   factory === undefined ? undefined : new IndexedDbConnectionRepository(factory);
+
+const CONNECTIONS_CHANGED_CHANNEL = 'ferretry-connections-changed';
+
+/**
+ * Tells this browser's other tabs the pairing registry was saved, so `fy pair --open` in a new tab
+ * finishes the first-run page waiting in the old one. The message is a constant: nothing about the
+ * pairing travels, a receiver re-reads IndexedDB. No channel where the browser has none.
+ */
+const browserConnectionsChanged = (
+  factory: typeof BroadcastChannel | undefined = globalThis.BroadcastChannel,
+): DaemonConnectionsChanged | undefined => {
+  if (factory === undefined) return undefined;
+  const channel = new factory(CONNECTIONS_CHANGED_CHANNEL);
+  return {
+    announce: () => channel.postMessage('changed'),
+    subscribe: listener => {
+      const heard = (): void => listener();
+      channel.addEventListener('message', heard);
+      return () => channel.removeEventListener('message', heard);
+    },
+  };
+};
 
 type ConnectDaemonClient = (daemon: DaemonConnection) => Promise<FyApiClient>;
 
@@ -887,6 +910,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const pushService = daemonPushService(carried);
   const connections = await DaemonConnectionStore.open({
     repository: options.repository ?? browserConnectionRepository(),
+    ...(options.repository === undefined ? { changed: browserConnectionsChanged() } : {}),
     // `documentDraftStore` is not built here — the composer needs it as a module default before any
     // context exists — but it is browser-persisted daemon state like every other entry, so it is
     // invalidated like every other entry. A store the registry cannot reach keeps serving an
