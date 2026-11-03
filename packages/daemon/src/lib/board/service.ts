@@ -33,7 +33,6 @@ import {
   categoryOf,
   formatTaskRef,
   type Lane,
-  type LaneCategory,
   type LaneSet,
   type LaneTrigger,
   type TaskKind,
@@ -62,6 +61,7 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
+import type { SessionRoster } from './activity.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
@@ -94,7 +94,7 @@ import type {
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
-import { returnCard } from './return-to-lead.ts';
+import { returnCard, returnLead } from './return-to-lead.ts';
 import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
 
 export interface BoardServiceDependencies {
@@ -327,28 +327,33 @@ export class BoardService {
   /**
    * Hands a card whose ferret (`from`) ended to `lead`, the nearest live lead above that ferret (the board sweep found
    * it): assigned as the daemon, with `returned to <lead>: <ferret> finished` in its history. The decision is made
-   * again INSIDE the card's write, against the card as it is now: `recheck` answers the lead the card should go to
-   * from a roster read at this moment, or `null` when it should stay (the ferret is back, the card became a PR-free
-   * helper to close, the lane changed). A card that moved, was reassigned, dropped or closed, or whose nearest live
-   * lead is no longer `lead`, is left alone; the next sweep plans it afresh. `true` when it moved.
+   * again INSIDE the card's write, against the card as it is now AND the sessions as they are now: `settle` holds the
+   * standing of the sessions the return rests on (the ferret, the ended ones above it, the lead) and hands the write a
+   * roster of exactly those, read after the hold was taken, so none of them can end or resume between that read and
+   * the card landing on disk. A card that moved, was reassigned, dropped or closed, whose ferret is back, or whose
+   * nearest live lead is no longer `lead`, is left alone; the next sweep plans it afresh. The journal and the notices
+   * run after the hold is released. `true` when it moved.
    */
   async returnToLead(
     id: BoardTaskId,
     plan: { readonly lead: string; readonly from: string },
-    recheck: (card: BoardTask, category: LaneCategory | undefined) => Promise<string | null>,
+    settle: <T>(work: (fresh: SessionRoster) => Promise<T>) => Promise<T>,
   ): Promise<boolean> {
     const caller: BoardCaller = { kind: 'daemon' };
-    const returned = await this.ports.store.write(id, async current => {
-      if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== plan.from) {
-        return { task: null, result: null };
-      }
-      const context = await this.context(current, caller);
-      const category = categoryOf(context.laneSet, current.laneId);
-      const lead = await recheck(current, category.ok ? category.value : undefined);
-      if (lead !== plan.lead) return { task: null, result: null };
-      const task = requireValidCard(returnCard(current, plan.lead, plan.from, context));
-      return { task, result: task };
-    });
+    const returned = await settle(
+      async fresh =>
+        await this.ports.store.write(id, async current => {
+          if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== plan.from) {
+            return { task: null, result: null };
+          }
+          const context = await this.context(current, caller);
+          const category = categoryOf(context.laneSet, current.laneId);
+          const lead = returnLead(current, category.ok ? category.value : undefined, fresh);
+          if (lead !== plan.lead) return { task: null, result: null };
+          const task = requireValidCard(returnCard(current, plan.lead, plan.from, context));
+          return { task, result: task };
+        }),
+    );
     if (returned === null) return false;
     await this.afterWrite(caller, returned, [returned.projectId]);
     return true;

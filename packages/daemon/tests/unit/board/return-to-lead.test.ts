@@ -11,7 +11,6 @@ import {
   nearestLiveLead,
   planSweep,
   returnCard,
-  returnLead,
   type SessionRoster,
   type SweepBoard,
   SUB_CARD_HELPER_REASON,
@@ -248,9 +247,10 @@ describe('the sweep returning an ended ferret’s card', () => {
       board: {
         sweepBoard: async () => swept,
         closeEndedHelper: async id => await service.closeEndedHelper(id),
-        returnToLead: async (id, plan, recheck) => await service.returnToLead(id, plan, recheck),
+        returnToLead: async (id, plan, settle) => await service.returnToLead(id, plan, settle),
       },
       sessions: new FakeSessions(rosterWithEnded('completed')),
+      guard: new FakeSessions(rosterWithEnded('completed')),
       memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
       nudges: { send: async () => undefined },
       clock: { now: () => NOW },
@@ -286,6 +286,7 @@ describe('the sweep returning an ended ferret’s card', () => {
         },
       },
       sessions: new FakeSessions(rosterWithEnded('completed')),
+      guard: new FakeSessions(rosterWithEnded('completed')),
       memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
       nudges: { send: async () => undefined },
       clock: { now: () => NOW },
@@ -319,8 +320,10 @@ describe('returning one card through the service', () => {
 
     // Act
     const roster = rosterWithEnded('completed');
-    const moved = await service.returnToLead('F2', { lead: 'child', from: 'grandchild' }, async (current, category) =>
-      returnLead(current, category, roster),
+    const moved = await service.returnToLead(
+      'F2',
+      { lead: 'child', from: 'grandchild' },
+      async work => await work(roster),
     );
 
     // Assert
@@ -368,9 +371,10 @@ const tickWithRosterChange = async (options: {
         sessions.current = options.after;
         return false;
       },
-      returnToLead: async (id, plan, recheck) => await service.returnToLead(id, plan, recheck),
+      returnToLead: async (id, plan, settle) => await service.returnToLead(id, plan, settle),
     },
     sessions,
+    guard: sessions,
     memory: { read: async () => EMPTY_SWEEP_MEMORY, write: async () => undefined },
     nudges: { send: async () => undefined },
     clock: { now: () => NOW },

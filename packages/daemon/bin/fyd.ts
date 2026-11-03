@@ -11399,6 +11399,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const boardSweep = new BoardSweep({
         board: boardWorld.board,
         sessions: boardSessions,
+        guard: boardSessions,
         memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
         nudges: {
           // A stale nudge was routed by the plan (assignee, else nearest live lead, else owner); a go-ahead still

@@ -981,6 +981,18 @@ export class DaemonStorage {
     });
   }
 
+  /**
+   * Runs `work` while no document of these sessions can be written: every write to a session's config or state goes
+   * through its serial lane, and this holds the lanes of all of them at once. A write already queued lands first and
+   * is seen by a `proved` read inside `work`; one that arrives after waits until `work` is done. It is how a decision
+   * about whether a session is alive is committed without that answer changing underneath it. Reads take no lane, so
+   * `work` may read these sessions freely, but it must not write them (it would wait on itself).
+   */
+  async holdSessions<T>(ids: readonly SessionId[], work: () => Promise<T>): Promise<T> {
+    this.assertOpen();
+    return await this.serial.runAcross(ids, work);
+  }
+
   /** A document's text, from the identity cache when the file is still the one it holds. */
   private async readCachedText(
     path: string,

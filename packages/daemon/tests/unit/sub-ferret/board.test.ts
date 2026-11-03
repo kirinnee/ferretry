@@ -5,13 +5,7 @@ import {
   BoardTaskCreateRequestSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import {
-  type BoardCaller,
-  BoardError,
-  BoardService,
-  returnLead,
-  type SessionRoster,
-} from '../../../src/lib/board/index.ts';
+import { type BoardCaller, BoardError, BoardService, type SessionRoster } from '../../../src/lib/board/index.ts';
 import { card, FakeParents, liveSession, MemoryBoardStore, rosterOf, world } from '../board/support.ts';
 import { DIRECTORY, REFUSED } from './support.ts';
 
@@ -280,9 +274,7 @@ describe('planning inside a subtree', () => {
       liveSession('grandchild', { lead: 'child', status: 'completed' }),
     ]);
     const returnAll = async (id: string) =>
-      await service.returnToLead(id, { lead: 'child', from: 'grandchild' }, async (current, category) =>
-        returnLead(current, category, ended),
-      );
+      await service.returnToLead(id, { lead: 'child', from: 'grandchild' }, async work => await work(ended));
 
     // Act
     const returned = [await returnAll('F2'), await returnAll('F3')];

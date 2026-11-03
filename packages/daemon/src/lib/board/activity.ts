@@ -81,6 +81,16 @@ export interface SessionLivenessSource {
   roster(): Promise<SessionRoster>;
 }
 
+/**
+ * Holds some sessions' standing still while a decision resting on it is committed. `work` is handed a roster of
+ * exactly `ids`, read fresh AFTER the hold was taken, and no write to those sessions lands until it settles: a
+ * session that was seen alive cannot end, and one seen ended cannot resume, between the read and the commit.
+ * `work` must not write the sessions it holds.
+ */
+export interface SessionLivenessGuard {
+  settled<T>(ids: readonly string[], work: (fresh: SessionRoster) => Promise<T>): Promise<T>;
+}
+
 /** Whether a session is there to do work: `dead` is gone or finished; `unknown` could not be read. */
 export type SessionPresence = 'alive' | 'dead' | 'unknown';
 

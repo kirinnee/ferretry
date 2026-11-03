@@ -369,6 +369,7 @@ const tickWorld = (swept: SweepBoard, memory: SweepMemory, failing: ReadonlySet<
   const ports: BoardSweepPorts = {
     board: { sweepBoard: async () => swept, closeEndedHelper: async () => false, returnToLead: async () => false },
     sessions: new FakeSessions(everyone),
+    guard: new FakeSessions(everyone),
     memory: store,
     nudges: {
       send: async (sessionId, message) => {

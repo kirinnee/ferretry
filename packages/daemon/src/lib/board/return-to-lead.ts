@@ -16,6 +16,7 @@ import { type BoardTask, isSubCard, type LaneCategory } from '@ferretry/protocol
 import { type CardContext, withEvent } from './card-actions.ts';
 import { nearestLiveLead, presenceOf, type SessionRoster } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
+import { MAX_LINEAGE_DEPTH } from './lineage.ts';
 import { HELPER_ENDED_GRACE_MS, isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
 
 export { nearestLiveLead };
@@ -79,3 +80,19 @@ export const returnCard = (
   ),
   assignee: lead,
 });
+
+/**
+ * The sessions from `ferret` up to `lead`, both included, walked up the roster's `lead`: exactly the ones a return
+ * rests on (the ferret is gone, each one between is gone, `lead` is alive), so those are the ones whose standing is
+ * held still while the card is handed over. `null` when `lead` is not above `ferret`.
+ */
+export const lineageThrough = (roster: SessionRoster, ferret: string, lead: string): readonly string[] | null => {
+  const line = [ferret];
+  while (line.length <= MAX_LINEAGE_DEPTH) {
+    const next = roster.sessions.get(line[line.length - 1] as string)?.lead;
+    if (next === undefined || next === '' || line.includes(next)) return null;
+    line.push(next);
+    if (next === lead) return line;
+  }
+  return null;
+};

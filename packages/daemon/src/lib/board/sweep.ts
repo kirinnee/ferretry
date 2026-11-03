@@ -37,22 +37,26 @@
  * {@link planSweep} is pure; {@link BoardSweep} does the IO through its ports.
  */
 import {
-  type BoardTask,
   type BoardTaskId,
   type BoardTaskView,
   formatTaskRef,
   InstantSchema,
   isBlockerDone,
-  type LaneCategory,
   laneOf,
   type TaskRef,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { cardStaleAfterMs, presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
+import {
+  cardStaleAfterMs,
+  presenceOf,
+  type SessionLivenessGuard,
+  type SessionLivenessSource,
+  type SessionRoster,
+} from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
 import { noticeRecipient } from './notice-route.ts';
-import { endedForGrace, returnLead, returnTarget } from './return-to-lead.ts';
+import { endedForGrace, lineageThrough, returnTarget } from './return-to-lead.ts';
 import { isHandedHelper, isPrFreeHelper } from './sub-card-close.ts';
 import type { BoardClock, BoardDiagnostics } from './ports.ts';
 
@@ -272,16 +276,17 @@ export interface BoardSweepPorts {
     /** Closes a helper whose ferret ended; `true` when it closed. */
     closeEndedHelper(id: BoardTaskId): Promise<boolean>;
     /**
-     * Hands a card whose ferret ended to its live lead; `true` when it moved. `recheck` is asked inside the card's
-     * write and answers the lead the card should go to now, or `null` to leave it.
+     * Hands a card whose ferret ended to its live lead; `true` when it moved. `settle` holds the standing of the
+     * sessions the return rests on and hands the card's write a fresh roster of them (see {@link SessionLivenessGuard}).
      */
     returnToLead(
       id: BoardTaskId,
       plan: { readonly lead: string; readonly from: string },
-      recheck: (card: BoardTask, category: LaneCategory | undefined) => Promise<string | null>,
+      settle: <T>(work: (fresh: SessionRoster) => Promise<T>) => Promise<T>,
     ): Promise<boolean>;
   };
   readonly sessions: SessionLivenessSource;
+  readonly guard: SessionLivenessGuard;
   readonly memory: SweepMemoryStore;
   readonly nudges: BoardNudgeSender;
   readonly clock: BoardClock;
@@ -350,10 +355,10 @@ export class BoardSweep {
     }
     const returned: BoardTaskId[] = [];
     for (const { id, lead, from } of plan.returns) {
+      const line = lineageThrough(roster, from, lead);
+      if (line === null) continue;
       await this.ports.board
-        .returnToLead(id, { lead, from }, async (card, category) =>
-          returnLead(card, category, await this.ports.sessions.roster()),
-        )
+        .returnToLead(id, { lead, from }, async work => await this.ports.guard.settled(line, work))
         .then(
           done => {
             if (done) returned.push(id);

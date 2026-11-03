@@ -173,6 +173,7 @@ describe('the board session roster', () => {
     await session(storage, 'broken', { status: 'running' });
     const reading = {
       listSessions: () => storage.listSessions(),
+      holdSessions: storage.holdSessions.bind(storage),
       readConfig: storage.readConfig.bind(storage),
       readState: async (id: Parameters<Storage['readState']>[0]) => {
         if (id === 'broken') throw new Error('unreadable');
