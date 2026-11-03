@@ -66,7 +66,7 @@ export const handledNotification = (
     tag,
     silent: true,
     renotify: false,
-    data: { url: notificationUrl(undefined, origin, machine) },
+    data: { url: notificationUrl(undefined, origin, machine), handled: true },
   },
 });
 
@@ -100,11 +100,13 @@ export const planClear = (
 export interface ShownNotification {
   close(): void;
   readonly timestamp?: number;
+  readonly tag?: string;
+  readonly data?: unknown;
 }
 
 /** The slice of a service-worker registration a clear needs. */
 export interface ClearRegistration {
-  getNotifications(options: { tag: string }): PromiseLike<readonly ShownNotification[]>;
+  getNotifications(options?: { tag: string }): PromiseLike<readonly ShownNotification[]>;
   showNotification(title: string, options?: NotificationOptions): PromiseLike<void>;
   readonly pushManager?: { getSubscription(): PromiseLike<{ readonly endpoint: string } | null> };
 }
@@ -115,6 +117,22 @@ const mustShowSomething = async (registration: ClearRegistration): Promise<boole
     return mustShowForEveryPush((await registration.pushManager?.getSubscription())?.endpoint);
   } catch {
     return true;
+  }
+};
+
+/**
+ * Shows the quiet line, then closes every OTHER quiet line this registration shows (review round 9): each item has its
+ * own tag, so a line swapped under one item's tag would otherwise stay beside the next, and a phone would collect one
+ * per handled item. The newest one is kept, so the push that showed it still showed something.
+ */
+const showHandled = async (
+  registration: ClearRegistration,
+  note: ReturnType<typeof handledNotification>,
+): Promise<void> => {
+  await registration.showNotification(note.title, note.options);
+  for (const shown of await registration.getNotifications()) {
+    const handled = (shown.data as { readonly handled?: unknown } | null | undefined)?.handled === true;
+    if (handled && shown.tag !== note.options.tag) shown.close();
   }
 };
 
@@ -133,7 +151,7 @@ export const applyClear = async (
   const showing = found.filter(([, notifications]) => notifications.length > 0).map(([tag]) => tag);
   const plan = planClear(showing, await mustShowSomething(registration), machine, origin);
   // The line is shown first: where a push must show something, the replacement is that something.
-  if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
+  if (plan.show !== undefined) await showHandled(registration, plan.show);
   for (const [tag, notifications] of found) {
     if (!plan.close.includes(tag)) continue;
     for (const notification of notifications) notification.close();
@@ -244,7 +262,7 @@ export const settleIfCleared = async (
   // Only the clear's own quiet line can be under a cleared tag here; a newer push's line is never touched.
   const showing = verdict === 'cleared' ? await registration.getNotifications({ tag }) : [];
   const plan = planClear(showing.length > 0 ? [tag] : [], await mustShowSomething(registration), machine, origin);
-  if (plan.show !== undefined) await registration.showNotification(plan.show.title, plan.show.options);
+  if (plan.show !== undefined) await showHandled(registration, plan.show);
   return true;
 };
 

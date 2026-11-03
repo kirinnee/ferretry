@@ -62,7 +62,9 @@ class FakeRegistration implements ClearRegistration {
   /** When each tag's line was shown; a tag not here was shown at 0, long ago, and one set to `undefined` has no stamp. */
   readonly stamps: Record<string, number | undefined> = {};
 
-  async getNotifications(options: { tag: string }): Promise<readonly ShownNotification[]> {
+  async getNotifications(options?: { tag: string }): Promise<readonly ShownNotification[]> {
+    // Asked for every line, it lists none: no quiet line it showed is kept here.
+    if (options === undefined) return [];
     const stamp = options.tag in this.stamps ? this.stamps[options.tag] : 0;
     // A line closed is gone: closing the same tag again finds nothing more.
     const left = (this.showing[options.tag] ?? 0) - this.closed.filter(tag => tag === options.tag).length;
@@ -114,7 +116,7 @@ describe('the quiet note', () => {
       tag: 'fy-push:x:attention-s:A3',
       silent: true,
       renotify: false,
-      data: { url: `${ORIGIN}/d/${encodeURIComponent(WORK.daemonId)}` },
+      data: { url: `${ORIGIN}/d/${encodeURIComponent(WORK.daemonId)}`, handled: true },
     });
     expect(HANDLED_BODY).toBe('Nothing to do here.');
   });
@@ -548,15 +550,29 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
       this.pushManager = { getSubscription: async () => ({ endpoint }) };
     }
 
-    async getNotifications(options: { tag: string }): Promise<readonly { close(): void }[]> {
-      return Array.from({ length: this.lines.get(options.tag) ?? 0 }, () => ({
-        close: () => void this.lines.delete(options.tag),
-      }));
+    /** The tags whose line is a quiet note. */
+    readonly notes = new Set<string>();
+
+    async getNotifications(options?: { tag: string }): Promise<readonly ShownNotification[]> {
+      const tags = options === undefined ? [...this.lines.keys()] : [options.tag];
+      return tags.flatMap(each =>
+        Array.from({ length: this.lines.get(each) ?? 0 }, () => ({
+          tag: each,
+          data: { handled: this.notes.has(each) },
+          close: () => {
+            this.lines.delete(each);
+            this.notes.delete(each);
+          },
+        })),
+      );
     }
 
     async showNotification(title: string, options?: NotificationOptions): Promise<void> {
       this.shown.push({ title, tag: options?.tag });
-      if (options?.tag !== undefined) this.lines.set(options.tag, 1);
+      if (options?.tag === undefined) return;
+      this.lines.set(options.tag, 1);
+      if ((options.data as { handled?: boolean } | undefined)?.handled === true) this.notes.add(options.tag);
+      else this.notes.delete(options.tag);
     }
   }
 
@@ -655,6 +671,22 @@ describe('a push and its clear handled at once in one worker (review round 2)', 
     // Act / Assert
     expect(await settleIfCleared(registration, tag, recent, recent.arrived(), WORK, ORIGIN)).toBe(false);
     expect(recent.verdict(shownTag('attention-session-1:A4', WORK), 0)).toBe('show');
+  });
+
+  it('should keep one quiet line on an iPhone however many items are handled, the newest (review round 9)', async () => {
+    // Arrange — two items' lines are up; each is handled on another device in turn.
+    const registration = new LiveRegistration(APPLE);
+    const other = shownTag('attention-session-1:A4', WORK);
+    const stillWanted = shownTag('attention-session-1:A5', WORK);
+    for (const each of [tag, other, stillWanted]) registration.lines.set(each, 1);
+
+    // Act
+    await applyClear(registration, clear(['attention-session-1:A3']), WORK, ORIGIN);
+    await applyClear(registration, clear(['attention-session-1:A4']), WORK, ORIGIN);
+
+    // Assert — A3's quiet line went when A4's came; A5's real line was never touched.
+    expect([...registration.lines.keys()].sort()).toEqual([other, stillWanted].sort());
+    expect([...registration.notes]).toEqual([other]);
   });
 
   for (const [service, endpoint] of [

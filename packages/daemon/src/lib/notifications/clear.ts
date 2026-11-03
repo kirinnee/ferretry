@@ -116,7 +116,8 @@ export class AgendaAlertClearer implements AgendaChangeObserver {
     // Read BEFORE waiting for the lane (review rounds 6–8): a push of the item's still being sent when the owner
     // opened it reached no page that could close it, so once it lands it comes down on every device. One that had
     // already landed is the ordinary clear's, which skips the opener: its page closes the item's own lines itself,
-    // so the phone just tapped never says "Handled on another device".
+    // so the phone just tapped almost never says "Handled on another device" (only when another device's push service
+    // holds that push up is it still on its way here).
     const admitted = Date.parse(this.options.clock.now());
     const before = await this.options.ledger.entries();
     return await this.run(sessionId, async (snapshot, entries) => {

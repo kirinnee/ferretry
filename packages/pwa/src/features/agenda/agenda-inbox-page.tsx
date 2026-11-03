@@ -1106,6 +1106,12 @@ export interface AgendaInboxPageProps {
 /** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
 const OPEN_WAIT_MS = 5_000;
 
+/** How soon after the last input on this page a card coming up on top still counts as the owner opening it. */
+const ATTENDED_MS = 60_000;
+
+/** What counts as someone at the page: a press, a key, a tap, or the page coming back into view. */
+const ATTENDED_INPUTS = ['pointerdown', 'keydown', 'click', 'touchstart', 'visibilitychange'] as const;
+
 /** Everything a row needs besides the card itself. */
 interface RowEnv {
   readonly inbox: AgendaInbox;
@@ -1666,12 +1672,42 @@ export function AgendaInboxPage({
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
-  // Opening an item is the owner seeing it: its alerts come down here and on their other devices.
+  // Opening an item is the owner seeing it: its alerts come down here and on their other devices. Only while someone is
+  // at this page (review round 9): a deck that moved on by itself on a screen nobody is at — its card was answered
+  // elsewhere — or a hidden tab is not an open, or it would take the next card's alert off the phone in the owner's
+  // hand. The card on top is told when it comes up within `ATTENDED_MS` of an input on a visible page (coming to the
+  // page counts), or else at the next one.
   const openedCard = cardOpen ? deckSelected : undefined;
+  const opened = useRef({ card: openedCard, tell: onItemOpened });
+  opened.current = { card: openedCard, tell: onItemOpened };
+  const readClock = clock ?? Date.now;
+  const lastInput = useRef(readClock());
+  const toldKey = useRef<string | null>(null);
+  const tellOpened = useRef((): void => undefined);
+  tellOpened.current = () => {
+    const { card, tell } = opened.current;
+    if (card === undefined || toldKey.current === card.key) return;
+    if (document.visibilityState === 'hidden' || readClock() - lastInput.current > ATTENDED_MS) return;
+    toldKey.current = card.key;
+    tell?.(card);
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: a different item on top is the only trigger; the card object and the host callback are re-made every render
   useEffect(() => {
-    if (openedCard !== undefined) onItemOpened?.(openedCard);
+    if (openedCard === undefined) toldKey.current = null;
+    tellOpened.current();
   }, [openedCard?.key]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the clock is read through `readClock` each time
+  useEffect(() => {
+    const input = (): void => {
+      if (document.visibilityState === 'hidden') return;
+      lastInput.current = readClock();
+      tellOpened.current();
+    };
+    for (const type of ATTENDED_INPUTS) document.addEventListener(type, input, true);
+    return () => {
+      for (const type of ATTENDED_INPUTS) document.removeEventListener(type, input, true);
+    };
+  }, []);
 
   // The desktop run's keys. ←, ↑, → and ↓ answer or skip an agenda card inside the deck; a task card is answered here.
   // j and k move between cards, Esc closes. Never while the reader is in a field, a menu or a dialog.

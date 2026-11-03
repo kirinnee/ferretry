@@ -213,6 +213,11 @@ to it). The app closes that item's lines on the device in the owner's hand at on
 and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.
 The device the item was opened on is skipped, so it never gets the iPhone note below about its own tap.
 
+An Inbox card counts as opened only while someone is at that page (`ATTENDED_MS`): it came on top within a minute of
+a press, key or tap on a visible page — coming to the page counts — or else it is told at the next one. A deck left
+open on a screen nobody is at moves on by itself when its card is answered elsewhere, and that is not the owner
+opening the next card, so it never takes that card's alert off the phone in their hand.
+
 The answer can be slow, and by then a NEWER line can be up under one of its tags (the next item was raised, and a new
 stop went out). So the app closes, for the answer's tags, only a line whose `timestamp` is at or before the moment of
 the open, read when the item was opened rather than when the answer came. A line the browser gives no `timestamp`
@@ -243,6 +248,8 @@ Such a device swaps rather than closes because its push service revokes the subs
 push and shows nothing — Apple's at once, Mozilla's once a small quota of such pushes is spent — the same rule a
 muted push answers (below). The note never names the item. A tap on it opens that machine. Chrome lets a push show
 nothing too, within a budget: past it, Chrome shows its own "This site has been updated in the background" line.
+Each note is marked as one (`data.handled`), and showing one closes this machine's other notes on that device, so it
+keeps one quiet note however many items were handled (the newest, so the push that showed it still showed something).
 
 **Once each.** A clear is written to `notifications.jsonl` with the pushes it covers before it is sent, so a second
 change or a restart never clears the same push again; a later push about the same item (it woke again) is cleared on
@@ -267,8 +274,9 @@ clear reaches EVERY device, the one that opened the item included: its page clos
 asked, so an iPhone there may show the quiet note for that one line. The same holds for a push being sent when the
 owner opens its item: the open notes it before it waits its turn in the ferret's lane, and clears it on every device
 if it landed meanwhile. One that had already landed when the open reached the machine (the owner most likely just
-tapped it) is the ordinary clear's, which skips the opener, so the phone in the owner's hand never says "Handled on
-another device" about its own tap. A push recorded with no outcome counts as on its way for 10 minutes at most. At
+tapped it) is the ordinary clear's, which skips the opener, so the phone in the owner's hand almost never says "Handled on
+another device" about its own tap — only when another device's push service holds that push up (10 s at most) is it
+still on its way at the open. A push recorded with no outcome counts as on its way for 10 minutes at most. At
 start the daemon looks once at every ferret with a line this release pushed still up, for a board that changed while
 it was down.
 
@@ -287,6 +295,9 @@ ever made counts as uncovered. The start-up look therefore skips a push recorded
 by its own ferret's next board change or open, one ferret at a time as the owner works, and only while it is under
 two days old. A finished ferret's old lines stay up as they did before this release, and an upgrade sends no burst of
 clears. A push this release made has no age bound: its item may be answered days later.
+
+**GAP: the ledger is never rotated.** The clearer reads the whole `notifications.jsonl` on every board change, every
+landing and each open, and the file only grows (its bounded rotation is a follow-up), so that cost grows with it.
 
 **Rolling back.** A daemon older than this release reads the new ledger records (a push's `tag`, a clear) as lines
 it cannot read and skips them: `fy doctor` counts them, and it may repeat a deadline, stop or wake push for an item
