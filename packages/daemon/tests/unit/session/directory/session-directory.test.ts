@@ -301,5 +301,28 @@ describe('createSessionDirectory', () => {
       should(after.map(view => view.config.id)).eql(['live-0', 'live-2']);
       should(removed).have.length(1);
     });
+
+    it('should let go of a session the index swapped for an unusable one, though the count did not change', async () => {
+      // Arrange
+      const { subject, index } = stored(2);
+      const first = await subject.list();
+      const [kept, left] = [index[0], index[1]];
+      // `live-2` is indexed but has no documents at all, so it never enters the cache: the index and the cache
+      // both hold two sessions after this swap, and only membership tells them apart.
+      index.splice(0, 2, kept as IndexedSession, indexed('live-2', 'running'));
+      const withoutLeaver = await subject.list();
+      index.splice(0, 2, kept as IndexedSession, left as IndexedSession);
+
+      // Act
+      const returned = await subject.list();
+
+      // Assert
+      should(withoutLeaver.map(view => view.config.id)).eql(['live-0']);
+      should(returned.map(view => view.config.id)).eql(['live-0', 'live-1']);
+      should(returned[0]).equal(first[0]);
+      // Same documents, but the departed session was forgotten, so its view is built anew rather than recalled.
+      should(returned[1]).not.equal(first[1]);
+      should(returned[1]).eql(first[1]);
+    });
   });
 });

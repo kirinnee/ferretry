@@ -142,14 +142,20 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
           directory: ports.directory(id),
           ...(journalSequence === undefined ? {} : { journalSequence }),
         };
+    // Both schemas are objects, so a pair that parsed is a pair of objects; a pair that did not has already
+    // been forgotten above. The check narrows the types for the entry, it does not choose between outcomes.
     if (isDocument(rawConfig) && isDocument(rawState))
       known.set(id, { rawConfig, rawState, config, state, journalSequence, view: assembled });
-    else known.delete(id);
     return assembled;
   };
-  /** Lets go of the sessions the index no longer holds, so what is kept is bounded by the fleet. */
+  /**
+   * Lets go of the sessions the index no longer holds, so what is kept is bounded by the fleet.
+   *
+   * By membership, never by size: an index that swaps one session for another holds as many as before, and a
+   * count comparison would keep the one that left — a session that came back later with the same documents
+   * would be handed its stale view.
+   */
   const forget = (listed: readonly IndexedSession[]): void => {
-    if (known.size <= listed.length) return;
     const held = new Set<string>(listed.map(session => session.id));
     for (const id of known.keys()) if (!held.has(id)) known.delete(id);
   };
