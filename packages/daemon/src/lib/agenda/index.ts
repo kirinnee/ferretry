@@ -1,6 +1,7 @@
 export * from './agenda-files.ts';
 export * from './agenda-migration.ts';
 export * from './clear-agents.ts';
+export * from './closest.ts';
 export * from './rollup.ts';
 export * from './config-confirms.ts';
 export * from './conversation.ts';

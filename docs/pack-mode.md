@@ -69,8 +69,8 @@ and the longest routing prompt:
 | Tools (terminals, browser pages)         | 1,154      | 289      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Board (opt-in; `fy task`, cards)         | 802        | 201      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,237      | 309      | `FY_AGENDA=1`               |
+| Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
+| Agenda (`fy agenda`, with answer shapes) | 1,285      | 321      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -84,7 +84,13 @@ section (749, with the card-writing rule, How to test and the lane-by-category r
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
 is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-parks-the-item rule — do the work and `done`; `edit --back` with the card refreshed only for something new — and the rule that an owner's question about an item is answered ON it (`edit --question-answer`, options kept) and an unanswered question is closed only with `done --reason`, paid for in its own words and by raising the cap from 7.9 to 8 KB; its one kind → answer-shape line, `AGENDA_SHAPE_LINE` from `@ferretry/protocol`, replaced the old per-kind flag hints and was paid for by tightening the section's own wording, leaving 6 characters under the cap; the `form=` clause for agenda forms, added after, was paid for by trimming the Lessons rule, so the measured total is 7,841), and the test keeps at least 150 characters of headroom under the 8 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
-exactly what Jev is told.
+exactly what Jev is told. The agenda-first model (2026-11-03) rewrote the Agenda section to teach what an agenda
+is — one channel of the owner's attention, the three-part test, search-check-open, the states, the type stages,
+splitting and chat discussion — and the Board section to say a card shows progress only, its asks ride its agenda,
+and there are no umbrella cards. It was paid for by the Board section's gate words and its full `fy task create`
+example, and by tightening the Agenda section's own wording: agenda 1,237 → 1,285, board 802 → 638, the measured total
+7,841 → 7,725. That leaves 125 characters under the cap for the agenda verbs that ship next (`answer`, `rest`, `log`,
+`split`, `merge`), which join the section when they exist.
 
 ## The routing prompt
 
@@ -329,7 +335,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   never raise agenda items or notify the owner, report to your lead with `fy send`; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2339 characters** (3277 with Agenda mode on), **sub-ferret 1748**.
+  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2250**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

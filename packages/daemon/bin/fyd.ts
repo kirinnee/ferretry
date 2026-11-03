@@ -113,6 +113,7 @@ import {
   type WardenGuardConfig,
   type DuplicateAsk,
   MACHINE_AGENDA_ID,
+  MAX_WORK_RELATED_TEXT_LENGTH,
 } from '@ferretry/protocol';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
@@ -616,7 +617,7 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
-import { type AgendaMutation, isAgendaSessionId } from '../src/lib/agenda/index.ts';
+import { type AgendaMutation, closestAgenda, isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
@@ -972,6 +973,7 @@ import {
   InferredLaneProposer,
   InitialAttachmentError,
   InputAgendaAdapter,
+  type InputClosestAgenda,
   InputAgentNotifierAdapter,
   InputAuditAdapter,
   InputCardClosedObserver,
@@ -6633,6 +6635,8 @@ function createInputRequestService(input: {
   readonly terminals: TerminalRuntimePort;
   readonly tmux: TmuxCommandPort;
   readonly agenda: AgendaService;
+  /** The open agenda an input card belongs with, so it links its topic instead of reading as a fresh one. */
+  readonly closestAgenda?: InputClosestAgenda;
   readonly agentReplies: AgendaReplyBatcher;
   readonly audit: AuditLog;
   readonly values: EphemeralValues;
@@ -6704,7 +6708,7 @@ function createInputRequestService(input: {
       // replaces a value and lists names, never returns one.
       new SecretStoreTarget(input.secretStore),
     ),
-    agenda: new InputAgendaAdapter(input.agenda),
+    agenda: new InputAgendaAdapter(input.agenda, input.closestAgenda),
     notifier: new InputAgentNotifierAdapter(
       async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
     ),
@@ -11302,6 +11306,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals,
         tmux,
         agenda,
+        // An agenda is one channel of the owner's attention: a card that strongly matches an open one links to it.
+        closestAgenda: async (sessionId, card) => {
+          const listed = await agenda.list(sessionId);
+          const title = card.prompt.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH);
+          if (!listed.ok || title === '') return undefined;
+          const related = await workSearch.related({
+            kind: 'agenda',
+            title,
+            ask: card.ask.trim().slice(0, MAX_WORK_RELATED_TEXT_LENGTH),
+          });
+          return closestAgenda(related, sessionId, listed.value.items);
+        },
         agentReplies: agendaReplies,
         audit: auditLog,
         values: justTyped,

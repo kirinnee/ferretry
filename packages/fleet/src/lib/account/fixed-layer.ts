@@ -442,7 +442,7 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
 /**
  * AGENDA MODE — a per-FERRET section (docs/agenda.md): this ferret keeps the owner's agendas, each ONE channel of
  * their attention, and the daemon pushes the phone once when it stops with items waiting. Off unless the
- * daemon writes {@link AGENDA_ENV} `1`. docs/agenda.md quotes this text verbatim.
+ * daemon writes {@link AGENDA_ENV} `1`. docs/notifications.md quotes this text verbatim.
  */
 export const AGENDA_ENV = 'FY_AGENDA';
 
