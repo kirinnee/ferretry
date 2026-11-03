@@ -72,7 +72,7 @@ and the longest routing prompt:
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,236      | 309      | `FY_AGENDA=1`               |
-| Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
+| Hypermedia                               | 1,320      | 330      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
 | Lessons                                  | 238        | 60       | `FY_LEARNING_PASSIVE=1`     |

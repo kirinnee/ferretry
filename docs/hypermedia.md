@@ -76,7 +76,7 @@ Write a fenced block whose info string is exactly fy-render: `type: <type>`, `al
 - svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
 - html: a fragment with inline CSS and <script> for interaction (runs isolated); no network loads.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
-- map, image, video, audio, pdf: `fy render guide <type>`.
+- card, board (live board cards), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
 alt: How a request flows
@@ -107,6 +107,8 @@ A block renders by itself once it is near the screen — there is no Render butt
 | `map`     | small JSON/YAML: centre, markers, lines, polygons | an inline interactive map (Leaflet, OpenStreetMap tiles); a coordinates list if it cannot draw   |
 | `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
 | `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
+| `card`    | one card reference, `&F12`                        | the board's own card, live: its lane, progress and PRs; a quiet note if it cannot be read        |
+| `board`   | card references, or `parent: &F12`                | a mini board of those cards, or of a card's children grouped by lane, live                       |
 | `image`   | `src:` — or `mime:` + base64 inline               | a picture; an https image needs CORS from its host, else a link row                              |
 | `video`   | `src:`                                            | the browser's native player (https plays directly)                                               |
 | `audio`   | `src:`                                            | the browser's native player (https plays directly)                                               |

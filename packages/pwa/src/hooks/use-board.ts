@@ -133,12 +133,14 @@ export const useBoardTask = (
   store: DaemonBoardStore,
   machine: DaemonConnection | undefined,
   id: BoardTaskId,
+  options: { readonly beat?: boolean } = {},
 ): BoardTaskState => {
   const daemonId = machine?.daemonId;
+  const beat = options.beat !== false;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing is the deliberate key
   useEffect(
-    () => (machine === undefined ? undefined : store.watchTask(machine, id)),
-    [store, daemonId, machine?.baseUrl, machine?.deviceId, id],
+    () => (machine === undefined ? undefined : store.watchTask(machine, id, { beat })),
+    [store, daemonId, machine?.baseUrl, machine?.deviceId, id, beat],
   );
   return useSyncExternalStore(
     store.subscribe,

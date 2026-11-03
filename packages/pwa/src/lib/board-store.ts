@@ -175,6 +175,8 @@ interface TaskWatch {
   state: BoardTaskState;
   stamp: number;
   timer: unknown;
+  /** Some holder wants the card re-read on the 30-second beat; an inline block reads only on its events. */
+  beat: boolean;
 }
 
 /** The key of the view for a query over these machines: what `watch` joins and `view` reads. */
@@ -480,17 +482,26 @@ export class DaemonBoardStore {
     return this.#tasks.get(taskKey(daemonId, id))?.state ?? IDLE_BOARD_TASK;
   }
 
-  /** Joins the page for one card, reads it, and re-reads it on its `board.changed` and every beat. */
-  watchTask(machine: DaemonConnection, id: BoardTaskId): () => void {
+  /**
+   * Joins the page for one card, reads it, and re-reads it on its `board.changed` and, unless a holder
+   * passes `beat: false`, every beat. A card shown inline in a message is live on events alone: nothing
+   * about a message earns a timer, and the page that holds the card in full still gets its beat.
+   */
+  watchTask(machine: DaemonConnection, id: BoardTaskId, options: { readonly beat?: boolean } = {}): () => void {
+    const beat = options.beat !== false;
     this.#connections.set(machine.daemonId, machine);
     const key = taskKey(machine.daemonId, id);
     let watch = this.#tasks.get(key);
     if (watch === undefined) {
-      watch = { daemonId: machine.daemonId, id, refs: 0, state: IDLE_BOARD_TASK, stamp: 0, timer: undefined };
+      watch = { daemonId: machine.daemonId, id, refs: 0, state: IDLE_BOARD_TASK, stamp: 0, timer: undefined, beat };
       this.#tasks.set(key, watch);
     }
     watch.refs += 1;
     const joined = watch;
+    if (beat && !joined.beat) {
+      joined.beat = true;
+      if (joined.state.status !== 'idle' && joined.timer === undefined) this.#armTask(joined);
+    }
     if (joined.state.status === 'idle') void this.#readTask(joined);
     let released = false;
     return () => {
@@ -546,6 +557,7 @@ export class DaemonBoardStore {
   }
 
   #armTask(watch: TaskWatch): void {
+    if (!watch.beat) return;
     if (watch.timer !== undefined) this.#env.clearTimeout(watch.timer);
     watch.timer = this.#env.setTimeout(() => {
       watch.timer = undefined;

@@ -463,6 +463,25 @@ describe('DaemonBoardStore one card and projects', () => {
     expect(store.taskState(laptop.daemonId, 'F1').status).toBe('idle');
   });
 
+  it('holds a card watched without a beat by events alone, and a later beat from any watcher arms the timer', async () => {
+    let task = card('F1');
+    const port = fakePort({ task: async () => ({ task, laneSet: lanes }) });
+    const { store, environment } = open(port);
+    const quiet = store.watchTask(laptop, 'F1', { beat: false });
+    await flush();
+    expect(environment.pending()).toBe(0);
+    task = card('F1', { laneId: 'review' });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    await flush();
+    expect(store.taskState(laptop.daemonId, 'F1').task?.laneId).toBe('review');
+    expect(environment.pending()).toBe(0);
+    const beating = store.watchTask(laptop, 'F1');
+    expect(environment.pending()).toBe(1);
+    beating();
+    quiet();
+    expect(environment.pending()).toBe(0);
+  });
+
   it('keeps the card it had when a re-read fails', async () => {
     let fail = false;
     const port = fakePort({
