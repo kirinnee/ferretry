@@ -1655,8 +1655,8 @@ function placeOnReturn(command: EditCommand, item: AgendaItem): 'old' | 'fresh' 
  *   queue when it answers their reply, FRESH after the ferret took it on (`placeOnReturn`). An item on the ferret's
  *   turn for more information is handed back by any edit of the ferret's, as before.
  * - A resting item edited any other way stays resting: nothing it writes reaches the owner.
- * - A SNOOZED item stays asleep unless the ferret says it is urgent (`now`), or newly marks it blocking: either wakes
- *   it, at most once an hour (`AGENDA_URGENT_WAKE_MS`); a blocker past that limit stays asleep, with a note.
+ * - A SNOOZED item stays asleep unless the ferret says it is urgent (`now`, at most once an hour per item
+ *   (`AGENDA_URGENT_WAKE_MS`)) or newly marks it blocking, which wakes it whenever it happens.
  */
 function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
