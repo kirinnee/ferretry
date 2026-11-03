@@ -214,6 +214,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/pack/recommend operator any',
   'POST /v1/pack/new operator any',
   'GET /v1/sessions/:sessionId/result operator any',
+  'GET /v1/sessions/:sessionId/subtree operator any',
   'PATCH /v1/sessions/:sessionId/pack operator person',
   'POST /v1/sessions/:sessionId/mcp/project/preview operator any',
   'POST /v1/sessions/:sessionId/mcp/login/preview operator any',

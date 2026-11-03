@@ -541,6 +541,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     result: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    subtree: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     setSwitch: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -969,6 +972,7 @@ describe('the mounted daemon surface', () => {
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
       1 + // the security log read
+      1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1 + // "Send now" for the answers a ferret's outbox holds (docs/agenda.md § The loop)
       1 + // the owner's "Clear all from agent ferrets": every open item on the agent ferrets' boards, dismissed (docs/agenda.md)
@@ -1309,6 +1313,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pack/recommend',
       'POST /v1/pack/new',
       'GET /v1/sessions/:sessionId/result',
+      'GET /v1/sessions/:sessionId/subtree',
       'PATCH /v1/sessions/:sessionId/pack',
       'POST /v1/sessions/:sessionId/mcp/project/preview',
       'POST /v1/sessions/:sessionId/mcp/login/preview',

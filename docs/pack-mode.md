@@ -40,12 +40,13 @@ far above a server's text. The runtime wrapper composes it per ferret at exec ti
 called `fy`:
 
 ```text
-Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits it. Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line below.
-1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
-2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
-3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.
-4. `fy wait <id>` prints its result when it finishes; check it, then combine the results yourself. Message a sub-ferret with `fy send <id> --kind blocker|action|fyi` (default action; fyi rarely).
-Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
+Pack mode: hand self-contained parts of your task to sub-ferrets (agents, each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.
+1. `fy recommend` lists usable models, most quota first, with start commands.
+2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"`: Ferretry chooses). Always pass `--name` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.
+3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.
+4. `fy wait <id>` prints its result; check it, then combine. Label sends: `--kind blocker|action|fyi` (fyi rarely).
+Check your children with `fy status --subtree` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.
+Stop unneeded sub-ferrets: `fy stop children <your id> --yes`.
 ```
 
 The Pack section then ends with the **whole routing prompt** ([The routing prompt](#the-routing-prompt)) as
@@ -66,15 +67,15 @@ and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
-| Tools (terminals, browser pages)         | 1,154      | 289      | every agent runtime         |
-| Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
+| Tools (terminals, browser pages)         | 1,299      | 325      | every agent runtime         |
+| Ferretry settings (short "Set up" skill) | 493        | 123      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (opt-in; `fy task`, cards)         | 638        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with answer shapes) | 1,252      | 313      | `FY_AGENDA=1`               |
-| Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
-| Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
+| Agenda (`fy agenda`, with answer shapes) | 1,233      | 308      | `FY_AGENDA=1`               |
+| Hypermedia                               | 1,288      | 322      | `FY_HYPERMEDIA=1`           |
+| Pack mode                                | 1,046      | 262      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
-| Lessons                                  | 262        | 66       | `FY_LEARNING_PASSIVE=1`     |
+| Lessons                                  | 238        | 60       | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
@@ -96,11 +97,14 @@ paid for by tightening the Agenda section's other lines: agenda 1,285 → 1,276,
 (7,730 counting the 14 section-separator characters), leaving 134 characters under the 7,850 cap (120 counting the
 separators). The agenda body rule (keep the body a one-screen summary; link the full report) then took the agenda
 section 1,276 → 1,319 (cap 1,290 → 1,330). With the send-label rule that took Pack to 1,026, the measured total is 7,814
-(7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The merge
-of that with the agenda model tightened the Agenda section's own wording (the repeated "unsure: closest", `done <id>` →
-`done`, `"<the ask>"` → `"<ask>"`, the form's "text in the reply", which the help already says, and "on it" in the chat
-line): agenda 1,319 → 1,252, the measured total 7,747 (7,761 counting the separators), leaving 103 characters under the
-7,850 cap (89 counting the separators). The whole-prompt cap is unchanged.
+(7,828 counting the separators), leaving 36 characters under the 7,850 cap (22 counting the separators). The
+pack-status rule (`fy status --subtree`, screenshot review by a sub-agent) then took Pack to 1,166 and the total to 7,954, over both
+caps; the Pack wording was tightened (1,166 → 1,046, no rule dropped), so the measured total is 7,834 (7,848 counting the
+separators), leaving 16 characters under the 7,850 cap (2 counting the separators). The merge of that with the agenda model tightened
+the Agenda section's own wording (the repeated "unsure: closest", `done <id>` → `done`, `"<the ask>"` → `"<ask>"`, the form's
+"text in the reply", which the help already says, "on it" in the chat line, and "say so"): agenda 1,319 → 1,233, the measured
+total 7,748 (7,762 counting the separators), leaving 102 characters under the 7,850 cap (88 counting the separators).
+The whole-prompt cap is unchanged.
 
 ## The routing prompt
 
@@ -319,6 +323,54 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 
+## Checking on your sub-ferrets
+
+A lead does not need its children to message it progress. A sub-ferret puts routine progress on its card
+(`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
+**looks when it wants to**:
+
+```text
+$ fy status --subtree
+rhett (mvzxdjv2-58f11bc0): 3 descendants
+SESSION  MODEL        STATE      CARD             PR               LAST
+ada      sonnet-5-5   running    &F767 Implement  #321 CI pending  [2m] route and table done, writing tests
+  bo     glm-5.3      needs-you  &F770 Review     -                [14m] which lane should review move to?
+cy       gpt-6.1-sol  ended 25m  &F768 Done       #320 merged      [25m] merged; nothing left
+```
+
+- **One call.** `fy status --subtree [<id>]` asks `GET /v1/sessions/:sessionId/subtree` once (default: the calling
+  session; the owner outside a pane names an id). The daemon builds every row from what it already holds — the
+  sessions registry, one read of the board's cards, the PR cache the board keeps, and the end of each
+  descendant's outbox. It never calls GitHub per row, so fifty descendants cost one request.
+- **Rows.** One per live descendant, plus any that ended in the last two hours (`ended 25m`), in tree order: a
+  ferret, then its own sub-ferrets indented beneath it, then the next sibling (by callsign). Lineage is the
+  registry's `parent` links (the shared `subtreeDepths` walk `fy stop` also uses), never the request.
+- **State.** `running`; `waiting` (parked or rate limited); `needs-you` (an open question, an agenda item or a
+  flagged need — painted amber); `ended`.
+- **Card and PR.** The card a session works on (`&F767`) and its lane; the card's open PR (else its newest) with CI
+  as the board's PR cache last read it (`CI passing|failing|pending`, or `merged`/`closed`). `-` where there is none.
+- **Last line.** The newer of the card's last note and the ferret's last message to the asking ferret, cut to one line
+  of at most 100 characters (`…`; an emoji counts as one). A tie goes to the note. "The asking ferret" is the caller the
+  daemon derives from its credential, not the id in the path: when lead A asks for `--subtree B`, a grandchild's result
+  sent to A shows, not only what was sent to B. The owner outside a pane has no such caller, so it sees messages sent to the
+  named root. The outbox is read backwards in 64 KiB chunks, whole records at a time, up to 1 MiB: a long report never
+  hides the message under it, and only a message older than the last megabyte falls back to the card's note.
+- **Secrets never reach the line.** The whole note or message is run through the same fail-closed redactor the
+  operator transcript reads use (the vault, logins and just-typed values) **before** it is cut to a line, in one batch
+  per table, so a secret that straddles the 100-character cut is masked whole. If the redactor cannot run, every
+  excerpt reads `[excerpt withheld]` — the raw text is never shown.
+- **Bounded work.** A large tree cannot make the daemon scan without limit: at most 4 outbox files are open at once,
+  at most 64 rows get an excerpt (live rows first; at most 8 of them recently ended), and at most 8 MiB of outbox is
+  read for the table (1 MiB per row), live rows spending it before ended ones. A read that fails keeps its whole
+  share of that budget, since it may already have read it. A row past a budget is still listed — state, card and PR intact — with no
+  last line, so `-` in that column on a very large table means "not read", not "silent". A failed outbox read does
+  the same for its row.
+- **`--json`** prints the same view (`root`, `at`, `endedWindowMs`, `rows` with `depth`, `state`, `status`, `card`, `pr`,
+  `last`, `endedAt`).
+
+The route is `fleet.use` ([grants.md](grants.md)). The lead's instruction line is: check your children with
+`fy status --subtree` instead of asking them; delegate screenshot review to a sub-agent and keep only its verdict.
+
 ## Sub-ferret limits
 
 The owner's decision (2026-10-30): **only lead ferrets raise agenda items and move cards; sub-ferrets report to
@@ -344,8 +396,8 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   ([agenda.md](agenda.md#the-agenda-home)). Only a hands-on card (a password, code or approval the daemon asks for) stays
   on the sub-ferret.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
-  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2520**.
+  never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); routine progress goes on its card (`fy task note`) and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
+  out. Sizes with the default binary name: **lead 2739 characters** (4026 with Agenda mode on), **sub-ferret 2552**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale

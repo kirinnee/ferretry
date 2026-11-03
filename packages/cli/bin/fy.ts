@@ -16,6 +16,7 @@ import {
   type IFyHttpTransport,
   readLoopbackFirewallMarker,
   type SessionView,
+  SubtreeViewSchema,
 } from '@ferretry/protocol';
 import { FetchHttpTransport, FyApiClient } from '@ferretry/protocol/client';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
@@ -254,6 +255,7 @@ import {
   type ICellColour,
   InterruptSessionController,
   type ISessionBoard,
+  type ISessionSubtree,
   ListSessionsController,
   RenameSessionController,
   ResumeSessionController,
@@ -263,6 +265,7 @@ import {
   type SessionEnvironment,
   SessionPresenter,
   SessionStatusController,
+  SessionSubtreeController,
   SignalSessionController,
   StartSessionController,
   SuggestNamesController,
@@ -1776,6 +1779,11 @@ function sessionCommands(
   const board: ISessionBoard = {
     laneNames: async () => boardLaneNames(new FyBoardGateway(await connect())),
   };
+  // The daemon builds the whole table from its own registry, board and outbox: one request, whatever the size.
+  const subtree: ISessionSubtree = {
+    subtree: async id =>
+      await (await connect()).request(`/v1/sessions/${encodeURIComponent(id)}/subtree`, SubtreeViewSchema),
+  };
   // Chalk is the terminal's attention colour; it is the identity when colour is off (NO_COLOR, a
   // non-TTY stdout), which is exactly the deal the renderer measures widths under.
   const colour: ICellColour = { amber: cell => chalk.yellow(cell) };
@@ -1787,6 +1795,7 @@ function sessionCommands(
     start: new StartSessionController(api, files, presenter, environment, BINARY_NAME),
     list: new ListSessionsController(api, presenter, board, colour),
     status: new SessionStatusController(api, presenter),
+    subtree: new SessionSubtreeController(subtree, presenter, environment, new SystemClock(), colour),
     send: new SendMessageController(api, files, presenter, environment, {
       nowMs: () => Date.now(),
       sleep: milliseconds => Bun.sleep(milliseconds),
