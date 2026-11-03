@@ -752,7 +752,7 @@ split sends neither, and the app then shows every card and no toggle.
 
 ### Cards to test: a person asked
 
-The Inbox's To test section, Answer quickly, and the chat task panel's Cards view list only the cards a PERSON asked
+The Inbox's To test section and Answer quickly (on a machine without `agenda.card-asks.1`) list only the cards a PERSON asked
 for, so the owner is not flooded with the follow-ups their ferrets file for themselves. That is `askedBy` on a card
 (`person` or `agent`), and the card STORES it: the daemon decides it once, when it creates the card, and never from
 the request (the create body has no such field, so a caller cannot claim it). `decideAskedBy` in `origin.ts` says
@@ -1051,7 +1051,7 @@ a stop's push only while its sole open items are card asks ([notifications.md](n
 `agenda.card-asks.1` on `GET /v1/health`.
 
 **Cards carry no "waiting on you".** `waitingOnOwner`, the activity `waiting`, the `toTest` and `waitingOnYou` counts
-and the `to_test` and `waiting_on_you` filters are deprecated: the daemon sends `waitingOnOwner: []` and both counts as
+and the `to_test` and `waiting_on_you` filters are deprecated, and the app draws none of them (no board pills, no badge on the Board tab): the daemon sends `waitingOnOwner: []` and both counts as
 0, never derives `waiting`, and the two filters match no card, so an app that predates card asks still reads the board.
 `fy board` shows none of them, and a card's detail lists the agendas that carry it.
 

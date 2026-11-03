@@ -1394,7 +1394,7 @@ the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — 
 nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
 options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.
 
-- **→** is the forward option (Done, OK to build, Yes), the same as the side panel's Cards view and the to-test rows; **←** is **Not good**, which reopens the card with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
+- **→** is the forward option (Done, OK to build, Yes), the same as the to-test rows; **←** is **Not good**, which reopens the card with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
 - **Not good needs words.** Pressing it (or ←) answers nothing yet: the "why" box opens where the answer row was, and
   Send back stays disabled until something is written. The words go as the answer's note. Cancel (or Esc) changes nothing.
   The box is the chat's own composer — the same field, mic, Enter to send and Shift+Enter for a new line — with the same
@@ -1408,7 +1408,9 @@ options are the gate's own, laid out as every choice is (the first ←, the seco
 **The app ships before the daemon.** A machine that advertises `board.gate-items.1` on its health sends gate items, and the
 Inbox then drops the _synthesized_ to-test rows those items replace. A machine that also advertises `agenda.card-asks.1`
 sends card asks instead, which today's app does not count as covering a card: it keeps the to-test row beside the
-agenda's card ask. Either answers through the owner's authority and moves the card once; the other is withdrawn. A machine that does not keeps today's rows. A person-asked
+agenda's card ask. Either answers through the owner's authority and moves the card once; the other is withdrawn. A machine that does not keeps today's rows.
+
+**The Inbox has no To test list on a card-asks machine.** Once a machine advertises `agenda.card-asks.1` its cards leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the card's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no card waiting on the owner is lost while machines are on different versions. A person-asked
 card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates, so no card
 waiting on the owner is ever lost between the two lists.
 
@@ -1422,17 +1424,32 @@ refused with them, and the Inbox draws no "+" on "Not yet". A resolve with files
 refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged and the card moved and the ferret told **once**, but only when the repeat is the SAME answer: the same choice, the same words (spacing aside) and the same files (`from` and ids). The same choice with other words or other files is a stale tab, refused `409 gate_moved_on` ("was already answered, differently: nothing was sent") rather than a success that drops them, and a repeat is still held to a first answer's rules (the owner, the grant, words for a Not good, files from this session). The full answer is kept with the answered item, so an exact repeat succeeds even after a restart. A repeat from anyone else is not a replay. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
 takes them; the app draws the "+" only there, and an older machine keeps Not good as words alone.
 
-### What the side panel's Cards view shows
+### The side panel's Agenda tab
 
-This view is the app's own, read from the board; the card's ask itself is on its agenda ([Card asks](#card-asks)).
-The task panel's **Cards** view and the Inbox ask the same question of a card — _is it waiting on the owner?_ — through one
-pure selector (`awaitingOwner`, `lib/awaiting-owner.ts`): a card shows only if it is **not dropped, asked of a person (not an
-internal agent), and sitting in a gate lane**. A gate lane is a verify lane ("Try it") or an owner-gate lane that is not
-closed ("OK to build?"). Everything else — to do, in progress, in review, merged, released, closed, and every internal or
-agent-asked card — never appears there; the Kanban and the List show the rest. With nothing waiting, the view says so in one
-line rather than listing cards that need nothing from the owner.
+The info panel (the phone's sheet and the desktop's right panel) has an **Agenda** tab after Overview. It shows the
+ferret's **lineage** — its agenda home is the lineage root ([The agenda home](#the-agenda-home)), where its sub-ferrets'
+items live, so a lead's panel shows its sub-ferrets' items too — in four filters:
 
-A card here swipes as a gate item does: **→ Done**, **← Not good**, **↓ Skip**, and the buttons read Not good (left) · Done (right). The to-test rows in the Inbox and the Answer-quickly run swipe the same way.
+| Filter        | Rows                                          | Order                                                                       |
+| ------------- | --------------------------------------------- | --------------------------------------------------------------------------- |
+| **Needs you** | items waiting on the owner (`needsYouQueue`)  | blockers first, then by when each started needing the owner; each item once |
+| **Resting**   | items resting, not snoozed (`restingQueue`)   | waiting on the ferret first, then the ferret working                        |
+| **Snoozed**   | items snoozed (`restingQueue`'s snoozed tail) | by wake time                                                                |
+| **Resolved**  | items that were answered or closed            | newest first                                                                |
+
+Each filter's count **is the length of its row list** — read off the list, never computed beside it. A plain
+notification is read, never answered, so it is on none of the four. A row shows the title, a **state chip** (Needs you ·
+Resting · waiting on <ferret> · Resting · working · Snoozed until <time> · Done), a **stage chip** (Explainer, Question,
+Plan to approve, Tracker, Test; a resolved row shows the last stage it had) and its age. Opening a row opens
+`AgendaItemView`, the same view the Inbox and the chat show. The tab is the pure model `agendaTabModel`
+(`lib/agenda-tab.ts`), drawn by `features/agenda/agenda-tab.tsx`.
+
+**Overview** keeps one line — "2 need you · 1 resting · 0 snoozed · 5 resolved" — with an **Open Agenda** button into the
+tab, so the two cannot disagree. The tab is hidden while the agenda has nothing on it and agenda mode is off.
+
+The task panel has no Cards view: the Tasks tab is **Kanban** or **List** (List by default). A card's ask is an item on an
+agenda, so it appears here and in the Inbox, and a card swipes as a gate item does (**→ Done**, **← Not good**,
+**↓ Skip**) wherever its ask is drawn.
 
 ## Delivery
 
