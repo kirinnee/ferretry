@@ -160,7 +160,12 @@ import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../src/features/pack/pack-settings.tsx';
 import { AboutMachineSurface } from '../src/features/settings/about-machine.tsx';
+import { pricingSettingsTab } from '../src/features/settings/pricing-settings.tsx';
+import { terminalSlotsSettingsTab } from '../src/features/settings/terminal-slots-settings.tsx';
+import { speedupsSettingsTab } from '../src/features/speedups/speedups-surface.tsx';
+import { LEARNING_SETTINGS_TAB } from '../src/features/learning/learning-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -322,6 +327,12 @@ import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
+import {
+  HARNESS_PACK_STATE,
+  harnessPricingClient,
+  harnessSpeedupsClient,
+  harnessTerminalSlotsClient,
+} from './settings-panels-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
   WARDEN_FIXTURE_AGENDA,
@@ -875,12 +886,10 @@ const HARNESS_RECORDER = harnessRecorder();
 const HARNESS_CONFIG_FILES_CLIENT = harnessConfigFilesClient(unreachableDaemon.daemonId);
 
 /**
- * The panels the composition root supplies, in the order it supplies them (production also
- * supplies Model pricing, which this fixture leaves out).
+ * The panels the composition root supplies, in the order it supplies them. Model pricing, Speed-ups,
+ * Terminals, Learning and Pack mode answer from `settings-panels-fixture.ts` and `learning-hub.tsx`.
  *
- * The frame then renders EIGHT — Warden, Secrets, Add a device, What devices may do, Resource
- * limits, Doctor, Carrier, Host checks. Each one
- * is the real surface behind a client that answers from memory: no leaf is faked
+ * Each one is the real surface behind a client that answers from memory: no leaf is faked
  * and nothing here reaches the network, which the screenshot driver enforces by
  * aborting every request that leaves the loopback origin.
  *
@@ -960,6 +969,21 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     description: 'The Claude Code and Codex this machine runs, whether Ferretry verified them, and updating them.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
       <AgentClisSurface connection={connection} createClient={harnessAgentClisClient} />
+    ),
+  },
+  pricingSettingsTab(harnessPricingClient),
+  speedupsSettingsTab(harnessSpeedupsClient),
+  terminalSlotsSettingsTab(harnessTerminalSlotsClient),
+  {
+    ...LEARNING_SETTINGS_TAB,
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <LearningSettingsHarness connection={connection} sessions={WORKSPACE_FLEET} />
+    ),
+  },
+  {
+    ...PACK_SETTINGS_TAB,
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <PackSettingsSurface connection={connection} state={HARNESS_PACK_STATE} />
     ),
   },
 ];

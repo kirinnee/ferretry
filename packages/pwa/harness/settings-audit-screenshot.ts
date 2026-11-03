@@ -79,7 +79,7 @@ const PANELS: readonly (readonly [tab: string, panel: string])[] = [
   ['machine', 'performance'],
   ['machine', 'agent-clis'],
   ['machine', 'files'],
-  ['machine', 'terminal-slots'],
+  ['machine', 'terminals'],
   ['machine', 'speedups'],
   ['machine', 'model-pricing'],
   ['machine', 'about'],
@@ -181,7 +181,7 @@ try {
           await page
             .locator(`[data-daemon-panel-open="${panel}"]`)
             .waitFor({ state: 'visible', timeout: 5_000 })
-            .catch(() => process.stderr.write(`⚠ panel ${panel} did not open at ${tag}\n`));
+            .catch(() => fail(`panel ${panel} did not open at ${tag}`));
           await settle(page);
           await capture(page, `panel-${panel}-${tag}`, vp);
         }
