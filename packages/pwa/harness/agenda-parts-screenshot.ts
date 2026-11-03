@@ -13,7 +13,8 @@
  * lack their own heading or the card's test steps, are cut off, or sit under the dock; the item's own answer is docked
  * beside a card ask; the activity log does not list each stage; a push does not open the item at its ask; the head's
  * title scrolls, is cut at a side or takes more than two lines, or is longer than them and not drawn whole in the
- * body; or a Yes / No row is not No ← · Yes →.
+ * body; a Yes / No row is not No ← · Yes →; or a choice whose options are explained has buttons that do not say its
+ * options' short labels (a bare letter, a description, an empty or cut-off button).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -194,7 +195,8 @@ const checkCommon = async (page: Page, label: string): Promise<void> => {
     );
   }
   check(
-    /^(No,Yes,?)*$/u.test(found.yesNo.join(',')),
+    // Read left to right, each pair is No, Yes; a lone No (beside "Only blockers") or a lone Yes has no pair to order.
+    /^(?:No,Yes|No(?!,Yes)|Yes(?!,No))(?:,(?:No,Yes|No(?!,Yes)|Yes(?!,No)))*$|^$/u.test(found.yesNo.join(',')),
     `${label}: Yes and No sit as ${found.yesNo.join(',')}, wanted No,Yes`,
   );
 };
@@ -434,6 +436,37 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   }
   await shot(long, 'long-title', form, theme);
   await long.close();
+
+  // A CHOICE WHOSE OPTIONS ARE EXPLAINED: its buttons say "No" and "Only blockers", whole, never "A" and "B".
+  const described = await open('A126');
+  await scrollTop(described);
+  await checkCommon(described, `described-options ${form} ${theme}`);
+  const row = await described.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.fy-qr__row [data-agenda-option]')].map(button => {
+      const label = button.querySelector<HTMLElement>('.fy-qr__label');
+      const box = button.getBoundingClientRect();
+      return {
+        option: button.dataset.agendaOption ?? '',
+        said: label?.textContent ?? '',
+        cut: label === null || label.scrollWidth > label.clientWidth + 1,
+        offWidth: box.left < 0 || box.right > window.innerWidth,
+      };
+    }),
+  );
+  check(
+    row.map(each => each.said).join(',') === 'No,Only blockers',
+    `described-options ${form} ${theme}: the buttons say ${row.map(each => `"${each.said}"`).join(', ')}, wanted "No", "Only blockers"`,
+  );
+  check(
+    row.map(each => each.option).join(',') === 'No,Only blockers',
+    `described-options ${form} ${theme}: the buttons send ${row.map(each => each.option).join(',')}`,
+  );
+  for (const each of row) {
+    check(!each.cut, `described-options ${form} ${theme}: "${each.said}" is cut off`);
+    check(!each.offWidth, `described-options ${form} ${theme}: "${each.said}" is off the screen's width`);
+  }
+  await shot(described, 'described-options', form, theme);
+  await described.close();
 
   await browserContext.close();
 };

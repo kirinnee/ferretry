@@ -15,7 +15,8 @@
  *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
  *   ?parts=1              only the nine-part item view's items (`agenda-parts.ts`): A120 explainer, A121 question
  *                         (a long report and a conversation), A122 plan to approve, A123 tracker, A124 test with a card
- *                         ask, for `agenda-parts-screenshot.ts`
+ *                         ask, A125 a long title, A126 a choice whose options are explained, for
+ *                         `agenda-parts-screenshot.ts`
  *   ?shapes=1             only one item of each answer shape (A101 choice … A108 info), for `agenda-shapes-screenshot.ts`
  *   ?headings=1           only the A110 card: a long ask and a heading in every segment (`agenda-ask-screenshot.ts`)
  *

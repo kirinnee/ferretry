@@ -194,6 +194,28 @@ const LONG_TITLE = item('A125', 8, {
   ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
 } as Partial<AgendaItem>);
 
+/**
+ * 7. A CHOICE WHOSE OPTIONS ARE EXPLAINED (No, and the two-word Only blockers): its buttons say the options' short
+ * labels, never "A" and "B", which would mean nothing once the ask has scrolled away.
+ */
+const DESCRIBED_OPTIONS = item('A126', 6, {
+  title: 'Should the badge count snoozed items?',
+  subject: 'Should the badge count snoozed items?',
+  kind: 'choice',
+  stage: 'question',
+  stages: [{ stage: 'question', at: ago(6) }],
+  premise: BRIEF.premise,
+  context: BRIEF.context,
+  whereWeAre: 'Snoozed items count today. Blockers already wake a snoozed item.',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'No', description: 'A snooze means "not now": it stays out of the count' },
+      { label: 'Only blockers', description: 'A snoozed item counts again only once a blocker wakes it' },
+    ],
+  },
+} as Partial<AgendaItem>);
+
 /** The card's How to test, as the board holds it: the card ask above its Done / Not good carries these steps. */
 export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   F559: [
@@ -204,7 +226,7 @@ export const PARTS_HOW_TO_TEST: Readonly<Record<string, string>> = {
   ].join('\n'),
 };
 
-export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST, LONG_TITLE] as const;
+export const PARTS_ITEMS = [EXPLAINER, QUESTION, PLAN, TRACKER, TEST, LONG_TITLE, DESCRIBED_OPTIONS] as const;
 
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
