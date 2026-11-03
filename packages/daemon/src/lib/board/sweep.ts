@@ -18,9 +18,13 @@
  *    `&F20 can go ahead: &F18 merged.` Nobody else is.
  *
  * NO NEWS. A card's move, block, drop, reopen or done is never typed into anybody's chat — not the
- * lead's, and not as a batched digest. The owner (2026-10-30): "there should not be any append or prepend
- * on any feature". The ferret that finished tells its lead in its own words, the board shows the state,
- * and the card's history keeps every event.
+ * lead's, not alone, and not in any digest: the owner's "no batched digest" rule (2026-10-30: "there should
+ * not be any append or prepend on any feature") still holds for everything the board, and every other part
+ * of Ferretry, sends. The one digest the owner has allowed (2026-11-03) is for FERRET messages that a
+ * ferret labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers together with the
+ * receiver's other pending ferret messages (docs/message-delivery.md § Labels and combined delivery). A
+ * board message is the daemon's, never labelled, and never held. The ferret that finished tells its lead in
+ * its own words, the board shows the state, and the card's history keeps every event.
  *
  * 3. **A helper whose ferret ended is closed**: a sub-card with no PR to ship, assigned to a ferret that is gone for
  *    longer than {@link HELPER_ENDED_GRACE_MS}, closes as "helper finished" (docs/board.md § Sub-cards close

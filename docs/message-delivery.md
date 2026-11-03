@@ -23,7 +23,9 @@ this page, which is still how a message reaches the pane.
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
-  one message typing at a time (`nextToDeliver`). A daemon notice to an interactive session is never in the
+  one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
+  (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —
+  a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive session is never in the
   delivery order (`boardOnly`): that session is the owner's own chat, so it takes the direct path. The board's
   alerts therefore avoid it: they go to the card's working ferret and its leads first, and reach an interactive
   session only when none is alive ([board.md](board.md#who-a-board-alert-is-for)).
@@ -35,15 +37,15 @@ this page, which is still how a message reaches the pane.
   the send path finish it (`clearOwnDraft`) and goes on, or — when the Enter does not take — names it as the
   message's `waitBehind` ([below](#b144-a-ferret-idle-behind-its-own-unsent-message)).
 - **Deliverer** — `QueueDeliverer` (`lib/session/queue/deliverer.ts`) is the one owner of WHEN and IN WHAT
-  ORDER. It marks a message `typing` on disk, then hands it to the tracked send path under the message's
-  own id (`SendPathQueueTransport.handOver` → `SessionSendService.send`, the ONE function that delivers a
-  message — a later change that folds several waiting messages into one payload hands that payload to it as
-  a single message), which does the HOW: the turn file, the turn record, the busy-pane
+  ORDER. It asks `planDelivery` what is next, marks it `typing` on disk, then hands it to the tracked send
+  path under one id (`SendPathQueueTransport.handOver` → `SessionSendService.send`, the ONE function that
+  delivers a turn; a combined delivery is handed to it as one payload with its `parts`), which does the HOW: the turn file, the turn record, the busy-pane
   queue, a revive. The send ledger, keyed by that id, is where every later tick comes from
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
-  message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
-  in it is still waiting or unproven. It is armed after the bind, like the send tracker, and stopped FIRST
+  message is enqueued, when its state document changes, at boot, every `lookMs` (5 s) while something
+  in it is still waiting or unproven, and at the moment the earliest HOLD ends (a hold is not a wait reason:
+  nothing is wrong, the message is simply not due). It is armed after the bind, like the send tracker, and stopped FIRST
   on the way down: a send answers once its message is on disk, so one sent just before a stop is still
   being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
@@ -127,6 +129,70 @@ this page, which is still how a message reaches the pane.
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
 <ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
   the agent's, and either answers `409`.
+
+## Labels and combined delivery
+
+A ferret labels every message it sends: `fy send --kind blocker|action|fyi` (default `action`; `--ask`,
+`--expect-reply` and `--now` are blockers). The label is the sender's own word about how soon the receiver needs the message, and
+it decides how long the queue may hold it so that several can ride in one turn instead of waking the receiver
+once each (owner-approved 2026-11-03).
+
+| Label     | Delivered                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| `blocker` | At once, with every ferret message already waiting in front of it.                                            |
+| `action`  | After `actionWindowMs` (60 s) from its arrival, with every ferret message that arrived in that time.          |
+| `fyi`     | When the receiver ends a turn that began after it arrived, or after `fyiMaxHoldMs` (10 min), whichever first. |
+
+These are never held, whatever label they carry or lack: **the owner's messages, the daemon's (Warden,
+Board, Agenda) and a ferret's `--now`**. A **question** (`--ask`, `--expect-reply`) is never held at all, as
+news or to be combined: the CLI makes it a blocker and refuses `--kind fyi` beside it, and the daemon treats
+any message that expects a reply as a blocker whatever label it arrives with (a raw or older client included).
+**The reply to a ferret the receiver is parked on is a blocker** too. A message with no label is delivered at
+once only when it was queued before this existed. One that arrives with no label from an older CLI is an
+`action`: the queue stamps it with the 60 s window and combines it, unless it expects a reply or is an
+interrupt, which go at once.
+
+- **One decision** — `planDelivery` (`lib/session/queue/policy.ts`) is pure: it takes the queue, the
+  receiver's turn state, the clock and the settings, and answers `single`, `batch` or `hold`. A person's
+  message goes alone and first. If ANY ferret message is due, EVERY pending ferret message goes with it, in
+  acceptance order, up to `batchMax` (20; the rest follow as their own delivery).
+- **Hold** — `enqueue` stamps `holdUntil` on a held message; the answer to `fy send` says so
+  (`heldUntil`) and the CLI prints "held until …; do not resend". An FYI-only batch is never delivered to a
+  STOPPED session (an FYI must not revive a ferret); it waits as `stopped` until a blocker or action
+  arrives or the session runs. That is judged on the WHOLE pending queue: once a blocker or action is
+  waiting behind any number of FYIs, they drain in order (a capped batch of FYIs included) so its turn
+  comes. FYIs alone never hold back a daemon message.
+- **One turn, one record** — the members are all moved to `typing` on disk, each carrying the batch id, BEFORE
+  anything is typed; the send ledger gets ONE record, under the oldest member's id. `deliveredAs` on every
+  member names that id, so a member's ticks and `GET …/sends/:id` come from the batch's record
+  (`sendRecordFor`). A crash before the hand-over leaves them `typing` with no ledger record: all go back to
+  `queued`, none is typed twice.
+- **What the receiver reads** — one turn that lists each message with its place, kind, label and sender, in
+  order ([format](ferret-messages.md#combined-deliveries)). Each part keeps its own kind, so the one that
+  answers a wait still ends it. If the turn cannot be proven delivered, EVERY sender in it is told, each
+  under its own message id (the ledger row keeps the members in `batch`).
+- **A failure notice survives a crash** — the senders still to be told are written on the ledger row
+  (`noticesOwed`, daemon-internal, never on the wire) in the SAME line as the `unaccounted` / `timed_out` fate,
+  and each member is crossed off only after its notice was sent. A crash after the fate, or mid-loop, leaves
+  the row owing exactly the members not yet crossed off; the next look — the boot walk included — pays them
+  under the existing per-member key `send-failed:<recipient>:<sendId>`, so a notice sent but not yet crossed
+  off is attempted again and lands once. A notice that throws stays owed. A send later proven `delivered`
+  drops its debt, and a final row owing nothing stays quiet.
+- **A debt that could not be paid schedules its own retry** — a look that leaves any notice unsent (the notifier
+  threw, or the crossing-off would not write) schedules another look for that session after 60 s, then 2×, 4× …
+  the wait before it, at most 6 in a row; the earlier of that and the sends' own next look wins, since one look
+  is kept per session. Past the cap nothing is scheduled but the debt stays on the row, and `watching` counts it
+  **whatever the age of its send** (the proof-age ceilings end a wait for proof, not for a notice), so the next
+  reader's look or the next boot pays it. A paid debt resets the backoff and schedules nothing.
+- **Settings** — `delivery` in `config/daemon.json`: `coalesce` (default `true`; `false` is the kill switch —
+  every ferret message is a blocker and goes alone, as before), `actionWindowMs` (60 000),
+  `fyiMaxHoldMs` (600 000), `batchMax` (20). Read at start.
+- **Not a digest of anything else** — the only digest Ferretry allows is this one, of FERRET messages the
+  sender chose to label `fyi`. Board news, Warden alerts and every other daemon message are never batched
+  ([board.md](board.md)).
+- **Downgrade** — a daemon that does not know `label` answers 400; the CLI retries once without it and says
+  so, and the message is then unlabelled. A combined turn already written is only text: an older app shows it
+  as one message.
 
 ## The composer is read, never searched for
 

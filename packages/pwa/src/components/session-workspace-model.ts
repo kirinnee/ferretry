@@ -117,10 +117,31 @@ const entryFor = (record: LogRecord, id: string, at: number | undefined): Transc
  * The id is taken from the record as written, so a row keeps its identity whatever this reading of it
  * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so it
  * carries no label, only the record's instant.
+ *
+ * Several ferret messages the daemon combined into ONE turn are one record but N rows, in order, each
+ * from its own sender: the app draws what was said and by whom, never the combined wrapper.
  */
-const userEntryFor = (record: LogRecord, id: string, at: number | undefined): TranscriptEntry => {
+const userEntriesFor = (record: LogRecord, id: string, at: number | undefined): readonly TranscriptEntry[] => {
   const entry = entryFor(record, id, at);
   const message = readUserMessage(entry.text);
+  if (message.kind !== 'combined') return [userEntryFor(entry, message, at)];
+  const instant = at === undefined ? {} : { at };
+  return message.parts.map(
+    (part, position): TranscriptEntry => ({
+      id: position === 0 ? entry.id : `${entry.id}~${position + 1}`,
+      kind: 'user',
+      text: part.body,
+      peer: part.from,
+      ...instant,
+    }),
+  );
+};
+
+const userEntryFor = (
+  entry: TranscriptEntry,
+  message: Exclude<ReturnType<typeof readUserMessage>, { readonly kind: 'combined' }>,
+  at: number | undefined,
+): TranscriptEntry => {
   const instant = at === undefined ? {} : { at };
   if (message.kind === 'human') {
     // Text the harness typed into the user channel — a background task finishing, an interrupt, a
@@ -366,7 +387,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       return;
     }
     const at = instants[index];
-    push(recordKind(record) === 'user' ? userEntryFor(record, id, at) : entryFor(record, id, at), record);
+    if (recordKind(record) === 'user') for (const entry of userEntriesFor(record, id, at)) push(entry, record);
+    else push(entryFor(record, id, at), record);
   });
   flush();
   return entries;

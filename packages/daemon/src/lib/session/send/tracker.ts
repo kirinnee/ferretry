@@ -16,6 +16,7 @@ import {
 import {
   type SendHeldAt,
   type SendLedger,
+  type SendNoticeOwed,
   type SendRecord,
   type SendRepository,
   SendRetypeWithheld,
@@ -123,14 +124,32 @@ const UNREADABLE: SendEvidenceReading = { readable: false, inputs: [] };
 /** One look at where the pane holds a send: a place, nowhere, or a pane that could not be read. */
 type PaneHold = SendHeldAt | 'nowhere' | 'unreadable';
 
+/** How many times in a row a look that could not pay a debt schedules another, each after twice the wait before it. */
+export const OWED_NOTICE_RETRY_LIMIT = 6;
+
 export class SendTracker implements SendTracking, SendTrackingLoop {
+  /** Sessions whose failure notices a look in this process could not send, so its own settling is retried too. */
+  private readonly unpaid = new Set<SessionId>();
+  /** Consecutive looks that left a debt unpaid, per session; the backoff and its cap. Cleared when the debt is. */
+  private readonly debtLooks = new Map<SessionId, number>();
+  /** Set by a disarm: nothing is scheduled, and no scheduled look fires, until `arm` runs again. */
+  private disarmed = false;
+
   constructor(
     private readonly ports: SendTrackerPorts,
     private readonly settings: SendTrackerSettings,
   ) {}
 
   track(id: SessionId): void {
-    this.ports.scheduler.schedule(id, this.settings.firstCheckMs, () => void this.check(id).catch(() => undefined));
+    this.scheduleLook(id, this.settings.firstCheckMs);
+  }
+
+  /** The one place a look is scheduled, so a disarmed tracker cannot be restarted by a look still in flight. */
+  private scheduleLook(id: SessionId, delayMs: number): void {
+    if (this.disarmed) return;
+    this.ports.scheduler.schedule(id, delayMs, () => {
+      if (!this.disarmed) void this.check(id).catch(() => undefined);
+    });
   }
 
   /**
@@ -144,6 +163,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    */
   arm(): () => void {
     let armed = true;
+    this.disarmed = false;
     void (async () => {
       for (const id of this.ports.roster.sessions()) {
         if (!armed) return;
@@ -152,6 +172,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     })();
     return () => {
       armed = false;
+      this.disarmed = true;
       this.ports.scheduler.cancelAll();
     };
   }
@@ -169,11 +190,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     try {
       await this.ports.serial.run(id, async () => await this.checkLocked(id));
     } catch (error) {
-      this.ports.scheduler.schedule(
-        id,
-        this.settings.busyExtensionMs,
-        () => void this.check(id).catch(() => undefined),
-      );
+      this.scheduleLook(id, this.settings.busyExtensionMs);
       throw error;
     }
   }
@@ -181,7 +198,9 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /** Whether a look at this session could change anything, so a reader knows one is worth taking. */
   async watching(id: SessionId): Promise<boolean> {
     const now = Date.parse(this.ports.clock.now());
-    return (await this.ports.ledger.list(id)).some(record => this.watches(record, now));
+    // A debt is watched however old its send is: the proof-age ceilings below end a wait for PROOF, and a
+    // notice that was never sent is not waiting for any.
+    return (await this.ports.ledger.list(id)).some(record => owesNotices(record) || this.watches(record, now));
   }
 
   /**
@@ -204,13 +223,77 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     return (record.fate === 'unaccounted' || record.fate === 'timed_out') && age < this.settings.holdLimitMs;
   }
 
+  /**
+   * One look, then the news a crash left owed. The debt is paid AFTER the proofs so a send this look finds
+   * delivered after all is not reported lost, and in a `finally` so a look that threw does not leave it
+   * unpaid. A notice already sent dedupes under its own key.
+   *
+   * A DEBT STILL OWED SCHEDULES ITS OWN NEXT LOOK. A notifier that was down for a look used to leave the
+   * debt on the ledger with nothing coming back to it: no look was scheduled for a final send, and a
+   * reader's look is only taken for a send `watching` calls open. So a look that leaves any notice unsent
+   * schedules another after twice the wait of the last, up to `OWED_NOTICE_RETRY_LIMIT` in a row; past the
+   * limit the debt stays durable and `watching`, and the next reader's look or boot pays it. The wait is
+   * the earlier of the debt's and the sends' own next look, since one scheduled look is kept per session.
+   */
   private async checkLocked(id: SessionId): Promise<void> {
-    const records = await this.ports.ledger.list(id);
+    this.unpaid.delete(id);
+    let seen: readonly SendRecord[] | undefined;
+    let lookDelay: number | undefined;
+    try {
+      seen = await this.ports.ledger.list(id);
+      lookDelay = await this.look(id, seen);
+    } finally {
+      const owed = await this.payOwedNotices(id, seen);
+      // A disarm during this look: no retry is scheduled, and none is counted against the debt's limit.
+      if (!this.disarmed) {
+        const debtDelay = this.debtDelay(id, owed);
+        const delay = lookDelay === undefined ? debtDelay : Math.min(lookDelay, debtDelay ?? lookDelay);
+        if (delay !== undefined) this.scheduleLook(id, delay);
+      }
+    }
+  }
+
+  /** How long until the next look for an unpaid debt, `undefined` when none is owed or the retries are spent. */
+  private debtDelay(id: SessionId, owed: boolean): number | undefined {
+    if (!owed) {
+      this.debtLooks.delete(id);
+      return undefined;
+    }
+    const looks = this.debtLooks.get(id) ?? 0;
+    if (looks >= OWED_NOTICE_RETRY_LIMIT) return undefined;
+    this.debtLooks.set(id, looks + 1);
+    return this.settings.busyExtensionMs * 2 ** looks;
+  }
+
+  /**
+   * Pays what the ledger shows owed, and answers whether any notice is STILL owed afterwards. The ledger is read
+   * again only when the look's own reading showed a debt, or never got that far; a debt this look wrote itself
+   * was already attempted by the settle that wrote it, and is only counted here.
+   */
+  private async payOwedNotices(id: SessionId, seen: readonly SendRecord[] | undefined): Promise<boolean> {
+    if (seen?.some(owesNotices) === false) return this.unpaid.has(id);
+    let records: readonly SendRecord[];
+    try {
+      records = await this.ports.ledger.list(id);
+    } catch {
+      return true;
+    }
+    let owed = false;
+    for (const record of records) {
+      if (!owesNotices(record)) continue;
+      const after = await this.tell(id, record, record.noticesOwed ?? []).catch(() => record);
+      owed ||= owesNotices(after);
+    }
+    return owed;
+  }
+
+  /** One look at a session's sends. Answers how long until the next one it wants, or `undefined` for none. */
+  private async look(id: SessionId, records: readonly SendRecord[]): Promise<number | undefined> {
     const now = Date.parse(this.ports.clock.now());
     // A person's send nothing has been typed for goes FIRST: it is the owner's message, and every other
     // send in this look would otherwise be typed ahead of it into the same queue.
     const watched = records.filter(record => this.watches(record, now)).sort(untypedFirst);
-    if (watched.length === 0) return;
+    if (watched.length === 0) return undefined;
     const oldest = Math.min(...watched.map(record => Date.parse(record.acceptedAt)));
     const since = new Date(oldest - this.settings.matchSlackMs).toISOString();
     const reading = await this.ports.evidence.read(id, since).catch(() => UNREADABLE);
@@ -260,8 +343,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
             : Math.min(due, composerLook);
       next = next === undefined ? at : Math.min(next, at);
     }
-    if (next !== undefined)
-      this.ports.scheduler.schedule(id, Math.max(0, next - now), () => void this.check(id).catch(() => undefined));
+    return next === undefined ? undefined : Math.max(0, next - now);
   }
 
   private async deliver(id: SessionId, record: SendRecord, verdict: SendVerdict): Promise<void> {
@@ -273,6 +355,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       unaccountedReason: undefined,
       retryable: undefined,
       cancelEffect: undefined,
+      // Delivered after all: the "it did not arrive" news a crash left owed would now be false.
+      noticesOwed: undefined,
     });
     await this.ports.repository.journal(id, 'control.send_delivered', {
       sendId: record.sendId,
@@ -589,6 +673,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     fate: 'unaccounted' | 'timed_out',
     reason: SendUnaccountedReason,
   ): Promise<SendRecord> {
+    // A combined turn is ledgered once, but every sender whose message was in it is owed the news, each
+    // under its own message id. The debt is written WITH the fate, in one ledger line, so no crash after
+    // the fate can leave a final record that forgot whom it still had to tell.
+    const audience = record.senderKind === 'agent' ? failureAudience(record) : [];
     const next =
       (await this.ports.ledger.settle(id, record.sendId, {
         fate,
@@ -597,6 +685,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         // Only a send proven absent from a session that can still take input may be retried as-is.
         retryable: fate === 'timed_out' && reason !== 'session_ended',
         deadlineAt: undefined,
+        noticesOwed: audience.length > 0 ? audience : undefined,
       })) ?? record;
     await this.ports.repository.journal(
       id,
@@ -607,10 +696,52 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         attempt: record.attempt ?? 1,
       },
     );
-    if (record.senderKind === 'agent' && record.from !== undefined)
-      await this.ports.notifier.notify(record.from, id, next).catch(() => undefined);
-    return next;
+    return await this.tell(id, next, audience);
   }
+
+  /**
+   * Tells each owed sender once, and crosses a member off the record only AFTER its notice was sent.
+   *
+   * A crash anywhere in here leaves the record owing exactly the members not yet crossed off, and the
+   * boot walk replays them. A member whose notice was sent but not yet crossed off is told again under the
+   * same `send-failed:<recipient>:<sendId>` key, which the notifier's send dedupes — replay can repeat a
+   * notice's attempt, never its delivery. A notice that throws stays owed for the next look.
+   */
+  private async tell(id: SessionId, record: SendRecord, owed: readonly SendNoticeOwed[]): Promise<SendRecord> {
+    let current = record;
+    let remaining = owed;
+    for (const member of owed) {
+      const sent = await this.ports.notifier
+        .notify(member.from, id, { ...current, sendId: member.sendId })
+        .then(() => true)
+        .catch(() => false);
+      if (!sent) continue;
+      remaining = remaining.filter(entry => entry !== member);
+      current =
+        (await this.ports.ledger.settle(id, record.sendId, {
+          noticesOwed: remaining.length > 0 ? remaining : undefined,
+        })) ?? current;
+    }
+    // Said here so the look that settled the send knows, without a second read, that it left a debt behind.
+    if (remaining.length > 0) this.unpaid.add(id);
+    return current;
+  }
+}
+
+/** A final fate that still owes its senders news: only an unconfirmed or timed-out send is ever told of. */
+function owesNotices(record: SendRecord): boolean {
+  return (
+    (record.fate === 'unaccounted' || record.fate === 'timed_out') &&
+    record.noticesOwed !== undefined &&
+    record.noticesOwed.length > 0
+  );
+}
+
+/** Who is told a send failed, and under which message id: every member of a combined turn, else its one sender. */
+function failureAudience(record: SendRecord): readonly SendNoticeOwed[] {
+  if (record.batch !== undefined && record.batch.length > 0)
+    return record.batch.map(member => ({ from: member.from, sendId: member.queueId }));
+  return record.from === undefined ? [] : [{ from: record.from, sendId: record.sendId }];
 }
 
 /**

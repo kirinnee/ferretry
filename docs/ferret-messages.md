@@ -19,10 +19,30 @@ multi-line message was refused the direct path — it travelled as a "Read the f
 pointer that cost the receiver an extra model call. With one line a short message is pasted whole
 ([how it is delivered](message-delivery.md#which-messages-are-typed-whole)).
 
-An optional **label** slot sits after the kind: `[message · fyi from ferret tomi …]`, one of
-`blocker`, `action`, `fyi`. The parser reads it into `PeerEnvelope.label`; **nothing writes it yet**
-(`peerEnvelopePreamble` emits a label only when a sender names one, and no sender does), so it is a
-seam for message kinds, not a behaviour. An unknown label is not a banner and the message stays plain text.
+A **label** sits after the kind: `[message · fyi from ferret tomi …]`, one of `blocker`, `action`, `fyi` —
+the sender's word (`fy send --kind`) for how soon the message is needed, and what lets several share one
+turn ([queue rules](message-delivery.md#labels-and-combined-delivery)). The parser reads it into
+`PeerEnvelope.label`; an unknown label is not a banner and the message stays plain text.
+
+### Combined deliveries
+
+Messages delivered together arrive as ONE turn, oldest first. The header counts them, and each part opens
+with its own banner carrying its place:
+
+```text
+[2 messages from ferrets, oldest first — not from the owner]
+
+[1/2 · message · action from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner] To reply: fy send tomi "<reply>"
+PR is green.
+
+[2/2 · question · blocker from ferret avary (session mvie18ro-172c460c) — not from the owner] avary is waiting for your answer. Reply with: fy send avary "<reply>"
+Merge now or wait?
+```
+
+A combined text is read back (`parseCombinedDelivery`) only when the header's count equals the parts found and
+their places run 1..N; anything else — including a body that merely quotes a banner — stays plain text, so
+nobody can forge a sender. The owner's Chat draws a combined turn as one ferret row per part, never as
+"You".
 
 The first word is the message's **kind**:
 
@@ -139,6 +159,11 @@ No board news reaches a chat (the owner, 2026-10-30: "there should not be any ap
 feature"). A card's move, block, unblock, drop, reopen or done is never typed into the lead's chat, alone
 or as a batched digest: the ferret that finished tells its lead in its own words (`fy signal done` reaches
 it through `fy wait`), the board shows the state, and the card's history keeps every event.
+
+The one digest the owner has allowed (2026-11-03) is not the board's: it is made of messages a FERRET
+labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers with the receiver's other pending
+ferret messages ([rules](message-delivery.md#labels-and-combined-delivery)). The board's messages are the
+daemon's, carry no label, and are never held or combined.
 
 The board types only what a ferret has to **act on**, each as a plain sentence with no tag in front and no
 footer behind. Who sent it is the queue item's metadata, `by: {kind: 'ferretry', feature: 'Board'}`, which

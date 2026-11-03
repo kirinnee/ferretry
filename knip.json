@@ -179,6 +179,7 @@
         "harness/theme-gallery-screenshot.tsx",
         "harness/theme-fonts-screenshot.ts",
         "harness/peer-messages-screenshot.tsx",
+        "harness/message-urgency-screenshot.tsx",
         "harness/dictation-review-screenshot.tsx",
         "harness/dictation-insert-mode-screenshot.tsx",
         "harness/dictation-debug-screenshot.tsx",

@@ -348,6 +348,7 @@ describe('registerSessionCommands · the rest of the group', () => {
       message: 'heads up\n\nfrom the file',
       attachmentIds: ['att-1'],
       now: true,
+      label: 'blocker',
     });
   });
 
@@ -372,7 +373,26 @@ describe('registerSessionCommands · the rest of the group', () => {
 
     // Assert
     should(subject.api.methods()).deepEqual(['send']);
-    should(subject.api.calls[0]?.args[1]).deepEqual({ message: 'yes go ahead', attachmentIds: [], now: false });
+    should(subject.api.calls[0]?.args[1]).deepEqual({
+      message: 'yes go ahead',
+      attachmentIds: [],
+      now: false,
+      label: 'action',
+    });
+  });
+
+  it('should carry --kind on send and on reply', async () => {
+    // Arrange
+    const send = harness();
+    const reply = harness();
+
+    // Act
+    await send.run(['send', 'ses-1', 'fyi only', '--kind', 'fyi']);
+    await reply.run(['reply', 'ses-1', 'done', '--kind', 'blocker']);
+
+    // Assert
+    should(send.api.calls[0]?.args[1]).containDeep({ label: 'fyi' });
+    should(reply.api.calls[0]?.args[1]).containDeep({ label: 'blocker' });
   });
 
   it('should answer a pending question with labels, other and responses', async () => {

@@ -2488,6 +2488,18 @@ button.fy-receipt {
   font-size: 11px;
   padding: 0 8px;
 }
+/* The sender's own label (blocker / action / fyi): a quiet outline chip; only a blocker is loud. */
+.fy-peer-label {
+  border: var(--stroke) solid var(--fy-border);
+  border-radius: var(--radius-badge);
+  color: var(--fy-muted);
+  font-size: 11px;
+  padding: 0 8px;
+}
+.fy-peer-label[data-peer-label='blocker'] {
+  border-color: var(--warn-border, var(--fy-border));
+  color: var(--warn, var(--fy-fg));
+}
 .fy-peer-kind[data-peer-kind='reply'] {
   background: var(--fy-surface-2);
   border-color: var(--fy-border);

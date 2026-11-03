@@ -71,6 +71,8 @@ export class RecordingApi implements ISessionApi {
       start?: SessionView;
       send?: SendResult;
       sendStatus?: SendRecord[];
+      /** Thrown by `send` calls, in order, before the stubbed result answers. */
+      sendFailures?: Error[];
       /** Thrown by `sendStatus` polls, in order, before the stubbed rows answer. */
       sendStatusFailures?: Error[];
       answer?: SessionView;
@@ -108,6 +110,11 @@ export class RecordingApi implements ISessionApi {
   }
 
   send(id: string, input: SendRequest): Promise<SendResult> {
+    const failure = this.responses.sendFailures?.shift();
+    if (failure !== undefined) {
+      this.calls.push({ method: 'send', args: [id, input] });
+      return Promise.reject(failure);
+    }
     return this.record('send', [id, input], this.responses.send);
   }
 

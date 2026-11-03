@@ -41,6 +41,7 @@ export const REPORT_OVERDUE_MS = 20 * 60_000;
 
 /** One send, as far as this module reads it: who sent it, when, whether it asked for a reply. */
 export interface ExchangeSend {
+  readonly sendId?: string | undefined;
   readonly from?: string | undefined;
   readonly acceptedAt: string;
   readonly turn?: number | undefined;
@@ -54,6 +55,43 @@ export interface ParentExchange {
   readonly asked?: { readonly at: string; readonly turn?: number; readonly replyExpected: boolean };
   /** When the sub-ferret last sent its parent anything. */
   readonly answeredAt?: string;
+}
+
+/** A queued message, as far as the exchange reads it: whose it is, and whether it asked for a reply. */
+export interface ExchangeQueued {
+  readonly id: string;
+  readonly from?: string | undefined;
+  readonly replyExpected?: boolean | undefined;
+  readonly deliveredAs?: string | undefined;
+}
+
+/**
+ * The ledger as the exchange should read it when several ferret messages were delivered as ONE turn.
+ *
+ * The send ledger holds that turn once, under the oldest member's id, attributed to that member's sender.
+ * Read as it stands, a parent whose message rode second would look silent, and the lead's `replyExpected`
+ * would belong to the wrong message. So each member of such a turn becomes a send of its own, with its own
+ * sender and its own `replyExpected`, at the turn's time. A turn with no batch member in the queue is
+ * returned unchanged.
+ */
+export function withBatchMembers(
+  sends: readonly ExchangeSend[],
+  queued: readonly ExchangeQueued[],
+): readonly ExchangeSend[] {
+  const members = new Map<string, ExchangeQueued[]>();
+  for (const message of queued) {
+    if (message.deliveredAs === undefined) continue;
+    members.set(message.deliveredAs, [...(members.get(message.deliveredAs) ?? []), message]);
+  }
+  return sends.flatMap(send =>
+    send.sendId === undefined || !members.has(send.sendId)
+      ? [send]
+      : (members.get(send.sendId) ?? []).map(member => ({
+          ...send,
+          from: member.from,
+          replyExpected: member.replyExpected === true,
+        })),
+  );
 }
 
 /** A send that never reached anybody is not a message: it was withdrawn before a key was typed, or cancelled. */
