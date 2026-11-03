@@ -1433,7 +1433,7 @@ describe('AppShell', () => {
     // of them: install, the daemon, the carrier choice, then pairing.
     await chooseRoute(view.container, 'first-time');
     expect(stepOfSetup(view.container)).toBe('install');
-    expect(view.container.textContent).toContain('fy --version');
+    expect(view.container.textContent).toContain('fy daemon start');
     await view.unmount();
   });
 
@@ -1448,7 +1448,7 @@ describe('AppShell', () => {
     const { view } = await renderShell('/setup#fy-setup=v2;route=first-time;target=this;doer=self;step=install');
 
     expect(stepOfSetup(view.container)).toBe('install');
-    expect(view.container.textContent).toContain('fy --version');
+    expect(view.container.textContent).toContain('fy daemon start');
     // Neither question is asked again: the link answered both, and this machine
     // can hold the answer it proposed.
     expect(view.container.querySelector('button[data-onboarding-target]')).toBeNull();
