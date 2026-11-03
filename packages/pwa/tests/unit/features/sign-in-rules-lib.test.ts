@@ -10,6 +10,7 @@ import {
   SIGN_IN_RULE_TERMINAL_HONEST_LIMIT,
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TOTP_WARNING,
+  SignInRuleEligibilitySchema,
 } from '@ferretry/protocol';
 import {
   checkedWords,
@@ -19,8 +20,10 @@ import {
   narrowEnd,
   passkeyWords,
   RULE_HONEST_LIMIT,
+  RULE_PROGRESS_WHY,
   ruleFailureWords,
   ruleFlags,
+  ruleReadiness,
   ruleWordsOf,
   runRuleApproval,
   sheetWords,
@@ -329,5 +332,43 @@ describe('narrowing a rule to an end the owner typed', () => {
       ['0', 'days'],
     ] as const)
       expect(narrowEnd(typed, unit, ENDS, NOW).ok).toBe(false);
+  });
+});
+
+describe('progress toward a standing rule', () => {
+  const answer = (rest: Record<string, unknown>) =>
+    SignInRuleEligibilitySchema.parse({ signIn: SITE_SIGN_IN, ...rest });
+
+  it('is ready when the sign-in is eligible', () => {
+    expect(ruleReadiness(answer({ eligible: true, history: 2 }))).toEqual({ kind: 'ready' });
+  });
+
+  it('is not yet, with the count, when the daemon sent the history', () => {
+    expect(ruleReadiness(answer({ eligible: false, because: 'no-history', history: 1 }))).toEqual({
+      kind: 'not-yet',
+      history: 1,
+      words: '1 of 2 sign-ins done',
+    });
+    expect(ruleReadiness(answer({ eligible: false, because: 'no-history', history: 0 }))).toMatchObject({
+      kind: 'not-yet',
+      words: '0 of 2 sign-ins done',
+    });
+  });
+
+  it('says nothing of progress for an older daemon that sent no history', () => {
+    expect(ruleReadiness(answer({ eligible: false, because: 'no-history' }))).toBeUndefined();
+  });
+
+  it('gives any other reason in the daemon’s words', () => {
+    expect(ruleReadiness(answer({ eligible: false, because: 'via-provider' }))).toEqual({
+      kind: 'other',
+      words: SIGN_IN_RULE_INELIGIBLE_WORDS['via-provider'],
+    });
+  });
+
+  it('explains why twice, in the owner’s words', () => {
+    expect(RULE_PROGRESS_WHY).toBe(
+      'Ferretry offers a standing rule only for a sign-in you filled yourself from the app, twice in a row, so it has seen this page take this password.',
+    );
   });
 });

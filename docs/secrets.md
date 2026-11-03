@@ -556,7 +556,10 @@ history and the fills through the shared matcher ([input requests › Standing r
 are matched by the screens in the app: the sheet (Accounts › a sign-in › Standing rule, and "Don’t ask again for this
 sign-in…" on an input card the owner just filled by hand), the rule card (narrow, revoke, resume, approve again), a
 ferret's suggestion, and Settings › Secure copy › Standing sign-in rules, where a rule staged on the machine with
-`fy rules add` waits for this device's passkey. Every warning (root, one factor, the automatic recipe) is drawn from the
+`fy rules add` waits for this device's passkey. While a sign-in is `no-history` the app reads the eligibility with
+`&progress=1` and shows "1 of 2 sign-ins done" (two pills and a one-line explainer) on the open
+password card before Send, on a ferret's suggestion (instead of a bare refusal) and on the Rule tab; it never holds the
+card after Send. A daemon that sends no `history` gets today's words and no meter. Every warning (root, one factor, the automatic recipe) is drawn from the
 rule's structured flags, never from its words. Each is one protocol constant, said the same in the app and `fy rules`:
 
 - One factor (`SIGN_IN_RULE_TOTP_WARNING`, the same `AUTOMATED_CODE_WARNING` a plan line's code tick says): "Ferretry

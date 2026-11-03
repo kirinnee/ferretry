@@ -5,7 +5,7 @@ import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { fieldsOf } from '../../../src/lib/input-card.ts';
-import type { RuleClient } from '../../../src/lib/sign-in-rules.ts';
+import { RULE_PROGRESS_WHY, type RuleClient } from '../../../src/lib/sign-in-rules.ts';
 import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
@@ -306,6 +306,94 @@ describe('finishing a follow-up lets go of the view (#B147)', () => {
     expect(holds.at(-1)).toEqual([true, undefined]);
 
     await finishRule(view);
+    expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
+  });
+});
+
+describe('the progress toward a standing rule, on the open card (#F640)', () => {
+  const notYet = {
+    eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history', history: 1 },
+  } as const;
+  const one = () => withSaved(saved({ offers: [primaryOffer({ why: 'site' })] }));
+
+  it('shows how many sign-ins are done, before Send, for the sign-in the card offers', async () => {
+    const view = await card(one(), true, { world: notYet });
+    await settle();
+
+    const line = view.container.querySelector('[data-rule-progress]');
+    expect(line?.textContent).toContain('1 of 2 sign-ins done');
+    expect(line?.getAttribute('data-rule-progress')).toBe('1');
+    expect(view.container.querySelector('[data-rule-progress-why]')?.textContent).toBe(RULE_PROGRESS_WHY);
+    expect(view.container.querySelector('[data-input-form] [data-rule-progress]')).not.toBeNull();
+  });
+
+  it('reads the progress for the offered sign-in, with the count asked for', async () => {
+    const rules = ruleClient(notYet);
+    const fake = fakeClient(delivered);
+    const client = {
+      request: async (path: string, schema: never, init?: RequestInit) =>
+        await (path.startsWith('/v1/sign-in-rules') ? rules.client : fake.client).request(path, schema, init),
+    } as never;
+    const value = one();
+    const view = await mount(
+      <InputCard
+        agentName="Hadi"
+        client={client}
+        fields={fieldsOf(value)}
+        now={NOW}
+        onDone={() => undefined}
+        request={value}
+        ruleOffer={{ askPasskey: async () => true }}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+
+    expect(rules.keys()).toEqual(['GET /v1/sign-in-rules/eligibility?signIn=si_0123456789abcdef&progress=1']);
+  });
+
+  it('is not drawn on a machine without sign-in rules', async () => {
+    const view = await card(one(), false, { world: notYet });
+    await settle();
+    expect(view.container.querySelector('[data-rule-progress]')).toBeNull();
+  });
+
+  it('draws nothing for an older daemon that sent no count, a ready sign-in, another reason, or an unreadable answer', async () => {
+    const worlds = [
+      { eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } },
+      { eligibility: { signIn: SITE_SIGN_IN, eligible: true, history: 2 } },
+      { eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'via-provider' } },
+      { fail: (key: string) => (key.includes('/eligibility') ? new Error('offline') : undefined) },
+    ];
+    for (const world of worlds) {
+      const view = await card(one(), true, { world });
+      await settle();
+      expect(view.container.querySelector('[data-rule-progress]')).toBeNull();
+    }
+  });
+
+  it('is not drawn once the owner types a different one, or when the card offers no sign-in', async () => {
+    const typed = await card(one(), true, { world: notYet });
+    await settle();
+    await click(typed.container.querySelector('[data-input-type-instead]'));
+    await settle();
+    expect(typed.container.querySelector('[data-rule-progress]')).toBeNull();
+
+    const plain = await card(withSaved(saved({ offers: [primaryOffer({ why: 'site', signIn: undefined })] })), true, {
+      world: notYet,
+    });
+    await settle();
+    expect(plain.container.querySelector('[data-rule-progress]')).toBeNull();
+  });
+
+  it('does not hold the view after Send: a line that is not offered yet must not keep the card open', async () => {
+    const holds: Hold[] = [];
+    const view = await card(one(), true, { holds, world: notYet });
+    await settle();
+    await click(view.container.querySelector('[data-variant="primary"][data-input-offer]'));
+    await settle();
+
+    expect(view.container.querySelector('[data-rule-progress]')).toBeNull();
     expect(holds.at(-1)).toEqual([false, 'Sent to %terminal:deploy.']);
   });
 });
