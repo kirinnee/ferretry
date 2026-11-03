@@ -1248,9 +1248,10 @@ const AgendaItemBaseShape = {
    */
   gateAttached: AgendaGateSchema.optional(),
   /**
-   * When `gateAttached` last CHANGED FROM one ask to another (the shown one answered or withdrawn, the next taking its
-   * place): an old app still showing the first would answer the second without the owner seeing it, so the daemon
-   * refuses an answer from an app that names no ask for a short while after. Absent when the mirror never replaced one.
+   * When `gateAttached` last CHANGED FROM one ask to another or to none (the shown one answered or withdrawn, the next
+   * taking its place or arriving later): an old app still showing the first would answer the second without the owner
+   * seeing it, so the daemon refuses an answer from an app that names no ask for a short while after. Absent when the
+   * mirror never replaced or lost an ask.
    */
   gateAttachedChangedAt: InstantSchema.optional(),
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */

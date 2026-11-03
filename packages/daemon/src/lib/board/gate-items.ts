@@ -54,7 +54,7 @@ import {
   parseGateReference,
   type AgendaGateOption,
 } from '@ferretry/protocol';
-import type { CardAskOperation } from '../agenda/card-asks.ts';
+import { type CardAskOperation, LEGACY_REPLAY_MS } from '../agenda/card-asks.ts';
 import type { AgendaQueryResult } from '../agenda/service.ts';
 import type { AgendaActor, AgendaMutation, RaiseAgendaRequest } from '../agenda/state-machine.ts';
 import { type BoardCaller, effectiveAssignee } from './authority.ts';
@@ -172,12 +172,6 @@ export interface GateExpectation {
   readonly laneId: string;
   readonly entry: number;
 }
-
-/**
- * How long after an ask is answered a repeat from an app that predates card asks (it names no ask) is still read as
- * that repeat, when another ask has taken the first one's place on the agenda since: a lost response, retried.
- */
-const LEGACY_REPLAY_MS = 2 * 60_000;
 
 const DAEMON: AgendaActor = { kind: 'daemon', cause: 'system' };
 

@@ -64,9 +64,17 @@ const bounded = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] => {
 };
 
 /**
+ * How long after an ask is answered, or the mirror changes, a repeat from an app that predates card asks (it names no
+ * ask) is still read as the screen's old view: a lost response retried, or a screen that still draws the ask before.
+ */
+export const LEGACY_REPLAY_MS = 2 * 60_000;
+
+/**
  * The item carrying exactly these asks, `gateAttached` mirroring the first open one; both absent when none is left.
- * Given the time of the write (`at`), a mirror that comes to show a DIFFERENT ask than it did is stamped
- * (`gateAttachedChangedAt`); one that shows the same ask keeps its stamp, and one that shows nothing drops it.
+ * Given the time of the write (`at`), a mirror that comes to show a DIFFERENT ask than it did, or to show nothing, is
+ * stamped (`gateAttachedChangedAt`): a screen of an older app may still draw the ask that went. One that shows the same
+ * ask keeps its stamp, and so does one that comes from nothing — until the stamp is older than {@link LEGACY_REPLAY_MS}.
+ * An agenda that was never mirrored has none.
  */
 export const withCardAsks = (item: AgendaItem, asks: readonly AgendaCardAsk[], at?: string): AgendaItem => {
   const { cardAsks: _asks, gateAttached: before, gateAttachedChangedAt: stamped, ...rest } = item;
@@ -74,7 +82,12 @@ export const withCardAsks = (item: AgendaItem, asks: readonly AgendaCardAsk[], a
   const mirror = mirroredCardAsk({ cardAsks: kept });
   const replaced =
     before !== undefined && mirror !== undefined && cardAskReference({ gate: before }) !== cardAskReference(mirror);
-  const changedAt = mirror === undefined ? undefined : replaced ? at : before === undefined ? undefined : stamped;
+  const gone = before !== undefined && mirror === undefined;
+  const fresh =
+    stamped !== undefined && (at === undefined || Date.parse(at) - Date.parse(stamped) < LEGACY_REPLAY_MS)
+      ? stamped
+      : undefined;
+  const changedAt = replaced || gone ? at : before === undefined ? fresh : stamped;
   return {
     ...rest,
     ...(kept.length === 0 ? {} : { cardAsks: kept }),
@@ -116,9 +129,21 @@ const backTo = (item: AgendaItem, turn: AgendaCardAskWoke): AgendaItem => ({
   ...turn,
 });
 
-/** Whether nothing has happened to the item's turn since an ask woke it at `at`: still the owner's, still from that ask. */
+/** Whether anything but the daemon's own lines was written on the item after `at`: the owner or a ferret has spoken since. */
+const talkedSince = (item: AgendaItem, at: string): boolean =>
+  (item.history ?? []).some(entry => entry.kind !== 'updated' && entry.at > at) ||
+  (item.ownerAnswer !== undefined && item.ownerAnswer.at > at);
+
+/** Whether an owner's answer to a card ask was recorded on the item after `at`. */
+const answeredSince = (item: AgendaItem, at: string): boolean =>
+  (item.history ?? []).some(entry => entry.kind === 'gate-answered' && entry.at > at);
+
+/**
+ * Whether nothing has happened to the item's turn since an ask woke it at `at`: still the owner's, still from that ask,
+ * and nobody has replied, asked, or answered since — a thread that went back to the owner after talk is theirs to see.
+ */
 const stillWoken = (item: AgendaItem, at: string): boolean =>
-  item.parked === undefined && item.waitingOn === undefined && item.waitingSince === at;
+  item.parked === undefined && item.waitingOn === undefined && item.waitingSince === at && !talkedSince(item, at);
 
 /** The item resting on the owner's answer, waiting on its ferret, as every other answer rests one. */
 const restedOnAnswer = (item: AgendaItem, at: string): AgendaItem => {
@@ -210,21 +235,24 @@ export const applyCardAsk = (
       asks.filter(ask => ask !== target),
       at,
     );
-    if (openCardAsks(left).length > 0) {
+    const waiting = openCardAsks(left).filter(ask => ask.notYet === undefined);
+    if (waiting.length > 0) {
       // The newest ask goes: the thread has waited on the owner since the one before, not since the one that went.
-      const newest = Math.max(...openCardAsks(left).map(ask => Date.parse(ask.at)));
+      const newest = Math.max(...waiting.map(ask => Date.parse(ask.at)));
       const settled = stillWoken(left, target.at) ? { ...left, waitingSince: new Date(newest).toISOString() } : left;
       return { kind: 'changed', item: settled, change: 'refreshed' };
     }
     const note = `${formatTaskRef({ id: target.gate.cardId })} moved on, so nothing is left to answer`;
     const told = effects.history(left, 'updated', note);
     if (target.woke !== undefined && !isCardAgenda(left)) {
-      // A ferret's thread goes back to the turn the ask woke it out of; one that has moved on since stays as it is.
-      return {
-        kind: 'changed',
-        item: stillWoken(left, target.at) ? backTo(told, target.woke) : told,
-        change: 'refreshed',
-      };
+      // A ferret's thread goes back to the turn the ask woke it out of; one that has moved on since stays as it is,
+      // and one the owner answered an ask of since rests, as any answer rests it.
+      const settled = stillWoken(left, target.at)
+        ? backTo(told, target.woke)
+        : answeredSince(left, target.at)
+          ? restedOnAnswer(told, at)
+          : told;
+      return { kind: 'changed', item: settled, change: 'refreshed' };
     }
     if ((left.cardAsks ?? []).length > 0 || (isCardAgenda(left) && hasTalk(left))) {
       return { kind: 'changed', item: restedOnAnswer(told, at), change: 'refreshed' };

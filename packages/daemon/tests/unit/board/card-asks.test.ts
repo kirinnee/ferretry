@@ -977,6 +977,75 @@ describe('answering a card ask', () => {
     should(outcome).match({ handled: true, mutation: { ok: true } });
   });
 
+  /** F1's thread shows F1's ask alone; `leave` takes it away; then sub-card F2's plan ask is put on the same thread. */
+  const askReplacedByNothing = async (
+    leave: (world: ReturnType<typeof fixture>, id: string) => Promise<void>,
+    faults: Faults = {},
+  ) => {
+    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })], faults);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    await world.board.trigger('F1', 'release.running');
+    should(openOf(world, 'lead', id).gateAttached?.cardId).equal('F1');
+    await leave(world, id);
+    should(openOf(world, 'lead', id).gateAttached).be.undefined();
+    await world.board.act('F2', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    should(openOf(world, 'lead', id).gateAttached?.cardId).equal('F2');
+    return { world, id };
+  };
+
+  it('refuses an older app’s answer after its only ask was answered Not good elsewhere and another card’s ask took its place', async () => {
+    // Arrange — the owner answers F1's ask Not good on another device; F2's ask is put on within two minutes
+    const { world, id } = await askReplacedByNothing(async (each, thread) => {
+      await each.answer(thread, choose('Not good'), {
+        sessionId: 'lead',
+        cardAsk: 'gate:F1:tested:2',
+        note: 'flickers',
+      });
+    });
+
+    // Act — a phone on an older app still draws F1's ask and taps
+    const outcome = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert — F2, which the owner never saw, did not move
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('two minutes');
+    should(world.stored('F2').laneId).equal('plan');
+  });
+
+  it('refuses an older app’s answer after its only ask left with its card dragged on the Board, then another took its place', async () => {
+    // Arrange
+    const { world, id } = await askReplacedByNothing(async each => {
+      await each.move('implement', OWNER, 'one more fix');
+    });
+
+    // Act
+    const outcome = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('two minutes');
+    should(world.stored('F2').laneId).equal('plan');
+  });
+
+  it('takes an older app’s answer on an ask that appeared after the old one left, once two minutes have passed', async () => {
+    // Arrange — the same, read three minutes later
+    const { world, id } = await askReplacedByNothing(
+      async each => {
+        await each.move('implement', OWNER, 'one more fix');
+      },
+      { gatesNow: '2026-10-30T10:03:00.000Z' },
+    );
+
+    // Act
+    const outcome = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F2').laneId).not.equal('plan');
+  });
+
   it('reads an older app’s lost-response retry of the first of two answers as that answer, not a conflict with the second', async () => {
     // Arrange — A (F1) answered Done, then B (F2) answered Not good, on one thread, within two minutes
     const world = fixture([leads(), leads({ id: 'F2' })]);
