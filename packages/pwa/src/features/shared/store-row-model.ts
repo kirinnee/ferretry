@@ -4,11 +4,12 @@
  * install record says and what the verified manifest lists. Nothing here updates anything: every act is the person's.
  */
 
-import type {
-  CatalogInstall,
-  CatalogInstallPreview,
-  CatalogInstallPreviewRequest,
-  SharedCatalogItemVersions,
+import {
+  isLinkProvenance,
+  type CatalogInstall,
+  type CatalogInstallPreview,
+  type CatalogManifestInstallPreviewRequest,
+  type SharedCatalogItemVersions,
 } from '@ferretry/protocol';
 import type { InstallRefusal } from '../catalogs/catalog-install-model.ts';
 import type { UpdateSource } from './shared-controller.ts';
@@ -171,7 +172,7 @@ export function updateRequest(
   source: UpdateSource,
   install: CatalogInstall,
   options: { readonly replaceEdited: boolean },
-): CatalogInstallPreviewRequest {
+): CatalogManifestInstallPreviewRequest {
   return {
     signedManifest: source.signedManifest,
     item: source.item,
@@ -198,6 +199,7 @@ export function updateDisagreement(
     publisher.daemonId === manifest.publisher &&
     provenance.publisherName === manifest.publisherName &&
     publisher.name === manifest.publisherName &&
+    !isLinkProvenance(provenance) &&
     provenance.catalogId === manifest.catalogId &&
     provenance.catalogName === manifest.name &&
     provenance.itemId === item.itemId &&

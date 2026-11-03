@@ -320,6 +320,13 @@ export const DAEMON_FEATURES = {
    * daemon without this name answers 404 there, so the app says an item was opened only where the machine reports it.
    */
   pushClear: 'push.clear.1',
+  /**
+   * The installer takes a LINK as a source (docs/catalogs.md § Installing from a link): the install preview accepts a
+   * `signedLink` and its item, refuses with `catalog_link_mismatch`, `catalog_link_expired` and
+   * `catalog_link_sequence_older`, and records the link as the install's provenance. A daemon without this name
+   * refuses the strict fields, so a surface offers "install from this link" only where the machine reports it.
+   */
+  catalogInstallLinks: 'catalog-installs.links.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

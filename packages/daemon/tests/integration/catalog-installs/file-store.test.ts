@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import should from 'should';
 import {
   CATALOG_INSTALLS_DOCUMENT,
+  CATALOG_INSTALLS_V1_BACKUP,
   FileCatalogInstallStore,
 } from '../../../src/adapters/catalog-installs/file-store.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
   type CatalogInstallState,
   CatalogInstallStateError,
+  CatalogInstallStateV1Schema,
   EMPTY_CATALOG_INSTALL_STATE,
 } from '../../../src/lib/catalog-installs/store.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
@@ -124,5 +126,74 @@ describe('FileCatalogInstallStore', () => {
     should((error as Error).message).equal(
       `${CATALOG_INSTALLS_DOCUMENT} is not a record of installs this daemon writes, so no install was changed`,
     );
+  });
+
+  it('should keep the exact version 1 text, readable only by its owner, when the first link install upgrades the file', async () => {
+    // Arrange
+    const { store, file, directory } = await fixture();
+    await store.write(SOME_STATE);
+    const old = await readFile(file, 'utf8');
+
+    // Act
+    await store.write({ ...SOME_STATE, schemaVersion: 2, linkSequences: { 'a/lnk_b': 3 } });
+
+    // Assert
+    const backup = join(directory, CATALOG_INSTALLS_V1_BACKUP);
+    should(await readFile(backup, 'utf8')).equal(old);
+    should((await stat(backup)).mode & 0o777).equal(0o600);
+    should((await store.read()).schemaVersion).equal(2);
+  });
+
+  it('should not touch the backup on a later write, so it always holds the last version 1 file', async () => {
+    // Arrange
+    const { store, file, directory } = await fixture();
+    await store.write(SOME_STATE);
+    const old = await readFile(file, 'utf8');
+    const v2 = { ...SOME_STATE, schemaVersion: 2 as const, linkSequences: { 'a/lnk_b': 3 } };
+    await store.write(v2);
+
+    // Act
+    await store.write({ ...v2, linkSequences: { 'a/lnk_b': 4 } });
+
+    // Assert
+    should(await readFile(join(directory, CATALOG_INSTALLS_V1_BACKUP), 'utf8')).equal(old);
+  });
+
+  it('should keep no backup for a first write, a catalog write on version 1, or a version 2 file with no previous', async () => {
+    // Arrange
+    const { store, directory } = await fixture();
+
+    // Act
+    await store.write({ ...SOME_STATE, schemaVersion: 2, linkSequences: {} });
+    await store.write(SOME_STATE);
+    await store.write(SOME_STATE);
+
+    // Assert
+    should(await readdir(directory)).not.containEql(CATALOG_INSTALLS_V1_BACKUP);
+  });
+
+  it('should not back up a previous file that is not a version 1 record', async () => {
+    // Arrange
+    const { store, file, directory } = await fixture();
+    await store.write(EMPTY_CATALOG_INSTALL_STATE);
+    await writeFile(file, 'not json at all', 'utf8');
+
+    // Act
+    await store.write({ ...SOME_STATE, schemaVersion: 2, linkSequences: {} });
+
+    // Assert
+    should(await readdir(directory)).not.containEql(CATALOG_INSTALLS_V1_BACKUP);
+  });
+
+  it('should read a version 2 file and refuse the same file as version 1', async () => {
+    // Arrange
+    const { store, file } = await fixture();
+    const v2: CatalogInstallState = { ...SOME_STATE, schemaVersion: 2, linkSequences: { 'a/lnk_b': 3 } };
+    await store.write(v2);
+    const text = await readFile(file, 'utf8');
+
+    // Assert
+    should(await store.read()).deepEqual(v2);
+    should(CatalogInstallStateV1Schema.safeParse(JSON.parse(text)).success).be.false();
   });
 });

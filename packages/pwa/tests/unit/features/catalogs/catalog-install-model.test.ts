@@ -61,6 +61,19 @@ describe('the machine and the file agree', () => {
     const provenanceChange = (change: Record<string, unknown>) =>
       installPreview({ provenance: { ...agreeing.provenance, ...change }, publisher: agreeing.publisher });
     should(check(provenanceChange({ catalogName: 'Another catalog' }))).equal(PREVIEW_DISAGREES);
+    // A review that says it came from a link is never the review of a catalog's item.
+    const { catalogId: _id, catalogName: _name, ...fromCatalog } = agreeing.provenance as Record<string, unknown>;
+    should(
+      check(
+        installPreview({
+          provenance: {
+            ...fromCatalog,
+            link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 1 },
+          } as never,
+          publisher: agreeing.publisher,
+        }),
+      ),
+    ).equal(PREVIEW_DISAGREES);
     // The item, too: the machine may not review a different one than the one chosen from the signed list.
     should(check(provenanceChange({ itemId: `itm_${'z'.repeat(22)}` }))).equal(PREVIEW_DISAGREES);
     should(check(provenanceChange({ kind: 'mcp' }))).equal(PREVIEW_DISAGREES);
@@ -284,6 +297,14 @@ describe('installRefusal', () => {
 describe('installed items', () => {
   it('reads where an install came from', () => {
     should(installedFromLine(installRecord())).equal('From Team skills (kirin-box)');
+  });
+  it('reads an install from a link as from a shared link', () => {
+    const { catalogId: _id, catalogName: _name, ...shared } = installRecord().provenance as Record<string, unknown>;
+    const fromLink = {
+      ...installRecord(),
+      provenance: { ...shared, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 1 } },
+    } as ReturnType<typeof installRecord>;
+    should(installedFromLine(fromLink)).equal('From a shared link (kirin-box)');
   });
   it('marks hidden characters in the names the publisher chose', () => {
     const base = installRecord();

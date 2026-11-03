@@ -12,7 +12,9 @@ import {
   type CatalogInstallPreviewRequest,
   type CatalogInstallRequest,
   type CatalogSecretBindings,
+  isLinkProvenance,
   isSignInSecretName,
+  provenanceSource,
   readSharedCatalogFile,
   revealHidden,
   SHARED_CATALOG_FILE_MAX_BYTES,
@@ -116,6 +118,7 @@ export function previewDisagreement(
     publisher.daemonId === manifest.publisher &&
     provenance.publisherName === manifest.publisherName &&
     publisher.name === manifest.publisherName &&
+    !isLinkProvenance(provenance) &&
     provenance.catalogId === manifest.catalogId &&
     provenance.catalogName === manifest.name &&
     provenance.itemId === entry.itemId &&
@@ -321,7 +324,7 @@ export function installRefusal(error: unknown): InstallRefusal {
 
 /** "From Team skills (kirin-box)" */
 export function installedFromLine(install: Pick<CatalogInstall, 'provenance'>): string {
-  return `From ${revealHidden(install.provenance.catalogName)} (${revealHidden(install.provenance.publisherName)})`;
+  return `From ${revealHidden(provenanceSource(install.provenance))} (${revealHidden(install.provenance.publisherName)})`;
 }
 
 /** The installs that wrote this skill or server by name. A row shows each one it matches. */

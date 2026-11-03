@@ -1060,6 +1060,15 @@ function putComponent(
   return existing === undefined ? `Add ${word} ${change.name}` : `Change ${word} ${change.name}`;
 }
 
+/** A link's item is replaced only by the same link, a catalog's only by the same catalog: never across the two. */
+function sameSource(
+  earlier: { catalogId?: string; link?: { linkId?: string } },
+  origin: { catalogId?: string; link?: { linkId: string } },
+): boolean {
+  if (origin.link !== undefined) return earlier.link !== undefined && earlier.link.linkId === origin.link.linkId;
+  return earlier.link === undefined && earlier.catalogId === origin.catalogId;
+}
+
 /**
  * An MCP server or a skill a catalog published, put into the setup and into ONE profile. It is a
  * component put with three differences: the component records where it came from (`installedFrom`,
@@ -1079,15 +1088,15 @@ function installCatalogItem(
   const word = KIND_WORDS[kind];
   const origin = change.installedFrom;
   const existing = model.components[kind][change.name] as Record<string, unknown> | undefined;
-  const earlier = existing?.installedFrom as { publisher?: string; catalogId?: string; itemId?: string } | undefined;
+  const earlier = existing?.installedFrom as
+    | { publisher?: string; catalogId?: string; itemId?: string; link?: { linkId?: string } }
+    | undefined;
   if (existing !== undefined && !change.replace) {
     refuse(`${change.name} is already a ${word} on ${facts.machineName}, and no install of this item put it there`);
   }
   if (
     existing !== undefined &&
-    (earlier?.publisher !== origin.publisher ||
-      earlier.catalogId !== origin.catalogId ||
-      earlier.itemId !== origin.itemId)
+    (earlier?.publisher !== origin.publisher || earlier.itemId !== origin.itemId || !sameSource(earlier, origin))
   ) {
     refuse(`${change.name} is a ${word} on ${facts.machineName} that this item did not install`);
   }

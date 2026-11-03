@@ -1,4 +1,4 @@
-import type { CatalogInstall, CatalogInstallPreview } from '@ferretry/protocol';
+import { type CatalogInstall, type CatalogInstallPreview, provenanceSource } from '@ferretry/protocol';
 
 const indent = (text: string, by: string): string =>
   text
@@ -10,7 +10,7 @@ const indent = (text: string, by: string): string =>
 export const renderPreview = (preview: CatalogInstallPreview): string => {
   const { provenance, publisher } = preview;
   const lines = [
-    `${provenance.name} (${provenance.kind}, version ${provenance.version}) from ${provenance.catalogName}`,
+    `${provenance.name} (${provenance.kind}, version ${provenance.version}) from ${provenanceSource(provenance)}`,
     `Published by ${publisher.name} (${publisher.daemonId})${publisher.firstSeen ? ' - first time you install from them; this fingerprint is pinned from now on' : ''}`,
     `Digest ${provenance.digest}`,
     `Lands in: ${preview.destination}`,
@@ -43,7 +43,7 @@ export const renderInstalls = (installs: readonly CatalogInstall[]): string => {
         .map(([placeholder, own]) => `${placeholder} -> ${own ?? 'unbound'}`)
         .join(', ');
       return [
-        `${install.installId}  ${provenance.name} v${provenance.version} (${provenance.kind}) from ${provenance.catalogName} by ${provenance.publisherName}`,
+        `${install.installId}  ${provenance.name} v${provenance.version} (${provenance.kind}) from ${provenanceSource(provenance)} by ${provenance.publisherName}`,
         `  in ${install.destination}${bound === '' ? '' : `; secrets: ${bound}`}`,
       ].join('\n');
     })

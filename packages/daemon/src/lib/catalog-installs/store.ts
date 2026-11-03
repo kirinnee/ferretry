@@ -6,10 +6,17 @@
  * this machine has installed from, which publisher each catalog is PINNED to, and the highest manifest
  * revision seen per catalog. A pin outlives the installs it came from: removing the last install of a
  * catalog does not make its next publisher a first one.
+ *
+ * Two versions of the file. Version 1 is what every daemon wrote until a LINK was first installed from; version 2
+ * adds `linkSequences` (the highest signed sequence installed from each link) and lets an install's provenance
+ * name a link. The upgrade happens ONLY inside the first link install's write, after the adapter has kept the exact
+ * old text as `catalog-installs.v1.json`; a daemon that does not know version 2 refuses the file (its schema is a
+ * literal 1) and never writes over it. A machine that never installs from a link never leaves version 1.
  */
 import {
   CatalogInstallIdSchema,
   CatalogInstallTargetSchema,
+  CatalogManifestProvenanceSchema,
   CatalogProvenanceSchema,
   CatalogSecretBindingsSchema,
   DaemonIdSchema,
@@ -19,6 +26,7 @@ import {
 import { z } from 'zod';
 
 export const CATALOG_INSTALLS_SCHEMA_VERSION = 1 as const;
+export const CATALOG_INSTALLS_SCHEMA_VERSION_LINKS = 2 as const;
 
 /** One thing an install wrote. `entry` names a server inside a shared `.mcp.json`; otherwise `path` is a whole file. */
 export const CatalogInstalledFileSchema = z.strictObject({
@@ -28,10 +36,9 @@ export const CatalogInstalledFileSchema = z.strictObject({
 });
 export type CatalogInstalledFile = z.infer<typeof CatalogInstalledFileSchema>;
 
-export const CatalogInstallRecordSchema = z.strictObject({
+const installRecordFields = {
   installId: CatalogInstallIdSchema,
   installedAt: InstantSchema,
-  provenance: CatalogProvenanceSchema,
   target: CatalogInstallTargetSchema,
   destination: z.string().min(1),
   /** Where it lands, one value per place: two installs with the same key would overwrite each other. */
@@ -53,20 +60,61 @@ export const CatalogInstallRecordSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{64}$/u)
     .optional(),
+};
+
+/** An install as version 1 of the file holds it: always from a catalog. */
+const CatalogInstallRecordV1Schema = z.strictObject({
+  ...installRecordFields,
+  provenance: CatalogManifestProvenanceSchema,
+});
+
+/** An install as this daemon holds and lists it: from a catalog or from a link. */
+export const CatalogInstallRecordSchema = z.strictObject({
+  ...installRecordFields,
+  provenance: CatalogProvenanceSchema,
 });
 export type CatalogInstallRecord = z.infer<typeof CatalogInstallRecordSchema>;
 
-export const CatalogInstallStateSchema = z.strictObject({
-  schemaVersion: z.literal(CATALOG_INSTALLS_SCHEMA_VERSION),
-  installs: z.array(CatalogInstallRecordSchema),
+const installStateFields = {
   /** Publisher daemon id → when this machine first installed from it. */
   publishers: z.record(DaemonIdSchema, InstantSchema),
   /** Catalog id → the one publisher it may be installed from. */
   pins: z.record(SharedCatalogIdSchema, DaemonIdSchema),
   /** Catalog id → the highest manifest revision an install came from. */
   revisions: z.record(SharedCatalogIdSchema, z.number().int().min(1)),
+};
+
+/** The file as every daemon wrote it before links. Kept so a v1 file is read exactly, and so a v2 file is provably not a v1 one. */
+export const CatalogInstallStateV1Schema = z.strictObject({
+  schemaVersion: z.literal(CATALOG_INSTALLS_SCHEMA_VERSION),
+  installs: z.array(CatalogInstallRecordV1Schema),
+  ...installStateFields,
 });
-export type CatalogInstallState = z.infer<typeof CatalogInstallStateSchema>;
+
+/** The file once a link has been installed from. */
+export const CatalogInstallStateV2Schema = z.strictObject({
+  schemaVersion: z.literal(CATALOG_INSTALLS_SCHEMA_VERSION_LINKS),
+  installs: z.array(CatalogInstallRecordSchema),
+  ...installStateFields,
+  /** `<publisher>/<linkId>` → the highest signed sequence an install came from. A lower one is never accepted. */
+  linkSequences: z.record(z.string().min(1).max(256), z.number().int().min(1).max(0xffffffff)),
+});
+
+/** Either version, as found on disk. */
+export const CatalogInstallStateSchema = z.union([CatalogInstallStateV1Schema, CatalogInstallStateV2Schema]);
+
+/** The state as the service holds it: `linkSequences` is there exactly when the version is 2. */
+export interface CatalogInstallState {
+  readonly schemaVersion: 1 | 2;
+  readonly installs: readonly CatalogInstallRecord[];
+  readonly publishers: Readonly<Record<string, string>>;
+  readonly pins: Readonly<Record<string, string>>;
+  readonly revisions: Readonly<Record<string, number>>;
+  readonly linkSequences?: Readonly<Record<string, number>>;
+}
+
+/** The key of a link in `linkSequences`. */
+export const linkSequenceKey = (publisher: string, linkId: string): string => `${publisher}/${linkId}`;
 
 export const EMPTY_CATALOG_INSTALL_STATE: CatalogInstallState = {
   schemaVersion: CATALOG_INSTALLS_SCHEMA_VERSION,

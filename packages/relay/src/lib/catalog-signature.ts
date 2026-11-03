@@ -360,17 +360,9 @@ export async function verifyLinkBundle(
   bundle: SharedCatalogLinkBundle,
   expected: ExpectedLink,
 ): Promise<CatalogVerification<{ readonly link: SharedCatalogLink; readonly item: SharedCatalogItem }>> {
-  const { link } = bundle.signedLink;
-  const spki = fromBase64UrlFixed(bundle.signedLink.spki, ED25519_SPKI_BYTES);
-  const sig = fromBase64UrlFixed(bundle.signedLink.sig, ED25519_SIGNATURE_BYTES);
-  const notSigned = 'This link was not signed by the machine it names.';
-  if (spki === null || sig === null) return refuse('signature_invalid', notSigned);
-  if (!(await publicKeyMatchesDaemonId(crypto, spki, link.publisher))) return refuse('signature_invalid', notSigned);
-  const signed = await linkSignedBytes(crypto, link);
-  if (signed === null)
-    return refuse('not_canonical', 'This link has no one canonical spelling, so it cannot be checked.');
-  if (!(await crypto.verifyEd25519(spki, sig, signed))) return refuse('signature_invalid', notSigned);
-
+  const signature = await verifyLinkSignature(crypto, bundle.signedLink);
+  if (!signature.ok) return signature;
+  const { link } = signature.value;
   if (
     link.publisher !== expected.publisher ||
     link.bundleId !== expected.bundleId ||
@@ -378,7 +370,59 @@ export async function verifyLinkBundle(
   )
     return refuse('link_mismatch', 'This link is not the one its address names, so it was not used.');
 
-  const { item } = bundle;
+  const matched = await verifyLinkItemBytes(crypto, link, bundle.item);
+  if (!matched.ok) return matched;
+
+  if (expected.now !== undefined && expected.now.getTime() > Date.parse(link.notAfter) + LINK_CLOCK_SKEW_MS)
+    return refuse('link_stale', 'This link has ended. Ask the person who sent it for a new one.');
+  return { ok: true, value: { link, item: matched.value } };
+}
+
+/**
+ * Check a link and its item the way an INSTALLING daemon sees them: no envelope, so no bundle id or sequence from
+ * a URL — only the fingerprint the URL named. In this order: the signature under the link label; that the signer is
+ * that fingerprint; that the item is exactly the one the document describes. Freshness and the sequence are the
+ * installer's own policy, so they are not decided here.
+ */
+export async function verifyLinkItem(
+  crypto: RelayCrypto,
+  signedLink: SignedCatalogLink,
+  item: SharedCatalogItem,
+  linkFingerprint: string,
+): Promise<CatalogVerification<{ readonly link: SharedCatalogLink; readonly item: SharedCatalogItem }>> {
+  const signature = await verifyLinkSignature(crypto, signedLink);
+  if (!signature.ok) return signature;
+  const { link } = signature.value;
+  if (link.publisher !== linkFingerprint)
+    return refuse('link_mismatch', 'This link is not the one its address names, so it was not used.');
+  const matched = await verifyLinkItemBytes(crypto, link, item);
+  return matched.ok ? { ok: true, value: { link, item: matched.value } } : matched;
+}
+
+/** The key hashes to the publisher the document names, and the signature holds under the link label. */
+async function verifyLinkSignature(
+  crypto: RelayCrypto,
+  signedLink: SignedCatalogLink,
+): Promise<CatalogVerification<SignedCatalogLink>> {
+  const { link } = signedLink;
+  const spki = fromBase64UrlFixed(signedLink.spki, ED25519_SPKI_BYTES);
+  const sig = fromBase64UrlFixed(signedLink.sig, ED25519_SIGNATURE_BYTES);
+  const notSigned = 'This link was not signed by the machine it names.';
+  if (spki === null || sig === null) return refuse('signature_invalid', notSigned);
+  if (!(await publicKeyMatchesDaemonId(crypto, spki, link.publisher))) return refuse('signature_invalid', notSigned);
+  const signed = await linkSignedBytes(crypto, link);
+  if (signed === null)
+    return refuse('not_canonical', 'This link has no one canonical spelling, so it cannot be checked.');
+  if (!(await crypto.verifyEd25519(spki, sig, signed))) return refuse('signature_invalid', notSigned);
+  return { ok: true, value: signedLink };
+}
+
+/** The item is exactly the one the document describes, by every field and by the digest and size of these bytes. */
+async function verifyLinkItemBytes(
+  crypto: RelayCrypto,
+  link: SharedCatalogLink,
+  item: SharedCatalogItem,
+): Promise<CatalogVerification<SharedCatalogItem>> {
   const mismatch = `${item.name} is not the item this link says it carries, so it was not used.`;
   if (
     item.publisher !== link.publisher ||
@@ -396,8 +440,5 @@ export async function verifyLinkBundle(
     return refuse('not_canonical', `${item.name} has no one canonical spelling, so it cannot be checked.`);
   if (measured.digest !== link.item.digest || measured.size !== link.item.size)
     return refuse('item_mismatch', mismatch);
-
-  if (expected.now !== undefined && expected.now.getTime() > Date.parse(link.notAfter) + LINK_CLOCK_SKEW_MS)
-    return refuse('link_stale', 'This link has ended. Ask the person who sent it for a new one.');
-  return { ok: true, value: { link, item } };
+  return { ok: true, value: item };
 }

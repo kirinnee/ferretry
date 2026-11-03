@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, it } from 'bun:test';
 import { lstat, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CatalogInstallPreviewRequest } from '@ferretry/protocol';
+import type { CatalogManifestInstallPreviewRequest } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
 import { FileCatalogInstallStore } from '../../../src/adapters/catalog-installs/file-store.ts';
@@ -76,7 +76,7 @@ async function machineB() {
 /** What crosses between the machines: text, and nothing else. */
 async function carried(
   items: Parameters<typeof publish>[1],
-): Promise<{ signedManifest: CatalogInstallPreviewRequest['signedManifest']; items: typeof items }> {
+): Promise<{ signedManifest: CatalogManifestInstallPreviewRequest['signedManifest']; items: typeof items }> {
   const published = await publish(machineA, items, {});
   return JSON.parse(JSON.stringify({ signedManifest: published.signedManifest, items: published.items })) as never;
 }

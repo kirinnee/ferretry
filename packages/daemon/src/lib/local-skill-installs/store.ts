@@ -7,7 +7,7 @@
  */
 import {
   CatalogInstallTargetSchema,
-  CatalogProvenanceSchema,
+  CatalogManifestProvenanceSchema,
   InstantSchema,
   LocalSkillInstallIdSchema,
   LocalSkillOriginSchema,
@@ -30,7 +30,7 @@ const LocalSkillInstallRecordSchema = z.strictObject({
   /** Where it came from on this machine, as the inventory listed it. */
   origin: LocalSkillOriginSchema,
   /** The synthetic provenance a runtime install hands the fleet. Recorded so a replace matches it. */
-  provenance: CatalogProvenanceSchema,
+  provenance: CatalogManifestProvenanceSchema,
   target: CatalogInstallTargetSchema,
   destination: z.string().min(1),
   /** Where it lands, one value per place: two copies with the same key would overwrite each other. */

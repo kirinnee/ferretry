@@ -215,6 +215,12 @@ describe('updateDisagreement', () => {
       PREVIEW_UNRELATED,
     );
     expect(updateDisagreement(source, record, { ...agree(), replaces: undefined })).toBe(PREVIEW_UNRELATED);
+    const { catalogId: _id, catalogName: _name, ...fromCatalog } = agree().provenance as Record<string, unknown>;
+    const fromLink = {
+      ...agree(),
+      provenance: { ...fromCatalog, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 1 } },
+    } as never;
+    expect(updateDisagreement(source, record, fromLink)).toBe(PREVIEW_UNRELATED);
     expect(
       updateDisagreement(source, record, { ...agree(), replaces: { installId: `cin_${'z'.repeat(22)}`, version: 1 } }),
     ).toBe(PREVIEW_UNRELATED);

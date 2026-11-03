@@ -2918,6 +2918,59 @@ describe('deriveAccountChange: catalog.install', () => {
     );
   });
 
+  describe('from a shared link, which has no catalog', () => {
+    const { catalogId: _catalogId, catalogName: _catalogName, ...shared } = ORIGIN;
+    const LINK = { linkId: `lnk_${'a'.repeat(22)}`, kind: 'public', sequence: 1 } as const;
+    const LINK_ORIGIN = { ...shared, link: LINK } as const;
+    const linkedModel = (): AccountModel => {
+      const base = modelOf();
+      return parseAccountModel({
+        ...base,
+        components: {
+          ...base.components,
+          mcp: { ...base.components.mcp, 'acme-mcp': { command: 'acme-mcp', installedFrom: LINK_ORIGIN } },
+        },
+        profiles: { ...base.profiles, base: { layers: ['instructions/main', 'mcp/acme-mcp'] } },
+      });
+    };
+
+    it('should install it with the link recorded, and replace it only from the same link', () => {
+      // Act
+      const first = derive(install({ installedFrom: LINK_ORIGIN }));
+      const again = derive(
+        install({ replace: true, installedFrom: { ...LINK_ORIGIN, link: { ...LINK, sequence: 2 }, version: 2 } }),
+        linkedModel(),
+      );
+
+      // Assert
+      should(first.model.components.mcp['acme-mcp']).containEql({ installedFrom: LINK_ORIGIN });
+      should(again.summary).equal('Replace MCP server acme-mcp from kirin-box');
+    });
+
+    it('should never replace what another link installed', () => {
+      // Act + Assert
+      should(
+        refusalOf(
+          install({
+            replace: true,
+            installedFrom: { ...LINK_ORIGIN, link: { ...LINK, linkId: `lnk_${'b'.repeat(22)}` } },
+          }),
+          linkedModel(),
+        ),
+      ).equal(`acme-mcp is a ${refusalWord('mcp')} on studio that this item did not install`);
+    });
+
+    it('should never replace what a catalog installed, nor let a catalog replace what a link installed', () => {
+      // Act + Assert
+      should(refusalOf(install({ replace: true, installedFrom: LINK_ORIGIN }), installedModel())).equal(
+        `acme-mcp is a ${refusalWord('mcp')} on studio that this item did not install`,
+      );
+      should(refusalOf(install({ replace: true }), linkedModel())).equal(
+        `acme-mcp is a ${refusalWord('mcp')} on studio that this item did not install`,
+      );
+    });
+  });
+
   it('should refuse to replace a component that was put in by hand', () => {
     // Act + Assert
     should(refusalOf(install({ name: 'search', replace: true }))).equal(

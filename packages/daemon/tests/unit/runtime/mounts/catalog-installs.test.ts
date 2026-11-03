@@ -574,7 +574,10 @@ describe('who is asking, as a preview and its apply must agree', () => {
 describe('how a refusal is worded in HTTP', () => {
   const STATUS: Readonly<Record<CatalogInstallRefusal, number>> = {
     catalog_signature_invalid: 422,
+    catalog_link_mismatch: 422,
     catalog_item_mismatch: 422,
+    catalog_link_expired: 410,
+    catalog_link_sequence_older: 409,
     catalog_publisher_changed: 409,
     catalog_revision_older: 409,
     catalog_downgrade: 409,

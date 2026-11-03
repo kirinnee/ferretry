@@ -9,6 +9,7 @@ import {
   toBase64Url,
   utf8Bytes,
   verifyLinkBundle,
+  verifyLinkItem,
   verifySignedCatalogItemVersions,
   verifySignedCatalogManifest,
 } from '@ferretry/relay';
@@ -227,6 +228,65 @@ describe('verifying a link bundle', () => {
       sequence: 9,
     });
     should(result).match({ ok: false, refusal: 'signature_invalid' });
+  });
+});
+
+describe('verifying a link item the way an installing daemon sees it', () => {
+  it('should accept the item its publisher signed, with only the fingerprint the address named', async () => {
+    const world = await linkWorld();
+    const result = await verifyLinkItem(relayCrypto, world.signed, world.item, world.link.publisher);
+    should(result).match({ ok: true });
+    should(result.ok && result.value.link).deepEqual(world.link);
+    should(result.ok && result.value.item).deepEqual(world.item);
+  });
+
+  it('should say nothing about freshness or sequence: those are the installer’s policy', async () => {
+    const world = await linkWorld({ notAfter: '2026-11-01T09:00:00.000Z' });
+    should(await verifyLinkItem(relayCrypto, world.signed, world.item, world.link.publisher)).match({ ok: true });
+  });
+
+  it('should refuse a signature, a key or a document that was changed after signing', async () => {
+    const world = await linkWorld();
+    const other = await linkWorld();
+    const signeds = [
+      { ...world.signed, sig: flip(world.signed.sig) },
+      { ...world.signed, spki: other.signed.spki },
+      { ...world.signed, sig: 'AAAA' },
+      { ...world.signed, link: { ...world.signed.link, publisherName: 'Somebody else' } },
+    ];
+    for (const signed of signeds)
+      should(await verifyLinkItem(relayCrypto, signed, world.item, world.link.publisher)).match({
+        ok: false,
+        refusal: 'signature_invalid',
+      });
+  });
+
+  it('should refuse a genuine link that is by a different key than the fingerprint named', async () => {
+    const world = await linkWorld();
+    const stranger = await linkWorld();
+    should(await verifyLinkItem(relayCrypto, world.signed, world.item, stranger.link.publisher)).match({
+      ok: false,
+      refusal: 'link_mismatch',
+    });
+  });
+
+  it('should refuse an item that is not the one the signed document describes', async () => {
+    const world = await linkWorld();
+    const item = linkSkill(world.link.publisher, '# changed\n');
+    should(await verifyLinkItem(relayCrypto, world.signed, item, world.link.publisher)).match({
+      ok: false,
+      refusal: 'item_mismatch',
+    });
+  });
+
+  it('should check the signature before it says anything about the fingerprint', async () => {
+    const world = await linkWorld();
+    const stranger = await linkWorld();
+    const forged = { ...world.signed, sig: flip(world.signed.sig) };
+    should(await verifyLinkItem(relayCrypto, forged, world.item, stranger.link.publisher)).match({
+      ok: false,
+      refusal: 'signature_invalid',
+    });
   });
 });
 

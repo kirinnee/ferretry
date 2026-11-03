@@ -7,7 +7,13 @@
  * every secret and a fresh passkey.
  */
 
-import { type CatalogInstallPreview, type CatalogInstalled, revealHidden, type SecretList } from '@ferretry/protocol';
+import {
+  type CatalogInstallPreview,
+  type CatalogInstalled,
+  provenanceSource,
+  revealHidden,
+  type SecretList,
+} from '@ferretry/protocol';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { RelayCrypto } from '@ferretry/relay';
 import { CircleCheck, FileUp } from 'lucide-react';
@@ -670,7 +676,7 @@ export function Confirm({
       <WarningList warnings={preview.warnings.filter(warning => warning.code !== 'first-publisher')} />
       <div className="flex min-w-0 flex-col">
         <Fact label="From">
-          {revealHidden(preview.provenance.catalogName)} · {revealHidden(preview.publisher.name)} ·{' '}
+          {revealHidden(provenanceSource(preview.provenance))} · {revealHidden(preview.publisher.name)} ·{' '}
           <TapToExpand
             label="Publisher fingerprint"
             short={fingerprintStart(preview.publisher.daemonId)}

@@ -293,17 +293,27 @@ const CLONE_ORIGIN_SHAPE = {
  * from the caller. Display and provenance only; nothing is matched against it but the next install of the
  * same item. Editing the component by hand drops it, because the component is no longer what was published.
  */
-export const InstalledFromSchema = z.strictObject({
+const InstalledFromItem = {
   publisher: NonEmptyString,
   publisherName: NonEmptyString,
-  catalogId: NonEmptyString,
-  catalogName: NonEmptyString,
   itemId: NonEmptyString,
   kind: z.enum(['skill', 'mcp']),
   name: NonEmptyString,
   version: z.number().int().min(1),
   digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-});
+};
+export const InstalledFromSchema = z.union([
+  z.strictObject({ ...InstalledFromItem, catalogId: NonEmptyString, catalogName: NonEmptyString }),
+  /** From a shared link, which has no catalog: the link's id, kind and the signed sequence it was installed at. */
+  z.strictObject({
+    ...InstalledFromItem,
+    link: z.strictObject({
+      linkId: NonEmptyString,
+      kind: z.enum(['one-time', 'public']),
+      sequence: z.number().int().min(1),
+    }),
+  }),
+]);
 export type InstalledFrom = z.infer<typeof InstalledFromSchema>;
 
 /**

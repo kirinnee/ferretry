@@ -1,7 +1,7 @@
 import { beforeAll, describe, it } from 'bun:test';
 import type {
   CatalogInstallPreview,
-  CatalogInstallPreviewRequest,
+  CatalogManifestInstallPreviewRequest,
   CatalogInstallTarget,
   SharedCatalogItem,
 } from '@ferretry/protocol';
@@ -79,7 +79,7 @@ interface ViaList {
 }
 
 /** A request for a version other than the manifest's current, carrying the publisher's signed list. */
-async function viaList(options: ViaList): Promise<CatalogInstallPreviewRequest> {
+async function viaList(options: ViaList): Promise<CatalogManifestInstallPreviewRequest> {
   const current = options.current ?? options.offered[options.offered.length - 1];
   if (current === undefined) throw new Error('no versions');
   const published = await publish(alice, [current], { revision: options.revision ?? 1 });

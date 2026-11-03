@@ -9,6 +9,7 @@ import {
   type OwnedCatalog,
   type OwnedCatalogItem,
   type OwnedSharedItem,
+  provenanceSource,
   revealHidden,
 } from '@ferretry/protocol';
 
@@ -85,7 +86,7 @@ export function rowChips(installs: readonly CatalogInstall[], matches: readonly 
       version: null,
       from: {
         text: `from ${publisher} · ${versionChip(install.provenance.version)}`,
-        title: `From ${revealHidden(install.provenance.catalogName)} (${publisher}), pinned to version ${install.provenance.version}`,
+        title: `From ${revealHidden(provenanceSource(install.provenance))} (${publisher}), pinned to version ${install.provenance.version}`,
       },
     };
   }
@@ -101,4 +102,4 @@ export const canAdd = (installs: readonly CatalogInstall[]): boolean => installs
 
 /** The ⋯ menu's label for Uninstall: bare for the usual one install, naming the catalog when there are several. */
 export const removeLabel = (install: CatalogInstall, several: boolean): string =>
-  several ? `Uninstall (from ${revealHidden(install.provenance.catalogName)})` : 'Uninstall';
+  several ? `Uninstall (from ${revealHidden(provenanceSource(install.provenance))})` : 'Uninstall';

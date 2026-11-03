@@ -1,5 +1,6 @@
 import type {
   CatalogInstall,
+  CatalogManifestProvenance,
   CatalogInstalled,
   CatalogInstallList,
   CatalogInstallPreview,
@@ -93,16 +94,16 @@ export const catalogFileText = (items: readonly Item[]): string =>
     items,
   });
 
-const provenance = (name = 'pdf-tools'): CatalogInstall['provenance'] => ({
-  publisher: PUBLISHER as CatalogInstall['provenance']['publisher'],
+const provenance = (name = 'pdf-tools'): CatalogManifestProvenance => ({
+  publisher: PUBLISHER as CatalogManifestProvenance['publisher'],
   publisherName: 'kirin-box',
-  catalogId: CATALOG_ID as CatalogInstall['provenance']['catalogId'],
+  catalogId: CATALOG_ID as CatalogManifestProvenance['catalogId'],
   catalogName: "Kirin's catalog",
-  itemId: SKILL_ID as CatalogInstall['provenance']['itemId'],
+  itemId: SKILL_ID as CatalogManifestProvenance['itemId'],
   kind: 'skill',
   name,
   version: 2,
-  digest: DIGEST as CatalogInstall['provenance']['digest'],
+  digest: DIGEST as CatalogManifestProvenance['digest'],
 });
 
 export const previewOf = (overrides: Partial<CatalogInstallPreview> = {}): CatalogInstallPreview => ({

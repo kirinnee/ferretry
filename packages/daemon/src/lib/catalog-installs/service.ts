@@ -28,17 +28,23 @@ import {
   type CatalogMcpSetup,
   type CatalogInstallPreview,
   type CatalogInstallPreviewRequest,
+  type CatalogLinkInstallPreviewRequest,
+  type CatalogManifestInstallPreviewRequest,
   type CatalogInstallPrefsRequest,
   type CatalogInstallRemoved,
   type CatalogInstallRequest,
   type CatalogInstallScope,
   type CatalogInstallTarget,
   type CatalogInstallWarning,
+  type CatalogLinkProvenance,
+  type CatalogManifestProvenance,
   type CatalogProvenance,
   type CatalogSecretBindings,
   catalogItemReview,
   catalogItemWarnings,
   catalogSecretPlaceholders,
+  isLinkProvenance,
+  LINK_ITEM_CATALOG_ID,
   newDiffBudget,
   type FleetComponentInput,
   mcpServerRefusal,
@@ -47,8 +53,10 @@ import {
   type SharedCatalogManifest,
 } from '@ferretry/protocol';
 import {
+  type CatalogVerificationRefusal,
   verifyCatalogItem,
   verifyCatalogItemAgainstVersions,
+  verifyLinkItem,
   verifySignedCatalogManifest,
   type RelayCrypto,
 } from '@ferretry/relay';
@@ -88,11 +96,13 @@ import {
   type SkillFolderReading,
 } from './ports.ts';
 import {
+  CATALOG_INSTALLS_SCHEMA_VERSION_LINKS,
   type CatalogInstalledFile,
   type CatalogInstallRecord,
   type CatalogInstallState,
   type CatalogInstallStore,
   CatalogInstallStateError,
+  linkSequenceKey,
 } from './store.ts';
 
 export interface CatalogInstallServiceDeps {
@@ -119,6 +129,19 @@ export interface CatalogInstallServiceDeps {
 const SECRET_PLACEHOLDER = /^\$\{secret:([A-Za-z0-9_.-]+)\}$/u;
 const ENV_VARIABLE = /^[A-Z_][A-Z0-9_]*$/u;
 const PROJECT_MCP_FILE = '.mcp.json';
+
+/** How long past its signed end a link's copy is still accepted here. The fetcher checks strictly; this only bounds a very stale copy. */
+const LINK_INSTALL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** What each way a link can fail to verify is called to the person. */
+const LINK_REFUSALS: Readonly<Record<CatalogVerificationRefusal, CatalogInstallRefusalError['code']>> = {
+  signature_invalid: 'catalog_signature_invalid',
+  not_canonical: 'catalog_signature_invalid',
+  manifest_invalid: 'catalog_signature_invalid',
+  link_stale: 'catalog_signature_invalid',
+  link_mismatch: 'catalog_link_mismatch',
+  item_mismatch: 'catalog_item_mismatch',
+};
 
 /** The caller of a preview or an apply, as the mount identified it. */
 export interface CatalogCaller {
@@ -287,27 +310,14 @@ export class CatalogInstallService {
     const { item } = request;
     if (request.target.scope !== scope)
       refuse('catalog_target_unknown', `this asks for a ${scope} install but names a ${request.target.scope} target`);
-    // 1. The signature: the manifest was signed by the machine it names.
-    const manifest = await verifySignedCatalogManifest(this.deps.crypto, request.signedManifest);
-    if (!manifest.ok) return refuse('catalog_signature_invalid', manifest.reason);
-    // 2. The item is exactly the version, kind, name and bytes the manifest lists, or one the signed list offers.
-    const digest = await this.#verifiedDigest(request, manifest.value);
-    const provenance: CatalogProvenance = {
-      publisher: manifest.value.publisher,
-      publisherName: manifest.value.publisherName,
-      catalogId: manifest.value.catalogId,
-      catalogName: manifest.value.name,
-      itemId: item.itemId,
-      kind: item.kind,
-      name: item.name,
-      version: item.itemVersion,
-      digest,
-    };
+    // 1–2. Who signed it and that the item is the one signed: a catalog's manifest, or a link's document.
+    const { provenance, revision } =
+      'signedLink' in request ? await this.#verifyLink(request) : await this.#verifyManifest(request);
     const target = await this.#canonicalTarget(request.target);
     const state = await this.deps.store.read();
     const allowOlder = request.allowOlder === true;
     // 3–5. The publisher pin, the revision, the version.
-    const judged = this.#judge(state, provenance, manifest.value.revision, target, allowOlder);
+    const judged = this.#judge(state, provenance, revision, target, allowOlder);
     // 6. The bundle's own rules for this kind and this target.
     await this.#bundleRules(item, target);
     // 7. The target is one this machine knows.
@@ -334,7 +344,7 @@ export class CatalogInstallService {
         expiresAt,
         item,
         provenance,
-        revision: manifest.value.revision,
+        revision,
         target,
         allowOlder,
         placeholders,
@@ -437,22 +447,7 @@ export class CatalogInstallService {
         ...(resolved.destination.folder === undefined ? {} : { folder: resolved.destination.folder }),
         ...(written.componentSha256 === undefined ? {} : { componentSha256: written.componentSha256 }),
       };
-      await this.deps.store.write({
-        schemaVersion: state.schemaVersion,
-        installs: [...state.installs.filter(install => install.installId !== replaces?.installId), record],
-        publishers: {
-          ...state.publishers,
-          [held.provenance.publisher]: state.publishers[held.provenance.publisher] ?? installedAt,
-        },
-        pins: {
-          ...state.pins,
-          [held.provenance.catalogId]: state.pins[held.provenance.catalogId] ?? held.provenance.publisher,
-        },
-        revisions: {
-          ...state.revisions,
-          [held.provenance.catalogId]: Math.max(state.revisions[held.provenance.catalogId] ?? 0, held.revision),
-        },
-      });
+      await this.deps.store.write(this.#stateAfter(state, record, held, replaces?.installId, installedAt));
       this.#previews.consume(held.previewId);
       await this.#dropPrefs(replaces?.installId);
       return { install: this.#view(record, undefined), notes: written.notes };
@@ -481,13 +476,77 @@ export class CatalogInstallService {
 
   // ── The contract's checks ───────────────────────────────────────────────────────────────────────
 
+  /** Steps 1 and 2 for a catalog's item. */
+  async #verifyManifest(
+    request: CatalogManifestInstallPreviewRequest,
+  ): Promise<{ readonly provenance: CatalogManifestProvenance; readonly revision: number }> {
+    const { item } = request;
+    // 1. The signature: the manifest was signed by the machine it names.
+    const manifest = await verifySignedCatalogManifest(this.deps.crypto, request.signedManifest);
+    if (!manifest.ok) return refuse('catalog_signature_invalid', manifest.reason);
+    // A link's items carry a placeholder catalog; a catalog that names it would let a link item share a catalog's pin.
+    if (manifest.value.catalogId === LINK_ITEM_CATALOG_ID)
+      return refuse('catalog_item_invalid', `${manifest.value.name} names a catalog id only a shared link may carry.`);
+    // 2. The item is exactly the version, kind, name and bytes the manifest lists, or one the signed list offers.
+    const digest = await this.#verifiedDigest(request, manifest.value);
+    return {
+      provenance: {
+        publisher: manifest.value.publisher,
+        publisherName: manifest.value.publisherName,
+        catalogId: manifest.value.catalogId,
+        catalogName: manifest.value.name,
+        itemId: item.itemId,
+        kind: item.kind,
+        name: item.name,
+        version: item.itemVersion,
+        digest,
+      },
+      revision: manifest.value.revision,
+    };
+  }
+
+  /**
+   * Steps 1 to 3 for a link's item: the signature, that it is by the fingerprint the link's address named, that the
+   * item is the one signed, and that the signed copy has not been over for more than a week. Never contacts the
+   * publisher or any store.
+   */
+  async #verifyLink(
+    request: CatalogLinkInstallPreviewRequest,
+  ): Promise<{ readonly provenance: CatalogLinkProvenance; readonly revision: number }> {
+    const { item } = request;
+    const verified = await verifyLinkItem(this.deps.crypto, request.signedLink, item, request.linkFingerprint);
+    if (!verified.ok) return refuse(LINK_REFUSALS[verified.refusal], verified.reason);
+    const { link } = verified.value;
+    if (this.deps.now() > Date.parse(link.notAfter) + LINK_INSTALL_GRACE_MS)
+      return refuse(
+        'catalog_link_expired',
+        `This link ended on ${link.notAfter.slice(0, 10)}. Ask the person who sent it for a new one.`,
+      );
+    return {
+      provenance: {
+        publisher: link.publisher,
+        publisherName: link.publisherName,
+        link: { linkId: link.linkId, kind: link.kind, sequence: link.sequence },
+        itemId: item.itemId,
+        kind: item.kind,
+        name: item.name,
+        version: item.itemVersion,
+        digest: link.item.digest,
+      },
+      revision: link.sequence,
+    };
+  }
+
   /**
    * Step 2, and the digest the provenance records. The current version is checked against the manifest's own
    * line. Any other version must come with the publisher's signed list of versions: the same key signed both,
    * the list is for this catalog at this revision, and the item is exactly a version it offers — a retired
    * version is not on the list, so it is refused here.
    */
-  async #verifiedDigest(request: CatalogInstallPreviewRequest, manifest: SharedCatalogManifest): Promise<string> {
+  async #verifiedDigest(
+    request: CatalogManifestInstallPreviewRequest,
+    manifest: SharedCatalogManifest,
+  ): Promise<string> {
     const { item } = request;
     const current = manifest.items.find(candidate => candidate.itemId === item.itemId);
     if (current === undefined || current.version === item.itemVersion) {
@@ -586,7 +645,11 @@ export class CatalogInstallService {
     };
   }
 
-  /** Steps 3, 4 and 5: the publisher pin, the revision, the version. */
+  /**
+   * Steps 3, 4 and 5: for a catalog, the publisher pin and the revision; for a link, the sequence pin; then, for both,
+   * the version. `revision` is the number that source's rollback guard compares: a catalog's manifest revision, or a
+   * link's signed sequence.
+   */
   #judge(
     state: CatalogInstallState,
     provenance: CatalogProvenance,
@@ -594,9 +657,44 @@ export class CatalogInstallService {
     target: CatalogInstallTarget,
     allowOlder: boolean,
   ): Judged {
+    const replaces = isLinkProvenance(provenance)
+      ? this.#judgeLink(state, provenance, revision, target)
+      : this.#judgeCatalog(state, provenance, revision, target);
+    const warnings: CatalogInstallWarning[] = [];
+    if (replaces !== undefined && provenance.version < replaces.provenance.version) {
+      if (!allowOlder)
+        refuse(
+          'catalog_downgrade',
+          `${provenance.name} version ${replaces.provenance.version} is installed here, and ${isLinkProvenance(provenance) ? 'this link' : 'this file'} has version ${provenance.version}. Installing an older version has to be chosen.`,
+        );
+      warnings.push({
+        code: 'older-version',
+        text: `This is version ${provenance.version}; version ${replaces.provenance.version} is installed here now.`,
+      });
+    }
+    const firstSeen = state.publishers[provenance.publisher] === undefined;
+    if (firstSeen)
+      warnings.push({
+        code: 'first-publisher',
+        text: isLinkProvenance(provenance)
+          ? `This is the first thing installed from ${provenance.publisherName}. It came from a link, which only ever carries this one item and never updates it.`
+          : `This is the first thing installed from ${provenance.publisherName}. From now on ${provenance.catalogName} can only come from this same machine.`,
+      });
+    return { replaces, warnings, firstSeen };
+  }
+
+  /** A catalog: it stays with the machine it first came from, and an older copy of it is not accepted. */
+  #judgeCatalog(
+    state: CatalogInstallState,
+    provenance: CatalogManifestProvenance,
+    revision: number,
+    target: CatalogInstallTarget,
+  ): CatalogInstallRecord | undefined {
     const pinned =
       state.pins[provenance.catalogId] ??
-      state.installs.find(install => install.provenance.catalogId === provenance.catalogId)?.provenance.publisher;
+      state.installs.find(
+        install => !isLinkProvenance(install.provenance) && install.provenance.catalogId === provenance.catalogId,
+      )?.provenance.publisher;
     if (pinned !== undefined && pinned !== provenance.publisher)
       refuse(
         'catalog_publisher_changed',
@@ -609,32 +707,84 @@ export class CatalogInstallService {
         `This is revision ${revision} of ${provenance.catalogName}, and this machine has already installed from revision ${seen}. An older copy of a catalog is not accepted.`,
       );
     // Matched on publisher + catalog + item at the same target, never on the name.
-    const replaces = state.installs.find(
+    return state.installs.find(
       install =>
+        !isLinkProvenance(install.provenance) &&
         install.provenance.publisher === provenance.publisher &&
         install.provenance.catalogId === provenance.catalogId &&
         install.provenance.itemId === provenance.itemId &&
         sameTarget(install.target, target),
     );
-    const warnings: CatalogInstallWarning[] = [];
-    if (replaces !== undefined && provenance.version < replaces.provenance.version) {
-      if (!allowOlder)
-        refuse(
-          'catalog_downgrade',
-          `${provenance.name} version ${replaces.provenance.version} is installed here, and this file has version ${provenance.version}. Installing an older version has to be chosen.`,
-        );
-      warnings.push({
-        code: 'older-version',
-        text: `This is version ${provenance.version}; version ${replaces.provenance.version} is installed here now.`,
-      });
+  }
+
+  /**
+   * A link: an older signed copy of it is not accepted, and it replaces only an install of the SAME link. The same
+   * item from a catalog, or from another link, at the same place is not matched here and so is a conflict later.
+   */
+  #judgeLink(
+    state: CatalogInstallState,
+    provenance: CatalogLinkProvenance,
+    sequence: number,
+    target: CatalogInstallTarget,
+  ): CatalogInstallRecord | undefined {
+    const seen = state.linkSequences?.[linkSequenceKey(provenance.publisher, provenance.link.linkId)];
+    if (seen !== undefined && sequence < seen)
+      refuse(
+        'catalog_link_sequence_older',
+        `This is an older copy of the link than one this machine already installed from (${sequence} against ${seen}). An older copy of a link is not accepted, so nothing was installed.`,
+      );
+    return state.installs.find(
+      install =>
+        isLinkProvenance(install.provenance) &&
+        install.provenance.publisher === provenance.publisher &&
+        install.provenance.link.linkId === provenance.link.linkId &&
+        install.provenance.itemId === provenance.itemId &&
+        sameTarget(install.target, target),
+    );
+  }
+
+  /**
+   * The state after an install lands. A catalog install keeps the file's version. A link install is what upgrades
+   * version 1 to 2 (the adapter keeps the old text first), and records the highest sequence seen for its link and
+   * the publisher; it pins no catalog and records no revision, because it belongs to none.
+   */
+  #stateAfter(
+    state: CatalogInstallState,
+    record: CatalogInstallRecord,
+    held: HeldPreview,
+    replacedId: string | undefined,
+    installedAt: string,
+  ): CatalogInstallState {
+    const { provenance } = held;
+    const installs = [...state.installs.filter(install => install.installId !== replacedId), record];
+    const publishers = {
+      ...state.publishers,
+      [provenance.publisher]: state.publishers[provenance.publisher] ?? installedAt,
+    };
+    if (isLinkProvenance(provenance)) {
+      const key = linkSequenceKey(provenance.publisher, provenance.link.linkId);
+      return {
+        schemaVersion: CATALOG_INSTALLS_SCHEMA_VERSION_LINKS,
+        installs,
+        publishers,
+        pins: state.pins,
+        revisions: state.revisions,
+        linkSequences: {
+          ...state.linkSequences,
+          [key]: Math.max(state.linkSequences?.[key] ?? 0, provenance.link.sequence),
+        },
+      };
     }
-    const firstSeen = state.publishers[provenance.publisher] === undefined;
-    if (firstSeen)
-      warnings.push({
-        code: 'first-publisher',
-        text: `This is the first thing installed from ${provenance.publisherName}. From now on ${provenance.catalogName} can only come from this same machine.`,
-      });
-    return { replaces, warnings, firstSeen };
+    return {
+      ...state,
+      installs,
+      publishers,
+      pins: { ...state.pins, [provenance.catalogId]: state.pins[provenance.catalogId] ?? provenance.publisher },
+      revisions: {
+        ...state.revisions,
+        [provenance.catalogId]: Math.max(state.revisions[provenance.catalogId] ?? 0, held.revision),
+      },
+    };
   }
 
   /** Step 6: an artifact is opened, not installed; a server needs somewhere it can run; a harness-specific item needs its harness. */
@@ -750,7 +900,7 @@ export class CatalogInstallService {
     if (holder !== undefined && holder !== replaces)
       refuse(
         'catalog_install_conflict',
-        `${resolved.destination.words} already holds ${holder.provenance.name} from ${holder.provenance.publisherName}'s ${holder.provenance.catalogName}. Remove that first (install ${holder.installId}).`,
+        `${resolved.destination.words} already holds ${holder.provenance.name} from ${holder.provenance.publisherName}'s ${isLinkProvenance(holder.provenance) ? 'shared link' : holder.provenance.catalogName}. Remove that first (install ${holder.installId}).`,
       );
     const root = resolved.root as string;
     if (target.scope === 'project') {

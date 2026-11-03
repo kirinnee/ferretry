@@ -1,4 +1,7 @@
 import {
+  type CatalogInstallTarget,
+  type CatalogLinkInstallPreviewRequest,
+  LINK_ITEM_CATALOG_ID,
   type SharedCatalogItem,
   SharedCatalogItemSchema,
   SharedCatalogItemVersionsSchema,
@@ -6,9 +9,17 @@ import {
   type SharedCatalogManifest,
   SharedCatalogManifestSchema,
   type SignedCatalogManifest,
+  SharedCatalogLinkSchema,
 } from '@ferretry/protocol';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
-import { catalogItemDigest, type DaemonIdentity, signCatalogItemVersions, signCatalogManifest } from '@ferretry/relay';
+import {
+  catalogItemDigest,
+  type DaemonIdentity,
+  mintLinkSecrets,
+  signCatalogItemVersions,
+  signCatalogLink,
+  signCatalogManifest,
+} from '@ferretry/relay';
 
 export const crypto = new WebCryptoRelayCrypto();
 
@@ -190,4 +201,84 @@ export async function signVersionList(
   );
   if (!signed.ok) throw new Error(signed.reason);
   return signed.value;
+}
+
+const LINK_AT = '2026-10-31T09:00:00.000Z';
+export const LINK_NOT_AFTER = '2026-11-07T09:00:00.000Z';
+export const LINK_ID = `lnk_${'a'.repeat(22)}`;
+const LINK_ITEM_ID = `itm_${'l'.repeat(22)}`;
+
+export interface LinkOverrides {
+  readonly linkId?: string;
+  readonly sequence?: number;
+  readonly kind?: 'one-time' | 'public';
+  readonly notAfter?: string;
+  readonly itemVersion?: number;
+  readonly content?: string;
+}
+
+/** A skill as a link carries it: under the placeholder catalog id every link item has. */
+export const linkSkillItem = (publisher: string, overrides: LinkOverrides = {}): SharedCatalogItem =>
+  SharedCatalogItemSchema.parse({
+    format: 'ferretry-catalog-item',
+    version: 1,
+    publisher,
+    catalogId: LINK_ITEM_CATALOG_ID,
+    itemId: LINK_ITEM_ID,
+    itemVersion: overrides.itemVersion ?? 1,
+    name: 'pdf-tools',
+    summary: 'Split, merge and OCR PDFs',
+    kind: 'skill',
+    skill: { files: [{ path: 'SKILL.md', content: overrides.content ?? '# pdf tools\n' }] },
+  });
+
+/** Sign one link for `item`, as `identity`, and answer the installer's request for it. */
+export async function linkPreviewRequest(
+  identity: DaemonIdentity,
+  target: CatalogInstallTarget,
+  overrides: LinkOverrides & {
+    readonly item?: SharedCatalogItem;
+    readonly linkFingerprint?: string;
+    readonly allowOlder?: true;
+    readonly replaceEdited?: true;
+  } = {},
+): Promise<CatalogLinkInstallPreviewRequest> {
+  const item = overrides.item ?? linkSkillItem(identity.daemonId, overrides);
+  const measured = await catalogItemDigest(crypto, item);
+  if (measured === null) throw new Error('item has no canonical form');
+  const kind = overrides.kind ?? 'public';
+  const link = SharedCatalogLinkSchema.parse({
+    format: 'ferretry-catalog-link',
+    version: 1,
+    publisher: identity.daemonId,
+    publisherName: 'kirin-box',
+    linkId: overrides.linkId ?? LINK_ID,
+    bundleId: mintLinkSecrets(crypto).bundleId,
+    kind,
+    sequence: overrides.sequence ?? 1,
+    issuedAt: LINK_AT,
+    notAfter: overrides.notAfter ?? (kind === 'one-time' ? '2026-10-31T21:00:00.000Z' : LINK_NOT_AFTER),
+    ...(kind === 'one-time' ? { expiresAt: '2026-10-31T21:00:00.000Z' } : {}),
+    item: {
+      itemId: item.itemId,
+      kind: item.kind,
+      name: item.name,
+      summary: item.summary,
+      version: item.itemVersion,
+      digest: measured.digest,
+      size: measured.size,
+      publishedAt: LINK_AT,
+    },
+  });
+  const signed = await signCatalogLink(crypto, identity, link);
+  if (!signed.ok) throw new Error(signed.reason);
+  return {
+    signedLink: signed.value,
+    item,
+    linkFingerprint: (overrides.linkFingerprint ??
+      identity.daemonId) as CatalogLinkInstallPreviewRequest['linkFingerprint'],
+    target,
+    ...(overrides.allowOlder === true ? { allowOlder: true as const } : {}),
+    ...(overrides.replaceEdited === true ? { replaceEdited: true as const } : {}),
+  };
 }

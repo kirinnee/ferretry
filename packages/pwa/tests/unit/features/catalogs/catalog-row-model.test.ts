@@ -87,5 +87,12 @@ describe('rowChips, canAdd, removeLabel', () => {
   it('names the catalog on Uninstall only when several installs exist', () => {
     expect(removeLabel(installRecord(), false)).toBe('Uninstall');
     expect(removeLabel(installRecord(), true)).toBe('Uninstall (from Team skills)');
+    const { catalogId: _id, catalogName: _name, ...shared } = installRecord().provenance as Record<string, unknown>;
+    const fromLink = {
+      ...installRecord(),
+      provenance: { ...shared, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'public', sequence: 1 } },
+    } as ReturnType<typeof installRecord>;
+    expect(removeLabel(fromLink, true)).toBe('Uninstall (from a shared link)');
+    expect(rowChips([fromLink], []).from?.title).toMatch(/^From a shared link /u);
   });
 });

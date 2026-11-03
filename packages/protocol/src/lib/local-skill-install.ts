@@ -15,7 +15,11 @@
  */
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
-import { CatalogInstallTargetSchema, CatalogProvenanceSchema, type CatalogInstallScope } from './catalog-install.ts';
+import {
+  CatalogInstallTargetSchema,
+  CatalogManifestProvenanceSchema,
+  type CatalogInstallScope,
+} from './catalog-install.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 import { CatalogSourceProblemSchema } from './shared-catalog-owner.ts';
 import { CatalogItemNameSchema } from './shared-catalog.ts';
@@ -77,7 +81,7 @@ export const LocalSkillPreviewSchema = z.strictObject({
   expiresAt: InstantSchema,
   name: CatalogItemNameSchema,
   origin: LocalSkillOriginSchema,
-  provenance: CatalogProvenanceSchema,
+  provenance: CatalogManifestProvenanceSchema,
   target: CatalogInstallTargetSchema,
   /** Where it would write, in words. */
   destination: z.string().min(1),

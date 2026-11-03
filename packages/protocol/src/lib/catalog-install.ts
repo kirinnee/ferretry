@@ -34,6 +34,7 @@ import {
   SignedCatalogManifestSchema,
 } from './shared-catalog.ts';
 import { CatalogChangesSchema } from './shared-catalog-diff.ts';
+import { CatalogLinkIdSchema, CatalogLinkKindSchema, SignedCatalogLinkSchema } from './shared-catalog-link.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
 export const CATALOG_INSTALLS_PATH = '/v1/catalog-installs' as const;
@@ -93,8 +94,8 @@ export const CatalogInstallTargetSchema = z.discriminatedUnion('scope', [
 ]);
 export type CatalogInstallTarget = z.infer<typeof CatalogInstallTargetSchema>;
 
-/** `POST /v1/catalog-installs/<scope>/preview`: the signed manifest and one item, as fetched or as read from a file. */
-export const CatalogInstallPreviewRequestSchema = z.strictObject({
+/** `POST /v1/catalog-installs/<scope>/preview`, from a catalog: the signed manifest and one item, as fetched or as read from a file. */
+export const CatalogManifestInstallPreviewRequestSchema = z.strictObject({
   signedManifest: SignedCatalogManifestSchema,
   item: SharedCatalogItemSchema,
   target: CatalogInstallTargetSchema,
@@ -111,10 +112,36 @@ export const CatalogInstallPreviewRequestSchema = z.strictObject({
    */
   replaceEdited: z.literal(true).optional(),
 });
+export type CatalogManifestInstallPreviewRequest = z.infer<typeof CatalogManifestInstallPreviewRequestSchema>;
+
+/**
+ * The same route, from a LINK (docs/catalogs.md § Installing from a link): the signed link document and the one item it
+ * signs, with the fingerprint the link's URL named. B checks the signature, that the document is by that fingerprint,
+ * and that the item is the one it signs, before anything is reviewed; it never contacts the link's publisher or its
+ * store. There is no `signedVersions`: a link serves exactly one version.
+ */
+export const CatalogLinkInstallPreviewRequestSchema = z.strictObject({
+  signedLink: SignedCatalogLinkSchema,
+  item: SharedCatalogItemSchema,
+  /** The `fp` of the URL: the machine the person was told signed this. */
+  linkFingerprint: DaemonIdSchema,
+  target: CatalogInstallTargetSchema,
+  /** The person chose a version lower than the one installed; the review then says so first. */
+  allowOlder: z.literal(true).optional(),
+  /** As for a catalog install: the person saw that files of this install were edited here and chose to replace them. */
+  replaceEdited: z.literal(true).optional(),
+});
+export type CatalogLinkInstallPreviewRequest = z.infer<typeof CatalogLinkInstallPreviewRequestSchema>;
+
+/** `POST /v1/catalog-installs/<scope>/preview`: a catalog's item or a link's item. The two shapes share no field that tells them apart but their source. */
+export const CatalogInstallPreviewRequestSchema = z.union([
+  CatalogManifestInstallPreviewRequestSchema,
+  CatalogLinkInstallPreviewRequestSchema,
+]);
 export type CatalogInstallPreviewRequest = z.infer<typeof CatalogInstallPreviewRequestSchema>;
 
-/** Where an install came from, as B VERIFIED it — never as a caller reported it. Recorded on what it wrote. */
-export const CatalogProvenanceSchema = z.strictObject({
+/** Where an install came from, as B VERIFIED it, when it came from a catalog. */
+export const CatalogManifestProvenanceSchema = z.strictObject({
   publisher: DaemonIdSchema,
   publisherName: CatalogLabelSchema,
   catalogId: SharedCatalogIdSchema,
@@ -125,7 +152,40 @@ export const CatalogProvenanceSchema = z.strictObject({
   version: z.number().int().min(1),
   digest: CatalogDigestSchema,
 });
+export type CatalogManifestProvenance = z.infer<typeof CatalogManifestProvenanceSchema>;
+
+/**
+ * Where an install came from, as B VERIFIED it, when it came from a LINK: the publisher, the link (its id, kind and
+ * the signed sequence it was installed at) and the item. A link has no catalog, so it names none: nothing here can
+ * be mistaken for a catalog's pin, and an install from a link never makes its publisher a catalog's.
+ */
+export const CatalogLinkProvenanceSchema = z.strictObject({
+  publisher: DaemonIdSchema,
+  publisherName: CatalogLabelSchema,
+  link: z.strictObject({
+    linkId: CatalogLinkIdSchema,
+    kind: CatalogLinkKindSchema,
+    sequence: z.number().int().min(1).max(0xffffffff),
+  }),
+  itemId: SharedCatalogItemIdSchema,
+  kind: CatalogItemKindSchema,
+  name: CatalogItemNameSchema,
+  version: z.number().int().min(1),
+  digest: CatalogDigestSchema,
+});
+export type CatalogLinkProvenance = z.infer<typeof CatalogLinkProvenanceSchema>;
+
+/** Where an install came from, as B VERIFIED it — never as a caller reported it. Recorded on what it wrote. */
+export const CatalogProvenanceSchema = z.union([CatalogManifestProvenanceSchema, CatalogLinkProvenanceSchema]);
 export type CatalogProvenance = z.infer<typeof CatalogProvenanceSchema>;
+
+/** Whether this install came from a link rather than a catalog. */
+export const isLinkProvenance = (provenance: CatalogProvenance): provenance is CatalogLinkProvenance =>
+  'link' in provenance;
+
+/** The name a person reads for where an install came from: its catalog, or "a shared link". */
+export const provenanceSource = (provenance: CatalogProvenance): string =>
+  isLinkProvenance(provenance) ? 'a shared link' : provenance.catalogName;
 
 /**
  * One secret the item asks for, and whether B holds a secret of that same name (it is never bound for you).
@@ -239,13 +299,17 @@ export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
 /**
  * Why B refused, so a client words each one differently. In the order B checks (docs/catalogs.md):
  *
- * - `catalog_signature_invalid`: the manifest was not signed by the machine it names.
- * - `catalog_item_mismatch`: the item is not the version, or not the bytes, the signed manifest lists.
+ * - `catalog_signature_invalid`: the manifest (or link) was not signed by the machine it names.
+ * - `catalog_link_mismatch`: a link was signed by a machine other than the fingerprint its URL named.
+ * - `catalog_item_mismatch`: the item is not the version, or not the bytes, the signed manifest (or link) lists.
+ * - `catalog_link_expired`: a link's signed copy ended more than a week ago.
+ * - `catalog_link_sequence_older`: B has already installed from a newer upload of this link than this one.
  * - `catalog_publisher_changed`: B already installed from a publisher of this catalog under a different
  *   fingerprint — a different machine is using the same catalog.
  * - `catalog_revision_older`: the manifest is an older revision of this catalog than B has already seen.
  * - `catalog_downgrade`: the version is lower than the one installed, and the person did not choose that.
- * - `catalog_item_invalid`: the item breaks a bundle rule (path, size, a raw secret).
+ * - `catalog_item_invalid`: the item breaks a bundle rule (path, size, a raw secret), or a catalog names the
+ *   placeholder every link's item carries.
  * - `catalog_not_installable`: an artifact is opened, not installed; or a kind this target cannot take.
  * - `catalog_target_unknown`: B does not know that project, runtime or profile.
  * - `catalog_preview_unknown`, `catalog_preview_expired`: apply again from a fresh preview.
@@ -258,7 +322,10 @@ export type CatalogInstallList = z.infer<typeof CatalogInstallListSchema>;
  */
 export const CATALOG_INSTALL_REFUSALS = [
   'catalog_signature_invalid',
+  'catalog_link_mismatch',
   'catalog_item_mismatch',
+  'catalog_link_expired',
+  'catalog_link_sequence_older',
   'catalog_publisher_changed',
   'catalog_revision_older',
   'catalog_downgrade',

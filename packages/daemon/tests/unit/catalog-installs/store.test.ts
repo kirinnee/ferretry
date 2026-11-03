@@ -6,7 +6,10 @@ import {
   CatalogInstallRecordSchema,
   CatalogInstallStateError,
   CatalogInstallStateSchema,
+  CatalogInstallStateV1Schema,
+  CatalogInstallStateV2Schema,
   EMPTY_CATALOG_INSTALL_STATE,
+  linkSequenceKey,
 } from '../../../src/lib/catalog-installs/store.ts';
 
 /**
@@ -88,6 +91,9 @@ describe('the file of installs', () => {
 
   it('refuses another schema version, a missing section, and an unknown one', () => {
     should(
+      CatalogInstallStateSchema.safeParse({ ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 3 }).success,
+    ).be.false();
+    should(
       CatalogInstallStateSchema.safeParse({ ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 2 }).success,
     ).be.false();
     const { pins: _pins, ...withoutPins } = EMPTY_CATALOG_INSTALL_STATE;
@@ -111,5 +117,43 @@ describe('the file of installs', () => {
     should(error).be.instanceOf(Error);
     should(error.name).equal('CatalogInstallStateError');
     should(error.message).equal('damaged');
+  });
+
+  it('refuses a document that is not a V1 and is not a V2: one cannot pass for the other', () => {
+    const v2 = { ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 2, linkSequences: {} };
+    should(CatalogInstallStateV2Schema.safeParse(v2).success).be.true();
+    should(CatalogInstallStateV1Schema.safeParse(v2).success).be.false();
+    should(CatalogInstallStateV2Schema.safeParse(EMPTY_CATALOG_INSTALL_STATE).success).be.false();
+    should(CatalogInstallStateSchema.parse(v2)).deepEqual(v2);
+  });
+
+  it('reads a link install in a V2 file but never in a V1 one', () => {
+    const link = {
+      ...record,
+      provenance: {
+        publisher: DAEMON,
+        publisherName: 'kirin-box',
+        link: { linkId: `lnk_${'a'.repeat(22)}`, kind: 'public', sequence: 2 },
+        itemId: record.provenance.itemId,
+        kind: 'skill',
+        name: 'pdf-tools',
+        version: 1,
+        digest: `sha256:${SHA}`,
+      },
+    };
+    const base = { ...EMPTY_CATALOG_INSTALL_STATE, installs: [link] };
+    should(CatalogInstallStateV2Schema.safeParse({ ...base, schemaVersion: 2, linkSequences: {} }).success).be.true();
+    should(CatalogInstallStateV1Schema.safeParse(base).success).be.false();
+  });
+
+  it('refuses a link sequence below one, above the signed maximum, or under an empty key', () => {
+    const v2 = { ...EMPTY_CATALOG_INSTALL_STATE, schemaVersion: 2 };
+    for (const linkSequences of [{ a: 0 }, { a: 0x1_0000_0000 }, { '': 1 }])
+      should(CatalogInstallStateV2Schema.safeParse({ ...v2, linkSequences }).success).be.false();
+  });
+
+  it('keys a link by its publisher and its id, so two publishers never share a pin', () => {
+    should(linkSequenceKey(DAEMON, 'lnk_x')).equal(`${DAEMON}/lnk_x`);
+    should(linkSequenceKey('a', 'lnk_x')).not.equal(linkSequenceKey('b', 'lnk_x'));
   });
 });

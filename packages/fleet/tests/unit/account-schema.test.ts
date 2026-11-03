@@ -4,6 +4,7 @@ import should from 'should';
 import {
   AccountModelSchema,
   agendaNudgeEnabled,
+  InstalledFromSchema,
   COMPONENT_KINDS,
   isRuntimeName,
   type LayeredProfile,
@@ -1026,5 +1027,31 @@ describe('agendaNudgeEnabled', () => {
 
   it('should leave agendaNudge out of a machine that never wrote it', () => {
     should(MachineSchema.parse({})).not.have.property('agendaNudge');
+  });
+});
+
+describe('where an installed component came from', () => {
+  const item = {
+    publisher: `fy_daemon_${'A'.repeat(43)}`,
+    publisherName: 'kirin-box',
+    itemId: `itm_${'s'.repeat(22)}`,
+    kind: 'skill',
+    name: 'pdf-tools',
+    version: 1,
+    digest: `sha256:${'a'.repeat(64)}`,
+  };
+  const catalog = { ...item, catalogId: `cat_${'c'.repeat(22)}`, catalogName: 'Kirin catalog' };
+  const link = { ...item, link: { linkId: `lnk_${'l'.repeat(22)}`, kind: 'one-time', sequence: 1 } };
+
+  it('should read a catalog’s origin and a link’s, and keep each exactly', () => {
+    should(InstalledFromSchema.parse(catalog)).deepEqual(catalog);
+    should(InstalledFromSchema.parse(link)).deepEqual(link);
+  });
+
+  it('should refuse an origin that is both, neither, or a link with a bad sequence or kind', () => {
+    should(InstalledFromSchema.safeParse({ ...catalog, link: link.link }).success).be.false();
+    should(InstalledFromSchema.safeParse(item).success).be.false();
+    should(InstalledFromSchema.safeParse({ ...link, link: { ...link.link, sequence: 0 } }).success).be.false();
+    should(InstalledFromSchema.safeParse({ ...link, link: { ...link.link, kind: 'forever' } }).success).be.false();
   });
 });
