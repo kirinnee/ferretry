@@ -14,6 +14,7 @@ import {
   type Place,
   SIGN_IN_RULE_AUTO_RECIPE_WARNING,
   SIGN_IN_RULE_ERROR_CODES,
+  SIGN_IN_RULE_HISTORY_TAPS,
   SIGN_IN_RULE_HONEST_LIMIT,
   SIGN_IN_RULE_INELIGIBLE_WORDS,
   SIGN_IN_RULE_MAX_USES,
@@ -49,8 +50,10 @@ import {
   SignInRuleSuggestionDismissedSchema,
   signInRuleDayChoices,
   signInRuleLifetime,
+  signInRuleProgressWords,
   signInRuleScopeWords,
   stillAskedFor,
+  timesWords,
   signInRuleWords,
   type TwoFactorKeySummary,
 } from '@ferretry/protocol';
@@ -73,10 +76,10 @@ export async function listRules(client: RuleClient): Promise<SignInRuleList> {
   return await client.request('/v1/sign-in-rules', SignInRuleListSchema);
 }
 
-/** Whether a sign-in could have a rule now, and why not. */
+/** Whether a sign-in could have a rule now, and why not. `progress=1` asks a `no-history` answer for how far along it is. */
 export async function readEligibility(client: RuleClient, signIn: SignInId): Promise<SignInRuleEligibility> {
   return await client.request(
-    `/v1/sign-in-rules/eligibility?signIn=${encodeURIComponent(signIn)}`,
+    `/v1/sign-in-rules/eligibility?signIn=${encodeURIComponent(signIn)}&progress=1`,
     SignInRuleEligibilitySchema,
   );
 }
@@ -172,6 +175,27 @@ export const RULE_LINKED_ELSEWHERE_WORDS =
 export const RULE_STILL_ASKED = stillAskedFor('rule');
 
 export const INELIGIBLE_WORDS = SIGN_IN_RULE_INELIGIBLE_WORDS;
+
+/** Why a rule waits for the owner's own fills, drawn under the progress line on every screen that shows it. */
+export const RULE_PROGRESS_WHY = `Ferretry offers a standing rule only for a sign-in you filled yourself from the app, ${timesWords(SIGN_IN_RULE_HISTORY_TAPS)} in a row, so it has seen this page take this password.`;
+
+/** How many fills in a row the owner needs, for the meter's pills. */
+export const RULE_PROGRESS_TAPS = SIGN_IN_RULE_HISTORY_TAPS;
+
+/** Where a sign-in stands toward a standing rule, from the daemon's eligibility answer. */
+export type RuleReadiness =
+  | { readonly kind: 'ready' }
+  | { readonly kind: 'not-yet'; readonly history: number; readonly words: string }
+  | { readonly kind: 'other'; readonly words: string };
+
+/** The readiness an answer shows, or `undefined` for a no-history answer from a daemon that sent no count: today's words. */
+export function ruleReadiness(answer: SignInRuleEligibility): RuleReadiness | undefined {
+  if (answer.eligible) return { kind: 'ready' };
+  if (answer.because !== 'no-history') return { kind: 'other', words: INELIGIBLE_WORDS[answer.because] };
+  return answer.history === undefined
+    ? undefined
+    : { kind: 'not-yet', history: answer.history, words: signInRuleProgressWords(answer.history) };
+}
 
 export const failureWords = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 

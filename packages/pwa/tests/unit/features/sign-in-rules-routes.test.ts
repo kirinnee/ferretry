@@ -58,7 +58,7 @@ describe('the routes', () => {
     expect((await listSuggestions(fake.client)).suggestions).toHaveLength(1);
     expect(fake.keys()).toEqual([
       'GET /v1/sign-in-rules',
-      `GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}`,
+      `GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}&progress=1`,
       'GET /v1/sign-in-rules/suggestions',
     ]);
   });

@@ -19,6 +19,8 @@
  * with its Change button; "narrow-hours" is the narrow form ending in hours; "revoke-all" is an account's revoke-all
  * confirm; "passkey-flags" is the passkey sheet with the red root block and the amber cautions apart; "needs-update"
  * is the one line a machine too old for a feature shows; "deep-link-elsewhere" is the toast for a link to another machine.
+ * "progress-*" are the part-way "1 of 2 sign-ins done" line on the open password card, a ferret's suggestion card and the sheet; "progress-older-*" are the same
+ * for a daemon that sent no count (today's words, no meter).
  *
  * Fake fixtures only: no real account, no daemon, no value. Every width asserts no sideways scroll and the touch floor
  * on every button and checkbox of the phone.
@@ -106,7 +108,9 @@ const client = {
   request: async (path, schema, init) => schema.parse(answerFor(path, init?.method ?? 'GET')),
 };
 
-const eligible = { signIn: SITE_SIGN_IN, eligible: true, history: 3 };
+const notYet = { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history', history: 1 };
+const olderDaemon = { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' };
+const eligible = view?.startsWith('progress-older') ? olderDaemon : view?.startsWith('progress') ? notYet : { signIn: SITE_SIGN_IN, eligible: true, history: 3 };
 const sheet = (extra = {}) => (
   <div className="fy-card" data-harness-card="">
     <SignInRuleSheet accountName={view === 'create-terminal' ? 'kirin' : 'github work'} autoRecipe={false} canUsePasskey codeAvailable eligibility={eligible}
@@ -165,6 +169,19 @@ const body = () => {
     case 'create-totp': return sheet();
     case 'create-terminal': return sheet({ place: sudoPlace, username: 'kirin', codeAvailable: false, codeKey: undefined });
     case 'ineligible': return sheet({ eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } });
+    case 'progress-sheet': case 'progress-older-sheet': return sheet({ eligibility: eligible });
+    case 'progress-input': {
+      const input = fakeRequest({ saved: { match: 'github.com', suggest: { id: 'GITHUB_WORK', label: 'github work' }, saves: 'password',
+        offers: [{ id: 'GITHUB_WORK', label: 'github work', username: 'kirin@atomi.cloud', fills: 'password', matched: true, primary: true, why: 'site', signIn: SITE_SIGN_IN }] } });
+      return itemView({ inputForm: <InputCard agentName="Hadi" client={client} embedded fields={fieldsOf(input)} now={NOW} onDone={quiet} request={input} ruleOffer={{ askPasskey: async () => true }} /> },
+        { ...item, input: { requestId: input.id } });
+    }
+    case 'progress-suggestion': case 'progress-older-suggestion': return (
+      <div className="fy-card" data-harness-card="">
+        <SignInRuleSuggestionHost agentName="Hadi" askPasskey={async () => true} connection={connection}
+          createClient={async () => client} item={{ signInRuleSuggestion: { suggestion: suggestion().id } }} offered />
+      </div>
+    );
     case 'suggestion': return (
       <div className="fy-card" data-harness-card="">
         <SignInRuleSuggestionHost agentName="Hadi" askPasskey={async () => true} connection={connection}
@@ -285,6 +302,11 @@ const ALL_STATES = [
   'passkey-flags',
   'needs-update',
   'deep-link-elsewhere',
+  'progress-input',
+  'progress-suggestion',
+  'progress-sheet',
+  'progress-older-suggestion',
+  'progress-older-sheet',
 ] as const;
 const wanted = process.argv[3]?.split(',');
 const STATES = ALL_STATES.filter(state => wanted === undefined || wanted.includes(state));
@@ -314,6 +336,11 @@ const SURFACE: Readonly<Record<(typeof ALL_STATES)[number], string>> = {
   'passkey-flags': '[data-step-up-confirm]',
   'needs-update': '[data-machine-needs-update]',
   'deep-link-elsewhere': '[data-action-toast]',
+  'progress-input': '[data-rule-progress-line]',
+  'progress-suggestion': '[data-rule-suggestion-not-yet]',
+  'progress-sheet': '[data-rule-not-yet]',
+  'progress-older-suggestion': '[data-rule-suggestion-review]',
+  'progress-older-sheet': '[data-rule-ineligible]',
 };
 
 const server = Bun.serve({

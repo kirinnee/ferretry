@@ -41,6 +41,7 @@ import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } 
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 import { SignInRuleOffer } from '../secure-copy/sign-in-rule-offer.tsx';
+import { SignInRuleProgressLine } from '../secure-copy/sign-in-rule-progress-line.tsx';
 import { codesAccounts, startingAccount } from '../../lib/automatic-codes.ts';
 import { cancelInput, deliverInput, type InputClient, putAccountDefault, readInputShot } from '../../lib/input-api.ts';
 import {
@@ -430,6 +431,7 @@ export function InputCard({
             client={client}
             fields={fields}
             extra={setup}
+            ruleProgress={ruleOffer !== undefined}
             onRefresh={onRefresh}
             onSending={setSending}
             onSettled={(text, handTapped) => {
@@ -591,6 +593,8 @@ interface FormProps {
   readonly onRefresh: (() => void) | undefined;
   /** The "Set up automatic codes" panel, under the offers. */
   readonly extra: ReactNode;
+  /** Whether this machine offers sign-in rules: the card then shows how far the offered sign-in is from one. */
+  readonly ruleProgress: boolean;
 }
 
 type Nodes = Map<string, HTMLInputElement>;
@@ -869,6 +873,7 @@ function InputForm({
   onSending,
   onRefresh,
   extra,
+  ruleProgress,
 }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   const { primary, others: rest, elsewhere } = splitOffers(request.saved);
@@ -1123,6 +1128,9 @@ function InputForm({
               {reasonLine}
             </p>
           )}
+          {ruleProgress && primary.signIn !== undefined ? (
+            <SignInRuleProgressLine client={client} signIn={primary.signIn} />
+          ) : null}
         </div>
       )}
 

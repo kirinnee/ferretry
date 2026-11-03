@@ -1,13 +1,17 @@
 /** A ferret's suggestion and the quiet offer after a hand-tapped sign-in: both only open the owner's own sheet. */
 
 import { describe, expect, it } from 'bun:test';
-import { SIGN_IN_RULE_REFUSAL_WORDS } from '@ferretry/protocol';
+import { SIGN_IN_RULE_INELIGIBLE_WORDS, SIGN_IN_RULE_REFUSAL_WORDS } from '@ferretry/protocol';
 import { SignInRuleOffer } from '../../../src/features/secure-copy/sign-in-rule-offer.tsx';
 import { SignInRuleSuggestionHost } from '../../../src/features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { AnsweredSuggestions } from '../../../src/lib/answered-suggestions.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { RULE_NO_ACCOUNTS_DEVICE_WORDS, RULE_REPLACED_UNREADABLE_WORDS } from '../../../src/lib/sign-in-rules.ts';
+import {
+  RULE_NO_ACCOUNTS_DEVICE_WORDS,
+  RULE_PROGRESS_WHY,
+  RULE_REPLACED_UNREADABLE_WORDS,
+} from '../../../src/lib/sign-in-rules.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { mount, must } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
@@ -526,6 +530,105 @@ describe('the offer after a hand-tapped sign-in', () => {
       expect(q(mounted.container, '[data-rule-failure]').textContent).toBe('the daemon is offline');
     } finally {
       await mounted.unmount();
+    }
+  });
+});
+
+describe('a suggestion for a sign-in that is not ready yet (#F640)', () => {
+  const notYet: RuleWorld = {
+    eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history', history: 1 },
+  };
+
+  it('says "Not yet", shows the progress and what to do, instead of a bare refusal', async () => {
+    const { element } = host(notYet, { agentName: 'Pip' });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      const block = q(mounted.container, '[data-rule-suggestion-not-yet]');
+      expect(block.textContent).toContain('Not yet');
+      expect(q(block, '[data-rule-progress-words]').textContent).toBe('1 of 2 sign-ins done');
+      expect(q(block, '[data-rule-progress-why]').textContent).toBe(RULE_PROGRESS_WHY);
+      expect(q(block, '[data-rule-suggestion-todo]').textContent).toBe(
+        'Next time Pip asks for github.com, fill it from the card; after that you can turn this on here.',
+      );
+      expect(q(mounted.container, '[data-rule-suggestion-why]').textContent).toBe(
+        'Pip says: “I sign in here on every task.”',
+      );
+      expect(mounted.container.querySelector('[data-rule-suggestion-review]')).toBeNull();
+      expect(mounted.container.querySelector('[data-rule-suggestion-dismiss]')).not.toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('asks for the count, and reads the sign-in only once', async () => {
+    const { fake, element } = host(notYet);
+    const mounted = await mount(element);
+    try {
+      await settle();
+      expect(fake.keys().filter(key => key.includes('/eligibility'))).toEqual([
+        `GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}&progress=1`,
+      ]);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('still lets Dismiss answer it', async () => {
+    const answered = new AnsweredSuggestions();
+    const { fake, element } = host(notYet, { answered });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-dismiss]'));
+      await settle();
+      expect(fake.keys().some(key => key.startsWith('DELETE /v1/sign-in-rules/suggestions/'))).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('gives any other reason in the daemon’s words, with no way into a sheet that says no', async () => {
+    const { element } = host({ eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'via-provider' } });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      expect(q(mounted.container, '[data-rule-suggestion-other]').textContent).toBe(
+        `${SIGN_IN_RULE_INELIGIBLE_WORDS['via-provider']}.`,
+      );
+      expect(mounted.container.querySelector('[data-rule-suggestion-review]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('is today’s card, with no meter, for an older daemon that sent no count', async () => {
+    const { element } = host({ eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' } });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      expect(mounted.container.querySelector('[data-rule-progress]')).toBeNull();
+      expect(mounted.container.querySelector('[data-rule-suggestion-not-yet]')).toBeNull();
+      expect(mounted.container.querySelector('[data-rule-suggestion-review]')).not.toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('is today’s card when the sign-in is ready, or when the answer cannot be read', async () => {
+    const worlds: readonly RuleWorld[] = [
+      {},
+      { fail: key => (key.startsWith('GET /v1/sign-in-rules/eligibility') ? refused('offline') : undefined) },
+    ];
+    for (const world of worlds) {
+      const mounted = await mount(host(world).element);
+      try {
+        await settle();
+        expect(mounted.container.querySelector('[data-rule-progress]')).toBeNull();
+        expect(mounted.container.querySelector('[data-rule-suggestion-review]')).not.toBeNull();
+      } finally {
+        await mounted.unmount();
+      }
     }
   });
 });

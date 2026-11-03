@@ -13,6 +13,7 @@ import {
   RULE_DAMAGED_WORDS,
   RULE_DISMISSED_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
+  RULE_PROGRESS_WHY,
   suspendWarning,
 } from '../../../src/lib/sign-in-rules.ts';
 import { list as accountList } from '../../support/accounts-fixtures.ts';
@@ -126,7 +127,7 @@ describe('making a rule', () => {
       await click(q(mounted.container, '[data-rule-start]'));
       await settle();
       expect(q(mounted.container, '[data-rule-does]').textContent).toContain(' as GitHub for any ferret');
-      expect(rules.keys()).toContain(`GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}`);
+      expect(rules.keys()).toContain(`GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}&progress=1`);
       await click(q(mounted.container, '[data-rule-approve]'));
       await settle();
       const stage = must(
@@ -496,6 +497,47 @@ describe('changing a live rule from the Accounts panel', () => {
       expect([...picker.options].map(option => option.value)).toEqual(['any', `project:${PROJECT}`]);
     } finally {
       await mounted.unmount();
+    }
+  });
+});
+
+describe('progress toward a standing rule on the Rule tab (#F640)', () => {
+  const open = async (world: RuleWorld) => {
+    const mounted = await mount(panel(binding(world)));
+    await settle();
+    await click(q(mounted.container, '[data-rule-start]'));
+    await settle();
+    return mounted;
+  };
+
+  it('shows the meter and why, beside today’s words, when the daemon sent the count', async () => {
+    const mounted = await open({
+      eligibility: { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history', history: 1 },
+    });
+    try {
+      const line = q(mounted.container, '[data-rule-progress]');
+      expect(line.getAttribute('data-rule-progress')).toBe('1');
+      expect(q(line, '[data-rule-progress-words]').textContent).toBe('1 of 2 sign-ins done');
+      expect(q(mounted.container, '[data-rule-progress-why]').textContent).toBe(RULE_PROGRESS_WHY);
+      expect(q(mounted.container, '[data-rule-ineligible]').textContent).toBe(`${INELIGIBLE_WORDS['no-history']}.`);
+      expect(q<HTMLButtonElement>(mounted.container, '[data-rule-approve]').disabled).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('shows today’s words and no meter for an older daemon, or for any other reason', async () => {
+    for (const eligibility of [
+      { signIn: SITE_SIGN_IN, eligible: false, because: 'no-history' },
+      { signIn: SITE_SIGN_IN, eligible: false, because: 'via-provider' },
+    ]) {
+      const mounted = await open({ eligibility });
+      try {
+        expect(mounted.container.querySelector('[data-rule-progress]')).toBeNull();
+        expect(mounted.container.querySelector('[data-rule-ineligible]')).not.toBeNull();
+      } finally {
+        await mounted.unmount();
+      }
     }
   });
 });

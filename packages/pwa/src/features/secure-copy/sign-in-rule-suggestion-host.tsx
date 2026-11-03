@@ -30,11 +30,16 @@ import {
   isForbidden,
   listSuggestions,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
+  RULE_PROGRESS_WHY,
   type RuleClient,
+  type RuleReadiness,
+  readEligibility,
+  ruleReadiness,
 } from '../../lib/sign-in-rules.ts';
 import { useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
+import { SignInRuleProgress } from '../accounts/sign-in-rule-progress.tsx';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 
 export interface SignInRuleSuggestionHostProps {
@@ -61,6 +66,8 @@ interface Found {
   readonly suggestion: SignInRuleSuggestionView;
   readonly signIn: SignInSummary | undefined;
   readonly account: AccountSummary | undefined;
+  /** Where the sign-in stands toward a rule; `undefined` when the daemon sent no count or the read failed. */
+  readonly readiness: RuleReadiness | undefined;
 }
 
 export function SignInRuleSuggestionHost({
@@ -117,7 +124,12 @@ export function SignInRuleSuggestionHost({
         const accounts = await readAccounts(client);
         const signIn = accounts.signIns.find(each => each.id === suggestion.signIn);
         const account = signIn === undefined ? undefined : accounts.accounts.find(each => each.id === signIn.account);
-        return { client, suggestion, signIn, account } satisfies Found;
+        // The sheet reads this again when it opens; a card that cannot read it is today's card.
+        const readiness =
+          signIn === undefined
+            ? undefined
+            : await readEligibility(client, signIn.id).then(ruleReadiness, () => undefined);
+        return { client, suggestion, signIn, account, readiness } satisfies Found;
       })
       .then(
         next => {
@@ -149,7 +161,7 @@ export function SignInRuleSuggestionHost({
       </p>
     );
 
-  const { client, suggestion, signIn, account } = found;
+  const { client, suggestion, signIn, account, readiness } = found;
   const ferret = agentName ?? 'The ferret';
 
   if (sheet && signIn !== undefined && account !== undefined)
@@ -188,9 +200,25 @@ export function SignInRuleSuggestionHost({
       <span className="text-meta text-faint" data-rule-suggestion-why="">
         {ferret} says: “{suggestion.why}”
       </span>
-      <p className="m-0 text-cell text-muted">
-        Nothing is ticked and nothing is approved. You choose what Ferretry may type, and for how long.
-      </p>
+      {readiness?.kind === 'not-yet' ? (
+        <div className="flex min-w-0 flex-col gap-2" data-rule-suggestion-not-yet="">
+          <SignInRuleProgress history={readiness.history} lead="Not yet" words={readiness.words} />
+          <p className="m-0 text-cell text-muted" data-rule-progress-why="">
+            {RULE_PROGRESS_WHY}
+          </p>
+          <p className="m-0 text-cell text-muted" data-rule-suggestion-todo="">
+            Next time {ferret} asks for {suggestion.host}, fill it from the card; after that you can turn this on here.
+          </p>
+        </div>
+      ) : readiness?.kind === 'other' ? (
+        <p className="m-0 text-cell text-warn" data-rule-suggestion-other="" role="status">
+          {readiness.words}.
+        </p>
+      ) : (
+        <p className="m-0 text-cell text-muted">
+          Nothing is ticked and nothing is approved. You choose what Ferretry may type, and for how long.
+        </p>
+      )}
       {failure === undefined ? null : (
         <p className="m-0 text-ui text-err" data-rule-failure="" role="alert">
           {failure}
@@ -218,16 +246,18 @@ export function SignInRuleSuggestionHost({
         >
           Dismiss
         </button>
-        <button
-          className="kt-btn min-h-[44px]"
-          data-rule-suggestion-review=""
-          data-variant="primary"
-          disabled={busy || signIn === undefined || account === undefined}
-          onClick={() => setSheet(true)}
-          type="button"
-        >
-          Review the rule…
-        </button>
+        {readiness?.kind === 'not-yet' || readiness?.kind === 'other' ? null : (
+          <button
+            className="kt-btn min-h-[44px]"
+            data-rule-suggestion-review=""
+            data-variant="primary"
+            disabled={busy || signIn === undefined || account === undefined}
+            onClick={() => setSheet(true)}
+            type="button"
+          >
+            Review the rule…
+          </button>
+        )}
       </div>
     </div>
   );

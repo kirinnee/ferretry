@@ -22,12 +22,14 @@ import {
   lifetimeDaysOptions,
   RULE_DISMISSED_WORDS,
   RULE_NO_PASSKEY_DEVICE_WORDS,
+  RULE_PROGRESS_WHY,
   RULE_STILL_ASKED,
   RULE_TOTP_ACK_WORDS,
   type RuleOrigin,
   type RuleProgress,
   type RuleTicks,
   ruleFlags,
+  ruleReadiness,
   scopeWords,
   ruleWordsOf,
   sheetWords,
@@ -35,6 +37,7 @@ import {
   surfaceOf,
   ticksProblem,
 } from '../../lib/sign-in-rules.ts';
+import { SignInRuleProgress } from './sign-in-rule-progress.tsx';
 import { SignInRuleWords } from './sign-in-rule-words.tsx';
 
 export type RuleSheetPhase =
@@ -155,6 +158,7 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
   const problem = ticksProblem(ticks, surface);
   const blocked = !canUsePasskey;
   const ineligible = eligibility?.eligible === false ? eligibility.because : undefined;
+  const progress = eligibility === undefined ? undefined : ruleReadiness(eligibility);
   const times = eligibility?.eligible === true ? eligibility.history : undefined;
   const history =
     times === undefined || times < 1
@@ -215,6 +219,14 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
         <p className="m-0 text-ui text-muted" data-rule-eligibility="reading" role="status">
           Checking whether this sign-in can have a rule…
         </p>
+      ) : null}
+      {progress?.kind === 'not-yet' ? (
+        <div className="flex min-w-0 flex-col gap-1.5" data-rule-not-yet="">
+          <SignInRuleProgress history={progress.history} lead="Not yet" words={progress.words} />
+          <p className="m-0 text-meta text-muted" data-rule-progress-why="">
+            {RULE_PROGRESS_WHY}
+          </p>
+        </div>
       ) : null}
       {ineligible === undefined ? null : (
         <p className="m-0 text-ui text-warn" data-rule-ineligible={ineligible} role="status">
