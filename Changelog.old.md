@@ -1,3 +1,9 @@
+## [4.261.0](https://github.com/kirinnee/ferretry/compare/v4.260.0...v4.261.0) (2026-11-03)
+
+### Features
+
+* **agenda:** rest an item on the owner's answer instead of closing it ([#1409](https://github.com/kirinnee/ferretry/issues/1409)) ([3b564ee](https://github.com/kirinnee/ferretry/commit/3b564eebc563a0f906805a3b09d261d207f98b74))
+
 ## [4.260.0](https://github.com/kirinnee/ferretry/compare/v4.259.0...v4.260.0) (2026-11-03)
 
 ### Features
