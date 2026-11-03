@@ -264,8 +264,7 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
-import { pushScopePath } from './lib/push-scope.ts';
-import { agendaItemOpenedHandler } from './lib/push-seen.ts';
+import { agendaItemOpenedHandler, machinePushRegistration, type PushNavigator } from './lib/push-seen.ts';
 import { postAgendaItemSeen } from './lib/push-subscriptions.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
@@ -2276,13 +2275,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const itemOpened = useMemo(
     () =>
       agendaItemOpenedHandler({
-        registration: async daemon => {
-          if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
-          const scope = new URL(pushScopePath(daemon), window.location.origin).href;
-          const found = await navigator.serviceWorker.getRegistration(scope);
-          // Only this machine's own registration: the app-wide one holds none of its lines.
-          return found?.scope === scope ? found : null;
-        },
+        registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
         health: async daemon => await (await clientFor(daemon)).health(),
         seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
       }),

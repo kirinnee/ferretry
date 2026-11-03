@@ -10705,6 +10705,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const notificationLedger = new FileNotificationDeliveryLedger(paths, stateFiles, {
         warn: message => void process.stderr.write(`notifications: ${message}\n`),
       });
+      // Built below, once the boards it reads exist; a push that lands before then has no stale line to look for.
+      const alertClearerBox: { clearer?: AgendaAlertClearer } = {};
       const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
         ledger: notificationLedger,
@@ -10725,6 +10727,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         clock,
         diagnostics: notificationHealth,
+        // A push that landed after its item was handled or opened is taken down as soon as it is recorded.
+        landed: sessionId => void alertClearerBox.clearer?.recheck(sessionId),
         // An input card asking for a one-time code is pushed at high priority (pushUrgencyFor).
         subjectOf: (sessionId, item) =>
           item.input === undefined
@@ -10771,6 +10775,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         clock,
       });
+      alertClearerBox.clearer = alertClearer;
+      // A board that changed while this daemon was down still takes its handled items' alerts down, in the background.
+      void agendaFilesMigrated.then(async () => await alertClearer.sweep()).catch(() => undefined);
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))

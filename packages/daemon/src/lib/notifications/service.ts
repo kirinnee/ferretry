@@ -49,6 +49,11 @@ export interface NotificationServiceOptions {
    * one-time code is `one-time-code`. Absent, or `other`, is a normal push.
    */
   readonly subjectOf?: (sessionId: string, item: AgendaItem) => PushSubject;
+  /**
+   * Told when a push reached a device and its outcome is recorded: the item may have been handled or opened while it
+   * was on its way, so its line may already be stale (`AgendaAlertClearer.recheck`). Not awaited, never fails a push.
+   */
+  readonly landed?: (sessionId: string) => void;
 }
 
 /**
@@ -311,7 +316,7 @@ export class NotificationService implements AgendaRaisedObserver {
       return false;
     }
     this.tell(diagnostics => diagnostics.made(key, { delivered, failed }));
-    await this.options.ledger
+    const recorded = await this.options.ledger
       .append(
         NotificationRecordSchema.parse({
           v: 1,
@@ -322,8 +327,20 @@ export class NotificationService implements AgendaRaisedObserver {
           failed,
         }),
       )
-      .catch(() => undefined);
+      .then(
+        () => true,
+        () => false,
+      );
+    if (recorded && delivered > 0) this.land(sessionId);
     return delivered > 0;
+  }
+
+  private land(sessionId: string): void {
+    try {
+      this.options.landed?.(sessionId);
+    } catch {
+      // A look at stale lines must never be what fails a push.
+    }
   }
 
   private tell(say: (diagnostics: NotificationDiagnostics) => void): void {

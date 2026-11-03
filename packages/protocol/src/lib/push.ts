@@ -238,7 +238,8 @@ export type PushErrorCode = z.infer<typeof PushErrorCodeSchema>;
  * credential's, never the body's.
  */
 export const PushSeenRequestSchema = z.strictObject({
-  sessionId: z.string().min(1).max(200),
+  /** A board's id as the agenda store accepts one (a session's or the machine agenda's): anything else is a 400 here. */
+  sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'an agenda session id'),
   agendaId: AgendaIdSchema,
 });
 export type PushSeenRequest = z.infer<typeof PushSeenRequestSchema>;

@@ -183,9 +183,9 @@ plain "something is waiting in your Inbox" notification instead: never nothing.
 Every item push goes out under **its own tag**, `attention-<session>:<item>` (`agendaItemPushTag`): a ping, a
 gate, a deadline and a woken item each replace only that item's earlier line. **So a ferret with two pushed items
 shows two lines**, not one line with "+1 more". A stop's push keeps the ferret's tag, `attention-<session>`
-(`agendaSessionPushTag`), because it is about the ferret and everything waiting then. A push recorded before items
-had their own tag went out under the ferret's tag. The own tag is what lets a handled item's line come down on its
-own (below).
+(`agendaSessionPushTag`), because it is about the ferret and everything waiting then. The own tag is what lets a
+handled item's line come down on its own (below). A push recorded before tags were went out under the ferret's tag,
+the item's (a high push) or its approval's (`pa-<id>`): a clear names each one it may have used.
 
 ## When an alert is cleared
 
@@ -230,7 +230,14 @@ opens that machine.
 
 **Once each.** A clear is written to `notifications.jsonl` with the pushes it covers before it is sent, so a second
 change or a restart never clears the same push again; a later push about the same item (it woke again) is cleared on
-its own later. A clear is never in `fy doctor`'s push count: one that reached no device (the only one was the device
+its own later. Opening an item again tells the machine again, because it may have buzzed since; a clear with nothing
+left to cover sends nothing.
+
+**A push still on its way.** A push the owner handles or opens before it has reached a device had no line to take
+down yet. The daemon looks again as soon as that push's outcome is recorded: a handled item's line comes down then,
+and an open made while it was on its way is honoured then too, still skipping the device that opened it (that memory
+is not kept across a restart). At start the daemon looks once at every ferret with a line still up, for a board that
+changed while it was down. A clear is never in `fy doctor`'s push count: one that reached no device (the only one was the device
 that opened the item) is not a failed push. A clear the push service refused leaves that line up.
 
 **Older apps.** A service worker older than this release cannot read a clear and shows its plain "Something is

@@ -199,7 +199,7 @@ describe('which alerts come down (the owner: "if an agenda went to sleep … dis
     should(clears).deepEqual([{ tags: ['attention-session-1'], covers: [stop.key] }]);
   });
 
-  it('should treat a push recorded without a tag as shown under the session tag', () => {
+  it('should treat a push alert with no tag as shown under the session tag', () => {
     // Arrange
     const old = alert('A1', { key: `attention:${SESSION}:A1:ping`, tag: undefined });
     const { tag: _tag, ...untagged } = old;
@@ -611,7 +611,11 @@ describe('uncoveredAlerts', () => {
     const alerts = uncoveredAlerts(SESSION, entries);
 
     // Assert
-    should(alerts).deepEqual([{ key: `agenda:${SESSION}:A1:ping`, agendaId: 'A1', stop: false }]);
+    // Every tag it may have gone out under: the session's, and the item's (a high push), each covered on its own.
+    should(alerts).deepEqual([
+      { key: `agenda:${SESSION}:A1:ping`, agendaId: 'A1', stop: false },
+      { key: `agenda:${SESSION}:A1:ping#item`, agendaId: 'A1', stop: false, tag: 'attention-session-1:A1' },
+    ]);
   });
 
   it('should skip a push still in flight and one that errored', () => {
@@ -626,5 +630,185 @@ describe('uncoveredAlerts', () => {
     // Assert
     should(inFlight).deepEqual([]);
     should(failed).deepEqual([]);
+  });
+});
+
+describe('a legacy push (recorded before tags were; review round 1)', () => {
+  it("should clear a high code alert's item tag though another item still waits, and its session tag only later", async () => {
+    // Arrange — a high push went out under the item's tag, but the ledger did not record which.
+    const test = world(pushed('A1', { ping: true }, { tag: null }));
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A2')], [resolved(item('A1'))]));
+
+    // Act
+    await test.clearer.changed(SESSION, CHANGE);
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), resolved(item('A2'))]));
+    await test.clearer.changed(SESSION, CHANGE);
+    await test.clearer.changed(SESSION, CHANGE);
+
+    // Assert
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1:A1'],
+      ['attention-session-1'],
+    ]);
+  });
+
+  it("should clear an approve-on-phone push under its approval's tag, read from the item", async () => {
+    // Arrange
+    const [requested, outcome] = pushed('A1', { ping: true }, { tag: null });
+    const approval = NotificationRecordSchema.parse({
+      ...requested,
+      key: `agenda:${SESSION}:A1:phone-approval:0`,
+      ping: undefined,
+      phoneApproval: 0,
+    });
+    const landed = NotificationRecordSchema.parse({ ...outcome, key: approval.key });
+    const card = { ...item('A1'), kind: 'info', phoneApproval: { id: 'pa_0123456789abcdef01234567' } } as AgendaItem;
+    const test = world([approval, landed]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(card)]));
+
+    // Act
+    await test.clearer.changed(SESSION, CHANGE);
+
+    // Assert
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['pa-pa_0123456789abcdef01234567'],
+    ]);
+  });
+
+  it('should leave an approve-on-phone push uncovered when its item is gone from the board', () => {
+    // Act / Assert
+    should(
+      alertsToClear(SESSION, [{ key: 'k', agendaId: 'A1', stop: false, approval: true }], snapshotOf([])),
+    ).deepEqual([]);
+  });
+});
+
+describe('a push still on its way when its item is handled or opened (review round 1)', () => {
+  /** A push recorded as requested, with no outcome yet. */
+  const onItsWay = (agendaId: string): NotificationRecord[] => pushed(agendaId).slice(0, 1);
+  const landing = (agendaId: string): NotificationRecord => pushed(agendaId)[1] as NotificationRecord;
+
+  it('should clear it once it lands, after the item was answered while it was on its way', async () => {
+    // Arrange
+    const test = world(onItsWay('A1'));
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1'))]));
+    await test.clearer.changed(SESSION, CHANGE);
+    const before = test.sent.length;
+
+    // Act
+    await test.ledger.append(landing('A1'));
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(before).equal(0);
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1:A1'],
+    ]);
+  });
+
+  it('should honour an open made while it was on its way, skipping the device that opened it', async () => {
+    // Arrange — the item still waits on the owner; only the open says its line should come down.
+    const test = world(onItsWay('A1'));
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+    const opened = await test.clearer.seen(SESSION, 'A1', 'device-1');
+
+    // Act
+    await test.ledger.append(landing('A1'));
+    await test.clearer.recheck(SESSION);
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(opened).deepEqual({ found: true, tags: [] });
+    should(test.sent).have.length(1);
+    should(test.sent[0]?.exceptDevice).equal('device-1');
+    should(test.sent[0]?.payload).containDeep({ tags: ['attention-session-1:A1'] });
+  });
+
+  it("should keep waiting while the push has not landed, and forget an open for another ferret's push", async () => {
+    // Arrange
+    const test = world([...onItsWay('A1'), ...pushed('A9', { ping: true }, { sessionId: OTHER }).slice(0, 1)]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+    test.boards.set(OTHER, ledgerOf(OTHER, [item('A9')]));
+    await test.clearer.seen(SESSION, 'A1', 'device-1');
+    await test.clearer.seen(OTHER, 'A9', 'device-1');
+
+    // Act
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(test.sent).deepEqual([]);
+  });
+
+  it('should remember no more opens than its bound, forgetting the oldest first', async () => {
+    // Arrange — 260 items, each with a push on its way, each opened.
+    const ids = Array.from({ length: 260 }, (_, index) => `A${index + 1}`);
+    const test = world(ids.flatMap(onItsWay));
+    test.boards.set(
+      SESSION,
+      ledgerOf(
+        SESSION,
+        ids.map(id => item(id)),
+      ),
+    );
+    for (const id of ids) await test.clearer.seen(SESSION, id, 'device-1');
+
+    // Act — the oldest open's push and the newest one's both land.
+    await test.ledger.append(landing('A1'));
+    await test.ledger.append(landing('A260'));
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1:A260'],
+    ]);
+  });
+
+  it('should drop an open whose push is gone from the ledger', async () => {
+    // Arrange
+    const test = world(onItsWay('A1'));
+    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')]));
+    for (let index = 0; index < 300; index += 1) await test.clearer.seen(SESSION, 'A1', `device-${index}`);
+    test.ledger.records.splice(0, test.ledger.records.length);
+
+    // Act
+    await test.clearer.recheck(SESSION);
+
+    // Assert
+    should(test.sent).deepEqual([]);
+  });
+});
+
+describe('AgendaAlertClearer.sweep (a board that changed while the daemon was down)', () => {
+  it('should look once at every ferret with an alert still up, and at nobody else', async () => {
+    // Arrange
+    const reads: string[] = [];
+    const test = world([...pushed('A1'), ...pushed('A2', { ping: true }, { sessionId: OTHER, delivered: 0 })]);
+    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1'))]));
+    const read = test.boards.get.bind(test.boards);
+    test.boards.get = (id: string) => {
+      reads.push(id);
+      return read(id);
+    };
+
+    // Act
+    await test.clearer.sweep();
+
+    // Assert
+    should(reads).deepEqual([SESSION]);
+    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
+      ['attention-session-1:A1'],
+    ]);
+  });
+
+  it('should do nothing when the ledger cannot be read', async () => {
+    // Arrange
+    const test = world(pushed('A1'));
+    test.ledger.entries = async () => {
+      throw new Error('ledger cannot be read');
+    };
+
+    // Act / Assert
+    await test.clearer.sweep();
+    should(test.sent).deepEqual([]);
   });
 });

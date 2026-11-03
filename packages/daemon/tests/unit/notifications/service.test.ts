@@ -105,6 +105,7 @@ function fixture(
     readonly warnings?: string[];
     readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
     readonly now?: () => string;
+    readonly landed?: (sessionId: string) => void;
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -132,6 +133,7 @@ function fixture(
             },
           }),
       ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
+      ...(options.landed === undefined ? {} : { landed: options.landed }),
     }),
   };
 }
@@ -864,5 +866,42 @@ describe('NotificationService approve-on-phone push', () => {
       'Ferret “Approve on your phone”',
       'Ferret “Аpprove оn your phone now”',
     ]);
+  });
+});
+
+describe('NotificationService tells the clearer a push landed (review round 1: a push on its way when its item was handled)', () => {
+  it('should say so once the outcome of a push that reached a device is recorded, and not for one that reached none', async () => {
+    // Arrange
+    const landed: string[] = [];
+    const world = fixture({ landed: sessionId => landed.push(sessionId) });
+
+    // Act
+    await world.service.deadline(SESSION, due, snapshot);
+    world.push.result = { delivered: 0, failed: 2 };
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(landed).deepEqual([SESSION]);
+  });
+
+  it('should not say so when the outcome could not be recorded, and stay total when the listener throws', async () => {
+    // Arrange
+    const ledger = new MemoryLedger();
+    ledger.failOutcome = true;
+    const landed: string[] = [];
+    const failing = fixture({ ledger, landed: sessionId => landed.push(sessionId) });
+    const throwing = fixture({
+      landed: () => {
+        throw new Error('the clearer is down');
+      },
+    });
+
+    // Act
+    await failing.service.deadline(SESSION, due, snapshot);
+    await throwing.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(landed).deepEqual([]);
+    should(throwing.push.calls).equal(1);
   });
 });

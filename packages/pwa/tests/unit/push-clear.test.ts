@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { agendaItemPushTag, type PushClearPayload, type PushSeenResponse } from '@ferretry/protocol';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { NOTIFICATION_BADGE, NOTIFICATION_ICON } from '../../src/lib/notify.ts';
 import {
   applyClear,
@@ -19,7 +19,7 @@ import {
   planClear,
   shownTag,
 } from '../../src/lib/push-clear.ts';
-import { agendaItemOpenedHandler } from '../../src/lib/push-seen.ts';
+import { agendaItemOpenedHandler, machinePushRegistration } from '../../src/lib/push-seen.ts';
 import { postAgendaItemSeen } from '../../src/lib/push-subscriptions.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
@@ -273,17 +273,25 @@ describe('opening an item here (the owner opened it in the app)', () => {
     expect(registration.shown).toEqual([]);
   });
 
-  it('should tell the machine once per item, however often the item is opened again', async () => {
-    // Arrange
-    const { told, opened } = world();
+  it('should tell the machine again when the item is opened again: it may have buzzed since, or the first try failed', async () => {
+    // Arrange — the first try fails (offline), the second reaches the machine (review round 1).
+    let calls = 0;
+    const { told, opened } = world({
+      seen: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('offline');
+        return { cleared: true, tags: [] };
+      },
+    });
 
     // Act
-    await opened(connection, 'session-1', 'A3');
+    const first = await opened(connection, 'session-1', 'A3');
     const again = await opened(connection, 'session-1', 'A3');
 
     // Assert
-    expect(again).toEqual({ closed: 0, told: false });
-    expect(told).toHaveLength(1);
+    expect(first.told).toBe(false);
+    expect(again.told).toBe(true);
+    expect(told).toHaveLength(2);
   });
 
   it('should close the item’s line but tell nothing to a machine that does not list push.clear.1', async () => {
@@ -393,5 +401,44 @@ describe('postAgendaItemSeen', () => {
     // Act / Assert
     await expect(postAgendaItemSeen(connection, 'session-1', 'not-an-id', fetcher)).rejects.toThrow();
     expect(sent).toBe(0);
+  });
+});
+
+describe('machinePushRegistration (which registration holds a machine’s lines here)', () => {
+  const scope = `${ORIGIN}/push/home/`;
+  const registration = new FakeRegistration({});
+
+  it('should answer the machine’s own registration, and nothing for the app-wide one a lookup falls back to', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const own = machinePushRegistration(
+      { serviceWorker: { getRegistration: async url => (asked.push(url), Object.assign(registration, { scope })) } },
+      ORIGIN,
+    );
+    const fallback = machinePushRegistration(
+      {
+        serviceWorker: {
+          getRegistration: async () => Object.assign(new FakeRegistration({}), { scope: `${ORIGIN}/` }),
+        },
+      },
+      ORIGIN,
+    );
+
+    // Act / Assert
+    expect(await own(daemonId('home'))).toBe(registration);
+    expect(asked).toEqual([scope]);
+    expect(await fallback(daemonId('home'))).toBeNull();
+  });
+
+  it('should answer nothing without a service-worker container, or with no registration at all', async () => {
+    // Act / Assert
+    expect(await machinePushRegistration(undefined, ORIGIN)(daemonId('home'))).toBeNull();
+    expect(await machinePushRegistration({}, ORIGIN)(daemonId('home'))).toBeNull();
+    expect(
+      await machinePushRegistration(
+        { serviceWorker: { getRegistration: async () => undefined } },
+        ORIGIN,
+      )(daemonId('home')),
+    ).toBeNull();
   });
 });

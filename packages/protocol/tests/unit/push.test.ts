@@ -559,3 +559,13 @@ describe('agenda push tags', () => {
     ).be.true();
   });
 });
+
+describe('the seen request names a board the agenda store accepts (review round 1)', () => {
+  it('should refuse a traversal, a space and an over-long id, and accept a session and the machine agenda', () => {
+    // Act / Assert
+    for (const sessionId of ['../x', ' session-1', 'session 1', 'a'.repeat(129)])
+      should(push.PushSeenRequestSchema.safeParse({ sessionId, agendaId: 'A3' }).success).be.false();
+    for (const sessionId of ['session-1', 'machine-agenda', 'a'.repeat(128), 'mw0cb26c-30d27327'])
+      should(push.PushSeenRequestSchema.safeParse({ sessionId, agendaId: 'A3' }).success).be.true();
+  });
+});

@@ -14,6 +14,7 @@
 import { agendaItemPushTag, DAEMON_FEATURES, hasFeature, type PushSeenResponse } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type ClearRegistration, closeShownTags } from './push-clear.ts';
+import { pushScopePath } from './push-scope.ts';
 
 export interface AgendaItemOpenedPorts {
   /** This browser's push registration for one machine, or `null` when it has none. */
@@ -31,17 +32,14 @@ export interface AgendaItemOpened {
 }
 
 /**
- * The handler the Inbox calls each time it opens an item. Each item is told once per page life: opening it again
- * changes nothing the first time did not.
+ * The handler the Inbox calls each time it opens an item (the Inbox calls it once per item on top). Opening the same
+ * item again tells the machine again: it may have buzzed since (woken from a snooze), and a clear with nothing left to
+ * cover sends nothing.
  */
 export const agendaItemOpenedHandler = (
   ports: AgendaItemOpenedPorts,
 ): ((daemon: DaemonConnection, sessionId: string, agendaId: string) => Promise<AgendaItemOpened>) => {
-  const told = new Set<string>();
   return async (daemon, sessionId, agendaId) => {
-    const key = `${daemon.daemonId}\u0000${sessionId}\u0000${agendaId}`;
-    if (told.has(key)) return { closed: 0, told: false };
-    told.add(key);
     const machine = { daemonId: daemon.daemonId, label: daemon.daemonId };
     const registration = await ports.registration(daemon.daemonId).catch(() => null);
     const close = async (tags: readonly string[]): Promise<number> =>
@@ -57,3 +55,29 @@ export const agendaItemOpenedHandler = (
     }
   };
 };
+
+/** The slice of a service-worker container the page reads one machine's registration from. */
+interface PushRegistrationContainer {
+  getRegistration(
+    clientUrl: string,
+  ): Promise<(Pick<ClearRegistration, 'getNotifications'> & { readonly scope: string }) | undefined>;
+}
+
+/** The slice of `navigator` that may hold one; a browser without service workers has none. */
+export interface PushNavigator {
+  readonly serviceWorker?: PushRegistrationContainer | undefined;
+}
+
+/**
+ * This browser's push registration for one machine (`/push/<daemonId>/`), or `null`: no container, or no registration of
+ * that machine's own — the app-wide one, which a lookup by URL falls back to, holds none of its lines.
+ */
+export const machinePushRegistration =
+  (browser: PushNavigator | undefined, origin: string) =>
+  async (daemon: DaemonId): Promise<Pick<ClearRegistration, 'getNotifications'> | null> => {
+    const container = browser?.serviceWorker;
+    if (container === undefined) return null;
+    const scope = new URL(pushScopePath(daemon), origin).href;
+    const found = await container.getRegistration(scope);
+    return found?.scope === scope ? found : null;
+  };
