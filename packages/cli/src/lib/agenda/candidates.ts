@@ -1,5 +1,7 @@
 import {
   type AgendaActionRequest,
+  type AgendaCardAnswer,
+  agendaCardAnswers,
   type AgendaId,
   type AgendaItem,
   formatTaskRef,
@@ -216,6 +218,15 @@ const ASK_WORDS: Readonly<Record<NonNullable<AddRequest['ask']>['kind'], string>
   task: 'something for the owner to do',
 };
 
+const answerKey = (answer: AgendaCardAnswer): string =>
+  JSON.stringify([answer.direction, answer.does, answer.label.trim(), answer.description ?? '']);
+
+/** Whether the new ask has an answer (an `--up` label, say) that the candidate does not already offer. */
+function answersOfItsOwn(item: AgendaItem, request: AddRequest): boolean {
+  const offered = new Set(agendaCardAnswers(item).map(answerKey));
+  return agendaCardAnswers(request).some(answer => !offered.has(answerKey(answer)));
+}
+
 /** What the new ask says that `fy agenda edit` cannot add to an open agenda, in plain words; empty when nothing. */
 function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskRef | undefined): string[] {
   const { item } = candidate;
@@ -227,6 +238,7 @@ function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskR
     card !== undefined && (item.task === undefined || item.task === null || refKey(item.task) !== refKey(card));
   const found: [boolean, string][] = [
     [ask !== undefined && !sameAsk, ask === undefined ? '' : ASK_WORDS[ask.kind]],
+    [(ask === undefined || sameAsk) && answersOfItsOwn(item, request), 'answers of its own (--up)'],
     [filled(request.questions), 'questions'],
     [filled(request.fields), 'a form'],
     [filled(request.optionDetails), 'option details'],

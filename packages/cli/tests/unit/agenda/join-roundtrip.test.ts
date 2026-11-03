@@ -266,4 +266,88 @@ describe('the suggested join, applied to the real agenda state machine', () => {
     should(points(after.premise)).eql(['The relay is going live.', 'The relay needs a region.']);
     should(points(after.context)).eql(['Two sizes are near.', 'EU and US are both up.']);
   });
+
+  it('should not join a todo with its own --up answer into a todo without it; --new keeps the Skip answer', async () => {
+    // Arrange
+    const { gateway, run } = world();
+    await run([
+      'fy',
+      'agenda',
+      'add',
+      'Rotate the key',
+      '--title',
+      'Key',
+      '--kind',
+      'todo',
+      ...brief('The key is old.', 'It expires soon.'),
+    ]);
+    const before = gateway.item('A1');
+    const skippable = [
+      'fy',
+      'agenda',
+      'add',
+      'Rotate the backup key',
+      '--title',
+      'Backup key',
+      '--kind',
+      'todo',
+      '--up',
+      'Skip',
+      '--up-why',
+      'The backup is retired',
+      ...brief('The backup key is old.', 'It expires soon too.'),
+    ];
+
+    // Act
+    const refused = String(await run(skippable).catch((error: unknown) => (error as Error).message));
+    await run([...skippable, '--new', 'it can be skipped; closest is !A1']);
+
+    // Assert
+    should(refused).containEql('answers of its own (--up)');
+    should(refused).not.containEql('agenda edit A1');
+    should(refused).containEql('--new "<why none fits; closest is !A1>"');
+    should(gateway.item('A1')).eql(before);
+    should(gateway.ledger.entries).have.length(2);
+    should(
+      gateway
+        .item('A2')
+        .answers?.some(answer => answer.label === 'Skip' && answer.description === 'The backup is retired'),
+    ).be.true();
+  });
+
+  it('should still join a todo without --up into a todo that has it, which loses nothing', async () => {
+    // Arrange
+    const { run } = world();
+    await run([
+      'fy',
+      'agenda',
+      'add',
+      'Rotate the key',
+      '--title',
+      'Key',
+      '--kind',
+      'todo',
+      '--up',
+      'Skip',
+      ...brief('The key is old.', 'It expires soon.'),
+    ]);
+
+    // Act
+    const refused = String(
+      await run([
+        'fy',
+        'agenda',
+        'add',
+        'Rotate the backup key',
+        '--title',
+        'Backup key',
+        '--kind',
+        'todo',
+        ...brief('The backup key is old.', 'It expires too.'),
+      ]).catch((error: unknown) => (error as Error).message),
+    );
+
+    // Assert
+    should(refused).containEql('agenda edit A1');
+  });
 });

@@ -75,7 +75,7 @@ Open a new agenda only when none passes the test:
   lines stay, the new ask is added to them, and the premise and context are the union of both. An item the owner
   replied to is brought back by the same edit with `--back --summary '<the new ask>'`, the old subject kept as a
   still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
-  `--will-block`, `--by`, links, terms, its own `--why` or `--resolve`, a different card) is never squeezed in:
+  `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card) is never squeezed in:
   the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
 - **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
   printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";
@@ -93,14 +93,9 @@ Open a new agenda only when none passes the test:
   ([work-search.md](work-search.md#the-related-check)); then the words they share; then the oldest.
 - **The candidates** are the items a ferret raised and can add to. The owner's own items, notices, held configuration
   changes, gate items and the daemon's input cards are never listed.
-- **Joining.** The printed `edit` adds the ask to what is still open, keeping what was there. An item the owner
-  replied to is Resting, so its command also carries `--back` with the whole card refreshed (`--summary`,
-  `--premise`, `--context`), both items' points kept.
 - **A ferret** (nobody at a terminal) is refused with the list and the two ways out; `--json` prints
   `{candidates, related}` and refuses the same way. **A person at a terminal** is asked "Should this join !A7?": yes
-  prints the edit and opens nothing, no opens it.
-- **`--new "<why none fits>"`** opens it without the list. It still says so when an open agenda carries a tied card.
-  A bare `--new` still works for one release, with a warning asking for the reason.
+  prints the edit and opens nothing, anything else opens nothing and prints the two ways out.
 - **With no candidate**, the add opens, unless the daemon's related check finds a STRONG match in someone else's work,
   which refuses as before (`--related A3`, `--related F12`, `fy send`).
 - **Two decisions.** The add warns, and still opens, when the ask looks like two decisions: the one-line ask asks two
