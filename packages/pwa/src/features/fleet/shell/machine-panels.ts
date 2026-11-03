@@ -59,6 +59,10 @@ const PANEL_TABS: ReadonlyMap<string, MachineTabId> = new Map(
   PANEL_GROUPS.flatMap(group => group.panels.map(panel => [panel, group.tab] as const)),
 );
 
+/** Every panel id listed on a tab, in the order the tab draws them. */
+export const panelsOnTab = (tab: MachineTabId): readonly string[] =>
+  PANEL_GROUPS.filter(group => group.tab === tab).flatMap(group => group.panels);
+
 /** The tab a panel is opened from, or `undefined` for a word that names no panel. */
 export const panelTab = (panel: string): MachineTabId | undefined => PANEL_TABS.get(panel);
 

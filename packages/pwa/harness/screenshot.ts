@@ -50,6 +50,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
 import { type Browser, chromium, webkit } from 'playwright-core';
+import { panelsOnTab } from '../src/features/fleet/shell/machine-panels.ts';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
@@ -2902,7 +2903,7 @@ try {
               await frame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
             };
             type PanelTab = 'machine' | 'agents' | 'sign-ins';
-            const MACHINE_TAB_PANELS = 12;
+            const MACHINE_TAB_PANELS = panelsOnTab('machine').length;
             const openMachineTab = async (surface: Locator, tab: PanelTab = 'machine'): Promise<void> => {
               await surface.locator(`[data-machine-tab="${tab}"]`).click();
               await surface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
@@ -2912,8 +2913,8 @@ try {
             await openMachineTab(studioMachine);
             const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
             await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
-            // The fixture is only evidence about the real frame if it carries the panels the composition
-            // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
+            // The fixture is only evidence about the real frame if it mounts every panel the Machine tab lists,
+            // which `machine-panels.ts` owns.
             // The Machine tab lists exactly the panels that belong to it; Warden, Accounts, Secrets and Secure
             // copy moved to the Agents and Sign-ins tabs, where each is counted below.
             const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
