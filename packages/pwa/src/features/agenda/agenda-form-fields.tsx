@@ -14,7 +14,7 @@
  * answer it (a settled item, a chat with no agenda client), the fields are a numbered list to read, not controls.
  */
 
-import { type AgendaFormField, FORM_NO, FORM_YES, formFieldRequired } from '@ferretry/protocol';
+import { type AgendaFormField, formFieldRequired, YES_NO_ORDER } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { formProgress } from '../../lib/agenda-form-send.ts';
@@ -25,7 +25,7 @@ type Prose = (text: string) => ReactNode;
 
 const optionsOf = (field: AgendaFormField): readonly { readonly label: string; readonly detail?: string }[] =>
   field.type === 'yesno'
-    ? [{ label: FORM_YES }, { label: FORM_NO }]
+    ? YES_NO_ORDER.map(label => ({ label }))
     : (field.options ?? []).map(option => ({
         label: option.label.trim(),
         ...(option.description === undefined ? {} : { detail: option.description }),

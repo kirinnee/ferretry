@@ -23,6 +23,8 @@ import {
   isYesNoAsk,
   kindOfAsk,
   unswipedChoices,
+  YES_NO_ORDER,
+  yesNoOrder,
 } from '../../src/lib/agenda-card.ts';
 
 const AT = '2026-10-29T09:00:00.000Z';
@@ -144,6 +146,51 @@ describe('attention card', () => {
       should(layout(agendaCardAnswers(asked))).eql(['left:Monday', 'right:Friday']);
     });
 
+    it('puts No ← and Yes → whichever order the ferret listed them in, on a yes-or-no or a two-way choice', () => {
+      for (const kind of ['yesno', 'choice'] as const) {
+        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('Yes', 'No') }))).eql(['left:No', 'right:Yes']);
+        should(layout(agendaCardAnswers({ ...item, kind, ask: choice('No', 'Yes') }))).eql(['left:No', 'right:Yes']);
+      }
+      // An old item with no kind, its options in either case, and one recommending Yes (kept on ↑ before the rule).
+      should(layout(agendaCardAnswers({ ...item, ask: choice('yes', 'NO') }))).eql(['left:NO', 'right:yes']);
+      const recommended = {
+        ...item,
+        kind: 'choice' as const,
+        ask: choice('No', 'Yes'),
+        recommendation: { decision: 'Yes' },
+      };
+      should(layout(agendaCardAnswers(recommended))).eql(['left:No', 'right:Yes']);
+      // Answers the ferret pointed itself are re-pointed too: the order never depends on how they were written.
+      const pointed = {
+        ...item,
+        ask: choice('Yes', 'No'),
+        answers: [
+          { direction: 'left' as const, does: 'choose' as const, label: 'Yes' },
+          { direction: 'right' as const, does: 'choose' as const, label: 'No' },
+        ],
+      };
+      should(layout(agendaCardAnswers(pointed))).eql(['left:No', 'right:Yes']);
+    });
+
+    it('leaves a row that is not exactly Yes and No to the options list’s order', () => {
+      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'No', 'Later') }))).eql([
+        'left:Yes',
+        'up:No',
+        'right:Later',
+      ]);
+      should(layout(agendaCardAnswers({ ...item, ask: choice('Yes', 'Later') }))).eql(['left:Yes', 'right:Later']);
+    });
+
+    it('orders any list of Yes and No as No, Yes (yesNoOrder), and leaves any other list alone', () => {
+      should(YES_NO_ORDER).eql(['No', 'Yes']);
+      should(yesNoOrder(['Yes', 'No'], label => label)).eql(['No', 'Yes']);
+      should(yesNoOrder(['No', 'Yes'], label => label)).eql(['No', 'Yes']);
+      should(yesNoOrder([' YES ', 'no'], label => label)).eql(['no', ' YES ']);
+      should(yesNoOrder(['Yes', 'Later'], label => label)).eql(['Yes', 'Later']);
+      should(yesNoOrder(['Yes', 'No', 'Maybe'], label => label)).eql(['Yes', 'No', 'Maybe']);
+      should(yesNoOrder([], (label: string) => label)).eql([]);
+    });
+
     it('leaves answers that are not options where the card put them', () => {
       const permission = { ...item, ask: { kind: 'permission' as const } };
       should(layout(agendaCardAnswers(permission))).eql(layout(defaultAgendaAnswers('permission', permission.ask)));
@@ -194,7 +241,7 @@ describe('attention card', () => {
           { direction: 'left', does: 'choose', label: 'No' },
         ],
       });
-      should(layout(agendaCardAnswers(raised))).eql(['left:Yes', 'right:No']);
+      should(layout(agendaCardAnswers(raised))).eql(['left:No', 'right:Yes']);
     });
 
     it('refuses a stored item whose answers do not fit its ask, naming the answer', () => {

@@ -1242,7 +1242,8 @@ describe('a form opened in the chat (#B143)', () => {
     const view = openForm('A61', { clientOverride: recording(landing), onAnswered: () => answered.push('answered') });
     run(() => inputs(view, 'radio')[1]?.props.onChange());
     run(() => inputs(view, 'checkbox')[0]?.props.onChange());
-    run(() => yesNo(view)[0]?.props.onClick());
+    // Yes is the second button: No ←, Yes →.
+    run(() => yesNo(view)[1]?.props.onClick());
 
     run(() => live().composer.answerForm?.());
     // The composer reports its send at once; the form's view stays until the machine has the answer.

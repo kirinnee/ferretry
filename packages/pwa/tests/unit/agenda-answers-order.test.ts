@@ -21,7 +21,7 @@ describe('one meaning for every swipe: option answers in the options list’s or
   });
 
   test('two options on ← and →, one on ↑; a lone question’s options count as the list', () => {
-    expect(at({ ask: choices('Yes', 'No') })).toEqual(['left:Yes', 'right:No']);
+    expect(at({ ask: choices('Monday', 'Friday') })).toEqual(['left:Monday', 'right:Friday']);
     expect(at({ ask: choices('Ship it') })).toEqual(['up:Ship it']);
     expect(
       at({
@@ -29,6 +29,15 @@ describe('one meaning for every swipe: option answers in the options list’s or
         questions: [{ question: 'Which day?', options: [{ label: 'Monday' }, { label: 'Friday' }] }],
       } as never),
     ).toEqual(['left:Monday', 'right:Friday']);
+  });
+
+  test('Yes and No are always ← No · → Yes, whichever order they were listed in, on the row and the swipes', () => {
+    for (const listed of [choices('Yes', 'No'), choices('No', 'Yes')]) {
+      expect(at({ ask: listed })).toEqual(['left:No', 'right:Yes']);
+      expect(at({ kind: 'yesno', ask: listed } as Partial<AgendaItem>)).toEqual(['left:No', 'right:Yes']);
+      const targets = swipeTargets(agendaItem('A5', { ask: listed }));
+      expect([targets.left?.label, targets.right?.label]).toEqual(['No', 'Yes']);
+    }
   });
 
   test('the swipe deck reads the same directions', () => {

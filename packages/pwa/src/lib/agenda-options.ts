@@ -6,7 +6,7 @@
  */
 
 import type { AgendaAskOption, AgendaItem } from '@ferretry/protocol';
-import { singleAgendaQuestion } from '@ferretry/protocol';
+import { singleAgendaQuestion, yesNoOrder } from '@ferretry/protocol';
 
 export interface LetteredOption {
   readonly letter: string;
@@ -35,11 +35,15 @@ export const letteredOptions = (
     recommended: same(option.label, recommended),
   }));
 
-/** The options a lone question or a choice ask offers; none for a several-question item (each question has its own). */
-export const itemOptions = (item: AgendaItem): readonly AgendaAskOption[] => {
-  if (item.ask?.kind === 'multiple-choice') return item.ask.options;
-  return singleAgendaQuestion(item)?.options ?? [];
-};
+/**
+ * The options a lone question or a choice ask offers; none for a several-question item (each question has its own).
+ * Yes and No are listed No, Yes, as their buttons sit (`yesNoOrder`).
+ */
+export const itemOptions = (item: AgendaItem): readonly AgendaAskOption[] =>
+  yesNoOrder(
+    item.ask?.kind === 'multiple-choice' ? item.ask.options : (singleAgendaQuestion(item)?.options ?? []),
+    option => option.label,
+  );
 
 /** The letter of an option label among `options`, or `undefined` when the label is not one of them. */
 export const letterOf = (options: readonly AgendaAskOption[], label: string): string | undefined => {

@@ -37,10 +37,13 @@ describe('the letters of an item’s options', () => {
   });
 
   test('are read from a choice ask or a lone question, and from nothing else', () => {
-    expect(itemOptions(agendaItem('A1', { ask: choices('Yes', 'No') })).map(option => option.label)).toEqual([
-      'Yes',
-      'No',
+    expect(itemOptions(agendaItem('A1', { ask: choices('Ship', 'Hold') })).map(option => option.label)).toEqual([
+      'Ship',
+      'Hold',
     ]);
+    // Yes and No are listed as their buttons sit: No, then Yes, whichever order the ferret wrote.
+    for (const listed of [choices('Yes', 'No'), choices('No', 'Yes')])
+      expect(itemOptions(agendaItem('A1', { ask: listed })).map(option => option.label)).toEqual(['No', 'Yes']);
     const lone = agendaItem('A2', {
       ask: { kind: 'open-question' },
       questions: [{ question: 'Which?', options: [{ label: 'One' }] }],

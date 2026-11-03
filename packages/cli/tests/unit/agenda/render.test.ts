@@ -663,7 +663,28 @@ describe('attention cards', () => {
     // Assert
     should(row(actual, 1)).equal('  !A1  [question]  Release');
     should(row(actual, 2)).equal('      ask: Ship the release now?');
-    should(row(actual, 3)).equal('      answers: ← Yes · → No');
+    should(row(actual, 3)).equal('      answers: ← No · → Yes');
+  });
+
+  it('should print Yes and No as ← No · → Yes whichever order the ferret listed them in', () => {
+    // Act
+    const printed = (labels: readonly string[]) =>
+      row(
+        renderAgendaList(
+          snapshot([
+            humanItem('A1', 'Ship the release now?', {
+              title: 'Release',
+              kind: 'yesno',
+              ask: { kind: 'multiple-choice', options: labels.map(label => ({ label })) },
+            }),
+          ]),
+        ),
+        3,
+      );
+
+    // Assert
+    should(printed(['Yes', 'No'])).equal('      answers: ← No · → Yes');
+    should(printed(['No', 'Yes'])).equal('      answers: ← No · → Yes');
   });
 
   it('should lay a permission card with an up answer out left, up, right', () => {

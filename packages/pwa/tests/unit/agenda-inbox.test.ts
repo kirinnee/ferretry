@@ -259,10 +259,16 @@ const card = (extra: Partial<AgendaItem> = {}) => ({ subject: 'Rebase the branch
 
 describe('swipes', () => {
   test('a card swipes the answers it has — options in the list’s order — and an up only when it has one there', () => {
-    const yesNo = swipeMap(card({ ask: choice('Yes', 'No') }));
-    expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'Yes' });
-    expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'No' });
-    expect(yesNo.up).toBeUndefined();
+    const twoWay = swipeMap(card({ ask: choice('Ship', 'Hold') }));
+    expect(twoWay.left).toMatchObject({ kind: 'respond', label: 'Ship' });
+    expect(twoWay.right).toMatchObject({ kind: 'respond', label: 'Hold' });
+    expect(twoWay.up).toBeUndefined();
+    // Yes and No have one place, whichever order they were listed in: No ←, Yes →.
+    for (const listed of [choice('Yes', 'No'), choice('No', 'Yes')]) {
+      const yesNo = swipeMap(card({ ask: listed }));
+      expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'No', response: { choice: 'No' } });
+      expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'Yes', response: { choice: 'Yes' } });
+    }
     const task = swipeMap(card({ ask: { kind: 'task' } }));
     expect(task.right).toMatchObject({ kind: 'resolve', label: 'Mark as done' });
     expect(task.left).toBeUndefined();
