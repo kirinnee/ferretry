@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { gateAskOptions, type AgendaGate, type AgendaItem } from '@ferretry/protocol';
+import { useState } from 'react';
+import { gateAskOptions, gateReference, type AgendaGate, type AgendaItem } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import {
@@ -475,5 +476,57 @@ describe('the arrow keys on a gate item', () => {
     await key(view(again), 'ArrowRight');
     expect(pending(forward)).toEqual(['Done']);
     await again.unmount();
+  });
+});
+
+describe('Not good on a card ask drawn on a thread', () => {
+  const askOf = (cardId: string): AgendaGate => ({
+    cardId,
+    laneId: 'tested',
+    laneName: 'Tested',
+    entry: 1,
+    projectId: 'p1',
+    options: [...GATE_OPTIONS.options],
+  });
+  const thread = (cardId: string): InboxCard =>
+    inboxCard(
+      agendaItem('T1', {
+        subject: 'Which colour for the badge?',
+        ask: choices('Blue', 'Green'),
+        gateAttached: askOf(cardId),
+      } as Partial<AgendaItem>),
+      owner,
+    );
+
+  it('answers the ask the owner tapped, even when the shown one changed while they typed', async () => {
+    await mouseIsLastPointer();
+    const fake = fakeInbox();
+    let swap: (cards: readonly InboxCard[]) => void = () => undefined;
+    function Swappable() {
+      const [cards, setCards] = useState<readonly InboxCard[]>([thread('F2')]);
+      swap = setCards;
+      return page(fake, cards, { initialOpen: thread('F2').key });
+    }
+    const mounted = await mount(<Swappable />);
+    await press(
+      must(
+        mounted.container.querySelector<HTMLButtonElement>(
+          '.fy-attn-deck__top [data-agenda-attached-gate] [data-agenda-option="Not good"]',
+        ),
+        'the attached Not good',
+      ),
+    );
+    await flush();
+    const why = sendBackBox(mounted.container);
+    // The ask drawn changes to the next card's while the owner types.
+    await interact(() => swap([thread('F3')]));
+    await writeSendBack(why, 'The code is blank');
+    await press(sendBackSubmit(why));
+    expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
+      gate: true,
+      cardAsk: gateReference(askOf('F2')),
+      note: 'The code is blank',
+    });
+    await mounted.unmount();
   });
 });

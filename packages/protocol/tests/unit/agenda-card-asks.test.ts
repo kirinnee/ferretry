@@ -124,6 +124,23 @@ describe('an agenda item’s card asks', () => {
     should(twice.success).be.false();
     should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each card ask once');
   });
+
+  it('should carry the turn an ask woke the agenda out of, and when the mirror last changed, and read without them', () => {
+    const woke = {
+      waitingSince: AT,
+      resting: { sub: 'working' as const, at: AT },
+      parked: { reason: 'replied' as const, at: AT },
+    };
+    const withBoth = AgendaItemSchema.safeParse({
+      ...item([{ ...open('F412'), woke }]),
+      gateAttachedChangedAt: LATER,
+    });
+    should(withBoth.success).be.true();
+    should(withBoth.data?.cardAsks?.[0]?.woke?.resting?.sub).equal('working');
+    should(withBoth.data?.gateAttachedChangedAt).equal(LATER);
+    should(AgendaItemSchema.safeParse(item([open('F412')])).success).be.true();
+    should(AgendaItemSchema.safeParse(item([{ ...open('F412'), woke: { waitingSince: 'soon' } }])).success).be.false();
+  });
 });
 
 const thread = {

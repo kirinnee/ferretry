@@ -518,6 +518,72 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
     should(agendaState(after).state).equal('needs-you');
   });
 
+  it('puts a thread back on the owner’s turn when the ask that woke it is withdrawn, though it holds an older answer', async () => {
+    // Arrange — the lead's thread carries the plan asks of F2 and F3; the owner answers F2, so it holds an answered ask
+    const world = fixture([
+      leads(),
+      leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }),
+      leads({ id: 'F3', laneId: 'todo', parent: { id: 'F1' } }),
+    ]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    for (const each of ['F2', 'F3'])
+      await world.board.act(each, BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+    should(agendaState(openOf(world, 'lead', id)).state).equal('needs-you');
+
+    // Act — the owner drags F3 back on the Board
+    await world.board.act(
+      'F3',
+      BoardTaskActionRequestSchema.parse({ action: 'move', to: 'todo', reason: 'not yet' }),
+      OWNER,
+    );
+
+    // Assert — the lead's question is still the owner's to answer; the answered ask stays
+    const after = openOf(world, 'lead', id);
+    should(agendaState(after).state).equal('needs-you');
+    should(after.cardAsks?.map(ask => ask.gate.cardId)).eql(['F2']);
+  });
+
+  it('puts a resting thread back to rest when the ask that woke it is withdrawn, and keeps it out of Needs you', async () => {
+    // Arrange — the lead took the thread on without asking anything yet
+    const world = fixture([leads()]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    const rested = await world.agenda.rest('lead', id, 'looking into it', AGENT);
+    if (!rested.ok) throw new Error(rested.error.message);
+    const before = agendaState(openOf(world, 'lead', id)).state;
+    should(before).not.equal('needs-you');
+    await world.board.trigger('F1', 'release.running');
+    should(agendaState(openOf(world, 'lead', id)).state).equal('needs-you');
+
+    // Act
+    await world.move('closed');
+
+    // Assert — back where it was
+    const after = openOf(world, 'lead', id);
+    should(after.cardAsks).be.undefined();
+    should(agendaState(after).state).equal(before);
+  });
+
+  it('leaves a thread as it is when it moved on since the ask woke it', async () => {
+    // Arrange — the owner snoozes the thread after the ask woke it
+    const world = fixture([leads()]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    await world.board.trigger('F1', 'release.running');
+    await world.agenda.snooze('lead', id, '2030-01-01T00:00:00.000Z', HUMAN);
+
+    // Act
+    await world.move('closed');
+
+    // Assert — the snooze stands
+    should(agendaState(openOf(world, 'lead', id)).state).equal('snoozed');
+  });
+
   it('asks the next entry on a fresh agenda when the card comes back to the gate', async () => {
     // Arrange
     const { world, item } = await atTest();
@@ -781,6 +847,101 @@ describe('answering a card ask', () => {
         .cardAsks?.filter(ask => ask.answer === undefined)
         .map(ask => ask.gate.cardId),
     ).eql(['F3']);
+  });
+
+  const twoOpenPlanAsks = async () => {
+    const world = fixture([
+      leads(),
+      leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }),
+      leads({ id: 'F3', laneId: 'todo', parent: { id: 'F1' } }),
+    ]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    for (const each of ['F2', 'F3'])
+      await world.board.act(each, BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    return { world, id: raised.item.id };
+  };
+
+  it('refuses an older app’s answer just after the shown ask changed to another card’s, and moves nothing', async () => {
+    // Arrange — two open asks, F2's shown; the owner drags F2 on, so the mirror is F3's now
+    const { world, id } = await twoOpenPlanAsks();
+    await world.board.act(
+      'F2',
+      BoardTaskActionRequestSchema.parse({ action: 'move', to: 'implement', reason: 'one more fix' }),
+      OWNER,
+    );
+    should(openOf(world, 'lead', id).gateAttached?.cardId).equal('F3');
+
+    // Act — a phone that still draws F2's ask taps OK to build
+    const outcome = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert — the owner has not seen F3's ask; nothing moves
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should((outcome as { refused: { message: string } }).refused.message).containEql('two minutes');
+    should(world.stored('F3').laneId).equal('plan');
+  });
+
+  it('takes an older app’s answer to the shown ask once two minutes have passed since it changed', async () => {
+    // Arrange — the same change, read three minutes later
+    const world = fixture(
+      [
+        leads(),
+        leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }),
+        leads({ id: 'F3', laneId: 'todo', parent: { id: 'F1' } }),
+      ],
+      { gatesNow: '2026-10-30T10:03:00.000Z' },
+    );
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    for (const each of ['F2', 'F3'])
+      await world.board.act(each, BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    await world.board.act(
+      'F2',
+      BoardTaskActionRequestSchema.parse({ action: 'move', to: 'implement', reason: 'one more fix' }),
+      OWNER,
+    );
+
+    // Act
+    const outcome = await world.answer(raised.item.id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F3').laneId).not.equal('plan');
+  });
+
+  it('does not delay the first tap on an ask that came to a bare agenda', async () => {
+    // Arrange — one ask appears from nothing; nothing replaced another
+    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    await world.board.act('F2', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    should(openOf(world, 'lead', raised.item.id).gateAttachedChangedAt).be.undefined();
+
+    // Act
+    const outcome = await world.answer(raised.item.id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+  });
+
+  it('reads an older app’s lost-response retry of the first of two answers as that answer, not a conflict with the second', async () => {
+    // Arrange — A (F1) answered Done, then B (F2) answered Not good, on one thread, within two minutes
+    const world = fixture([leads(), leads({ id: 'F2' })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const id = raised.item.id;
+    await world.board.trigger('F1', 'release.running');
+    await world.board.trigger('F2', 'release.running');
+    const lead = { sessionId: 'lead' };
+    await world.answer(id, choose('Done'), { ...lead, cardAsk: 'gate:F1:tested:2' });
+    await world.answer(id, choose('Not good'), { ...lead, cardAsk: 'gate:F2:tested:2', note: 'it broke' });
+    should(openOf(world, 'lead', id).gateAttached).be.undefined();
+
+    // Act — the first tap's response was lost, and the old app sends it again
+    const retried = await world.answer(id, choose('Done'), { ...lead, gate: true });
+
+    // Assert — the repeat of A's answer comes back unchanged
+    should(retried).match({ handled: true, mutation: { ok: true, changed: false } });
   });
 
   it('takes an older app’s exact repeat once nothing is left to show, open agenda or closed', async () => {

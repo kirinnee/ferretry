@@ -209,7 +209,11 @@ each answer does to the card).
   Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
 - **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When that was the last
   open ask, the agenda stops being a blocker: it rests waiting on its ferret, or, if it is the daemon-opened card agenda
-  (`card-agenda:`) and holds no conversation, it closes. A thread that carries the ask stays as it was.
+  (`card-agenda:`) and holds no conversation, it closes. A ferret's thread that carried the ask goes back to the turn the
+  ask woke it out of (the owner's, with the question it had, or the park, rest or wait it was in), unless something has
+  happened to it since (the owner snoozed it, the ferret asked again), when it stays as it is. The ask remembers that turn
+  (`woke`); a thread from before that was recorded rests if it holds an answered ask, else stays as it is. The stage the
+  ask moved the agenda to is not undone: the stage is a log of what changed.
 - **It buzzes once**, when the ask is put on. An agenda is left out of a stop's push only while its sole open items are
   card asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).
 - **Not needed.** The owner's Not needed on the card's own agenda (`card-agenda:`, or a converted gate item) means they
@@ -220,7 +224,11 @@ each answer does to the card).
   `cardAsk`. Such an answer is to the ask the mirror shows. The app sends `cardAsk` from this version on, naming the ask it
   drew; one that does not is guarded by the daemon: while an ask on that agenda was answered with the same receipt (the
   choice, words and files) in the last two minutes, a no-`cardAsk` answer is never applied to another ask, whenever
-  that ask was put on — it is refused `409 gate_moved_on`. With no ask left to show, an exact repeat of that answer
+  that ask was put on — it is refused `409 gate_moved_on`. The same goes for any no-`cardAsk` answer in the two minutes
+  after the shown ask took another one's place (answered or withdrawn elsewhere; the item's `gateAttachedChangedAt`,
+  never set when the first ask simply appears): the screen that sent it may still draw the first. The refusal says to
+  answer again in two minutes. When several asks were answered in that time, the repeat is read against the one whose
+  receipt it matches, else the latest. With no ask left to show, an exact repeat of that answer
   comes back unchanged, on an open or a closed agenda, so a retry after a lost response succeeds. A
   daemon that puts card asks lists `agenda.card-asks.1` on `GET /v1/health`; an older one raised standalone gate items
   (`gate`, deprecated), which no daemon raises any more.

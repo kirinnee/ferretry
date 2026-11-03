@@ -7,6 +7,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import {
+  agendaState,
   type BoardTask,
   cardAgendaReference,
   cardAskReference,
@@ -365,17 +366,38 @@ describe('card asks across writes and restarts', () => {
     should((await openItems(daemon)).items).have.length(1);
   });
 
-  it('withdraws the open ask when the card leaves the gate on the board, and keeps the agenda', async () => {
+  it('withdraws the open ask when the card leaves the gate on the board, and closes the card agenda nobody talked on', async () => {
     // Arrange
     const { daemon, item } = await atGate();
 
     // Act — the owner drags it back on the Board
     await daemon.board.act('F1', { action: 'move', to: 'implement', reason: 'one more fix' }, { kind: 'owner' });
 
-    // Assert
+    // Assert — nothing is left to answer, so nothing is left in Needs you
+    const listed = await openItems(daemon);
+    should(listed.items.map(each => each.id)).not.containEql(item.id);
+    should(listed.resolved.map(each => each.id)).containEql(item.id);
+  });
+
+  it('withdraws the open ask and rests the card agenda, keeping it, when the owner talked on it', async () => {
+    // Arrange — the owner said something on the card's agenda
+    const { daemon, item } = await atGate();
+    const talked = await daemon.agenda.answer(
+      'grandchild',
+      item.id,
+      { kind: 'open-question', answer: 'looks odd' },
+      { kind: 'human' },
+    );
+    if (!talked.ok) throw new Error(talked.error.message);
+
+    // Act
+    await daemon.board.act('F1', { action: 'move', to: 'implement', reason: 'one more fix' }, { kind: 'owner' });
+
+    // Assert — it stays, with no ask, resting on its ferret
     const after = await theAgenda(daemon, item.id);
     should(after.cardAsks).be.undefined();
     should(after.gateAttached).be.undefined();
+    should(agendaState(after).state).equal('resting');
   });
 
   it('stays silent for an internal card, and its lead passes the gate itself', async () => {

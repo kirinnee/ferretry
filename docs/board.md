@@ -1009,7 +1009,8 @@ ferret marks it done once nothing more is expected.
 
 **Leaving.** A card that leaves the gate any other way — the owner's move on the Board, a drop, a refile — has its open
 ask withdrawn quietly. If that was the last open ask, the agenda rests waiting on its ferret, or closes when it is the
-daemon-opened card agenda with no conversation; a thread that carries the ask stays as it was. A Not good conversation raised before card asks
+daemon-opened card agenda with no conversation; a ferret's thread that carried it goes back to the turn the ask woke it out of
+(the owner's, or the park, rest or wait it was in), unless it has moved on since. A Not good conversation raised before card asks
 (`gate-followup:`) still closes by itself when the card next reaches a gate, unless it is still going with the owner or
 now carries the ask.
 
@@ -1083,8 +1084,8 @@ no longer drawn as the owner's action. A lane the owner renamed keeps its name; 
 (an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
 ([The board is opt-in](#the-board-is-opt-in), &F291). A Not good takes files only on a machine that reports
 `agenda.gate.attachments.1`. An app that predates card asks answers the ask `gateAttached` shows and names none: a
-answer with the same receipt given in the last two minutes is never applied to another ask on that agenda
-(`409 gate_moved_on`); with no ask left to show, an exact repeat comes back unchanged. The app now names the ask. An answered ask is remembered only as long as the agenda keeps it
+answer with the same receipt given in the last two minutes, or in the two minutes after the shown ask took another one's place, is never
+applied to another ask on that agenda (`409 gate_moved_on`); with no ask left to show, an exact repeat comes back unchanged. The app now names the ask. An answered ask is remembered only as long as the agenda keeps it
 (the newest 16 answered asks of an open agenda, `MAX_AGENDA_RESOLUTIONS` closed agendas).
 
 ## Activity and staleness

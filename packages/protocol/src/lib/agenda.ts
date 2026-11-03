@@ -1089,6 +1089,21 @@ export const AgendaCardAskAnswerSchema = z.object({
 export type AgendaCardAskAnswer = z.infer<typeof AgendaCardAskAnswerSchema>;
 
 /**
+ * WHAT A CARD ASK WOKE: the turn a ferret's thread was in when the ask was put on it (since when it waited on the owner,
+ * or the park, rest or wait on its ferret the ask ended), so the thread goes back to exactly that if the ask is
+ * withdrawn unanswered. Only on a ferret's own thread; the card's agenda the daemon opened has nothing to go back to.
+ */
+export const AgendaCardAskWokeSchema = z.object({
+  waitingSince: InstantSchema,
+  parked: AgendaParkedSchema.optional(),
+  resting: AgendaRestingSchema.optional(),
+  waitingOn: z.literal('ferret').optional(),
+  askedAt: InstantSchema.optional(),
+  waitingFor: z.enum(['info', 'discussion']).optional(),
+});
+export type AgendaCardAskWoke = z.infer<typeof AgendaCardAskWokeSchema>;
+
+/**
  * ONE CARD ASK: the card's gate as it stands (the card, its lane, the entry that put it there and the lane's
  * options), when it was put on this agenda, the card's How to test, and — once the owner answered — their answer.
  * Open while it has no answer. Only the daemon writes one; only the owner answers one.
@@ -1096,6 +1111,8 @@ export type AgendaCardAskAnswer = z.infer<typeof AgendaCardAskAnswerSchema>;
 export const AgendaCardAskSchema = z.object({
   gate: AgendaGateSchema,
   at: InstantSchema,
+  /** The turn this ask woke the thread out of (`AgendaCardAskWoke`); absent on the card's own agenda and on an ask from before it was kept. */
+  woke: AgendaCardAskWokeSchema.optional(),
   /** The card's How to test, as written (Markdown): what the owner tries before they answer. */
   howToTest: z.string().max(MAX_AGENDA_BODY_LENGTH).optional(),
   answer: AgendaCardAskAnswerSchema.optional(),
@@ -1230,6 +1247,12 @@ const AgendaItemBaseShape = {
    * on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
    */
   gateAttached: AgendaGateSchema.optional(),
+  /**
+   * When `gateAttached` last CHANGED FROM one ask to another (the shown one answered or withdrawn, the next taking its
+   * place): an old app still showing the first would answer the second without the owner seeing it, so the daemon
+   * refuses an answer from an app that names no ask for a short while after. Absent when the mirror never replaced one.
+   */
+  gateAttachedChangedAt: InstantSchema.optional(),
   /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
   cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
   /**

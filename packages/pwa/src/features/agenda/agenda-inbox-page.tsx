@@ -2009,7 +2009,7 @@ export function AgendaInboxPage({
                         label,
                         sent.reason,
                         gateWhy.action.kind === 'respond' && gateWhy.action.gate === true
-                          ? (deck[0].item.gateAttached ?? true)
+                          ? (gateWhy.action.cardAsk ?? deck[0].item.gateAttached ?? true)
                           : false,
                         from === null || sent.attachmentIds.length === 0
                           ? undefined

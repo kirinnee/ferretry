@@ -332,6 +332,15 @@ const agendaCases: SchemaCase[] = [
     },
   },
   {
+    name: 'card ask woke',
+    schema: agenda.AgendaCardAskWokeSchema,
+    value: {
+      waitingSince: '2026-07-30T09:00:00.000Z',
+      parked: { reason: 'replied', at: '2026-07-30T09:00:00.000Z' },
+      resting: { sub: 'waiting-on-ferret', at: '2026-07-30T09:00:00.000Z' },
+    },
+  },
+  {
     name: 'card ask',
     schema: agenda.AgendaCardAskSchema,
     value: {

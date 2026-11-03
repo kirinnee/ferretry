@@ -100,11 +100,14 @@ export const gateAsksWords = (item: AgendaItem, action: InboxAction): boolean =>
 export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] | undefined =>
   item.gate.options.find(option => option.outcome === 'reopen-with-agenda');
 
-/** The gate's answer as the action to send: the choice, and the owner's words as its note. */
+/**
+ * The gate's answer as the action to send: the choice, and the owner's words as its note. `attached` marks it as the
+ * answer to the card ask an older app is shown; an ask's gate or its reference names which one the owner was looking at.
+ */
 export const gateAnswerAction = (
   label: string,
   words: string,
-  attached: boolean | AgendaGate = false,
+  attached: boolean | string | AgendaGate = false,
   attachments?: BoardReopenAttachments,
 ): InboxAction => {
   const note = words.trim();
@@ -115,6 +118,7 @@ export const gateAnswerAction = (
     ...(note === '' ? {} : { note }),
     ...(attached === false ? {} : { gate: true as const }),
     ...(typeof attached === 'object' ? { cardAsk: gateReference(attached) } : {}),
+    ...(typeof attached === 'string' ? { cardAsk: attached } : {}),
     ...(attachments === undefined ? {} : { attachments }),
   };
 };

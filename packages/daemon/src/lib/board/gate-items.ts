@@ -283,19 +283,29 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
  */
 const askOf = (item: AgendaItem | ResolvedAgendaItem, answer: GateAnswer, now: number): AgendaCardAsk | undefined => {
   if (answer.cardAsk !== undefined) return cardAskOf(item, answer.cardAsk);
-  return mirroredCardAsk(item) ?? answeredLast(item, now);
+  return mirroredCardAsk(item) ?? answeredLast(item, answer, now);
 };
 
-/** The ask answered last on an item, if that was within {@link LEGACY_REPLAY_MS} of `now`. */
-const answeredLast = (item: AgendaItem | ResolvedAgendaItem, now: number): AgendaCardAsk | undefined => {
+/**
+ * The ask answered within {@link LEGACY_REPLAY_MS} of `now` that this answer repeats — the one whose own answer says
+ * exactly what this does — else the one answered last, so a retry of an older answer is not read against a newer one.
+ */
+const answeredLast = (
+  item: AgendaItem | ResolvedAgendaItem,
+  answer: GateAnswer,
+  now: number,
+): AgendaCardAsk | undefined => {
   const recent = (item.cardAsks ?? []).filter(
     ask => ask.answer !== undefined && now - Date.parse(ask.answer.at) < LEGACY_REPLAY_MS,
   );
-  return recent.length === 0
-    ? undefined
-    : recent.reduce((one, other) =>
-        Date.parse(other.answer?.at ?? '') > Date.parse(one.answer?.at ?? '') ? other : one,
-      );
+  const repeated = recent.find(ask => {
+    const decision = decide(ask.gate, answer);
+    return !('code' in decision) && receiptOf(answer, decision) === ask.answer?.receipt;
+  });
+  if (repeated !== undefined || recent.length === 0) return repeated;
+  return recent.reduce((one, other) =>
+    Date.parse(other.answer?.at ?? '') > Date.parse(one.answer?.at ?? '') ? other : one,
+  );
 };
 
 /** Whether the answer is to a card ask at all: it names one, or says it picks the shown one's option. */
@@ -533,7 +543,9 @@ export class GateItems implements CardWriteObserver {
    * An app that predates card asks names no ask: it answers the one `gateAttached` shows. When an ask on this agenda
    * was answered moments ago with these very words, this answer is that one retried or tapped twice — whenever the
    * shown ask came to the agenda, since the owner may well not have seen it — and is refused rather than spent on an
-   * ask they never saw. (An app that names its ask, `agenda.card-asks.1`, is never in doubt.)
+   * ask they never saw. So is an answer within the same two minutes of the shown ask taking another one's place
+   * (`gateAttachedChangedAt`): the screen that sent it may still draw the first. (An app that names its ask,
+   * `agenda.card-asks.1`, is never in doubt.)
    */
   private legacyRepeat(
     answer: GateAnswer,
@@ -546,10 +558,19 @@ export class GateItems implements CardWriteObserver {
     const earlier = (item.cardAsks ?? []).find(
       each => each.answer?.receipt === receipt && now - Date.parse(each.answer.at) < LEGACY_REPLAY_MS,
     );
-    if (earlier === undefined) return undefined;
+    if (earlier !== undefined) {
+      return {
+        code: 'moved-on',
+        message: `${formatTaskRef({ id: earlier.gate.cardId })} was just answered on ${answer.id}; it now asks about ${formatTaskRef({ id: shown.gate.cardId })}: read it, and answer again in two minutes`,
+      };
+    }
+    // The shown ask took another one's place a moment ago (answered or withdrawn elsewhere): a screen that still draws
+    // the old one has not shown the owner this one.
+    const replaced = item.gateAttachedChangedAt;
+    if (replaced === undefined || now - Date.parse(replaced) >= LEGACY_REPLAY_MS) return undefined;
     return {
       code: 'moved-on',
-      message: `${formatTaskRef({ id: earlier.gate.cardId })} was just answered on ${answer.id}; it now asks about ${formatTaskRef({ id: shown.gate.cardId })}: read it, and answer again in a moment`,
+      message: `${answer.id} just changed to ask about ${formatTaskRef({ id: shown.gate.cardId })}: read it, and answer again in two minutes`,
     };
   }
 

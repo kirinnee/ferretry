@@ -270,6 +270,7 @@ export type AgendaCarried = Pick<
   | 'stages'
   | 'cardAsks'
   | 'gateAttached'
+  | 'gateAttachedChangedAt'
 >;
 
 const CARRIED_FIELDS = [
@@ -289,6 +290,7 @@ const CARRIED_FIELDS = [
   // An agenda carried to another ferret takes its card asks with it: they are the card's, not the ferret's.
   'cardAsks',
   'gateAttached',
+  'gateAttachedChangedAt',
 ] as const satisfies readonly (keyof AgendaCarried)[];
 
 /** The carried fields an item has, and only those: an absent one stays absent. */
