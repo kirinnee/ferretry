@@ -1,7 +1,7 @@
 import { AGENDA_REST_NUDGE_MS, type AgendaItem, agendaState, agendaTitle } from '@ferretry/protocol';
 import type { AgendaSweepTimers } from './resurfacer.ts';
 import type { AgendaLedgerRepository, AgendaService } from './service.ts';
-import { agendaSnapshot, isGateFollowupItem } from './state-machine.ts';
+import { type AgendaNudgeTarget, agendaSnapshot, isGateFollowupItem } from './state-machine.ts';
 import { AGENDA_NUDGE_MARK } from './turn-nudge.ts';
 
 /**
@@ -14,8 +14,12 @@ import { AGENDA_NUDGE_MARK } from './turn-nudge.ts';
  * - **One message per ferret per sweep, never a burst.** Every item of one ferret that is due goes in ONE message.
  * - **An item migrated from before Resting is nudged once** (`resting.migrated`), never again, so the upgrade's
  *   backlog of old replies costs each ferret one message.
- * - **Exactly once per due nudge.** The send id names each item and its nudge count, so a sweep repeated after a
- *   restart (sent, but not yet recorded) is one message; the record moves the item's backoff on.
+ * - **Exactly once per due nudge.** The send id names the first item due, the rest it is in (when it began) and its
+ *   nudge count, so the same nudge in a later reply cycle is a different message. The Warden records that id on every
+ *   item of the message BEFORE it sends, and a sweep after a restart resumes the recorded message: whichever items
+ *   the crash left unrecorded are recorded under the same id, which the send path deduplicates, so no item is nudged
+ *   twice. The record moves each item's backoff on, and only the rest it was sent for: a reply that arrived while the
+ *   send was in flight starts a new rest, with its own first nudge.
  * - **Off with the turn-end check** (the machine's `attentionNudge`), and journalled as a nudge with the items named.
  *
  * Pure except {@link AgendaRestNudger}, which reads, sends and records through its ports.
@@ -64,9 +68,20 @@ export function restNudgeMessage(items: readonly AgendaItem[], binary: string): 
   return `${AGENDA_NUDGE_MARK} The owner replied on ${named} and is waiting on you. Answer ${them}: \`${binary} agenda answer ${first} "<text>"\` (back to their list), \`${binary} agenda rest ${first} --why "<what you are doing>"\` while you work on it, or \`${binary} agenda done ${first}\` when nothing more is expected.`;
 }
 
-/** The send id of one nudge: the session, and each item with the nudge it is. */
+/** What the Warden saw of one resting item: the rest it is in, and the nudges it has had. */
+export function restNudgeTarget(item: AgendaItem): AgendaNudgeTarget {
+  const view = agendaState(item);
+  return { id: item.id, since: view.state === 'resting' ? view.since : '', nudges: item.resting?.nudges ?? 0 };
+}
+
+/**
+ * The send id of one nudge message: the session, and the FIRST item due with the rest it is in and the nudge it is.
+ * That triple belongs to exactly one message, ever — a later reply cycle of the same item has another rest.
+ */
 export function restNudgeSendId(sessionId: string, items: readonly AgendaItem[]): string {
-  return `agenda-rest-nudge-${sessionId}-${items.map(item => `${item.id}.${(item.resting?.nudges ?? 0) + 1}`).join('-')}`;
+  const first = items[0];
+  const target = first === undefined ? undefined : restNudgeTarget(first);
+  return `agenda-rest-nudge-${sessionId}-${target?.id ?? 'none'}.${Date.parse(target?.since ?? '')}.${(target?.nudges ?? 0) + 1}`;
 }
 
 /** What the nudge reads and how it sends. */
@@ -87,7 +102,7 @@ export interface AgendaRestNudgePorts {
 export class AgendaRestNudger {
   constructor(
     private readonly boards: Pick<AgendaLedgerRepository, 'read'>,
-    private readonly agenda: Pick<AgendaService, 'nudged'>,
+    private readonly agenda: Pick<AgendaService, 'nudging' | 'nudged'>,
     private readonly ports: AgendaRestNudgePorts,
     private readonly sessionIds: () => readonly string[],
     private readonly timers: AgendaSweepTimers,
@@ -116,12 +131,14 @@ export class AgendaRestNudger {
         if (ledger === null) continue;
         const due = restNudgesDue(agendaSnapshot(ledger).items, now);
         if (due.length === 0) continue;
-        await this.ports.send(sessionId, restNudgeSendId(sessionId, due), restNudgeMessage(due, this.binary));
-        for (const item of due) await this.agenda.nudged(sessionId, item.id);
+        const batch = await this.plan(sessionId, due);
+        if (batch === undefined) continue;
+        await this.ports.send(sessionId, batch.sendId, restNudgeMessage(batch.items, this.binary));
+        for (const item of batch.items) await this.agenda.nudged(sessionId, restNudgeTarget(item));
         await this.ports
           .record(
             sessionId,
-            due.map(item => `waiting on you !${item.id}`),
+            batch.items.map(item => `waiting on you !${item.id}`),
           )
           .catch(() => undefined);
         nudged += 1;
@@ -130,6 +147,24 @@ export class AgendaRestNudger {
       }
     }
     return nudged;
+  }
+
+  /**
+   * The one message this sweep sends. A message already decided on (an item carries its send id) is finished first,
+   * with the items it still has to reach; otherwise the due items become a new message, recorded before it is sent.
+   */
+  private async plan(
+    sessionId: string,
+    due: readonly AgendaItem[],
+  ): Promise<{ readonly sendId: string; readonly items: readonly AgendaItem[] } | undefined> {
+    const decided = due.find(item => item.resting?.nudgeSend !== undefined)?.resting?.nudgeSend;
+    if (decided !== undefined) {
+      return { sendId: decided, items: due.filter(item => item.resting?.nudgeSend === decided) };
+    }
+    const sendId = restNudgeSendId(sessionId, due);
+    const marked = await this.agenda.nudging(sessionId, due.map(restNudgeTarget), sendId);
+    if (!marked.ok) throw new Error(marked.error.message);
+    return marked.changed ? { sendId, items: due } : undefined;
   }
 
   private async tick(): Promise<void> {

@@ -4,6 +4,7 @@ import should from 'should';
 import {
   AGENDA_REST_NUDGE_MAX_MS,
   AgendaRestNudger,
+  type AgendaRestNudgePorts,
   REST_NUDGE_SWEEP_MS,
   restNudgeDueAt,
   restNudgeMessage,
@@ -102,7 +103,7 @@ describe('when a resting item’s nudge is due', () => {
     should(message).containEql('fy agenda answer A1');
     should(message).containEql('fy agenda rest A1 --why');
     should(message).containEql('fy agenda done A1');
-    should(restNudgeSendId(SESSION, items)).equal(`agenda-rest-nudge-${SESSION}-A1.1-A2.2`);
+    should(restNudgeSendId(SESSION, items)).equal(`agenda-rest-nudge-${SESSION}-A1.${Date.parse(REPLIED)}.1`);
   });
 });
 
@@ -173,8 +174,8 @@ describe('the silence nudge sweep', () => {
     // Assert
     should([early, due, tooSoon, backoff]).deepEqual([0, 1, 0, 1]);
     should(sent).have.length(2);
-    should(sent[0]?.sendId).equal(`agenda-rest-nudge-${SESSION}-A1.1-A2.1`);
-    should(sent[1]?.sendId).equal(`agenda-rest-nudge-${SESSION}-A1.2-A2.2`);
+    should(sent[0]?.sendId).equal(`agenda-rest-nudge-${SESSION}-A1.${Date.parse(REPLIED)}.1`);
+    should(sent[1]?.sendId).equal(`agenda-rest-nudge-${SESSION}-A1.${Date.parse(REPLIED)}.2`);
     should(recorded[0]?.asks).deepEqual(['waiting on you !A1', 'waiting on you !A2']);
     const board = await repository.read(SESSION);
     const items = board?.entries.map(entry => entry.item) ?? [];
@@ -243,6 +244,149 @@ describe('the silence nudge sweep', () => {
   });
 });
 
+describe('the silence nudge across reply cycles, restarts and replies during a send', () => {
+  /** A send port the way the durable paths behave: the same id twice is one message. */
+  const dedupingPorts = (delivered: string[], hold?: { gate: Promise<void>; entered: () => void }) => ({
+    enabled: async () => true,
+    send: async (_sessionId: string, sendId: string) => {
+      hold?.entered();
+      await hold?.gate;
+      if (!delivered.includes(sendId)) delivered.push(sendId);
+    },
+    record: async () => undefined,
+  });
+
+  const rig = async (now: { value: string }) => {
+    const repository = new MemoryRepository();
+    const agenda = new AgendaService(
+      repository,
+      { now: () => now.value },
+      { has: async () => true },
+      { raised: async () => undefined },
+    );
+    const ask = {
+      source: 'agent-raised' as const,
+      sourceRef: null,
+      title: 'Region',
+      subject: 'Which region?',
+      why: 'w',
+      premise: 'p',
+      context: 'c',
+      howToResolve: 'h',
+      kind: 'reply' as const,
+      ask: { kind: 'open-question' as const },
+    };
+    now.value = at(-60);
+    await agenda.raise(SESSION, ask, AGENT);
+    await agenda.raise(SESSION, { ...ask, subject: 'Which cluster?', title: 'Cluster' }, AGENT);
+    now.value = REPLIED;
+    await agenda.reply(SESSION, 'A1', HUMAN, 'what is EU?');
+    await agenda.reply(SESSION, 'A2', HUMAN, 'and the cluster?');
+    const nudgerOver = (service: Pick<AgendaService, 'nudging' | 'nudged'>, ports: AgendaRestNudgePorts) =>
+      new AgendaRestNudger(
+        repository,
+        service,
+        ports,
+        () => [SESSION],
+        { schedule: () => undefined, cancel: () => undefined },
+        () => now.value,
+        'fy',
+      );
+    const restingOf = async (id: string) =>
+      (await repository.read(SESSION))?.entries.find(entry => entry.item.id === id)?.item.resting;
+    return { agenda, nudgerOver, restingOf };
+  };
+
+  it('should send a later reply cycle’s nudge under its own id, so a deduplicating send port still delivers it', async () => {
+    // Arrange — A1 is nudged once, the ferret answers, the owner replies again
+    const now = { value: REPLIED };
+    const { agenda, nudgerOver, restingOf } = await rig(now);
+    const delivered: string[] = [];
+    const nudger = nudgerOver(agenda, dedupingPorts(delivered));
+    now.value = at(31);
+    await nudger.sweep();
+    now.value = at(35);
+    await agenda.edit(SESSION, 'A1', { questionAnswer: 'EU is Frankfurt.' }, AGENT);
+    await agenda.edit(SESSION, 'A2', { questionAnswer: 'The big one.' }, AGENT);
+    now.value = at(100);
+    await agenda.reply(SESSION, 'A1', HUMAN, 'and Asia?');
+
+    // Act
+    now.value = at(131);
+    const swept = await nudger.sweep();
+
+    // Assert
+    should(swept).equal(1);
+    should(delivered).have.length(2);
+    should(new Set(delivered).size).equal(2);
+    should((await restingOf('A1'))?.nudges).equal(1);
+  });
+
+  it('should resume a half-recorded two-item nudge under its first id after a restart, and never nudge twice', async () => {
+    // Arrange — the send went out, A1 was recorded, and the daemon died before A2 was
+    const now = { value: REPLIED };
+    const { agenda, nudgerOver, restingOf } = await rig(now);
+    const delivered: string[] = [];
+    const dying = nudgerOver(
+      {
+        nudging: (sessionId, items, sendId) => agenda.nudging(sessionId, items, sendId),
+        nudged: async (sessionId, target) => {
+          if (target.id === 'A2') throw new Error('the daemon stopped');
+          return await agenda.nudged(sessionId, target);
+        },
+      },
+      dedupingPorts(delivered),
+    );
+    now.value = at(31);
+    await dying.sweep();
+
+    // Act — a restarted daemon sweeps again
+    now.value = at(32);
+    const restarted = nudgerOver(agenda, dedupingPorts(delivered));
+    const swept = await restarted.sweep();
+
+    // Assert
+    should(swept).equal(1);
+    should(delivered).have.length(1);
+    should((await restingOf('A1'))?.nudges).equal(1);
+    should((await restingOf('A2'))?.nudges).equal(1);
+    should((await restingOf('A2'))?.nudgeSend).be.undefined();
+  });
+
+  it('should leave a newer reply’s clock alone when a held nudge completes after the owner replied again', async () => {
+    // Arrange — A1's nudge is in flight (the send waits) when the owner replies on it again
+    const now = { value: REPLIED };
+    const { agenda, nudgerOver, restingOf } = await rig(now);
+    const delivered: string[] = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const sending = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const nudger = nudgerOver(agenda, dedupingPorts(delivered, { gate, entered }));
+    now.value = at(31);
+    const pending = nudger.sweep();
+    await sending;
+    now.value = at(33);
+    await agenda.reply(SESSION, 'A1', HUMAN, 'one more thing');
+
+    // Act
+    release();
+    await pending;
+
+    // Assert — the new rest has no nudge recorded, so its first one is still 30 minutes after the reply
+    const fresh = await restingOf('A1');
+    should(fresh?.at).equal(at(33));
+    should(fresh?.nudges).be.undefined();
+    should(fresh?.nudgedAt).be.undefined();
+    now.value = at(64);
+    should(await nudgerOver(agenda, dedupingPorts(delivered)).sweep()).equal(1);
+  });
+});
+
 describe('the silence nudge timer', () => {
   it('should sweep at once, then every minute, and cancel its timer on stop', async () => {
     // Arrange
@@ -252,7 +396,10 @@ describe('the silence nudge timer', () => {
     let sweeps = 0;
     const nudger = new AgendaRestNudger(
       new MemoryRepository(),
-      { nudged: async () => ({ ok: false, error: { code: 'invalid', message: 'unused' } }) },
+      {
+        nudging: async () => ({ ok: false, error: { code: 'invalid', message: 'unused' } }),
+        nudged: async () => ({ ok: false, error: { code: 'invalid', message: 'unused' } }),
+      },
       {
         enabled: async () => {
           sweeps += 1;

@@ -250,6 +250,13 @@ const agendaCarriedOf = (item: AgendaCarried): AgendaCarried =>
     CARRIED_FIELDS.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]])),
   ) as AgendaCarried;
 
+/** One RESTING item a nudge is about: which rest (`since`) and how many nudges it had had when the Warden looked. */
+export interface AgendaNudgeTarget {
+  readonly id: AgendaId;
+  readonly since: string;
+  readonly nudges: number;
+}
+
 /**
  * What an edit may change: the writing, the stage, and — REPLACING the ask (`askReplaced`) — the ask, the kind, the
  * answers and the questions; never the reason or who raised the item.
@@ -366,10 +373,28 @@ export type AgendaCommand =
       readonly at: string;
     }
   | {
-      /** The Warden nudged the ferret about this RESTING item (`rest-nudge.ts`): its nudge record moves on. Daemon-only. */
+      /**
+       * The Warden decided to nudge the ferret about these RESTING items with one message, `sendId`: each records it
+       * BEFORE the send, so a restart resumes that very message. Each names the rest it saw (`since`, `nudges`); one
+       * that has moved on is left alone. Daemon-only.
+       */
+      readonly action: 'nudging';
+      readonly actor: AgendaActor;
+      readonly items: readonly AgendaNudgeTarget[];
+      readonly sendId: string;
+      readonly at: string;
+    }
+  | {
+      /**
+       * The Warden nudged the ferret about this RESTING item (`rest-nudge.ts`): its nudge record moves on. It names the
+       * rest it nudged for (`since`, `nudges`): a delivery that finishes after the owner replied again, or the ferret
+       * answered, records nothing on the newer rest. Daemon-only.
+       */
       readonly action: 'nudged';
       readonly actor: AgendaActor;
       readonly id: AgendaId;
+      readonly since: string;
+      readonly nudges: number;
       readonly at: string;
     }
   | {
@@ -1003,6 +1028,8 @@ function transition(ledger: AgendaLedger, command: AgendaCommand): AgendaMutatio
       return surface(ledger, command);
     case 'rest':
       return rest(ledger, command);
+    case 'nudging':
+      return nudging(ledger, command);
     case 'nudged':
       return nudged(ledger, command);
     case 'snooze':
@@ -1050,6 +1077,7 @@ type DiscussCommand = Extract<AgendaCommand, { action: 'discuss' }>;
 type ReplyCommand = Extract<AgendaCommand, { action: 'reply' }>;
 type SurfaceCommand = Extract<AgendaCommand, { action: 'surface' }>;
 type RestCommand = Extract<AgendaCommand, { action: 'rest' }>;
+type NudgingCommand = Extract<AgendaCommand, { action: 'nudging' }>;
 type NudgedCommand = Extract<AgendaCommand, { action: 'nudged' }>;
 type SnoozeCommand = Extract<AgendaCommand, { action: 'snooze' }>;
 type UnsnoozeCommand = Extract<AgendaCommand, { action: 'unsnooze' }>;
@@ -1315,6 +1343,14 @@ function addressById(
       return failure(
         'ask_changed',
         `${command.id} asks something else now: the ferret replaced the ask you answered, so nothing was sent; read it again and answer the new ask`,
+      );
+    }
+    // An answer that names no version cannot say which ask it answered: once the ferret has replaced the ask it may be
+    // the old one (a stale tab, an older app, the undo window), so the owner re-reads it. A ferret's own answer is its own.
+    if (command.askVersion === undefined && command.actor.kind === 'human' && (target.item.askVersion ?? 1) > 1) {
+      return failure(
+        'ask_changed',
+        `${command.id} asks something else now: the ferret replaced the ask, and this answer does not say which ask it answers, so nothing was sent; read it again and answer the new ask`,
       );
     }
     // The input form answers an input card, because the value never travels as an agenda answer.
@@ -1764,13 +1800,14 @@ function sameField(left: unknown, right: unknown): boolean {
 }
 
 /**
- * Whether an edit REPLACES THE ASK (docs/agenda.md § Editable asks): a new ask, kind or answers, or questions that
- * are added, removed or given other options. Rewording a question, or restating what the item says, is no new ask.
+ * Whether an edit REPLACES THE ASK (docs/agenda.md § Editable asks): a new ask or answers, questions that are added,
+ * removed or given other options, or an explicit `kind` — even the kind the item already has, which is how a ferret
+ * says "this is a different question". Rewording a question, or restating what the item says, is no new ask.
  */
 function askReplaced(item: AgendaItem, patch: EditAgendaPatch): boolean {
   return (
     (patch.ask !== undefined && !sameField(patch.ask, item.ask)) ||
-    (patch.kind !== undefined && patch.kind !== agendaCardKind(item)) ||
+    patch.kind !== undefined ||
     (patch.answers !== undefined && !sameField(patch.answers, item.answers)) ||
     (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(item.questions))
   );
@@ -1800,16 +1837,15 @@ function placeOnReturn(command: EditCommand, item: AgendaItem): 'old' | 'fresh' 
   return command.back === true || askReplaced(item, command.patch) || working ? 'fresh' : 'old';
 }
 
-/** Why an edit may not replace this item's ask, or `undefined` when it may. */
-function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaActor): string | undefined {
-  if (item.confirms !== undefined) return `${item.id} confirms a configuration change: its answers are fixed`;
-  if (item.notice === true || item.kind === 'input' || patch.kind === 'input') {
-    return `${item.id} has no ask to replace`;
-  }
-  // A new kind with no ask of its own takes none of the old one: an old choice's options never answer an explainer.
-  const { ask: _ask, answers: _answers, ...rest } = item;
-  const next = {
-    ...(kindMoved(item, patch) ? rest : item),
+/** The shape fields an item of one kind cannot carry over to another: a new kind takes only what its edit gives. */
+const REPLACED_SHAPE = ['ask', 'answers', 'questions', 'optionDetails', 'fields', 'steps'] as const;
+
+/** The item an edit that REPLACES the ask leaves: a moved kind drops the old shape, and the edit's own fields land. */
+function composeReplacement(item: AgendaItem, patch: EditAgendaPatch): AgendaItem {
+  const moved = kindMoved(item, patch);
+  const { ask: _ask, answers: _answers, questions: _q, optionDetails: _o, fields: _f, steps: _s, ...rest } = item;
+  return {
+    ...(moved ? rest : item),
     ...(patch.ask === undefined ? {} : { ask: patch.ask }),
     ...(patch.kind === undefined ? {} : { kind: patch.kind }),
     ...(patch.answers === undefined ? {} : { answers: patch.answers }),
@@ -1818,6 +1854,16 @@ function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaA
     ...(patch.fields === undefined ? {} : { fields: patch.fields }),
     ...(patch.steps === undefined ? {} : { steps: patch.steps }),
   };
+}
+
+/** Why an edit may not replace this item's ask, or `undefined` when it may. */
+function replaceProblem(item: AgendaItem, patch: EditAgendaPatch, actor: AgendaActor): string | undefined {
+  if (item.confirms !== undefined) return `${item.id} confirms a configuration change: its answers are fixed`;
+  if (item.notice === true || item.kind === 'input' || patch.kind === 'input') {
+    return `${item.id} has no ask to replace`;
+  }
+  // A new kind takes none of the old shape: an old choice's options never answer an explainer.
+  const next = composeReplacement(item, patch);
   const kind = agendaCardKind(next);
   if (next.ask === undefined && kind !== 'info') {
     return `a new ${kind} needs its ask: give it with the kind (\`--kind ${kind}\` with --option or --question)`;
@@ -1911,13 +1957,12 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   const patch = command.patch;
   // A replaced ask takes the ferret's old answer to the owner's question with it, unless the edit gives a new one.
   const dropsAnswer = replaces && patch.questionAnswer === undefined && item.questionAnswer !== undefined;
-  // A new kind that brings no ask (or answers) of its own leaves the old ones behind (`replaceProblem`).
+  // A new kind brings its own ask and shape: the old fields it does not re-give go, and the revision records them.
   const moved = replaces && kindMoved(item, patch);
   const clearing: (typeof EDITABLE_FIELDS)[number][] = [
     ...(patch.clear ?? []),
     ...(dropsAnswer ? (['questionAnswer'] as const) : []),
-    ...(moved && patch.ask === undefined ? (['ask'] as const) : []),
-    ...(moved && patch.answers === undefined ? (['answers'] as const) : []),
+    ...(moved ? REPLACED_SHAPE.filter(field => patch[field] === undefined) : []),
   ];
   const clears = clearing.filter(field => item[field] !== undefined);
   if (
@@ -1927,8 +1972,9 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   ) {
     return failure('invalid', `nothing to edit: give at least one of stage, ${EDITABLE_FIELDS.join(', ')}`);
   }
+  const composed = replaces ? composeReplacement(item, patch) : item;
   const optionDetailProblem = agendaOptionDetailProblems({
-    ...item,
+    ...composed,
     ...(patch.ask === undefined ? {} : { ask: patch.ask }),
     ...(patch.answers === undefined ? {} : { answers: patch.answers }),
     ...(patch.questions === undefined ? {} : { questions: patch.questions }),
@@ -1937,7 +1983,7 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   const fieldsProblem = agendaFormProblems({
     kind: patch.kind ?? agendaCardKind(item),
-    fields: patch.fields ?? item.fields,
+    fields: patch.fields ?? composed.fields,
   })[0];
   if (patch.fields !== undefined && fieldsProblem !== undefined) return failure('invalid', fieldsProblem);
   // Steps belong to a to-do alone: an edit that keeps the ask never gives them to a card of another shape.
@@ -1978,7 +2024,15 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
     ...(changed.length === 0 ? {} : { revisions: [...(item.revisions ?? []), revision].slice(-MAX_AGENDA_REVISIONS) }),
     ...stageFields,
     // A new ask: asked again, fresh, under the next version; the owner's answer to the old one is history.
-    ...(replaces ? { askVersion: (item.askVersion ?? 1) + 1, waitingSince: command.at, ownerAnswer: undefined } : {}),
+    // The answer that failed to reach the ferret answered the OLD ask: its Retry goes with it.
+    ...(replaces
+      ? {
+          askVersion: (item.askVersion ?? 1) + 1,
+          waitingSince: command.at,
+          ownerAnswer: undefined,
+          undelivered: undefined,
+        }
+      : {}),
   };
   const final: AgendaItem = handsBack
     ? { ...edited, history: withHistory(edited.history, { at: command.at, kind: 'updated' }) }
@@ -2204,19 +2258,55 @@ function snooze(ledger: AgendaLedger, command: SnoozeCommand): AgendaMutation {
   return replaceItem(ledger, item, command.at, 'parked');
 }
 
+/** The waiting-on-ferret item a Warden record is about, when it is still in the rest the Warden saw. */
+function restedFor(ledger: AgendaLedger, target: AgendaNudgeTarget) {
+  const entry = ledger.entries.filter(isActiveAgenda).find(each => each.item.id === target.id);
+  const view = entry === undefined ? undefined : agendaState(entry.item);
+  if (entry === undefined || view?.state !== 'resting' || view.sub !== 'waiting-on-ferret') return undefined;
+  const resting: AgendaResting = entry.item.resting ?? { sub: 'waiting-on-ferret', at: view.since };
+  // A newer rest (the owner replied again) or a nudge already recorded is not the one the Warden looked at.
+  return view.since === target.since && (resting.nudges ?? 0) === target.nudges ? { entry, resting } : undefined;
+}
+
+/**
+ * The Warden decided on ONE nudge message (`sendId`) for these resting items, before it sends it: each item records
+ * the id, so a sweep after a restart resumes that message — the same id, which the send path deduplicates — and not a
+ * second one for the items it did not get to record. An item that is no longer the rest the Warden saw is skipped.
+ */
+function nudging(ledger: AgendaLedger, command: NudgingCommand): AgendaMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the Warden records a nudge');
+  const marked = new Map<AgendaId, AgendaResting>();
+  for (const target of command.items) {
+    const rested = restedFor(ledger, target);
+    if (rested !== undefined && rested.resting.nudgeSend === undefined) {
+      marked.set(target.id, { ...rested.resting, nudgeSend: command.sendId });
+    }
+  }
+  if (marked.size === 0) return unchanged(ledger);
+  const next: AgendaLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry => {
+      if (entry.lifecycle !== 'active') return entry;
+      const resting = marked.get(entry.item.id);
+      return resting === undefined ? entry : { ...entry, item: { ...entry.item, resting } };
+    }),
+    updatedAt: command.at,
+  };
+  return success(next, true, 'nudged');
+}
+
 /**
  * The Warden nudged the ferret about a RESTING item waiting on it: the item records when, and how many times, so the
- * next nudge waits its backoff and a migrated item is never nudged twice. Only the daemon says so, and only of an
- * item still waiting on its ferret; anything else is left as it is.
+ * next nudge waits its backoff and a migrated item is never nudged twice. Only the daemon says so, and only of the
+ * rest it nudged for (`since`, `nudges`) — a rest that has moved on since is left as it is.
  */
 function nudged(ledger: AgendaLedger, command: NudgedCommand): AgendaMutation {
   if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the Warden records a nudge');
-  const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
-  const view = target === undefined ? undefined : agendaState(target.item);
-  if (target === undefined || view?.state !== 'resting' || view.sub !== 'waiting-on-ferret') return unchanged(ledger);
-  const resting: AgendaResting = target.item.resting ?? { sub: 'waiting-on-ferret', at: view.since };
+  const rested = restedFor(ledger, { id: command.id, since: command.since, nudges: command.nudges });
+  if (rested === undefined) return unchanged(ledger);
+  const { nudgeSend: _sent, ...resting } = rested.resting;
   const item: AgendaItem = {
-    ...target.item,
+    ...rested.entry.item,
     resting: { ...resting, nudgedAt: command.at, nudges: (resting.nudges ?? 0) + 1 },
   };
   return replaceItem(ledger, item, command.at, 'nudged');

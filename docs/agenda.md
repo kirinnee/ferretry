@@ -282,12 +282,15 @@ fields every item already carries, so an item from any daemon reads as exactly o
   (`AGENDA_REST_NUDGE_MS`) gets the Warden's nudge (`rest-nudge.ts`): ONE message per ferret naming every item due,
   `[attention check] The owner replied on !A5 «…» and is waiting on you…`, then again on a doubling backoff (1 h,
   2 h, … at most a day). It is off with the turn-end check (`attentionNudge` in `machine.yaml`), journalled as a
-  nudge with the items named, and sent under one send id per item and nudge count, so a sweep repeated after a
-  restart is one message. A `working` item and a snoozed one are never nudged; nor is a card the daemon raised.
+  nudge with the items named. Its send id names the resting episode (`resting.at`), not just the nudge count, so a
+  later reply cycle never reuses a delivered nudge's id; the batch is recorded on each item (`resting.nudgeSend`)
+  BEFORE it is sent, so a restart, or a failure after the first item was recorded, resumes that very message and
+  never sends a second; and the completion is checked against the episode and count it was decided on, so a reply
+  that arrives while the send is in flight keeps its own full 30 minutes. A `working` item and a snoozed one are never nudged; nor is a card the daemon raised.
 
 **What a Resting item stores.** The field every app reads stays `parked: { reason: 'replied', at }` (or
 `waitingOn: 'ferret'` for a request for more information), so an app from before Resting lists it under
-**Replied** and never as needing the owner. Beside it, `resting: { sub, at, why?, nudgedAt?, nudges?, migrated? }`
+**Replied** and never as needing the owner. Beside it, `resting: { sub, at, why?, nudgedAt?, nudges?, nudgeSend?, migrated? }`
 says what that field cannot: the sub-state, what the ferret is doing, and the nudge clock. `parked` is what says
 the item rests; a `resting` with nothing parked is dropped on the next write.
 
@@ -323,13 +326,30 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
 **A ferret's edit may REPLACE the ask**: its `ask`, `kind`, `answers` and `questions` (their options too). On the
 command line `fy agenda edit A5 --kind <kind> --option … --question …` composes the new ask as `add` does.
 
+- **What is a replacement.** An edit that names a `kind` (even the one the item already has: `--kind reply
+--summary "…"` is the ferret saying "this is a different question"), or that changes the options (`ask`,
+  `answers`, or `questions` with other options or another shape), replaces the ask. Rewording alone — the
+  summary, body, context, `questions` text over the same options, `--blocking` — is an ordinary edit: the ask, its
+  version and the item's place in the queue stay.
 - **A replaced ask is a new ask.** The item re-enters the queue as its one entry, fresh; `askVersion` moves on (1
   when absent); the edit is recorded as a revision (and a stage change when the kind moves). The owner's answer to
   the old ask (`ownerAnswer`) goes, and so does the ferret's old answer to their question unless the edit gives a
-  new one. A new kind with no ask of its own drops the old one (an explainer has no options).
+  new one. An answer that failed to deliver (`undelivered`, which the app offers as Retry) goes too: its payload
+  answers the old ask and must never be blessed with the new version. A new kind with no ask of its own drops the
+  old one (an explainer has no options).
+- **A kind change drops the shape of the old kind.** The old `ask`, `answers`, `questions`,
+  `optionDetails`, `fields` and `steps` do not carry over (a question becomes an info card, a todo a reply, a
+  form anything else); the replacement is validated as the composed item, and the revision records what was
+  removed. The edit may give the new kind its own.
 - **An answer to the old ask is refused `409 ask_changed`**, never applied to the new options: an answer request
-  may name the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
-  window, a held send). One that names none is not checked.
+  names the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
+  window, a held send). **The app always names it**: it stamps the version of the ask on screen when the answer
+  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch (to a daemon
+  that reports `agenda.asks.1`; an older daemon never receives the field, and has no replaced asks to confuse).
+  An answer that names none is checked only where it cannot be stale: a **human's** answer with no version is
+  refused `409 ask_changed` once the ask has been replaced, so an older app is locked out of a replaced ask
+  until it reloads; the answer of a ferret's own `done --choice`, and any answer to an ask never replaced, are
+  taken as before.
 - **A stale "Answer to your question" clears**: `fy agenda edit A5 --clear-question-answer`.
 - A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input card has none: those
   are refused.
@@ -1206,7 +1226,8 @@ A daemon that rests items on an answer and takes the channel's requests reports 
 before reads every item. The request fields are refused as malformed by a daemon without their feature, so the CLI
 checks it first and says the daemon needs an update: `stage`, `whereWeAre`, `detail` and the `rest` action need
 `agenda.channel.1`; an edit's `ask`/`kind`/`answers`, `clear: ['questionAnswer']` and an answer's `askVersion` need
-`agenda.asks.1`. `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
+`agenda.asks.1`. An older app that sends no `askVersion` is refused only for a replaced ask (see
+[Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
 
 ### An older app keeps reading the board

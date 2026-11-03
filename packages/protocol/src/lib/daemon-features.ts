@@ -99,8 +99,8 @@ export const DAEMON_FEATURES = {
   agendaChannel: 'agenda.channel.1',
   /**
    * EDITABLE ASKS (docs/agenda.md § Editable asks): an edit may REPLACE the ask (`ask`, `kind`, `answers`, questions
-   * with other options) and clear `questionAnswer`, and an answer may name the `askVersion` it was given to and is
-   * refused `409 ask_changed` past it. A daemon without this name refuses all three as malformed, so a client sends
+   * with other options) and clear `questionAnswer`, and an answer names the `askVersion` it was given to and is
+   * refused `409 ask_changed` past it (a human's unversioned answer to a replaced ask too). A daemon without this name refuses all three as malformed, so a client sends
    * them only to one that reports it.
    */
   agendaAsks: 'agenda.asks.1',

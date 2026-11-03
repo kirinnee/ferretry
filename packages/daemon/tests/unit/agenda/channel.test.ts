@@ -298,6 +298,137 @@ describe('a replaced ask', () => {
     should(cleared.item?.askVersion).be.undefined();
   });
 
+  const reoptioned = (ledger: AgendaLedger, at = T3) =>
+    apply(ledger, {
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch: { kind: 'choice', ask: { kind: 'multiple-choice', options: [{ label: 'EU' }, { label: 'Asia' }] } },
+      at,
+    });
+
+  it('should refuse the owner’s answer that names no ask version once the ask was replaced, even when its label still fits', () => {
+    // Arrange — the tab showed EU/US and the owner chose EU; the ferret has since replaced the ask with EU/Asia
+    const replaced = ok(reoptioned(board())).ledger;
+
+    // Act
+    const unversioned = refused(answerOwner(replaced, 'EU', T4));
+    const stale = refused(answerOwner(replaced, 'EU', T4, 1));
+    const current = ok(answerOwner(replaced, 'EU', T4, 2));
+    const neverReplaced = ok(answerOwner(board(), 'EU', T4));
+
+    // Assert — and an item whose ask was never replaced still takes the older app's unversioned answer
+    should(unversioned.error.code).equal('ask_changed');
+    should(stale.error.code).equal('ask_changed');
+    should(current.item?.ownerAnswer?.response).deepEqual({ kind: 'multiple-choice', choice: 'EU' });
+    should(neverReplaced.item?.ownerAnswer?.response).deepEqual({ kind: 'multiple-choice', choice: 'EU' });
+  });
+
+  it('should take an explicit same-kind replacement as a new ask, and a plain rewording as none', () => {
+    // Arrange — the owner replied, so the item rests
+    const resting = reply(board());
+
+    // Act
+    const reworded = ok(
+      apply(resting, { action: 'edit', actor: AGENT, id: 'A1', patch: { subject: 'Which region now?' }, at: T3 }),
+    );
+    const replaced = ok(
+      apply(resting, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { kind: 'choice', subject: 'Should we delete the backups?' },
+        at: T3,
+      }),
+    );
+
+    // Assert
+    should(reworded.item?.askVersion).be.undefined();
+    should(agendaState(reworded.item ?? item(reworded.ledger)).state).equal('resting');
+    should(replaced.item).containDeep({ askVersion: 2, waitingSince: T3 });
+    should(agendaState(replaced.item ?? item(replaced.ledger)).state).equal('needs-you');
+    should(refused(answerOwner(replaced.ledger, 'EU', T4, 1)).error.code).equal('ask_changed');
+  });
+
+  it('should drop an answer that failed to reach the ferret when the ask is replaced, so Retry cannot bless it', () => {
+    // Arrange — the owner answered version 1, the delivery failed, and the ferret replaces the ask
+    const answered = ok(answerOwner(board()));
+    const request = answered.item?.ownerAnswer?.request;
+    const failed = ok(
+      apply(answered.ledger, { action: 'undelivered', actor: SYSTEM, id: 'A1', request, reason: 'gone', at: T3 }),
+    );
+    should(failed.item?.undelivered?.reply).containDeep({ action: 'resolve' });
+
+    // Act
+    const replaced = ok(reoptioned(failed.ledger, T4));
+
+    // Assert
+    should(replaced.item?.askVersion).equal(2);
+    should(replaced.item?.undelivered).be.undefined();
+  });
+
+  describe('a kind that moves takes none of the old shape', () => {
+    const raised = (request: Partial<RaiseAgendaRequest>) =>
+      ok(
+        applyAgendaCommandToSession(null, SESSION_ID, {
+          action: 'raise',
+          actor: AGENT,
+          request: { ...REGION, ...request },
+          at: T0,
+        }),
+      ).ledger;
+    const recompose = (ledger: AgendaLedger, patch: Extract<AgendaCommand, { action: 'edit' }>['patch']) =>
+      ok(apply(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: T3 }));
+
+    it('should turn a reply with questions into an info, and record the questions it dropped', () => {
+      // Arrange
+      const asks = raised({
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'Which region?' }, { question: 'Which cluster?' }],
+      });
+
+      // Act
+      const edited = recompose(asks, { kind: 'info' });
+
+      // Assert
+      should(edited.item?.questions).be.undefined();
+      should(edited.item?.kind).equal('info');
+      should(edited.item?.revisions?.at(-1)?.changed).containDeep(['kind', 'questions']);
+      should(edited.item?.revisions?.at(-1)?.previous.questions).have.length(2);
+    });
+
+    it('should turn a to-do with steps into a reply, and record the steps it dropped', () => {
+      // Arrange
+      const todo = raised({ kind: 'task', ask: { kind: 'task' }, steps: ['Build', 'Ship'] });
+
+      // Act
+      const edited = recompose(todo, { kind: 'reply', ask: { kind: 'open-question' } });
+
+      // Assert
+      should(edited.item?.steps).be.undefined();
+      should(edited.item?.kind).equal('reply');
+      should(edited.item?.revisions?.at(-1)?.changed).containDeep(['kind', 'steps']);
+    });
+
+    it('should turn a form into another kind, and record the fields it dropped', () => {
+      // Arrange
+      const form = raised({
+        kind: 'form',
+        ask: { kind: 'open-question' },
+        fields: [{ id: 'region', type: 'one', label: 'Region', options: [{ label: 'EU' }, { label: 'US' }] }],
+      });
+
+      // Act
+      const edited = recompose(form, { kind: 'reply', ask: { kind: 'open-question' } });
+
+      // Assert
+      should(edited.item?.fields).be.undefined();
+      should(edited.item?.kind).equal('reply');
+      should(edited.item?.revisions?.at(-1)?.changed).containDeep(['kind', 'fields']);
+    });
+  });
+
   it('should refuse a new kind with no ask, and an ask on a card that has none to replace', () => {
     // Arrange — a notice is read, not answered: it has no ask a ferret could replace
     const notice = ok(
