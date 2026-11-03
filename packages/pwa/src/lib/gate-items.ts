@@ -16,13 +16,14 @@ import {
   type AgendaGate,
   type AgendaItem,
   type BoardReopenAttachments,
+  cardAskOf,
   gateAnswers,
   gateAskOptions,
   gateReference,
   TEST_KIND_LABEL,
 } from '@ferretry/protocol';
-import type { DaemonId } from './daemon-connection.ts';
 import type { InboxAction } from './agenda-answers.ts';
+import type { DaemonId } from './daemon-connection.ts';
 import type { ToTestCard } from './to-test-inbox.ts';
 
 /** An item that is a gate: it carries the card, lane and options. */
@@ -40,9 +41,29 @@ export const choiceLabel = (action: InboxAction): string | null =>
 
 export type GateWords = 'required' | 'optional' | 'none';
 
-/** The gate an answer is to: the item's own, or — for an answer marked `gate` — the one attached to its thread. */
-const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined =>
-  action.kind === 'respond' && action.gate === true ? item.gateAttached : item.gate;
+/**
+ * The gate an answer is to: the item's own, or — for an answer marked `gate` — the card ask it names (`cardAsk`),
+ * else the one attached to its thread.
+ */
+const answeredGate = (item: AgendaItem, action: InboxAction): AgendaGate | undefined => {
+  if (action.kind !== 'respond' || action.gate !== true) return item.gate;
+  const named = action.cardAsk === undefined ? undefined : cardAskOf(item, action.cardAsk)?.gate;
+  return named ?? item.gateAttached;
+};
+
+/**
+ * What the words box after "Not good" / "Not yet" names: the CARD being tried — its title and id ("Pairing a second
+ * phone (&F61)") — never the agenda's own question, which the answer is not about. Falls back to the item's subject,
+ * without its closing "?" so the heading does not end in two.
+ */
+export const gateWhySubject = (item: AgendaItem, action: InboxAction): string => {
+  const gate = answeredGate(item, action);
+  if (gate !== undefined) {
+    const title = gate.cardTitle ?? (item.gate === gate ? item.title : undefined);
+    return title === undefined ? `&${gate.cardId}` : `${title} (&${gate.cardId})`;
+  }
+  return (item.subject ?? item.id).trim().replace(/\?+$/u, '');
+};
 
 /**
  * The gate attached to a thread, drawn as the gate item it would be: the same options in the same directions, so the

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { gateAnswers, gateAskOptions, type AgendaItem } from '@ferretry/protocol';
+import { type AgendaItem, gateAnswers, gateAskOptions } from '@ferretry/protocol';
 import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
@@ -9,6 +9,7 @@ import {
   gateAsksWords,
   gateHeld,
   gateReopenOption,
+  gateWhySubject,
   gateWordsFor,
   isGateItem,
   toGateAction,
@@ -288,5 +289,90 @@ describe('each swipe on a real gate item means what the protocol says', () => {
         Object.fromEntries(gateAnswers(g).map(answer => [answer.direction, answer.label])),
       );
     }
+  });
+});
+
+describe('the Not good box names the CARD being tried, never the agenda question', () => {
+  const notGood = {
+    kind: 'respond',
+    label: 'Not good',
+    response: { kind: 'multiple-choice', choice: 'Not good' },
+    gate: true,
+  } as const;
+  const question = (extra: Partial<AgendaItem>): AgendaItem =>
+    agendaItem('A9', {
+      subject: 'Which colour should the unread badge be, blue or green?',
+      kind: 'choice',
+      ...extra,
+    } as Partial<AgendaItem>);
+
+  test('a card ask on a question thread is named by its card title and id', () => {
+    const asked = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F61',
+      ),
+      cardTitle: 'Pairing a second phone',
+    };
+    const item = question({ gateAttached: asked });
+    expect(gateWhySubject(item, notGood)).toBe('Pairing a second phone (&F61)');
+  });
+
+  test('the answer names WHICH card ask: the second card is named, not the first', () => {
+    const first = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F61',
+      ),
+      cardTitle: 'Pairing a second phone',
+    };
+    const second = {
+      ...gate(
+        [
+          ['Done', 'close'],
+          ['Not good', 'reopen-with-agenda'],
+        ],
+        'F62',
+      ),
+      cardTitle: 'Badge colour',
+    };
+    const item = question({
+      gateAttached: first,
+      cardAsks: [
+        { gate: first, at: '2026-11-03T10:00:00.000Z' },
+        { gate: second, at: '2026-11-03T10:05:00.000Z' },
+      ],
+    } as Partial<AgendaItem>);
+    expect(gateWhySubject(item, toGateAction(notGood, second))).toBe('Badge colour (&F62)');
+  });
+
+  test('a gate item is named by its own title and card', () => {
+    const item = gateItem(twoOptions, { title: 'Pairing QR' });
+    const plain = {
+      kind: 'respond',
+      label: 'Not good',
+      response: { kind: 'multiple-choice', choice: 'Not good' },
+    } as const;
+    expect(gateWhySubject(item, plain)).toBe('Pairing QR (&F1)');
+  });
+
+  test('a card with no known title is named by its id alone', () => {
+    const item = question({ gateAttached: gate([['Not good', 'reopen-with-agenda']], 'F7') });
+    expect(gateWhySubject(item, notGood)).toBe('&F7');
+  });
+
+  test('with no card, the subject is used without its closing "?" so the heading never ends in two', () => {
+    const plain = {
+      kind: 'respond',
+      label: 'Not yet',
+      response: { kind: 'multiple-choice', choice: 'Not yet' },
+    } as const;
+    expect(gateWhySubject(question({}), plain)).toBe('Which colour should the unread badge be, blue or green');
   });
 });
