@@ -8,28 +8,28 @@
  * through the same `ThemeState`.
  */
 
-import { type KeyboardEvent, useId, useRef } from 'react';
+import { type KeyboardEvent, useCallback, useEffect, useId, useRef } from 'react';
 import { DENSITY_OPTIONS, type useDensity } from '../../hooks/use-density.ts';
 import type { ThemeState } from '../../hooks/use-theme.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonControlsStore, DeviceControls, MotionPreference, OpenLinksIn } from '../../lib/controls.ts';
 import { OPEN_LINKS_IN } from '../../lib/controls.ts';
 import type { ChatWidth } from '../../shell/chat-width-control.tsx';
-import { CHAT_WIDTH_OPTIONS } from '../../shell/chat-width-control.tsx';
-import { MODE_OPTIONS, Swatch } from '../../shell/theme-toggle.tsx';
+import { ACTIVE_EXPLANATION, CHAT_WIDTH_OPTIONS } from '../../shell/chat-width-control.tsx';
+import { MODE_OPTIONS, Swatch, scrollThemeFamilyIntoView } from '../../shell/theme-toggle.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { Segmented, SettingDisclosureRow, SettingGroup, SettingRow, SettingSwitch } from './setting-row.tsx';
 import { settingDefinition } from './settings-catalog.ts';
 
-const TEXT_SCALES = [
-  { id: 'default', label: 'Default' },
-  { id: 'large', label: 'Large' },
-  { id: 'larger', label: 'Larger' },
+export const TEXT_SCALE_OPTIONS = [
+  { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
+  { id: 'large', label: 'Large', description: '112% of default.' },
+  { id: 'larger', label: 'Larger', description: '125% of default.' },
 ] as const;
 
-const MOTIONS: readonly { readonly id: MotionPreference; readonly label: string }[] = [
-  { id: 'system', label: 'Follow system' },
-  { id: 'reduced', label: 'Reduced' },
+const MOTIONS: readonly { readonly id: MotionPreference; readonly label: string; readonly detail: string }[] = [
+  { id: 'system', label: 'Follow system', detail: 'Animations play unless this device asks for less motion.' },
+  { id: 'reduced', label: 'Reduced', detail: 'Spinners and transitions stay still on this device.' },
 ];
 
 const MOTION_HINT: Readonly<Record<MotionPreference, string>> = {
@@ -52,6 +52,35 @@ const OPEN_LINK_LABEL: Readonly<Record<OpenLinksIn, string>> = {
 const COMPUTER_LINKS_NOTE =
   'Default browser opens links in whichever browser this computer picks, so a link router can choose the profile.';
 
+/** The sentence each choice carries, one per line, so the (i) says what every option does and not only the chosen one. */
+function OptionNotes({ notes }: { readonly notes: readonly (readonly [label: string, text: string])[] }) {
+  return (
+    <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0" data-option-notes="">
+      {notes.map(([label, text]) => (
+        <li key={label}>
+          <span className="font-semibold text-fg">{label}</span> — {text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A row's (i): its lead sentence, then what each of its options does. */
+function Explained({
+  lead,
+  notes,
+}: {
+  readonly lead: string;
+  readonly notes: readonly (readonly [label: string, text: string])[];
+}) {
+  return (
+    <>
+      <p className="m-0">{lead}</p>
+      <OptionNotes notes={notes} />
+    </>
+  );
+}
+
 const described = (id: Parameters<typeof settingDefinition>[0], extra?: string): string =>
   extra === undefined ? settingDefinition(id).description : `${settingDefinition(id).description} ${extra}`;
 
@@ -60,6 +89,26 @@ function ThemeTiles({ theme }: { readonly theme: ThemeState }) {
   const group = useId();
   const ref = useRef<HTMLDivElement>(null);
   const { family, resolved, families, setFamily } = theme;
+
+  // The radio is `sr-only` and has no box of its own; the CARD around it is what the reader is looking for.
+  // Scoped to the Settings scroller: `scrollIntoView()` would also scroll the app's overflow-hidden shell.
+  const revealFamily = useCallback((control: HTMLElement) => {
+    const card = control.closest<HTMLElement>('[data-family-card]') ?? control;
+    const scroller = card.closest<HTMLElement>('[data-settings-scroller]');
+    if (scroller) scrollThemeFamilyIntoView(scroller, card);
+  }, []);
+
+  // Changing family also changes fonts and spacing. Recheck on the next frame, after `useTheme` has published
+  // the new root data-theme, so a card aligned to the old geometry cannot slip back under the scroller's edge.
+  useEffect(() => {
+    const target = ref.current?.querySelector<HTMLInputElement>(`[data-family="${family}"]`);
+    if (!target || document.activeElement !== target) return;
+    const frame = requestAnimationFrame(() => {
+      if (target.isConnected && document.activeElement === target) revealFamily(target);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [family, revealFamily]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
     if (!keys.includes(event.key)) return;
@@ -77,7 +126,11 @@ function ThemeTiles({ theme }: { readonly theme: ThemeState }) {
     const target = families[next];
     if (target === undefined) return;
     setFamily(target.id);
-    ref.current?.querySelector<HTMLInputElement>(`[data-family="${target.id}"]`)?.focus({ preventScroll: true });
+    const control = ref.current?.querySelector<HTMLInputElement>(`[data-family="${target.id}"]`);
+    if (control === null || control === undefined) return;
+    // Own the scroll: focus without scrolling, then reveal the card inside the Settings scroller.
+    control.focus({ preventScroll: true });
+    revealFamily(control);
   };
   return (
     // `relative` is load-bearing: the radios are `sr-only` (absolute) and must stay inside the page's scroller.
@@ -151,7 +204,12 @@ export function AppearanceGroups({ theme, densityState, device, computerAvailabl
           settingId="theme"
           name="Colour mode"
           hint={theme.mode === 'system' ? `Auto follows the system (now ${theme.resolved})` : `Always ${theme.mode}`}
-          explanation={`${described('theme')} Previews render in their own theme. Auto follows the OS live.`}
+          explanation={
+            <Explained
+              lead={`${described('theme')} Previews render in their own theme. Auto follows the OS live.`}
+              notes={MODE_OPTIONS.map(option => [option.label, option.hint] as const)}
+            />
+          }
           wide
           control={() => (
             <Segmented
@@ -162,27 +220,51 @@ export function AppearanceGroups({ theme, densityState, device, computerAvailabl
             />
           )}
         />
-        <SettingRow name="Theme" hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}>
+        <SettingRow
+          name="Theme"
+          hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}
+          explanation={
+            <Explained
+              lead="Each tile previews its family in its own light and dark theme."
+              notes={theme.families.map(option => [option.label, option.blurb] as const)}
+            />
+          }
+        >
           <ThemeTiles theme={theme} />
         </SettingRow>
         <SettingRow
           settingId="text-size"
           name="Text size"
           hint="Touch targets never shrink"
-          explanation={described(
-            'text-size',
-            'Sizes never go below Default, so existing 44px touch targets are not reduced.',
-          )}
+          explanation={
+            <Explained
+              lead={described(
+                'text-size',
+                'Sizes never go below Default, so existing 44px touch targets are not reduced.',
+              )}
+              notes={TEXT_SCALE_OPTIONS.map(option => [option.label, option.description] as const)}
+            />
+          }
           wide
           control={() => (
-            <Segmented label="Text size" value={theme.textScale} options={TEXT_SCALES} onChange={theme.setTextScale} />
+            <Segmented
+              label="Text size"
+              value={theme.textScale}
+              options={TEXT_SCALE_OPTIONS}
+              onChange={theme.setTextScale}
+            />
           )}
         />
         <SettingRow
           settingId="motion"
           name="Motion"
           hint={MOTION_HINT[device.motion]}
-          explanation={described('motion')}
+          explanation={
+            <Explained
+              lead={described('motion')}
+              notes={MOTIONS.map(option => [option.label, option.detail] as const)}
+            />
+          }
           wide
           control={() => (
             <Segmented label="Motion" value={device.motion} options={MOTIONS} onChange={motion => set({ motion })} />
@@ -199,10 +281,15 @@ export function AppearanceGroups({ theme, densityState, device, computerAvailabl
               ? `Device default: ${densityOption?.label ?? densityState.density}`
               : (densityOption?.description ?? '')
           }
-          explanation={described(
-            'density',
-            'Using the device default until you pick a level; picking one saves an explicit choice.',
-          )}
+          explanation={
+            <Explained
+              lead={described(
+                'density',
+                'Using the device default until you pick a level; picking one saves an explicit choice.',
+              )}
+              notes={DENSITY_OPTIONS.map(option => [option.label, option.description] as const)}
+            />
+          }
           wide
           control={() => (
             <Segmented
@@ -217,7 +304,12 @@ export function AppearanceGroups({ theme, densityState, device, computerAvailabl
           settingId="chat-width"
           name="Conversation width"
           hint={WIDTH_HINT[device.chatWidth]}
-          explanation={described('chat-width')}
+          explanation={
+            <Explained
+              lead={`${described('chat-width')} ${ACTIVE_EXPLANATION[device.chatWidth]} In a pane narrower than the column — a phone, or beside a split pane — the choices look the same.`}
+              notes={CHAT_WIDTH_OPTIONS.map(option => [option.label, option.description] as const)}
+            />
+          }
           wide
           control={() => (
             <Segmented

@@ -138,7 +138,8 @@ export function DevicePermissionsSetting() {
     >
       <div className="flex flex-col gap-3">
         <p className="m-0 text-meta leading-base text-faint">
-          {settingDefinition('device-permissions').description} Ferretry never uses a permission in the background.
+          {settingDefinition('device-permissions').description} Nothing here is asked for until you press its button.
+          Ferretry never uses a permission in the background.
         </p>
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Device permissions">
           {DEVICE_PERMISSIONS.map(info => (

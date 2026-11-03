@@ -27,6 +27,9 @@ const DICTATION_DEBUG_INTRO =
 const DICTATION_DEBUG_PRIVACY =
   'While on, this tab keeps the last 10 calls in memory only. They are never saved, synced or sent to any machine, they disappear when you reload or switch this off, and your key is never part of one. A record does hold the words you dictated and a little conversation around them.';
 
+/** Said while the log is off and empty, where the call list is not shown. */
+const DICTATION_DEBUG_OFF_HINT = 'Switch it on, then dictate: each clean-up call will be listed here.';
+
 export const DICTATION_DEBUG_EMPTY = 'No calls yet. Dictate something and its clean-up call will appear here.';
 
 const NOTHING_KEPT: DictationDebugSnapshot = Object.freeze({ enabled: false, records: [] });
@@ -78,6 +81,7 @@ export function DictationDebugSettings({ log: injected }: DictationDebugSettings
         <div className="flex min-w-0 flex-col gap-1">
           <p className="m-0">{DICTATION_DEBUG_INTRO}</p>
           <p className="m-0">{DICTATION_DEBUG_PRIVACY}</p>
+          {showCalls ? null : <p className="m-0">{DICTATION_DEBUG_OFF_HINT}</p>}
         </div>
       }
       control={labelId => (

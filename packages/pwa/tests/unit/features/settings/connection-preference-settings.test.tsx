@@ -4,7 +4,9 @@
  */
 
 import { describe, it } from 'bun:test';
+import type { ReactTestInstance } from 'react-test-renderer';
 import should from 'should';
+import { CARRIER_PREFERENCE_DESCRIPTION } from '../../../../src/features/carrier/carrier-preference-selector.tsx';
 import {
   ConnectionPreferenceSettings,
   NO_MACHINES_TO_CONNECT,
@@ -72,5 +74,49 @@ describe('the connection preferences for every machine', () => {
     should(info?.props['aria-expanded']).equal(false);
     run(() => info?.props.onClick());
     should(JSON.stringify(view.toJSON())).containEql('never sent to it');
+  });
+
+  it('should say why an unusable choice is unusable even while another choice is selected', () => {
+    const view = render(
+      <ConnectionPreferenceSettings
+        machines={[
+          {
+            daemonId: STUDIO,
+            label: 'studio',
+            preference: 'relay',
+            availability: { webrtc: false, tunnelNote: 'Not set up by the operator.' },
+          },
+        ]}
+        onChange={() => undefined}
+      />,
+    );
+    const group = view.root.find(node => node.type === 'div' && node.props.role === 'radiogroup');
+    const radio = (value: string): ReactTestInstance =>
+      group.findAllByType('input').find(input => input.props.value === value) as ReactTestInstance;
+    const noteFor = (value: string): ReactTestInstance | undefined =>
+      view.root.findAll(node => node.props['data-carrier-preference-note'] === value)[0];
+
+    // Relay is selected, yet WebRTC and Tunnel each say why they would carry nothing.
+    should(noteFor('webrtc')?.children.join('')).containEql('WebRTC isn’t available in this build yet.');
+    should(noteFor('tunnel')?.children.join('')).containEql('Not set up by the operator.');
+    should(noteFor('relay')).equal(undefined);
+    should(noteFor('auto')).equal(undefined);
+    // Each affected radio is described by its own reason, and the usable ones carry no description.
+    should(radio('webrtc').props['aria-describedby']).equal(noteFor('webrtc')?.props.id);
+    should(radio('tunnel').props['aria-describedby']).equal(noteFor('tunnel')?.props.id);
+    should(radio('relay').props['aria-describedby']).equal(undefined);
+    should(radio('auto').props['aria-describedby']).equal(undefined);
+  });
+
+  it('should keep what every choice does behind the (i), not only the chosen one', () => {
+    const view = render(
+      <ConnectionPreferenceSettings
+        machines={[{ daemonId: STUDIO, label: 'studio', preference: 'relay', availability: { webrtc: true } }]}
+        onChange={() => undefined}
+      />,
+    );
+    run(() => view.root.findByProps({ 'data-setting-info': '' }).props.onClick());
+    const text = JSON.stringify(view.toJSON());
+    for (const description of Object.values(CARRIER_PREFERENCE_DESCRIPTION)) should(text).containEql(description);
   });
 });

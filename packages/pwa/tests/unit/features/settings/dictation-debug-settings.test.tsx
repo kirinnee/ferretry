@@ -80,6 +80,8 @@ describe('DictationDebugSettings', () => {
     expect(view.textContent).not.toContain('last 10 calls in memory only');
     await click(must(view.querySelector<HTMLElement>('button[aria-label="More about Dictation debug"]'), 'the (i)'));
     expect(view.textContent).toContain('last 10 calls in memory only');
+    // The old "switch it on, then dictate" line survives behind the (i) while the log is off and empty.
+    expect(view.textContent).toContain('Switch it on, then dictate: each clean-up call will be listed here.');
   });
 
   it('should switch on, wait for a call, list it and drop it again on switch-off', async () => {

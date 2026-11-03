@@ -252,4 +252,13 @@ describe('device permission hooks', () => {
     expect(reads.length).toBe(before * 2);
     await view.unmount();
   });
+
+  it('keeps the sentence that nothing is asked for until its button is pressed', async () => {
+    const { host } = fakeHost(ALL_PROMPT);
+    const view = await mount(within(host));
+    await openList(view.container);
+
+    expect(view.container.textContent).toContain('Nothing here is asked for until you press its button.');
+    await view.unmount();
+  });
 });

@@ -51,7 +51,7 @@ import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
-import { AppearanceGroups } from './appearance-groups.tsx';
+import { AppearanceGroups, TEXT_SCALE_OPTIONS } from './appearance-groups.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
@@ -83,12 +83,6 @@ import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './sett
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 import { ViewportDetails } from './viewport-details.tsx';
-
-export const TEXT_SCALE_OPTIONS = [
-  { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
-  { id: 'large', label: 'Large', description: '112% of default.' },
-  { id: 'larger', label: 'Larger', description: '125% of default.' },
-] as const;
 
 /**
  * Addresses that used to open the Daemons section or one of its panels. Daemons is part of each

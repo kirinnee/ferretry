@@ -50,6 +50,10 @@ const setup = (overrides: Partial<ThemeState> = {}) => {
 const groupNamed = (root: ReactTestInstance, label: string): ReactTestInstance =>
   root.find(node => node.props['data-setting-group'] === label);
 
+/** Every string under a node, joined: what a reader would read. */
+const textOf = (node: ReactTestInstance | string): string =>
+  typeof node === 'string' ? node : node.children.map(textOf).join(' ');
+
 const rowNames = (group: ReactTestInstance): string[] =>
   group
     .findAll(node => typeof node.type === 'string' && node.props['data-setting-row'] !== undefined)
@@ -140,5 +144,44 @@ describe('AppearanceGroups', () => {
     );
 
     expect(calls).toEqual([`family:${THEME_FAMILIES[1]?.id}`]);
+  });
+
+  it('keeps every option’s explanation behind the (i) of its row, not only the chosen one', () => {
+    const { root } = setup();
+    const explanationOf = (name: string): string => {
+      const row = root.find(node => node.type === 'li' && node.props['data-setting-row'] === name);
+      run(() => row.findByProps({ 'data-setting-info': '' }).props.onClick());
+      return textOf(row.find(node => node.props['data-setting-explanation'] !== undefined));
+    };
+
+    const text = explanationOf('Text size');
+    expect(text).toContain('Use the interface’s designed size.');
+    expect(text).toContain('112% of default.');
+    expect(text).toContain('125% of default.');
+    expect(text).toContain('Sizes never go below Default');
+    const density = explanationOf('Density');
+    for (const sentence of [
+      'Show the available session detail.',
+      'Keep rows easy to scan.',
+      'Prioritise the session names.',
+    ])
+      expect(density).toContain(sentence);
+    const width = explanationOf('Conversation width');
+    for (const sentence of [
+      'Default. A 720px column, centred — easiest to read.',
+      'A 1200px column, with room for code and wide tables.',
+      'The whole width of the conversation pane.',
+      'Compact is active: messages and the composer stay within a 720px column.',
+      'the choices look the same.',
+    ])
+      expect(width).toContain(sentence);
+    const motion = explanationOf('Motion');
+    expect(motion).toContain('Animations play unless this device asks for less motion.');
+    expect(motion).toContain('Spinners and transitions stay still on this device.');
+    const mode = explanationOf('Colour mode');
+    for (const sentence of ['Follow the operating system', 'Always light', 'Always dark', 'Auto follows the OS live.'])
+      expect(mode).toContain(sentence);
+    const themeRow = explanationOf('Theme');
+    for (const option of THEME_FAMILIES) expect(themeRow).toContain(option.blurb);
   });
 });

@@ -23,7 +23,7 @@ export function KeepChatsFreshSetting({ device, onChange }: KeepChatsFreshSettin
         settingId="keep-chats-fresh"
         name="Keep recent chats fresh"
         hint="The 40 you opened last stay up to date"
-        explanation={`${settingDefinition('keep-chats-fresh').description} Interactive chats and the 40 you opened last stay up to date, so switching to one is instant.`}
+        explanation={`${settingDefinition('keep-chats-fresh').description} Interactive chats and the 40 you opened last stay up to date, so switching to one is instant. Paused while this tab is hidden or your browser asks to save data.`}
         control={labelId => (
           <SettingSwitch
             checked={device.keepChatsFresh}

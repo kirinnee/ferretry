@@ -174,6 +174,8 @@ interface SegmentedOption<T extends string> {
   readonly label: string;
   /** Shown as the option's tooltip. */
   readonly title?: string;
+  /** The id of the text that says why this option is unusable, so a screen reader hears it with the radio. */
+  readonly describedBy?: string;
 }
 
 export interface SegmentedProps<T extends string> {
@@ -242,6 +244,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
               tabIndex={checked ? 0 : -1}
               onChange={() => onChange(option.id)}
               className="sr-only"
+              {...(option.describedBy === undefined ? {} : { 'aria-describedby': option.describedBy })}
             />
             {option.label}
           </label>
