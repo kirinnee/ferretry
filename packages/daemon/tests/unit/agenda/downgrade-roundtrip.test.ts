@@ -253,3 +253,23 @@ describe('Owner history shed when an old item is brought up to date', () => {
     should(back.conversations?.A1?.some(word => word.text === R0)).be.true();
   });
 });
+
+describe('A recorded version that predates the words an old item kept', () => {
+  it('should not swallow the owner words its thread never held', () => {
+    // Arrange: version 1 was recorded when the item was raised, so its thread is empty; the file's history is older.
+    const raisedLedger = raised();
+    const document = strippedBy2a(raisedLedger, each => {
+      const item = each.entries[0]?.item as { history?: unknown[] };
+      item.history = [
+        { at: '2026-07-30T09:01:00Z', kind: 'replied', note: 'first old reply' },
+        { at: '2026-07-30T09:02:00Z', kind: 'replied', note: 'second old reply' },
+      ];
+    });
+
+    // Act
+    const back = upgraded(document, recordedOf(raisedLedger));
+
+    // Assert
+    should(texts(back.conversations?.A1)).deepEqual(['first old reply', 'second old reply']);
+  });
+});

@@ -179,13 +179,18 @@ export interface RecordedItem {
   readonly conversation: readonly AgendaConversationEntry[];
 }
 
+/** The version's thread holds words from this word's speaker, so it was kept when the version was recorded. */
+const covered = (base: readonly AgendaConversationEntry[], word: AgendaConversationEntry): boolean =>
+  base.some(entry => entry.by === word.by);
+
 const sameWords = (left: AgendaConversationEntry, right: AgendaConversationEntry): boolean =>
   left.by === right.by && left.text === right.text;
 
 /**
  * THE THREAD AFTER A ROUND TRIP THROUGH A DAEMON THAT DOES NOT KEEP ONE: the item's latest recorded version holds the
  * whole thread as it stood (verbatim, tagged, in order), and the history `seeded` from what the older daemon kept says
- * what was said since. A seeded word at or before the version is already in it; a later one is added unless it is
+ * what was said since. A seeded word at or before the version is already in it, once the version's thread holds words
+ * from its speaker (a version recorded before the item's older words were kept holds none); a later one is added unless it is
  * there (the same chat message, or the same time, speaker and text). The ferret's answer to a question has no time of
  * its own, so it is matched by its text alone and, when new, placed no earlier than the version.
  *
@@ -202,7 +207,7 @@ export function resumedConversation(
     const message = word.fromChat?.messageId;
     if (message !== undefined && base.some(entry => entry.fromChat?.messageId === message)) continue;
     const answer = word.via === 'question-answer';
-    const older = Date.parse(word.at) <= after;
+    const older = Date.parse(word.at) <= after && covered(base, word);
     if (answer ? base.some(entry => entry.via === word.via && sameWords(entry, word)) : older) continue;
     const placed = answer && older ? { ...word, at: recorded.at } : word;
     if ([...base, ...added].some(entry => entry.at === placed.at && sameWords(entry, placed))) continue;
