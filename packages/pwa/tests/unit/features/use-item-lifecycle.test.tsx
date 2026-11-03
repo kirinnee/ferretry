@@ -274,6 +274,50 @@ describe('what an open item knows about its own life', () => {
     expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'failed' });
   });
 
+  test('reads the thread again from the start when a merge interleaves another thread into it', async () => {
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
+
+    thread = ['one', 'zero', 'two', 'three', 'four'];
+    calls = [];
+    await interact(() =>
+      update?.(
+        inputOf(
+          base({ conversationCount: 5, conversation: [entry('three'), entry('four')], mergedFrom: ['A6'] } as never),
+        ),
+      ),
+    );
+    await settleUntil(
+      () => latest?.conversationGap === undefined && latest?.conversation?.length === 5,
+      'the merged thread',
+      interact,
+    );
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'zero', 'two', 'three', 'four']);
+    expect(calls.filter(call => call.path.startsWith('/conversation'))[0]?.path).toBe('/conversation?index=0&offset=0');
+  });
+
+  test('tries the earlier entries again when the thread grows after a failed read', async () => {
+    fail = true;
+    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await settleUntil(() => latest?.conversationGap?.state === 'failed', 'the failure', interact);
+
+    fail = false;
+    thread = ['one', 'two', 'three', 'four'];
+    await interact(() =>
+      update?.(inputOf(base({ conversationCount: 4, conversation: [entry('three'), entry('four')] }))),
+    );
+    await settleUntil(() => latest?.conversationGap === undefined, 'the retry', interact);
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three', 'four']);
+  });
+
+  test('names an agenda merged away by its title, though a closed one is not on the board', async () => {
+    await draw(OLD, base({ mergedFrom: ['A6'] } as never), {
+      records: [agendaItem('A6', { subject: 'Where do ferrets sleep?' })],
+    });
+    expect(latest?.lineageTitles).toEqual({ A6: 'Where do ferrets sleep?' });
+  });
+
   test('draws the rebuilt thread when the item stores no words', async () => {
     await draw(STORES, base());
     expect(latest?.conversation).toBeNull();

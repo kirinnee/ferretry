@@ -29,6 +29,13 @@ const item = (id: string, minutes: number, patch: Partial<AgendaItem>): AgendaIt
 const BADGE_V1 = 'The number on the Inbox tab: how many items wait on you.';
 const BADGE_V3 = 'The number on the Inbox tab: how many open items wait on you.';
 
+/** A sixty-sentence rollout report in one paragraph: far more pieces than one block of lines is paired over. */
+const rollout = (word: string): string =>
+  Array.from(
+    { length: 60 },
+    (_, index) => `Stage ${String(index + 1)} of the rollout ${index === 30 ? word : 'finished'} cleanly.`,
+  ).join(' ');
+
 const BASE = {
   title: 'Should the badge count snoozed items?',
   subject: 'Should the badge count snoozed items?',
@@ -59,12 +66,14 @@ const ASK_V3 = {
 export const DIFF_VERSIONS: readonly AgendaItem[] = [
   item('A140', 180, {
     ...BASE,
+    detail: rollout('finished'),
     whereWeAre: 'I am reading how the badge is counted. Nothing is decided yet.',
     stillOpen: '- Whether a snoozed item counts',
     ask: ASK_V1,
   } as Partial<AgendaItem>),
   item('A140', 180, {
     ...BASE,
+    detail: rollout('finished'),
     whereWeAre: 'The badge reads the open list, so a resting item adds one. I am looking at the queue.',
     stillOpen: '- Whether a snoozed item counts',
     ask: ASK_V1,
@@ -76,6 +85,7 @@ export const DIFF_VERSIONS: readonly AgendaItem[] = [
       ...BASE.terms.slice(1),
       { term: 'needsYouQueue', meaning: 'The one function that lists what needs you, blockers first.' },
     ],
+    detail: rollout('failed'),
     whereWeAre:
       'The badge, the Inbox and push now read needsYouQueue, so the three agree. A snoozed item is the one open question.',
     stillOpen: '- Whether a snoozed item counts',

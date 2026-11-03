@@ -131,6 +131,8 @@ export interface AgendaInbox {
   readonly agendaClient?: DaemonAgendaClient;
   /** The items one conversation's board holds (or its roll-up): what a merge can join. */
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
+  /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
+  readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -202,6 +204,7 @@ const cardsKey = (cards: readonly InboxCard[]): string =>
   cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
 
 const NO_TO_TEST: readonly ToTestCard[] = [];
+const NO_RECORDS: readonly AgendaItem[] = [];
 
 const toTestKeyOf = (rows: readonly ToTestCard[]): string =>
   rows
@@ -434,6 +437,11 @@ export function useAgendaInboxModel(
     (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] => itemsOf(daemonId, sessionId)?.items ?? [],
     [itemsOf],
   );
+  const recordsOf = useCallback(
+    (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] =>
+      boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
+    [boards],
+  );
   const holders = useMemo(() => gateHolders(unread, sources, itemsOf), [unread, sources, itemsOf]);
   const offersGates = useCallback(
     (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
@@ -581,6 +589,7 @@ export function useAgendaInboxModel(
       canSnooze,
       agendaClient: client,
       boardOf,
+      recordsOf,
     }),
     [
       unread,
@@ -605,6 +614,7 @@ export function useAgendaInboxModel(
       canSnooze,
       client,
       boardOf,
+      recordsOf,
     ],
   );
 }

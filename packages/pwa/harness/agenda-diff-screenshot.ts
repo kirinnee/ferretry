@@ -200,6 +200,19 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     const keys = marks.sections.map(section => section.key);
     for (const key of ['whereWeAre', 'terms', 'ask'])
       check(keys.includes(key), `${label('diff')}: "${key}" is not shown as changed (${keys.join(', ')})`);
+    // A long text with a one-word edit stays a word diff: sixty sentences in, one word out and one word in.
+    const long = await page.evaluate(() => ({
+      del: [...document.querySelectorAll('[data-agenda-diff-section="detail"] del')].map(node =>
+        node.textContent?.trim(),
+      ),
+      ins: [...document.querySelectorAll('[data-agenda-diff-section="detail"] ins')].map(node =>
+        node.textContent?.trim(),
+      ),
+    }));
+    check(
+      long.del.length === 1 && long.del[0] === 'finished' && long.ins.length === 1 && long.ins[0] === 'failed',
+      `${label('diff')}: the long detail is not one word out and one in (${long.del.join(' | ')} / ${long.ins.join(' | ')})`,
+    );
     check(marks.folded === false, `${label('diff')}: the unchanged sections are not folded`);
     // A rewrite is one block out and one block in; a one-word edit stays a word diff inside its line.
     const rewrite = await page.evaluate(() => ({
@@ -219,6 +232,12 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     );
     await scrollToSelector(page, '[data-agenda-diff]');
     await shot(page, 'changes', form, theme);
+    // The one changed word sits in the middle of sixty sentences: the picture centres on it.
+    await page.evaluate(() =>
+      document.querySelector('[data-agenda-diff-section="detail"] del')?.scrollIntoView({ block: 'center' }),
+    );
+    await page.waitForTimeout(200);
+    await shot(page, 'long-text', form, theme);
 
     // THE VERSION PICKER: any two versions, here v2 to v3.
     await page.locator('[data-agenda-diff-from]').selectOption('2');
@@ -258,6 +277,11 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       (await page.locator('[data-agenda-lineage-line="merged-from"]').count()) === 1,
       `${label('merge')}: A141 does not say it absorbed A143`,
     );
+    const absorbed = (await page.locator('[data-agenda-lineage-line="merged-from"]').textContent()) ?? '';
+    check(
+      absorbed.includes('Snoozed items in the Inbox'),
+      `${label('merge')}: the absorbed agenda, closed, is not named by its title ("${absorbed}")`,
+    );
     await press(page, '[data-agenda-merge-open]');
     await page.locator('[data-agenda-merge-picker]').waitFor({ state: 'visible' });
     check(
@@ -282,6 +306,21 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     );
     await scrollToSelector(page, '[data-agenda-lineage]');
     await shot(page, 'merge-confirm', form, theme);
+    await page.close();
+  }
+
+  // THE GAP ROW: the earlier entries of a stored thread still loading, unreadable, or past one read.
+  for (const [state, words] of [
+    ['loading', /Loading 2 earlier entries/],
+    ['failed', /2 earlier entries could not be read/],
+    ['capped', /2 earlier entries are not shown/],
+  ] as const) {
+    const page = await open('A140', `&gap=${state}`);
+    await page.locator(`[data-history-gap="${state}"]`).waitFor({ state: 'visible' });
+    const said = (await page.locator('[data-history="gap"]').textContent()) ?? '';
+    check(words.test(said), `${label(`gap ${state}`)}: the row says "${said}"`);
+    await scrollToPart(page, 'conversation');
+    await shot(page, `gap-${state}`, form, theme);
     await page.close();
   }
 

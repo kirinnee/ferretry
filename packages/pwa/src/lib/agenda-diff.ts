@@ -196,11 +196,11 @@ const piecesOf = (text: string, splitter: RegExp): readonly string[] => text.spl
  * Pairs the pieces of two texts in order and says what became of each: kept (equal), paired with one alike enough to
  * be compared inside, or removed or added whole. The pairing is the order-keeping one that keeps the most likeness.
  */
-const align = (
+const pair = (
   before: readonly string[],
   after: readonly string[],
   inner: (a: string, b: string) => readonly WordRun[],
-  alike: (a: string, b: string) => number = similarity,
+  alike: (a: string, b: string) => number,
 ): readonly WordRun[] => {
   const n = before.length;
   const m = after.length;
@@ -253,6 +253,51 @@ const align = (
   }
   for (; i < n; i += 1) runs.push({ kind: 'removed', text: before[i] as string });
   for (; j < m; j += 1) runs.push({ kind: 'added', text: after[j] as string });
+  return merged(runs);
+};
+
+/**
+ * Pairs the pieces of two texts. Equal pieces at both ends are kept first; when what lies between is still too large to
+ * pair at once, the pieces that stay equal anchor it, and only the gaps between anchors are paired (each under its own
+ * cap), so one changed word in a long report never turns the whole report into a block out and a block in.
+ */
+const align = (
+  before: readonly string[],
+  after: readonly string[],
+  inner: (a: string, b: string) => readonly WordRun[],
+  alike: (a: string, b: string) => number = similarity,
+): readonly WordRun[] => {
+  const { head, tail } = sharedEnds(before, after);
+  const middleA = before.slice(head, before.length - tail);
+  const middleB = after.slice(head, after.length - tail);
+  const front: WordRun = { kind: 'same', text: before.slice(0, head).join('') };
+  const back: WordRun = { kind: 'same', text: before.slice(before.length - tail).join('') };
+  const table = middleA.length * middleB.length > MAX_LINE_PAIRS ? lcsTable(middleA, middleB) : null;
+  if (table === null) return merged([front, ...pair(middleA, middleB, inner, alike), back]);
+  const width = middleB.length + 1;
+  const runs: WordRun[] = [front];
+  let i = 0;
+  let j = 0;
+  let gapA = 0;
+  let gapB = 0;
+  const closeGap = (): void => {
+    runs.push(...pair(middleA.slice(gapA, i), middleB.slice(gapB, j), inner, alike));
+  };
+  while (i < middleA.length && j < middleB.length) {
+    if (middleA[i] === middleB[j]) {
+      closeGap();
+      runs.push({ kind: 'same', text: middleA[i] as string });
+      i += 1;
+      j += 1;
+      gapA = i;
+      gapB = j;
+    } else if ((table[(i + 1) * width + j] as number) >= (table[i * width + j + 1] as number)) i += 1;
+    else j += 1;
+  }
+  i = middleA.length;
+  j = middleB.length;
+  closeGap();
+  runs.push(back);
   return merged(runs);
 };
 

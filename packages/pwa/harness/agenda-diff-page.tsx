@@ -5,6 +5,7 @@
  *   ?agenda=A141    an open conversation a merge can join; it says "Merged in from !A143"
  *   ?agenda=A143    the closed item that was merged into A141
  *   ?agenda=A144    split from !A140 (A146 reads "Split into !A144, !A145")
+ *   &gap=loading|failed|capped   A140's earlier thread is still being read, cannot be read, or is longer than one read takes
  *   &old=1          the machine does not speak `agenda.conversation.1`: no diff, no merge, the rebuilt thread
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`, with the real fetch client and the real wire
@@ -34,6 +35,8 @@ import {
 const params = new URLSearchParams(location.search);
 const target = params.get('agenda') as never;
 const old = params.get('old') === '1';
+// How the earlier part of A140's thread is read: `loading` never answers, `failed` is refused, `capped` never ends.
+const gap = params.get('gap');
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -54,7 +57,19 @@ globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
     return summary === undefined || kept === undefined ? json({}, 404) : json({ ...summary, item: kept });
   }
   if (path === '/conversation') {
+    if (gap === 'loading') return new Promise<Response>(() => undefined);
+    if (gap === 'failed') return json({ error: 'gone', code: 'not-found' }, 404);
     const index = Number(url.searchParams.get('index') ?? '0');
+    if (gap === 'capped') {
+      const offset = Number(url.searchParams.get('offset') ?? '0');
+      return json({
+        total: DIFF_CONVERSATION.length,
+        index,
+        offset,
+        entry: DIFF_CONVERSATION[0],
+        next: { index, offset: offset + 1 },
+      });
+    }
     const entry = DIFF_CONVERSATION[index];
     return json({
       total: DIFF_CONVERSATION.length,

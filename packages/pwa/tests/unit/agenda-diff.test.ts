@@ -199,6 +199,65 @@ describe('the text diff: lines, then sentences, then words', () => {
   });
 });
 
+describe('a long text with a small edit', () => {
+  const report = (count: number, edit: Readonly<Record<number, string>>): string =>
+    Array.from(
+      { length: count },
+      (_, index) => `${edit[index] ?? `Step ${String(index)} of the report finished cleanly`}\n`,
+    ).join('');
+  const joined = (runs: ReturnType<typeof diffText>, drop: 'added' | 'removed'): string =>
+    runs
+      .filter(run => run.kind !== drop)
+      .map(run => run.text)
+      .join('');
+
+  test.each([60, 1000])('keeps %i lines with one word changed word-level', count => {
+    const before = report(count, {});
+    const after = report(count, {
+      [Math.floor(count / 2)]: `Step ${String(Math.floor(count / 2))} of the report failed cleanly`,
+    });
+    const runs = diffText(before, after);
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['finished']);
+    expect(runs.filter(run => run.kind === 'added').map(run => run.text)).toEqual(['failed']);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('anchors on equal lines when edits lie far apart in a long text', () => {
+    const before = report(1000, {});
+    const after = report(1000, {
+      100: 'Step 100 of the report failed cleanly',
+      900: 'Step 900 of the report failed cleanly',
+    });
+    const runs = diffText(before, after);
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['finished', 'finished']);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+
+  test('keeps a sixty sentence paragraph with one word changed word-level', () => {
+    const paragraph = (word: string): string =>
+      Array.from(
+        { length: 60 },
+        (_, index) => `Sentence ${String(index)} ${index === 30 ? word : 'holds'} steady.`,
+      ).join(' ');
+    const runs = diffText(paragraph('holds'), paragraph('wobbles'));
+    expect(runs.filter(run => run.kind === 'removed').map(run => run.text)).toEqual(['holds']);
+    expect(runs.filter(run => run.kind === 'added').map(run => run.text)).toEqual(['wobbles']);
+  });
+
+  test('pairs the gaps between anchors under their own cap, and shows a gap too large as a block', () => {
+    const lines = (prefix: string, count: number): string =>
+      Array.from({ length: count }, (_, index) => `${prefix}${String(index)}\n`).join('');
+    const before = `keep\n${lines('a', 100)}keep too\n${lines('c', 100)}`;
+    const after = `keep\n${lines('b', 100)}keep too\n${lines('d', 100)}`;
+    const runs = diffText(before, after);
+    expect(runs.map(run => run.kind)).toEqual(['same', 'removed', 'added', 'same', 'removed', 'added']);
+    expect(joined(runs, 'added')).toBe(before);
+    expect(joined(runs, 'removed')).toBe(after);
+  });
+});
+
 describe('the sections of an item as text', () => {
   test('says the ask by its kind and options, terms and references one a line', () => {
     const choice = item({

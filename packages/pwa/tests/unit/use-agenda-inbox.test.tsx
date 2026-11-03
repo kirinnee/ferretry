@@ -923,6 +923,31 @@ describe('the Resolved filter reads', () => {
     await settle();
     expect(calls.length).toBe(before + 1);
   });
+  test('hands a conversation its resolved records, so a merged-away agenda keeps its title', async () => {
+    const { client } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const latest = (): AgendaInbox => inbox as unknown as AgendaInbox;
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[{ connection: studio, name: 'Studio', sessions: [waiting('a')] }]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+      />,
+    );
+    await settle();
+    expect(latest().recordsOf?.(studio.daemonId, 'a')).toEqual([]);
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(
+      latest()
+        .recordsOf?.(studio.daemonId, 'a')
+        ?.map(record => record.id),
+    ).toEqual(['A1']);
+    expect(latest().recordsOf?.(studio.daemonId, 'unread')).toEqual([]);
+  });
+
   test('skips a board whose machine was unpaired after the read was asked for', async () => {
     const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
     const { timers } = manualTimers();

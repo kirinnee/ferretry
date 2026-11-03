@@ -412,6 +412,7 @@ function OpenItem({
     client: inbox.agendaClient,
     item: card.item,
     board: inbox.boardOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
+    records: inbox.recordsOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
   });
   const history = useMemo(
     () =>

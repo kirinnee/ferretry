@@ -77,13 +77,23 @@ export interface UseItemLifecycleInput {
   readonly item: AgendaItem | undefined;
   /** The open items on the same board: what a merge can join. */
   readonly board: readonly AgendaItem[];
+  /** The resolved records on the same board: an item merged into another is closed, so its title is read from here. */
+  readonly records?: readonly AgendaItem[];
 }
 
 const NONE = { conversation: null } as const;
 const NO_TITLES: LineageTitles = {};
+const NO_RECORDS: readonly AgendaItem[] = [];
 const NO_ENTRIES: readonly AgendaConversationEntry[] = [];
 
-export const useItemLifecycle = ({ connection, scope, client, item, board }: UseItemLifecycleInput): ItemLifecycle => {
+export const useItemLifecycle = ({
+  connection,
+  scope,
+  client,
+  item,
+  board,
+  records = NO_RECORDS,
+}: UseItemLifecycleInput): ItemLifecycle => {
   const machineKeeps = useAgendaConversationOffered(connection?.daemonId) === true;
   const offered = machineKeeps && connection !== undefined && !isMachineAgendaId(scope.sessionId);
   const id = item?.id;
@@ -159,38 +169,40 @@ export const useItemLifecycle = ({ connection, scope, client, item, board }: Use
   const tail = item?.conversation ?? NO_ENTRIES;
   const count = item === undefined ? 0 : storedCount(item);
   const earlierCount = Math.max(0, count - tail.length);
+  // A merge interleaves the absorbed thread into this one by time, so what was read before it is no longer a prefix.
+  const thread = `${key}|${item?.mergedFrom?.join(',') ?? ''}`;
   const earlier = useRef(new Map<string, AgendaConversationEntry[]>());
   const [reading, setReading] = useState<{
     readonly key: string;
     readonly count: number;
     readonly state: 'loading' | 'failed' | 'capped' | 'done';
   } | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the entries before the tail (their count) are the trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the thread, its stored count and the entries before the tail are the triggers
   useEffect(() => {
     if (!stored || whole || connection === undefined || id === undefined) return undefined;
-    const have = earlier.current.get(key) ?? [];
+    const have = earlier.current.get(thread) ?? [];
     if (have.length >= earlierCount) {
-      setReading({ key, count: earlierCount, state: 'done' });
+      setReading({ key: thread, count: earlierCount, state: 'done' });
       return undefined;
     }
     let live = true;
-    setReading({ key, count: earlierCount, state: 'loading' });
+    setReading({ key: thread, count: earlierCount, state: 'loading' });
     fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount })
       .then(read => {
         if (!live) return;
-        earlier.current.set(key, [...have, ...read.entries]);
-        setReading({ key, count: earlierCount, state: read.capped ? 'capped' : 'done' });
+        earlier.current.set(thread, [...have, ...read.entries]);
+        setReading({ key: thread, count: earlierCount, state: read.capped ? 'capped' : 'done' });
       })
       .catch(() => {
-        if (live) setReading({ key, count: earlierCount, state: 'failed' });
+        if (live) setReading({ key: thread, count: earlierCount, state: 'failed' });
       });
     return () => {
       live = false;
     };
-  }, [stored, whole, key, earlierCount]);
-  const inHand = whole ? [] : (earlier.current.get(key) ?? []).slice(0, earlierCount);
+  }, [stored, whole, thread, count, earlierCount]);
+  const inHand = whole ? [] : (earlier.current.get(thread) ?? []).slice(0, earlierCount);
   const missing = earlierCount - inHand.length;
-  const state = reading?.key === key ? reading.state : 'loading';
+  const state = reading?.key === thread ? reading.state : 'loading';
   const conversation = !stored ? null : [...inHand, ...tail];
   const conversationGap: ConversationGap | undefined =
     !stored || whole || missing <= 0
@@ -208,7 +220,10 @@ export const useItemLifecycle = ({ connection, scope, client, item, board }: Use
     };
   }, [item, client, offered, board, connection, scope]);
 
-  const titles = useMemo(() => (item === undefined ? NO_TITLES : lineageTitles(item, board)), [item, board]);
+  const titles = useMemo(
+    () => (item === undefined ? NO_TITLES : lineageTitles(item, [...board, ...records])),
+    [item, board, records],
+  );
   const named = Object.keys(titles).length === 0 ? {} : { lineageTitles: titles };
   if (!open) return { ...NONE, ...named };
   return {

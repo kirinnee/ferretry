@@ -505,7 +505,7 @@ export const useAgenda = ({
   const paged = cardItem !== undefined && !isResolved(cardItem) ? openItems.indexOf(cardItem) : -1;
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
-  const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems });
+  const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems, records });
   const history = useMemo(
     () =>
       cardItem === undefined
