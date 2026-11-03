@@ -16,7 +16,9 @@ import {
   cardVisibility,
   defaultVisibility,
   visibilityVerdict,
+  withDefaultVisibility,
 } from '../../../src/lib/board/index.ts';
+import type { OwnerWords } from '../../../src/lib/board/index.ts';
 import type { BoardStanding } from '../../../src/lib/board/authority.ts';
 import { card, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
 
@@ -206,14 +208,52 @@ describe('the visibility action', () => {
   });
 });
 
+class FakeOwnerWords implements OwnerWords {
+  constructor(readonly bySession: Record<string, readonly string[] | Error>) {}
+  async said(sessionId: string): Promise<readonly string[]> {
+    const words = this.bySession[sessionId] ?? [];
+    if (words instanceof Error) throw words;
+    return words;
+  }
+}
+
+const OWNER_SAID = 'Make the inbox show only cards a person asked for, with the project name next to the machine';
+const lead_made = (id: string, overrides: Partial<BoardTask> = {}) =>
+  card({
+    id,
+    ask: { text: OWNER_SAID, source: 'session:lead' },
+    createdBy: { kind: 'ferret', sessionId: 'lead' },
+    ...overrides,
+  });
+
+describe('withDefaultVisibility', () => {
+  it('should never touch a chosen visibility, with or without a source', () => {
+    const chosen = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
+    const legacy = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private' });
+    should(withDefaultVisibility(chosen)).equal(chosen);
+    should(withDefaultVisibility(legacy)).equal(legacy);
+  });
+
+  it('should answer the same card when its default already holds, and re-derive one that does not', () => {
+    const holds = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
+    should(withDefaultVisibility(holds)).equal(holds);
+    const stale = card({ ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'default' });
+    should(withDefaultVisibility(stale)).match({ visibility: 'public', visibilitySource: 'default' });
+    should(withDefaultVisibility(card({ ask: PERSON_ASK, askedBy: 'person' }))).match({
+      visibility: 'public',
+      visibilitySource: 'default',
+    });
+  });
+});
+
 describe('backfilling visibility', () => {
-  it('should store what each card reads as, once, and never change a stored value', async () => {
+  it('should store what each settled card reads as, once, and never change a chosen value', async () => {
     const { ports, service } = serviceWith([
-      card({ id: 'F1', ask: PERSON_ASK }),
-      card({ id: 'F2', ask: AGENT_ASK }),
-      card({ id: 'F3', ask: PERSON_ASK, parent: { id: 'F1' } }),
-      card({ id: 'F4', ask: AGENT_ASK, visibility: 'public' }),
-      card({ id: 'F5', ask: PERSON_ASK, visibility: 'private' }),
+      card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' }),
+      card({ id: 'F2', ask: AGENT_ASK, askedBy: 'agent' }),
+      card({ id: 'F3', ask: PERSON_ASK, askedBy: 'person', parent: { id: 'F1' } }),
+      card({ id: 'F4', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
+      card({ id: 'F5', ask: PERSON_ASK, askedBy: 'person', visibility: 'private' }),
     ]);
     const store = ports.store as MemoryBoardStore;
 
@@ -226,15 +266,273 @@ describe('backfilling visibility', () => {
       'public',
       'private',
     ]);
+    should(['F1', 'F2', 'F3', 'F4', 'F5'].map(id => stored(ports, id).visibilitySource)).eql([
+      'default',
+      'default',
+      'default',
+      'chosen',
+      undefined,
+    ]);
     should(store.writes.map(write => write.id).sort()).eql(['F1', 'F2', 'F3']);
     should(await service.backfillVisibility()).equal(0);
   });
 
   it('should write no history and change nothing else about the card', async () => {
-    const before = card({ id: 'F1', ask: PERSON_ASK });
+    const before = card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' });
     const { ports, service } = serviceWith([before]);
     await service.backfillVisibility();
-    should(stored(ports, 'F1')).eql({ ...before, visibility: 'public' });
+    should(stored(ports, 'F1')).eql({ ...before, visibility: 'public', visibilitySource: 'default' });
+  });
+
+  it('should leave a card whose asker is not settled without a visibility, for a later boot', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: { text: 'x', source: 'session:lead' } })]);
+    should(await service.backfillVisibility()).equal(0);
+    should(stored(ports, 'F1').visibility).be.undefined();
+  });
+
+  it('should settle a stored default again from the facts as they are now, and leave a chosen one', async () => {
+    const { ports, service } = serviceWith([
+      card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'default' }),
+      card({ id: 'F2', ask: PERSON_ASK, askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' }),
+    ]);
+    should(await service.backfillVisibility()).equal(1);
+    should(stored(ports, 'F1').visibility).equal('public');
+    should(stored(ports, 'F2').visibility).equal('private');
+  });
+
+  it('should leave a card whose write the store refuses, and carry on', async () => {
+    const memory = new MemoryBoardStore([
+      card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' }),
+      card({ id: 'F2', ask: PERSON_ASK, askedBy: 'person' }),
+    ]);
+    const write = memory.write.bind(memory);
+    memory.write = async (id, decide) => {
+      if (id === 'F1') throw new Error('quarantined');
+      return await write(id, decide);
+    };
+    const { ports, service } = serviceWith([], { store: memory });
+
+    should(await service.backfillVisibility()).equal(1);
+
+    should(stored(ports, 'F1').visibility).be.undefined();
+    should(stored(ports, 'F2').visibility).equal('public');
+    should(ports.warnings.join('\n')).match(/F1.*quarantined/u);
+  });
+
+  it('should not store over a card that changed since it was read', async () => {
+    const memory = new MemoryBoardStore([card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
+    const seen = await memory.read();
+    memory.cards.set('F1', card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person', visibility: 'private' }));
+    memory.read = async () => seen;
+    const { ports, service } = serviceWith([], { store: memory });
+    should(await service.backfillVisibility()).equal(0);
+    should(stored(ports, 'F1').visibility).equal('private');
+    memory.cards.delete('F1');
+    should(await service.backfillVisibility()).equal(0);
+  });
+});
+
+describe('visibility follows who asked once that is settled', () => {
+  const query = async (service: BoardService, visibility: 'public' | 'private') =>
+    (await service.board(BoardQuerySchema.parse({ visibility }))).cards.map(entry => entry.id);
+
+  it("should publish a top-level owner ask once the owner's words can be read after a failed first boot", async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([lead_made('F1')], { ownerWords: words });
+
+    should(await service.backfillAskedBy()).equal(0);
+    should(await service.backfillVisibility()).equal(0);
+    should(stored(ports, 'F1').visibility).be.undefined();
+    should(await query(service, 'public')).eql([]);
+
+    words.bySession.lead = [OWNER_SAID];
+    should(await service.backfillAskedBy()).equal(1);
+    should(await service.backfillVisibility()).equal(1);
+    should(stored(ports, 'F1')).match({ askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
+    should(await query(service, 'public')).eql(['F1']);
+  });
+
+  it('should repair a default that was stored private while the asker was a guess', async () => {
+    const words = new FakeOwnerWords({ lead: [OWNER_SAID] });
+    const { ports, service } = serviceWith(
+      [lead_made('F1', { askedBy: 'agent', visibility: 'private', visibilitySource: 'default' })],
+      { ownerWords: words },
+    );
+    should(await service.backfillAskedBy()).equal(1);
+    should(stored(ports, 'F1')).match({ askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
+  });
+
+  it('should never undo a choice when the asker is settled later', async () => {
+    const words = new FakeOwnerWords({ lead: [OWNER_SAID] });
+    const { ports, service } = serviceWith(
+      [
+        lead_made('F1', { askedBy: 'agent', visibility: 'private', visibilitySource: 'chosen' }),
+        lead_made('F2', { askedBy: 'agent', visibility: 'private' }),
+      ],
+      { ownerWords: words },
+    );
+    should(await service.backfillAskedBy()).equal(2);
+    should(stored(ports, 'F1')).match({ askedBy: 'person', visibility: 'private', visibilitySource: 'chosen' });
+    should(stored(ports, 'F2')).match({ askedBy: 'person', visibility: 'private' });
+    should(await service.backfillVisibility()).equal(0);
+  });
+
+  it('should settle a new card made while the owner words were unreadable at the next boot', async () => {
+    const words = new FakeOwnerWords({ lead: new Error('queue torn') });
+    const { ports, service } = serviceWith([], { ownerWords: words });
+    const { task } = await service.create(
+      create({ ask: { text: OWNER_SAID, source: 'session:lead' }, projectId: PROJECT }),
+      lead,
+    );
+    should(stored(ports, task.id)).match({ askedBy: 'agent', visibility: 'private', visibilitySource: 'default' });
+    should(await query(service, 'public')).eql([]);
+
+    words.bySession.lead = [OWNER_SAID];
+    should(await service.backfillAskedBy()).equal(1);
+    should(stored(ports, task.id)).match({ askedBy: 'person', visibility: 'public', visibilitySource: 'default' });
+    should(await query(service, 'public')).eql([task.id]);
+  });
+
+  it('should store a chosen visibility for a new card that asked for one', async () => {
+    const { ports, service } = serviceWith([]);
+    const { task } = await service.create(create({ visibility: 'public' }), lead);
+    should(stored(ports, task.id)).match({ visibility: 'public', visibilitySource: 'chosen' });
+  });
+});
+
+describe('moving a card under another keeps the visibility rules', () => {
+  const reparent = (service: BoardService, id: string, parent: string | null, caller: BoardCaller) =>
+    service.act(id, { action: 'reparent', parent: parent === null ? null : { id: parent } }, caller);
+  const forbidden = async (work: Promise<unknown>) =>
+    await work.then(
+      () => should.fail(undefined, undefined, 'the move was accepted'),
+      (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
+    );
+  const base = () => [card({ id: 'F2', ask: AGENT_ASK }), card({ id: 'F3', ask: AGENT_ASK })];
+
+  it('should refuse a ferret that would make its published card a public sub-card, and let the owner', async () => {
+    const { ports, service } = serviceWith([
+      ...base(),
+      card({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
+    ]);
+    await forbidden(reparent(service, 'F1', 'F2', lead));
+    should(stored(ports, 'F1').parent).be.null();
+
+    await reparent(service, 'F1', 'F2', owner);
+    should(stored(ports, 'F1')).match({ parent: { id: 'F2' }, visibility: 'public', visibilitySource: 'chosen' });
+  });
+
+  it('should let a ferret make its card private first and then move it', async () => {
+    const { ports, service } = serviceWith([
+      ...base(),
+      card({ id: 'F1', ask: AGENT_ASK, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' }),
+    ]);
+    await service.act('F1', { action: 'visibility', visibility: 'private' }, lead);
+    await reparent(service, 'F1', 'F2', lead);
+    should(stored(ports, 'F1')).match({ parent: { id: 'F2' }, visibility: 'private' });
+  });
+
+  it('should refuse a ferret that would hide the owner’s card by moving it, and let the owner', async () => {
+    const { ports, service } = serviceWith([
+      ...base(),
+      card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person', visibility: 'public', visibilitySource: 'default' }),
+    ]);
+    await forbidden(reparent(service, 'F1', 'F2', lead));
+    should(stored(ports, 'F1')).match({ parent: null, visibility: 'public' });
+
+    await reparent(service, 'F1', 'F2', owner);
+    should(stored(ports, 'F1')).match({ parent: { id: 'F2' }, visibility: 'private', visibilitySource: 'default' });
+  });
+
+  it('should publish a person’s sub-card again when it is lifted to the top level, and keep a chosen one', async () => {
+    const { ports, service } = serviceWith([
+      ...base(),
+      card({
+        id: 'F1',
+        ask: PERSON_ASK,
+        askedBy: 'person',
+        parent: { id: 'F2' },
+        visibility: 'private',
+        visibilitySource: 'default',
+      }),
+      card({
+        id: 'F4',
+        ask: PERSON_ASK,
+        askedBy: 'person',
+        parent: { id: 'F2' },
+        visibility: 'private',
+        visibilitySource: 'chosen',
+      }),
+    ]);
+    await reparent(service, 'F1', null, lead);
+    await reparent(service, 'F4', null, lead);
+    should(stored(ports, 'F1')).match({ parent: null, visibility: 'public', visibilitySource: 'default' });
+    should(stored(ports, 'F4')).match({ parent: null, visibility: 'private', visibilitySource: 'chosen' });
+  });
+
+  it('should let a ferret move the owner’s public sub-card between parents, which publishes nothing new', async () => {
+    const { ports, service } = serviceWith([
+      ...base(),
+      card({
+        id: 'F1',
+        ask: AGENT_ASK,
+        parent: { id: 'F2' },
+        visibility: 'public',
+        visibilitySource: 'chosen',
+      }),
+    ]);
+    await reparent(service, 'F1', 'F3', lead);
+    should(stored(ports, 'F1')).match({ parent: { id: 'F3' }, visibility: 'public' });
+  });
+
+  it('should leave a card with no stored visibility without one, reading it by where it sits', async () => {
+    const { ports, service } = serviceWith([...base(), card({ id: 'F1', ask: AGENT_ASK })]);
+    await reparent(service, 'F1', 'F2', lead);
+    should(stored(ports, 'F1').visibility).be.undefined();
+    should(cardVisibility(stored(ports, 'F1'))).equal('private');
+  });
+});
+
+describe('editing a card with its visibility is one mutation', () => {
+  const edit = (service: BoardService, id: string, fields: Record<string, unknown>, caller: BoardCaller) =>
+    service.act(id, { action: 'edit', ...fields } as never, caller);
+
+  it('should apply text and visibility together, with one stored result', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    const store = ports.store as MemoryBoardStore;
+    await edit(service, 'F1', { title: 'Changed', visibility: 'public' }, lead);
+    should(store.writes).have.length(1);
+    should(stored(ports, 'F1')).match({ title: 'Changed', visibility: 'public', visibilitySource: 'chosen' });
+    should(stored(ports, 'F1').history.map(event => event.type)).eql(['created', 'field-edited', 'note']);
+  });
+
+  it('should change visibility alone through an edit', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    await edit(service, 'F1', { visibility: 'public' }, lead);
+    should(stored(ports, 'F1')).match({ visibility: 'public' });
+  });
+
+  it('should refuse a forbidden visibility without applying the text', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: PERSON_ASK, askedBy: 'person' })]);
+    await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, lead).then(
+      () => should.fail(undefined, undefined, 'a ferret hid the owner’s ask'),
+      (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'forbidden' }),
+    );
+    should(stored(ports, 'F1').title).equal('Board store');
+    should((ports.store as MemoryBoardStore).writes).have.length(0);
+    await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, owner);
+    should(stored(ports, 'F1')).match({ title: 'Changed', visibility: 'private' });
+  });
+
+  it('should ignore a visibility the card already has beside a text change, and refuse a no-op', async () => {
+    const { ports, service } = serviceWith([card({ id: 'F1', ask: AGENT_ASK })]);
+    await edit(service, 'F1', { title: 'Changed', visibility: 'private' }, lead);
+    should(stored(ports, 'F1')).match({ title: 'Changed' });
+    should(stored(ports, 'F1').visibility).be.undefined();
+    await edit(service, 'F1', { visibility: 'private' }, lead).then(
+      () => should.fail(undefined, undefined, 'a no-op was accepted'),
+      (error: unknown) => should(error).be.instanceOf(BoardError).and.match({ code: 'invalid' }),
+    );
   });
 });
 

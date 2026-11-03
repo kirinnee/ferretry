@@ -21,10 +21,8 @@ import {
   buildTriggerAction,
   buildUnblockAction,
   buildUndependAction,
-  buildVisibilityAction,
   createPrLinks,
   DEFAULT_REOPEN_SOURCE,
-  editsFields,
   parseTerms,
   requireCardRef,
   visibilityOf,
@@ -541,15 +539,15 @@ describe('public and private cards', () => {
     should(() => visibilityOf('secret')).throw(/--visibility must be one of public \| private/u);
   });
 
-  it('should build the visibility action', () => {
+  it('should build one edit action for visibility alone or beside card text', () => {
     // Act + Assert
-    should(buildVisibilityAction('private')).eql({ action: 'visibility', visibility: 'private' });
-  });
-
-  it('should tell a visibility-only edit from one that changes card text', () => {
-    // Act + Assert
-    should(editsFields({ visibility: 'private' })).be.false();
-    should(editsFields({ title: 'New title' })).be.true();
+    should(buildEditAction({ visibility: 'private' })).eql({ action: 'edit', visibility: 'private' });
+    should(buildEditAction({ title: 'New title', visibility: ' public ' })).eql({
+      action: 'edit',
+      title: 'New title',
+      visibility: 'public',
+    });
+    should(() => buildEditAction({ title: 'New title', visibility: 'secret' })).throw(/--visibility must be one of/u);
   });
 
   it('should ask the board for public cards by default', () => {

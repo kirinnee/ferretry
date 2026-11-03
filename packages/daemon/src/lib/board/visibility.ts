@@ -11,7 +11,7 @@ import type { BoardStanding } from './authority.ts';
 import { cardAskedBy } from './origin.ts';
 
 /** The facts a card's visibility rests on. */
-export type VisibilityFacts = Pick<BoardTask, 'ask' | 'askedBy' | 'parent' | 'visibility'>;
+export type VisibilityFacts = Pick<BoardTask, 'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource'>;
 
 /**
  * What a card without a stored visibility reads as: public when a person asked for it and it sits at the top
@@ -23,6 +23,23 @@ export const defaultVisibility = (card: Pick<BoardTask, 'ask' | 'askedBy' | 'par
 /** A card's visibility: the stored one, else {@link defaultVisibility}. Pure and total. */
 export const cardVisibility = (card: VisibilityFacts): BoardTaskVisibility =>
   card.visibility ?? defaultVisibility(card);
+
+/** Whether a stored visibility is a choice (set by a person or a ferret) rather than the derived default. */
+export const visibilityChosen = (card: Pick<BoardTask, 'visibility' | 'visibilitySource'>): boolean =>
+  card.visibility !== undefined && card.visibilitySource !== 'default';
+
+/**
+ * The card with its AUTOMATIC visibility settled from the facts as they stand now (who asked, where it sits). A
+ * chosen visibility is never touched, so no repair can undo a choice. Answers the same object when nothing would
+ * change, so a caller can tell whether there is anything to write. Pure and total.
+ */
+export const withDefaultVisibility = <T extends VisibilityFacts>(card: T): T => {
+  if (visibilityChosen(card)) return card;
+  const visibility = defaultVisibility(card);
+  return card.visibility === visibility && card.visibilitySource === 'default'
+    ? card
+    : { ...card, visibility, visibilitySource: 'default' };
+};
 
 /** The standings that may change a ferret's own card: its owner ferret, the leads above it, and the owner. */
 const KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];

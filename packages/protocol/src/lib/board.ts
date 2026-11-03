@@ -430,6 +430,13 @@ export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
 export const BoardTaskVisibilitySchema = z.enum(['public', 'private']);
 export type BoardTaskVisibility = z.infer<typeof BoardTaskVisibilitySchema>;
 
+/**
+ * Where a stored visibility came from: `default` is the one the daemon derived from who asked and where the card
+ * sits, and re-derives when those facts change; `chosen` was set by a person or a ferret and is never re-derived.
+ */
+export const BoardTaskVisibilitySourceSchema = z.enum(['default', 'chosen']);
+export type BoardTaskVisibilitySource = z.infer<typeof BoardTaskVisibilitySourceSchema>;
+
 const BoardTaskShape = {
   v: z.literal(BOARD_TASK_SCHEMA_VERSION),
   id: BoardTaskIdSchema,
@@ -495,6 +502,11 @@ const BoardTaskShape = {
    * The VIEW always carries it; absent only on a card stored before it existed.
    */
   visibility: BoardTaskVisibilitySchema.optional(),
+  /**
+   * Whether the stored visibility is the daemon's `default` (it follows the card's asker and parent) or was
+   * `chosen`. Absent beside a stored visibility reads `chosen`: a value of unknown origin is never undone.
+   */
+  visibilitySource: BoardTaskVisibilitySourceSchema.optional(),
   /**
    * The owner's Yes this card was made on where its board is off (docs/board.md § The board is opt-in): an item on
    * the creating ferret's agenda. One Yes makes one card. Absent on every other card.
@@ -877,9 +889,15 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('assign'), assignee: SessionIdSchema.nullable() }),
   z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH) }),
   z
-    .strictObject({ action: z.literal('edit'), ...editFields })
+    .strictObject({
+      action: z.literal('edit'),
+      ...editFields,
+      /** Changes the card's visibility in the same mutation as its text, so one request is one outcome. */
+      visibility: BoardTaskVisibilitySchema.optional(),
+    })
     .refine(
-      value => BoardEditableFieldSchema.options.some(field => value[field] !== undefined),
+      value =>
+        value.visibility !== undefined || BoardEditableFieldSchema.options.some(field => value[field] !== undefined),
       'an edit changes at least one field',
     ),
   z.strictObject({

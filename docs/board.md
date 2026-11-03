@@ -622,11 +622,17 @@ and its lead writes them.
 cards included. The board shows public cards by default; the rest are one switch away. A public card stays linked
 to its PRs and its approval exactly as any card is: visibility only decides whether the board lists it.
 
-A card stores `visibility: public | private`. A card stored before the field reads through one pure, total function,
-`cardVisibility` (`packages/daemon/src/lib/board/visibility.ts`): **public** when a person asked for it and it has no
-parent, **private** otherwise (an agent's card, a sub-card). Boot stores that value on every card that lacks one
-(`backfillVisibility`; idempotent, never changes a stored value, writes no history), so a card keeps its visibility when
-its parent or asker is later seen differently. A new card gets the same default unless the caller chose.
+A card stores `visibility: public | private` and `visibilitySource: default | chosen`. A card stored before the field
+reads through one pure, total function, `cardVisibility` (`packages/daemon/src/lib/board/visibility.ts`): **public** when
+a person asked for it and it has no parent, **private** otherwise (an agent's card, a sub-card).
+
+**A default is retryable; a choice is final.** `default` means the daemon derived it from the facts it had, `chosen`
+means someone set it (`--private` / `--public` on create, `fy task edit --visibility`, the app). Boot stores the
+default on every card whose asker is settled (`backfillVisibility`; idempotent, writes no history). A card whose asker
+is still a guess (`backfillAskedBy` could not read the owner's words) is left alone for a later boot, and a stored
+`default` is derived again whenever the asker is settled later, so a first-boot failure never freezes a person's ask
+private. A `chosen` visibility is never touched by any of this. A new card gets the default unless the caller chose,
+and is repaired the same way.
 
 | Who                                             | May                                                                                                             |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -635,8 +641,12 @@ its parent or asker is later seen differently. A new card gets the same default 
 | A ferret                                        | not make a card a person asked for private (it must never hide the owner's ask), and not make a sub-card public |
 | Anyone else, a sub-ferret                       | change nothing                                                                                                  |
 
-The daemon enforces this (`visibilityVerdict`) on create and on `fy task edit --visibility`, and answers `forbidden`
-with who could. A change is recorded on the card as a note. A caller off this host, a relayed phone included, is
+The daemon enforces this (`visibilityVerdict`) on create, on `fy task edit --visibility` and on a **reparent** (moving a
+public top-level card under another makes it a sub-card, so a ferret is refused unless the owner does it; a ferret
+cannot hide a person-asked card by moving it under another either), and answers `forbidden` with who could. A change
+is recorded on the card as a note. `fy task edit --title … --visibility …` is **one** daemon mutation with one result:
+the visibility rides in the edit action, so a refused or unsupported visibility (an older daemon rejects the unknown
+field) leaves the text unedited. A caller off this host, a relayed phone included, is
 never the owner on the strength of arriving at loopback: it is governed like any remote caller
 ([grants.md](grants.md)).
 

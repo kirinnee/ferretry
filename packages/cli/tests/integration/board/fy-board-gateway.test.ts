@@ -27,6 +27,40 @@ describe('the board gateway', () => {
     should(calls[0]?.path).equal('/v1/board?project=unfiled&state=closed&limit=500');
   });
 
+  it('should carry the visibility filter in the URL', async () => {
+    const { client: fake, calls } = client(boardResponse());
+
+    await new FyBoardGateway(fake).board({ visibility: 'private', limit: 500 });
+
+    should(calls[0]?.path).equal('/v1/board?visibility=private&limit=500');
+  });
+
+  it('should post a card visibility with the create', async () => {
+    const { client: fake, calls } = client(taskResponse());
+
+    await new FyBoardGateway(fake).create('session-7', {
+      kind: 'feature',
+      title: 'Rename the widget',
+      ask: { text: 'please rename it', source: 'chat://1' },
+      visibility: 'private',
+    });
+
+    should(JSON.parse(String(calls[0]?.init?.body))).have.property('visibility', 'private');
+  });
+
+  it('should post text and visibility as one edit body', async () => {
+    const { client: fake, calls } = client(taskResponse());
+
+    await new FyBoardGateway(fake).act('session-7', 'F412', {
+      action: 'edit',
+      title: 'Changed',
+      visibility: 'private',
+    });
+
+    should(calls).have.length(1);
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({ action: 'edit', title: 'Changed', visibility: 'private' });
+  });
+
   it('should read the whole board when no query is given', async () => {
     const { client: fake, calls } = client(boardResponse());
     await new FyBoardGateway(fake).board({});

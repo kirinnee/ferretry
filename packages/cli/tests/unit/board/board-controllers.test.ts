@@ -1041,22 +1041,23 @@ describe('the action verbs', () => {
     should(await refusal(() => controller.edit('F1', {}))).match(/nothing to edit/u);
   });
 
-  it('should change only the visibility with --visibility, and edit then change it when text comes too', async () => {
+  it('should send --visibility, alone or with text, as ONE edit and print one result', async () => {
     // Arrange
     const { controller, gateway, log } = harness();
 
     // Act
     await controller.edit('F1', { visibility: 'private' });
-    await controller.edit('F1', { title: 'New name', visibility: 'public' });
+    await controller.edit('F1', { title: 'New name', visibility: 'public', json: true });
 
     // Assert
     should(sent(gateway)).eql([
-      { action: 'visibility', visibility: 'private' },
-      { action: 'edit', title: 'New name' },
-      { action: 'visibility', visibility: 'public' },
+      { action: 'edit', visibility: 'private' },
+      { action: 'edit', title: 'New name', visibility: 'public' },
     ]);
-    should(log).have.length(3);
+    should(log).have.length(2);
+    should(JSON.parse(log[1]?.slice(4) ?? '').task.id).equal('F1');
     should(await refusal(() => controller.edit('F1', { visibility: 'secret' }))).match(/--visibility must be one of/u);
+    should(sent(gateway)).have.length(2);
   });
 
   it('should edit How to test from --how-to-test or --how-to-test-file', async () => {

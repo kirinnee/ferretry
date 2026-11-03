@@ -69,7 +69,7 @@ import { ancestorsOf } from './lineage.ts';
 import { gateEntry } from './gate-policy.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
-import { defaultVisibility, visibilityVerdict } from './visibility.ts';
+import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
 import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type {
@@ -411,7 +411,13 @@ export class BoardService {
           if (current === undefined || current.askedBy === 'person') return { task: null, result: false };
           const decided = await this.askedByOf(current, false);
           if (decided === current.askedBy) return { task: null, result: false };
-          return { task: requireValidCard({ ...current, askedBy: decided }), result: true };
+          // A default visibility stored while the asker was unsettled follows the answer; none stored is left to
+          // backfillVisibility, and a chosen one is never touched.
+          const asked = { ...current, askedBy: decided };
+          return {
+            task: requireValidCard(current.visibility === undefined ? asked : withDefaultVisibility(asked)),
+            result: true,
+          };
         });
         if (done) stored += 1;
       } catch (error) {
@@ -424,23 +430,28 @@ export class BoardService {
   }
 
   /**
-   * Stores the visibility every card still without one reads as ({@link defaultVisibility}), so a card keeps it when
-   * its parent or its asker is later seen differently. It never changes a stored value, so it is idempotent and
-   * cannot undo a choice; it writes no history and does not touch the card's last-touched time. A card that cannot
-   * be written is reported and left for the next boot. Answers how many cards it stored.
+   * Stores the visibility every card still without one reads as ({@link defaultVisibility}), and settles the ones
+   * stored as a default again, from who asked and where the card sits now. A card whose asker is not settled yet
+   * (`backfillAskedBy` could not decide it) is left without one, because a default stored then would be a guess;
+   * it reads by the same rule meanwhile and is settled by a later boot. A chosen visibility is never touched, so it
+   * is idempotent and cannot undo a choice; it writes no history and does not touch the card's last-touched time. A
+   * card that cannot be written is reported and left for the next boot. Answers how many cards it stored.
    */
   async backfillVisibility(): Promise<number> {
     const { cards } = await this.ports.store.read();
     let stored = 0;
-    for (const { id, visibility } of cards) {
-      if (visibility !== undefined) continue;
+    for (const card of cards) {
+      const { id } = card;
+      if (visibilityChosen(card) || card.askedBy === undefined) continue;
       try {
         const done = await this.ports.store.write(id, async current => {
-          if (current === undefined || current.visibility !== undefined) return { task: null, result: false };
-          return {
-            task: requireValidCard({ ...current, visibility: defaultVisibility(current) }),
-            result: true,
-          };
+          if (current === undefined || visibilityChosen(current) || current.askedBy === undefined) {
+            return { task: null, result: false };
+          }
+          const settled = withDefaultVisibility(current);
+          return settled === current
+            ? { task: null, result: false }
+            : { task: requireValidCard(settled), result: true };
         });
         if (done) stored += 1;
       } catch (error) {
@@ -895,6 +906,7 @@ export class BoardService {
     });
     const askedBy = await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true);
     const visibility = request.visibility ?? defaultVisibility({ ...made, askedBy });
+    const visibilitySource = request.visibility === undefined ? 'default' : 'chosen';
     if (request.visibility !== undefined) {
       const standing = facts.caller.kind === 'owner' ? 'owner-human' : 'owner';
       const refusal = visibilityVerdict({ ...made, askedBy }, request.visibility, standing);
@@ -904,6 +916,7 @@ export class BoardService {
       ...made,
       askedBy,
       visibility,
+      visibilitySource,
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
     await this.ports.store.write(id, async current => {

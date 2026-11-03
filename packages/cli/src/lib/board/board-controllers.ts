@@ -34,8 +34,6 @@ import {
   buildDependAction,
   buildDropAction,
   buildEditAction,
-  buildVisibilityAction,
-  editsFields,
   buildFileAction,
   buildFocusAction,
   buildLinkAction,
@@ -50,7 +48,6 @@ import {
   buildUndependAction,
   createPrLinks,
   requireCardRef,
-  visibilityOf,
 } from './board-request';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
 
@@ -446,13 +443,8 @@ export class BoardController {
   }
 
   async edit(idText: string, options: TaskEditFlags) {
-    const ref = requireCardRef(idText);
-    const visibility = visibilityOf(options.visibility);
     const texts = await this.resolveTexts(options);
-    if (visibility === undefined || editsFields(options, texts)) {
-      await this.perform('edit', ref, options, buildEditAction(options, texts));
-    }
-    if (visibility !== undefined) await this.perform('visibility', ref, options, buildVisibilityAction(visibility));
+    await this.perform('edit', requireCardRef(idText), options, buildEditAction(options, texts));
   }
 
   async refile(

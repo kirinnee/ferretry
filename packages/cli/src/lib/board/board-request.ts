@@ -365,9 +365,6 @@ export function visibilityOf(value: string | undefined): BoardTaskVisibility | u
   return given === undefined ? undefined : requireChoice(given, BoardTaskVisibilitySchema.options, '--visibility');
 }
 
-export const buildVisibilityAction = (visibility: BoardTaskVisibility): BoardTaskActionRequest =>
-  action({ action: 'visibility', visibility }, 'cannot change the visibility');
-
 export interface BoardEditOptions {
   readonly title?: string;
   readonly summary?: string;
@@ -404,23 +401,20 @@ const editFields = (options: BoardEditOptions, texts: BoardEditTexts) => {
   return fields;
 };
 
-/** Whether an edit changes any card text, as opposed to only its visibility. */
-export const editsFields = (options: BoardEditOptions, texts: BoardEditTexts = {}): boolean =>
-  Object.keys(editFields(options, texts)).length > 0;
-
-/** Terms replace the whole glossary. */
+/** Terms replace the whole glossary. `--visibility` rides in the same action, so text and visibility are one change. */
 export function buildEditAction(options: BoardEditOptions, texts: BoardEditTexts = {}): BoardTaskActionRequest {
   const fields = editFields(options, texts);
-  if (Object.keys(fields).length === 0) {
+  const visibility = visibilityOf(options.visibility);
+  if (Object.keys(fields).length === 0 && visibility === undefined) {
     refuse(
-      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test or --how-to-test-file',
+      'nothing to edit: pass --title, --summary, --premise, --context, --term, --brief, --brief-file, --how-to-test, --how-to-test-file or --visibility',
     );
   }
   if ('title' in fields && fields.title !== undefined) {
     const problem = taskTitleIssue(fields.title);
     if (problem !== null) refuse(problem);
   }
-  return action({ action: 'edit', ...fields }, 'cannot edit');
+  return action({ action: 'edit', ...fields, ...(visibility === undefined ? {} : { visibility }) }, 'cannot edit');
 }
 
 export const buildRefileAction = (

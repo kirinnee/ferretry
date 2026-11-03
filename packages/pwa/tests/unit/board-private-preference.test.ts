@@ -1,4 +1,4 @@
-import { describe, test } from 'bun:test';
+import { afterEach, describe, test } from 'bun:test';
 import should from 'should';
 import {
   BOARD_PRIVATE_KEY,
@@ -66,5 +66,43 @@ describe('BoardPrivateStore', () => {
     const store = new BoardPrivateStore(undefined);
     store.set(true);
     should(store.snapshot()).be.true();
+  });
+});
+
+describe('BoardPrivateStore with the browser storage', () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const stub = (descriptor: PropertyDescriptor) =>
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, ...descriptor });
+  afterEach(() => {
+    if (saved === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+    else Object.defineProperty(globalThis, 'localStorage', saved);
+  });
+
+  test('reads and writes the page storage when there is one', () => {
+    const storage = memory({ [BOARD_PRIVATE_KEY]: '1' });
+    stub({ value: storage });
+    const store = new BoardPrivateStore();
+    should(store.snapshot()).be.true();
+    store.set(false);
+    should(storage.values.get(BOARD_PRIVATE_KEY)).equal('0');
+  });
+
+  test('treats a storage that cannot be reached as none', () => {
+    stub({
+      get: () => {
+        throw new Error('SecurityError');
+      },
+    });
+    const store = new BoardPrivateStore();
+    should(store.snapshot()).be.false();
+    store.set(true);
+    should(store.snapshot()).be.true();
+  });
+
+  test('treats an object that is not a storage as none', () => {
+    stub({ value: { getItem: () => '1' } });
+    should(new BoardPrivateStore().snapshot()).be.false();
+    stub({ value: undefined });
+    should(new BoardPrivateStore().snapshot()).be.false();
   });
 });

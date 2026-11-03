@@ -22,6 +22,7 @@ import {
   type BoardClarification,
   type BoardEditableField,
   BoardEditableFieldSchema,
+  type BoardTaskVisibility,
   type BoardProjectId,
   type BoardTask,
   type BoardTaskActionRequest,
@@ -60,7 +61,7 @@ import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 import { closedLaneOf, shippedCloseReason, SUB_CARD_SHIPPED_REASON } from './sub-card-close.ts';
-import { cardVisibility, visibilityVerdict } from './visibility.ts';
+import { cardVisibility, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 /** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
 const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
@@ -743,11 +744,15 @@ const edit = (
     field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
   );
   if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, card);
-  if (changed.length === 0) throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
+  const visibility =
+    action.visibility === undefined || action.visibility === cardVisibility(card) ? undefined : action.visibility;
+  if (changed.length === 0 && visibility === undefined) {
+    throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
+  }
   let next = card;
   for (const field of changed)
     next = { ...withEvent(next, { type: 'field-edited', field }, context), [field]: action[field] };
-  return { task: next };
+  return { task: visibility === undefined ? next : visibilityChanged(next, card, visibility, undefined, context) };
 };
 
 /**
@@ -759,17 +764,32 @@ const setVisibility = (
   action: Extract<BoardTaskActionRequest, { action: 'visibility' }>,
   context: CardContext,
 ): CardOutcome => {
-  const ref = formatTaskRef(card);
-  const from = cardVisibility(card);
-  const refusal = visibilityVerdict(card, action.visibility, context.standing);
-  if (refusal !== null) throw new BoardError('forbidden', `${ref}: ${refusal.message}`, refusal.allowed);
-  if (action.visibility === from) throw new BoardError('invalid', `${ref} is already ${from}`);
-  const why = action.reason === undefined ? '' : `: ${action.reason}`;
+  if (action.visibility === cardVisibility(card)) {
+    throw new BoardError('invalid', `${formatTaskRef(card)} is already ${action.visibility}`);
+  }
+  return { task: visibilityChanged(card, card, action.visibility, action.reason, context) };
+};
+
+/**
+ * `card` (which may already carry other edits) made `to`, if the caller's standing on `original` allows it. The choice
+ * is stored as chosen, so no later repair of the derived default can undo it.
+ */
+const visibilityChanged = (
+  card: BoardTask,
+  original: BoardTask,
+  to: BoardTaskVisibility,
+  reason: string | undefined,
+  context: CardContext,
+): BoardTask => {
+  const refusal = visibilityVerdict(original, to, context.standing);
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${formatTaskRef(original)}: ${refusal.message}`, refusal.allowed);
+  }
+  const why = reason === undefined ? '' : `: ${reason}`;
   return {
-    task: {
-      ...withEvent(card, { type: 'note', text: `visibility: ${from} → ${action.visibility}${why}` }, context),
-      visibility: action.visibility,
-    },
+    ...withEvent(card, { type: 'note', text: `visibility: ${cardVisibility(original)} → ${to}${why}` }, context),
+    visibility: to,
+    visibilitySource: 'chosen',
   };
 };
 
@@ -968,9 +988,24 @@ const reparent = (
       `${ref} is already ${to === null ? 'at the top level' : `under ${formatTaskRef(to)}`}`,
     );
   }
+  const sitting = { ...card, parent: to };
+  const moved = card.visibility === undefined ? sitting : withDefaultVisibility(sitting);
+  const was = cardVisibility(card);
+  const now = cardVisibility(moved);
+  // Where a card sits is part of what decides who can see it: a card never becomes a public sub-card, and a
+  // person's card is never hidden, by a caller the visibility rules would stop doing either directly.
+  const refusal =
+    now === 'public' && card.parent === null && to !== null
+      ? visibilityVerdict(moved, 'public', context.standing)
+      : was === 'public' && now === 'private'
+        ? visibilityVerdict(moved, 'private', context.standing)
+        : null;
+  if (refusal !== null) {
+    throw new BoardError('forbidden', `${ref}: ${refusal.message}, and moving it there would do that`, refusal.allowed);
+  }
   return {
     task: {
-      ...withEvent(card, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
+      ...withEvent(moved, { type: 'reparented', from: card.parent, to, reason: action.reason ?? null }, context),
       parent: to,
     },
   };
