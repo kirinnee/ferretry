@@ -127,7 +127,7 @@ export const standingOf = (
 };
 
 /**
- * Who a card's gates ask (docs/board.md § Gates ask the owner): an EXTERNAL card is one a person asked for, and its
+ * Who a card's gates ask (docs/board.md § Cards show progress): an EXTERNAL card is one a person asked for, and its
  * gates are the owner's alone, asked as agenda items; an INTERNAL card is a ferret's own bookkeeping, and the owner
  * never sees it, so its owner ferret or a lead above that ferret passes its gates with an ordinary move.
  */

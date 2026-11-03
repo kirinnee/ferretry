@@ -2,6 +2,7 @@ import {
   agendaItemPushTag,
   type AgendaItem,
   type AgendaSnapshot,
+  hasOpenCardAsk,
   type PushSubject,
   pushUrgencyFor,
 } from '@ferretry/protocol';
@@ -105,8 +106,8 @@ export class NotificationService implements AgendaRaisedObserver {
    * else raised — an agenda item, a warden's card — waits for the stop or the deadline. Total.
    */
   async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
-    if (item.gate !== undefined) {
-      // A card's gate: its one push, under the same once-per-item key a notice's ping has.
+    if (item.gate !== undefined || hasOpenCardAsk(item)) {
+      // A card's ask: its one push, under the same once-per-item key a notice's ping has.
       await this.announce({ sessionId, agendaId: item.id, ping: true }, item, () =>
         gateNotificationPayload(sessionId, item, snapshot),
       );
@@ -125,7 +126,9 @@ export class NotificationService implements AgendaRaisedObserver {
    */
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
     // A card's gate item made its own push at its raise: a stop never names it again.
-    const [first, ...rest] = ownerTurnItems(snapshot.items).filter(item => item.gate === undefined);
+    const [first, ...rest] = ownerTurnItems(snapshot.items).filter(
+      item => item.gate === undefined && !hasOpenCardAsk(item),
+    );
     if (first === undefined) return;
     await this.announce(
       { sessionId, agendaId: first.id, stoppedAt },
@@ -144,10 +147,12 @@ export class NotificationService implements AgendaRaisedObserver {
     );
   }
 
-  /** A snoozed item woke and it blocks or has a deadline: its one push for this wake. Total. */
+  /** A snoozed item woke and it blocks or has a deadline, or a card ask woke its agenda (each ask fresh): its one push. Total. */
   async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     await this.announce({ sessionId, agendaId: item.id, woke: item.waitingSince }, item, () =>
-      wokeNotificationPayload(sessionId, item, snapshot),
+      hasOpenCardAsk(item)
+        ? gateNotificationPayload(sessionId, item, snapshot)
+        : wokeNotificationPayload(sessionId, item, snapshot),
     );
   }
 

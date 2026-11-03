@@ -23,6 +23,7 @@ describe('threadCardOf', () => {
 
 describe('ThreadGateObserver', () => {
   const run = async (change: Record<string, unknown>, fails = false) => {
+    const actor = change.actor ?? { kind: 'agent', sessionId: 's1' };
     const written: string[] = [];
     const observer = new ThreadGateObserver({
       written: async id => {
@@ -30,7 +31,7 @@ describe('ThreadGateObserver', () => {
         if (fails) throw new Error('boom');
       },
     });
-    await observer.changed('s1', change as never);
+    await observer.changed('s1', { ...change, actor } as never);
     await new Promise(resolve => setTimeout(resolve, 0));
     return written;
   };
@@ -46,5 +47,32 @@ describe('ThreadGateObserver', () => {
   it('ignores a change that is no thread of a card, and a failing look never rejects', async () => {
     should(await run({ item: item({ task: undefined }) })).deepEqual([]);
     should(await run({ item: item() }, true)).deepEqual(['F1']);
+  });
+});
+
+describe('the cards a card ask names', () => {
+  const GATE = { cardId: 'F9', laneId: 'tested', laneName: 'Ready to try', entry: 1, options: [] };
+
+  it('looks again at every card an agenda asks for, a daemon-raised one too', async () => {
+    const written: string[] = [];
+    const observer = new ThreadGateObserver({ written: async id => void written.push(id) });
+
+    await observer.changed('s1', {
+      actor: { kind: 'human' },
+      item: item({ raisedBy: 'daemon', task: { id: 'F9' }, cardAsks: [{ gate: GATE, at: '2026-07-30T10:00:00Z' }] }),
+    } as never);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    should(written).deepEqual(['F9']);
+  });
+
+  it('ignores the daemon’s own card-ask writes, which would only loop', async () => {
+    const written: string[] = [];
+    const observer = new ThreadGateObserver({ written: async id => void written.push(id) });
+
+    await observer.changed('s1', { actor: { kind: 'daemon', cause: 'system' }, item: item() } as never);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    should(written).deepEqual([]);
   });
 });

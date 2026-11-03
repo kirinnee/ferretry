@@ -567,9 +567,11 @@ export const isSubCard = (card: { readonly parent: TaskRef | null }): boolean =>
 
 /**
  * How a card is doing, derived from session liveness and the board (`board-design.md` §3.3): `active`
- * (an attributed session is working), `idle`, `stale` (idle past its lane's threshold), `waiting` (on the
- * owner, the outside world or another card — someone else's clock, so never stale) or `orphaned` (its
- * ferrets are gone with the card still in an active or review lane).
+ * (an attributed session is working), `idle`, `stale` (idle past its lane's threshold) or `orphaned` (its
+ * ferrets are gone with the card still in an active or review lane). A card that is blocked, depends on an
+ * unfinished card, or whose agenda carries its open ask is `idle` and never stale: someone else's clock.
+ * `waiting` is DEPRECATED (docs/agenda.md § Card asks): a card never waits on the owner itself, so no daemon that
+ * reports `agenda.card-asks.1` derives it; it stays in the enum so an app still reads an older daemon's board.
  */
 export const BoardTaskActivitySchema = z.enum(['active', 'idle', 'stale', 'waiting', 'orphaned']);
 export type BoardTaskActivity = z.infer<typeof BoardTaskActivitySchema>;
@@ -615,9 +617,12 @@ const BoardTaskViewShape = {
   rollup: RollupSchema,
   /** The lane the children suggest moving to; `null` when they suggest nothing. */
   suggestedLane: LaneIdSchema.nullable(),
-  /** Open, blocking agenda items raised against this card. */
-  waitingOnOwner: z.array(AgendaRefSchema),
-  /** Every open agenda item raised against this card, blocking or not. */
+  /**
+   * DEPRECATED (docs/agenda.md § Card asks): a card never waits on the owner itself, its ask rides its agenda. A
+   * daemon that reports `agenda.card-asks.1` sends it empty, so an app that predates card asks still parses the card.
+   */
+  waitingOnOwner: z.array(AgendaRefSchema).optional(),
+  /** The open agendas that carry this card: about it, or carrying one of its asks. */
   openAsks: z.array(AgendaRefSchema),
   /** Dependencies not yet done and not overridden. */
   blockedBy: z.array(TaskRefSchema),
@@ -640,7 +645,7 @@ const agendaKey = (ref: AgendaRef): string => `${ref.sessionId}/${ref.id}`;
 export const BoardTaskViewSchema = z.object(BoardTaskViewShape).superRefine((value, context) => {
   refineBoardTask(value, context);
   const open = new Set(value.openAsks.map(agendaKey));
-  if (value.waitingOnOwner.some(ref => !open.has(agendaKey(ref)))) {
+  if ((value.waitingOnOwner ?? []).some(ref => !open.has(agendaKey(ref)))) {
     context.addIssue({ code: 'custom', message: 'every blocking ask is also an open ask', path: ['waitingOnOwner'] });
   }
 });
@@ -653,7 +658,11 @@ export type BoardTaskView = z.infer<typeof BoardTaskViewSchema>;
 export const BoardPrStateFilterSchema = z.enum(['none', 'draft', 'open', 'ci_red', 'merged', 'released']);
 export type BoardPrStateFilter = z.infer<typeof BoardPrStateFilterSchema>;
 
-/** The activity states, plus the views the Board's one-tap pills open. */
+/**
+ * The activity states, plus the views the Board's one-tap pills open. `to_test` and `waiting_on_you` are DEPRECATED
+ * (docs/agenda.md § Card asks): an older app still sends them, and a daemon that reports `agenda.card-asks.1` matches
+ * no card to either; the owner's asks are on the agenda.
+ */
 export const BoardActivityFilterSchema = z.enum([
   ...BoardTaskActivitySchema.options,
   'to_test',
@@ -708,8 +717,10 @@ export const BoardCountsSchema = z.strictObject({
   stale: NonNegativeIntegerSchema,
   orphaned: NonNegativeIntegerSchema,
   active: NonNegativeIntegerSchema,
-  toTest: NonNegativeIntegerSchema,
-  waitingOnYou: NonNegativeIntegerSchema,
+  /** DEPRECATED (docs/agenda.md § Card asks): sent as 0 by a daemon that reports `agenda.card-asks.1`. */
+  toTest: NonNegativeIntegerSchema.optional(),
+  /** DEPRECATED (docs/agenda.md § Card asks): sent as 0 by a daemon that reports `agenda.card-asks.1`. */
+  waitingOnYou: NonNegativeIntegerSchema.optional(),
 });
 export type BoardCounts = z.infer<typeof BoardCountsSchema>;
 

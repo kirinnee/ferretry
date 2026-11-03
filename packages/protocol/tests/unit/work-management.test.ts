@@ -320,6 +320,34 @@ const agendaCases: SchemaCase[] = [
       options: [{ id: 'done', label: 'Done', outcome: 'close' }],
     },
   },
+  {
+    name: 'card ask answer',
+    schema: agenda.AgendaCardAskAnswerSchema,
+    value: {
+      at: '2026-07-30T10:00:00.000Z',
+      response: { kind: 'multiple-choice', choice: 'Done' },
+      note: 'works for me',
+      receipt: 'd'.repeat(64),
+      askVersion: 2,
+    },
+  },
+  {
+    name: 'card ask',
+    schema: agenda.AgendaCardAskSchema,
+    value: {
+      gate: {
+        cardId: 'F412',
+        laneId: 'released',
+        laneName: 'Released',
+        entry: 7,
+        projectId: 'p-1',
+        options: [{ id: 'done', label: 'Done', outcome: 'close' }],
+      },
+      at: '2026-07-30T10:00:00.000Z',
+      howToTest: 'Open the app and add a card.',
+      notYet: { at: '2026-07-30T11:00:00.000Z', note: 'tomorrow' },
+    },
+  },
   { name: 'attention paste plan pointer', schema: agenda.AgendaCopyPlanRefSchema, value: { planId: 'b'.repeat(32) } },
   { name: 'attention task plan pointer', schema: agenda.AgendaTaskPlanRefSchema, value: { planId: 'c'.repeat(32) } },
   {

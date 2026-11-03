@@ -1,4 +1,4 @@
-import type { AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaSnapshot, hasOpenCardAsk } from '@ferretry/protocol';
 import {
   type AgendaBoardChange,
   type AgendaChangeObserver,
@@ -41,7 +41,7 @@ const deadlineDue = (item: AgendaItem, horizon: number): boolean =>
  *  3. a notice with `ping`;
  *  4. a SNOOZED item woke and it blocks the ferret or has a deadline — ONE push per wake (an item already
  *     inside its deadline's window gets the deadline's push instead, never both);
- *  5. a card reached a gate that asks the owner (`item.gate`, docs/board.md § Gates ask the owner) — ONE push per
+ *  5. a card reached a gate that asks the owner (`item.gate`, docs/board.md § Cards show progress) — ONE push per
  *     gate item, at its raise. It is the gate's only signal, so it never also counts towards a stop's push.
  *
  * Everything else — a new item while the ferret works, an edit, a change of whose turn it is, a notice
@@ -70,7 +70,8 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
       await this.sink.raised(sessionId, item, snapshot).catch(() => undefined);
       return;
     }
-    if (item.gate !== undefined) {
+    // A card ask is a blocker of its card: the agenda raised with one buzzes once, as a gate item did.
+    if (item.gate !== undefined || hasOpenCardAsk(item)) {
       await this.sink.raised(sessionId, item, snapshot).catch(() => undefined);
       return;
     }
@@ -83,11 +84,11 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
     if (change.actor.kind !== 'human') await this.settle(sessionId, true);
   }
 
-  /** A woken item buzzes only when it blocks or has a deadline, and not when the deadline's own push will. */
+  /** A woken item buzzes only when it blocks (a card ask is a blocker) or has a deadline, and not when the deadline's own push will. */
   private async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;
     if (deadlineDue(item, horizon)) return;
-    if (item.blockingNow !== true && item.neededBy === undefined) return;
+    if (item.blockingNow !== true && item.neededBy === undefined && !hasOpenCardAsk(item)) return;
     await this.sink.woke(sessionId, item, snapshot).catch(() => undefined);
   }
 
@@ -117,9 +118,12 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, this.clock.now());
       const snapshot = agendaSnapshot(ledger);
       // A card being filled in advance is not the owner's to answer: it neither pushes its deadline nor makes a stop.
-      // A gate item made its one push when it was raised: it is never a second one inside a stop.
+      // A gate item, or an agenda carrying a card ask, made its one push when it was asked: never a second inside a stop.
       const owner = ownerTurnItems(snapshot.items).filter(
-        item => item.gate === undefined && (item.input === undefined || !this.quiet(sessionId, item.input.requestId)),
+        item =>
+          item.gate === undefined &&
+          !hasOpenCardAsk(item) &&
+          (item.input === undefined || !this.quiet(sessionId, item.input.requestId)),
       );
       if (owner.length === 0) return;
       const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;

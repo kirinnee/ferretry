@@ -141,19 +141,17 @@ describe('the page filters', () => {
       expected: true,
     },
     {
-      name: 'a verify card to test',
+      name: 'a verify card on the deprecated to-test filter, which matches nothing',
       input: { activity: 'to_test' as const },
       entry: scoped(view(), 'verify'),
-      expected: true,
+      expected: false,
     },
     { name: 'a backlog card to test', input: { activity: 'to_test' as const }, entry: scoped(view()), expected: false },
     {
-      name: 'a card waiting on the owner',
+      name: 'a card with an open agenda on the deprecated waiting-on-you filter, which matches nothing',
       input: { activity: 'waiting_on_you' as const },
-      entry: scoped(
-        view({ waitingOnOwner: [{ sessionId: 'lead', id: 'A1' }], openAsks: [{ sessionId: 'lead', id: 'A1' }] }),
-      ),
-      expected: true,
+      entry: scoped(view({ openAsks: [{ sessionId: 'lead', id: 'A1' }] })),
+      expected: false,
     },
     {
       name: 'an unasked card waiting on the owner',
@@ -203,22 +201,17 @@ describe('the header counts', () => {
     scoped(view({ activity: 'stale' }, { id: 'F2' }), 'active'),
     scoped(view({ activity: 'orphaned' }, { id: 'F3' }), 'review'),
     scoped(view({}, { id: 'F4' }), 'verify'),
-    scoped(
-      view(
-        { waitingOnOwner: [{ sessionId: 'lead', id: 'A1' }], openAsks: [{ sessionId: 'lead', id: 'A1' }] },
-        { id: 'F5' },
-      ),
-    ),
+    scoped(view({ openAsks: [{ sessionId: 'lead', id: 'A1' }] }, { id: 'F5' })),
     scoped(view({ activity: 'stale' }, { id: 'F6' }), 'closed'),
     scoped(view({}, { id: 'F7', dropped: { reason: 'no', at: NOW } }), 'closed'),
   ];
 
-  it('should count the open board and the closed cards it hides', () => {
+  it('should count the open board and the closed cards it hides, and nothing to test or waiting on the owner', () => {
     // Act
     const counts = countsOf(query(), board);
 
     // Assert
-    should(counts).eql({ closedHidden: 1, stale: 1, orphaned: 1, active: 1, toTest: 1, waitingOnYou: 1 });
+    should(counts).eql({ closedHidden: 1, stale: 1, orphaned: 1, active: 1, toTest: 0, waitingOnYou: 0 });
   });
 
   it('should hide nothing on a board that shows the closed cards', () => {

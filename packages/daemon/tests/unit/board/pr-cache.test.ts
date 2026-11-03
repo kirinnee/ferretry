@@ -183,7 +183,7 @@ describe('applyPrUpdate', () => {
   });
 
   it('should keep a card waiting at the To test gate for an open PR, and write down only the facts', () => {
-    // A gate is passed only by the owner (docs/board.md § Gates ask the owner): the open PR is told on its gate item.
+    // A gate is passed only by the owner (docs/board.md § Cards show progress): the open PR is told on its gate item.
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
     const subject = card({

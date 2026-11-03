@@ -72,4 +72,4 @@ export const shownLane = (lanes: readonly PhoneLane[], wanted: string | null): P
 
 /** What the Board tab's badge counts: the cards the owner is the next move on. */
 export const boardBadgeCount = (counts: Pick<BoardCounts, 'toTest' | 'waitingOnYou'>): number =>
-  counts.toTest + counts.waitingOnYou;
+  (counts.toTest ?? 0) + (counts.waitingOnYou ?? 0);

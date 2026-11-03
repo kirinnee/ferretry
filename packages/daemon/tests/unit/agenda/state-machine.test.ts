@@ -7,13 +7,14 @@ import {
   AgendaSnapshotSchema,
   agendaBadgeCount,
   agendaState,
+  cardAgendaReference,
   gateReference,
-  gatesAnsweredOn,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_RESOLUTIONS,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
+  openCardAsks,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -32,11 +33,13 @@ import {
   emptyAgendaLedger,
   isActiveAgenda,
   isWardenEscalationAgenda,
+  liftGateItems,
   MAX_AGENT_AGENDA_PER_SESSION,
   parkOwnerReplies,
   parseAgendaLedger,
   type RaiseAgendaRequest,
 } from '../../../src/lib/agenda/state-machine.ts';
+import type { CardAskOperation } from '../../../src/lib/agenda/card-asks.ts';
 
 const SESSION_ID = 'session-1';
 const OTHER_SESSION_ID = 'session-2';
@@ -4521,73 +4524,124 @@ describe('Agenda state machine: one unreadable entry', () => {
   });
 });
 
-describe('attach-gate (docs/agenda.md § One ask per thing)', () => {
+describe('card-ask (docs/agenda.md § Card asks)', () => {
   const GATE = {
     cardId: 'F1',
     laneId: 'tested',
     laneName: 'Try it',
     entry: 1,
     projectId: 'p1',
-    options: [{ id: 'o0', label: 'Done', outcome: 'close' as const }],
+    options: [
+      { id: 'o0', label: 'Done', outcome: 'close' as const },
+      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' as const },
+    ],
   };
-  const attach = (
-    ledger: AgendaLedger,
-    gate: typeof GATE | null,
-    actor: AgendaActor = { kind: 'daemon', cause: 'system' },
-    id: AgendaId = 'A1',
-  ): AgendaMutation => applyAgendaCommand(ledger, { action: 'attach-gate', actor, id, gate, at: SECOND });
+  const NEXT = { ...GATE, entry: 2 };
+  const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const RECEIPT = 'a'.repeat(64);
+  const ask = (ledger: AgendaLedger, operation: CardAskOperation, actor: AgendaActor = SYSTEM, id: AgendaId = 'A1') =>
+    applyAgendaCommand(ledger, { action: 'card-ask', actor, id, operation, at: SECOND });
+  const attach = (ledger: AgendaLedger, gate: typeof GATE = GATE, howToTest?: string) =>
+    succeeded(ask(ledger, { kind: 'attach', ask: { gate, ...(howToTest === undefined ? {} : { howToTest }) } }));
+  const answer = (ledger: AgendaLedger, gate: typeof GATE = GATE, receipt = RECEIPT) =>
+    ask(ledger, {
+      kind: 'answered',
+      reference: gateReference(gate),
+      answer: { at: SECOND, response: { kind: 'multiple-choice', choice: 'Done' }, receipt },
+    });
 
-  it('sets the gate on an open thread, leaves everything else alone, and clears it again', () => {
+  it('puts a new ask on an agenda, mirrors it as gateAttached and wakes the agenda into Needs you at the test stage', () => {
+    // Arrange
     const { ledger } = raised();
+    const snoozed = succeeded(
+      applyAgendaCommand(ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: FIRST } as never),
+    );
 
-    const set = succeeded(attach(ledger, GATE));
-    const again = succeeded(attach(set.ledger, GATE));
-    const cleared = succeeded(attach(set.ledger, null));
+    // Act
+    const woke = attach(snoozed.ledger, GATE, 'Open the app.');
 
-    should(set.change).equal('refreshed');
-    should(set.item?.gateAttached).deepEqual(GATE);
-    should(set.item?.subject).equal('Approve the deployment?');
-    should(again.changed).be.false();
-    should(cleared.item?.gateAttached).be.undefined();
-    should(succeeded(attach(ledger, null)).changed).be.false();
+    // Assert
+    should(woke.change).equal('woke');
+    should(openCardAsks(woke.item!)).have.length(1);
+    should(woke.item?.cardAsks?.[0]).containDeep({ gate: GATE, at: SECOND, howToTest: 'Open the app.' });
+    should(woke.item?.gateAttached).deepEqual(GATE);
+    should(woke.item?.waitingSince).equal(SECOND);
+    should(agendaState(woke.item!).state).equal('needs-you');
+    should(woke.item?.stage).equal('test');
   });
 
-  it('is the daemon’s alone', () => {
+  it('restates an open ask without waking it again, and refuses nothing it already holds', () => {
+    const first = attach(raised().ledger);
+
+    const same = attach(first.ledger);
+    const renamed = attach(first.ledger, { ...GATE, laneName: 'Ready to try' });
+
+    should(same.changed).be.false();
+    should(renamed.change).equal('refreshed');
+    should(renamed.item?.gateAttached?.laneName).equal('Ready to try');
+    should(renamed.item?.cardAsks).have.length(1);
+  });
+
+  it('withdraws an open ask and clears the mirror', () => {
+    const first = attach(raised().ledger);
+
+    const gone = succeeded(ask(first.ledger, { kind: 'withdraw', reference: gateReference(GATE) }));
+
+    should(gone.item?.cardAsks).be.undefined();
+    should(gone.item?.gateAttached).be.undefined();
+  });
+
+  it('records the answer and rests the agenda on its ferret; the same receipt again is unchanged, another is refused', () => {
+    const first = attach(raised().ledger);
+
+    const answered = succeeded(answer(first.ledger));
+    const replay = succeeded(answer(answered.ledger));
+    const different = failed(answer(answered.ledger, GATE, 'b'.repeat(64)));
+
+    should(answered.change).equal('answered');
+    should(openCardAsks(answered.item!)).have.length(0);
+    should(answered.item?.cardAsks?.[0]?.answer?.receipt).equal(RECEIPT);
+    should(answered.item?.gateAttached).be.undefined();
+    should(agendaState(answered.item!).state).equal('resting');
+    should(isActiveAgenda(activeEntry(answered.ledger))).be.true();
+    should(replay.changed).be.false();
+    should(different.error.code).equal('invalid');
+  });
+
+  it('keeps the agenda in Needs you while another of its asks is still open', () => {
+    const both = attach(attach(raised().ledger).ledger, NEXT);
+
+    const one = succeeded(answer(both.ledger));
+
+    should(openCardAsks(one.item!).map(each => each.gate.entry)).deepEqual([2]);
+    should(one.item?.gateAttached).deepEqual(NEXT);
+    should(agendaState(one.item!).state).equal('needs-you');
+  });
+
+  it('never asks an answered ask again', () => {
+    const answered = succeeded(answer(attach(raised().ledger).ledger));
+
+    const again = attach(answered.ledger);
+
+    should(again.changed).be.false();
+    should(openCardAsks(activeEntry(again.ledger).item)).have.length(0);
+  });
+
+  it('records Not yet as an open, marked ask and rests the agenda', () => {
+    const first = attach(raised().ledger);
+
+    const notYet = succeeded(ask(first.ledger, { kind: 'not-yet', reference: gateReference(GATE), note: 'tomorrow' }));
+
+    should(openCardAsks(notYet.item!)).have.length(1);
+    should(notYet.item?.cardAsks?.[0]?.notYet).deepEqual({ at: SECOND, note: 'tomorrow' });
+    should(agendaState(notYet.item!).state).equal('resting');
+  });
+
+  it('is the daemon’s alone, and refuses a missing item, a gate item and a notice', () => {
     const { ledger } = raised();
     for (const actor of [AGENT, HUMAN, OTHER_AGENT])
-      should(failed(attach(ledger, GATE, actor)).error.code).equal('forbidden');
-  });
-
-  it('records the owner’s answer in the history, every time, even when the gate is unchanged', () => {
-    const { ledger } = raised();
-    const set = succeeded(attach(ledger, GATE));
-    const answer = (from: AgendaLedger, left: typeof GATE | null) =>
-      succeeded(
-        applyAgendaCommand(from, {
-          action: 'attach-gate',
-          actor: { kind: 'daemon', cause: 'system' },
-          id: 'A1',
-          gate: left,
-          answered: GATE,
-          at: SECOND,
-        }),
-      );
-
-    const notYet = answer(set.ledger, GATE);
-    const again = answer(notYet.ledger, GATE);
-    const left = answer(again.ledger, null);
-
-    should(notYet.changed).be.true();
-    should(notYet.item?.gateAttached).deepEqual(GATE);
-    should(gatesAnsweredOn(notYet.item!)).deepEqual([gateReference(GATE)]);
-    should(gatesAnsweredOn(again.item!)).have.length(2);
-    should(left.item?.gateAttached).be.undefined();
-    should(gatesAnsweredOn(left.item!)).have.length(3);
-  });
-
-  it('refuses an item that is not there, a gate item and a notice', () => {
-    const { ledger } = raised();
-    should(failed(attach(ledger, GATE, undefined, 'A9')).error.code).equal('not-found');
+      should(failed(ask(ledger, { kind: 'attach', ask: { gate: GATE } }, actor)).error.code).equal('forbidden');
+    should(failed(ask(ledger, { kind: 'attach', ask: { gate: GATE } }, SYSTEM, 'A9')).error.code).equal('not-found');
 
     const gateItem = succeeded(
       applyAgendaCommandToSession(
@@ -4595,16 +4649,173 @@ describe('attach-gate (docs/agenda.md § One ask per thing)', () => {
         SESSION_ID,
         raiseCommand(DAEMON, {
           source: 'task',
-          sourceRef: gateReference({ cardId: 'F1', laneId: 'tested', entry: 1 }),
+          sourceRef: gateReference(GATE),
           gate: GATE,
           task: { id: 'F1' },
         } as never),
       ),
     );
-    should(failed(attach(gateItem.ledger, GATE)).error.code).equal('invalid');
+    should(failed(ask(gateItem.ledger, { kind: 'attach', ask: { gate: GATE } })).error.code).equal('invalid');
 
     const notice = raised(AGENT, { notice: true, ask: undefined, kind: 'info' } as never);
-    should(failed(attach(notice.ledger, GATE)).error.code).equal('invalid');
+    should(failed(ask(notice.ledger, { kind: 'attach', ask: { gate: GATE } })).error.code).equal('invalid');
+  });
+
+  it('keeps its ferret from closing or resting it, and the owner from a bare Done, while an ask is open', () => {
+    const first = attach(raised().ledger);
+
+    const close = failed(
+      applyAgendaCommand(first.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: THIRD } as never),
+    );
+    const bare = failed(
+      applyAgendaCommand(first.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: THIRD } as never),
+    );
+    const afterAnswer = succeeded(
+      applyAgendaCommand(succeeded(answer(first.ledger)).ledger, {
+        action: 'resolve',
+        actor: AGENT,
+        id: 'A1',
+        note: 'the owner tried it',
+        at: THIRD,
+      } as never),
+    );
+
+    should(close.error.message).match(/carries the ask of &F1, which only the owner answers/u);
+    should(bare.error.message).match(/card ask/u);
+    should(afterAnswer.changed).be.true();
+  });
+
+  it('refuses a ferret raising card asks of its own', () => {
+    const result = failed(
+      applyAgendaCommandToSession(null, SESSION_ID, raiseCommand(AGENT, { cardAsks: [{ gate: GATE, at: FIRST }] })),
+    );
+    should(result.error.code).equal('forbidden');
+  });
+});
+
+describe('liftGateItems (docs/agenda.md § Card asks: the migration)', () => {
+  const GATE = {
+    cardId: 'F1',
+    laneId: 'tested',
+    laneName: 'Released · to test',
+    entry: 1,
+    projectId: 'p1',
+    options: [
+      { id: 'o0', label: 'Done', outcome: 'close' as const },
+      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' as const },
+    ],
+  };
+  const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const reread = (ledger: AgendaLedger): AgendaLedger => {
+    const parsed = parseAgendaLedger(JSON.parse(agendaLedgerDocument(ledger)), SESSION_ID);
+    if (parsed === null) throw new Error('ledger did not read back');
+    return parsed;
+  };
+  const gateItem = (from: AgendaLedger | null, gate = GATE, at = FIRST) =>
+    succeeded(
+      applyAgendaCommandToSession(
+        from,
+        SESSION_ID,
+        raiseCommand(
+          SYSTEM,
+          {
+            source: 'task',
+            sourceRef: gateReference(gate),
+            subject: 'Try it: F1',
+            body: 'Open the app and add a card.',
+            gate,
+            task: { id: 'F1' },
+          } as never,
+          at,
+        ),
+      ),
+    );
+
+  it('turns a lone gate item into its card’s agenda in place, keeping the steps as the ask’s howToTest', () => {
+    // Arrange
+    const legacy = gateItem(null).ledger;
+
+    // Act
+    const lifted = reread(legacy);
+
+    // Assert
+    const item = activeEntry(lifted).item;
+    should(item.id).equal('A1');
+    should(item.gate).be.undefined();
+    should(item.sourceRef).equal(cardAgendaReference('F1'));
+    should(item.ask).deepEqual({ kind: 'open-question' });
+    should(item.cardAsks).have.length(1);
+    should(item.cardAsks?.[0]).containDeep({ gate: GATE, howToTest: 'Open the app and add a card.' });
+    should(item.gateAttached).deepEqual(GATE);
+    should(item.stage).equal('test');
+    should(agendaState(item).state).equal('needs-you');
+  });
+
+  it('is idempotent: reading the lifted ledger again changes nothing', () => {
+    const once = reread(gateItem(null).ledger);
+
+    should(reread(once)).deepEqual(once);
+  });
+
+  it('moves a gate item’s ask onto the card’s open thread and closes the gate item, saying where it went', () => {
+    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
+    const legacy = gateItem(thread.ledger, GATE, SECOND).ledger;
+
+    const lifted = reread(legacy);
+
+    const open = lifted.entries.filter(isActiveAgenda);
+    should(open.map(entry => entry.item.id)).deepEqual(['A1']);
+    should(open[0]?.item.cardAsks?.[0]?.gate).deepEqual(GATE);
+    const closed = lifted.entries.find(entry => entry.lifecycle !== 'active' && entry.item.id === 'A2');
+    should(closed).not.be.undefined();
+    should(JSON.stringify(closed)).match(/its card's ask is now on !A1/u);
+    should(reread(lifted)).deepEqual(lifted);
+  });
+
+  it('merges two gate items of one card into one agenda', () => {
+    const first = gateItem(null).ledger;
+    const legacy = gateItem(first, { ...GATE, entry: 2 }, SECOND).ledger;
+
+    const lifted = reread(legacy);
+
+    const open = lifted.entries.filter(isActiveAgenda);
+    should(open).have.length(1);
+    should(open[0]?.item.cardAsks?.map(each => each.gate.entry).sort()).deepEqual([1, 2]);
+  });
+
+  it('lifts a bare gateAttached into an open card ask, keeping a Not yet', () => {
+    const thread = raised(AGENT, { task: { id: 'F1' } } as never);
+    const bare = {
+      ...thread.ledger,
+      entries: thread.ledger.entries.map(entry =>
+        entry.lifecycle === 'active'
+          ? {
+              ...entry,
+              item: {
+                ...entry.item,
+                gateAttached: GATE,
+                history: [
+                  ...(entry.item.history ?? []),
+                  { kind: 'gate-answered' as const, at: SECOND, note: gateReference(GATE) },
+                ],
+              },
+            }
+          : entry,
+      ),
+    } as AgendaLedger;
+
+    const lifted = reread(bare);
+
+    const item = activeEntry(lifted).item;
+    should(item.cardAsks).have.length(1);
+    should(item.cardAsks?.[0]?.notYet).deepEqual({ at: SECOND });
+    should(item.gateAttached).deepEqual(GATE);
+  });
+
+  it('leaves a ledger with no gate item exactly as it was', () => {
+    const { ledger } = raised();
+
+    should(liftGateItems(ledger)).equal(ledger);
   });
 });
 

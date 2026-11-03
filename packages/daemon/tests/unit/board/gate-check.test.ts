@@ -37,11 +37,17 @@ const mine = (overrides: Partial<GateCheckItem> = {}): GateCheckItem => ({
   waitingSince: AFTER,
   ...overrides,
 });
-/** The daemon's gate item for F412. */
+/** The agenda that carries F412's card ask, opened by the daemon on its ferret's behalf. */
 const gate = (overrides: Partial<GateCheckItem> = {}): GateCheckItem => ({
   id: 'A31',
   raisedBy: 'daemon',
-  sourceRef: 'gate:F412:tested:3',
+  sourceRef: 'card-agenda:F412',
+  cardAsks: [
+    {
+      gate: { cardId: 'F412', laneId: 'tested', laneName: 'Ready to try', entry: 3, projectId: 'p1', options: [] },
+      at: BEFORE,
+    },
+  ],
   task: { id: 'F412' },
   waitingSince: BEFORE,
   ...overrides,
@@ -97,10 +103,10 @@ describe('isGateLane', () => {
 });
 
 describe('the gate check words', () => {
-  it('should name the card, the daemon item and the command that drops the ferret item, one line each', () => {
+  it('should name the card, the agenda that carries it, how to add to it and how to drop the ferret item, one line each', () => {
     // Act + Assert
     should(gateCheckMessage([{ card: 'F412', gateItem: 'A31', item: 'A44' }], 'zz')).equal(
-      '&F412 is at a gate; the daemon already asked the owner (!A31). Drop yours: zz agenda dismiss !A44',
+      '&F412 already asks the owner on !A31, which carries the card: add yours to it (zz agenda edit A31 --where "<what you need>"), then drop !A44: zz agenda dismiss !A44',
     );
     should(
       gateCheckMessage(
@@ -136,7 +142,8 @@ describe('BoardGateCheck', () => {
       {
         sessionId: 's-1',
         sendId: 'board-gate-check-s-1-A44',
-        message: '&F412 is at a gate; the daemon already asked the owner (!A31). Drop yours: zz agenda dismiss !A44',
+        message:
+          '&F412 already asks the owner on !A31, which carries the card: add yours to it (zz agenda edit A31 --where "<what you need>"), then drop !A44: zz agenda dismiss !A44',
       },
     ]);
     should(h.records).eql([{ sessionId: 's-1', items: ['A44'], cards: ['F412'] }]);
@@ -194,14 +201,30 @@ describe('BoardGateCheck', () => {
     }
   });
 
-  it('should say nothing when the daemon has raised no gate item to point to', async () => {
+  it("should say nothing when no other agenda carries the card's open ask", async () => {
     // Arrange
     const none = harness({ items: [mine()] });
-    const otherCard = harness({ items: [mine(), gate({ sourceRef: 'gate:F9:tested:3' })] });
-    const prefix = harness({ items: [mine(), gate({ sourceRef: 'gate:F4123:tested:3' })] });
+    const askOf = (cardId: string, answered = false) => [
+      {
+        gate: { cardId, laneId: 'tested', laneName: 'Ready to try', entry: 3, projectId: 'p1', options: [] },
+        at: BEFORE,
+        ...(answered
+          ? {
+              answer: {
+                at: BEFORE,
+                response: { kind: 'multiple-choice' as const, choice: 'Done' },
+                receipt: 'a'.repeat(64),
+              },
+            }
+          : {}),
+      },
+    ];
+    const otherCard = harness({ items: [mine(), gate({ cardAsks: askOf('F9') })] });
+    const prefix = harness({ items: [mine(), gate({ cardAsks: askOf('F4123') })] });
+    const answered = harness({ items: [mine(), gate({ cardAsks: askOf('F412', true) })] });
 
     // Act + Assert
-    for (const h of [none, otherCard, prefix]) {
+    for (const h of [none, otherCard, prefix, answered]) {
       should(await new BoardGateCheck(h.ports, 'zz').check('s-1')).be.false();
       should(h.sent).eql([]);
     }

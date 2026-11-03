@@ -28,12 +28,19 @@ interface Pill {
 }
 
 const pills = (counts: BoardCounts): readonly Pill[] => [
-  { filter: 'to_test', icon: 'to-test', label: 'To test', count: counts.toTest, tone: 'pill', word: 'cards to test' },
+  {
+    filter: 'to_test',
+    icon: 'to-test',
+    label: 'To test',
+    count: counts.toTest ?? 0,
+    tone: 'pill',
+    word: 'cards to test',
+  },
   {
     filter: 'waiting_on_you',
     icon: 'waiting-on-you',
     label: 'Waiting on you',
-    count: counts.waitingOnYou,
+    count: counts.waitingOnYou ?? 0,
     tone: 'pill',
     word: 'cards waiting on you',
   },

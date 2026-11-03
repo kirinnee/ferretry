@@ -271,7 +271,7 @@ describe('LaneSetService.apply', () => {
       ['ms8-abcd1234', `lanes:${FERRETRY_ID}:4`],
     ]);
     should(agenda.raised[0]?.[2].why).containEql(
-      'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+      'removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
     );
     should(agenda.raised[0]?.[2].why).containEql('keeps its lanes until you accept');
   });
@@ -522,7 +522,7 @@ describe('LaneSetService merges Released and To test at boot', () => {
       [FERRETRY_ID, { tested: 'released' }],
     ]);
     should(relocator.reasons).deepEqual([RELEASE_MERGE_REASON, RELEASE_MERGE_REASON]);
-    should(RELEASE_MERGE_REASON).equal('Released and To test are one lane now: Released · to test');
+    should(RELEASE_MERGE_REASON).equal('Released and To test are one lane now: Released');
     should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'tested')).be.false();
     should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
     should(relocator.authorities.map(by => by.kind)).deepEqual(['daemon', 'daemon']);

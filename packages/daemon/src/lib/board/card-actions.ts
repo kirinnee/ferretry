@@ -214,7 +214,7 @@ const requireOwnerForClosed = (
 };
 
 // ---------------------------------------------------------------------------------------------------
-// Gates: the one stopping point (docs/board.md § Gates ask the owner)
+// Gates: the one stopping point (docs/board.md § Cards show progress)
 // ---------------------------------------------------------------------------------------------------
 
 const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
@@ -362,7 +362,7 @@ const reopen = (
  * and never moves a dropped card, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
  *
- * IT NEVER PASSES A GATE (docs/board.md § Gates ask the owner): a card waiting at one stays there, whatever the
+ * IT NEVER PASSES A GATE (docs/board.md § Cards show progress): a card waiting at one stays there, whatever the
  * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
@@ -928,7 +928,7 @@ const refile = (
 };
 
 /**
- * Where a refile lands for anyone who may not pass a gate (docs/board.md § Gates ask the owner): never past a gate of
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Cards show progress): never past a gate of
  * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
  * and a card waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
  * gate. Throws `owner-gate` naming the gate.

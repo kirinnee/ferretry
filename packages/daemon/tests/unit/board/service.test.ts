@@ -774,7 +774,7 @@ describe('everything else on a card', () => {
 
     // Assert
     should(blocked).eql({ on: 'external', reason: 'waiting on GitHub', since: NOW });
-    should(view.task.activity).equal('waiting');
+    should(view.task.activity).equal('idle');
     should(stored(ports).blocked).be.null();
     should(lastEvent(ports)).match({ type: 'unblocked', reason: null });
     should(again.code).equal('invalid');
@@ -1431,7 +1431,7 @@ describe('refiling a card', () => {
   });
 
   it('should take a named lane, and let the daemon refile too', async () => {
-    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Gates ask the owner)
+    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Cards show progress)
     const { ports, service } = serviceWith([card({ workflow: 'quick' })]);
 
     // Act
@@ -1620,7 +1620,7 @@ describe('reading the board', () => {
     // Assert
     should(response.cards.map(entry => entry.id).sort()).eql(['F1', 'F3']);
     should(response.laneSet?.projectId).equal(PROJECT);
-    should(response.counts).match({ closedHidden: 1, toTest: 1 });
+    should(response.counts).match({ closedHidden: 1, toTest: 0 });
     should(response.quarantined).eql([{ id: 'F9', reason: 'the card file is not valid JSON' }]);
     should(response.nextCursor).be.null();
   });
@@ -1689,7 +1689,7 @@ describe('reading the board', () => {
       {
         open: async sessionId =>
           sessionId === 'stranger'
-            ? ([{ id: 'A1', task: { id: 'F1' }, blockingNow: true }] as unknown as readonly AgendaItem[])
+            ? ([{ id: 'A1', cardAsks: [{ gate: { cardId: 'F1' }, at: NOW }] }] as unknown as readonly AgendaItem[])
             : [],
       },
       () => MACHINE,
@@ -1711,8 +1711,9 @@ describe('reading the board', () => {
 
     // Assert
     should(derived[0]).eql(['F0', 'F1', 'F2']);
-    should(one.task.waitingOnOwner).eql([ask]);
-    should(one.task.activity).equal('waiting');
+    should(one.task.openAsks).eql([ask]);
+    should(one.task.waitingOnOwner).eql([]);
+    should(one.task.activity).equal('idle');
     should(one.task).eql(whole.cards.find(each => each.id === 'F1'));
   });
 
@@ -2099,7 +2100,7 @@ describe('lanes follow PR facts at the write', () => {
   });
 
   it('should keep a card waiting at the Plan gate where it is, whatever its linked PR says', async () => {
-    // Arrange — only the owner passes a gate (docs/board.md § Gates ask the owner)
+    // Arrange — only the owner passes a gate (docs/board.md § Cards show progress)
     const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
       runningVersion: () => '4.114.0',
     });

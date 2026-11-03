@@ -912,7 +912,7 @@ function HomeRoute({ connection }: DaemonPageProps) {
       onNavigate={navigate}
       sessions={sessions}
       spendTodayUsd={spendTodayUsd}
-      toTest={board.status === 'ready' ? board.model.counts.toTest : null}
+      toTest={board.status === 'ready' ? (board.model.counts.toTest ?? 0) : null}
     />
   );
 }

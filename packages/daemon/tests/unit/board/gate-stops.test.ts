@@ -19,7 +19,7 @@ import {
 import { card, FakeFocus, FakeLanes, lanes, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, world } from './support.ts';
 
 /**
- * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Gates ask the owner): their answer to its item, or their own
+ * A GATE IS PASSED ONLY BY THE OWNER (docs/board.md § Cards show progress): their answer to its item, or their own
  * move — and, on an internal card, its owner ferret's or a lead's. A ferret's move, a daemon trigger, PR facts,
  * `fy signal done` and a refile may bring a card INTO a gate; none takes it out of one or past one.
  */

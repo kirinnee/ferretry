@@ -1048,7 +1048,7 @@ export type AgendaGateOption = z.infer<typeof AgendaGateOptionSchema>;
 
 /**
  * THE GATE AN ITEM ASKS ABOUT: the daemon raised it because an owner-asked card entered a lane whose stage is a
- * gate, and answering it moves the card (docs/board.md § Gates ask the owner). Only the daemon writes one; an app
+ * gate, and answering it moves the card (docs/board.md § Cards show progress). Only the daemon writes one; an app
  * that predates the field reads an ordinary choice card and answers it by label.
  */
 export const AgendaGateSchema = z.strictObject({
@@ -1064,6 +1064,48 @@ export const AgendaGateSchema = z.strictObject({
   options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
 });
 export type AgendaGate = z.infer<typeof AgendaGateSchema>;
+
+// ---------------------------------------------------------------------------------------------------
+// CARD ASKS (docs/agenda.md § Card asks). A card never asks the owner itself: when it reaches a stage that waits on
+// the owner (a gate: OK to build, or Done / Not good), the daemon puts a CARD ASK on the agenda that carries the card.
+// Kept in a block of its own: the conversation's merge and split carry `cardAsks` as they find them.
+// ---------------------------------------------------------------------------------------------------
+
+/** The most card asks one agenda keeps: every open one, then the newest answered ones, so a replay still finds its own. */
+export const MAX_AGENDA_CARD_ASKS = 16;
+
+/**
+ * The owner's answer to a card ask, kept on the ask: the choice, their words, and a SHA-256 of everything the answer
+ * said (`receipt`) with the `askVersion` it was given against, so an exact repeat (a lost response, a second tap) is
+ * answered as the first one was and moves nothing again.
+ */
+export const AgendaCardAskAnswerSchema = z.object({
+  at: InstantSchema,
+  response: AgendaResponseSchema,
+  note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+  receipt: z.string().regex(/^[0-9a-f]{64}$/u),
+  askVersion: PositiveIntegerSchema.optional(),
+});
+export type AgendaCardAskAnswer = z.infer<typeof AgendaCardAskAnswerSchema>;
+
+/**
+ * ONE CARD ASK: the card's gate as it stands (the card, its lane, the entry that put it there and the lane's
+ * options), when it was put on this agenda, the card's How to test, and — once the owner answered — their answer.
+ * Open while it has no answer. Only the daemon writes one; only the owner answers one.
+ */
+export const AgendaCardAskSchema = z.object({
+  gate: AgendaGateSchema,
+  at: InstantSchema,
+  /** The card's How to test, as written (Markdown): what the owner tries before they answer. */
+  howToTest: z.string().max(MAX_AGENDA_BODY_LENGTH).optional(),
+  answer: AgendaCardAskAnswerSchema.optional(),
+  /**
+   * The owner said "Not yet" (a one-option gate's other answer): the card stays, their words reached its ferret, and
+   * the ask stays OPEN for them to answer later. The ferret may rest the agenda now; it still may not close it.
+   */
+  notYet: z.object({ at: InstantSchema, note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional() }).optional(),
+});
+export type AgendaCardAsk = z.infer<typeof AgendaCardAskSchema>;
 
 /**
  * THE OWNER'S LATEST ANSWER TO AN OPEN ITEM'S ASK (docs/agenda.md § States): an answer rests the item, it never
@@ -1177,13 +1219,19 @@ const AgendaItemBaseShape = {
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
-  /** The card gate this item asks about (`AgendaGate`); only the daemon raises one, and only the owner answers it. */
+  /**
+   * DEPRECATED: the card gate a standalone gate item asked about. No daemon raises one any more — a card's ask rides
+   * its agenda (`cardAsks`) — and the boot migration turned every open one into its card's agenda. Kept so an item
+   * answered before reads, and its receipt still answers a replay.
+   */
   gate: AgendaGateSchema.optional(),
   /**
-   * The card gate this THREAD answers for (docs/agenda.md § One ask per thing): a ferret's open, owner-facing thread
-   * about a card whose gate is asking carries it instead of a gate item of its own. Only the daemon sets or clears it.
+   * The FIRST OPEN card ask's gate (`cardAsks`), mirrored for an app that predates card asks: it draws Done / Not good
+   * on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
    */
   gateAttached: AgendaGateSchema.optional(),
+  /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
+  cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
   /**
    * How a RESTING item rests (`agenda-state.ts`): waiting on its ferret, or the ferret working on it, and the nudge
    * clock. It rides beside the `parked: replied` (or `waitingOn: 'ferret'`) every app reads, which stays the field
@@ -1254,6 +1302,10 @@ export const StoredAgendaItemSchema = z
     }
     if (value.gate !== undefined && value.raisedBy !== 'daemon') {
       context.addIssue({ code: 'custom', message: 'only the daemon raises a gate item', path: ['gate'] });
+    }
+    const asked = (value.cardAsks ?? []).map(ask => `${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`);
+    if (new Set(asked).size !== asked.length) {
+      context.addIssue({ code: 'custom', message: 'an agenda carries each card ask once', path: ['cardAsks'] });
     }
     for (const problem of agendaFormProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
@@ -1661,6 +1713,11 @@ export const AgendaActionRequestSchema = z
       response: AgendaResponseSchema.optional(),
       /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
+      /**
+       * WHICH card ask the response answers (`agenda.card-asks.1`): its gate reference (`gate:<card>:<lane>:<entry>`).
+       * Absent with `gate: true`, the answer is to the ask an older app was shown (`gateAttached`).
+       */
+      cardAsk: z.string().min(1).max(MAX_AGENDA_SOURCE_REF_LENGTH).optional(),
       /**
        * The `askVersion` of the item the answer — or the Done given from its ask — was given to (`agenda.asks.1`):
        * when the ferret has replaced the ask since, it is refused `ask_changed` instead of being applied to the new

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  BOARD_ACTIVITY_CHOICES,
   buildAssignAction,
   buildClaimAction,
   buildBlockAction,
@@ -466,7 +467,7 @@ describe('buildBoardQuery', () => {
   it('should carry the resolved project and ferret and every filter', () => {
     // Act
     const query = buildBoardQuery(
-      { kind: 'bug', pr: 'ci_red', activity: 'waiting_on_you', state: 'dropped', query: ' widget ' },
+      { kind: 'bug', pr: 'ci_red', activity: 'stale', state: 'dropped', query: ' widget ' },
       { projectId: FERRETRY_ID, ferretId: 'sess-1' },
     );
 
@@ -476,10 +477,17 @@ describe('buildBoardQuery', () => {
       ferret: 'sess-1',
       kind: 'bug',
       prState: 'ci_red',
-      activity: 'waiting_on_you',
+      activity: 'stale',
       state: 'dropped',
       query: 'widget',
     });
+  });
+
+  it('should refuse the deprecated waiting filters: a card never waits on the owner, its agenda does', () => {
+    // Act + Assert
+    for (const activity of ['waiting', 'to_test', 'waiting_on_you'])
+      should(() => buildBoardQuery({ activity }, everything)).throw(/--activity must be one of/u);
+    should(BOARD_ACTIVITY_CHOICES).not.containEql('waiting_on_you');
   });
 
   it('should read --closed as --state closed, and accept both when they agree', () => {

@@ -134,7 +134,7 @@ export interface BoardServiceDependencies {
   /** The caller's open agenda threads a card may be made for (`--thread`). Absent, a card naming one is refused. */
   readonly threads?: BoardThreads;
   /**
-   * Told after every committed write of a card, by any path (docs/board.md § Gates ask the owner): the gate items
+   * Told after every committed write of a card, by any path (docs/board.md § Cards show progress): the gate items
    * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
    */
   readonly gates?: CardWriteObserver;

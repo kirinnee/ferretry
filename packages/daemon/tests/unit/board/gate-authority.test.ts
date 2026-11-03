@@ -12,7 +12,7 @@ import {
 import { card, MemoryBoardStore, world } from './support.ts';
 
 /**
- * WHO PASSES A GATE (docs/board.md § Gates ask the owner): the owner always; on an INTERNAL card (a ferret's own
+ * WHO PASSES A GATE (docs/board.md § Cards show progress): the owner always; on an INTERNAL card (a ferret's own
  * errand) its owner ferret and the leads above it too; nobody else. Every standing × audience × kind of lane.
  */
 

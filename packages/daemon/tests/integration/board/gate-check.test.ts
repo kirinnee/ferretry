@@ -58,8 +58,14 @@ const mine: GateCheckItem = {
 const gate: GateCheckItem = {
   id: 'A31',
   raisedBy: 'daemon',
-  sourceRef: 'gate:F412:tested:3',
+  sourceRef: 'card-agenda:F412',
   task: { id: 'F412' },
+  cardAsks: [
+    {
+      gate: { cardId: 'F412', laneId: 'tested', laneName: 'Ready to try', entry: 3, projectId: 'p1', options: [] },
+      at: '2026-10-30T09:00:00.000Z',
+    },
+  ],
   waitingSince: '2026-10-30T09:00:00.000Z',
 };
 
@@ -168,7 +174,8 @@ describe('the turn-end gate check', () => {
     should([...world.delivered.values()]).eql([
       {
         sessionId: 'lead-1',
-        message: '&F412 is at a gate; the daemon already asked the owner (!A31). Drop yours: fy agenda dismiss !A44',
+        message:
+          '&F412 already asks the owner on !A31, which carries the card: add yours to it (fy agenda edit A31 --where "<what you need>"), then drop !A44: fy agenda dismiss !A44',
       },
     ]);
     const journal = await world.nudged(LEAD);

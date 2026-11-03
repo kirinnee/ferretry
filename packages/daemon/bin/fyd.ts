@@ -2314,7 +2314,13 @@ function createBoardWorld(
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
-    agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
+    // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
+    agenda: new AgendaCardLinks(
+      { open: agendaItems },
+      machineId,
+      diagnostics,
+      new AgendaHomes(new StorageHomeSessions(storage), undefined, boardDiagnostics),
+    ),
     changes: new JournalBoardChanges(storage),
     clock,
     diagnostics: boardDiagnostics,
@@ -10363,7 +10369,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // What each click's start came to, by the key the click carried, apart from whether its ferret is still alive: a
       // retry after a lost response gets the same answer even once that ferret has finished. Bounded, oldest first.
       const cardStartResults = new Map<string, BoardTaskStartResponse>();
-      // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
+      // The gate items (docs/board.md § Cards show progress) are built with the agenda, further down: a card written
       // before then (a boot migration) is caught up by their boot backfill instead.
       let gateItems: GateItems | undefined;
       // The owner's shared drafts are built with the rest of the subsystems, further down; an item that closes
@@ -10883,6 +10889,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               );
             }
           })
+          .then(async () => await laneSets.progressLaneNames())
+          .then(outcomes => {
+            for (const outcome of outcomes) {
+              process.stderr.write(
+                outcome.renamed
+                  ? `board lanes: ${outcome.projectId} lanes now show progress (version ${String(outcome.version)})\n`
+                  : `board lanes: ${outcome.projectId} could not rename its lanes as progress: ${outcome.problem}\n`,
+              );
+            }
+          })
           .then(async () => await unfiledRefiler.run())
           .catch(() => undefined);
       });
@@ -11211,7 +11227,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
-      // daemon starts get theirs once, in the background (docs/board.md § Gates ask the owner).
+      // daemon starts get theirs once, in the background (docs/board.md § Cards show progress).
       const gateWordsMessenger = new SendReopenMessenger(boardOwnerSends);
       gateItems = new GateItems({
         agenda,

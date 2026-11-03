@@ -50,10 +50,10 @@ const inState = (query: Pick<BoardQuery, 'state'>, scoped: ScopedView): boolean 
 
 const matchesActivity = (filter: NonNullable<BoardQuery['activity']>, scoped: ScopedView): boolean => {
   switch (filter) {
+    // Deprecated (docs/agenda.md § Card asks): the owner's asks are on the agenda, so no card is either.
     case 'to_test':
-      return scoped.category === 'verify';
     case 'waiting_on_you':
-      return scoped.view.waitingOnOwner.length > 0;
+      return false;
     case 'blocked':
       return scoped.view.blocked !== null || scoped.view.blockedBy.length > 0;
     default:
@@ -101,8 +101,9 @@ export const countsOf = (query: BoardQuery, scoped: readonly ScopedView[]): Boar
     stale: open.filter(entry => entry.view.activity === 'stale').length,
     orphaned: open.filter(entry => entry.view.activity === 'orphaned').length,
     active: open.filter(entry => entry.view.activity === 'active').length,
-    toTest: open.filter(entry => entry.category === 'verify').length,
-    waitingOnYou: open.filter(entry => entry.view.waitingOnOwner.length > 0).length,
+    // Deprecated and always 0 (docs/agenda.md § Card asks): kept for an app that predates card asks.
+    toTest: 0,
+    waitingOnYou: 0,
   };
 };
 

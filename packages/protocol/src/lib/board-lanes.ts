@@ -321,14 +321,15 @@ export interface LaneTargets {
 }
 
 /**
- * The emphasis a lane is drawn with: the one it declares, else its category's. A `verify` lane, an
- * owner-gated lane and nothing else asks the owner to act; `shipped` and `closed` lanes are information.
+ * The emphasis a lane is drawn with: the one it declares, else its category's. Lanes show progress; the owner's asks
+ * ride the card's agenda (docs/agenda.md § Card asks). A `verify` lane defaults to `action` only as the mirror an
+ * app that predates card asks requires; `shipped` and `closed` lanes are information.
  */
 export const laneEmphasis = (lane: Pick<Lane, 'category' | 'ownerGate' | 'emphasis'>): LaneEmphasis => {
   if (lane.emphasis !== undefined) return lane.emphasis;
   if (lane.category === 'verify') return 'action';
   if (lane.category === 'shipped' || lane.category === 'closed') return 'info';
-  return lane.ownerGate === true ? 'action' : 'progress';
+  return 'progress';
 };
 
 /** What puts a card in a lane by itself, in the words `fy board lanes show` prints. */
@@ -351,12 +352,12 @@ export const LANE_CATEGORY_USE: Readonly<Record<LaneCategory, string>> = {
   active: 'you are building it now',
   review: 'built and waiting to be reviewed',
   shipped: 'merged, waiting for a release',
-  verify: 'the owner tests it',
+  verify: 'released or ready for the owner to try',
   closed: 'finished; only the owner closes it',
 };
 
 /** The category use of an active lane the owner gates: a plan or design, before the building starts. */
-const PLAN_USE = 'you are planning or designing it; the owner approves before it moves on';
+const PLAN_USE = 'you are planning or designing it; its agenda asks the owner OK to build before it moves on';
 
 /**
  * One lane's "use when …" line: its category's meaning, what moves a card in by itself, and who passes its
@@ -372,7 +373,9 @@ export const laneUse = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate'>):
         ? null
         : 'move it here yourself'
       : `moves in when ${lane.enterOn.map(trigger => TRIGGER_WORDS[trigger]).join(' or ')}`;
-  return [base, entry, gated ? 'the owner moves it on' : null].filter(part => part !== null).join('; ');
+  return [base, entry, gated ? 'its agenda asks the owner to move it on' : null]
+    .filter(part => part !== null)
+    .join('; ');
 };
 
 /**
@@ -424,8 +427,9 @@ export const laneLayoutProblems = (layout: LaneLayout): readonly (readonly [stri
   if (hasVerify && closed.some(lane => lane.ownerGate !== true)) {
     problems.push(['lanes', 'the closed lane is owner-gated in a set that has a verify lane']);
   }
+  // A mirror, not a meaning: an app that predates card asks refuses a verify lane drawn any other way.
   if (layout.lanes.some(lane => lane.category === 'verify' && laneEmphasis(lane) !== 'action')) {
-    problems.push(['lanes', "a verify lane is the owner's action, so its emphasis is action"]);
+    problems.push(['lanes', "a verify lane's emphasis is action, so an older app still reads the set"]);
   }
   if (closed.some(lane => laneEmphasis(lane) !== 'info')) {
     problems.push(['lanes', 'the closed lane is hidden information, so its emphasis is info']);
@@ -849,7 +853,7 @@ const plan: Lane = {
   enterOn: ['work.started'],
   ownerGate: true,
   staleAfter: '2h',
-  emphasis: 'action',
+  emphasis: 'progress',
 };
 /**
  * Being worked on, PR open or not: review and CI are the ferret's to finish, not the owner's to act on, so
@@ -871,10 +875,14 @@ const merged: Lane = {
   staleAfter: '3d',
   emphasis: 'info',
 };
-/** A release is what the owner can test, so released IS "to test": one lane, the owner's to move on. */
+/**
+ * A release is what the owner can try: one lane, Released. Its card's agenda carries the owner's Done / Not good
+ * (docs/agenda.md § Card asks); the lane only shows where the work is. A verify lane keeps `emphasis: 'action'`
+ * as the mirror an app that predates card asks requires of one.
+ */
 const releasedToTest: Lane = {
   id: 'released',
-  name: 'Released · to test',
+  name: 'Released',
   category: 'verify',
   enterOn: ['release.published'],
   ownerGate: true,
@@ -922,18 +930,18 @@ const writingLanes: Lane[] = stagedLanes([
     category: 'review',
     enterOn: ['pr.opened', 'signal.done'],
     staleAfter: '24h',
-    emphasis: 'action',
+    emphasis: 'progress',
   },
   { id: 'published', name: 'Published', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d' },
   closed,
 ]);
 /**
- * Quick work's one thing for the owner to do: try it. It has no release step, so a merge is what the owner
- * tests, and so is a ferret's done with no PR.
+ * Quick work that is ready to try. It has no release step, so a merge is what the owner tries, and so is a ferret's
+ * done with no PR; the card's agenda carries the ask.
  */
 export const QUICK_TO_TEST_LANE: Lane = staged({
   id: 'to-test',
-  name: 'To test',
+  name: 'Ready to try',
   category: 'verify',
   enterOn: ['pr.merged', 'release.published', 'signal.done'],
   ownerGate: true,
@@ -950,17 +958,17 @@ const quickLanes: Lane[] = stagedLanes([
 export type LaneTemplate = LaneLayoutValue & LaneTargets;
 
 /**
- * The templates, as data, built by the lane design rule (`docs/board.md`): a lane for each thing the owner
- * DOES, plus just enough progress to show work moves, and nothing more.
+ * The templates, as data, built by the lane design rule (`docs/board.md`): lanes show PROGRESS — just enough to
+ * show work moves, and nothing more. What the owner does is on the card's agenda (docs/agenda.md § Card asks).
  *
- * - `pr-release-verify` — Ferretry's own: Todo → Plan/Design → In progress → Merged → Released · to test →
- *   Closed. A card reaches Released · to test when its PR ships in a release; the owner's Done closes it.
+ * - `pr-release-verify` — Ferretry's own: Todo → Plan/Design → In progress → Merged → Released → Closed. A card
+ *   reaches Released when its PR ships in a release; its agenda asks Done / Not good, and the owner's Done closes it.
  * - `pr-release` — no testing step; Released closes.
  * - `pr` — Merged closes.
  * - `ops` — Investigate → Fix → Verify → Closed.
  * - `writing` — Research → Draft → Review → Published → Closed.
- * - `quick` — Todo → Doing → To test → Closed. A merge, a release or the ferret's done puts the card in To
- *   test; the owner's Done closes it. The Unfiled board uses it.
+ * - `quick` — Todo → Doing → Ready to try → Closed. A merge, a release or the ferret's done puts the card in
+ *   Ready to try; its agenda asks, and the owner's Done closes it. The Unfiled board uses it.
  *
  * In the PR templates only `design-first` and `research-first` work walks Plan/Design. Not good sends a
  * card back to the last active lane (In progress, Fix, Draft, Doing); Done sends it to the closed lane.

@@ -1,7 +1,7 @@
 import { AGENDA_REST_NUDGE_MS, type AgendaItem, agendaState, agendaTitle } from '@ferretry/protocol';
 import type { AgendaSweepTimers } from './resurfacer.ts';
 import type { AgendaLedgerRepository, AgendaService } from './service.ts';
-import { type AgendaNudgeTarget, agendaSnapshot, isGateFollowupItem } from './state-machine.ts';
+import { type AgendaNudgeTarget, agendaSnapshot, isOnBehalfItem } from './state-machine.ts';
 import { AGENDA_NUDGE_MARK } from './turn-nudge.ts';
 
 /**
@@ -51,7 +51,7 @@ export function restNudgesDue(items: readonly AgendaItem[], now: number): Agenda
   return (
     items
       // Only what the ferret speaks for: its own items and a gate's follow-up; the daemon's own cards are not its to answer.
-      .filter(item => item.notice !== true && (item.raisedBy === 'agent' || isGateFollowupItem(item)))
+      .filter(item => item.notice !== true && (item.raisedBy === 'agent' || isOnBehalfItem(item)))
       .filter(item => {
         const due = restNudgeDueAt(item);
         return due !== undefined && due <= now;

@@ -77,7 +77,9 @@ export const activityText = (
     case 'stale':
       return 'Stale: idle longer than its lane allows';
     case 'waiting':
-      return task.waitingOnOwner.length > 0 ? 'Stopped until you answer' : 'Waiting on something outside the ferret';
+      return (task.waitingOnOwner ?? []).length > 0
+        ? 'Stopped until you answer'
+        : 'Waiting on something outside the ferret';
     case 'orphaned':
       return 'No ferret is left on it';
   }
@@ -278,7 +280,7 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
 
 /** The card's open asks that are NOT also stopping the ferret: the rest of `openAsks`. */
 export const nonBlockingAsks = (task: Pick<BoardTaskView, 'openAsks' | 'waitingOnOwner'>): readonly AgendaRef[] =>
-  task.openAsks.filter(ask => !task.waitingOnOwner.some(waiting => waiting.id === ask.id));
+  task.openAsks.filter(ask => !(task.waitingOnOwner ?? []).some(waiting => waiting.id === ask.id));
 
 // ---------------------------------------------------------------------------------------------------
 // Messages the owner sends
@@ -384,7 +386,9 @@ export const collectAsks = (task: BoardTaskView, agendas: readonly SessionAgenda
     open: task.openAsks.map(ref => ({
       ref,
       item: itemOf(ref),
-      blocking: task.waitingOnOwner.some(waiting => waiting.sessionId === ref.sessionId && waiting.id === ref.id),
+      blocking: (task.waitingOnOwner ?? []).some(
+        waiting => waiting.sessionId === ref.sessionId && waiting.id === ref.id,
+      ),
     })),
     resolved,
     reading: agendas.some(entry => entry.snapshot === null),

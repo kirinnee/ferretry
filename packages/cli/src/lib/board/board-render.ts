@@ -49,10 +49,9 @@ export function prLabel(prs: readonly PrLink[]): string {
   return pr.checks === 'failing' ? `${base} open, CI red` : `${base} open`;
 }
 
-/** The one word for how the card is doing: what the owner is waited on for beats the derived activity. */
+/** The one word for how the card is doing: a block beats the derived activity. A card never waits on the owner itself. */
 export function activityLabel(card: BoardTaskView): string {
   if (card.dropped !== null) return 'dropped';
-  if (card.waitingOnOwner.length > 0) return 'waiting on you';
   if (card.blocked !== null) return 'blocked';
   if (card.blockedBy.length > 0) return 'blocked by deps';
   return card.activity;
@@ -72,8 +71,6 @@ const countsLine = (counts: BoardCounts): string =>
     `${String(counts.stale)} stale`,
     `${String(counts.orphaned)} orphaned`,
     `${String(counts.active)} active`,
-    `${String(counts.toTest)} to test`,
-    `${String(counts.waitingOnYou)} waiting on you`,
   ].join(' · ');
 
 interface LaneGroup {
@@ -273,12 +270,8 @@ export function renderCard(
   ];
   if (linkRows.length > 0) lines.push(...section('Links', linkRows.join('\n')));
   if (card.files.length > 0) lines.push(...section('Files', card.files.join('\n')));
-  if (card.openAsks.length > 0) {
-    const blocking = agendaList(card.waitingOnOwner);
-    lines.push(
-      ...section('Asks', `open: ${agendaList(card.openAsks)}${blocking === '' ? '' : `\nwaiting on you: ${blocking}`}`),
-    );
-  }
+  // The agendas that carry the card: its asks ride them (docs/agenda.md § Card asks).
+  if (card.openAsks.length > 0) lines.push(...section('Agenda', agendaList(card.openAsks)));
 
   const history = card.history.map(
     event =>

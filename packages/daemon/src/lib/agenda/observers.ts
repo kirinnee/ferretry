@@ -17,7 +17,7 @@ import {
   type ReplyKey,
 } from './reply-batch.ts';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaLedgerRepository, AgendaService } from './service.ts';
-import { agendaSnapshot, emptyAgendaLedger, isGateFollowupItem } from './state-machine.ts';
+import { agendaSnapshot, emptyAgendaLedger, isOnBehalfItem } from './state-machine.ts';
 import { type AgendaModes, decoratedSummary, type SessionStops } from './stopped.ts';
 
 /** Every observer is told, even after a failure. Critical delivery failures prevent durable acknowledgement. */
@@ -109,10 +109,10 @@ export class SessionAgendaProjection implements AgendaChangeObserver {
 
 /**
  * Whether an item speaks for the ferret whose board holds it: one it raised, or a gate's follow-up conversation the
- * daemon opened on its behalf (`gate-followup:`), so the owner's words there reach it as on its own item.
+ * daemon opened on its behalf (`gate-followup:`, `card-agenda:`), so the owner's words there reach it as on its own item.
  */
 const speaksFor = (item: AgendaItem | ResolvedAgendaItem, sessionId: string): boolean =>
-  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) || isGateFollowupItem(item);
+  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) || isOnBehalfItem(item);
 
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.

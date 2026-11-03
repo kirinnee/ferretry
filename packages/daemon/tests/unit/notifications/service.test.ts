@@ -280,7 +280,7 @@ describe('NotificationService woke push', () => {
   });
 });
 
-/** A card's gate item (docs/board.md § Gates ask the owner): raised by the daemon, answered only by the owner. */
+/** A card's gate item (docs/board.md § Cards show progress): raised by the daemon, answered only by the owner. */
 const gated = AgendaItemSchema.parse({
   id: 'A5',
   source: 'task',

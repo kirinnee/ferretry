@@ -2,8 +2,8 @@
  * THE NEEDS-YOU QUEUE AND THE RESTING LIST (docs/agenda.md § The Needs-you queue): one selector each, so the Inbox,
  * the badge, push and every count read the same list in the same order. Pure and total.
  */
-import type { AgendaParked } from './agenda.ts';
-import { agendaWakeAt } from './agenda.ts';
+import { type AgendaCardAsk, type AgendaParked, agendaWakeAt } from './agenda.ts';
+import { hasOpenCardAsk } from './agenda-card-asks.ts';
 import { agendaNeedsYouSince } from './agenda-stage.ts';
 import { type AgendaRestSubState, type AgendaStateSource, agendaState } from './agenda-state.ts';
 
@@ -14,13 +14,17 @@ export interface AgendaQueueSource extends AgendaStateSource {
   readonly blockingNow?: true | undefined;
   readonly neededBy?: string | undefined;
   readonly parked?: AgendaParked | undefined;
+  readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer'>[] | undefined;
 }
+
+/** A blocker goes first: the ferret said it is stuck now, or the agenda carries a card ask the owner has yet to answer. */
+const isBlocker = (item: AgendaQueueSource): boolean => item.blockingNow === true || hasOpenCardAsk(item);
 
 const byClock = (left: string, right: string): number => Date.parse(left) - Date.parse(right);
 
 /**
  * THE NEEDS-YOU QUEUE: every item whose state is `needs-you`, each AT MOST ONCE (the first of any repeat of its
- * key wins), blockers first, then by when each started needing the owner (`agendaNeedsYouSince`), then by key.
+ * key wins), blockers first (`blockingNow`, or an open card ask), then by when each started needing the owner (`agendaNeedsYouSince`), then by key.
  * `keyOf` names an item across boards (the roll-up keys by session too); on one board its id is enough.
  */
 export function needsYouQueue<Item extends AgendaQueueSource>(
@@ -37,7 +41,7 @@ export function needsYouQueue<Item extends AgendaQueueSource>(
   });
   return queue.sort(
     (left, right) =>
-      Number(right.blockingNow === true) - Number(left.blockingNow === true) ||
+      Number(isBlocker(right)) - Number(isBlocker(left)) ||
       byClock(agendaNeedsYouSince(left), agendaNeedsYouSince(right)) ||
       keyOf(left).localeCompare(keyOf(right)),
   );

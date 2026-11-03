@@ -1,12 +1,20 @@
 /**
- * GATES ASK THE OWNER, through the agenda route (docs/board.md § Gates ask the owner): the board and the agenda on
+ * CARD ASKS, through the agenda route (docs/board.md § Cards show progress): the board and the agenda on
  * their REAL file stores, the route handler called with the context the authorization boundary would have built.
  * It proves what the owner and a ferret can do over the wire — only the owner's answer moves the card, a device
  * only with the board's grant — and that a restart never raises a gate twice.
  */
 import { afterAll, describe, it } from 'bun:test';
 import { join } from 'node:path';
-import { type BoardTask, DAEMON_FEATURES, daemonFeatureList, type GrantRefusal } from '@ferretry/protocol';
+import {
+  type BoardTask,
+  cardAgendaReference,
+  cardAskReference,
+  DAEMON_FEATURES,
+  daemonFeatureList,
+  type GrantRefusal,
+  openCardAsks,
+} from '@ferretry/protocol';
 import should from 'should';
 import { FileAgendaLedgerRepository } from '../../../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
@@ -152,11 +160,12 @@ const post = async (
   }
 };
 
-const choose = (id: string, choice: string, note?: string) => ({
+const choose = (id: string, choice: string, note?: string, cardAsk?: string) => ({
   action: 'resolve',
   id,
   response: { kind: 'multiple-choice', choice },
   ...(note === undefined ? {} : { note }),
+  ...(cardAsk === undefined ? {} : { cardAsk }),
 });
 
 const openItems = async (daemon: ReturnType<typeof daemonOver>, sessionId = 'grandchild') => {
@@ -167,23 +176,44 @@ const openItems = async (daemon: ReturnType<typeof daemonOver>, sessionId = 'gra
 
 const laneOf = async (daemon: ReturnType<typeof daemonOver>, id = 'F1') => (await daemon.board.task(id)).task.laneId;
 
+/** A card at its gate, and the card agenda the daemon opened for it on its ferret's behalf. */
 const atGate = async (laneId = 'tested', overrides: Partial<BoardTask> = {}) => {
   const home = await tempDirectory('gate-items');
   const daemon = daemonOver(home);
   await daemon.store.write('F1', async () => ({ task: external(laneId, overrides), result: undefined }));
   await daemon.gates.backfill();
   const [item] = (await openItems(daemon)).items;
-  if (item === undefined) throw new Error('expected a gate item');
-  return { home, daemon, item };
+  const ask = item === undefined ? undefined : openCardAsks(item)[0];
+  if (item === undefined || ask === undefined) throw new Error('expected a card agenda with an open card ask');
+  return { home, daemon, item, reference: cardAskReference(ask) };
 };
 
-describe('answering a gate item over the agenda route', () => {
-  it('moves the card when the owner at the machine answers Done, then closes the item', async () => {
-    // Arrange
+/** The one open agenda of the card's ferret, as it is now. */
+const theAgenda = async (daemon: ReturnType<typeof daemonOver>, id: string) => {
+  const found = (await openItems(daemon)).items.find(each => each.id === id);
+  if (found === undefined) throw new Error(`expected !${id} to be open`);
+  return found;
+};
+
+describe('answering a card ask over the agenda route', () => {
+  it('opens one card agenda that asks, mirrored as gateAttached for an older app', async () => {
+    // Arrange + Act
     const { daemon, item } = await atGate();
 
+    // Assert
+    should((await openItems(daemon)).items).have.length(1);
+    should(item.sourceRef).equal(cardAgendaReference('F1'));
+    should(item.gate).be.undefined();
+    should(item.cardAsks?.[0]).match({ gate: { cardId: 'F1', laneId: 'tested' }, howToTest: '1. Open the Inbox' });
+    should(item.gateAttached).match({ cardId: 'F1', laneId: 'tested' });
+  });
+
+  it('moves the card when the owner at the machine answers Done, then RESTS the agenda for its ferret', async () => {
+    // Arrange
+    const { daemon, item, reference } = await atGate();
+
     // Act
-    const answer = await post(daemon, HOST, choose(item.id, 'Done'));
+    const answer = await post(daemon, HOST, choose(item.id, 'Done', undefined, reference));
 
     // Assert
     should(answer.status).equal(200);
@@ -196,16 +226,19 @@ describe('answering a gate item over the agenda route', () => {
       actor: { kind: 'owner' },
       actorVia: 'admin-token',
     });
-    should((await openItems(daemon)).items).be.empty();
+    const agenda = await theAgenda(daemon, item.id);
+    should(agenda.cardAsks?.[0]?.answer?.receipt).match(/^[0-9a-f]{64}$/u);
+    should(openCardAsks(agenda)).be.empty();
+    should(agenda.gateAttached).be.undefined();
     should(daemon.done.notices).have.length(1);
   });
 
   it('moves the card for a paired device the fleet grant lets use the board', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
+    const { daemon, item, reference } = await atGate();
 
     // Act
-    const answer = await post(daemon, DEVICE, choose(item.id, 'Done'));
+    const answer = await post(daemon, DEVICE, choose(item.id, 'Done', undefined, reference));
 
     // Assert
     should(answer.status).equal(200);
@@ -215,92 +248,89 @@ describe('answering a gate item over the agenda route', () => {
 
   it('refuses a paired device without the fleet grant, and moves nothing', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
+    const { daemon, item, reference } = await atGate();
 
     // Act
-    const answer = await post(daemon, DEVICE_WITHOUT_FLEET, choose(item.id, 'Done'));
+    const answer = await post(daemon, DEVICE_WITHOUT_FLEET, choose(item.id, 'Done', undefined, reference));
 
     // Assert
     should(answer.status).equal(403);
     should(await laneOf(daemon)).equal('tested');
-    should((await openItems(daemon)).items.map(each => each.id)).eql([item.id]);
+    should(openCardAsks(await theAgenda(daemon, item.id))).have.length(1);
   });
 
-  it('refuses the card’s ferret, its lead and a stranger, on every verb that would close it', async () => {
+  it('refuses the card’s ferret, its lead and a stranger, on every verb that would pass the ask', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
+    const { daemon, item, reference } = await atGate();
     const callers = [peer('grandchild'), peer('child'), peer('lead'), peer('stranger')];
 
     // Act
     const answers = [];
     for (const caller of callers) {
+      answers.push(await post(daemon, caller, choose(item.id, 'Done', undefined, reference)));
       answers.push(await post(daemon, caller, choose(item.id, 'Done')));
       answers.push(await post(daemon, caller, { action: 'resolve', id: item.id, note: 'tested it' }));
       answers.push(await post(daemon, caller, { action: 'dismiss', id: item.id }));
     }
 
     // Assert
-    for (const answer of answers) should(answer.status).equal(403);
+    for (const answer of answers) should(answer.status >= 400 && answer.status < 500).be.true();
     should(await laneOf(daemon)).equal('tested');
-    should((await openItems(daemon)).items.map(each => each.id)).eql([item.id]);
+    should(openCardAsks(await theAgenda(daemon, item.id))).have.length(1);
   });
 
-  it('refuses a ferret’s raise that carries a gate', async () => {
+  it('refuses a ferret’s raise that carries a gate or a card ask', async () => {
     // Arrange
     const { daemon, item } = await atGate();
+    const add = {
+      action: 'add',
+      title: 'Try it',
+      subject: 'Try it: open the Board',
+      why: 'It shipped.',
+      howToResolve: 'Choose.',
+      premise: 'It shipped.',
+      context: 'On the Mac.',
+      kind: 'choice',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
+    };
 
     // Act
-    const answer = await post(
-      daemon,
-      peer('child'),
-      {
-        action: 'add',
-        title: 'Try it',
-        subject: 'Try it: open the Board',
-        why: 'It shipped.',
-        howToResolve: 'Choose.',
-        premise: 'It shipped.',
-        context: 'On the Mac.',
-        kind: 'choice',
-        ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
-        gate: item.gate,
-      },
-      'child',
-    );
+    const withGate = await post(daemon, peer('child'), { ...add, gate: item.cardAsks?.[0]?.gate }, 'child');
+    const withAsks = await post(daemon, peer('child'), { ...add, cardAsks: item.cardAsks }, 'child');
 
     // Assert
-    should(answer.status).equal(400);
+    should(withGate.status).equal(400);
+    should(withAsks.status).equal(400);
     should((await openItems(daemon, 'child')).items).be.empty();
   });
 
-  it('Not good with the owner’s words reopens the card and opens exactly one follow-up', async () => {
+  it('Not good with the owner’s words reopens the card once, and opens no second item', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
+    const { daemon, item, reference } = await atGate();
 
     // Act
-    const answer = await post(daemon, HOST, choose(item.id, 'Not good', 'the badge counts twice'));
-    const again = await post(daemon, HOST, choose(item.id, 'Not good', 'the badge counts twice'));
+    const answer = await post(daemon, HOST, choose(item.id, 'Not good', 'the badge counts twice', reference));
+    const again = await post(daemon, HOST, choose(item.id, 'Not good', 'the badge counts twice', reference));
 
     // Assert
     should(answer.status).equal(200);
     should(again.status).equal(200);
     should(await laneOf(daemon)).equal('implement');
     should(daemon.reopen.notices).have.length(1);
-    const open = (await openItems(daemon)).items;
-    should(open.map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
+    should((await openItems(daemon)).items.map(each => each.id)).eql([item.id]);
   });
 
-  it('Not good without words is refused, and the item stays open', async () => {
+  it('Not good without words is refused, and the ask stays open', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
+    const { daemon, item, reference } = await atGate();
 
     // Act
-    const answer = await post(daemon, HOST, choose(item.id, 'Not good'));
+    const answer = await post(daemon, HOST, choose(item.id, 'Not good', undefined, reference));
 
     // Assert
     should(answer.status).equal(400);
     should(await laneOf(daemon)).equal('tested');
-    should((await openItems(daemon)).items.map(each => each.id)).eql([item.id]);
+    should(openCardAsks(await theAgenda(daemon, item.id))).have.length(1);
   });
 
   it('lets the owner say Not needed: the card stays and the gate never asks again for that entry', async () => {
@@ -320,8 +350,8 @@ describe('answering a gate item over the agenda route', () => {
   });
 });
 
-describe('gate items across writes and restarts', () => {
-  it('raises nothing new for the same entry after a restart', async () => {
+describe('card asks across writes and restarts', () => {
+  it('opens nothing new for the same entry after a restart', async () => {
     // Arrange
     const { home, daemon } = await atGate();
 
@@ -335,17 +365,17 @@ describe('gate items across writes and restarts', () => {
     should((await openItems(daemon)).items).have.length(1);
   });
 
-  it('resolves the open item when the card leaves the gate on the board', async () => {
+  it('withdraws the open ask when the card leaves the gate on the board, and keeps the agenda', async () => {
     // Arrange
-    const { daemon } = await atGate();
+    const { daemon, item } = await atGate();
 
     // Act — the owner drags it back on the Board
     await daemon.board.act('F1', { action: 'move', to: 'implement', reason: 'one more fix' }, { kind: 'owner' });
 
     // Assert
-    const board = await openItems(daemon);
-    should(board.items).be.empty();
-    should(board.resolved[0]).match({ resolvedBy: 'daemon', resolutionNote: 'the card moved on' });
+    const after = await theAgenda(daemon, item.id);
+    should(after.cardAsks).be.undefined();
+    should(after.gateAttached).be.undefined();
   });
 
   it('stays silent for an internal card, and its lead passes the gate itself', async () => {
@@ -368,8 +398,9 @@ describe('gate items across writes and restarts', () => {
     should(await laneOf(daemon)).equal('closed');
   });
 
-  it('advertises gate items on health', () => {
+  it('advertises gate items and card asks on health', () => {
     should(daemonFeatureList()).containEql(DAEMON_FEATURES.boardGateItems);
+    should(daemonFeatureList()).containEql(DAEMON_FEATURES.agendaCardAsks);
   });
 });
 
@@ -428,26 +459,26 @@ describe('a question that names a gate', () => {
     return raised.item;
   };
 
-  it('moves no card when the owner answers Done on it, and leaves the real gate item open', async () => {
+  it('moves no card when the owner answers Done on it, and leaves the real card ask open', async () => {
     // Arrange
-    const { daemon, item } = await atGate();
-    const forged = await forge(daemon, item.sourceRef as string);
+    const { daemon, item, reference } = await atGate();
+    const forged = await forge(daemon, reference);
 
     // Act
     await post(daemon, HOST, choose(forged.id, 'Done'));
 
     // Assert
     should(forged.gate).be.undefined();
+    should(forged.cardAsks).be.undefined();
     should(await laneOf(daemon)).equal('tested');
-    should((await openItems(daemon)).items.some(each => each.id === item.id && each.source === 'task')).be.true();
+    should(openCardAsks(await theAgenda(daemon, item.id))).have.length(1);
   });
 
-  it('raised and closed before the card arrives, does not stop the real gate item', async () => {
+  it('raised and closed before the card arrives, does not stop the real card ask', async () => {
     // Arrange — the reference the card will get, learned from a throwaway daemon
-    const { item: probe } = await atGate();
-    const ref = probe.sourceRef as string;
+    const { reference } = await atGate();
     const daemon = daemonOver(await tempDirectory('gate-forge'));
-    const forged = await forge(daemon, ref);
+    const forged = await forge(daemon, reference);
     await post(daemon, HOST, choose(forged.id, 'Done'));
 
     // Act
@@ -456,28 +487,6 @@ describe('a question that names a gate', () => {
 
     // Assert
     const open = (await openItems(daemon)).items;
-    should(open.some(each => each.source === 'task' && each.sourceRef === ref && each.gate !== undefined)).be.true();
-  });
-
-  it('naming a follow-up, raised and closed first, does not stop the real follow-up after Not good', async () => {
-    // Arrange
-    const { item: probe, daemon: first } = await atGate();
-    await post(first, HOST, choose(probe.id, 'Not good', 'the button is broken'));
-    const followupRef = (await openItems(first)).items.find(each =>
-      each.sourceRef?.startsWith('gate-followup:'),
-    )?.sourceRef;
-    const daemon = daemonOver(await tempDirectory('gate-forge'));
-    const forged = await forge(daemon, followupRef as string);
-    await post(daemon, HOST, choose(forged.id, 'Done'));
-    await daemon.store.write('F1', async () => ({ task: external('tested'), result: undefined }));
-    await daemon.gates.backfill();
-    const gate = (await openItems(daemon)).items.find(each => each.gate !== undefined);
-
-    // Act
-    await post(daemon, HOST, choose((gate as NonNullable<typeof gate>).id, 'Not good', 'the button is broken'));
-
-    // Assert
-    const open = (await openItems(daemon)).items;
-    should(open.some(each => each.source === 'task' && each.sourceRef === followupRef)).be.true();
+    should(open.some(each => openCardAsks(each).some(ask => cardAskReference(ask) === reference))).be.true();
   });
 });

@@ -216,7 +216,8 @@ export const chatChip = (
       ref,
       title: task.title,
       lane: place?.laneName ?? null,
-      activity: task.activity === 'waiting' && task.waitingOnOwner.length > 0 ? 'waiting on you' : task.activity,
+      activity:
+        task.activity === 'waiting' && (task.waitingOnOwner ?? []).length > 0 ? 'waiting on you' : task.activity,
       tone: ACTIVITY_TONE[task.activity],
     };
   }
