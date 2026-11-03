@@ -36,7 +36,9 @@ this page, which is still how a message reaches the pane.
   message's `waitBehind` ([below](#b144-a-ferret-idle-behind-its-own-unsent-message)).
 - **Deliverer** — `QueueDeliverer` (`lib/session/queue/deliverer.ts`) is the one owner of WHEN and IN WHAT
   ORDER. It marks a message `typing` on disk, then hands it to the tracked send path under the message's
-  own id (`SendPathQueueTransport`), which does the HOW: the turn file, the turn record, the busy-pane
+  own id (`SendPathQueueTransport.handOver` → `SessionSendService.send`, the ONE function that delivers a
+  message — a later change that folds several waiting messages into one payload hands that payload to it as
+  a single message), which does the HOW: the turn file, the turn record, the busy-pane
   queue, a revive. The send ledger, keyed by that id, is where every later tick comes from
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
@@ -492,6 +494,78 @@ another (the tracker calls the service, so they cannot share one); a tracker wri
 append after the service counted an Enter and put the count back — seven Enters past a limit of five. The file
 ledger now runs every read-modify-append for a session as one transaction (`FileSendLedger.transaction`), a
 leaf lock with nothing else awaited under it.
+
+## Which messages are typed whole
+
+An IDLE session is sent a message one of two ways, decided by `isDirectSend` (`lib/session/send/policy.ts`):
+
+- **`direct`** — the text itself is typed (or pasted) into the composer and submitted. The agent reads the
+  message with no further call.
+- **`turn-file`** — the text is written to `turns/turn-N.md` and the composer is typed a one-line pointer,
+  "Read the file …". The agent must make one more model call to read it.
+
+The turn file is written on BOTH paths (a revive and the logs rely on it); the paths differ only in what is
+typed.
+
+| The message                                                                                              | Claude Code                    | Codex / others |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------- |
+| One line, no control characters, within the session's `directSendMaxChars`                               | `direct`                       | `direct`       |
+| Several lines, no control characters, within `directPasteMaxChars` (2,000) and the session's own ceiling | `direct`, as a bracketed paste | `turn-file`    |
+| Longer than that, or holding a tab, `\r` or another control character                                    | `turn-file`                    | `turn-file`    |
+
+- **`directPasteMaxChars`** (`settings.ts`, default 2,000) is the longest MULTI-LINE message pasted whole. It
+  can only narrow a session's `directSendMaxChars`, never widen it: the multi-line ceiling is the smaller of
+  the two, and `directSendMaxChars: 0` turns every direct send off, pasted ones included. An interactive Claude
+  session has no single-line ceiling, but an explicit `directSendMaxChars` it was given (zero included) still
+  bounds a multi-line paste.
+- **Newlines are allowed, nothing else is.** Quotes, backticks, `$`, and unicode are text and pass; a tab or any
+  other control character could be read by the composer as a key, so it still goes by turn file.
+
+- **The paste is the same one the busy path already uses.** Text with a line break (or over 240 characters) is
+  sent with tmux's bracketed paste (`paste-buffer -p`), so Claude takes the lines as text, not as Enter. A busy
+  pane is unchanged: up to `nativeQueueInlineMaxChars` (1,000) is typed into the harness's own queue
+  (`native-inline`), longer is a pointer (`native-file`).
+- **The landing proof is B144's.** A paste is proven by the characters appearing in the composer or by a
+  collapsed chip — `[Pasted text #N +M lines]` — whose line count matches the message's line breaks
+  (`lonePasteOf`, accepted at `breaks` or `breaks + 1`). Enter is pressed once the paste is seen and
+  pressed again, with the same verification and bounded budget, while the composer still holds it; a paste that
+  never shows is `unaccounted` (`landing_unconfirmed`) and never retyped.
+- **Codex stays on the one-line rule.** The repository has no capture proving a multi-line bracketed paste
+  lands and submits in Codex's composer (its paste-burst window swallows Enter — see
+  [Measured Codex behaviour](#measured-codex-behaviour)), so multi-line messages to Codex, and to any harness
+  that is not Claude Code, still go by turn file until one is measured.
+
+### The peer banner is one line
+
+A message one ferret sends another opens with ONE banner line, then the message on the next
+(`peerEnvelopePreamble`, `packages/protocol/src/lib/agent-messages.ts`):
+
+```
+[<kind> from ferret <name> (session <id>) — not from the owner] <note>
+<message…>
+```
+
+- **`<kind>`** is `message`, `question` or `reply`. Only a `question` is waiting for an answer.
+- **The label slot.** The kind may be followed by ` · <label>` before `from`, so a sender can say how
+  urgent a message is without the receiver reading it first:
+
+  ```
+  [message · fyi from ferret <name> (session <id>) — not from the owner] <note>
+  ```
+
+  The allowed labels are `blocker` (the sender cannot go on without an answer), `action` (something for the
+  receiver to do) and `fyi` (no action needed) — `PEER_MESSAGE_LABELS`. **Nothing emits a label yet**: the
+  banner writer can carry one, but the daemon does not pass one, so every banner sent today is the label-less
+  shape above. The parser already accepts it (`parsePeerEnvelope` returns the `label`), so the change that adds
+  labels to `fy send` needs no parser change.
+
+- **Old banners still parse.** The two-line banner (`[message from ferret <name> …]`, the note on the second
+  line, a blank line after it) and the older `[peer message from teammate <name> …]` wording are read, never
+  written, because transcripts and queued messages still hold them. The PWA reads banners through the same
+  parser.
+- **Why one line.** A composer takes a single-line message verbatim but pastes a multi-line one. A two-line
+  banner plus a blank line made every peer message multi-line before its first word, so each one went by turn
+  file and cost the receiver an extra model call to read it.
 
 ## B144: a ferret idle behind its own unsent message
 

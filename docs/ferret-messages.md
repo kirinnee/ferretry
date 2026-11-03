@@ -6,19 +6,27 @@ message for the owner.
 
 ## What the receiving agent reads
 
-The daemon prepends a two-line banner to the message, then a blank line. The agent reads only text, so
-this is the only way it can tell a ferret from its owner:
+The daemon prepends a **one-line** banner to the message, then a line break and the body. The agent reads
+only text, so this is the only way it can tell a ferret from its owner:
 
 ```text
-[message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]
-To reply: fy send tomi "<reply>"
-
+[message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner] To reply: fy send tomi "<reply>"
 Hello from home-manager-fd.
 ```
 
+One line, because a banner of two lines plus a blank one made EVERY peer message multi-line, and a
+multi-line message was refused the direct path — it travelled as a "Read the file …/turns/turn-N.md"
+pointer that cost the receiver an extra model call. With one line a short message is pasted whole
+([how it is delivered](message-delivery.md#which-messages-are-typed-whole)).
+
+An optional **label** slot sits after the kind: `[message · fyi from ferret tomi …]`, one of
+`blocker`, `action`, `fyi`. The parser reads it into `PeerEnvelope.label`; **nothing writes it yet**
+(`peerEnvelopePreamble` emits a label only when a sender names one, and no sender does), so it is a
+seam for message kinds, not a behaviour. An unknown label is not a banner and the message stays plain text.
+
 The first word is the message's **kind**:
 
-| Kind       | When                                                                                      | Second line                                                           |
+| Kind       | When                                                                                      | Note after the banner                                                 |
 | ---------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `message`  | A note; the sender carried on                                                             | `To reply: fy send tomi "<reply>"`                                    |
 | `question` | The sender wants an answer: `send --ask` (parked until answered) or `send --expect-reply` | `tomi is waiting for your answer. Reply with: fy send tomi "<reply>"` |
@@ -39,9 +47,9 @@ Rules for the wording:
 - **One owner for both ends**: the writer and the parser are `packages/protocol/src/lib/agent-messages.ts`.
   The daemon writes it (`session/send/policy.ts`), the app parses it back out. Reword it there, with
   its tests, and nowhere else.
-- **Old records stay readable**: the parser also reads the banner earlier daemons wrote
-  (`[peer message from teammate …]`), so a transcript recorded before the rewording still renders the
-  message as coming from the ferret that sent it.
+- **Old records stay readable**: the parser also reads the two-line banner (note on its own line, then a
+  blank line) and the banner earlier daemons wrote (`[peer message from teammate …]`), so a transcript
+  recorded before a rewording still renders the message as coming from the ferret that sent it.
 
 A message too long to type travels as a **turn file**; the banner is at the top of that file, and the
 transcript records only the pointer to it.

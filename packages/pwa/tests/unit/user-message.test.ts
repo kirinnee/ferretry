@@ -78,6 +78,30 @@ describe('readUserMessage', () => {
     });
   });
 
+  test('reads the one-line banner, with and without a label, from a Claude paste wrapper', () => {
+    const line =
+      '[message from ferret rhett (session mvgt2oz9-04e28935) — not from the owner] To reply: fy send rhett "<reply>"';
+    const note = 'To reply: fy send rhett "<reply>"';
+    expect(readUserMessage(`<pasted_content id="p">\n${line}\nline one\n\nline two\n</pasted_content>`)).toEqual({
+      kind: 'peer',
+      from: { name: 'rhett', sessionId: 'mvgt2oz9-04e28935', kind: 'message', replyExpected: false, note },
+      body: 'line one\n\nline two',
+    });
+    const labelled = line.replace('[message from', '[message · blocker from');
+    expect(readUserMessage(`${labelled}\nPlease decide.`)).toEqual({
+      kind: 'peer',
+      from: {
+        name: 'rhett',
+        sessionId: 'mvgt2oz9-04e28935',
+        kind: 'message',
+        label: 'blocker',
+        replyExpected: false,
+        note,
+      },
+      body: 'Please decide.',
+    });
+  });
+
   test('reads the banner an older daemon wrote, "No reply needed" and all, the same way', () => {
     // Transcripts recorded before the rewording keep the old second line.
     const older =

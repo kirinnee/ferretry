@@ -31,7 +31,14 @@ import type { SessionQueueStore } from './ports.ts';
 
 /** The send path, as delivery uses it. */
 export interface QueueTransport {
-  /** Hands one message to the pane under its own id; says what the pane proved. */
+  /**
+   * Hands one message to the pane under its own id; says what the pane proved.
+   *
+   * This is the ONE place a queued message becomes a delivery: the banner, the direct-or-turn-file rule
+   * (`isDirectSend`) and the landing proof all sit behind it. A later change that folds several waiting
+   * messages into one payload hands that payload to this call as a single `QueuedMessage` and changes
+   * nothing else here.
+   */
   handOver(id: SessionId, message: QueuedMessage): Promise<HandOver>;
   /** Where a message handed over before now stands, per the send ledger; `undefined` when it never got there. */
   fate(id: SessionId, messageId: string): Promise<SendFate | undefined>;

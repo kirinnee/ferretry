@@ -399,6 +399,90 @@ describe('send to an idle prompt', () => {
     should(long.turns.documents[0]).equal(`${message}\n`);
   });
 
+  describe('a multi-line message to an idle Claude composer', () => {
+    const claude = (overrides: Partial<SendTarget> = {}): SendTarget =>
+      target({ harness: 'claude', directSendMaxChars: 4_096, ...overrides });
+    const multiline = 'first line\nsecond line\n\nthird line';
+
+    it('is pasted as it is, keeps the turn document, and starts the turn like any direct send', async () => {
+      const { service, ledger, terminal, turns, repository } = parts(claude());
+      const outcome = await service.send(request({ message: multiline }));
+
+      should(outcome.disposition).equal('delivered');
+      should(terminal.typed).eql([multiline]);
+      should(ledger.only()).match({ path: 'direct', turn: 4, fate: 'accepted' });
+      // Revive and the logs read the turn document, so the direct path still writes it.
+      should(turns.documents).eql([`${multiline}\n`]);
+      should(repository.transitions[0]).match({ event: 'turn.started', turn: 4 });
+    });
+
+    it('carries a peer banner on one line and the body after it, with no pointer to a file', async () => {
+      const sender = { id: PEER, status: 'waiting', mode: 'auto', turn: 2, teammate: 'loge' } as SendTarget;
+      const { service, terminal, ledger } = parts(claude(), [pane({ promptReady: true })], { [PEER]: sender });
+      await service.send(request({ senderReference: PEER, message: multiline }));
+
+      const [typed] = terminal.typed;
+      should(typed?.split('\n')[0]).equal(
+        '[message from ferret loge (session session-2) — not from the owner] To reply: fy send loge "<reply>"',
+      );
+      should(typed).endWith(multiline);
+      should(typed).not.containEql('turn-004.md');
+      should(ledger.only().path).equal('direct');
+    });
+
+    it('stays a turn file for Codex and for a harness nobody named', async () => {
+      for (const harness of ['codex', undefined]) {
+        const { service, terminal, ledger } = parts(claude({ harness }));
+        await service.send(request({ message: multiline }));
+        should(terminal.typed[0]).containEql('/state/turns/turn-004.md');
+        should(ledger.only().path).equal('turn-file');
+      }
+    });
+
+    it('stays a turn file past 2,000 characters, and goes direct at exactly 2,000', async () => {
+      const exactly = `${'x'.repeat(1_998)}\ny`;
+      const at = parts(claude());
+      await at.service.send(request({ message: exactly }));
+      should(at.ledger.only().path).equal('direct');
+
+      const over = parts(claude());
+      await over.service.send(request({ message: `${exactly}z` }));
+      should(over.ledger.only().path).equal('turn-file');
+      should(over.terminal.typed[0]).containEql('/state/turns/turn-004.md');
+      // The long message is still whole in its turn document.
+      should(over.turns.documents[0]).equal(`${exactly}z\n`);
+    });
+
+    it('stays a turn file for a session that opted out of direct sends', async () => {
+      const { service, terminal, ledger } = parts(claude({ directSendMaxChars: 0 }));
+      await service.send(request({ message: multiline }));
+      should(ledger.only().path).equal('turn-file');
+      should(terminal.typed[0]).containEql('/state/turns/turn-004.md');
+    });
+
+    it('stays a turn file when the message holds a tab', async () => {
+      const { service, ledger } = parts(claude());
+      await service.send(request({ message: 'col1\tcol2\nrow2' }));
+      should(ledger.only().path).equal('turn-file');
+    });
+
+    it('settles a paste the pane never showed as unconfirmed, keeping the accepted record', async () => {
+      const { service, terminal, ledger } = parts(claude());
+      terminal.deliverFailure = new SendLandingUnconfirmed('typed, and the composer never showed it');
+      await service.send(request({ message: multiline })).catch(() => undefined);
+      should(terminal.typed).eql([multiline]);
+      should(ledger.only().fate).not.equal('delivered');
+    });
+
+    it('rides the harness queue, not the paste, when the pane is busy', async () => {
+      const { service, terminal, ledger } = parts(claude({ status: 'running' }), [pane(), pane()]);
+      await service.send(request({ message: multiline }));
+      should(ledger.only().path).equal('native-inline');
+      should(terminal.calls).containEql('queue');
+      should(terminal.calls).not.containEql('deliver');
+    });
+  });
+
   it('records the message in the session inbox against the turn it started', async () => {
     const { service, channel } = parts();
     await service.send(request());
