@@ -1,7 +1,13 @@
 import { describe, it } from 'bun:test';
-import { DAEMON_FEATURES, MAX_AGENDA_SUBJECT_LENGTH, type WorkRelatedResponse } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  DAEMON_FEATURES,
+  MAX_AGENDA_SUBJECT_LENGTH,
+  type WorkRelatedResponse,
+} from '@ferretry/protocol';
 import should from 'should';
 import { AgendaController } from '../../../src/lib/agenda/controller';
+import type { IAgendaCardTies } from '../../../src/lib/agenda/ports';
 import { RelatedCheck } from '../../../src/lib/work-search/related';
 import {
   agendaHit,
@@ -178,7 +184,11 @@ describe('agenda controller add', () => {
     const controller = new AgendaController(gateway, out, SESSION);
 
     // Act
-    await controller.add(['same', 'subject'], { ...BRIEF, title: 'Pick a cluster' });
+    await controller.add(['same', 'subject'], {
+      ...BRIEF,
+      title: 'Pick a cluster',
+      new: 'a second cluster, decided apart',
+    });
 
     // Assert
     should(out.messages[0]).startWith('agenda !A2 recorded');
@@ -801,29 +811,41 @@ describe('agenda controller clear --agents', () => {
 
 describe('agenda controller add — related work', () => {
   const own = snapshot([agentItem('A3', 'pick a relay')]);
-  const strong = [{ strength: 'strong' as const, hit: agendaHit({ sessionId: SESSION }) }];
+  const strong = [{ strength: 'strong' as const, hit: agendaHit({ sessionId: LIZZETTE }) }];
 
-  const withCheck = (matches: WorkRelatedResponse['matches'] | undefined, board = own) => {
+  const withCheck = (
+    matches: WorkRelatedResponse['matches'] | undefined,
+    board = snapshot([]),
+    extras: { interactive?: boolean; answer?: string; ties?: IAgendaCardTies } = {},
+  ) => {
     const search = new FakeWorkSearchGateway();
     search.relatedAnswer = matches === undefined ? undefined : { matches };
     const searchOut = new WorkSearchOutput();
     const gateway = new RecordingAgendaGateway(board);
     const out = new CapturingOutput();
+    const asked: string[] = [];
     const controller = new AgendaController(
       gateway,
       out,
       SESSION,
       undefined,
       () => Date.UTC(2026, 6, 31, 9),
-      undefined,
+      {
+        interactive: () => extras.interactive === true,
+        ask: message => {
+          asked.push(message);
+          return Promise.resolve(extras.answer ?? 'n');
+        },
+      },
       new RelatedCheck(search, searchOut, 'fy'),
+      extras.ties,
     );
-    return { controller, gateway, out, search, searchOut };
+    return { controller, gateway, out, search, searchOut, asked };
   };
 
   const brief = { ...BRIEF, title: 'Pick a relay' };
 
-  it('should refuse a strong duplicate, raise nothing, and offer the ways out', async () => {
+  it("should refuse another ferret's strong duplicate when no open agenda of its own could take it", async () => {
     // Arrange
     const { controller, gateway, search } = withCheck(strong);
 
@@ -837,20 +859,8 @@ describe('agenda controller add — related work', () => {
     should((failure as Error).message).containEql('!A3');
     should((failure as Error).message).containEql('--related A3');
     should((failure as Error).message).containEql('--related F12');
-    should((failure as Error).message).containEql('--new');
-    should((failure as Error).message).containEql('yours — fy agenda edit A3');
-  });
-
-  it('should raise it with --new, and not ask', async () => {
-    // Arrange
-    const { controller, gateway, search } = withCheck(strong);
-
-    // Act
-    await controller.add(['choose', 'a', 'relay'], { ...brief, new: true });
-
-    // Assert
-    should(gateway.applied).have.length(1);
-    should(search.relatedCalls).eql([]);
+    should((failure as Error).message).containEql('--new "<why>"');
+    should((failure as Error).message).containEql('fy send <callsign>');
   });
 
   it('should print the matches as JSON on a strong match with --json, and raise nothing', async () => {
@@ -865,9 +875,199 @@ describe('agenda controller add — related work', () => {
     should(JSON.parse(searchOut.lines[0] ?? '').related[0].hit.id).equal('A3');
   });
 
+  it('should open it with no open agenda to join and no strong match', async () => {
+    // Arrange
+    const { controller, gateway } = withCheck([{ strength: 'weak', hit: agendaHit({ sessionId: LIZZETTE }) }]);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], brief);
+
+    // Assert
+    should(gateway.applied).have.length(1);
+  });
+
+  it('should refuse a ferret with its open agendas listed, the join question and the two ways out', async () => {
+    // Arrange — an agent runs non-interactively: there is nobody to ask, so it is told.
+    const board = snapshot([agentItem('A3', 'pick a relay', { title: 'Relay choice' }), agentItem('A5', 'tokens')]);
+    const { controller, gateway, asked } = withCheck([], board);
+
+    // Act
+    const failure = await controller.add(['choose', 'a', 'relay'], brief).catch((error: unknown) => error);
+
+    // Assert
+    should(gateway.applied).eql([]);
+    should(asked).eql([]);
+    const message = (failure as Error).message;
+    should(message).containEql('Search, check, then open');
+    should(message).match(/!A3\s+needs you\s+Relay choice/u);
+    should(message).containEql('!A5');
+    should(message).containEql('Should this join !A3?');
+    should(message).containEql("fy agenda edit A3 --still-open 'choose a relay'");
+    should(message).containEql('--new "<why none fits>"');
+    should(message).containEql('Nothing was opened.');
+  });
+
+  it('should list a Resting item with the edit that brings it back whole, the owner having replied', async () => {
+    // Arrange
+    const replied = agentItem('A3', 'pick a relay', {
+      premise: '- Two relays are up',
+      context: '- Cost differs',
+    }) as AgendaItem;
+    const board = snapshot([{ ...replied, parked: { reason: 'replied', at: '2026-07-31T09:30:00.000Z' } }]);
+    const { controller } = withCheck([], board);
+
+    // Act
+    const failure = await controller.add(['choose', 'a', 'relay'], brief).catch((error: unknown) => error);
+
+    // Assert
+    const message = (failure as Error).message;
+    should(message).match(/!A3\s+resting/u);
+    should(message).containEql(
+      "fy agenda edit A3 --still-open 'choose a relay' --back --summary 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.'",
+    );
+  });
+
+  it('should open a new one with --new "<why>", and not ask', async () => {
+    // Arrange
+    const { controller, gateway, search, out } = withCheck(strong, own);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, new: 'a relay for the phone, not the laptop' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(search.relatedCalls).eql([]);
+    should(out.diagnostics).eql([]);
+  });
+
+  it('should still open with a bare --new for one release, warning that the reason is wanted', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck(strong, own);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, new: true });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(out.diagnostics[0]).containEql('a bare --new is deprecated');
+    should(out.diagnostics[0]).containEql('--new "<why none fits>"');
+  });
+
+  it('should ask a person at a terminal, and print the edit and open nothing on yes', async () => {
+    // Arrange
+    const { controller, gateway, out, asked } = withCheck([], own, { interactive: true, answer: 'y' });
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], brief);
+
+    // Assert
+    should(asked).eql(['Should this join !A3? [y/N]']);
+    should(gateway.applied).eql([]);
+    should(out.diagnostics[0]).containEql('Search, check, then open');
+    should(out.messages[0]).containEql(
+      "Nothing was opened. Add it to !A3:\nfy agenda edit A3 --still-open 'choose a relay'",
+    );
+  });
+
+  it('should open it when the person at the terminal says no', async () => {
+    // Arrange
+    const { controller, gateway } = withCheck([], own, { interactive: true, answer: 'n' });
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], brief);
+
+    // Assert
+    should(gateway.applied).have.length(1);
+  });
+
+  it('should print the candidates as JSON with --json, and open nothing', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck([], own);
+
+    // Act
+    const failure = await controller.add(['choose'], { ...brief, json: true }).catch((error: unknown) => error);
+
+    // Assert
+    should(gateway.applied).eql([]);
+    should(JSON.parse(out.messages[0] ?? '').candidates[0]).eql({
+      id: 'A3',
+      title: 'pick a relay',
+      state: 'needs you',
+      cards: [],
+    });
+    should((failure as Error).message).containEql('--new "<why none fits>"');
+  });
+
+  it('should list first the agenda carrying a card the named card depends on (dependent things share one)', async () => {
+    // Arrange
+    const board = snapshot([
+      agentItem('A2', 'choose a relay soon'),
+      agentItem('A7', 'ship the cache', { task: { id: 'F9' } } as never),
+    ]);
+    const ties: IAgendaCardTies = {
+      ties: card => Promise.resolve(card.id === 'F12' ? { dependsOn: [{ id: 'F9' }], blocks: [] } : undefined),
+    };
+    const { controller, gateway } = withCheck([], board, { ties });
+    gateway.offered = [DAEMON_FEATURES.agendaTask];
+
+    // Act
+    const failure = await controller
+      .add(['choose', 'a', 'relay'], { ...brief, task: 'F12' })
+      .catch((error: unknown) => error);
+
+    // Assert
+    const message = (failure as Error).message;
+    should(gateway.applied).eql([]);
+    should(message).containEql('Should this join !A7?');
+    should(message).containEql('&F9  ← carries &F9, which &F12 depends on');
+  });
+
+  it('should warn when a new one opens beside an agenda carrying a tied card', async () => {
+    // Arrange
+    const board = snapshot([agentItem('A7', 'ship the cache', { task: { id: 'F14' } } as never)]);
+    const ties: IAgendaCardTies = { ties: () => Promise.resolve({ dependsOn: [], blocks: [{ id: 'F14' }] }) };
+    const { controller, gateway, out } = withCheck([], board, { ties });
+    gateway.offered = [DAEMON_FEATURES.agendaTask];
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], { ...brief, task: 'F12', new: 'its own decision' });
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(out.diagnostics[0]).containEql('!A7 already carries &F14, tied to &F12: dependent things share one agenda.');
+  });
+
+  it('should not list what a ferret cannot add to: the owner’s items, notices, gates and held changes', async () => {
+    // Arrange
+    const board = snapshot([
+      humanItem('A1', 'approve the deploy'),
+      agentItem('A2', 'a notice', { notice: true }),
+      agentItem('A4', 'allow the change', { confirms: { file: 'machine.yaml' } } as never),
+    ]);
+    const { controller, gateway } = withCheck([], board);
+
+    // Act
+    await controller.add(['choose', 'a', 'relay'], brief);
+
+    // Assert
+    should(gateway.applied).have.length(1);
+  });
+
+  it('should warn, and still open, when the ask looks like two decisions', async () => {
+    // Arrange
+    const { controller, gateway, out } = withCheck([]);
+
+    // Act
+    await controller.add(['Approve the relay? And rename the app?'], brief);
+
+    // Assert
+    should(gateway.applied).have.length(1);
+    should(out.diagnostics[0]).containEql('This looks like two decisions: the ask asks 2 questions in one line.');
+  });
+
   it('should print the edit command for the caller’s own item, and raise nothing, with --related A3', async () => {
     // Arrange
-    const { controller, gateway, out, search } = withCheck(strong);
+    const { controller, gateway, out, search } = withCheck(strong, own);
 
     // Act
     await controller.add(['choose', 'a', "relay, don't wait"], { ...brief, related: 'A3' });
@@ -906,16 +1106,15 @@ describe('agenda controller add — related work', () => {
     should((failure as Error).message).match(/no agenda item !?A9/u);
   });
 
-  it('should link the item to a card with --related F12, and skip the check', async () => {
+  it('should link the item to a card with --related F12, and skip the strong-duplicate check', async () => {
     // Arrange
-    const { controller, gateway, search } = withCheck(strong);
+    const { controller, gateway } = withCheck(strong);
     gateway.offered = [DAEMON_FEATURES.agendaTask];
 
     // Act
     await controller.add(['choose', 'a', 'relay'], { ...brief, related: 'F12' });
 
     // Assert
-    should(search.relatedCalls).eql([]);
     should(gateway.applied).have.length(1);
     should(gateway.applied[0]?.request).containEql({ action: 'add', task: { id: 'F12' } });
   });
@@ -926,7 +1125,7 @@ describe('agenda controller add — related work', () => {
 
     // Act
     const failure = await controller
-      .add(['x'], { ...brief, new: true, related: 'A3' })
+      .add(['x'], { ...brief, new: 'separate', related: 'A3' })
       .catch((error: unknown) => error);
 
     // Assert
@@ -944,5 +1143,16 @@ describe('agenda controller add — related work', () => {
     // Assert
     should(gateway.applied).have.length(1);
     should(searchOut.notices).eql(['related check skipped: this daemon has no search yet']);
+  });
+
+  it('should open a held configuration change without listing candidates: it answers one change', async () => {
+    // Arrange
+    const { controller, search } = withCheck([], own);
+
+    // Act — the confirm path itself reads a file this test has no reader for, so only the skipped check is asserted.
+    await controller.add(['allow'], { ...brief, confirms: 'machine.yaml' }).catch(() => undefined);
+
+    // Assert
+    should(search.relatedCalls).eql([]);
   });
 });

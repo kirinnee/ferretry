@@ -53,42 +53,69 @@ export class RelatedCheck {
     return { sessionId, callsign: callsign ?? sessionId };
   }
 
-  async guard(kind: WorkKind, title: string, ask: string | undefined, options: RelatedGuardOptions): Promise<void> {
+  /**
+   * The daemon's related matches for a new title and ask, or `undefined` when it cannot say (an older daemon, a
+   * failed call): said once on stderr, never a refusal, because the check must never be the reason work goes unfiled.
+   */
+  async matches(
+    kind: WorkKind,
+    title: string,
+    ask: string | undefined,
+    as: string | undefined,
+  ): Promise<WorkRelatedResponse | undefined> {
     const trimmedAsk = ask?.trim() ?? '';
     const request: WorkRelatedRequest = {
       kind,
       title: clip(title.trim()),
       ...(trimmedAsk === '' ? {} : { ask: clip(trimmedAsk) }),
     };
-    let response: WorkRelatedResponse | undefined;
     try {
-      response = await this.gateway.related(request, options.as);
+      const response = await this.gateway.related(request, as);
+      if (response === undefined) this.out.diagnostic(RELATED_CHECK_UNAVAILABLE);
+      return response;
     } catch (error) {
       this.out.diagnostic(`related check skipped: ${error instanceof Error ? error.message : String(error)}`);
-      return;
+      return undefined;
     }
-    if (response === undefined) {
-      this.out.diagnostic(RELATED_CHECK_UNAVAILABLE);
-      return;
-    }
+  }
+
+  /** The matches as the aligned lines `fy search` prints, each labelled when the caller owns it. */
+  async lines(matches: WorkRelatedResponse['matches'], as: string | undefined): Promise<string[]> {
+    if (matches.length === 0) return [];
+    const context = { directory: await this.gateway.sessions(), own: as, binary: this.binary };
+    return renderHits(
+      matches.map(match => match.hit),
+      context,
+    );
+  }
+
+  async guard(kind: WorkKind, title: string, ask: string | undefined, options: RelatedGuardOptions): Promise<void> {
+    const response = await this.matches(kind, title, ask, options.as);
+    if (response !== undefined) await this.refuseStrong(response, options);
+  }
+
+  /** Refuses when `response` holds a STRONG match, listing it and the ways out; anything weaker returns. */
+  async refuseStrong(response: WorkRelatedResponse, options: RelatedGuardOptions): Promise<void> {
     const matches = listedMatches(response);
     if (!matches.some(match => match.strength === 'strong')) return;
     if (options.json === true) {
       this.out.success(JSON.stringify({ related: matches }, null, 2));
       return refuse('related work already exists; nothing was created');
     }
-    const context = { directory: await this.gateway.sessions(), own: options.as, binary: this.binary };
-    const section = (strength: 'strong' | 'weak'): string[] => {
-      const chosen = matches.filter(match => match.strength === strength).map(match => match.hit);
-      return chosen.length === 0 ? [] : renderHits(chosen, context).map(line => `  ${line}`);
-    };
-    const weak = section('weak');
+    const section = async (strength: 'strong' | 'weak'): Promise<string[]> =>
+      (
+        await this.lines(
+          matches.filter(match => match.strength === strength),
+          options.as,
+        )
+      ).map(line => `  ${line}`);
+    const weak = await section('weak');
     return refuse(
       [
         'Related work already exists, and nothing was created.',
         '',
         'Strong matches:',
-        ...section('strong'),
+        ...(await section('strong')),
         ...(weak.length === 0 ? [] : ['', 'Weaker matches:', ...weak]),
         '',
         'Instead:',

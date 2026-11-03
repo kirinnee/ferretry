@@ -13,6 +13,7 @@ import type {
   TaskListShimFlags,
 } from '../../lib/board/board-controllers';
 import { laneGuide } from '../../lib/board/lane-guide';
+import { TASK_CREATE_RULE } from '../../lib/board/umbrella';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
@@ -46,7 +47,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
   const group = program.command('task').description("create and move the cards of a project's board");
 
   acting(group.command('create'))
-    .description('record a task on the project board, preserving the human ask verbatim')
+    .description('record one outcome on the project board, the human ask verbatim — prefer adding to a related card')
     .argument('[title...]', 'the title, if you would rather not repeat --title')
     .requiredOption('-k, --kind <kind>', `one of ${choices(TaskKindSchema.options)}`)
     .option('-t, --title <title>', TASK_TITLE_GUIDANCE)
@@ -92,6 +93,8 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--new', 'create even if a card on the same thing exists')
     .option('--private', "a ferret's own bookkeeping: off the default board (default for a card an agent asked for)")
     .option('--public', 'a card the owner sees on the default board (default for a card a person asked for)')
+    .option('--broad <why>', 'create a card that gathers several outcomes, saying why it must be one card')
+    .addHelpText('after', `\n${TASK_CREATE_RULE}`)
     .action(async (titleWords: string[], options: TaskCreateFlags) => {
       await board.create(titleWords, options);
     });

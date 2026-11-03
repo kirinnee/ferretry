@@ -8,6 +8,7 @@ import {
   formatTaskRef,
   parseTaskRef,
   type TaskRef,
+  type WorkRelatedResponse,
 } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
 import {
@@ -18,9 +19,17 @@ import {
   type EditFlags,
   parseBriefFile,
 } from './brief.ts';
-import type { RelatedCheck } from '../work-search/related.ts';
+import { listedMatches, type RelatedCheck } from '../work-search/related.ts';
+import {
+  type AgendaCandidate,
+  agendaCandidates,
+  type CardTies,
+  joinCommand,
+  renderCandidates,
+  shellQuote,
+} from './candidates.ts';
 import { type CardFlag, resolveCardFlag } from './card-flag.ts';
-import type { IAgendaBriefInput, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
+import type { IAgendaBriefInput, IAgendaCardTies, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
 import { agendaReference, parseAgendaReference } from './reference.ts';
 import {
   renderAgendaHistory,
@@ -30,6 +39,7 @@ import {
   renderRepliesSent,
   wasWithdrawn,
 } from './render.ts';
+import { twoDecisionsWarning } from './two-decisions.ts';
 import { parseNeededBy } from './when.ts';
 import { DaemonFeaturesUnreadable } from '../daemon/features.ts';
 
@@ -79,8 +89,11 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
   readonly bodyFile?: string;
   /** `--offer-close`: the owner's tap may also close the card the item belongs to. */
   readonly offerClose?: boolean;
-  /** `--new`: raise it even when the related-work check found a strong match. */
-  readonly new?: boolean;
+  /**
+   * `--new "<why none fits>"`: open a new agenda although open ones were listed as candidates (search, check, then
+   * open). A bare `--new` (true) still works for one release, with a warning that asks for the reason.
+   */
+  readonly new?: boolean | string;
   /** `--related <id>`: a card to tie the item to, or an agenda item to edit instead of raising a duplicate. */
   readonly related?: string;
 }
@@ -156,6 +169,8 @@ export class AgendaController {
     private readonly prompt?: IAgendaPrompt,
     /** Asks the daemon whether a new item duplicates one; absent, adds are never checked. */
     private readonly related?: RelatedCheck,
+    /** Reads what a named card depends on and blocks, so an agenda carrying one is listed first; absent, none is. */
+    private readonly cardTies?: IAgendaCardTies,
   ) {}
 
   /** Said once on stderr by the deprecated `attention` spelling; stdout stays the command's own. */
@@ -209,16 +224,17 @@ export class AgendaController {
     );
     requireBrief(composed);
     if (pointer.item !== undefined) return await this.#editInstead(pointer.item, composed, options);
-    if (flag.card === undefined && pointer.card === undefined && options.new !== true) {
-      await this.#guardRelated(composed, options);
-    }
+    const sessionId = this.#target(options);
+    // The board is read first so the item just raised can be named by identity rather than guessed at
+    // by matching its subject text — kteam's match reported the wrong id for two identical subjects. It is
+    // also the caller's own agenda: the open candidates "search, check, then open" lists.
+    const before = await this.gateway.snapshot(sessionId);
+    const warning = twoDecisionsWarning(composed);
+    if (warning !== undefined) this.out.diagnostic(warning);
+    // A held configuration change is its own card: the owner's Allow applies that one change, so it joins nothing.
+    if (composed.confirms === undefined && !(await this.#searchCheckOpen(before, composed, flag.card, options))) return;
     const carded = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
     const request = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
-    const sessionId = this.#target(options);
-
-    // The board is read first so the item just raised can be named by identity rather than guessed at
-    // by matching its subject text — kteam's match reported the wrong id for two identical subjects.
-    const before = await this.gateway.snapshot(sessionId);
     const after = await this.gateway.apply(sessionId, request);
 
     const raised = onlyNewId(before, after);
@@ -226,35 +242,111 @@ export class AgendaController {
     this.#report(after, options, () => renderAgendaMutation(verb, undefined, after, raised));
   }
 
-  /** `--related`: a card (tie the item to it) or an agenda item (edit it instead); never both, never with `--new`. */
-  #relatedPointer(options: AgendaAddOptions): { card?: string; item?: AgendaId } {
-    const typed = options.related?.trim() ?? '';
-    if (typed === '') return {};
-    if (options.new === true) throw new Error('pass --new or --related <id>, not both');
-    if (parseTaskRef(typed).ok) {
-      if (typeof options.task === 'string') throw new Error('pass --task <card> or --related <card>, not both');
-      return { card: typed };
+  /**
+   * SEARCH, CHECK, THEN OPEN (docs/agenda.md § One channel per topic): whether the add may open a new agenda. The open
+   * agendas on the caller's own ledger are the candidates, closest first — one carrying the named card, or a card it
+   * depends on or blocks, leads (dependent things share one agenda). With none, the add opens, after the daemon's
+   * strong-duplicate check of everyone's work. With some, it needs `--new "<why none fits>"`; a person at a terminal is
+   * asked "Should this join !A3?" instead, and a ferret is refused with the list and the two ways out. False: nothing
+   * is to be opened, and what to do instead was said.
+   */
+  async #searchCheckOpen(
+    own: AgendaSnapshot,
+    request: Extract<AgendaActionRequest, { action: 'add' }>,
+    card: TaskRef | undefined,
+    options: AgendaAddOptions,
+  ): Promise<boolean> {
+    const why = typeof options.new === 'string' ? options.new.trim() : '';
+    const bare = options.new === true || (typeof options.new === 'string' && why === '');
+    const binary = this.related?.binary ?? 'fy';
+    if (bare) {
+      this.out.diagnostic(
+        `a bare --new is deprecated and stops working in a later release: say why no open agenda fits, --new "<why none fits>"`,
+      );
     }
-    return { item: parseAgendaReference(typed) };
+    const as = this.#actor(options);
+    // The daemon's related check is asked once: it ranks the candidates and catches a strong duplicate elsewhere.
+    const related =
+      bare || why !== ''
+        ? undefined
+        : await this.related?.matches('agenda', request.title ?? request.subject, askOf(request), as);
+    const ties = card === undefined ? undefined : await this.#ties(card);
+    const candidates = agendaCandidates(own.items, {
+      sessionId: own.sessionId,
+      title: request.title ?? request.subject,
+      ask: askOf(request),
+      related,
+      ties,
+    });
+    const tied = candidates.find(candidate => candidate.tie !== undefined);
+    if (bare || why !== '') {
+      if (tied !== undefined) this.out.diagnostic(tiedWarning(tied, card, binary));
+      return true;
+    }
+    if (candidates.length === 0) {
+      // Nothing of the caller's own to join: only another ferret's (or a card's) strong duplicate stops the add.
+      if (related !== undefined && card === undefined) await this.#refuseStrong(related, options);
+      return true;
+    }
+    const listing = renderCandidates(candidates, { binary, request, named: card });
+    if (options.json === true) {
+      this.out.success(
+        JSON.stringify(
+          { candidates: candidates.map(candidateJson), related: related === undefined ? [] : listedMatches(related) },
+          null,
+          2,
+        ),
+      );
+      throw new Error(
+        'open agendas could take this; nothing was opened. Join one with agenda edit, or pass --new "<why none fits>"',
+      );
+    }
+    if (this.prompt?.interactive() === true) {
+      const [closest] = candidates;
+      this.out.diagnostic(listing);
+      if (closest !== undefined && (await this.#confirmed(`Should this join ${agendaReference(closest.id)}?`))) {
+        this.out.success(
+          `Nothing was opened. Add it to ${agendaReference(closest.id)}:\n${joinCommand(binary, closest, request)}`,
+        );
+        return false;
+      }
+      return true;
+    }
+    throw new Error(`${listing}\n\nNothing was opened.`);
   }
 
-  async #guardRelated(
-    request: Extract<AgendaActionRequest, { action: 'add' }>,
-    options: AgendaAddOptions,
-  ): Promise<void> {
+  /** What the named card depends on and blocks, or nothing when the board cannot say: the check never stops an add. */
+  async #ties(card: TaskRef): Promise<CardTies | undefined> {
+    const read = await this.cardTies?.ties(card).catch(() => undefined);
+    return read === undefined ? undefined : { card, ...read };
+  }
+
+  /** The daemon's strong-duplicate refusal for work outside the caller's own agenda, with the ways out. */
+  async #refuseStrong(related: WorkRelatedResponse, options: AgendaAddOptions): Promise<void> {
     if (this.related === undefined) return;
     const binary = this.related.binary;
-    const ask = request.why === request.subject ? request.subject : `${request.subject}\n${request.why}`;
-    await this.related.guard('agenda', request.title ?? request.subject, ask, {
+    await this.related.refuseStrong(related, {
       as: this.#actor(options),
       json: options.json,
       choices: [
         `${binary} agenda add … --related A3   the match is yours: prints the ${binary} agenda edit that rewords it`,
         `${binary} agenda add … --related F12  tie it to a card instead of raising a new item`,
-        `${binary} agenda add … --new          it really is separate; raise it anyway`,
+        `${binary} agenda add … --new "<why>"  it really is separate; raise it anyway`,
         `${binary} send <callsign> "…"         the match is another ferret's: ask them`,
       ],
     });
+  }
+
+  /** `--related`: a card (tie the item to it) or an agenda item (edit it instead); never both, never with `--new`. */
+  #relatedPointer(options: AgendaAddOptions): { card?: string; item?: AgendaId } {
+    const typed = options.related?.trim() ?? '';
+    if (typed === '') return {};
+    if (options.new !== undefined && options.new !== false) throw new Error('pass --new or --related <id>, not both');
+    if (parseTaskRef(typed).ok) {
+      if (typeof options.task === 'string') throw new Error('pass --task <card> or --related <card>, not both');
+      return { card: typed };
+    }
+    return { item: parseAgendaReference(typed) };
   }
 
   /** `--related A3`: nothing is raised. Your own item gets the `edit` that rewords it; another ferret's is theirs to change. */
@@ -531,8 +623,24 @@ function describeClear(result: AgendaClearAgentsResult): string {
   return `${result.cleared} open agenda ${items} on ${result.sessions} agent ${ferrets}`;
 }
 
-/** One shell word, single-quoted, so a title with spaces or quotes pastes back as typed. */
-const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+/** The ask the related check weighs: the one-line ask, and the why when it says more. */
+const askOf = (request: Extract<AgendaActionRequest, { action: 'add' }>): string =>
+  request.why === request.subject ? request.subject : `${request.subject}\n${request.why}`;
+
+/** A candidate as `--json` prints it: what the listing says, without the whole item. */
+const candidateJson = (candidate: AgendaCandidate) => ({
+  id: candidate.id,
+  title: candidate.title,
+  state: candidate.state,
+  cards: candidate.cards,
+  ...(candidate.tie === undefined ? {} : { tie: candidate.tie }),
+});
+
+/** Said when a new agenda is opened beside one that carries a dependent card: dependent things share one. */
+function tiedWarning(tied: AgendaCandidate, card: TaskRef | undefined, binary: string): string {
+  const named = card === undefined ? 'this card' : formatTaskRef(card);
+  return `${agendaReference(tied.id)} already carries ${tied.tie?.card ?? ''}, tied to ${named}: dependent things share one agenda. If deciding one changes the other, add this there instead: ${binary} agenda edit ${tied.id} …`;
+}
 
 /** The options minus `--by`, which is read separately into `neededBy`. */
 function withoutBy<T extends { readonly by?: string }>(options: T): Omit<T, 'by'> {

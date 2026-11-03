@@ -429,11 +429,13 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // Board 817: opt-in first, then the search-first line and the card rules (cap 840); the total keeps the 8,000 - 150 cap.
     // #1197 and #1199 each fit alone but together measured 7,859; Pack's wording was tightened (pack 991 → 971).
     // The agenda's bug-batch and card-formatting rules measured 7,856; its wording was tightened (agenda 1,252 → 1,244).
+    // The agenda-first model (F559) measured 7,725 (agenda 1,237 → 1,285, board 802 → 638: the gate words and the
+    // create syntax went), leaving 125 for the agenda verbs that ship next (answer, rest, log, split, merge).
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
-    should(sizes.board).be.below(840);
+    should(sizes.board).be.below(700);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);

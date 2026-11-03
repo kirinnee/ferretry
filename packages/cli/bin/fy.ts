@@ -28,6 +28,7 @@ import root from '../../../package.json' with { type: 'json' };
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
+import { BoardCardTies } from '../src/adapters/agenda/card-ties';
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
@@ -1090,6 +1091,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         undefined,
         { interactive: () => world.io.interactive(), ask: async message => await world.prompt.ask(message) },
         relatedCheck(world, client),
+        new BoardCardTies(new FyBoardGateway(client)),
       ),
       async (words, options) => await runNotify(notifyPorts, words, options),
     );
