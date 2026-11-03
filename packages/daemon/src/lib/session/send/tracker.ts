@@ -132,6 +132,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   private readonly unpaid = new Set<SessionId>();
   /** Consecutive looks that left a debt unpaid, per session; the backoff and its cap. Cleared when the debt is. */
   private readonly debtLooks = new Map<SessionId, number>();
+  /** Set by a disarm: nothing is scheduled, and no scheduled look fires, until `arm` runs again. */
+  private disarmed = false;
 
   constructor(
     private readonly ports: SendTrackerPorts,
@@ -139,7 +141,15 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   ) {}
 
   track(id: SessionId): void {
-    this.ports.scheduler.schedule(id, this.settings.firstCheckMs, () => void this.check(id).catch(() => undefined));
+    this.scheduleLook(id, this.settings.firstCheckMs);
+  }
+
+  /** The one place a look is scheduled, so a disarmed tracker cannot be restarted by a look still in flight. */
+  private scheduleLook(id: SessionId, delayMs: number): void {
+    if (this.disarmed) return;
+    this.ports.scheduler.schedule(id, delayMs, () => {
+      if (!this.disarmed) void this.check(id).catch(() => undefined);
+    });
   }
 
   /**
@@ -153,6 +163,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
    */
   arm(): () => void {
     let armed = true;
+    this.disarmed = false;
     void (async () => {
       for (const id of this.ports.roster.sessions()) {
         if (!armed) return;
@@ -161,6 +172,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     })();
     return () => {
       armed = false;
+      this.disarmed = true;
       this.ports.scheduler.cancelAll();
     };
   }
@@ -178,11 +190,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     try {
       await this.ports.serial.run(id, async () => await this.checkLocked(id));
     } catch (error) {
-      this.ports.scheduler.schedule(
-        id,
-        this.settings.busyExtensionMs,
-        () => void this.check(id).catch(() => undefined),
-      );
+      this.scheduleLook(id, this.settings.busyExtensionMs);
       throw error;
     }
   }
@@ -236,10 +244,12 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       lookDelay = await this.look(id, seen);
     } finally {
       const owed = await this.payOwedNotices(id, seen);
-      const debtDelay = this.debtDelay(id, owed);
-      const delay = lookDelay === undefined ? debtDelay : Math.min(lookDelay, debtDelay ?? lookDelay);
-      if (delay !== undefined)
-        this.ports.scheduler.schedule(id, delay, () => void this.check(id).catch(() => undefined));
+      // A disarm during this look: no retry is scheduled, and none is counted against the debt's limit.
+      if (!this.disarmed) {
+        const debtDelay = this.debtDelay(id, owed);
+        const delay = lookDelay === undefined ? debtDelay : Math.min(lookDelay, debtDelay ?? lookDelay);
+        if (delay !== undefined) this.scheduleLook(id, delay);
+      }
     }
   }
 

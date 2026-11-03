@@ -847,6 +847,34 @@ describe('a failure notice a crash interrupted', () => {
     should(world.only.noticesOwed).be.undefined();
     should(world.scheduled).be.empty();
   });
+
+  it('schedules nothing from a look still in flight when it is disarmed, and schedules again once re-armed', async () => {
+    const world = new World({ ...quiet(), fate: 'unaccounted', fateAt: at(15_000), noticesOwed: owedAll });
+    world.nowMs = T0 + 15_000;
+    world.noticeFails = true;
+    world.holdLooks = true;
+
+    const disarm = world.tracker.arm();
+    await Bun.sleep(0);
+    disarm();
+    while (world.holds.length > 0) {
+      world.holds.shift()?.();
+      await Bun.sleep(0);
+    }
+
+    should(world.notices).have.length(3);
+    should(world.scheduled).be.empty();
+    world.tracker.track(ID);
+    should(world.scheduled).be.empty();
+
+    world.holdLooks = false;
+    world.tracker.arm();
+    await Bun.sleep(0);
+    should(world.scheduled.map(entry => entry.delayMs)).eql([60_000]);
+    should(world.scheduled).have.length(1);
+    world.tracker.track(ID);
+    should(world.scheduled.at(-1)?.delayMs).equal(2_000);
+  });
 });
 
 describe('a message a revive carried', () => {
