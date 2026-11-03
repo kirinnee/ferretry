@@ -974,6 +974,7 @@ export class BoardService {
    * is neither.
    */
   private async standing(caller: BoardCaller, card: BoardTask) {
+    if (caller.kind === 'ferret' && caller.sessionId === card.owner) return standingOf(caller, card, [], []);
     const [owners, assignees] = await this.lineages(caller, card);
     return standingOf(caller, card, owners, assignees);
   }
