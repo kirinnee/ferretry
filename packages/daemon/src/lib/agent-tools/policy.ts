@@ -131,19 +131,40 @@ export interface CredentialedSessions {
  * Only digests are retained. A digest locates a candidate; its freshly read hash still has to match
  * in constant time, and its current state must be active. A stopped session's credential proves
  * nothing: the session it named is not there to act for. A miss scans the fleet as before.
+ *
+ * ## THE ANSWER NEVER DEPENDS ON CACHE HISTORY
+ *
+ * The answer is the first ACTIVE session, in snapshot order, whose stored hash matches. A remembered
+ * location is therefore only trusted while it is provably the ONLY session that holds the digest:
+ * the scan that built the map recorded a digest shared by several sessions as ambiguous, which always
+ * scans, and `stamp` says whether any session configuration — the only place a stored hash is
+ * written — was written since that scan. A moved stamp discards every remembered location, so a
+ * rotation or a new session that makes a digest shared is seen before it can be answered from a hint.
+ * Between stamps, the one session is re-read, so its own rotation, stop or removal refuses at once.
+ *
+ * The one thing the stamp cannot see is a configuration edited by hand, outside this daemon. That
+ * can only change the answer when it plants a digest another session already holds, which a
+ * credential's random 256-bit digest never does by itself; the next scan reads it.
  */
 export class CredentialAgentIdentities implements AgentIdentityResolver {
+  /** The stamp the map was built under; absent until the first scan, so nothing is trusted before one. */
+  private scannedAt: string | undefined;
+
   constructor(
     private readonly sessions: CredentialedSessions,
     private readonly hash: (capability: string) => string,
     private readonly matches: (left: string, right: string) => boolean,
     /** Injected lookup state: a null id marks a digest shared by multiple sessions. */
     private readonly byDigest: Map<string, string | null>,
+    /** Moves whenever any session configuration is written: the signal that a stored hash may have changed. */
+    private readonly stamp: () => string,
   ) {}
 
   async resolve(capability: string): Promise<AgentIdentity | undefined> {
     const digest = this.hash(capability);
-    const id = this.byDigest.get(digest);
+    // Read BEFORE any document, so a write landing during a scan can only make the map look older.
+    const stamp = this.stamp();
+    const id = this.scannedAt === stamp ? this.byDigest.get(digest) : undefined;
     let session: CredentialedSession | undefined;
     if (id !== undefined && id !== null) {
       const candidate = await this.sessions.session(id);
@@ -165,6 +186,7 @@ export class CredentialAgentIdentities implements AgentIdentityResolver {
         const stored = candidate.sessionCapabilityHash;
         this.byDigest.set(stored, this.byDigest.has(stored) ? null : candidate.id);
       }
+      this.scannedAt = stamp;
       session = sessions.find(candidate => candidate.active && this.matches(candidate.sessionCapabilityHash, digest));
     }
     if (session === undefined) return undefined;

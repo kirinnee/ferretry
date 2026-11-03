@@ -180,6 +180,7 @@ function directoryOver(sessions: readonly CredentialedSession[]) {
       return secretsMatch(left, right);
     },
     new Map(),
+    () => '',
   );
   const directory: SessionCredentialDirectory = {
     resolve: async capability => {

@@ -1557,6 +1557,7 @@ describe('SessionLifecycleService credential per launch', () => {
       capability => credential(capability).hash,
       (left, right) => left === right,
       new Map(),
+      () => '',
     );
     return {
       ...built,
@@ -1656,6 +1657,7 @@ describe('SessionLifecycleService credential per launch', () => {
         capability => credential(capability).hash,
         (left, right) => left === right,
         new Map(),
+        () => '',
       );
       const current = built.repository.current();
       built.repository.documents.set(ID, JSON.stringify({ ...current, state: { ...current.state, status } }));

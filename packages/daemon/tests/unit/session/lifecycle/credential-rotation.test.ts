@@ -133,6 +133,7 @@ describe('the prefixed session credential, across a rotation', () => {
       sha256,
       secretsMatch,
       new Map(),
+      () => '',
     );
     const directory = { resolve: async (capability: string) => await identities.resolve(capability) };
     const asBearer = async (value: string) =>

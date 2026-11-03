@@ -57,6 +57,7 @@ describe('CredentialAgentIdentities', () => {
     capability => `hash:${capability}`,
     secretsMatch,
     new Map(),
+    () => '',
   );
 
   it('should resolve a credential to the live session it was minted for, and to nothing else', async () => {

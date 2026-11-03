@@ -16,6 +16,7 @@ function harness(...records: CredentialedSession[]) {
   const reads: string[] = [];
   const compared: (readonly [string, string])[] = [];
   const byDigest = new Map<string, string | null>();
+  let configWrites = 0;
   const subject = new CredentialAgentIdentities(
     {
       snapshot: async () => {
@@ -33,8 +34,13 @@ function harness(...records: CredentialedSession[]) {
       return secretsMatch(left, right);
     },
     byDigest,
+    () => String(configWrites),
   );
-  return { subject, records, scans, reads, compared, byDigest };
+  /** A configuration write, as the daemon's storage counts it. */
+  const wrote = () => {
+    configWrites += 1;
+  };
+  return { subject, records, scans, reads, compared, byDigest, wrote };
 }
 
 describe('CredentialAgentIdentities digest lookup', () => {
@@ -130,6 +136,51 @@ describe('CredentialAgentIdentities digest lookup', () => {
     should(reads).be.empty();
   });
 
+  it('should answer a rotation that makes a digest shared exactly as a fresh full scan does', async () => {
+    // Arrange — warm the map while the digests are distinct, so 'later' is the remembered holder of H2.
+    const { subject, records, scans, reads, wrote } = harness(
+      credentialed('earlier', 'h1'),
+      credentialed('later', 'h2'),
+    );
+    should(await subject.resolve('h2')).deepEqual({ sessionId: 'later' });
+    records[0] = credentialed('earlier', 'h2');
+    wrote();
+    const fresh = new CredentialAgentIdentities(
+      { snapshot: async () => records.slice(), session: async id => records.find(record => record.id === id) },
+      digest,
+      secretsMatch,
+      new Map(),
+      () => '',
+    );
+    reads.length = 0;
+
+    // Act
+    const actual = await subject.resolve('h2');
+
+    // Assert — the first active holder in snapshot order wins, not the remembered one.
+    should(await fresh.resolve('h2')).deepEqual({ sessionId: 'earlier' });
+    should(actual).deepEqual({ sessionId: 'earlier' });
+    should(scans).have.length(2);
+    should(reads).be.empty();
+  });
+
+  it('should trust a remembered location only while no configuration has been written since the scan', async () => {
+    // Arrange
+    const { subject, scans, reads, wrote } = harness(credentialed('first', 'alpha'));
+    await subject.resolve('alpha');
+    await subject.resolve('alpha');
+    should(scans).have.length(1);
+    should(reads).deepEqual(['first']);
+
+    // Act
+    wrote();
+    const actual = await subject.resolve('alpha');
+
+    // Assert — a write discards every remembered location, so it is a scan again.
+    should(actual).deepEqual({ sessionId: 'first' });
+    should(scans).have.length(2);
+  });
+
   it('should refuse a digest-map hit when the injected matcher refuses its freshly read hash', async () => {
     // Arrange — map equality must never replace the constant-time acceptance check.
     const record = credentialed('first', 'alpha');
@@ -141,8 +192,11 @@ describe('CredentialAgentIdentities digest lookup', () => {
         compared.push([left, right]);
         return false;
       },
-      new Map([[digest('alpha'), 'first']]),
+      new Map(),
+      () => '',
     );
+    await subject.resolve('alpha');
+    compared.length = 0;
 
     // Act
     const actual = await subject.resolve('alpha');

@@ -6808,6 +6808,8 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
     capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
     secretsMatch,
     new Map(),
+    // Every config this daemon writes (a rotation or a new session included) moves it; see CredentialAgentIdentities.
+    () => String(storage.configWrites()),
   );
 }
 
