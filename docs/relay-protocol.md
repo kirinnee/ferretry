@@ -888,11 +888,11 @@ The relay adds no header, strips none, and holds no link state, token, or log of
 **One relay deploy, and it is an outage for every connected user** (the rule in "Reserve, then route" above
 and the `relay-hosted.yaml` header). Publishing restarts the Worker and its Durable Objects, so:
 
-| Dropped                                                                    | Back by itself? | How fast (from the code)                                                                                                                                                                                             |
-| -------------------------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Each online daemon's **rendezvous claim** (one socket per daemon)          | yes             | `relayRedialDelayMs` (`daemon/src/lib/relay/carrier.ts`): the first redial is immediate; a `4409` from a not-yet-evicted incumbent becomes attempt 1, then 0.25–0.5 s, 0.5–1 s, 1–2 s, then 2.5–5 s (ceiling 1–10 s) |
-| Every relayed **browser session** (end-to-end channel; new keys on return) | yes             | `reconnectDelayMs` (`pwa/src/lib/connection-health.ts`): 0.15–0.3 s, 0.3–0.6 s, 0.6–1.2 s, 1.2–2.4 s, 2.4–4.8 s, then 5–10 s forever; `online`/foreground/"Retry now" skip the wait                                  |
-| In-flight frames at that instant                                           | re-requested    | §9: frames in flight are lost and known lost; reads are re-sent on the new session, live streams reopen from their cursor, a write is never re-sent blind (the send ledger decides from evidence)                    |
+| Dropped                                                                    | Back by itself? | How fast (from the code)                                                                                                                                                                                                                                          |
+| -------------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Each online daemon's **rendezvous claim** (one socket per daemon)          | yes             | `relayRedialDelayMs` (`daemon/src/lib/relay/carrier.ts`): the first redial is immediate; a `4409` from a not-yet-evicted incumbent becomes attempt 1, then 0.25–0.5 s, 0.5–1 s, 1–2 s, then 2.5–5 s (ceiling 1–10 s)                                              |
+| Every relayed **browser session** (end-to-end channel; new keys on return) | yes             | `reconnectDelayMs` (`pwa/src/lib/connection-health.ts`): 0.15–0.3 s, 0.3–0.6 s, 0.6–1.2 s, 1.2–2.4 s, 2.4–4.8 s, then 5–10 s forever; `online`/foreground/"Retry now" skip the wait                                                                               |
+| In-flight frames at that instant                                           | no (lost)       | §9: frames in flight are lost and known lost; the application may re-request: reads are re-sent on the new session, live streams reopen from their cursor, a write is never re-sent blind (the send ledger decides), and terminal input in flight is not replayed |
 
 **Not dropped:** tunnels (traffic goes straight to the host through Cloudflare, and the tunnel control
 object holds provisioning rows only), direct connections, anything the daemon is doing (only its carrier
@@ -900,13 +900,24 @@ restarts), the hosted meter and its leases (durable rows; the dead sockets' rese
 next report or by the 10-minute lease, and a daemon is nowhere near its 16-socket ceiling with one stale
 slot), and the link store (its own Worker).
 
-**Realistic number: about 1 to 3 seconds of reconnecting, and no more than about 10 seconds.** The new version
-is serving as soon as the old sockets end, so the daemon's immediate redial lands on it. A browser whose first
-retry beats its daemon's rendezvous gets `4404` and retries, and its five doubling retries span about 9 seconds
-at their longest. The pill says "reconnecting" only after 1.5 s of outage (`RECONNECTING_GRACE_MS`), so a
-drop under that is invisible; the screen keeps showing the last good content meanwhile. **Nothing is lost
-because the relay holds nothing that matters:** a session is a pair of sockets, and the work lives on the
-daemon. These figures are derived from the constants above, not measured on the live deployment.
+**Healthy-path expectation (unmeasured): about 1 to 3 seconds of reconnecting.** The new version is serving
+as soon as the old sockets end, so the daemon's immediate redial lands on it. A browser whose first retry
+beats its daemon's rendezvous gets `4404` and retries; its five doubling retries span about 9 seconds at their
+longest. The pill says "reconnecting" only after 1.5 s of outage (`RECONNECTING_GRACE_MS`), so a drop under
+that is invisible; the screen keeps showing the last good content meanwhile.
+
+**There is no upper bound on the outage.** The 10 s figure caps _each_ browser retry delay, not the total:
+browser retries continue forever. Slower paths exist: a daemon dial can itself wait up to 15 s
+(`carrier.ts`) before it fails and backs off; detection of a dead socket can take a ping interval plus the 10 s pong bound
+("Endpoint keepalive"); and a deployment sitting at the 16-per-daemon or 512-global socket ceiling can have reservations
+stranded until the 10-minute lease, because an admission without live evidence cannot reclaim them at once
+(`hosted-control.ts`, `hosted.ts`) — a `4432` then makes the daemon wait 60–120 s before its next try
+(`bun-relay-carrier.ts`, `carrier.ts`). **Durable daemon work is preserved**, because the relay holds no
+durable state: a session is a pair of sockets and the work lives on the daemon. **Transport state is not:**
+frames in flight are lost, and terminal bytes in flight can be lost — the browser sends them as stream
+records (`web-terminals.ts`), and a new attach redraws the screen without replaying input; per §9, writes are
+never blindly retried. These figures are derived from the constants above, not measured on the live
+deployment.
 
 #### Deploying it (operator, in this order)
 

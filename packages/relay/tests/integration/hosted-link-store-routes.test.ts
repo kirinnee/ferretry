@@ -61,6 +61,24 @@ function environment(overrides: Partial<RelayEnvironment> = {}): RelayEnvironmen
 const request = (method: string, path: string, init: RequestInit = {}): Request =>
   new Request(`${HOST}${path}`, { method, ...init });
 
+/** An environment whose LINK_STORE getter throws, so reading the binding at all is a test failure. */
+function unreadableBinding(mode: string | undefined): RelayEnvironment {
+  const base = environment({ RELAY_MODE: mode });
+  Object.defineProperty(base, 'LINK_STORE', {
+    enumerable: true,
+    get: () => {
+      throw new Error('the LINK_STORE binding was read');
+    },
+  });
+  return base;
+}
+
+interface Arrival {
+  readonly authorization: string | null;
+  readonly bodyPulledOnArrival: boolean;
+  readonly body: string;
+}
+
 describe('which paths belong to the link store', () => {
   it('should claim the five service paths and everything under /v1/links/', () => {
     for (const [, path] of STORE_PATHS) should(isHostedLinkStorePath(path)).be.true();
@@ -91,6 +109,44 @@ describe('the hosted relay with a LINK_STORE binding', () => {
       should(await response.text()).equal('from the store');
       should(fake.received).have.length(1);
       should(fake.received[0]).equal(incoming);
+    }
+  });
+
+  it('should hand the store the credentials and body it was sent, with the body still unread', async () => {
+    for (const [method, path] of STORE_PATHS.filter(([method]) => method !== 'GET')) {
+      let pulled = false;
+      const arrivals: Arrival[] = [];
+      const fake = store(async seen => {
+        const bodyPulledOnArrival = pulled;
+        arrivals.push({
+          authorization: seen.headers.get('Authorization'),
+          bodyPulledOnArrival,
+          body: await seen.text(),
+        });
+        return new Response('stored');
+      });
+      const upload = new ReadableStream<Uint8Array>(
+        {
+          pull: controller => {
+            pulled = true;
+            controller.enqueue(new TextEncoder().encode('envelope-bytes'));
+            controller.close();
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const response = await relayFetch(
+        request(method, path, {
+          body: upload,
+          duplex: 'half',
+          headers: { Authorization: 'Bearer signed-by-the-daemon', 'Content-Type': 'application/octet-stream' },
+        } as RequestInit),
+        environment({ LINK_STORE: fake.binding }),
+      );
+      should(await response.text()).equal('stored');
+      should(arrivals).eql([
+        { authorization: 'Bearer signed-by-the-daemon', bodyPulledOnArrival: false, body: 'envelope-bytes' },
+      ]);
     }
   });
 
@@ -202,26 +258,21 @@ describe('the hosted relay without a LINK_STORE binding', () => {
 });
 
 describe('a relay that is not hosted', () => {
-  it('should leave a self-hosted relay byte-identical: the store paths are the same 404 as any unknown path, the binding unread', async () => {
-    const fake = store(() => new Response('should not be asked'));
-    const selfHosted = environment({ RELAY_MODE: undefined, LINK_STORE: fake.binding });
-    for (const [method, path] of STORE_PATHS) {
-      const expected = await relayFetch(request(method, '/v1/something-else'), selfHosted);
-      const actual = await relayFetch(request(method, path), selfHosted);
-      should(actual.status).equal(404);
-      should(await actual.text()).equal(await expected.text());
-      should([...actual.headers]).eql([...expected.headers]);
-    }
-    should(fake.received).have.length(0);
-  });
+  for (const mode of [undefined, 'self-hosted'] as const) {
+    it(`should leave a relay with RELAY_MODE ${mode === undefined ? 'unset' : `"${mode}"`} byte-identical: the store paths are the same 404 as any unknown path, the binding never read`, async () => {
+      const selfHosted = unreadableBinding(mode);
+      for (const [method, path] of STORE_PATHS) {
+        const expected = await relayFetch(request(method, '/v1/something-else'), selfHosted);
+        const actual = await relayFetch(request(method, path), selfHosted);
+        should(actual.status).equal(404);
+        should(await actual.text()).equal(await expected.text());
+        should([...actual.headers]).eql([...expected.headers]);
+      }
+    });
+  }
 
-  it('should refuse a deployment mode it does not know before dispatching anything', async () => {
-    const fake = store(() => new Response('should not be asked'));
-    const response = await relayFetch(
-      request('GET', '/v1/link-store'),
-      environment({ RELAY_MODE: 'staging', LINK_STORE: fake.binding }),
-    );
+  it('should refuse a deployment mode it does not know before the binding is read', async () => {
+    const response = await relayFetch(request('GET', '/v1/link-store'), unreadableBinding('staging'));
     should(response.status).equal(503);
-    should(fake.received).have.length(0);
   });
 });
