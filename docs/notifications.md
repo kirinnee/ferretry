@@ -46,9 +46,9 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
 | 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
 
-A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is never counted
-inside a stop while its ask is open, so a ferret that stops with only such an agenda waiting makes no stop push, and
-one with other items too counts only those. An internal card (a ferret's own errand) never asks, so it never buzzes.
+A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
+of a stop only while its sole open items are card asks, so a ferret that stops with only such an agenda waiting makes
+no stop push, and a question it asked on the same agenda is counted. An internal card (a ferret's own errand) never asks, so it never buzzes.
 
 An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
 **quiet** (below). An

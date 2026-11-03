@@ -149,7 +149,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first and prefer adding to one. Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Cards (&F412) show progress only; every human ask goes in the card's agenda. No umbrella cards; check related cards first and prefer adding to one. Before it is ready to try: `fy task edit <id> --how-to-test "<1. where 2. do 3. see>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -386,7 +386,7 @@ has no session yet, so it stays in Todo until the lead passes `--lane` or moves 
 
 **Which lane, by what the work is.** `fy task move --help` and `fy board lanes show` give the rule by lane category,
 and `lanes show` adds a "use when" per lane (`laneUse`, single-sourced in `@ferretry/protocol`): planning or designing
-in the lane the owner gates (the owner approves leaving it), building in the active lane, a PR, a merge, a release and
+in the planning lane, building in the active lane, a PR, a merge, a release and
 `fy signal done` move a card by themselves, and blocked is not a lane (`fy task block`, `depend`).
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
@@ -395,9 +395,9 @@ Plan/Design.
 
 **Released and To test became one lane.** Boards stored before board v3 had a `shipped` Released lane and a
 `verify` To test lane after it, entered when this machine ran the release. At every boot the daemon folds any set
-that still has that pair into one Released · to test lane (`mergeReleaseLanes`): the Released lane's id and place,
+that still has that pair into one Released lane (`mergeReleaseLanes`): the Released lane's id and place,
 category `verify`, entered on release, gated as To test was. The cards of both end up in it, each moved card's
-history says "Released and To test are one lane now: Released · to test", the set's version rises, its confirmation
+history says "Released and To test are one lane now: Released", the set's version rises, its confirmation
 stands, and the owner is asked nothing. It is idempotent. Nothing else on an existing board changes: Review/CI
 stays a lane there until the owner edits it out.
 
@@ -1008,7 +1008,8 @@ ferret marks it done once nothing more is expected.
 | Not needed (dismiss)    | the owner closes the agenda: the card stays where it is, quietly, and that entry asks nothing again (`fleet` grant)  |
 
 **Leaving.** A card that leaves the gate any other way — the owner's move on the Board, a drop, a refile — has its open
-ask withdrawn quietly; the agenda stays for its ferret to close. A Not good conversation raised before card asks
+ask withdrawn quietly. If that was the last open ask, the agenda rests waiting on its ferret, or closes when it is the
+daemon-opened card agenda with no conversation; a thread that carries the ask stays as it was. A Not good conversation raised before card asks
 (`gate-followup:`) still closes by itself when the card next reaches a gate, unless it is still going with the owner or
 now carries the ask.
 
@@ -1044,8 +1045,8 @@ refused every verb that would answer, rest or close an agenda's open card ask; a
 card ask (the state machine's `card-ask` command), and it records an answer only after the owner's check passed and
 the card moved.
 
-**Notifications.** A card ask buzzes the phone once, when it is put on its agenda, and that agenda is never counted in
-a stop's push ([notifications.md](notifications.md#when-the-phone-buzzes)). A daemon that puts card asks lists
+**Notifications.** A card ask buzzes the phone once, when it is put on its agenda, and that agenda is left out of
+a stop's push only while its sole open items are card asks ([notifications.md](notifications.md#when-the-phone-buzzes)). A daemon that puts card asks lists
 `agenda.card-asks.1` on `GET /v1/health`.
 
 **Cards carry no "waiting on you".** `waitingOnOwner`, the activity `waiting`, the `toTest` and `waitingOnYou` counts
@@ -1082,8 +1083,8 @@ no longer drawn as the owner's action. A lane the owner renamed keeps its name; 
 (an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
 ([The board is opt-in](#the-board-is-opt-in), &F291). A Not good takes files only on a machine that reports
 `agenda.gate.attachments.1`. An app that predates card asks answers the ask `gateAttached` shows and names none: a
-repeat of an answer given in the last two minutes that reaches an agenda whose shown ask changed since is refused
-(`409 gate_moved_on`), never spent on the new one. An answered ask is remembered only as long as the agenda keeps it
+answer with the same receipt given in the last two minutes is never applied to another ask on that agenda
+(`409 gate_moved_on`); with no ask left to show, an exact repeat comes back unchanged. The app now names the ask. An answered ask is remembered only as long as the agenda keeps it
 (the newest 16 answered asks of an open agenda, `MAX_AGENDA_RESOLUTIONS` closed agendas).
 
 ## Activity and staleness
@@ -1263,7 +1264,7 @@ or an `*_ask_owner` tool) that is open on a card **currently** in a gate lane, a
 agenda carries that card's open ask, the ferret gets one queued message per item:
 
 ```text
-&F412 already asks the owner on !A31, which carries the card: add yours to it (fy agenda edit A31 --where "<what you need>"), then drop !A44: fy agenda dismiss !A44
+&F412 already asks the owner on !A31, which carries the card: put yours on it (fy agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !A44: fy agenda dismiss !A44
 ```
 
 - **Once per item.** The send id carries the item, so a turn end seen twice is one message.

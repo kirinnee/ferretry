@@ -207,20 +207,34 @@ each answer does to the card).
   it, and the ferret marks it done once nothing more is expected.
 - **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board (the same grant guards
   Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
-- **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly; the agenda stays.
-- **It buzzes once**, when the ask is put on, and that agenda is never part of a stop's push ([notifications.md](notifications.md)).
+- **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When that was the last
+  open ask, the agenda stops being a blocker: it rests waiting on its ferret, or, if it is the daemon-opened card agenda
+  (`card-agenda:`) and holds no conversation, it closes. A thread that carries the ask stays as it was.
+- **It buzzes once**, when the ask is put on. An agenda is left out of a stop's push only while its sole open items are
+  card asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).
+- **Not needed.** The owner's Not needed on the card's own agenda (`card-agenda:`, or a converted gate item) means they
+  have seen the ask and want it left: it counts as asked. On any other thread that carries the ask it means "drop this
+  thread", so the ask is put on the next carrier, or on a new card agenda.
 - **An older app** reads `gateAttached`: the daemon mirrors the FIRST open card ask's gate there on every write, so an
   app that predates card asks still draws Done / Not good on the agenda, and answers it with `gate: true` and no
-  `cardAsk`. Such an answer is to the ask the mirror shows; a repeat of an answer given in the last two minutes that
-  reaches an agenda whose shown ask has changed since is refused `409 gate_moved_on`, never spent on the new ask. A
+  `cardAsk`. Such an answer is to the ask the mirror shows. The app sends `cardAsk` from this version on, naming the ask it
+  drew; one that does not is guarded by the daemon: while an ask on that agenda was answered with the same receipt (the
+  choice, words and files) in the last two minutes, a no-`cardAsk` answer is never applied to another ask, whenever
+  that ask was put on — it is refused `409 gate_moved_on`. With no ask left to show, an exact repeat of that answer
+  comes back unchanged, on an open or a closed agenda, so a retry after a lost response succeeds. A
   daemon that puts card asks lists `agenda.card-asks.1` on `GET /v1/health`; an older one raised standalone gate items
   (`gate`, deprecated), which no daemon raises any more.
 - **The migration** is read-time, total and idempotent, like the channel's: a thread's bare `gateAttached` becomes its
   open card ask (a "Not yet" in its history becomes `notYet`); an open gate item whose card has an open thread here puts
   its ask on that thread and closes, its note naming the thread (the thread takes the gate item's place in Needs you if
-  only the gate item was there); any other open gate item BECOMES its card's agenda in place — the same id, history,
+  only the gate item was there); a gate item whose card ask cannot be read stays as it is, and a plain answer to it is
+  refused (it would close the item without moving the card); any other open gate item BECOMES its card's agenda in place — the same id, history,
   snooze and turn — its gate now its card ask, raised on its ferret's behalf. Closed items stay as they were, so an
-  answered gate keeps its receipt and a replay still finds it.
+  answered gate keeps its receipt and a replay still finds it. A thread carries asks only when the engine would let it
+  (`canCarryCardAsk`, one predicate for both: not an input, confirm, plan, 2FA, phone-approval or sign-in item).
+
+  **GAP: one ledger.** The migration folds a gate item and a thread only inside one home's ledger. A card that changed
+  hands can keep two agendas, the converted gate item and a thread on another home, until one is closed.
 
 ## One ask per thing
 
@@ -230,7 +244,7 @@ The owner is asked about one thing **once**:
   opening another (above), and a second open copy of the same ask is withdrawn.
 - **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card whose ask is open, answers
   `invalid`, pointing to the agenda that carries the card: on the agent's own agenda `&F12 already asks the owner on !A3,
-which carries the card; add yours to it: fy agenda edit A3 --where "<what you need>"`, else naming that agenda and
+which carries the card; put yours on it: fy agenda edit A3 --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`, else naming that agenda and
   `fy task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is
   raised **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). If the card's
   ask cannot be read, the add is raised without the card, with a note saying so. Notices are never refused.
