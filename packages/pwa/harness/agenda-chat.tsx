@@ -181,7 +181,7 @@ export function AgendaChatHarness({
             data-agenda-harness-info=""
           >
             <h2 className="m-0 mb-sm text-meta font-semibold text-faint">Agenda</h2>
-            {agenda.section()}
+            {agenda.tab()}
           </aside>
         </div>
       ) : (

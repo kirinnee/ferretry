@@ -79,7 +79,7 @@ export const nextWake = (rows: readonly ToTestCard[], now: number): number | nul
 };
 
 /** One card as a card to test: `null` when it is dropped, a person did not ask for it, or its project's lanes do not name where Done and Not good go. */
-export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
+const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
   if (awaitingOwner(card, group.laneSet) !== 'try') return null;
   const doneLaneId = doneLaneOf(group.laneSet);
   const notGoodLaneId = notGoodLaneOf(group.laneSet);
@@ -91,32 +91,6 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     doneLaneId,
     notGoodLaneId,
     howToTest: card.task.howToTest,
-    taskName: null,
-    projectName: null,
-    since: sinceOf(card),
-    snoozedUntil: snoozedUntilOf(card),
-  };
-};
-
-/**
- * One card waiting on a plan as a row the same shell draws: Approve moves it to the lane after the gate, Send back (with
- * the owner's words) to the lane before it. `null` when it is not a plan to approve or the gate has no lane on one side.
- */
-export const toApproveOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
-  if (awaitingOwner(card, group.laneSet) !== 'approve' || group.laneSet === null) return null;
-  const lanes = group.laneSet.lanes;
-  const at = lanes.findIndex(lane => lane.id === card.task.laneId);
-  const forward = lanes[at + 1];
-  const back = at > 0 ? lanes[at - 1] : undefined;
-  if (forward === undefined || back === undefined) return null;
-  return {
-    key: toTestKey(card),
-    card,
-    group,
-    doneLaneId: forward.id,
-    notGoodLaneId: back.id,
-    howToTest: card.task.brief,
-    stage: 'approve',
     taskName: null,
     projectName: null,
     since: sinceOf(card),

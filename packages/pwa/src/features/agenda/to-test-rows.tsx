@@ -94,7 +94,7 @@ export interface ToTestAnswers {
 }
 
 /** The snooze verb for a row: a refusal is said where the page says its other notices. */
-export const snoozeOver =
+const snoozeOver =
   (actions: Pick<BoardActions, 'snoozeTask'>, onNotice: (message: string) => void) =>
   (row: ToTestCard, until: string | null): void => {
     void actions.snoozeTask({ daemonId: row.card.daemonId, id: row.card.task.id }, until).then(result => {
@@ -102,7 +102,7 @@ export const snoozeOver =
     });
   };
 
-export const toTestAnswersOver = ({
+const toTestAnswersOver = ({
   requestMove,
   answerFor,
   composerFor,

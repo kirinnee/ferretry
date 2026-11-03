@@ -662,26 +662,15 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
-  it('badges the Board tab with the cards that need the owner, in words, and draws nothing at zero', async () => {
+  it('puts no number on the Board tab: what waits on the owner is the Inbox and the Agenda, not a board count', async () => {
     setViewport(PHONE);
-    const mounted = await mount(tabBar({ boardCount: 4 }));
+    const mounted = await mount(tabBar({ agendaCount: 2 }));
     const tab = (): HTMLAnchorElement => mounted.container.querySelector('[data-app-tab="board"]') as HTMLAnchorElement;
-    const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
 
     expect(tab().getAttribute('href')).toBe('/d/workshop/board');
-    expect(badge()?.textContent).toBe('4');
-    expect(tab().textContent).toContain('4 board cards need you');
-
-    await mounted.render(tabBar({ boardCount: 1 }));
-    expect(tab().textContent).toContain('1 board card needs you');
-
-    await mounted.render(tabBar({ boardCount: 0 }));
-    expect(badge()).toBeNull();
+    expect(tab().querySelector('[data-unread-badge]')).toBeNull();
     expect(tab().textContent).toBe('Board');
-
-    // The Board's number never lands on another tab, and the Inbox keeps its own.
-    await mounted.render(tabBar({ boardCount: 7, agendaCount: 2 }));
-    expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(2);
+    expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(1);
     expect(mounted.container.querySelector('[data-app-tab="attention"] [data-unread-badge]')?.textContent).toContain(
       '2',
     );

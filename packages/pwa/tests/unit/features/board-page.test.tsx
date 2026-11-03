@@ -136,7 +136,8 @@ describe('BoardPage — reading', () => {
     const { root, reads } = await open();
     expect(root.querySelector('h1')?.textContent).toBe('Board');
     expect(titles(root)).toEqual(['Plan the thing', 'Build the thing', 'Review the thing', 'Try the thing']);
-    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('To test1');
+    expect(root.querySelector('[data-count="to_test"]')).toBeNull();
+    expect(root.querySelector('[data-count="waiting_on_you"]')).toBeNull();
     expect(root.querySelector('[data-count="closed"]')?.textContent).toBe('1 closed hidden');
     expect([...root.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain('Closed');
     expect(root.querySelector('.fy-board__reading')).toBeNull();
@@ -453,10 +454,10 @@ describe('BoardPage — filters and counts', () => {
     expect(written.get('activity')).toBe('stale');
   });
 
-  it('turns the To test pill into the activity filter', async () => {
+  it('turns the stale chip into the activity filter', async () => {
     const { root, searches } = await open();
-    await click(root, '[data-count="to_test"]');
-    expect(new URLSearchParams(searches[0]).get('activity')).toBe('to_test');
+    await click(root, '[data-count="stale"]');
+    expect(new URLSearchParams(searches[0]).get('activity')).toBe('stale');
   });
 
   it('starts the filters folded on a narrow screen', async () => {

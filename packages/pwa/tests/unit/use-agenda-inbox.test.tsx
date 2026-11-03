@@ -262,6 +262,74 @@ describe('useAgendaInboxModel', () => {
     });
   });
 
+  describe('the health switch for card asks', () => {
+    const run = async (advertising: readonly (typeof boardLaptop)[], upgrade = false) => {
+      const { client } = fakeClient(new Map());
+      upgraded = () =>
+        client.wires.note(boardLaptop.daemonId, {
+          kind: 'read',
+          health: healthOf('4.120.0', [DAEMON_FEATURES.agendaCardAsks]),
+        });
+      client.wires.note(boardLaptop.daemonId, { kind: 'read', health: healthOf('4.110.0') });
+      for (const machine of advertising)
+        client.wires.note(machine.daemonId, {
+          kind: 'read',
+          health: healthOf('4.120.0', [DAEMON_FEATURES.agendaCardAsks]),
+        });
+      const { timers } = manualTimers();
+      let inbox: AgendaInbox | null = null;
+      const rows = toTestCards(
+        await boardModelOf([
+          card('F1', { laneId: 'tested' }),
+          card('F2', { laneId: 'tested', snoozed: { until: '2999-01-01T00:00:00.000Z', laneId: 'tested' } }),
+        ]),
+      );
+      view = await mount(
+        <Probe
+          client={client}
+          machines={[{ connection: boardLaptop, name: 'Laptop', sessions: [] }]}
+          onInbox={value => (inbox = value)}
+          timers={timers}
+          toTest={rows}
+        />,
+      );
+      await settle();
+      if (upgrade) {
+        await interact(() => upgraded());
+        await settle();
+      }
+      return inbox as unknown as AgendaInbox;
+    };
+    let upgraded: () => void = () => undefined;
+
+    test('a machine that starts advertising card asks after the page is open drops its To-test list at once', async () => {
+      const read = await run([], true);
+      expect(read.toTest).toEqual([]);
+      expect(read.toTestSnoozed).toEqual([]);
+      expect(read.total).toBe(0);
+    });
+
+    test('on a machine that advertises card asks there is no To-test list: awake, snoozed or counted', async () => {
+      const read = await run([boardLaptop]);
+      expect(read.toTest).toEqual([]);
+      expect(read.toTestSnoozed).toEqual([]);
+      expect(read.total).toBe(0);
+    });
+
+    test('on a machine that does not, every row stays, awake and snoozed, and counts', async () => {
+      const read = await run([]);
+      expect(read.toTest.map(row => row.card.task.id)).toEqual(['F1']);
+      expect(read.toTestSnoozed.map(row => row.card.task.id)).toEqual(['F2']);
+      expect(read.total).toBe(1);
+    });
+
+    test('another machine advertising card asks takes nothing from this machine’s rows', async () => {
+      const read = await run([studio]);
+      expect(read.toTest.map(row => row.card.task.id)).toEqual(['F1']);
+      expect(read.toTestSnoozed.map(row => row.card.task.id)).toEqual(['F2']);
+    });
+  });
+
   test('puts a snoozed card aside, out of the count, and brings it back when its time is up', async () => {
     const { client } = fakeClient(new Map());
     let clock = Date.parse('2026-08-02T12:00:00.000Z');

@@ -142,7 +142,6 @@ import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
-import { sessionTaskNames } from '../to-test-inbox.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
@@ -651,7 +650,6 @@ export function SessionChatPage({
     }
     return names;
   }, [daemonSessions]);
-  const taskNames = useMemo(() => sessionTaskNames(daemonSessions ?? []), [daemonSessions]);
   const openTasks = useCallback(() => showInfo(hasBoard ? 'tasks' : 'overview'), [showInfo, hasBoard]);
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
@@ -1415,6 +1413,19 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient, canNavigate]);
+  // A sub-ferret's items are raised on its lead's agenda: its own tab says so and opens the lead.
+  const leadView =
+    session.config.parent === undefined
+      ? undefined
+      : daemonSessions?.find(candidate => candidate.config.id === session.config.parent);
+  const agendaLead =
+    leadView === undefined || onNavigate === undefined
+      ? undefined
+      : {
+          name: sessionDisplayName(leadView),
+          open: () => onNavigate(daemonSessionPath(connection.daemonId, leadView.config.id)),
+        };
+  const agendaCounts = agenda.counts;
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   boardFullRef.current = tasksFull;
   collapseBoardRef.current = () => tasks.setExpanded(false);
@@ -1437,8 +1448,11 @@ export function SessionChatPage({
               browser={browserPages.status}
               driving={driving}
               name={agentName}
+              agendaTab={agenda.tab(presentation === 'sheet' ? info.close : undefined, agendaLead)}
               about={{
-                agenda: agenda.section(presentation === 'sheet' ? info.close : undefined),
+                ...(agendaCounts === null
+                  ? {}
+                  : { agenda: { counts: agendaCounts(), onOpen: () => info.show('agenda') } }),
                 ...(switches === undefined
                   ? {}
                   : {
@@ -1464,7 +1478,6 @@ export function SessionChatPage({
                       tasks: (
                         <ChatTasks
                           callsigns={callsigns}
-                          taskNames={taskNames}
                           chat={cardChat}
                           machine={{ connection, name: machineName }}
                           now={Date.now()}
@@ -1763,7 +1776,6 @@ export function SessionChatPage({
         <section aria-label="Tasks" className="fy-board-full" data-board-full="">
           <ChatTasks
             callsigns={callsigns}
-            taskNames={taskNames}
             chat={cardChat}
             expanded
             machine={{ connection, name: machineName }}

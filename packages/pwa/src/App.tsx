@@ -199,7 +199,6 @@ import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { NO_BOARD_FILTERS } from './lib/board-model.ts';
-import { boardBadgeCount } from './lib/board-phone.ts';
 import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
@@ -2412,18 +2411,10 @@ function useBoardMachines(): readonly BoardMachine[] {
   );
 }
 
-/**
- * The phone's bottom bar with the Board tab's number on it. It shares the Board page's own unfiltered read
- * (the same store key), so the badge costs no request of its own; only this subtree renders when it moves.
- */
-function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
-  const store = useAppStore();
-  const machines = useBoardMachines();
-  const { model } = useBoard(store.board, machines, NO_BOARD_FILTERS);
+/** The phone's bottom bar, with the shell's What's new door in More. */
+function PhoneTabBar(props: AppTabBarProps) {
   const whatsNew = useWhatsNewEntry();
-  return (
-    <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} {...(whatsNew === null ? {} : { whatsNew })} />
-  );
+  return <AppTabBar {...props} {...(whatsNew === null ? {} : { whatsNew })} />;
 }
 
 function QueueRoute({ connection, sessionId }: QueuePageProps) {

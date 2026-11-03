@@ -4,7 +4,7 @@ import { ChatTasks, type ChatTasksProps } from '../../../src/features/board/chat
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
 import { type BoardChat, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
 import { NO_BOARD_FILTERS } from '../../../src/lib/board-model.ts';
-import { boardSideView } from '../../../src/lib/board-side-view.ts';
+import { boardSideView, parseBoardSideView } from '../../../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../../src/lib/pages/routes.ts';
@@ -19,7 +19,7 @@ import {
   laptop,
   originCard,
 } from '../board-support.ts';
-import { sendBack, sendBackBox, plainSendBackEditor } from './send-back-support.ts';
+import { sendBack, plainSendBackEditor } from './send-back-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const SELF = 's1';
@@ -493,259 +493,37 @@ describe('ChatTasks — Internal and Expand', () => {
   });
 });
 
-const ASK = { sessionId: 's1', id: 'A1' };
-const waiting = card('F40', {
-  owner: SELF,
-  laneId: 'plan',
-  title: 'Needs a call',
-  activity: 'waiting',
-  waitingOnOwner: [ASK],
-  openAsks: [ASK],
-});
-
-const where = (root: HTMLElement) => root.querySelector('.fy-item-view__where')?.textContent;
-const shownTitle = (root: HTMLElement) =>
-  root.querySelector('[data-board-cards] .fy-board-card__title, [data-board-cards] [data-to-test-title]')?.textContent;
-const step = (root: HTMLElement, label: 'Previous card' | 'Next card') =>
-  must(root.querySelector<HTMLButtonElement>(`[data-board-cards] button[aria-label="${label}"]`), label);
-
-describe('ChatTasks — the Cards view', () => {
-  beforeEach(() => boardSideView.set('cards'));
-
-  it('is the view this panel opens on, with Kanban and List still there as tabs', async () => {
-    const { root } = await open({ extraCards: [waiting] });
-    expect(root.querySelector('[data-board-cards]')).not.toBeNull();
-    expect(root.querySelector('[data-board-side-kanban]')).toBeNull();
+describe('ChatTasks — the Cards view is gone', () => {
+  it('offers Kanban and List only, and draws no one-card-at-a-time deck', async () => {
+    const { root } = await open();
     expect(
-      [...root.querySelectorAll<HTMLButtonElement>('.fy-board-side__view')].map(tab => [
-        tab.dataset['view'],
-        tab.getAttribute('aria-pressed'),
-      ]),
-    ).toEqual([
-      ['cards', 'true'],
-      ['kanban', 'false'],
-      ['list', 'false'],
-    ]);
-  });
-
-  it('shows one card at a time, the card to test first and then the plan to approve', async () => {
-    const { root } = await open({ extraCards: [waiting] });
-    expect(where(root)).toBe('1/3');
-    expect(shownTitle(root)).toBe('Try the board');
-    expect(root.querySelectorAll('[data-board-cards] [data-task], [data-board-cards] [data-to-test]')).toHaveLength(1);
-    expect(root.querySelector('[data-board-cards-rank]')).toBeNull();
-    await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('2/3');
-    expect(root.querySelector('[data-board-cards] [data-to-test-reveal="right"]')?.textContent).toBe('Approve');
-  });
-
-  it('holds only the cards waiting on the owner: nothing in progress, in review or merged', async () => {
-    const { root } = await open({ extraCards: [waiting] });
-    const titles: (string | null | undefined)[] = [];
-    for (let at = 0; at < 3; at += 1) {
-      titles.push(shownTitle(root));
-      if (at < 2) await interact(() => step(root, 'Next card').click());
-    }
-    expect(titles.slice(0, 1)).toEqual(['Try the board']);
-    expect([...titles].sort()).toEqual(['Board system', 'Needs a call', 'Try the board']);
-  });
-
-  it('says so in one line when no card is waiting on the owner', async () => {
-    const model = await boardModelOf([card('F23', { owner: SELF, laneId: 'closed', title: 'Shipped board' })]);
-    const cards = chatCards(model, {
-      daemonId: laptop.daemonId,
-      sessionId: SELF,
-      focus: null,
-      relatives: new Set(),
-      agents: false,
-    });
-    const { root } = await open({ chat: { ...(await chatOf()), cards } });
-    expect(root.querySelector('[data-board-cards-empty]')?.textContent).toContain('Nothing is waiting on you');
+      [...root.querySelectorAll<HTMLButtonElement>('.fy-board-side__view')].map(tab => tab.dataset['view']),
+    ).toEqual(['kanban', 'list']);
+    expect(root.querySelector('button[data-view="cards"]')).toBeNull();
+    expect(root.querySelector('[data-board-cards]')).toBeNull();
     expect(root.querySelector('[data-to-test]')).toBeNull();
   });
 
-  it('stops at both ends of the stack', async () => {
-    const { root } = await open({ extraCards: [waiting] });
-    expect(step(root, 'Previous card').disabled).toBe(true);
-    for (let at = 1; at < 3; at += 1) await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('3/3');
-    expect(step(root, 'Next card').disabled).toBe(true);
-    await interact(() => step(root, 'Previous card').click());
-    expect(where(root)).toBe('2/3');
-  });
-
-  it('lays the buttons out as the Inbox gate card does: Not good left, Done right, Skip behind (i)', async () => {
+  it('opens on the List when the device has never chosen, and on the List when it stored the retired Cards view', async () => {
+    expect(parseBoardSideView(null)).toBe('list');
+    expect(parseBoardSideView('cards')).toBe('list');
+    boardSideView.set(parseBoardSideView('cards'));
     const { root } = await open();
-    const answers = must(root.querySelector('.fy-totest__answers'), 'the answer row');
-    expect([...answers.querySelectorAll('button')].map(button => button.textContent?.trim())).toEqual([
-      'Not good',
-      'Done',
-    ]);
-    expect(answers.querySelector('[data-to-test-not-good] svg.lucide-arrow-left')).not.toBeNull();
-    expect(answers.querySelector('[data-to-test-done] svg.lucide-arrow-right')).not.toBeNull();
-    expect(root.querySelector('[data-to-test-skip]')).toBeNull();
-    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
-    const quiet = must(root.querySelector('.fy-totest__quiet'), 'the quiet row');
-    expect(quiet.querySelector('[data-to-test-skip]')).not.toBeNull();
-    expect(answers.contains(quiet)).toBe(false);
+    expect(root.querySelector('button[data-view="list"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-board-side-kanban]')).toBeNull();
   });
 
-  it('marks a card to test Done with the button, through the Board’s own move', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-done]'), 'Done').click());
-    await interact(() => flush());
-    expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('sends a card to test back with the owner’s words, through the Board’s reason box', async () => {
-    const { root, acts } = await open();
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Not good').click());
-    expect(acts).toEqual([]);
-    await sendBack(sendBackBox(document.body), 'It crashes');
-    expect(acts).toHaveLength(1);
-    expect(acts[0]?.id).toBe('F22');
-    expect(JSON.stringify(acts[0]?.request)).toContain('It crashes');
-  });
-
-  it('draws How to test on the card to test', async () => {
-    const { root } = await open({
-      extraCards: [card('F50', { owner: SELF, laneId: 'tested', title: 'Steps', howToTest: '1. Press it' })],
-    });
-    await interact(() => step(root, 'Next card').click());
-    expect(shownTitle(root)).toBe('Steps');
-    expect(root.querySelector('[data-to-test-how]')?.textContent).toContain('Press it');
-  });
-
-  it('draws a plan to approve on the same shell: Send back left, Approve right, its brief as the plan', async () => {
-    const { root } = await open({ extraCards: [waiting] });
-    await interact(() => step(root, 'Next card').click());
-    const answers = must(root.querySelector('[data-board-cards] .fy-totest__answers'), 'the answer row');
-    expect([...answers.querySelectorAll('button')].map(button => button.textContent?.trim())).toEqual([
-      'Send back',
-      'Approve',
-    ]);
-    expect(root.querySelector('[data-board-cards] [data-task]')).toBeNull();
-  });
-
-  it('approves a plan with the button: the card moves to the lane after the gate', async () => {
-    const { root, acts } = await open({ extraCards: [waiting] });
-    await interact(() => step(root, 'Next card').click());
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-done]'), 'Approve').click());
-    await interact(() => flush());
-    expect(acts).toEqual([{ id: 'F18', request: { action: 'move', to: 'implement' } }]);
-  });
-
-  it('sends a plan back with the owner’s words through the Board’s reason box, in the plan’s own words', async () => {
-    const { root, acts } = await open({ extraCards: [waiting] });
-    await interact(() => step(root, 'Next card').click());
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Send back').click());
-    const dialog = sendBackBox(document.body);
-    expect(dialog.textContent).toContain('Send Board system back to Todo');
-    await sendBack(dialog, 'Split it');
-    expect(acts).toHaveLength(1);
-    expect(JSON.stringify(acts[0]?.request)).toContain('Split it');
-  });
-
-  it('names the ferret by its task on the card to test, never by its callsign', async () => {
-    const { root } = await open({ taskNames: new Map([[SELF, 'Credentials Build Lead']]) });
-    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
-    expect(root.querySelector('[data-board-cards] [data-to-test-ferret]')?.textContent).toBe('Credentials Build Lead');
-  });
-
-  it('has a Skip button on a card to test that steps to the next card', async () => {
-    const { root, acts } = await open({ extraCards: [waiting] });
-    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
-    expect(where(root)).toBe('2/3');
-    expect(acts).toEqual([]);
-  });
-
-  it('opens the card’s drawer from the title of a card to test', async () => {
-    const { root } = await open();
-    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title').click());
-    expect(document.body.querySelector('.fy-board-detail__scrim')).not.toBeNull();
-  });
-
-  it('switches to Kanban and back, and remembers the pick on this device', async () => {
-    const { root } = await open();
-    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="kanban"]'), 'Kanban').click());
-    expect(boardSideView.snapshot()).toBe('kanban');
-    expect(root.querySelector('[data-board-cards]')).toBeNull();
-    expect(root.querySelector('[data-board-side-kanban]')).not.toBeNull();
-    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="cards"]'), 'Cards').click());
-    expect(root.querySelector('[data-board-cards]')).not.toBeNull();
-  });
-
-  it('has no "Agent tasks" toggle in the Cards view, which only ever holds the cards waiting on the owner', async () => {
+  it('shows the "Agent tasks" toggle in both views', async () => {
     const chat: BoardChat = { ...(await chatOf()), splitsAgents: true };
     const { root } = await open({ chat });
-    expect(root.querySelector('input[data-filter="agents"]')).toBeNull();
-    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="kanban"]'), 'Kanban').click());
+    expect(root.querySelector('input[data-filter="agents"]')).not.toBeNull();
+    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="list"]'), 'List').click());
     expect(root.querySelector('input[data-filter="agents"]')).not.toBeNull();
   });
 
   it('says so when the ferret has no cards', async () => {
     const chat = await chatOf();
     const { root } = await open({ chat: { ...chat, cards: { ...chat.cards, total: 0, hiddenAgents: 0 } } });
-    expect(root.querySelector('[data-board-cards]')).toBeNull();
     expect(root.querySelector('[data-board-side-empty]')).not.toBeNull();
-  });
-});
-
-const pointer = (type: string, x: number, init: PointerEventInit = {}): PointerEvent =>
-  new PointerEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    clientX: x,
-    clientY: 300,
-    pointerId: 9,
-    pointerType: 'touch',
-    ...init,
-  });
-
-const swipe = async (root: HTMLElement, dx: number): Promise<void> => {
-  const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__top'), 'a place to grab');
-  await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
-  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx / 2)));
-  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx)));
-  await interact(() => grip.dispatchEvent(pointer('pointerup', 100 + dx)));
-};
-
-describe('ChatTasks — swiping a card to test, at once', () => {
-  beforeEach(() => boardSideView.set('cards'));
-
-  it('a right swipe is Done, with no tap on a button first', async () => {
-    const { root, acts } = await open();
-    await swipe(root, 300);
-    await interact(() => flush());
-    expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
-  });
-
-  it('a left swipe opens the Board’s reason box and moves nothing yet', async () => {
-    const { root, acts } = await open();
-    await swipe(root, -300);
-    await interact(() => flush());
-    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(acts).toEqual([]);
-  });
-
-  it('a swipe down is Skip: the next card, and nothing moves', async () => {
-    const { root, acts } = await open({ extraCards: [waiting] });
-    const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__top'), 'a place to grab');
-    await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 340 })));
-    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 430 })));
-    await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 430 })));
-    await interact(() => flush());
-    expect(where(root)).toBe('2/3');
-    expect(acts).toEqual([]);
-  });
-
-  it('a short swipe does nothing', async () => {
-    const { root, acts } = await open();
-    await swipe(root, 40);
-    await interact(() => flush());
-    expect(acts).toEqual([]);
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 });

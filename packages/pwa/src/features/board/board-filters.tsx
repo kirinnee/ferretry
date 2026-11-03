@@ -90,6 +90,9 @@ const ACTIVITY_LABEL: Readonly<Record<string, string>> = {
   blocked: 'Blocked',
 };
 
+/** Activities no card has any more: the owner's asks live on the agenda. An old URL still parses; the menu no longer offers them. */
+const RETIRED_ACTIVITIES: readonly string[] = ['waiting', 'to_test', 'waiting_on_you'];
+
 const PR_LABEL: Readonly<Record<string, string>> = {
   none: 'No PR',
   draft: 'Draft',
@@ -280,7 +283,12 @@ function BoardFilterFields({ filters, onChange, choices, archive }: FieldsProps)
         any="Any activity"
         name="activity"
         onPick={value => set({ activity: BoardActivityFilterSchema.safeParse(value).data ?? null })}
-        options={optionsOf(BoardActivityFilterSchema.options, ACTIVITY_LABEL)}
+        options={optionsOf(
+          BoardActivityFilterSchema.options.filter(
+            activity => !RETIRED_ACTIVITIES.includes(activity) || activity === filters.activity,
+          ),
+          ACTIVITY_LABEL,
+        )}
         title="Activity"
         value={filters.activity ?? ''}
       />

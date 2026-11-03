@@ -258,3 +258,44 @@ describe('whether a machine rolls up every conversation’s items (agenda.open.1
     expect(wires.openOf(A)).toBeUndefined();
   });
 });
+
+describe('whether a machine takes card asks or snoozes (agenda.card-asks.1, agenda.snooze.1)', () => {
+  const featured = (...features: string[]): DaemonHealthRead => ({
+    kind: 'read',
+    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, ...features]),
+  });
+
+  it('tells listeners when only the card-asks answer changes after a machine is already read', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, featured());
+    const before = heard;
+    wires.note(A, featured());
+    expect(heard).toBe(before);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(wires.cardAsksOf(A)).toBe(true);
+    expect(heard).toBe(before + 1);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(heard).toBe(before + 1);
+    wires.clearDaemon(A);
+    expect(wires.cardAsksOf(A)).toBeUndefined();
+    expect(heard).toBeGreaterThan(before + 1);
+  });
+
+  it('tells listeners when only the snooze answer changes', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.note(A, featured());
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
+    expect(wires.snoozeOf(A)).toBe(true);
+    expect(heard).toBe(1);
+    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
+    expect(heard).toBe(1);
+  });
+});

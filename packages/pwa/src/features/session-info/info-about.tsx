@@ -4,15 +4,16 @@
  * chip, the capability icons, the refresh mark and the Agenda toggle moved here. Nothing was lost, only
  * moved: every row keeps the control it had in the bar.
  *
- * The agenda is a section of this block, not a side bar of its own; the floating "Agenda · n need you" line
- * above the composer stays the quick way in.
+ * The agenda is one line of this block (its four counts and a way to the Agenda tab), not a list: the tab owns the
+ * list, so the two cannot disagree. The floating "Agenda · n need you" line above the composer stays the quick way in.
  *
  * PRESENTATIONAL: the page owns every action and state and hands this block what to draw.
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import { activeSubFerrets, SubFerretsPack } from '../../components/sub-ferrets.tsx';
+import { type AgendaTabFilter, agendaSummary } from '../../lib/agenda-tab.ts';
 import { type ChatChip, chatCardLabel } from '../../lib/board-chat.ts';
 import { OutdatedGlyph, useOutdatedMarkState } from '../restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from './info-model.ts';
@@ -35,8 +36,11 @@ export interface InfoAboutProps {
   readonly switches?: SwitchMarksProps;
   /** The same Restart as Actions › Restart CLI. Absent: this reader may not restart it. */
   readonly onRestart?: () => Promise<void>;
-  /** The agenda's rows (`useAgenda().section`). Absent: this ferret is not in agenda mode. */
-  readonly agenda?: ReactNode;
+  /** The agenda in one line: the four counts and the way to the Agenda tab. Absent: this ferret has no agenda. */
+  readonly agenda?: {
+    readonly counts: Readonly<Record<AgendaTabFilter, number>>;
+    readonly onOpen: () => void;
+  };
 }
 
 function RestartRow({ view, onRestart }: Pick<InfoAboutProps, 'view' | 'onRestart'>) {
@@ -118,10 +122,13 @@ export function InfoAbout({ view, subFerrets, onOpenSession, card, switches, onR
           {anyOn ? <SwitchMarks {...marks} /> : <span className="fy-info-muted">None on</span>}
         </InfoRow>
         <RestartRow onRestart={onRestart} view={view} />
-        {agenda === undefined || agenda === null ? null : (
+        {agenda === undefined ? null : (
           <InfoRow label="Agenda">
             <span className="fy-info-about__agenda" data-info-agenda="">
-              {agenda}
+              {agendaSummary(agenda.counts)}
+              <button className="fy-info-inline-action" data-info-agenda-open="" onClick={agenda.onOpen} type="button">
+                Open Agenda
+              </button>
             </span>
           </InfoRow>
         )}
