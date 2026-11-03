@@ -66,6 +66,8 @@ export interface CodexLoginPanelProps {
   readonly copy?: ClipboardWriter;
   /** What one sign-in covers, and what to say once it is done. */
   readonly wording: LoginPanelWording;
+  /** Another form on the page owns the primary: draw this panel's primaries as plain buttons. */
+  readonly quiet?: boolean;
   className?: string;
 }
 
@@ -117,9 +119,11 @@ export function CodexLoginPanel({
   linked,
   copy = browserClipboardWriter(),
   wording,
+  quiet = false,
   className,
 }: CodexLoginPanelProps) {
   const [address, setAddress] = useState('');
+  const tone = quiet ? 'outline' : 'primary';
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -179,7 +183,7 @@ export function CodexLoginPanel({
                 ? 'Codex signs in with a link. Start here, open the link on any device, sign in, then paste back the address the browser ends on.'
                 : 'Codex signs in with a device code. Start here, then open the link on any device and type the code it gives you at the provider’s page. Nothing comes back to this screen.'}
             </p>
-            <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
+            <Button type="button" variant={tone} onClick={onStart} disabled={busy || state === 'starting'}>
               <Link2 size={16} aria-hidden="true" />
               {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Codex'}
             </Button>
@@ -279,7 +283,7 @@ export function CodexLoginPanel({
                 required
               />
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" disabled={busy || address.trim() === ''}>
+                <Button type="submit" variant={tone} disabled={busy || address.trim() === ''}>
                   <ShieldCheck size={16} aria-hidden="true" />
                   {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>
@@ -334,7 +338,7 @@ export function CodexLoginPanel({
             <p className="m-0 text-meta leading-base">{ending?.next ?? flow.remedy}</p>
             <div className="flex flex-wrap items-center gap-2">
               {onRecheck === undefined ? null : (
-                <Button type="button" variant="primary" onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
+                <Button type="button" variant={tone} onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
                   <RefreshCw size={16} aria-hidden="true" />
                   {busy ? 'Looking…' : 'Look for the login again'}
                 </Button>

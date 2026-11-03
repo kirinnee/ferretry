@@ -114,7 +114,7 @@ export function EnvironmentLogin({
   const { loaded, stored, onStored } = useProviderCatalog(connection, createClient);
   const [screen, setScreen] = useState<Screen>({ kind: 'grid' });
   // Past the grid every screen has a primary of its own (Save, Continue, Done): the setup footer's steps back.
-  useQuietFooter(screen.kind !== 'grid');
+  const leads = useQuietFooter(screen.kind !== 'grid');
   // One read of Ollama when this flow opens and it offers the Ollama tile; then only on Check again.
   const local = useLocalModels({
     connection,
@@ -155,6 +155,7 @@ export function EnvironmentLogin({
         presets={presets}
         onBack={backToGrid}
         onContinue={(presetId, prefill) => setScreen({ kind: 'form', presetId, prefill })}
+        quiet={!leads}
       />
     );
 
@@ -178,7 +179,12 @@ export function EnvironmentLogin({
           createClient={createClient}
         />
         <div>
-          <Button type="button" variant="primary" data-step-next="" onClick={() => onAdded(added)}>
+          <Button
+            type="button"
+            variant={leads ? 'primary' : 'outline'}
+            data-step-next=""
+            onClick={() => onAdded(added)}
+          >
             Done
           </Button>
         </div>
@@ -200,6 +206,7 @@ export function EnvironmentLogin({
         createClient={createClient}
         changes={changes}
         local={preset.id === OLLAMA_PRESET_ID ? local : undefined}
+        quiet={!leads}
         reload={reload}
         onBack={backToGrid}
         onSaved={credentialId => {

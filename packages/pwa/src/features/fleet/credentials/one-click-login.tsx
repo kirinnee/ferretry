@@ -79,6 +79,8 @@ export interface OneClickLoginProps {
   readonly onBack?: () => void;
   /** The button's words. Defaults to "Add". */
   readonly submitLabel?: string;
+  /** Another form on the page owns the primary: Add is drawn as a plain button (it still adds). */
+  readonly quiet?: boolean;
   /** What sits just above the button (Add a login's runtime choice). */
   readonly children?: ReactNode;
   /** The login is added: its id. */
@@ -100,6 +102,7 @@ export function OneClickLogin({
   onBack,
   onSaved,
   submitLabel = 'Add',
+  quiet = false,
   children,
 }: OneClickLoginProps) {
   const ids = useId();
@@ -326,6 +329,7 @@ export function OneClickLogin({
         busyLabel={storing ? 'Storing the key…' : 'Adding…'}
         refusal={changes.refusal}
         submitLabel={submitLabel}
+        quiet={quiet}
         disabled={problem !== null || !preset.offered.available}
         onSubmit={() => void add()}
       />

@@ -146,6 +146,19 @@ try {
         await screen.locator('[data-setup-note="import-carry"]').waitFor({ state: 'visible' });
         await stepBody('codex');
         await shot('codex');
+        // A key form is open, then Sign in first is opened too: the form that came first keeps the one
+        // primary, the sign-in's button goes quiet, and nothing typed is lost.
+        await screen.locator('[data-harness-provider-toggle]').click();
+        await screen.locator('[data-provider-tile="deepseek"]').click();
+        await screen.locator('[data-env-secret-input="DEEPSEEK_API_KEY"]').fill('sk-demo-not-a-real-key');
+        await screen.locator('[data-harness-sign-in]').click();
+        await screen.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
+        await shot('codex-sign-in-and-key');
+        const kept = await screen.locator('[data-env-secret-input="DEEPSEEK_API_KEY"]').inputValue();
+        if (kept !== 'sk-demo-not-a-real-key') fail('the typed key was lost when Sign in first opened');
+        await screen.locator('[data-first-run-sign-in-close]').click();
+        await screen.locator('[data-harness-provider-toggle]').click();
+        await screen.locator('[data-env-login="form"]').waitFor({ state: 'detached' });
         // Back to Claude Code: already imported, so the one primary is Continue.
         await screen.locator('[data-onboarding-back]').click();
         await stepBody('claude');

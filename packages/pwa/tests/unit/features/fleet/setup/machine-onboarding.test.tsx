@@ -1112,6 +1112,85 @@ describe('MachineOnboarding · an open provider-key form', () => {
   });
 });
 
+describe('MachineOnboarding · sign-in and a provider key together', () => {
+  const SIGNED_OUT = scan({
+    harnesses: scan().harnesses.map(entry => ({ ...entry, account: { state: 'not-signed-in' as const } })),
+  });
+  const screenWith = (extra: Record<string, unknown> = {}) =>
+    render({
+      machine: FRESH_MACHINE,
+      routes: {
+        ...SET_UP_READS,
+        '/v1/fleet/machine': FRESH_MACHINE,
+        '/v1/fleet/setup/scan': SIGNED_OUT,
+        '/v1/fleet/presets': PROVIDERS,
+        '/v1/secrets': (call: Call) =>
+          call.body === undefined
+            ? { v: 1, health: 'ready', secrets: [], references: [] }
+            : {
+                name: (call.body as { name: string }).name,
+                createdAt: '2026-10-16T08:00:00.000Z',
+                updatedAt: '2026-10-16T08:00:00.000Z',
+              },
+        ...extra,
+      },
+    });
+  const KEY = '[data-env-secret-input="DEEPSEEK_API_KEY"]';
+  const typedKey = (screen: Screen) => (screen.q(KEY) as HTMLInputElement | null)?.value;
+  const openForm = async (screen: Screen): Promise<void> => {
+    await screen.click('[data-harness-provider-toggle]');
+    await screen.click('[data-provider-tile="deepseek"]');
+    await typeInto(screen.q(KEY), 'sk-deepseek-typed', 'the key');
+  };
+  const signInSubmit = (screen: Screen) =>
+    must(screen.q('[data-first-run-sign-in] [data-change-submit]') as HTMLButtonElement | null, 'the sign-in button');
+
+  for (const [harness, name] of [
+    ['claude', 'Claude Code'],
+    ['codex', 'Codex'],
+  ] as const) {
+    it(`${name}: a key form opened first keeps the one primary; the sign-in steps back, still works, and nothing typed is lost`, async () => {
+      const screen = await screenWith({
+        '/v1/fleet/proposals': STAGED,
+        [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'ok' },
+      });
+      await screen.rail(harness);
+      await openForm(screen);
+      await screen.click('[data-harness-sign-in]');
+      expect(screen.q(`[data-first-run-sign-in="${harness}"]`)).not.toBeNull();
+      expect(primaries(screen)).toEqual(['Add']);
+      const quiet = signInSubmit(screen);
+      expect(quiet.textContent).toBe(`Sign in to ${name}`);
+      expect(quiet.disabled).toBe(false);
+      expect(typedKey(screen)).toBe('sk-deepseek-typed');
+      await screen.click('[data-first-run-sign-in] [data-change-submit]');
+      expect(screen.calls.some(call => call.path === '/v1/fleet/proposals' || call.path === '/v1/fleet/login')).toBe(
+        true,
+      );
+      expect(primaries(screen)).toEqual(['Add']);
+      await screen.click('[data-first-run-sign-in-close]');
+      expect(screen.q('[data-first-run-sign-in]')).toBeNull();
+      expect(primaries(screen)).toEqual(['Add']);
+      expect(typedKey(screen)).toBe('sk-deepseek-typed');
+    });
+
+    it(`${name}: a sign-in opened first keeps the one primary; the key form steps back, and takes it when the sign-in closes`, async () => {
+      const screen = await screenWith();
+      await screen.rail(harness);
+      await screen.click('[data-harness-sign-in]');
+      expect(primaries(screen)).toEqual([`Sign in to ${name}`]);
+      await openForm(screen);
+      expect(primaries(screen)).toEqual([`Sign in to ${name}`]);
+      const add = must(screen.q('[data-env-login="form"] [data-change-submit]') as HTMLButtonElement | null, 'Add');
+      expect(add.disabled).toBe(false);
+      expect(typedKey(screen)).toBe('sk-deepseek-typed');
+      await screen.click('[data-first-run-sign-in-close]');
+      expect(primaries(screen)).toEqual(['Add']);
+      expect(typedKey(screen)).toBe('sk-deepseek-typed');
+    });
+  }
+});
+
 describe('MachineOnboarding · Save keys that finish after the person has moved on', () => {
   it('keeps the page the person moved to, and still counts Speed-ups as set', async () => {
     let release: () => void = () => undefined;

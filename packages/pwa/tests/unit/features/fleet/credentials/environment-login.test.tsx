@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+import type { ReactNode } from 'react';
 import type { FleetCredentialView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { EnvironmentLogin } from '../../../../../src/features/fleet/credentials/environment-login.tsx';
 import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import {
+  FooterQuietContext,
+  useFooterQuietState,
+  useQuietFooter,
+} from '../../../../../src/features/fleet/setup/footer-slot.tsx';
 import { useMachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { LONG_PRESS_MS } from '../../../../../src/shell/agent-sidebar-model.ts';
@@ -80,7 +86,19 @@ function Host({
   );
 }
 
-const open = async (routes: Record<string, unknown> = {}, harness?: 'claude' | 'codex') => {
+/** The setup rail's footer state, so a form can find out whether another one got the page's primary first. */
+function Quiet({ children }: { readonly children: ReactNode }) {
+  const state = useFooterQuietState();
+  return <FooterQuietContext.Provider value={state}>{children}</FooterQuietContext.Provider>;
+}
+
+/** Another form on the page that opened first (a sign-in): it holds the primary. */
+function Rival() {
+  useQuietFooter(true);
+  return null;
+}
+
+const open = async (routes: Record<string, unknown> = {}, harness?: 'claude' | 'codex', rival = false) => {
   const calls: Call[] = [];
   const made: FleetCredentialView[] = [];
   const client = scripted(
@@ -111,7 +129,10 @@ const open = async (routes: Record<string, unknown> = {}, harness?: 'claude' | '
   );
   const added: string[] = [];
   const view = await mount(
-    <Host {...(harness === undefined ? {} : { harness })} createClient={async () => client} added={added} />,
+    <Quiet>
+      {rival ? <Rival /> : null}
+      <Host {...(harness === undefined ? {} : { harness })} createClient={async () => client} added={added} />
+    </Quiet>,
   );
   return { view, calls, added };
 };
@@ -463,6 +484,42 @@ describe('EnvironmentLogin · providers', () => {
     await until(() => failed.view.container.querySelector('[data-env-login="failed"]') !== null, 'the failure');
     expect(failed.view.container.textContent).toContain('No presets here.');
     await failed.view.unmount();
+  });
+});
+
+describe('EnvironmentLogin · one primary on the setup page', () => {
+  const variant = (element: Element | null, what: string) => must(element, what).getAttribute('data-variant');
+
+  it('draws Add and Done as the primary when it leads the page, and as plain buttons when another form got there first', async () => {
+    for (const rival of [false, true]) {
+      const { view } = await open({}, undefined, rival);
+      await until(() => grid(view.container) !== null, 'the grid');
+      const c = view.container;
+      await click(c.querySelector('[data-provider-tile="deepseek"]'), 'DeepSeek');
+      const lead = rival ? null : 'primary';
+      expect(variant(c.querySelector('[data-env-login="form"] [data-change-submit]'), 'Add')).toBe(lead);
+      await type(c.querySelector('[data-env-secret-input="DEEPSEEK_API_KEY"]'), 'a-pasted-deepseek-key');
+      await click(c.querySelector('[data-env-login="form"] [data-change-submit]'), 'Add');
+      await until(() => c.querySelector('[data-env-login="added"]') !== null, 'the added screen');
+      expect(variant(c.querySelector('[data-step-next]'), 'Done')).toBe(lead);
+      await view.unmount();
+    }
+  });
+
+  it('draws Paste variables’ Continue as plain when another form got the primary first', async () => {
+    for (const rival of [false, true]) {
+      const { view } = await open({}, undefined, rival);
+      await until(() => grid(view.container) !== null, 'the grid');
+      const c = view.container;
+      await click(c.querySelector('[data-provider-tile="paste"]'), 'Paste variables');
+      await type(
+        c.querySelector('[data-paste-input]'),
+        'export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic\nexport ANTHROPIC_AUTH_TOKEN=sk-pasted-deepseek-secret',
+      );
+      await click(c.querySelector('[data-paste-read]'), 'Read');
+      expect(variant(c.querySelector('[data-paste-continue]'), 'Continue')).toBe(rival ? null : 'primary');
+      await view.unmount();
+    }
   });
 });
 

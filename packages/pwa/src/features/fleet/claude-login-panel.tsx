@@ -66,6 +66,8 @@ export interface ClaudeLoginPanelProps {
   readonly copy?: ClipboardWriter;
   /** What one sign-in covers, and what to say once it is done. */
   readonly wording: LoginPanelWording;
+  /** Another form on the page owns the primary: draw this panel's primaries as plain buttons. */
+  readonly quiet?: boolean;
   className?: string;
 }
 
@@ -106,9 +108,11 @@ export function ClaudeLoginPanel({
   onRecheck,
   copy = browserClipboardWriter(),
   wording,
+  quiet = false,
   className,
 }: ClaudeLoginPanelProps) {
   const [code, setCode] = useState('');
+  const tone = quiet ? 'outline' : 'primary';
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -166,7 +170,7 @@ export function ClaudeLoginPanel({
               Start here and open the link on any device. Claude shows you a code once you have signed in — bring that
               code back to this screen.
             </p>
-            <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
+            <Button type="button" variant={tone} onClick={onStart} disabled={busy || state === 'starting'}>
               <Link2 size={16} aria-hidden="true" />
               {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Claude Code'}
             </Button>
@@ -216,7 +220,7 @@ export function ClaudeLoginPanel({
                 required
               />
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
+                <Button type="submit" variant={tone} disabled={busy || code.trim() === ''}>
                   <ShieldCheck size={16} aria-hidden="true" />
                   {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>
@@ -257,7 +261,7 @@ export function ClaudeLoginPanel({
             <p className="m-0 text-meta leading-base">{codeEnding(flow.lastCode)?.next ?? flow.remedy}</p>
             <div className="flex flex-wrap items-center gap-2">
               {onRecheck === undefined ? null : (
-                <Button type="button" variant="primary" onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
+                <Button type="button" variant={tone} onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
                   <RefreshCw size={16} aria-hidden="true" />
                   {busy ? 'Looking…' : 'Look for the login again'}
                 </Button>

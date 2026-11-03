@@ -55,6 +55,8 @@ export interface CredentialSignInProps {
   readonly initialFlow?: CredentialLoginFlow;
   /** Supplied in tests. */
   readonly pollMs?: number;
+  /** Another form on the page owns the primary: this sign-in draws its buttons as plain ones. */
+  readonly quiet?: boolean;
 }
 
 const WAITING: ReadonlySet<HarnessLoginFlow['state']> = new Set([
@@ -80,6 +82,7 @@ export function CredentialSignIn({
   onSignedIn,
   initialFlow,
   pollMs = SIGN_IN_POLL_MS,
+  quiet = false,
 }: CredentialSignInProps) {
   const [flow, setFlow] = useState<CredentialLoginFlow | null>(initialFlow ?? null);
   const [busy, setBusy] = useState(false);
@@ -237,6 +240,7 @@ export function CredentialSignIn({
           busy={busy || changes.busy}
           busyLabel="Starting sign-in…"
           refusal={refusal ?? changes.refusal}
+          quiet={quiet}
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
           onSubmit={() => void start(restartNext)}
         />
@@ -268,6 +272,7 @@ export function CredentialSignIn({
     loginId: credential.id,
     busy,
     refusal,
+    quiet,
     wording,
     onStart: again,
     onCancel: () => void cancel(),
