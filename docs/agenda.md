@@ -268,8 +268,8 @@ fields every item already carries, so an item from any daemon reads as exactly o
   request as `fy agenda edit A5 --question-answer "<text>"`) shows the answer above the item's ask and puts it back
   where it stood in the queue: the item's `waitingSince`, which is when it last STARTED needing the owner
   (`agendaNeedsYouSince`), is left as it was.
-- **A genuinely new need re-enters fresh** (`waitingSince` is now): the ferret's answer after it took the item on as
-  `working`.
+- **A genuinely new ask re-enters fresh** (`waitingSince` is now): a replaced ask ([Editable asks](#editable-asks)),
+  or the ferret's answer after it took the item on as `working`.
 - **`fy agenda rest A5 --why "<what I'm doing>"`** takes an item on without asking anything yet: Resting, sub-state
   **working**, quiet, never nudged. Refused on an item the owner snoozed.
 - **Only the ferret marks it Done** (`fy agenda done`), once nothing more is expected; the owner's own done or
@@ -278,19 +278,36 @@ fields every item already carries, so an item from any daemon reads as exactly o
 - **A blocker wakes a snooze.** A ferret's edit that newly sets `--blocking` on a snoozed item wakes it, fresh, as
   `--now` does — but it is its own reason, outside the once-an-hour limit that `--now` keeps, so an item that woke as
   urgent a moment ago still wakes for a new blocker.
+- **The silence nudge.** An item waiting on its ferret that the ferret leaves silent for **30 minutes**
+  (`AGENDA_REST_NUDGE_MS`) gets the Warden's nudge (`rest-nudge.ts`): ONE message per ferret naming every item due,
+  `[attention check] The owner replied on !A5 «…» and is waiting on you…`, then again on a doubling backoff (1 h,
+  2 h, … at most a day). It is off with the turn-end check (`attentionNudge` in `machine.yaml`), journalled as a
+  nudge with the items named. Its send id names the resting episode (`resting.at`), not just the nudge count, so a
+  later reply cycle never reuses a delivered nudge's id; the batch is recorded on each item (`resting.nudgeSend`)
+  BEFORE it is sent, so a restart, or a failure after the first item was recorded, resumes that very message and
+  never sends a second; and the completion is checked against the episode and count it was decided on, so a reply
+  that arrives while the send is in flight keeps its own full 30 minutes. A `working` item and a snoozed one are never nudged; nor is a card the daemon raised.
 
 **What a Resting item stores.** The field every app reads stays `parked: { reason: 'replied', at }` (or
 `waitingOn: 'ferret'` for a request for more information), so an app from before Resting lists it under
-**Replied** and never as needing the owner. Beside it, `resting: { sub, at, why?, nudgedAt?, nudges?, migrated? }`
-says what that field cannot: the sub-state, what the ferret is doing, and when it began resting. `parked` is what says
+**Replied** and never as needing the owner. Beside it, `resting: { sub, at, why?, nudgedAt?, nudges?, nudgeSend?, migrated? }`
+says what that field cannot: the sub-state, what the ferret is doing, and the nudge clock. `parked` is what says
 the item rests; a `resting` with nothing parked is dropped on the next write.
 
 **Who is exempt (until card asks move into agendas).** An answer still CLOSES what the daemon acts on: a card's
 gate item, a held configuration change (`--confirms`), an input card, and every item the daemon raised for itself
 (`restsOnAnswer`). Gate items keep working end to end as before.
 
-**What counts.** The daemon's badge count (`agendaBadgeCount`) and its stop push count Needs-you items only: a
-resting, snoozed or done item, or a notice, never moves them.
+### The Needs-you queue
+
+**Needs you is one queue, and each item is in it at most once.** `needsYouQueue(items, keyOf?)` (protocol) is the one
+selector: every `needs-you` item, the first of any repeat of its key (`keyOf` names an item across boards: its
+session and id), **blockers first, then by when each started needing the owner**, then by key. The daemon's badge
+count (`agendaBadgeCount`, the queue's length) and its stop push (`ownerTurnItems`: the queue, so a push opens at
+a blocker first) read it. The app's Inbox adopts it with the side-panel Agenda tab.
+
+**The Resting list** (`restingQueue`) is every resting or snoozed item, each once: those **waiting on their ferret
+first**, then those it is **working** on, each oldest rest first, then the snoozed ones by when they wake.
 
 ### Stage, where we are, and the detail
 
@@ -303,6 +320,47 @@ resting, snoozed or done item, or a notice, never moves them.
   complete the item — an explainer, a report — lives here.
 - **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
   folded away.
+
+### Editable asks
+
+**A ferret's edit may REPLACE the ask**: its `ask`, `kind`, `answers` and `questions` (their options too). On the
+command line `fy agenda edit A5 --kind <kind> --option … --question …` composes the new ask as `add` does.
+
+- **What is a replacement.** An edit that names a `kind` (even the one the item already has: `--kind reply
+--summary "…"` is the ferret saying "this is a different question"), or that changes the options (`ask`,
+  `answers`, `questions` with other options or another shape, or a form's `fields` added, removed, retyped or given
+  other options), replaces the ask. Rewording alone — the summary, body, context, `questions` text over the same
+  options, a field's label, `--blocking` — is an ordinary edit: the ask, its version and the item's place in the
+  queue stay.
+- **A replaced ask is a new ask.** The item re-enters the queue as its one entry, fresh; `askVersion` moves on (1
+  when absent); the edit is recorded as a revision (and a stage change when the kind moves). The owner's answer to
+  the old ask (`ownerAnswer`) goes, and so does the ferret's old answer to their question unless the edit gives a
+  new one. An answer that failed to deliver (`undelivered`, which the app offers as Retry) goes too: its payload
+  answers the old ask and must never be blessed with the new version. A new kind with no ask of its own drops the
+  old one (an explainer has no options).
+- **A replacement drops the shape of the ask it replaces.** A kind change drops the old `ask`, `answers`,
+  `questions`, `optionDetails`, `fields` and `steps` (a question becomes an info card, a todo a reply, a form
+  anything else). A new ask of the same kind (an explicit `--kind`, or a new `ask` or `answers`) drops the old
+  `questions` and `optionDetails`, which described the ask it replaces and would otherwise sit beside the new one
+  or name an option it no longer offers. The replacement is validated as the composed item, and the revision records
+  what was removed. The edit may give the new ask its own.
+- **An answer to the old ask is refused `409 ask_changed`**, never applied to the new options: an answer request
+  names the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
+  window, a held send). **The app always names it**: it stamps the version of the ask on screen when the answer
+  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch (to a daemon
+  that reports `agenda.asks.1`; an older daemon never receives the field, and has no replaced asks to confuse).
+  An answer that names none is checked only where it cannot be stale: a **human's** answer with no version is
+  refused `409 ask_changed` once the ask has been replaced, so an older app is locked out of a replaced ask
+  until it reloads; the answer of a ferret's own `done --choice`, and any answer to an ask never replaced, are
+  taken as before.
+- **A Done or a Skip given from the ask is checked the same way.** A to-do's Mark as done, and any answer that closes
+  the item, is an answer to the ask on screen: the app names its `askVersion` on the `resolve` or `dismiss`
+  request, so a Done held in the undo window never closes the question that replaced the to-do (`409
+ask_changed`, the new question stays open). A close that names no version — the owner's own explicit closing of
+  the item as it stands, an older app, the ferret's `done` — closes whatever the item asks now.
+- **A stale "Answer to your question" clears**: `fy agenda edit A5 --clear-question-answer`.
+- A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input card has none: those
+  are refused.
 
 ### No size limit
 
@@ -367,9 +425,9 @@ The board file says its shape (`version`; absent reads as 1). It is brought to v
 (`toChannel`, pure, total and idempotent: a board already in the shape is the same object), and the next write
 persists it; nothing on an item is dropped.
 
-- An open item parked as `replied` rests as **waiting on the ferret**, its reply time when it began resting. One
-  from a version-1 file is marked `migrated`: an old reply, kept apart from new ones so that a backlog of them is
-  never nudged as a burst.
+- An open item parked as `replied` rests as **waiting on the ferret**, its reply time the nudge clock. One from a
+  version-1 file is marked `migrated`: the Warden nudges it **once** after the upgrade and never again, and every
+  item of one ferret goes in one message, so a backlog of old replies is never a burst.
 - An item with no stage gets the one its kind says (`done` once closed), as the first of its stages.
 
 ## Turns
@@ -419,7 +477,8 @@ The ferret receives the message as
 the ferret (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
 and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
 referenced. If the ferret finishes a turn without touching a referenced item (an `answer`, `rest`, `edit`, `done`,
-`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re !A…` opener); after that it stays quiet. The nudge says: "Owner replied about !A5; it
+`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re !A…` opener); after that
+only the 30-minute silence nudge ([States](#states)) speaks. The turn-end nudge says: "Owner replied about !A5; it
 rests, waiting on you. Answer on it: `fy agenda answer A5 "<text>"` (back on their list), or `fy agenda done A5`
 when nothing more is expected." It never says it is the ferret's turn to hand the item back.
 
@@ -446,10 +505,11 @@ ever, and closing it would lose it when the ferret still needs something.
   information, a discussion) ends: the reply answered it.
 - **It stays off the list until the ferret answers on it.** A plain `fy agenda edit <id> …` by the ferret updates the
   card (the living summary) and **leaves it resting**: no `waitingSince` bump, nothing unread, no badge.
-  `fy agenda answer <id> "<text>"` brings it back to the owner **in its old place** (`waitingSince` unchanged). `fy agenda done <id>` / `dismiss <id>` closes it **without
+  `fy agenda answer <id> "<text>"` brings it back to the owner **in its old place** (`waitingSince` unchanged); a
+  replaced ask (`edit --kind …`) brings it back fresh. `fy agenda done <id>` / `dismiss <id>` closes it **without
   telling the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified
   (they had already replied)", and the item shows under Resolved as usual.
-- **`--back` is retired** from the CLI, which refuses it and names `agenda answer`. The daemon
+- **`--back` is retired** from the CLI, which refuses it and names `agenda answer` and `edit --kind`. The daemon
   still takes it from an older CLI: a `--back` with the whole card refreshed (`--summary`, `--premise`, `--context`)
   brings the item back fresh, and one that leaves one out is refused (`invalid`, naming the missing flags); so is a
   bare `fy agenda surface <id>` of a resting item.
@@ -689,22 +749,24 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 
 `fy agenda add | edit | answer | rest | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                       | Does                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `add`                      | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
-| `add --offer-close`        | With `--task`: the owner may close the card with the same tap that resolves it.                                                            |
-| `add --task <card>`        | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
-| `edit <id>`                | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
-| `answer <id> "<text>"`     | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
-| `rest <id> --why "<what>"` | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
-| `edit <id> --back`         | Retired: refused, naming `answer`.                                                                                                         |
-| `surface <id>`             | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
-| `snooze <id>`              | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
-| `unsnooze <id>`            | The owner's: bring a snoozed or resting item back to the list now.                                                                         |
-| `done <id>`                | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.                                         |
-| `dismiss <id>`             | Close without answering; agents only their own. Quiet on a resting item.                                                                   |
-| `ls` / `show`              | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.                                       |
-| `needs-info`, `discuss`    | The owner's side, kept for old clients. They make it the ferret's turn.                                                                    |
+| Verb                                | Does                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `add`                               | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
+| `add --offer-close`                 | With `--task`: the owner may close the card with the same tap that resolves it.                                                            |
+| `add --task <card>`                 | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
+| `edit <id>`                         | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
+| `edit <id> --kind <kind>`           | Replace the ask (with `--option` / `--question`): it asks again, fresh ([Editable asks](#editable-asks)).                                  |
+| `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                                                  |
+| `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
+| `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
+| `edit <id> --back`                  | Retired: refused, naming `answer` and `edit --kind`.                                                                                       |
+| `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
+| `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
+| `unsnooze <id>`                     | The owner's: bring a snoozed or resting item back to the list now.                                                                         |
+| `done <id>`                         | Close it, optionally answering its ask (`--choice`, `--yes`, `--other`…). Quiet on a resting item.                                         |
+| `dismiss <id>`                      | Close without answering; agents only their own. Quiet on a resting item.                                                                   |
+| `ls` / `show`                       | Open items with their stage, turn, how long each has rested, and blocking fields / one item in full.                                       |
+| `needs-info`, `discuss`             | The owner's side, kept for old clients. They make it the ferret's turn.                                                                    |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 
@@ -1167,10 +1229,14 @@ every combination of old and new meets.
 ### The channel (`agenda.channel.1`)
 
 A daemon that rests items on an answer and takes the channel's requests reports `agenda.channel.1` on
-`GET /v1/health`. Every new item field (`resting`, `stage`, `stages`, `ownerAnswer`, `whereWeAre`, `detail`) is
-optional, so an app or CLI from before reads every item; the request fields (`stage`, `whereWeAre`, `detail`, the
-`rest` action) are refused as malformed by an older daemon, so the CLI checks the feature first and says the daemon
-needs an update. `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
+`GET /v1/health`; one that also takes [editable asks](#editable-asks) reports `agenda.asks.1`. Every new item field
+(`resting`, `stage`, `stages`, `ownerAnswer`, `askVersion`, `whereWeAre`, `detail`) is optional, so an app or CLI from
+before reads every item. The request fields are refused as malformed by a daemon without their feature, so the CLI
+checks it first and says the daemon needs an update: `stage`, `whereWeAre`, `detail` and the `rest` action need
+`agenda.channel.1`; an edit's `ask`/`kind`/`answers`, `clear: ['questionAnswer']` and an answer's `askVersion` need
+`agenda.asks.1`; so does a Done or Skip's `askVersion`. An older app that sends no `askVersion` is refused only for an
+answer to a replaced ask (see
+[Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
 
 ### An older app keeps reading the board

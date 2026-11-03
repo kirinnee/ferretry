@@ -928,30 +928,39 @@ describe('Agenda state machine edit', () => {
     should(unchanged.changed).be.false();
   });
 
-  it('should reword questions but refuse to add, drop or re-option them', () => {
+  it('should reword questions in place, and take other options as a REPLACED ask, never an empty one', () => {
     // Arrange
     const created = questioned();
-    const edit = (questions: NonNullable<EditAgendaPatch['questions']>) =>
-      applyAgendaCommand(created.ledger, {
-        action: 'edit',
-        actor: AGENT,
-        id: 'A1',
-        patch: { questions },
-        at: SECOND,
-      });
+    const edit = (patch: EditAgendaPatch) =>
+      applyAgendaCommand(created.ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: SECOND });
 
     // Act
     const reworded = succeeded(
-      edit([
-        { question: 'Which login plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
-      ]),
+      edit({
+        questions: [
+          {
+            question: 'Which login plan?',
+            options: [{ label: 'A' }, { label: 'B' }],
+            recommended: 'A',
+            why: 'Cheaper.',
+          },
+        ],
+      }),
     );
-    const reoptioned = failed(edit([{ question: 'Which plan?', options: [{ label: 'A' }, { label: 'C' }] }]));
-    const dropped = failed(edit([]));
+    const reoptioned = succeeded(
+      edit({
+        ask: { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'C' }] },
+        questions: [{ question: 'Which plan?', options: [{ label: 'A' }, { label: 'C' }] }],
+      }),
+    );
+    const dropped = failed(edit({ questions: [] }));
 
     // Assert
     should(reworded.item?.questions?.[0]?.question).equal('Which login plan?');
-    should(reoptioned.error.code).equal('invalid');
+    should(reworded.item?.askVersion).be.undefined();
+    should(reoptioned.item?.askVersion).equal(2);
+    should(reoptioned.item?.waitingSince).equal(SECOND);
+    should(reoptioned.item?.revisions?.[0]?.changed).containDeep(['ask', 'questions']);
     should(dropped.error.code).equal('invalid');
   });
 

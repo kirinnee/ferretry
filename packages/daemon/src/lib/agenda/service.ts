@@ -33,6 +33,7 @@ import {
   type AgendaFailure,
   type AgendaLedger,
   type AgendaMutation,
+  type AgendaNudgeTarget,
   agendaSnapshot,
   agentConfinedTo,
   applyAgendaCommandToSession,
@@ -311,11 +312,22 @@ export class AgendaService {
     note?: string | null,
     via: AgendaVia = 'board',
     receipt?: string,
+    /** The ask the answer was given to: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
     const at = this.clock.now();
     return this.apply(
       sessionId,
-      { action: 'answer', actor, id, response, note, at, ...(receipt === undefined ? {} : { receipt }) },
+      {
+        action: 'answer',
+        actor,
+        id,
+        response,
+        note,
+        at,
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
       via,
     );
   }
@@ -388,6 +400,29 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'rest', actor, id, why, at: this.clock.now() });
   }
 
+  /** The Warden decided on one nudge message for these resting items: each records its send id first (`rest-nudge.ts`). */
+  async nudging(sessionId: string, items: readonly AgendaNudgeTarget[], sendId: string): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'nudging',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      items,
+      sendId,
+      at: this.clock.now(),
+    });
+  }
+
+  /** The Warden nudged the ferret about a resting item: the item records it, if it is still the rest nudged for. */
+  async nudged(sessionId: string, target: AgendaNudgeTarget): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'nudged',
+      actor: { kind: 'daemon', cause: 'warden-escalation' },
+      id: target.id,
+      since: target.since,
+      nudges: target.nudges,
+      at: this.clock.now(),
+    });
+  }
+
   /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */
   async snooze(sessionId: string, id: AgendaId, until: string, actor: AgendaActor): Promise<AgendaMutation> {
     return this.apply(sessionId, { action: 'snooze', actor, id, until, at: this.clock.now() });
@@ -414,12 +449,39 @@ export class AgendaService {
     actor: AgendaActor,
     note?: string | null,
     via: AgendaVia = 'board',
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
   ): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'resolve', actor, id, note, at: this.clock.now() }, via);
+    return this.apply(
+      sessionId,
+      {
+        action: 'resolve',
+        actor,
+        id,
+        note,
+        at: this.clock.now(),
+        ...(askVersion === undefined ? {} : { askVersion }),
+      },
+      via,
+    );
   }
 
-  async dismiss(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'dismiss', actor, id, note, at: this.clock.now() });
+  async dismiss(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    note?: string | null,
+    /** The ask the close was given from: refused `ask_changed` once the ferret replaced it. */
+    askVersion?: number,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'dismiss',
+      actor,
+      id,
+      note,
+      at: this.clock.now(),
+      ...(askVersion === undefined ? {} : { askVersion }),
+    });
   }
 
   /**

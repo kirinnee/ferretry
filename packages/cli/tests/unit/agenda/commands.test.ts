@@ -691,6 +691,7 @@ describe('agenda surface command', () => {
     const flat = help.replace(/\s+/gu, ' ');
     should(flat).containEql('--back retired');
     should(flat).containEql('stays resting unless you answer on it (agenda answer)');
+    should(flat).containEql('--kind');
   });
 
   it('should no longer take --surface on add: a new ask is the owner’s turn', async () => {
@@ -1163,6 +1164,7 @@ describe('agenda clear', () => {
 
 describe('agenda as a channel (agenda.channel.1)', () => {
   const CHANNEL = [DAEMON_FEATURES.agendaChannel];
+  const ASKS = [DAEMON_FEATURES.agendaChannel, DAEMON_FEATURES.agendaAsks];
   const failure = async (parsed: Promise<unknown>): Promise<string> =>
     await parsed.then(
       () => 'no error',
@@ -1196,7 +1198,7 @@ describe('agenda as a channel (agenda.channel.1)', () => {
     should(older.gateway.applied).be.empty();
   });
 
-  it('should send --stage, --where and --detail on edit', async () => {
+  it('should send --stage, --where, --detail and --clear-question-answer on edit', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
       [
@@ -1211,9 +1213,10 @@ describe('agenda as a channel (agenda.channel.1)', () => {
         'Two risks are left',
         '--detail',
         'From zero: …',
+        '--clear-question-answer',
       ],
       board,
-      CHANNEL,
+      ASKS,
     );
     await parsed;
 
@@ -1224,6 +1227,25 @@ describe('agenda as a channel (agenda.channel.1)', () => {
       stage: 'plan',
       whereWeAre: '- The plan is written\n- Two risks are left',
       detail: 'From zero: …',
+      clear: ['questionAnswer'],
+    });
+  });
+
+  it('should replace the ask with --kind, composed as add composes one', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      ['agenda', 'edit', 'A1', '--kind', 'choice', '--option', 'Rebase', '--option', 'Merge'],
+      board,
+      ASKS,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({
+      action: 'edit',
+      id: 'A1',
+      kind: 'choice',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase' }, { label: 'Merge' }] },
     });
   });
 
@@ -1262,5 +1284,23 @@ describe('agenda as a channel (agenda.channel.1)', () => {
 
     // Assert
     should(gateway.applied[0]?.request).match({ action: 'add', stage: 'explainer', whereWeAre: 'Drafted' });
+  });
+});
+
+describe('editable asks (agenda.asks.1)', () => {
+  it('should refuse --kind and --clear-question-answer on a daemon that has the channel but not editable asks', async () => {
+    // Arrange + Act
+    const kind = run(['agenda', 'edit', 'A1', '--kind', 'yesno'], board, [DAEMON_FEATURES.agendaChannel]);
+    const clear = run(['agenda', 'edit', 'A1', '--clear-question-answer'], board, [DAEMON_FEATURES.agendaChannel]);
+    const refusal = async (parsed: Promise<unknown>): Promise<string> =>
+      await parsed.then(
+        () => 'no error',
+        (error: unknown) => String(error),
+      );
+
+    // Assert
+    should(await refusal(kind.parsed)).match(/older than --kind and --clear-question-answer/u);
+    should(await refusal(clear.parsed)).match(/older than --kind and --clear-question-answer/u);
+    should(kind.gateway.applied).be.empty();
   });
 });

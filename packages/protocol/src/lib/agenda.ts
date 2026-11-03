@@ -651,8 +651,11 @@ export const agendaBriefRequiredProblems = (value: {
   ];
 };
 
-/** The agenda fields an edit can clear: they have no empty value to write, so clearing is named. */
-export const AgendaClearableFieldSchema = z.enum(['blockingNow', 'willBlock', 'neededBy']);
+/**
+ * The agenda fields an edit can clear: they have no empty value to write, so clearing is named. `questionAnswer` is
+ * the ferret's stale answer to the owner's question (`--clear-question-answer`, `agenda.asks.1`).
+ */
+export const AgendaClearableFieldSchema = z.enum(['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']);
 export type AgendaClearableField = z.infer<typeof AgendaClearableFieldSchema>;
 
 /**
@@ -739,8 +742,8 @@ export const agendaWakeAt = (item: {
 };
 
 /**
- * The number a badge shows for a board: its Needs-you items (`agendaState`) —
- * never a resting, snoozed or done item, nor a notice. A snapshot's `count` stays every open
+ * The number a badge shows for a board: its Needs-you items (`agendaState`), the length of its Needs-you queue
+ * (`needsYouQueue`) — never a resting, snoozed or done item, nor a notice. A snapshot's `count` stays every open
  * item — the wire checks `count === items.length`.
  */
 export const agendaBadgeCount = (snapshot: { readonly items: readonly AgendaStateSource[] }): number =>
@@ -1155,6 +1158,11 @@ const AgendaItemBaseShape = {
   stages: z.array(AgendaStageEntrySchema).min(1).max(MAX_AGENDA_STAGES).optional(),
   /** The owner's latest answer while the item stays open (`AgendaOwnerAnswer`); absent until they answer. */
   ownerAnswer: AgendaOwnerAnswerSchema.optional(),
+  /**
+   * Which ask the item is asking: 1 when absent, one more each time a ferret REPLACES the ask (its ask, kind,
+   * answers or questions). An answer that names an older one is refused `ask_changed`, never applied to the new ask.
+   */
+  askVersion: PositiveIntegerSchema.optional(),
 };
 
 /** Stored entries are decoded before the transport budget is applied by migration. */
@@ -1558,7 +1566,7 @@ export const agendaConfirmsProblems = (value: {
 export const AgendaActionRequestSchema = z
   .discriminatedUnion('action', [
     AddAgendaRequestSchema,
-    /** Rewrite an open item in place: its writing and its stage, never its ask or who raised it. */
+    /** Rewrite an open item in place: its writing, its stage, or — replacing the ask — what it asks; never who raised it. */
     z.strictObject({
       action: z.literal('edit'),
       id: AgendaIdSchema,
@@ -1569,16 +1577,24 @@ export const AgendaActionRequestSchema = z
        * reports `agenda.channel.1` takes it.
        */
       stage: AgendaStageSchema.optional(),
+      /**
+       * A REPLACED ASK (`agenda.asks.1`): a new ask, kind, answers or questions (their options too). The item asks
+       * again, fresh, as its one entry in the Needs-you queue; its `askVersion` moves on, so an answer to the old ask
+       * is refused, and the ferret's answer to an earlier question is cleared unless this edit sets a new one.
+       */
+      ask: AgendaAskSchema.optional(),
+      kind: AgendaCardShape.kind,
+      answers: AgendaCardShape.answers,
       context: z.preprocess(asBullets, z.string().max(MAX_AGENDA_CONTEXT_LENGTH)).nullable().optional(),
       ...AgendaBriefShape,
       /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
-      clear: z.array(AgendaClearableFieldSchema).min(1).max(3).optional(),
+      clear: z.array(AgendaClearableFieldSchema).min(1).max(AgendaClearableFieldSchema.options.length).optional(),
       /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
       now: z.literal(true).optional(),
       /**
        * `--back`, RETIRED from the CLI (`fy agenda answer` replaced it) and kept for older ones: the ferret needs
        * something NEW from the owner, so a RESTING item asks again, fresh, with the whole card refreshed. Without it
-       * (and without a `questionAnswer`) an edit of a resting item only rewrites the card.
+       * (and without a `questionAnswer` or a replaced ask) an edit of a resting item only rewrites the card.
        */
       back: z.literal(true).optional(),
     }),
@@ -1589,6 +1605,12 @@ export const AgendaActionRequestSchema = z
       response: AgendaResponseSchema.optional(),
       /** The response picks one of the attached card gate's options, not one of the thread's own answers. */
       gate: z.literal(true).optional(),
+      /**
+       * The `askVersion` of the item the answer — or the Done given from its ask — was given to (`agenda.asks.1`):
+       * when the ferret has replaced the ask since, it is refused `ask_changed` instead of being applied to the new
+       * one. Absent: not checked, which is how the owner closes the item as it stands now.
+       */
+      askVersion: PositiveIntegerSchema.optional(),
       /**
        * Files the owner sent with a Not good on a card's gate (`from` is this agenda's own session, where the app
        * uploaded them): carried to the card's ferret with the reopen. Only an answer to a gate takes them, and only a
@@ -1656,6 +1678,8 @@ export const AgendaActionRequestSchema = z
       action: z.literal('dismiss'),
       id: AgendaIdSchema,
       note: z.string().max(MAX_AGENDA_REPLY_LENGTH).optional(),
+      /** The `askVersion` of the ask this Skip was given from (`agenda.asks.1`); see `resolve`. Absent: not checked. */
+      askVersion: PositiveIntegerSchema.optional(),
     }),
   ])
   .superRefine((value, context) => {
@@ -1789,6 +1813,8 @@ export const AgendaErrorCodeSchema = z.enum([
   'corrupt',
   /** The generic answer was used on a `kind: 'input'` card, or a paste plan's: its own form answers it. */
   'use_input_form',
+  /** An answer named an ask the ferret has since replaced (`askVersion`): the item asks something else now. */
+  'ask_changed',
 ]);
 export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;
 

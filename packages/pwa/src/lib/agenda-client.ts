@@ -281,8 +281,25 @@ export class DaemonAgendaClient {
     return promise;
   }
 
-  resolve(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'resolve', id, ...(note === undefined ? {} : { note }) });
+  resolve(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    note?: string,
+    askVersion?: number,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, {
+      action: 'resolve',
+      id,
+      ...(note === undefined ? {} : { note }),
+      ...this.#versioned(daemon, askVersion),
+    });
+  }
+
+  /** The ask version, when the machine checks it (`agenda.asks.1`) or an ask was replaced (so it does): else nothing. */
+  #versioned(daemon: DaemonConnection, askVersion: number | undefined): { readonly askVersion?: number } {
+    const checked = askVersion !== undefined && (this.wires.asksOf(daemon.daemonId) === true || askVersion > 1);
+    return checked ? { askVersion } : {};
   }
 
   respond(
@@ -293,6 +310,7 @@ export class DaemonAgendaClient {
     note?: string,
     gate?: true,
     attachments?: BoardReopenAttachments,
+    askVersion?: number,
   ): Promise<void> {
     return this.#mutate(daemon, scope, {
       action: 'resolve',
@@ -301,11 +319,23 @@ export class DaemonAgendaClient {
       ...(note === undefined ? {} : { note }),
       ...(gate === undefined ? {} : { gate }),
       ...(attachments === undefined ? {} : { attachments }),
+      ...this.#versioned(daemon, askVersion),
     });
   }
 
-  dismiss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'dismiss', id, ...(note === undefined ? {} : { note }) });
+  dismiss(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    note?: string,
+    askVersion?: number,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, {
+      action: 'dismiss',
+      id,
+      ...(note === undefined ? {} : { note }),
+      ...this.#versioned(daemon, askVersion),
+    });
   }
 
   /** Ticks (or unticks) one 0-based step of an item's checklist; every device sees it. */

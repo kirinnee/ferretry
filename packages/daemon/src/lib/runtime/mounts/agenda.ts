@@ -73,6 +73,7 @@ const AGENDA_ERROR_STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   full: 409,
   corrupt: 500,
   use_input_form: 400,
+  ask_changed: 409,
 };
 
 /**
@@ -250,15 +251,18 @@ async function apply(
                     : request.action === 'unsnooze'
                       ? agenda.unsnooze(sessionId, request.id, actor)
                       : request.action === 'dismiss'
-                        ? agenda.dismiss(sessionId, request.id, actor, request.note)
+                        ? agenda.dismiss(sessionId, request.id, actor, request.note, request.askVersion)
                         : request.response === undefined
-                          ? agenda.resolve(sessionId, request.id, actor, request.note)
+                          ? agenda.resolve(sessionId, request.id, actor, request.note, 'board', request.askVersion)
                           : agenda.answer(
                               sessionId,
                               request.id,
                               request.response,
                               actor,
                               confirmed?.note ?? request.note,
+                              'board',
+                              undefined,
+                              request.askVersion,
                             ));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';

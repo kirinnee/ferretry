@@ -24,11 +24,20 @@ export const sendAgendaAction = async (
   action: InboxAction,
 ): Promise<void> => {
   if (action.kind === 'respond')
-    await client.respond(connection, scope, id, action.response, action.note, action.gate, action.attachments);
-  else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
+    await client.respond(
+      connection,
+      scope,
+      id,
+      action.response,
+      action.note,
+      action.gate,
+      action.attachments,
+      action.askVersion,
+    );
+  else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note, action.askVersion);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
   else if (action.kind === 'discuss') await client.discuss(connection, scope, id, action.note);
   else if (action.kind === 'snooze') await client.snooze(connection, scope, id, action.until);
   else if (action.kind === 'unsnooze') await client.unsnooze(connection, scope, id);
-  else await client.resolve(connection, scope, id, action.note);
+  else await client.resolve(connection, scope, id, action.note, action.askVersion);
 };

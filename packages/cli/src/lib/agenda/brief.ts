@@ -4,6 +4,8 @@ import {
   AgendaActionRequestSchema,
   type AgendaAsk,
   type AgendaAskOption,
+  type AgendaCardAnswer,
+  type AgendaKind,
   type AgendaStage,
   AgendaStageSchema,
   type AgendaItem,
@@ -561,6 +563,13 @@ export interface EditFlags {
   readonly where?: string | readonly string[];
   /** `--detail`: replaces the context explained from zero. */
   readonly detail?: string;
+  /** `--clear-question-answer`: takes a stale answer to the owner's question off the item. */
+  readonly clearQuestionAnswer?: boolean;
+  /**
+   * `--kind`: REPLACES THE ASK with a new one of this kind (`agenda.asks.1`), composed as `add` composes one:
+   * `--option` and `--question` then name its options and questions. The item asks again, fresh.
+   */
+  readonly kind?: string;
   readonly title?: string;
   readonly summary?: string;
   readonly premise?: string | readonly string[];
@@ -609,6 +618,46 @@ function stageFrom(typed: string | undefined): AgendaStage | undefined {
   return parsed.data;
 }
 
+/** The ask an edit's `--kind` REPLACES the item's with, composed from `--option` and `--question` as `add` does. */
+function replacementOf(flags: EditFlags):
+  | {
+      readonly kind: AgendaKind;
+      readonly ask?: AgendaAsk;
+      readonly answers?: AgendaCardAnswer[];
+      readonly questions?: AgendaQuestion[];
+      readonly optionDetails?: { label: string; detail: string }[];
+    }
+  | undefined {
+  const named = text(flags.kind);
+  if (named === undefined) return undefined;
+  const picked = (flags.option ?? []).map(splitOption);
+  const options = picked.length > 0 ? picked.map(each => each.label) : undefined;
+  const asked: BriefFlags = {
+    ...(flags.question === undefined ? {} : { question: flags.question }),
+    ...(flags.recommend === undefined ? {} : { recommend: flags.recommend }),
+    ...(flags.recommendWhy === undefined ? {} : { recommendWhy: flags.recommendWhy }),
+  };
+  const questions = questionsFrom(asked, {}, options);
+  const card = askFor(named, options, questions, stepsFrom(flags.step) !== undefined);
+  const answers = defaultAgendaAnswers(
+    card.kind,
+    card.ask,
+    recommendedAgendaOption({ ask: card.ask, ...(questions === undefined ? {} : { questions }) }),
+    undefined,
+  );
+  const optionDetails = optionDetailsFrom(
+    picked.flatMap(each => (each.detail === undefined ? [] : [{ label: each.label, detail: each.detail }])),
+    flags.optionDetail,
+  );
+  return {
+    kind: card.kind,
+    ...(card.ask === undefined ? {} : { ask: card.ask }),
+    ...(answers.length === 0 ? {} : { answers }),
+    ...(questions === undefined ? {} : { questions }),
+    ...(optionDetails === undefined ? {} : { optionDetails }),
+  };
+}
+
 /**
  * The edit request one `fy agenda edit <id>` describes, merged onto the item as it stands: only the
  * writing changes. New question words replace the old in order and keep each question's options,
@@ -642,18 +691,25 @@ export function composeEditRequest(
   const stage = stageFrom(text(flags.stage));
   const whereWeAre = prose(flags.where);
   const detail = text(flags.detail);
-  const optionDetails = optionDetailsFrom(
-    (flags.option ?? []).map(raw => {
-      const picked = splitOption(raw);
-      if (picked.detail === undefined) {
-        throw new Error(
-          `an edit cannot change the options: give --option "Label: detail", or --option-detail, for ${raw.trim()}`,
+  if (questionAnswer !== undefined && flags.clearQuestionAnswer === true) {
+    throw new Error('--question-answer and --clear-question-answer contradict');
+  }
+  const replaced = replacementOf(flags);
+  const optionDetails =
+    replaced !== undefined
+      ? replaced.optionDetails
+      : optionDetailsFrom(
+          (flags.option ?? []).map(raw => {
+            const picked = splitOption(raw);
+            if (picked.detail === undefined) {
+              throw new Error(
+                `an edit keeps the options unless it replaces the ask: give --option "Label: detail" or --option-detail for ${raw.trim()}, or --kind with the new options`,
+              );
+            }
+            return { label: picked.label, detail: picked.detail };
+          }),
+          flags.optionDetail,
         );
-      }
-      return { label: picked.label, detail: picked.detail };
-    }),
-    flags.optionDetail,
-  );
   if (flags.blocking === true && flags.notBlocking === true)
     throw new Error('--blocking and --not-blocking contradict');
   if (willBlock !== undefined && flags.clearWillBlock === true) {
@@ -664,20 +720,34 @@ export function composeEditRequest(
     ...(flags.notBlocking === true ? ['blockingNow' as const] : []),
     ...(flags.clearWillBlock === true ? ['willBlock' as const] : []),
     ...(flags.clearBy === true ? ['neededBy' as const] : []),
+    ...(flags.clearQuestionAnswer === true ? ['questionAnswer' as const] : []),
   ];
   const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
-  if (words.length > 0 && current === undefined) throw new Error(`no open agenda item ${id} to reword`);
+  if (replaced === undefined && words.length > 0 && current === undefined) {
+    throw new Error(`no open agenda item ${id} to reword`);
+  }
   const before = current?.questions ?? [];
-  if (words.length > 0 && words.length !== before.length) {
-    throw new Error(`${id} has ${before.length} question(s); give exactly that many --question texts, in order`);
+  if (replaced === undefined && words.length > 0 && words.length !== before.length) {
+    throw new Error(
+      `${id} has ${before.length} question(s); give exactly that many --question texts, in order (or --kind to replace the ask)`,
+    );
   }
   const questions =
-    words.length === 0
-      ? undefined
-      : before.map((each, index) => ({ ...each, question: words[index] ?? each.question }));
+    replaced !== undefined
+      ? replaced.questions
+      : words.length === 0
+        ? undefined
+        : before.map((each, index) => ({ ...each, question: words[index] ?? each.question }));
   const request = {
     action: 'edit' as const,
     id,
+    ...(replaced === undefined
+      ? {}
+      : {
+          kind: replaced.kind,
+          ...(replaced.ask === undefined ? {} : { ask: replaced.ask }),
+          ...(replaced.answers === undefined ? {} : { answers: replaced.answers }),
+        }),
     ...(stage === undefined ? {} : { stage }),
     ...(whereWeAre === undefined ? {} : { whereWeAre }),
     ...(detail === undefined ? {} : { detail }),

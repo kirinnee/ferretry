@@ -283,7 +283,7 @@ function mountVerbs(
     agenda
       .command('edit')
       .description(
-        "rewrite an open item you raised: its writing and its stage, never the ask; an item resting on the owner's reply stays resting unless you answer on it (agenda answer)",
+        "rewrite an open item you raised: its writing, its stage, or — with --kind — a NEW ask (it asks again, fresh); an item resting on the owner's reply stays resting unless you answer on it (agenda answer)",
       )
       .argument('<id>', 'the item reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
@@ -314,7 +314,16 @@ function mountVerbs(
       )
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
-      .option('-o, --option <label-and-detail>', "give an existing option's detail; repeat", collect, [])
+      .option(
+        '-k, --kind <kind>',
+        `REPLACE the ask with a new one of this kind (${ASK_KIND_NAMES.join(', ')}): --option and --question then name its options and questions`,
+      )
+      .option(
+        '-o, --option <label-and-detail>',
+        "an existing option's detail; with --kind, a new option (repeat)",
+        collect,
+        [],
+      )
       .option('--option-detail <label=markdown>', "replace an option's longer explanation; repeat", collect, [])
       .option('--field <spec>', "replace a form's fields with these, all of them, in order; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')
@@ -333,6 +342,7 @@ function mountVerbs(
         '--question-answer <markdown>',
         'the same as `agenda answer`: your answer to the owner, shown above its options; a resting item goes back to their list',
       )
+      .option('--clear-question-answer', "take a stale answer to the owner's question off the item")
       .option('--stage <stage>', 'what it needs from the owner now: explainer, question, plan, tracker or test')
       .option('--where <point>', 'replace where things stand now, one point each (repeat)', collect, [])
       .option('--detail <markdown>', 'replace the context explained from zero')
@@ -343,7 +353,7 @@ function mountVerbs(
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--clear-by', 'drop when it is needed')
       .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)')
-      .option('--back', 'retired: answer the owner with `agenda answer`'),
+      .option('--back', 'retired: answer with `agenda answer`, or ask anew with --kind'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));
   });

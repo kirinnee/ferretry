@@ -30,7 +30,7 @@
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { InboxAction } from '../../lib/agenda-answers.ts';
+import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
@@ -301,7 +301,7 @@ export const useAgenda = ({
   const act = (item: AgendaItem, action: InboxAction, composer: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
     const note = composerNoteFor(item, composer);
-    const sent = withComposerNote(action, note);
+    const sent = withAskVersion(withComposerNote(action, note), item);
     setCard(item.id, null);
     setAnnouncement('');
     sendAgendaAction(client, connection, scope, item.id, sent).then(

@@ -757,6 +757,7 @@ import {
   AgendaRollup,
   AgendaService,
   AgendaTurnNudge,
+  AgendaRestNudger,
   AgendaWaker,
   type AgentCopyPagesPort,
   type AgentCopyPort,
@@ -11713,6 +11714,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       armAgendaNudge(storage, attentionNudge, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
+      // The silence nudge (docs/agenda.md § States): a ferret silent on an item the owner replied to is nudged by the
+      // Warden after 30 minutes, then on a doubling backoff; one message per ferret, under the same switch.
+      new AgendaRestNudger(
+        agendaBoards,
+        agenda,
+        {
+          enabled: async () => agendaNudgeEnabled((await effectiveAccountModel())?.machine ?? { attentionNudge: true }),
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await agendaNudgeSends.send({ id, sendId, message });
+          },
+          record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
+        },
+        () => storage.listSessions().map(session => session.id),
+        new KeyedAgendaReplyTimers(),
+        () => clock.now(),
+        CLIENT_NAME,
+      ).start();
       // The board's turn-end check (board-design.md §3.4): a turn that edited, committed, pushed, started a
       // sub-ferret or opened a PR while the session had no open card gets one nudge an hour. Armed on the same
       // settled turn end as the agenda check, through the same one-check-per-session listener.

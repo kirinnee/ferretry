@@ -33,8 +33,8 @@ const notice = {
 describe('AgendaClearableFieldSchema', () => {
   it('should name exactly the agenda fields an edit can take off an item', () => {
     // Assert
-    should(AgendaClearableFieldSchema.options).deepEqual(['blockingNow', 'willBlock', 'neededBy']);
-    for (const field of ['blockingNow', 'willBlock', 'neededBy']) {
+    should(AgendaClearableFieldSchema.options).deepEqual(['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']);
+    for (const field of ['blockingNow', 'willBlock', 'neededBy', 'questionAnswer']) {
       should(AgendaClearableFieldSchema.safeParse(field).success).be.true();
     }
     for (const field of ['title', 'subject', 'urgency', '']) {
@@ -140,7 +140,7 @@ describe('the edit request: clear', () => {
     ).containDeep({ willBlock: 'the release', clear: ['blockingNow', 'neededBy'] });
   });
 
-  it('should refuse an empty clear list, an unknown field and more than three', () => {
+  it('should refuse an empty clear list, an unknown field and more fields than can be cleared', () => {
     // Assert
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', clear: [] }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ action: 'edit', id: 'A1', clear: ['title'] }).success).be.false();
@@ -148,7 +148,7 @@ describe('the edit request: clear', () => {
       AgendaActionRequestSchema.safeParse({
         action: 'edit',
         id: 'A1',
-        clear: ['blockingNow', 'willBlock', 'neededBy', 'neededBy'],
+        clear: ['blockingNow', 'willBlock', 'neededBy', 'questionAnswer', 'neededBy'],
       }).success,
     ).be.false();
   });

@@ -794,7 +794,9 @@ describe('agenda option details', () => {
         { label: 'Wait', detail: 'Later.' },
       ],
     });
-    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(/cannot change the options/u);
+    should(() => composeEditRequest('A1', { option: ['Go'] }, undefined)).throw(
+      /keeps the options unless it replaces the ask/u,
+    );
   });
 });
 
@@ -875,5 +877,14 @@ describe('agenda brief answer shapes', () => {
     // Act + Assert
     should(() => composeEditRequest('A3', { step: ['One'] }, reply)).throw(STEPS_ONLY_TODO);
     should(composeEditRequest('A3', { step: ['One'] }, todo)).containDeep({ steps: ['One'] });
+  });
+});
+
+describe('clearing the answer to the owner’s question', () => {
+  it('should refuse to set and clear the answer in one edit', () => {
+    // Assert
+    should(() => composeEditRequest('A1', { questionAnswer: 'EU', clearQuestionAnswer: true }, undefined)).throw(
+      /--question-answer and --clear-question-answer contradict/u,
+    );
   });
 });
