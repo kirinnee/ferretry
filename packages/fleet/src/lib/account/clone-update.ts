@@ -970,17 +970,29 @@ export function analyseCloneUpdate(input: CloneUpdateInput): CloneAnalysis {
   }
   const writes = (choice: CloneChoice | undefined): boolean => choice === 'take' || choice === 'add';
   const idle = (ref: string): CloneChoice => (byRef.get(ref)?.outcome === 'new' ? 'skip' : 'keep');
+  // An item whose write is refused, or that needs one that is, can't be written by default. The set is
+  // closed over the dependency graph first, so a dependent can never re-add what was left out for a refusal.
+  const unwritable = new Set<string>();
+  for (let grown = true; grown; ) {
+    grown = false;
+    for (const [ref, wanted] of needs) {
+      if (unwritable.has(ref)) continue;
+      if (wanted.some(need => unwritable.has(need) || byRef.get(need)?.blocked !== undefined)) {
+        unwritable.add(ref);
+        grown = true;
+      }
+    }
+  }
+  for (const ref of unwritable) defaults.set(ref, idle(ref));
+  // What is left only ever goes from left out to added, so it settles: at most one pass per item.
   for (let changed = true; changed; ) {
     changed = false;
     for (const [ref, wanted] of needs) {
       if (!writes(defaults.get(ref))) continue;
       for (const need of wanted) {
         if (writes(defaults.get(need)) || !byRef.has(need)) continue;
-        // What needs a refused write is left as it is too, rather than chosen into a refusal.
-        if (byRef.get(need)?.blocked === undefined) defaults.set(need, 'add');
-        else defaults.set(ref, idle(ref));
+        defaults.set(need, 'add');
         changed = true;
-        break;
       }
     }
   }

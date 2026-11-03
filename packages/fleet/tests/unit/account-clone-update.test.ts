@@ -1605,6 +1605,90 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
     should(plan.model.profiles.p).be.undefined();
   });
 
+  describe('default propagation through a dependency chain whose end cannot be written', () => {
+    const KEY_P = 'iiiiiiiiiiiiiiiiiiiiiiiiii';
+    const KEY_Q = 'jjjjjjjjjjjjjjjjjjjjjjjjjj';
+    const KEY_R = 'kkkkkkkkkkkkkkkkkkkkkkkkkk';
+    const owner = parseAccountModel({ version: 2, components: { hooks: { b: hooksAt('.', KEY_B) } } });
+    const hookC = { hooks: { c: { harness: 'claude', directory: 'components/hooks/c' } } };
+    const fileC = [{ path: 'components/hooks/c/run.sh', content: 'new' }];
+    const chain = (target = owner, direct = true) => {
+      const bundle = sourceBundle({
+        keys: { 'hooks/c': KEY_A, 'profile/p': KEY_P, 'profile/q': KEY_Q, 'runtime/r': KEY_R },
+        credentials: [{ id: 'api', harness: 'claude' }],
+        components: hookC,
+        files: fileC,
+        profiles: { p: { layers: ['hooks/c'] }, q: { layers: ['profile/p'] } },
+        runtimes: { r: { credential: 'api', profile: direct ? 'p' : 'q', agent: true } },
+      });
+      return analyseCloneUpdate(bareInput(bundle, target, here));
+    };
+    const reason = /hooks\/b here uses the whole setup folder/u;
+
+    it('should return, and leave out the runtime, its profile and the blocked hook, by default', () => {
+      // Arrange + Act: runtime r -> profile p -> hook c, which cannot be written while b owns the tree.
+      const analysis = chain();
+      const plan = planCloneUpdate(analysis, { decisions: {} });
+
+      // Assert
+      should(analysis.defaults.get('hooks/c')).equal('skip');
+      should(analysis.defaults.get('profile/p')).equal('skip');
+      should(analysis.defaults.get('runtime/r')).equal('skip');
+      should(plan.files).eql([]);
+      should(plan.model.profiles.p).be.undefined();
+      should(plan.model.runtimes.r).be.undefined();
+      should(reviewCloneUpdate(analysis).items.find(item => item.ref === 'runtime/r')?.choice).equal('skip');
+    });
+
+    it('should leave out a nested profile chain whose end cannot be written', () => {
+      // Arrange + Act: runtime r -> profile q -> profile p -> blocked hook c.
+      const analysis = chain(owner, false);
+
+      // Assert
+      for (const ref of ['hooks/c', 'profile/p', 'profile/q', 'runtime/r']) {
+        should(analysis.defaults.get(ref)).equal('skip');
+      }
+      should(planCloneUpdate(analysis, { decisions: {} }).files).eql([]);
+    });
+
+    it('should refuse writing any of the affected items, saying why', () => {
+      // Arrange
+      const analysis = chain(owner, false);
+
+      // Act + Assert: the hook says who owns the tree; each dependent says what it needs.
+      should(() => planCloneUpdate(analysis, { decisions: { 'hooks/c': 'add' } })).throw(CloneRefusal, {
+        message: reason,
+      });
+      should(() => planCloneUpdate(analysis, { decisions: { 'profile/p': 'add' } })).throw(CloneRefusal, {
+        message: /profile\/p needs hooks\/c/u,
+      });
+      should(() => planCloneUpdate(analysis, { decisions: { 'profile/q': 'add' } })).throw(CloneRefusal, {
+        message: /profile\/q needs profile\/p/u,
+      });
+      should(() => planCloneUpdate(analysis, { decisions: { 'runtime/r': 'add' } })).throw(CloneRefusal, {
+        message: /runtime\/r needs profile\/q/u,
+      });
+      should(() =>
+        planCloneUpdate(analysis, {
+          decisions: { 'hooks/c': 'add', 'profile/p': 'add', 'profile/q': 'add', 'runtime/r': 'add' },
+        }),
+      ).throw(CloneRefusal, { message: reason });
+    });
+
+    it('should still tick every item of the chain when nothing blocks it', () => {
+      // Arrange + Act: the same chain onto a machine that owns nothing.
+      const analysis = chain(parseAccountModel({ version: 2 }), false);
+      const plan = planCloneUpdate(analysis, { decisions: {} });
+
+      // Assert
+      for (const ref of ['hooks/c', 'profile/p', 'profile/q', 'runtime/r']) {
+        should(analysis.defaults.get(ref)).equal('add');
+      }
+      should(plan.files.map(file => file.path)).eql(['components/hooks/c/run.sh']);
+      should(plan.model.runtimes.r?.profile).equal('q');
+    });
+  });
+
   it('should refuse adding a new document while an item here owns the whole tree, and not tick it by default', () => {
     // Arrange: c is new; b here names the whole asset tree.
     const bundle = sourceBundle({
