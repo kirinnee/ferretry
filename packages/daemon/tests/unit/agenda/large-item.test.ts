@@ -3,6 +3,7 @@ import {
   AgendaActionRequestSchema,
   AgendaItemSchema,
   MAX_AGENDA_CONTENT_LENGTH,
+  MAX_AGENDA_GATE_HISTORY_LENGTH,
   MAX_AGENDA_ITEM_LENGTH,
   ResolvedAgendaItemSchema,
   agendaContentLength,
@@ -92,6 +93,58 @@ function heavyQuestionBoard(): AgendaLedger {
 }
 
 describe('a long agenda item', () => {
+  it('should reserve gate receipts and reject an oversized stored closing envelope', () => {
+    const item = open(heavyQuestionBoard());
+    const receipt = { at: AT, kind: 'gate-answered', note: 'r'.repeat(MAX_AGENDA_GATE_HISTORY_LENGTH) };
+    const gate = AgendaItemSchema.safeParse({ ...item, history: [receipt] });
+    should(gate.success).be.false();
+    should(JSON.stringify(gate.error?.issues)).containEql('gate receipts');
+    const closed = ResolvedAgendaItemSchema.safeParse({
+      ...item,
+      resolvedAt: AT,
+      disposition: 'done',
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: '\u0000'.repeat(30_000),
+    });
+    should(closed.success).be.false();
+    should(JSON.stringify(closed.error?.issues)).containEql('answer plus note');
+  });
+
+  it('should keep the full pending Retry when the owner snoozes its card', () => {
+    const answered = ok(
+      applyAgendaCommand(heavyQuestionBoard(), {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'open-question', answer: 'a'.repeat(9_000) },
+        note: 'n'.repeat(3_000),
+        at: AT,
+      }),
+    );
+    const failed = ok(
+      applyAgendaCommand(answered.ledger, {
+        action: 'undelivered',
+        actor: { kind: 'daemon', cause: 'system' },
+        id: 'A1',
+        request: 1,
+        reason: 'offline',
+        at: AT,
+      }),
+    );
+    const snoozed = ok(
+      applyAgendaCommand(failed.ledger, {
+        action: 'snooze',
+        actor: HUMAN,
+        id: 'A1',
+        until: '2026-11-03T09:00:00.000Z',
+        at: AT,
+      }),
+    );
+    should(open(snoozed.ledger).parked?.reason).equal('snoozed');
+    should(open(snoozed.ledger).undelivered).deepEqual(open(failed.ledger).undelivered);
+  });
   it('should archive every owner answer before compaction, including past twenty history entries', () => {
     let ledger = heavyQuestionBoard();
     for (let round = 1; round <= 23; round++) {

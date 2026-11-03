@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AgendaItemSchema, type AgendaItem } from '@ferretry/protocol';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { AgendaRollup } from '../../../../src/lib/agenda/index.ts';
@@ -7,12 +8,15 @@ import { agendaOpenRoutes } from '../../../../src/lib/runtime/mounts/agenda-open
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
 
-function fixture() {
+function fixture(items: AgendaItem[] = []) {
   const reads: string[] = [];
   const rollup = {
     page: async (query: unknown) => {
       reads.push(`page:${JSON.stringify(query)}`);
-      return { sessions: [], ...((query as { after?: string }).after === 'a' ? { next: 'b' } : {}) };
+      return {
+        sessions: items.length === 0 ? [] : [{ sessionId: 's1', items }],
+        ...((query as { after?: string }).after === 'a' ? { next: 'b' } : {}),
+      };
     },
   } as unknown as AgendaRollup;
   const dispatcher = new ApiDispatcher(
@@ -29,6 +33,30 @@ function fixture() {
 }
 
 describe('GET /v1/agenda/open', () => {
+  it('should send whole channel items only to a caller that opts in', async () => {
+    const item = AgendaItemSchema.parse({
+      id: 'A1',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject: 'Report',
+      why: 'Read it',
+      waitingSince: '2026-11-03T08:00:00.000Z',
+      howToResolve: 'Read',
+      raisedBy: 'agent',
+      raisedBySession: 's1',
+      raisedByName: 'Ada',
+      body: 'b'.repeat(50_000),
+      whereWeAre: 'Ready',
+    });
+    const { get } = fixture([item]);
+    const legacy = await get();
+    const channel = await get([], { ...human, 'x-fy-agenda-channel': '1' });
+    const items = (response: ApiResponse) => (jsonBody(response).sessions as { items: AgendaItem[] }[])[0]?.items;
+    should(items(legacy)?.[0]?.body).have.length(8_000);
+    should(items(legacy)?.[0]).not.have.property('whereWeAre');
+    should(items(channel)?.[0]?.body).have.length(50_000);
+    should(items(channel)?.[0]?.whereWeAre).equal('Ready');
+  });
   it('should answer the owner a page, with the query read from the URL', async () => {
     // Arrange
     const { reads, get } = fixture();

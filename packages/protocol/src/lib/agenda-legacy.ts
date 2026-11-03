@@ -1,6 +1,7 @@
 import type {
   AgendaItem,
   AgendaOpenSession,
+  AgendaOptionDetail,
   AgendaResponse,
   AgendaSnapshot,
   AgendaUndeliveredReply,
@@ -56,12 +57,10 @@ function clippedFields<T extends object>(fields: T): T {
     out.steps = out.steps.map(step => (typeof step === 'string' ? clip(step, LEGACY_AGENDA_LIMITS.step) : step));
   }
   if (Array.isArray(out.optionDetails)) {
-    out.optionDetails = out.optionDetails.map((option: unknown) => {
-      const entry = option as { readonly detail?: unknown };
-      return typeof entry.detail === 'string'
-        ? { ...entry, detail: clip(entry.detail, LEGACY_AGENDA_LIMITS.optionDetail) }
-        : option;
-    });
+    out.optionDetails = (out.optionDetails as readonly AgendaOptionDetail[]).map(option => ({
+      ...option,
+      detail: clip(option.detail, LEGACY_AGENDA_LIMITS.optionDetail),
+    }));
   }
   return out as T;
 }

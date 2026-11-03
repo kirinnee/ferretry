@@ -4,6 +4,7 @@ import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../fixtures/age
 import {
   AgendaItemSchema,
   AgendaSnapshotSchema,
+  type AgendaResponse,
   MAX_AGENDA_CONTENT_LENGTH,
   MAX_AGENDA_RESPONSE_LENGTH,
   ResolvedAgendaItemSchema,
@@ -12,6 +13,7 @@ import {
   AGENDA_CHANNEL_HEADER,
   LEGACY_AGENDA_LIMITS,
   legacyAgendaItem,
+  legacyAgendaOpenSession,
   legacyAgendaSnapshot,
   legacyResolvedAgendaItem,
   readsAgendaChannel,
@@ -42,6 +44,45 @@ const SNAPSHOT = {
 } as const;
 
 describe('the legacy agenda projection', () => {
+  it('should project option explanations and every free-text response variant into the old schema', () => {
+    const optionItem = AgendaItemSchema.parse({
+      ...minimal,
+      ask: { kind: 'multiple-choice', options: [{ label: 'Proceed' }, { label: 'Wait' }] },
+      optionDetails: [{ label: 'Proceed', detail: 'd'.repeat(3_000) }],
+    });
+    const session = legacyAgendaOpenSession({ sessionId: 'session-1', items: [optionItem] });
+    should(session.items[0]?.optionDetails?.[0]?.detail).have.length(LEGACY_AGENDA_LIMITS.optionDetail);
+    should(OldAgendaSnapshotSchema.safeParse({ ...SNAPSHOT, ...session, resolved: [] }).success).be.true();
+
+    const responses: AgendaResponse[] = [
+      { kind: 'answer-review', verdict: 'clarify', clarification: 'c'.repeat(3_000) },
+      { kind: 'answer-review', verdict: 'good' },
+      {
+        kind: 'form',
+        answers: [
+          { id: 'free', picked: 'f'.repeat(3_000) },
+          { id: 'many', picked: ['One', 'Two'] },
+        ],
+      },
+    ];
+    for (const response of responses) {
+      const item = AgendaItemSchema.parse({
+        ...minimal,
+        undelivered: { at: AT, reason: 'offline', reply: { action: 'resolve', response } },
+      });
+      const projected = legacyAgendaItem(item);
+      should(OldAgendaSnapshotSchema.safeParse({ ...SNAPSHOT, items: [projected], resolved: [] }).success).be.true();
+      const reply = projected.undelivered?.reply;
+      if (reply?.action !== 'resolve') throw new Error('missing retry');
+      if (reply.response?.kind === 'answer-review' && reply.response.verdict === 'clarify') {
+        should(reply.response.clarification).have.length(LEGACY_AGENDA_LIMITS.text);
+      }
+      if (reply.response?.kind === 'form') {
+        should(reply.response.answers[0]?.picked).have.length(LEGACY_AGENDA_LIMITS.text);
+        should(reply.response.answers[1]?.picked).deepEqual(['One', 'Two']);
+      }
+    }
+  });
   it('should satisfy the pre-channel main schema for every nested widened field', () => {
     const item = AgendaItemSchema.parse({
       ...minimal,
