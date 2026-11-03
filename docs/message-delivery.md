@@ -67,8 +67,8 @@ this page, which is still how a message reaches the pane.
 - **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
   the card's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
   NOT sent: `BoardAlerts` (`lib/board/alert-sends.ts`) journals it on that session as `board.alert-withheld`
-  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor, so the default board shows
-  it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
+  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
+  journalled only), so the board shows it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
   the owner chats with had 177 alerts typed into it as turns in three days (2026-10-31 to 2026-11-03) — 158 "CI is red",
   17 stale, 2 closed unmerged — 134 on the `direct` path and 43 on `native-inline`, every one `senderKind: daemon`.
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning

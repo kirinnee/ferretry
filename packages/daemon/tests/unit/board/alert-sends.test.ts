@@ -30,7 +30,10 @@ const alertWorld = (
   const withheld: string[] = [];
   const notes: string[] = [];
   const surface = new AlertSurface({
-    cards: async () => options.cards ?? [],
+    snapshot: async () => ({
+      cards: options.cards ?? [],
+      laneSets: new Map([[PROJECT, lanes()]]),
+    }),
     note: async (id, text) => {
       notes.push(`${id}: ${text}`);
     },
@@ -261,6 +264,49 @@ describe('a withheld alert about a private card', () => {
     // Assert
     should(world.sent).be.empty();
     should(world.withheld).have.length(3);
+    should(world.notes).be.empty();
+  });
+
+  it.each([
+    ['dropped', { dropped: { reason: 'superseded', at: NOW } }],
+    ['in a closed lane', { laneId: 'closed' }],
+  ])('should walk past an archived public parent (%s) to the open public grandparent', async (_name, archived) => {
+    // Arrange: F30 (open, public) > F31 (archived, public) > F32 (private), the card the alert is about.
+    const root = card({ id: 'F30', askedBy: 'person', owner: 'lizzette', parent: null });
+    const parentCard = card({ id: 'F31', owner: 'lizzette', visibility: 'public', parent: { id: 'F30' }, ...archived });
+    const leaf = card({ id: 'F32', owner: 'lizzette', assignee: 'child', parent: { id: 'F31' } });
+    const message = '&F32 PR #940 CI is red. Fix it, or note on the card why it can stay red.';
+    const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, parentCard, leaf] });
+
+    // Act
+    const outcome = await world.alerts.send('lizzette', message, 'F32' as BoardTaskId);
+
+    // Assert
+    should(outcome).equal('withheld');
+    should(world.sent).be.empty();
+    should(world.notes).eql([`F30: sub-card alert, not typed to the interactive lead: ${message}`]);
+  });
+
+  it('should note nothing when the only public ancestor is archived, and still type nothing', async () => {
+    // Arrange: an archived public root > an open private child.
+    const root = card({
+      id: 'F40',
+      askedBy: 'person',
+      owner: 'lizzette',
+      parent: null,
+      dropped: { reason: 'x', at: NOW },
+    });
+    const leaf = card({ id: 'F41', owner: 'lizzette', assignee: 'child', parent: { id: 'F40' } });
+    const message = '&F41 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.';
+    const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, leaf] });
+
+    // Act
+    const outcome = await world.alerts.send('lizzette', message, 'F41' as BoardTaskId);
+
+    // Assert
+    should(outcome).equal('withheld');
+    should(world.sent).be.empty();
+    should(world.withheld).eql([`lizzette: ${message}`]);
     should(world.notes).be.empty();
   });
 

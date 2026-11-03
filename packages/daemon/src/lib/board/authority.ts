@@ -84,7 +84,7 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   reopen: WORKERS,
   clarify: WORKERS,
   link: [...WORKERS, 'daemon'],
-  note: WORKERS,
+  note: [...WORKERS, 'daemon'],
   edit: WORKERS,
   file: WORKERS,
   refile: [...WORKERS, 'daemon'],

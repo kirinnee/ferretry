@@ -10378,7 +10378,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own interactive chat is journalled on it instead of typed (lib/board/alert-sends.ts).
       const boardAlertJournal = new JournalBoardChecks(storage);
       const alertSurface = new AlertSurface({
-        cards: async () => (await boardWorld.board.snapshot()).cards,
+        snapshot: async () => await boardWorld.board.snapshot(),
         note: async (card, text) => {
           await boardWorld.board.act(card, { action: 'note', text }, { kind: 'daemon' });
         },

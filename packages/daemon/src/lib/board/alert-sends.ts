@@ -14,13 +14,14 @@
  * so what was withheld can be counted. An automatic session gets every alert as before.
  *
  * A PRIVATE card is hidden from the default board, so a red CI or a PR closed unmerged on one is seen by nobody
- * who does not open it. Such an alert is also written as a note on the nearest PUBLIC ancestor ({@link AlertSurface}),
- * which the owner's board does show — still not a turn. A stale nudge is journalled only: it is a card's own
+ * who does not open it. Such an alert is also written as a note on the nearest PUBLIC ancestor that is still open ({@link AlertSurface}),
+ * which the owner's default board does show — still not a turn. A stale nudge is journalled only: it is a card's own
  * quiet, and a note on its parent would count as the parent's activity.
  */
 import type { BoardTask, BoardTaskId, InteractionMode } from '@ferretry/protocol';
 import { boardOnly } from '../session/queue/policy.ts';
-import { BoardIndex } from './graph.ts';
+import { BoardIndex, cardCategory, type LaneSets } from './graph.ts';
+import { isOpenOnBoard } from './query.ts';
 import { cardVisibility } from './visibility.ts';
 
 export interface BoardAlertPorts {
@@ -58,19 +59,24 @@ export class BoardAlerts {
 }
 
 export interface AlertSurfacePorts {
-  /** Every readable card. */
-  cards(): Promise<readonly BoardTask[]>;
+  /** Every readable card, archived ones included, with every board's lanes. */
+  snapshot(): Promise<{ readonly cards: readonly BoardTask[]; readonly laneSets: LaneSets }>;
   /** Writes a note on a card's history as the daemon. */
   note(card: BoardTaskId, text: string): Promise<void>;
   machineId(): string | undefined;
 }
 
-/** The nearest ancestor of `card` that is public, never the card itself; `undefined` when there is none. */
-const publicAncestor = (card: BoardTask, index: BoardIndex): BoardTask | undefined => {
+/**
+ * The nearest ancestor of `card` that is public AND on the default board (open, not dropped, not in a closed lane —
+ * the board's own `isOpenOnBoard`), never the card itself; `undefined` when there is none. An archived ancestor is
+ * walked past: a note on it would sit where the default board does not list it.
+ */
+const visibleAncestor = (card: BoardTask, index: BoardIndex, laneSets: LaneSets): BoardTask | undefined => {
   const seen = new Set<BoardTaskId>([card.id]);
   let parent = card.parent === null ? undefined : index.get(card.parent);
   while (parent !== undefined && !seen.has(parent.id)) {
-    if (cardVisibility(parent) === 'public') return parent;
+    if (cardVisibility(parent) === 'public' && isOpenOnBoard(cardCategory(parent, laneSets), parent.dropped !== null))
+      return parent;
     seen.add(parent.id);
     parent = parent.parent === null ? undefined : index.get(parent.parent);
   }
@@ -78,18 +84,18 @@ const publicAncestor = (card: BoardTask, index: BoardIndex): BoardTask | undefin
 };
 
 /**
- * Where a held-back alert about a PRIVATE card is seen: a note on its nearest public ancestor, which the default
- * board lists. A public card needs nothing (its own PR facts show), and a private card with no public ancestor has
- * nowhere visible to go — a declared gap (docs/board.md).
+ * Where a held-back alert about a PRIVATE card is seen: a note on its nearest public ancestor that the default
+ * board lists (open). A public card needs nothing (its own PR facts show), and a private card with no such ancestor
+ * has nowhere visible to go — journalled only, a declared gap (docs/board.md).
  */
 export class AlertSurface {
   constructor(private readonly ports: AlertSurfacePorts) {}
 
   async surface(id: BoardTaskId, message: string): Promise<void> {
-    const cards = await this.ports.cards();
+    const { cards, laneSets } = await this.ports.snapshot();
     const card = cards.find(entry => entry.id === id);
     if (card === undefined || cardVisibility(card) === 'public') return;
-    const ancestor = publicAncestor(card, new BoardIndex(cards, this.ports.machineId() ?? ''));
+    const ancestor = visibleAncestor(card, new BoardIndex(cards, this.ports.machineId() ?? ''), laneSets);
     if (ancestor !== undefined)
       await this.ports.note(ancestor.id, `sub-card alert, not typed to the interactive lead: ${message}`);
   }
