@@ -146,6 +146,27 @@ if [ "$2" = github-personal ]; then echo 'user git'; echo 'hostname github.com';
       });
     });
 
+    it('should let the oldest folder go once it keeps as many as it may', async () => {
+      await withTempRoot(async root => {
+        // Arrange — two folders kept at most; three asked about.
+        const repo = await repository(root);
+        const folders = ['a', 'b', 'c'].map(name => join(repo, name));
+        for (const folder of folders) await mkdir(folder);
+        const { binary, asked } = await countingGit(root);
+        const copies = new GitWorkingCopies(binary, 'ssh', Date.now, 2);
+
+        // Act
+        for (const folder of folders) await copies.branchOf(folder);
+        const filled = (await asked()).length;
+        await copies.branchOf(folders[2] as string);
+        await copies.branchOf(folders[0] as string);
+
+        // Assert — the newest is still kept; the oldest was let go and is asked again.
+        should(filled).equal(3);
+        should((await asked()).length).equal(4);
+      });
+    });
+
     it('should ask again after ten minutes, and every time for a question git answered with nothing', async () => {
       await withTempRoot(async root => {
         // Arrange

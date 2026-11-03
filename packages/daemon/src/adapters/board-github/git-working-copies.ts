@@ -101,6 +101,7 @@ export class GitWorkingCopies implements WorkingCopies {
     private readonly gitBinary = 'git',
     private readonly sshBinary = 'ssh',
     private readonly nowMs: () => number = Date.now,
+    private readonly rememberedFolders = REMEMBERED_FOLDERS,
   ) {}
 
   async repositoryOf(path: string): Promise<string | null> {
@@ -132,7 +133,7 @@ export class GitWorkingCopies implements WorkingCopies {
     if (known !== undefined && known.files === files && nowMs - known.askedAtMs < REMEMBERED_FOR_MS)
       return await known.answer;
     this.remembered.delete(key);
-    if (this.remembered.size >= REMEMBERED_FOLDERS) {
+    if (this.remembered.size >= this.rememberedFolders) {
       const oldest = this.remembered.keys().next().value;
       if (oldest !== undefined) this.remembered.delete(oldest);
     }
