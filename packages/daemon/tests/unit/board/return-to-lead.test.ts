@@ -123,6 +123,17 @@ describe('the live lead above an ended ferret', () => {
     should(nearestLiveLead(ended, 'lead')).be.null();
     should(nearestLiveLead(loop, 'a')).be.null();
   });
+
+  it('should stop walking past the lineage depth cap', () => {
+    // Arrange — a chain of ended ferrets longer than the cap, with a live lead beyond it
+    const chain = Array.from({ length: 70 }, (_, depth) =>
+      session(`s${depth}`, depth === 69 ? 'live' : `s${depth + 1}`, { status: 'stopped' }),
+    );
+    const roster = rosterOf([session('live'), ...chain]);
+
+    // Act / Assert
+    should(nearestLiveLead(roster, 's0')).be.null();
+  });
 });
 
 describe('the sweep returning an ended ferret’s card', () => {
