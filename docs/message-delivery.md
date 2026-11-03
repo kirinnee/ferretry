@@ -601,6 +601,21 @@ typed.
   [Measured Codex behaviour](#measured-codex-behaviour)), so multi-line messages to Codex, and to any harness
   that is not Claude Code, still go by turn file until one is measured.
 
+**Where "is this Claude?" comes from.** The policy never looks at the pane for it; it reads
+`SendTarget.harness`, which the repository fills from the session's own `config.harness`
+(`StorageSendRepository.target()`, `adapters/session/send/storage-send-repository.ts`). Two decisions hang on
+that one field:
+
+- **Whole paste.** `isDirectSend` types a short multi-line message whole only when the target's harness is
+  `claude`.
+- **The idle stop key.** `shouldPressStopKey` presses the stop key at an idle prompt only for an interactive
+  `claude` session; at an idle Codex prompt that key can quit the TUI, so it stays suppressed there.
+
+A target built WITHOUT `harness` reads as "not Claude": every multi-line send quietly falls back to a turn
+file and the idle stop key is never pressed. Policy tests that build targets by hand cannot catch this, so
+`tests/unit/session/send/storage-send-repository.test.ts` exercises the real repository and asserts both
+outcomes.
+
 ### The peer banner is one line
 
 A message one ferret sends another opens with ONE banner line, then the message on the next
