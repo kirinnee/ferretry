@@ -64,7 +64,7 @@ export function ClearCachedDataSetting({ onClear }: ClearCachedDataSettingProps)
             variant="outline"
             size="sm"
             className="min-h-[44px]"
-            aria-label="Clear cached data"
+            aria-label={phase === 'clearing' ? undefined : 'Clear cached data'}
             disabled={phase === 'clearing'}
             onClick={() => setPhase('confirming')}
           >

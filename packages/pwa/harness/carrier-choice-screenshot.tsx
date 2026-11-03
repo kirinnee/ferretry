@@ -182,7 +182,7 @@ try {
         });
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
-        await page.locator('[data-scene="device"] [data-setting-row]').waitFor({ state: 'visible' });
+        await page.locator('[data-scene="device"] [data-setting-row]').first().waitFor({ state: 'visible' });
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${overflow}px`);
         for (const name of SCENES) {

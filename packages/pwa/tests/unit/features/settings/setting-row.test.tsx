@@ -124,11 +124,13 @@ describe('Segmented', () => {
     expect(radios(root).every(r => r.props.className === 'sr-only')).toBe(true);
   });
 
-  it('keeps the compact height on a desktop and the 44px floor on a phone', () => {
+  it('keeps the compact height, wraps long labels at every width, and the 44px floor on a phone', () => {
     const root = render(<Segmented label="Pick" value="a" options={options} onChange={() => {}} />).root;
 
     for (const label of root.findAllByType('label')) {
-      expect(label.props.className).toContain('h-control-sm');
+      expect(label.props.className).toContain('min-h-[var(--control-h-sm)]');
+      expect(label.props.className).toContain('whitespace-normal');
+      expect(label.props.className).not.toContain('whitespace-nowrap');
       expect(label.props.className).toContain('max-md:min-h-[44px]');
     }
   });
